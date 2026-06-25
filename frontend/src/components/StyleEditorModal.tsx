@@ -217,9 +217,10 @@ interface StyleEditorModalProps {
   aspectRatio?: string;
   inline?: boolean;
   activeTab?: "presets" | "hook" | "subtitle";
+  thumbnailUrl?: string;
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab }: StyleEditorModalProps) {
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl }: StyleEditorModalProps) {
   const [tab, setTab] = useState<"presets" | "hook" | "subtitle">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
@@ -241,7 +242,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} />}
       </div>
     );
   }
@@ -269,7 +270,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} />}
         </div>
       </div>
     </div>
@@ -389,7 +390,7 @@ function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange }
 
 // ─── Hook Editor ─────────────────────────────────────────────────────────────
 
-function HookEditor({ style, onChange, aspectRatio }: { style: HookStyle; onChange: (s: HookStyle) => void; aspectRatio: string }) {
+function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: HookStyle; onChange: (s: HookStyle) => void; aspectRatio: string; thumbnailUrl?: string }) {
   const update = (patch: Partial<HookStyle>) => onChange({ ...style, ...patch });
   const [activePreset, setActivePreset] = useState<string | null>(null);
   useGoogleFont(style.fontFamily);
@@ -531,6 +532,7 @@ function HookEditor({ style, onChange, aspectRatio }: { style: HookStyle; onChan
       <div className="col-span-4 p-4 flex flex-col items-center bg-zinc-950 overflow-y-auto">
         <p className="text-[9px] text-zinc-600 mb-3 uppercase tracking-widest shrink-0">Live Preview</p>
         <div className="relative w-full bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: previewAspect }}>
+          {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
           <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
           {/* Text with animation */}
           <div className="absolute inset-0 flex px-4" style={{ justifyContent: style.textAlign === "left" ? "flex-start" : style.textAlign === "right" ? "flex-end" : "center" }}>
@@ -569,7 +571,7 @@ function HookEditor({ style, onChange, aspectRatio }: { style: HookStyle; onChan
 
 // ─── Subtitle Editor ─────────────────────────────────────────────────────────
 
-function SubtitleEditor({ style, onChange, aspectRatio }: { style: SubtitleStyle; onChange: (s: SubtitleStyle) => void; aspectRatio: string }) {
+function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: SubtitleStyle; onChange: (s: SubtitleStyle) => void; aspectRatio: string; thumbnailUrl?: string }) {
   const update = (patch: Partial<SubtitleStyle>) => onChange({ ...style, ...patch });
   const [newWord, setNewWord] = useState("");
   const [activeWordIdx, setActiveWordIdx] = useState(0);
@@ -719,6 +721,7 @@ function SubtitleEditor({ style, onChange, aspectRatio }: { style: SubtitleStyle
       <div className="col-span-4 p-4 flex flex-col items-center bg-zinc-950 overflow-y-auto">
         <p className="text-[9px] text-zinc-600 mb-3 uppercase tracking-widest shrink-0">Live Preview</p>
         <div className="relative w-full bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: previewAspect }}>
+          {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
           <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/30 to-zinc-900/50" />
           <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
             <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>

@@ -111,9 +111,16 @@ export function NewJob() {
     e.preventDefault();
     if (!validateUrl(url)) return;
     setIsSubmitting(true);
+    // Auto-prefix https:// if missing
+    let submitUrl = url.trim();
+    if (!submitUrl.startsWith("http")) {
+      submitUrl = "https://www." + submitUrl;
+    } else if (submitUrl.startsWith("http://")) {
+      submitUrl = submitUrl.replace("http://", "https://");
+    }
     try {
       const res = await jobs.create({
-        youtube_url: url.trim(),
+        youtube_url: submitUrl,
         target_aspect_ratio: aspectRatio,
         hook_style: hookStyleConfig.animation || undefined,
         force_reprocess: forceReprocess,
@@ -310,6 +317,7 @@ export function NewJob() {
               aspectRatio={aspectRatio}
               inline
               activeTab={styleTab}
+              thumbnailUrl={videoMeta?.thumbnail}
             />
           </Card>
         </div>
