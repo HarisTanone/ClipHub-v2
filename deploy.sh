@@ -211,8 +211,9 @@ if [ -d "$FRONTEND_DIR" ]; then
         echo "  ⚠️  Frontend build may have failed"
     fi
 
-    # Install serve globally if not present
-    if ! command -v serve &>/dev/null && ! npx serve --version &>/dev/null 2>&1; then
+    # Install serve globally for static file serving
+    if ! command -v serve &>/dev/null; then
+        echo "  Installing serve..."
         npm install -g serve 2>/dev/null || true
     fi
 else
@@ -279,7 +280,7 @@ After=network.target
 Type=simple
 User=$DEPLOY_USER
 WorkingDirectory=$FRONTEND_DIR
-ExecStart=/usr/bin/npx serve dist -l $FRONTEND_PORT -s --no-clipboard
+ExecStart=/usr/bin/npx --yes serve dist -l $FRONTEND_PORT -s --no-clipboard
 Restart=always
 RestartSec=5
 StandardOutput=journal
