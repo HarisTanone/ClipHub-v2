@@ -106,3 +106,22 @@ tmp/output/{job_id}/
 │   └── clip_01.jpg        # Thumbnail at 1s
 └── meta_job_xxx.json      # Job metadata
 ```
+
+## Logs (Production)
+
+```bash
+# Live log backend (streaming, Ctrl+C untuk stop)
+sudo journalctl -u autocliper-backend -f
+
+# 50 baris terakhir
+sudo journalctl -u autocliper-backend -n 50 --no-pager
+
+# Remotion log
+sudo journalctl -u autocliper-remotion -f
+
+# Frontend log
+sudo journalctl -u autocliper-frontend -f
+
+# Status semua services
+sudo systemctl status autocliper-backend autocliper-remotion autocliper-frontend
+```
