@@ -43,14 +43,20 @@ class YouTubeDownloader(IDownloader):
             if homebrew_bin not in env.get("PATH", ""):
                 env["PATH"] = f"{homebrew_bin}:{env.get('PATH', '')}"
 
-            proc = await asyncio.create_subprocess_exec(
-                ytdlp_cmd,
-                "--cookies-from-browser", "chrome",
+            # Build command — only use cookies on local (Mac with Chrome)
+            cmd_args = [ytdlp_cmd]
+            if sys.platform == "darwin":
+                cmd_args += ["--cookies-from-browser", "chrome"]
+            cmd_args += [
                 "--geo-bypass",
                 "--no-download",
                 "--print", "duration",
                 "--no-warnings",
                 url,
+            ]
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
@@ -104,7 +110,10 @@ class YouTubeDownloader(IDownloader):
 
         cmd = [
             ytdlp_cmd,
-            "--cookies-from-browser", "chrome",
+        ]
+        if sys.platform == "darwin":
+            cmd += ["--cookies-from-browser", "chrome"]
+        cmd += [
             "--geo-bypass",
             "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "--merge-output-format", "mp4",
