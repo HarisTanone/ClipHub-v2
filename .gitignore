@@ -73,3 +73,14 @@ logs/
 
 # ─── Kiro ─────────────────────────────────────────────────────────────────────
 .kiro/
+
+# ─── ML Models (too large for git) ───────────────────────────────────────────
+*.pt
+*.bin
+*.onnx
+*.pb
+models/
+
+# ─── Agent skills (local reference only) ─────────────────────────────────────
+.agents/
+skills-lock.json
