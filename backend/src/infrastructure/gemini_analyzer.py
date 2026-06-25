@@ -30,8 +30,19 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         from src.infrastructure.auth import GeminiKeyRotator
         self._key_rotator = GeminiKeyRotator()
         self._model = settings.GEMINI_MODEL
+        self._fallback_model = settings.GEMINI_FALLBACK_MODEL
+        self._using_fallback = False
+        self._consecutive_503 = 0
         self._client = None
         self._init_client()
+
+    def _switch_to_fallback(self) -> None:
+        """Switch to fallback model after repeated 503 errors."""
+        if not self._using_fallback and self._fallback_model and self._fallback_model != self._model:
+            logger.warning(f"Switching from {self._model} → {self._fallback_model} (repeated 503)")
+            self._model = self._fallback_model
+            self._using_fallback = True
+            self._consecutive_503 = 0
 
     def _init_client(self) -> None:
         key = self._key_rotator.get_current_key()
@@ -250,6 +261,11 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                     if attempt < MAX_RETRIES - 1:
                         time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                         continue
+
+                if "503" in error_str or "unavailable" in error_str:
+                    self._consecutive_503 += 1
+                    if self._consecutive_503 >= 3:
+                        self._switch_to_fallback()
 
                 if attempt < MAX_RETRIES - 1:
                     delay = RETRY_DELAYS[attempt]
