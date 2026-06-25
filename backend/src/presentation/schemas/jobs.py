@@ -1,0 +1,95 @@
+"""Pydantic schemas for job API endpoints."""
+from datetime import datetime
+from typing import Any, Optional
+
+from pydantic import BaseModel, field_validator
+
+
+class CreateJobRequest(BaseModel):
+    youtube_url: str
+    force_reprocess: bool = False
+    style_preset: str = ""
+    target_aspect_ratio: str = "9:16"  # "9:16", "16:9", "1:1"
+    hook_engine: str = "v3"  # "v2" (legacy) or "v3" (Browser Render Engine)
+    hook_style: str = ""  # e.g. "slide_punch_framer"
+    broll_enabled: bool = False  # B-Roll disabled by default
+    autogrid_enabled: bool = False  # Enable multi-speaker grid (9:16 only)
+    custom_style: Optional[dict] = None
+    # v3.0 Remotion fields
+    use_remotion: Optional[bool] = None  # Override USE_REMOTION setting
+    ai_layer_enabled: Optional[bool] = None  # Override REMOTION_ENABLE_AI_LAYER
+    threejs_enabled: Optional[bool] = None  # Override REMOTION_ENABLE_THREEJS
+    remotion_quality: Optional[str] = None  # "low", "medium", "high"
+    # Full style configs from Custom Style Editor
+    hook_style_config: Optional[dict] = None
+    subtitle_style_config: Optional[dict] = None
+
+    @field_validator("youtube_url")
+    @classmethod
+    def url_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("URL tidak boleh kosong")
+        return v.strip()
+
+    @field_validator("target_aspect_ratio")
+    @classmethod
+    def valid_aspect(cls, v: str) -> str:
+        if v not in ("9:16", "16:9", "1:1"):
+            raise ValueError("aspect_ratio harus '9:16', '16:9', atau '1:1'")
+        return v
+
+    @field_validator("hook_engine")
+    @classmethod
+    def valid_engine(cls, v: str) -> str:
+        if v not in ("v2", "v3"):
+            raise ValueError("hook_engine harus 'v2' atau 'v3'")
+        return v
+    
+    @field_validator("remotion_quality")
+    @classmethod
+    def valid_quality(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("low", "medium", "high"):
+            raise ValueError("remotion_quality harus 'low', 'medium', atau 'high'")
+        return v
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    youtube_url: str
+    status: str
+    video_duration: Optional[float] = None
+    render_progress: Optional[str] = None
+    error_message: Optional[str] = None
+    clips_data: Optional[Any] = None
+    clips_total: int = 0
+    clips_success: int = 0
+    clips_failed: int = 0
+    is_cached: bool = False
+    # v0.4 fields
+    style_preset: Optional[str] = None
+    target_aspect_ratio: Optional[str] = None
+    # v3.0 Remotion fields
+    use_remotion: bool = False
+    ai_layer_enabled: bool = False
+    threejs_enabled: bool = False
+    remotion_quality: str = "medium"
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class JobErrorResponse(BaseModel):
+    job_id: str
+    error_message: Optional[str] = None
+    error_details: Optional[dict] = None
+
+
+class ClipDataResponse(BaseModel):
+    """Response untuk Remotion — berisi clip data lengkap dengan subtitle dan hook."""
+    job_id: str
+    status: str
+    clips: Optional[list[dict]] = None
+    video_url: Optional[str] = None
+
+
+class ErrorResponse(BaseModel):
+    detail: str

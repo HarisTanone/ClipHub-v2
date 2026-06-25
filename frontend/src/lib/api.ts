@@ -1,0 +1,460 @@
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+function getToken(): string | null {
+  return localStorage.getItem("access_token");
+}
+
+function setTokens(access: string, refresh: string) {
+  localStorage.setItem("access_token", access);
+  localStorage.setItem("refresh_token", refresh);
+}
+
+function clearTokens() {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem("refresh_token");
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) {
+      clearTokens();
+      return null;
+    }
+    const data = await res.json();
+    setTokens(data.access_token, data.refresh_token);
+    return data.access_token;
+  } catch {
+    clearTokens();
+    return null;
+  }
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  let token = getToken();
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  let res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401 && token) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      headers["Authorization"] = `Bearer ${newToken}`;
+      res = await fetch(url, { ...options, headers });
+    } else {
+      clearTokens();
+      window.location.href = "/login";
+      throw new Error("Session expired");
+    }
+  }
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new ApiError(res.status, error.detail || "Request failed");
+  }
+
+  return res.json();
+}
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+// ─── Auth API ─────────────────────────────────────────────────────────────────
+
+export interface LoginResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export interface User {
+  id: number;
+  email: string;
+  full_name: string;
+  role: string;
+  role_id: number;
+  permissions: string[];
+  is_superadmin: boolean;
+  is_active: boolean;
+  created_at: string | null;
+  last_login_at: string | null;
+}
+
+export const auth = {
+  async login(email: string, password: string): Promise<LoginResponse> {
+    const data = await request<LoginResponse>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    setTokens(data.access_token, data.refresh_token);
+    return data;
+  },
+
+  async logout(): Promise<void> {
+    const refreshToken = localStorage.getItem("refresh_token");
+    try {
+      await request("/api/auth/logout", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+    } finally {
+      clearTokens();
+    }
+  },
+
+  async me(): Promise<User> {
+    const res = await request<{ success: boolean; data: User }>("/api/auth/me");
+    return res.data;
+  },
+
+  isAuthenticated(): boolean {
+    return !!getToken();
+  },
+};
+
+// ─── Jobs API ─────────────────────────────────────────────────────────────────
+
+export interface CreateJobPayload {
+  youtube_url: string;
+  force_reprocess?: boolean;
+  style_preset?: string;
+  target_aspect_ratio?: string;
+  hook_engine?: string;
+  hook_style?: string;
+  autogrid_enabled?: boolean;
+  // Remotion fields
+  use_remotion?: boolean;
+  ai_layer_enabled?: boolean;
+  threejs_enabled?: boolean;
+  remotion_quality?: string;
+  // Full style configs from Custom Style Editor
+  hook_style_config?: Record<string, any>;
+  subtitle_style_config?: Record<string, any>;
+}
+
+export interface JobSummary {
+  job_id: string;
+  youtube_url: string;
+  status: string;
+  video_duration: number | null;
+  clips_total: number;
+  clips_success: number;
+  clips_failed: number;
+  style_preset: string | null;
+  target_aspect_ratio: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface JobListResponse {
+  success: boolean;
+  data: JobSummary[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+    has_more: boolean;
+  };
+}
+
+export interface JobResponse {
+  job_id: string;
+  youtube_url: string;
+  status: string;
+  video_duration: number | null;
+  render_progress: string | null;
+  error_message: string | null;
+  clips_data: any;
+  clips_total: number;
+  clips_success: number;
+  clips_failed: number;
+  is_cached?: boolean;
+  // v0.4 fields
+  style_preset: string | null;
+  target_aspect_ratio: string | null;
+  // v3.0 Remotion fields
+  use_remotion: boolean;
+  ai_layer_enabled: boolean;
+  threejs_enabled: boolean;
+  remotion_quality: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ClipInfo {
+  rank: number;
+  score: number | null;
+  start: number;
+  end: number;
+  duration: number;
+  hook: string | null;
+  reason: string | null;
+  has_words: boolean;
+  word_count: number;
+  has_final: boolean;
+  has_thumbnail: boolean;
+}
+
+export interface JobDetailResponse {
+  success: boolean;
+  data: {
+    job_id: string;
+    youtube_url: string;
+    status: string;
+    video_duration: number | null;
+    style_preset: string | null;
+    target_aspect_ratio: string | null;
+    error_message: string | null;
+    clips_total: number;
+    clips_success: number;
+    clips_failed: number;
+    clips: ClipInfo[];
+    files: { raw: string[]; final: string[]; thumbnails: string[] };
+    created_at: string | null;
+    updated_at: string | null;
+  };
+}
+
+export interface ClipDetailResponse {
+  success: boolean;
+  data: {
+    job_id: string;
+    rank: number;
+    score: number | null;
+    start: number;
+    end: number;
+    duration: number;
+    hook: string | null;
+    reason: string | null;
+    words: Array<{ word: string; start: number; end: number; highlight?: boolean }>;
+    highlights: any[];
+    file_status: { raw: boolean; final: boolean; thumbnail: boolean };
+    urls: { raw: string | null; final: string | null; thumbnail: string | null };
+  };
+}
+
+export interface ProgressResponse {
+  success: boolean;
+  data: {
+    job_id: string;
+    status: string;
+    is_terminal: boolean;
+    progress: {
+      current_step: number;
+      total_steps: number;
+      percentage: number;
+      step_name: string | null;
+      step_label: string | null;
+    };
+    clips: {
+      total: number;
+      success: number;
+      failed: number;
+      available: number[];
+    };
+    error: string | null;
+    timestamps: { created_at: string | null; updated_at: string | null };
+  };
+  pipeline_steps: Array<{ number: number; name: string; label: string }>;
+}
+
+export const jobs = {
+  async list(params?: { status?: string; limit?: number; offset?: number }): Promise<JobListResponse> {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.offset) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    return request<JobListResponse>(`/api/jobs${qs ? `?${qs}` : ""}`);
+  },
+
+  async get(jobId: string): Promise<JobResponse> {
+    return request<JobResponse>(`/api/jobs/${jobId}`);
+  },
+
+  async getDetail(jobId: string): Promise<JobDetailResponse> {
+    return request<JobDetailResponse>(`/api/jobs/${jobId}/detail`);
+  },
+
+  async create(payload: CreateJobPayload): Promise<JobResponse> {
+    return request<JobResponse>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async cancel(jobId: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+  },
+
+  async getProgress(jobId: string): Promise<ProgressResponse> {
+    return request<ProgressResponse>(`/api/jobs/${jobId}/progress/poll`);
+  },
+
+  getProgressSSEUrl(jobId: string): string {
+    return `${API_BASE}/api/jobs/${jobId}/progress`;
+  },
+
+  getClipVideoUrl(jobId: string, rank: number): string {
+    return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/video`;
+  },
+
+  getClipRawUrl(jobId: string, rank: number): string {
+    return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/raw`;
+  },
+
+  getClipFinalUrl(jobId: string, rank: number): string {
+    return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/final`;
+  },
+
+  getClipThumbUrl(jobId: string, rank: number): string {
+    return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/thumb`;
+  },
+
+  async getClipDetail(jobId: string, rank: number): Promise<ClipDetailResponse> {
+    return request<ClipDetailResponse>(`/api/jobs/${jobId}/clips/${rank}/detail`);
+  },
+
+  async editHook(jobId: string, rank: number, hookText: string): Promise<any> {
+    return request(`/api/jobs/${jobId}/clips/${rank}/hook`, {
+      method: "PATCH",
+      body: JSON.stringify({ hook_text: hookText }),
+    });
+  },
+
+  async editStyle(jobId: string, rank: number, hookStyle: string, config?: any): Promise<any> {
+    return request(`/api/jobs/${jobId}/clips/${rank}/style`, {
+      method: "PATCH",
+      body: JSON.stringify({ hook_style: hookStyle, hook_style_config: config }),
+    });
+  },
+
+  async rerender(jobId: string, rank: number, options?: { hook_text?: string; hook_style?: string }): Promise<any> {
+    return request(`/api/jobs/${jobId}/clips/${rank}/rerender`, {
+      method: "POST",
+      body: JSON.stringify(options || {}),
+    });
+  },
+
+  async restyle(jobId: string, rank: number, options: {
+    hook_text?: string;
+    hook_style?: string;
+    subtitle_enabled?: boolean;
+  }): Promise<any> {
+    return request(`/api/jobs/${jobId}/clips/${rank}/restyle`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  },
+};
+
+// ─── Health API ───────────────────────────────────────────────────────────────
+
+export interface VideoPreview {
+  video_id: string;
+  title: string;
+  channel: string;
+  channel_url: string;
+  duration: number;
+  duration_string: string;
+  view_count: number | null;
+  like_count: number | null;
+  upload_date: string;
+  thumbnail: string;
+  description: string;
+  cache?: {
+    has_cache: boolean;
+    has_transcript: boolean;
+    last_job_id?: string | null;
+    last_status?: string;
+    clips_total?: number;
+    clips_success?: number;
+    processed_at?: string;
+    message?: string | null;
+  };
+}
+
+export const preview = {
+  async fetchMetadata(url: string): Promise<VideoPreview> {
+    const res = await request<{ success: boolean; data: VideoPreview }>(
+      `/api/preview?url=${encodeURIComponent(url)}`
+    );
+    return res.data;
+  },
+};
+
+export const system = {
+  async health(): Promise<{ status: string; version: string; mode: string }> {
+    return request("/health");
+  },
+};
+
+// ─── Presets API ──────────────────────────────────────────────────────────────
+
+export interface Preset {
+  id: number;
+  name: string;
+  hook_style: Record<string, any>;
+  subtitle_style: Record<string, any>;
+  created_at: string | null;
+  owner_email?: string;
+  owner_name?: string;
+}
+
+export interface PresetsListResponse {
+  success: boolean;
+  data: Preset[];
+  total: number;
+}
+
+export const presets = {
+  async list(): Promise<Preset[]> {
+    const res = await request<PresetsListResponse>("/api/presets");
+    return res.data;
+  },
+
+  async create(name: string, hook_style: Record<string, any>, subtitle_style: Record<string, any>): Promise<{ success: boolean; id: number; message: string }> {
+    return request("/api/presets", {
+      method: "POST",
+      body: JSON.stringify({ name, hook_style, subtitle_style }),
+    });
+  },
+
+  async remove(id: number): Promise<{ success: boolean; message: string }> {
+    return request(`/api/presets/${id}`, { method: "DELETE" });
+  },
+};
+
+// ─── Storage/Cleanup API ─────────────────────────────────────────────────────
+
+export const storage = {
+  async clearProcessingData(): Promise<{ success: boolean; message: string }> {
+    return request("/api/storage/clear", { method: "POST" });
+  },
+};
+
+export { getToken, setTokens, clearTokens, API_BASE };

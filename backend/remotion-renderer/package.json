@@ -1,0 +1,32 @@
+{
+  "name": "autocliper-remotion-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx remotion studio",
+    "build": "tsc --noEmit",
+    "render": "npx remotion render ClipComposition",
+    "server": "tsx src/server/index.ts",
+    "server:dev": "tsx watch src/server/index.ts"
+  },
+  "dependencies": {
+    "@remotion/animation-utils": "^4.0.242",
+    "@remotion/bundler": "4.0.242",
+    "@remotion/captions": "^4.0.242",
+    "@remotion/cli": "4.0.242",
+    "@remotion/layout-utils": "^4.0.242",
+    "@remotion/media-utils": "4.0.242",
+    "@remotion/renderer": "4.0.242",
+    "express": "^4.21.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "4.0.242",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/react": "^18.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

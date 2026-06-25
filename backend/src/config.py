@@ -1,0 +1,158 @@
+"""Application configuration — environment-based (local M1 vs production server)."""
+import os
+from typing import Optional
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings
+
+PIPELINE_ENV = os.getenv("PIPELINE_ENV", "local")
+
+
+class Settings(BaseSettings):
+    # Environment
+    PIPELINE_ENV: str = "local"
+
+    # Database (SQLite)
+    DATABASE_URL: str = "sqlite+aiosqlite:///data/autoclip.db"
+
+    # Gemini — supports multiple keys: "key1,key2,key3"
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.5-flash"
+
+    # YouTube Data API v3 (for transcript/captions)
+    YOUTUBE_API_KEY: str = ""
+
+    # ─── Auth / JWT ───────────────────────────────────────────────────────
+    JWT_SECRET_KEY: str = "change-me-in-production"
+    JWT_REFRESH_SECRET_KEY: str = "change-me-refresh-in-production"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    JWT_ALGORITHM: str = "HS256"
+
+    # ─── Superadmin Seed ──────────────────────────────────────────────────
+    SUPERADMIN_EMAIL: str = "admin@autocliper.com"
+    SUPERADMIN_PASSWORD: str = "Admin@2024!Secure"
+
+    # === Job Concurrency ===
+    MAX_CONCURRENT_JOBS: int = 1 if PIPELINE_ENV == "local" else 8
+    MAX_WHISPER_PARALLEL: int = 1 if PIPELINE_ENV == "local" else 4
+    MAX_RENDER_WORKERS: int = 2 if PIPELINE_ENV == "local" else 6
+
+    # === Limits ===
+    MAX_VIDEO_DURATION: int = 300 if PIPELINE_ENV == "local" else 3600
+    DOWNLOAD_TIMEOUT: int = 300 if PIPELINE_ENV == "local" else 600
+    MIN_CLIP_DURATION: float = 5.0
+
+    # === Paths ===
+    OUTPUT_DIR: str = "tmp/output"
+    DOWNLOAD_DIR: str = "tmp/downloads"
+    WAV_DIR: str = "/tmp/pipeline/wav" if PIPELINE_ENV == "local" else "/dev/shm/pipeline_wav"
+
+    # === Whisper (local whisper.cpp) ===
+    WHISPER_MODEL_PATH: str = ""
+    WHISPER_BINARY_PATH: str = ""
+    WHISPER_THREADS: int = 4 if PIPELINE_ENV == "local" else 6
+    WHISPER_USE_GPU: bool = False if PIPELINE_ENV == "local" else True
+    WHISPER_MODEL_SIZE: str = "medium"  # tiny, base, small, medium, large-v3
+
+    # === Whisper CoreML (Apple Silicon acceleration) ===
+    WHISPER_USE_COREML: bool = False
+    WHISPER_COREML_MODEL_PATH: str = ""
+
+    # === Download ===
+    USE_ARIA2C: bool = False if PIPELINE_ENV == "local" else True
+
+    # Cleanup
+    CLEANUP_MAX_AGE_DAYS: int = 7
+
+    # === Resource Monitor Thresholds ===
+    MIN_DISK_GB: float = 5.0
+    MIN_RAM_GB: float = 2.0
+
+    # === Dev/Testing ===
+    VIDEO_FINAL_RESULT: Optional[int] = None  # None = follow AI recommendation
+
+    @field_validator("VIDEO_FINAL_RESULT", mode="before")
+    @classmethod
+    def parse_empty_int(cls, v):
+        if v == "" or v is None:
+            return None
+        return int(v)
+
+    # === Default Style Preset ===
+    DEFAULT_STYLE_PRESET: str = "bold_black"
+
+    # === YOLO Models ===
+    YOLO_MODEL_VERSION: str = "v11"
+    YOLO_MODEL_PATH: str = "models/yolo11n.pt"
+    YOLO_SEG_MODEL: str = "models/yolo11n-seg.pt"
+
+    # === Hook Rendering ===
+    HOOK_DEFAULT_STYLE: str = "zoom_punch"  # animation preset name
+
+    # === Subtitle Style Override (from assets/subtitle/*.json) ===
+    SUBTITLE_STYLE_ID: str = ""  # empty = use DB preset, set to JSON style id to override
+
+    # === CDN / MinIO Storage ===
+    CDN_ENABLED: bool = False
+    CDN_ENDPOINT: str = ""
+    CDN_BUCKET: str = ""
+    CDN_ACCESS_KEY: str = ""
+    CDN_SECRET_KEY: str = ""
+
+    # ─── Asset Fetcher ────────────────────────────────────────────────────
+    PEXELS_API_KEY: str = ""
+    PIXABAY_API_KEY: str = ""
+    GIPHY_API_KEY: str = ""
+    ASSET_FETCH_ENABLED: bool = True
+    ASSET_FETCH_TIMEOUT: int = 8          # seconds per API request
+    ASSET_FETCH_MAX_CONCURRENT: int = 4
+    ASSET_FETCH_MAX_VIDEO_SIZE_MB: int = 20
+    ASSET_CACHE_DIR: str = "data/asset_cache"
+    ASSET_CACHE_MAX_GB: float = 2.0
+    LOTTIE_LIBRARY_DIR: str = "assets/lottie_library"
+
+    # ─── Hook Engine ─────────────────────────────────────────────────────
+    HOOK_ENABLE_JALUR_A: bool = False
+
+    # ─── Remotion Render Engine ──────────────────────────────────────────
+    USE_REMOTION: bool = False
+    REMOTION_PROJECT_PATH: str = "remotion-renderer"
+    REMOTION_SERVER_URL: str = "http://localhost:3002"
+    REMOTION_SERVER_PORT: int = 3002
+    REMOTION_CONCURRENCY: int = 2
+    REMOTION_QUALITY: str = "medium"  # low, medium, high
+    REMOTION_ENABLE_THREEJS: bool = True
+    REMOTION_ENABLE_AI_LAYER: bool = True
+
+    # ─── Gemini Multi-Key Support ─────────────────────────────────────────
+
+    @property
+    def gemini_api_keys(self) -> list[str]:
+        """Parse comma-separated Gemini API keys. Returns list of valid keys."""
+        if not self.GEMINI_API_KEY:
+            return []
+        keys = [k.strip() for k in self.GEMINI_API_KEY.split(",") if k.strip()]
+        return keys
+
+    @property
+    def is_local(self) -> bool:
+        return self.PIPELINE_ENV == "local"
+
+    @property
+    def db_path(self) -> str:
+        """Extract SQLite file path from DATABASE_URL."""
+        url = self.DATABASE_URL
+        # Handle both sqlite+aiosqlite:///path and sqlite:///path
+        for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
+            if url.startswith(prefix):
+                return url[len(prefix):]
+        # Fallback
+        return "data/autoclip.db"
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+
+
+settings = Settings()

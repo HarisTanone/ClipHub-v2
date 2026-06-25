@@ -1,0 +1,9 @@
+{
+  "animations": [
+    {"id": "chart_up", "file": "chart_up.json", "keywords": ["chart", "graph", "growth", "up", "increase", "statistics"], "tags": ["business", "data"]},
+    {"id": "coin_spin", "file": "coin_spin.json", "keywords": ["coin", "money", "dollar", "cash", "finance"], "tags": ["business", "money"]},
+    {"id": "checkmark", "file": "checkmark.json", "keywords": ["check", "done", "success", "complete", "yes"], "tags": ["status"]},
+    {"id": "loading", "file": "loading.json", "keywords": ["loading", "wait", "process", "time"], "tags": ["ui"]},
+    {"id": "rocket", "file": "rocket.json", "keywords": ["rocket", "launch", "startup", "fast", "speed"], "tags": ["tech"]}
+  ]
+}

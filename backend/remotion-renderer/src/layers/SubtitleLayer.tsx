@@ -1,0 +1,270 @@
+/**
+ * SubtitleLayer — Enhanced with official Remotion techniques:
+ * - createTikTokStyleCaptions for optimal word grouping
+ * - fitText for responsive font sizing
+ * - makeTransform for composable animations
+ * - paintOrder: "stroke" for clean text outlines
+ * - spring() for smooth enter animations
+ */
+import React, { useMemo } from "react";
+import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig, interpolate, spring } from "remotion";
+import { makeTransform, scale, translateY } from "@remotion/animation-utils";
+import { fitText } from "@remotion/layout-utils";
+import type { Word } from "../types";
+
+interface SubtitleConfig {
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: string;
+  letterSpacing?: number;
+  lineHeight?: number;
+  color?: string;
+  highlightColor?: string;
+  highlightScale?: number;
+  highlightBold?: boolean;
+  highlightGlow?: boolean;
+  highlightGlowColor?: string;
+  highlightStyle?: string;
+  highlightWords?: string[];
+  bgEnabled?: boolean;
+  bgColor?: string;
+  bgOpacity?: number;
+  bgRadius?: number;
+  bgPadding?: number;
+  position?: string;
+  positionY?: number;
+  uppercase?: boolean;
+  italic?: boolean;
+  strokeEnabled?: boolean;
+  strokeColor?: string;
+  strokeWidth?: number;
+  shadowEnabled?: boolean;
+  shadowColor?: string;
+  shadowBlur?: number;
+  maxWordsPerLine?: number;
+  wordSpacing?: number;
+  animationStyle?: string;
+  animationSpeed?: number;
+}
+
+interface SubtitleLayerProps {
+  words: Word[];
+  config: SubtitleConfig;
+  fps: number;
+  startOffset?: number;
+}
+
+/**
+ * Enhanced subtitle layer — uses manual word grouping for reliability,
+ * spring animations, and fitText for responsive sizing.
+ */
+export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps, startOffset = 0 }) => {
+  const { width } = useVideoConfig();
+
+  const fontFamily = config.fontFamily === "monospace" ? "monospace" : `'${config.fontFamily || "Poppins"}', sans-serif`;
+  const fontSize = config.fontSize || 34;
+  const color = config.color || "#FFFFFF";
+  const highlightColor = config.highlightColor || "#FFCC00";
+  const positionY = config.positionY ?? 85;
+
+  // Group words into pages — manual grouping is most reliable with our word format
+  const pages = useMemo(() => {
+    const maxPerLine = config.maxWordsPerLine || 3;
+    const result: any[] = [];
+    let current: Word[] = [];
+
+    for (const w of words) {
+      // Break on gap > 0.5s or word count
+      const gapTooLarge = current.length > 0 && w.start - current[current.length - 1].end > 0.5;
+      if (current.length >= maxPerLine || gapTooLarge) {
+        if (current.length > 0) {
+          result.push({
+            startMs: Math.round(current[0].start * 1000),
+            endMs: Math.round(current[current.length - 1].end * 1000),
+            tokens: current.map(cw => ({ text: cw.word + " ", fromMs: Math.round(cw.start * 1000), toMs: Math.round(cw.end * 1000) })),
+          });
+        }
+        current = [];
+      }
+      current.push(w);
+    }
+    if (current.length > 0) {
+      result.push({
+        startMs: Math.round(current[0].start * 1000),
+        endMs: Math.round(current[current.length - 1].end * 1000),
+        tokens: current.map(cw => ({ text: cw.word + " ", fromMs: Math.round(cw.start * 1000), toMs: Math.round(cw.end * 1000) })),
+      });
+    }
+    return result;
+  }, [words, config.maxWordsPerLine]);
+
+  return (
+    <AbsoluteFill>
+      {pages.map((page, index) => {
+        const nextPage = pages[index + 1] ?? null;
+        const startFrame = Math.round(((page.startMs / 1000) + startOffset) * fps);
+        const endFrame = Math.round(((page.endMs / 1000) + startOffset) * fps) + 3; // +3 frames buffer
+        const durationInFrames = endFrame - startFrame;
+        if (durationInFrames <= 0) return null;
+
+        return (
+          <Sequence key={index} from={startFrame} durationInFrames={durationInFrames}>
+            <SubtitlePage
+              page={page}
+              config={config}
+              fontFamily={fontFamily}
+              fontSize={fontSize}
+              color={color}
+              highlightColor={highlightColor}
+              positionY={positionY}
+              viewportWidth={width}
+              startOffset={startOffset}
+            />
+          </Sequence>
+        );
+      })}
+    </AbsoluteFill>
+  );
+};
+
+// Individual subtitle page with spring animation
+function SubtitlePage({
+  page,
+  config,
+  fontFamily,
+  fontSize,
+  color,
+  highlightColor,
+  positionY,
+  viewportWidth,
+  startOffset,
+}: {
+  page: any;
+  config: SubtitleConfig;
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  highlightColor: string;
+  positionY: number;
+  viewportWidth: number;
+  startOffset: number;
+}) {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const timeInMs = (frame / fps) * 1000;
+  const animStyle = config.animationStyle || "pop";
+  const highlightWords = config.highlightWords || [];
+  const highlightScale = config.highlightScale || 1.2;
+  const highlightStyleType = config.highlightStyle || "scale";
+
+  // Spring enter animation (from @remotion/animation-utils)
+  const enter = spring({
+    frame,
+    fps,
+    config: { damping: 200 },
+    durationInFrames: 6,
+  });
+
+  // Compute enter transform using makeTransform (composable)
+  const enterTransform = animStyle === "none" ? undefined : makeTransform([
+    scale(interpolate(enter, [0, 1], [animStyle === "pop" ? 0.85 : 0.95, 1])),
+    translateY(interpolate(enter, [0, 1], [animStyle === "slide" ? 20 : 8, 0])),
+  ]);
+
+  // fitText: auto-resize if text is too long for viewport
+  const pageText = page.tokens?.map((t: any) => t.text).join("") || "";
+  const textForFit = config.uppercase ? pageText.toUpperCase() : pageText;
+  let responsiveFontSize = fontSize;
+  try {
+    const fitted = fitText({
+      fontFamily: config.fontFamily || "Poppins",
+      text: textForFit || "placeholder",
+      withinWidth: viewportWidth * 0.85,
+    });
+    responsiveFontSize = Math.min(fontSize, fitted.fontSize);
+  } catch {
+    // fitText may fail in headless — use fontSize directly
+    responsiveFontSize = fontSize;
+  }
+
+  // Fade opacity
+  const opacity = interpolate(frame, [0, 3], [0, 1], { extrapolateRight: "clamp" });
+
+  return (
+    <AbsoluteFill style={{ opacity }}>
+      <div style={{
+        position: "absolute",
+        top: `${positionY}%`,
+        transform: `translateY(-50%)`,
+        left: 0, right: 0,
+        display: "flex",
+        justifyContent: "center",
+        padding: "0 20px",
+      }}>
+        <div style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: config.wordSpacing || 6,
+          transform: enterTransform,
+          ...(config.bgEnabled !== false ? {
+            backgroundColor: `${config.bgColor || "#000"}${Math.round((config.bgOpacity ?? 0.4) * 255).toString(16).padStart(2, "0")}`,
+            borderRadius: config.bgRadius || 8,
+            padding: config.bgPadding || 12,
+          } : {}),
+        }}>
+          {page.tokens?.map((t: any, i: number) => {
+            const startRel = (t.fromMs || 0) - (page.startMs || 0);
+            const endRel = (t.toMs || 0) - (page.startMs || 0);
+            const isActive = startRel <= timeInMs && endRel > timeInMs;
+            const wordText = (t.text || "").trim();
+            if (!wordText) return null;
+            const isKeyword = highlightWords.includes(wordText.toLowerCase());
+            const shouldHighlight = isActive || isKeyword;
+
+            const wordFontSize = shouldHighlight ? responsiveFontSize * highlightScale : responsiveFontSize;
+            const wordColor = shouldHighlight ? highlightColor : color;
+            const wordWeight = shouldHighlight && config.highlightBold !== false ? 900 : Number(config.fontWeight || 700);
+
+            // Shadows
+            const shadows: string[] = [];
+            if (config.shadowEnabled !== false) {
+              shadows.push(`0 0 ${config.shadowBlur || 8}px ${config.shadowColor || "#000"}`);
+            }
+            if (shouldHighlight && config.highlightGlow) {
+              shadows.push(`0 0 12px ${config.highlightGlowColor || highlightColor}`);
+            }
+
+            const displayText = config.uppercase ? wordText.toUpperCase() : wordText;
+
+            return (
+              <span
+                key={`${t.fromMs}-${i}`}
+                style={{
+                  display: "inline-block",
+                  color: wordColor,
+                  fontSize: wordFontSize,
+                  fontWeight: wordWeight,
+                  fontFamily,
+                  fontStyle: config.italic ? "italic" : "normal",
+                  letterSpacing: config.letterSpacing || 0,
+                  textShadow: shadows.length ? shadows.join(", ") : undefined,
+                  // paintOrder: "stroke" — renders stroke behind fill (cleaner than WebkitTextStroke)
+                  paintOrder: config.strokeEnabled ? "stroke" : undefined,
+                  WebkitTextStroke: config.strokeEnabled ? `${config.strokeWidth || 2}px ${config.strokeColor || "#000"}` : undefined,
+                  // Highlight style decorations
+                  ...(shouldHighlight && highlightStyleType === "underline" ? { textDecoration: "underline", textDecorationColor: highlightColor, textUnderlineOffset: "4px", textDecorationThickness: "3px" } : {}),
+                  ...(shouldHighlight && highlightStyleType === "background" ? { backgroundColor: `${highlightColor}30`, borderRadius: 4, padding: "2px 6px" } : {}),
+                  ...(shouldHighlight && highlightStyleType === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: highlightColor, textDecorationThickness: "3px" } : {}),
+                  transition: "color 0.05s",
+                }}
+              >
+                {displayText}
+              </span>
+            );
+          }) || pageText}
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+}

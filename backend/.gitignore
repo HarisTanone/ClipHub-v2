@@ -1,0 +1,79 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# AutoCliper — .gitignore
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── Environment & Secrets (NEVER commit) ─────────────────────────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+*.key
+*.pem
+*.cert
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.whl
+
+# ─── Virtual Environment ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ─── Node.js ──────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.yarn/
+
+# ─── Data & Output (generated at runtime) ────────────────────────────────────
+tmp/
+data/
+*.mp4
+*.mp3
+*.wav
+*.webm
+*.sqlite
+*.db
+
+# ─── Frontend Build ───────────────────────────────────────────────────────────
+frontend/dist/
+frontend/node_modules/
+frontend/test-results/
+frontend/tsconfig.tsbuildinfo
+
+# ─── Remotion ─────────────────────────────────────────────────────────────────
+remotion-renderer/node_modules/
+remotion-renderer/dist/
+remotion-renderer/output/
+.remotion/
+.cache/
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ─── Security: prevent .git exposure on web server ────────────────────────────
+# Note: .git itself is never tracked by git.
+# On deployment, ensure your reverse proxy blocks /.git/ requests:
+#   nginx: location ~ /\.git { deny all; }
