@@ -197,13 +197,13 @@ if [ -d "$FRONTEND_DIR" ]; then
 
     if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules/.package-lock.json" ]; then
         echo "  Installing npm dependencies..."
-        npm install --omit=dev 2>/dev/null || npm install
+        npm install 2>/dev/null || npm install
     else
         echo "  ✅ npm dependencies up to date"
     fi
 
     echo "  Building production bundle..."
-    npm run build 2>/dev/null || npm run build
+    npx vite build 2>/dev/null || npx vite build
 
     if [ -d "dist" ] && [ -f "dist/index.html" ]; then
         echo "  ✅ Frontend built"
