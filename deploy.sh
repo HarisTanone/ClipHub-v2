@@ -62,7 +62,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Step 1: Git Pull"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-cd "$BACKEND_DIR"
+cd "$PROJECT_DIR"
 if [ -d ".git" ]; then
     echo "  Fetching latest..."
     git fetch origin 2>/dev/null || true
@@ -75,7 +75,7 @@ if [ -d ".git" ]; then
     git pull origin main 2>/dev/null || git pull 2>/dev/null || true
     echo "  ✅ Code updated"
 else
-    echo "  ⚠️  No .git in backend/ — skipping pull"
+    echo "  ⚠️  No .git found — skipping pull"
 fi
 
 # ─── Step 2: System Dependencies ────────────────────────────────────────────
