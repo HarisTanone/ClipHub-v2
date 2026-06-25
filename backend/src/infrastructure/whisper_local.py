@@ -87,7 +87,15 @@ class WhisperLocal(IWhisperLocal):
         """Transcribe single clip audio → segments with word-level timestamps."""
         loop = asyncio.get_event_loop()
         if self._use_faster_whisper:
-            return await loop.run_in_executor(None, self._transcribe_faster_whisper, audio_path)
+            # Add timeout to prevent hanging on large clips
+            try:
+                return await asyncio.wait_for(
+                    loop.run_in_executor(None, self._transcribe_faster_whisper, audio_path),
+                    timeout=300  # 5 minute max per clip
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"faster_whisper_timeout: {audio_path} exceeded 300s")
+                return []
         return await loop.run_in_executor(None, self._transcribe_sync, audio_path)
 
     def _transcribe_faster_whisper(self, audio_path: str) -> list[dict]:
@@ -99,7 +107,8 @@ class WhisperLocal(IWhisperLocal):
                 model_size = settings.WHISPER_MODEL_SIZE
                 logger.info(f"Loading faster-whisper model: {model_size}")
                 self._faster_whisper_model = WhisperModel(
-                    model_size, device="cpu", compute_type="int8"
+                    model_size, device="cpu", compute_type="float32",
+                    num_workers=1, cpu_threads=settings.WHISPER_THREADS
                 )
 
             segs, info = self._faster_whisper_model.transcribe(
