@@ -111,32 +111,49 @@ class WhisperLocal(IWhisperLocal):
                     num_workers=1, cpu_threads=settings.WHISPER_THREADS
                 )
 
-            segs, info = self._faster_whisper_model.transcribe(
-                audio_path, word_timestamps=True, language="id"
-            )
+            # Convert to WAV 16kHz mono (required for reliable transcription)
+            wav_path = audio_path.rsplit(".", 1)[0] + "_whisper.wav"
+            convert_cmd = [
+                "ffmpeg", "-y", "-i", audio_path,
+                "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+                wav_path
+            ]
+            result = subprocess.run(convert_cmd, capture_output=True, timeout=120)
+            if result.returncode != 0 or not os.path.exists(wav_path):
+                logger.error(f"WAV conversion failed: {result.stderr.decode()[:200]}")
+                return []
 
-            segments = []
-            for seg in segs:
-                words = []
-                for w in (seg.words or []):
-                    word_text = w.word.strip()
-                    if word_text:
-                        words.append({
-                            "word": word_text,
-                            "start": round(w.start, 3),
-                            "end": round(w.end, 3),
+            try:
+                segs, info = self._faster_whisper_model.transcribe(
+                    wav_path, word_timestamps=True, language="id"
+                )
+
+                segments = []
+                for seg in segs:
+                    words = []
+                    for w in (seg.words or []):
+                        word_text = w.word.strip()
+                        if word_text:
+                            words.append({
+                                "word": word_text,
+                                "start": round(w.start, 3),
+                                "end": round(w.end, 3),
+                            })
+
+                    if words:
+                        segments.append({
+                            "start": round(seg.start, 2),
+                            "end": round(seg.end, 2),
+                            "text": seg.text.strip(),
+                            "words": words,
                         })
 
-                if words:
-                    segments.append({
-                        "start": round(seg.start, 2),
-                        "end": round(seg.end, 2),
-                        "text": seg.text.strip(),
-                        "words": words,
-                    })
-
-            logger.info(f"faster_whisper_done: {len(segments)} segments, lang={info.language}")
-            return segments
+                logger.info(f"faster_whisper_done: {len(segments)} segments, lang={info.language}")
+                return segments
+            finally:
+                # Cleanup WAV file
+                if os.path.exists(wav_path):
+                    os.remove(wav_path)
 
         except ImportError:
             logger.error("faster-whisper not installed, cannot transcribe")
