@@ -155,6 +155,9 @@ export interface CreateJobPayload {
   // Full style configs from Custom Style Editor
   hook_style_config?: Record<string, any>;
   subtitle_style_config?: Record<string, any>;
+  // Smart features
+  smart_camera?: boolean;
+  smart_subtitle_position?: boolean;
 }
 
 export interface JobSummary {

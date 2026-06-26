@@ -20,6 +20,8 @@ export function NewJob() {
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [templateMode] = useState<"custom">("custom");
   const [forceReprocess, setForceReprocess] = useState(false);
+  const [smartCamera, setSmartCamera] = useState(false);
+  const [smartSubtitlePos, setSmartSubtitlePos] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [urlError, setUrlError] = useState("");
 
@@ -132,6 +134,8 @@ export function NewJob() {
         remotion_quality: "medium",
         hook_style_config: { ...hookStyleConfig, template_mode: templateMode },
         subtitle_style_config: subtitleStyleConfig,
+        smart_camera: smartCamera,
+        smart_subtitle_position: smartSubtitlePos,
       });
       toast.success(`Job created: ${res.job_id}`);
       navigate(`/jobs/${res.job_id}`);
@@ -216,6 +220,15 @@ export function NewJob() {
                 )}
               </div>
             )}
+          </Card>
+
+          {/* Smart Features */}
+          <Card className="p-3">
+            <label className="block text-[10px] font-medium text-zinc-500 mb-2 uppercase tracking-wider">Smart Features</label>
+            <div className="space-y-2">
+              <Toggle label="Smart Camera" description="Photography framing (eye-level, headroom, tracking)" checked={smartCamera} onChange={setSmartCamera} />
+              <Toggle label="Smart Subtitle Position" description="Auto posisi subtitle (hindari wajah)" checked={smartSubtitlePos} onChange={setSmartSubtitlePos} />
+            </div>
           </Card>
 
           {/* Presets Carousel */}
