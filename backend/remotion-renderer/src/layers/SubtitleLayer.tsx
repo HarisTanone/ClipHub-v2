@@ -26,6 +26,21 @@ interface SubtitleConfig {
   highlightGlowColor?: string;
   highlightStyle?: string;
   highlightWords?: string[];
+  // Dual style (separate font/style for highlight words)
+  dualStyleEnabled?: boolean;
+  highlightFontFamily?: string;
+  highlightFontSize?: number;
+  highlightFontWeight?: string;
+  highlightLetterSpacing?: number;
+  highlightItalic?: boolean;
+  highlightUppercase?: boolean;
+  highlightStrokeEnabled?: boolean;
+  highlightStrokeColor?: string;
+  highlightStrokeWidth?: number;
+  highlightShadowEnabled?: boolean;
+  highlightShadowColor?: string;
+  highlightShadowBlur?: number;
+  // Common
   bgEnabled?: boolean;
   bgColor?: string;
   bgOpacity?: number;
@@ -221,21 +236,30 @@ function SubtitlePage({
             if (!wordText) return null;
             const isKeyword = highlightWords.includes(wordText.toLowerCase());
             const shouldHighlight = isActive || isKeyword;
+            const useDual = shouldHighlight && config.dualStyleEnabled;
 
-            const wordFontSize = shouldHighlight ? responsiveFontSize * highlightScale : responsiveFontSize;
+            const wordFontSize = useDual
+              ? (config.highlightFontSize || responsiveFontSize * highlightScale)
+              : (shouldHighlight ? responsiveFontSize * highlightScale : responsiveFontSize);
             const wordColor = shouldHighlight ? highlightColor : color;
-            const wordWeight = shouldHighlight && config.highlightBold !== false ? 900 : Number(config.fontWeight || 700);
+            const wordWeight = useDual
+              ? Number(config.highlightFontWeight || 900)
+              : (shouldHighlight && config.highlightBold !== false ? 900 : Number(config.fontWeight || 700));
+            const wordFontFamily = useDual
+              ? `'${config.highlightFontFamily || "Anton"}', sans-serif`
+              : fontFamily;
 
             // Shadows
             const shadows: string[] = [];
-            if (config.shadowEnabled !== false) {
-              shadows.push(`0 0 ${config.shadowBlur || 8}px ${config.shadowColor || "#000"}`);
+            if (useDual ? config.highlightShadowEnabled : config.shadowEnabled !== false) {
+              shadows.push(`0 0 ${useDual ? (config.highlightShadowBlur || 12) : (config.shadowBlur || 8)}px ${useDual ? (config.highlightShadowColor || "#000") : (config.shadowColor || "#000")}`);
             }
             if (shouldHighlight && config.highlightGlow) {
               shadows.push(`0 0 12px ${config.highlightGlowColor || highlightColor}`);
             }
 
-            const displayText = config.uppercase ? wordText.toUpperCase() : wordText;
+            const wordUppercase = useDual ? config.highlightUppercase : config.uppercase;
+            const displayText = wordUppercase ? wordText.toUpperCase() : wordText;
 
             return (
               <span
@@ -245,17 +269,18 @@ function SubtitlePage({
                   color: wordColor,
                   fontSize: wordFontSize,
                   fontWeight: wordWeight,
-                  fontFamily,
-                  fontStyle: config.italic ? "italic" : "normal",
-                  letterSpacing: config.letterSpacing || 0,
+                  fontFamily: wordFontFamily,
+                  fontStyle: useDual ? (config.highlightItalic ? "italic" : "normal") : (config.italic ? "italic" : "normal"),
+                  letterSpacing: useDual ? (config.highlightLetterSpacing || 0) : (config.letterSpacing || 0),
                   textShadow: shadows.length ? shadows.join(", ") : undefined,
-                  // paintOrder: "stroke" — renders stroke behind fill (cleaner than WebkitTextStroke)
-                  paintOrder: config.strokeEnabled ? "stroke" : undefined,
-                  WebkitTextStroke: config.strokeEnabled ? `${config.strokeWidth || 2}px ${config.strokeColor || "#000"}` : undefined,
-                  // Highlight style decorations
-                  ...(shouldHighlight && highlightStyleType === "underline" ? { textDecoration: "underline", textDecorationColor: highlightColor, textUnderlineOffset: "4px", textDecorationThickness: "3px" } : {}),
-                  ...(shouldHighlight && highlightStyleType === "background" ? { backgroundColor: `${highlightColor}30`, borderRadius: 4, padding: "2px 6px" } : {}),
-                  ...(shouldHighlight && highlightStyleType === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: highlightColor, textDecorationThickness: "3px" } : {}),
+                  paintOrder: (useDual ? config.highlightStrokeEnabled : config.strokeEnabled) ? "stroke" : undefined,
+                  WebkitTextStroke: (useDual ? config.highlightStrokeEnabled : config.strokeEnabled)
+                    ? `${(useDual ? (config.highlightStrokeWidth || 3) : (config.strokeWidth || 2))}px ${useDual ? (config.highlightStrokeColor || "#000") : (config.strokeColor || "#000")}`
+                    : undefined,
+                  // Highlight style decorations (only if NOT dual)
+                  ...(!useDual && shouldHighlight && highlightStyleType === "underline" ? { textDecoration: "underline", textDecorationColor: highlightColor, textUnderlineOffset: "4px", textDecorationThickness: "3px" } : {}),
+                  ...(!useDual && shouldHighlight && highlightStyleType === "background" ? { backgroundColor: `${highlightColor}30`, borderRadius: 4, padding: "2px 6px" } : {}),
+                  ...(!useDual && shouldHighlight && highlightStyleType === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: highlightColor, textDecorationThickness: "3px" } : {}),
                   transition: "color 0.05s",
                 }}
               >
