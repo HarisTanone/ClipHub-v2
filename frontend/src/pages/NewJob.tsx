@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Toggle } from "@/components/ui/Toggle";
 import { useToast } from "@/components/ui/Toast";
+import { useAuth } from "@/hooks/useAuth";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, type HookStyle, type SubtitleStyle } from "@/components/StyleEditorModal";
 import { jobs, preview, presets as presetsApi, type VideoPreview, type Preset, API_BASE } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
@@ -14,6 +15,7 @@ import { cn, formatDuration } from "@/lib/utils";
 export function NewJob() {
   const navigate = useNavigate();
   const toast = useToast();
+  const { user } = useAuth();
   const [url, setUrl] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [templateMode] = useState<"custom">("custom");
@@ -318,6 +320,7 @@ export function NewJob() {
               inline
               activeTab={styleTab}
               thumbnailUrl={videoMeta?.thumbnail}
+              isSuperadmin={user?.is_superadmin}
             />
           </Card>
         </div>

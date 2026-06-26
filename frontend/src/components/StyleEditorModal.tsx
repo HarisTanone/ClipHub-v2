@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Type, Sparkles, Bookmark, Trash2, Save, Download } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { FeatureLock } from "@/components/ui/FeatureLock";
 import { presets as presetsApi, type Preset } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -246,9 +247,10 @@ interface StyleEditorModalProps {
   inline?: boolean;
   activeTab?: "presets" | "hook" | "subtitle";
   thumbnailUrl?: string;
+  isSuperadmin?: boolean;
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl }: StyleEditorModalProps) {
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin }: StyleEditorModalProps) {
   const [tab, setTab] = useState<"presets" | "hook" | "subtitle">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
@@ -270,7 +272,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} />}
       </div>
     );
   }
@@ -298,7 +300,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} />}
         </div>
       </div>
     </div>
@@ -599,7 +601,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
 
 // ─── Subtitle Editor ─────────────────────────────────────────────────────────
 
-function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: SubtitleStyle; onChange: (s: SubtitleStyle) => void; aspectRatio: string; thumbnailUrl?: string }) {
+function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadmin }: { style: SubtitleStyle; onChange: (s: SubtitleStyle) => void; aspectRatio: string; thumbnailUrl?: string; isSuperadmin?: boolean }) {
   const update = (patch: Partial<SubtitleStyle>) => onChange({ ...style, ...patch });
   const [newWord, setNewWord] = useState("");
   const [activeWordIdx, setActiveWordIdx] = useState(0);
@@ -682,39 +684,41 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style:
         </Section>
 
         <Section title="Dual Font Style (Highlight Words)">
-          <Checkbox label="Use separate style for highlight words" checked={style.dualStyleEnabled} onChange={(v) => update({ dualStyleEnabled: v })} />
-          <p className="text-[9px] text-zinc-600 mt-1 mb-2">Kata-kata penting (MAKANYA, JANGAN, dll) akan menggunakan font & style berbeda dari teks normal.</p>
-          {style.dualStyleEnabled && (
-            <div className="mt-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 space-y-3">
-              <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">Highlight Word Style</p>
-              <div className="grid grid-cols-3 gap-3">
-                <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={["Anton", "Poppins", "Inter", "Montserrat", "Bebas Neue", "Oswald", "Raleway"]} />
-                <SelectSmall label="Weight" value={style.highlightFontWeight} onChange={(v) => update({ highlightFontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
-                <RangeInput label={`Size: ${style.highlightFontSize}px`} min={24} max={56} value={style.highlightFontSize} onChange={(v) => update({ highlightFontSize: v })} />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <RangeInput label={`Spacing: ${style.highlightLetterSpacing}px`} min={-1} max={8} value={style.highlightLetterSpacing} onChange={(v) => update({ highlightLetterSpacing: v })} />
-                <div className="flex flex-col justify-end"><Checkbox label="UPPERCASE" checked={style.highlightUppercase} onChange={(v) => update({ highlightUppercase: v })} /></div>
-                <div className="flex flex-col justify-end"><Checkbox label="Italic" checked={style.highlightItalic} onChange={(v) => update({ highlightItalic: v })} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><Checkbox label="Stroke" checked={style.highlightStrokeEnabled} onChange={(v) => update({ highlightStrokeEnabled: v })} /></div>
-                <div><Checkbox label="Shadow" checked={style.highlightShadowEnabled} onChange={(v) => update({ highlightShadowEnabled: v })} /></div>
-              </div>
-              {style.highlightStrokeEnabled && (
-                <div className="grid grid-cols-2 gap-3">
-                  <ColorPicker label="Stroke Color" value={style.highlightStrokeColor} onChange={(v) => update({ highlightStrokeColor: v })} />
-                  <RangeInput label={`Width: ${style.highlightStrokeWidth}px`} min={1} max={6} value={style.highlightStrokeWidth} onChange={(v) => update({ highlightStrokeWidth: v })} />
+          <FeatureLock featureName="Dual Font Style" isSuperadmin={isSuperadmin}>
+            <Checkbox label="Use separate style for highlight words" checked={style.dualStyleEnabled} onChange={(v) => update({ dualStyleEnabled: v })} />
+            <p className="text-[9px] text-zinc-600 mt-1 mb-2">Kata-kata penting (MAKANYA, JANGAN, dll) akan menggunakan font & style berbeda dari teks normal.</p>
+            {style.dualStyleEnabled && (
+              <div className="mt-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 space-y-3">
+                <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">Highlight Word Style</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={["Anton", "Poppins", "Inter", "Montserrat", "Bebas Neue", "Oswald", "Raleway"]} />
+                  <SelectSmall label="Weight" value={style.highlightFontWeight} onChange={(v) => update({ highlightFontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                  <RangeInput label={`Size: ${style.highlightFontSize}px`} min={24} max={56} value={style.highlightFontSize} onChange={(v) => update({ highlightFontSize: v })} />
                 </div>
-              )}
-              {style.highlightShadowEnabled && (
-                <div className="grid grid-cols-2 gap-3">
-                  <ColorPicker label="Shadow Color" value={style.highlightShadowColor} onChange={(v) => update({ highlightShadowColor: v })} />
-                  <RangeInput label={`Blur: ${style.highlightShadowBlur}px`} min={0} max={24} value={style.highlightShadowBlur} onChange={(v) => update({ highlightShadowBlur: v })} />
+                <div className="grid grid-cols-3 gap-3">
+                  <RangeInput label={`Spacing: ${style.highlightLetterSpacing}px`} min={-1} max={8} value={style.highlightLetterSpacing} onChange={(v) => update({ highlightLetterSpacing: v })} />
+                  <div className="flex flex-col justify-end"><Checkbox label="UPPERCASE" checked={style.highlightUppercase} onChange={(v) => update({ highlightUppercase: v })} /></div>
+                  <div className="flex flex-col justify-end"><Checkbox label="Italic" checked={style.highlightItalic} onChange={(v) => update({ highlightItalic: v })} /></div>
                 </div>
-              )}
-            </div>
-          )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Checkbox label="Stroke" checked={style.highlightStrokeEnabled} onChange={(v) => update({ highlightStrokeEnabled: v })} /></div>
+                  <div><Checkbox label="Shadow" checked={style.highlightShadowEnabled} onChange={(v) => update({ highlightShadowEnabled: v })} /></div>
+                </div>
+                {style.highlightStrokeEnabled && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <ColorPicker label="Stroke Color" value={style.highlightStrokeColor} onChange={(v) => update({ highlightStrokeColor: v })} />
+                    <RangeInput label={`Width: ${style.highlightStrokeWidth}px`} min={1} max={6} value={style.highlightStrokeWidth} onChange={(v) => update({ highlightStrokeWidth: v })} />
+                  </div>
+                )}
+                {style.highlightShadowEnabled && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <ColorPicker label="Shadow Color" value={style.highlightShadowColor} onChange={(v) => update({ highlightShadowColor: v })} />
+                    <RangeInput label={`Blur: ${style.highlightShadowBlur}px`} min={0} max={24} value={style.highlightShadowBlur} onChange={(v) => update({ highlightShadowBlur: v })} />
+                  </div>
+                )}
+              </div>
+            )}
+          </FeatureLock>
         </Section>
 
         <Section title="Background & Stroke">
