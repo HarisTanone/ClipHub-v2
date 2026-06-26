@@ -65,7 +65,8 @@ class CreateUserRequest(BaseModel):
     email: str = Field(..., min_length=5)
     password: str = Field(..., min_length=8, max_length=72)
     full_name: str = Field(..., min_length=1, max_length=100)
-    role_id: int = Field(..., ge=1)
+    role_id: Optional[int] = Field(default=2, ge=1)  # Default: editor role
+    feature_codes: Optional[list[str]] = None  # Optional: grant features on creation
 
 
 class UpdateUserRequest(BaseModel):
@@ -272,7 +273,7 @@ async def get_me(user: CurrentUser = Depends(get_current_user)):
 
 @router.post("/users", status_code=201)
 async def create_user(body: CreateUserRequest, admin: CurrentUser = Depends(require_permission("users:create"))):
-    """Create new user (admin/superadmin only)."""
+    """Create new user (admin/superadmin only). Optionally grant features on creation."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
@@ -288,13 +289,37 @@ async def create_user(body: CreateUserRequest, admin: CurrentUser = Depends(requ
         if role["name"] == "superadmin" and not admin.is_superadmin:
             raise HTTPException(status_code=403, detail="Only superadmin can assign superadmin role")
 
+        # Validate feature codes if provided
+        if body.feature_codes:
+            from src.presentation.routes.features import AVAILABLE_FEATURES
+            invalid = [f for f in body.feature_codes if f not in AVAILABLE_FEATURES]
+            if invalid:
+                raise HTTPException(status_code=400, detail=f"Unknown features: {', '.join(invalid)}")
+
         hashed = hash_password(body.password)
         cur.execute(
             "INSERT INTO users (email, hashed_password, full_name, role_id) VALUES (?,?,?,?)",
             (body.email, hashed, body.full_name, body.role_id),
         )
+        new_user_id = cur.lastrowid
+
+        # Grant features if specified
+        granted_features = []
+        if body.feature_codes:
+            for code in body.feature_codes:
+                cur.execute(
+                    "INSERT OR IGNORE INTO user_features (user_id, feature_code, granted_by) VALUES (?, ?, ?)",
+                    (new_user_id, code, admin.id),
+                )
+                granted_features.append(code)
+
         conn.commit()
-        return {"success": True, "message": f"User '{body.email}' created with role '{role['name']}'"}
+
+        msg = f"User '{body.email}' created with role '{role['name']}'"
+        if granted_features:
+            msg += f" and {len(granted_features)} features granted"
+
+        return {"success": True, "message": msg, "data": {"user_id": new_user_id, "features": granted_features}}
     finally:
         conn.close()
 

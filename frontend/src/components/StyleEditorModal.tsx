@@ -50,7 +50,7 @@ export interface HookStyle {
   italic: boolean;
   // Accent line
   lineEnabled: boolean;
-  linePosition: "top" | "bottom" | "left" | "right" | "center-h" | "center-v";
+  linePosition: "top" | "bottom" | "left" | "right" | "center-h" | "center-v" | "auto-bottom";
   lineColor: string;
   lineWidth: number;
   lineAutoWidth: boolean;
@@ -461,7 +461,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
 
         <Section title="Typography">
           <div className="grid grid-cols-3 gap-3">
-            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={["Poppins", "Inter", "Montserrat", "Anton", "Bebas Neue", "Oswald", "Raleway", "monospace"]} />
+            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={["Poppins", "Inter", "Montserrat", "Anton", "Bebas Neue", "Oswald", "Raleway", "Roboto", "Lato", "Nunito", "Playfair Display", "Merriweather", "Barlow Condensed", "Archivo Black", "Righteous", "monospace"]} />
             <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
             <SelectSmall label="Align" value={style.textAlign} onChange={(v) => update({ textAlign: v as any })} options={["center", "left", "right"]} />
           </div>
@@ -530,9 +530,9 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
           <Checkbox label="Enable accent line" checked={style.lineEnabled} onChange={(v) => update({ lineEnabled: v })} />
           {style.lineEnabled && (
             <div className="mt-3 space-y-3">
-              <div className="grid grid-cols-6 gap-2">
-                {(["top", "center-h", "bottom", "left", "center-v", "right"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ linePosition: p })} className={cn("py-1.5 rounded-lg border text-[10px] font-medium capitalize transition-colors", style.linePosition === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400")}>{p.replace("-h", " ↔").replace("-v", " ↕")}</button>
+              <div className="grid grid-cols-7 gap-2">
+                {(["top", "center-h", "bottom", "left", "center-v", "right", "auto-bottom"] as const).map(p => (
+                  <button key={p} type="button" onClick={() => update({ linePosition: p })} className={cn("py-1.5 rounded-lg border text-[10px] font-medium capitalize transition-colors", style.linePosition === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400")}>{p.replace("-h", " ↔").replace("-v", " ↕").replace("auto-bottom", "Auto ↓")}</button>
                 ))}
               </div>
               <Checkbox label="Auto-adjust width (match text)" checked={style.lineAutoWidth} onChange={(v) => update({ lineAutoWidth: v, lineWidth: v ? 80 : style.lineWidth })} />
@@ -642,7 +642,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
 
         <Section title="Typography">
           <div className="grid grid-cols-3 gap-3">
-            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={["Poppins", "Inter", "Montserrat", "Anton", "Bebas Neue", "Oswald", "Raleway"]} />
+            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={["Poppins", "Inter", "Montserrat", "Anton", "Bebas Neue", "Oswald", "Raleway", "Roboto", "Lato", "Nunito", "Playfair Display", "Merriweather", "Barlow Condensed", "Archivo Black", "Righteous"]} />
             <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
             <RangeInput label={`Size: ${style.fontSize}px`} min={20} max={52} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
           </div>
@@ -693,7 +693,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
               <div className="mt-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 space-y-3">
                 <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">Highlight Word Style</p>
                 <div className="grid grid-cols-3 gap-3">
-                  <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={["Anton", "Poppins", "Inter", "Montserrat", "Bebas Neue", "Oswald", "Raleway"]} />
+                  <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={["Anton", "Poppins", "Inter", "Montserrat", "Bebas Neue", "Oswald", "Raleway", "Roboto", "Archivo Black", "Righteous", "Barlow Condensed", "Playfair Display"]} />
                   <SelectSmall label="Weight" value={style.highlightFontWeight} onChange={(v) => update({ highlightFontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
                   <RangeInput label={`Size: ${style.highlightFontSize}px`} min={24} max={56} value={style.highlightFontSize} onChange={(v) => update({ highlightFontSize: v })} />
                 </div>
@@ -874,6 +874,7 @@ function AccentLinePreview({ style }: { style: HookStyle }) {
   if (pos === "right") Object.assign(base, { right: style.lineOffset, top: "50%", transform: "translateY(-50%)", height: autoH, width: style.lineThickness });
   if (pos === "center-h") Object.assign(base, { top: `calc(50% + ${style.lineOffset}px)`, left: "50%", transform: "translate(-50%, -50%)", width: autoW, height: style.lineThickness });
   if (pos === "center-v") Object.assign(base, { top: "50%", left: `calc(50% + ${style.lineOffset}px)`, transform: "translate(-50%, -50%)", height: autoH, width: style.lineThickness });
+  if (pos === "auto-bottom") Object.assign(base, { top: `calc(${style.positionY}% + ${style.lineOffset + 20}px)`, left: "50%", transform: "translateX(-50%)", width: autoW, height: style.lineThickness });
   return <div style={base} />;
 }
 

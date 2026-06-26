@@ -48,6 +48,11 @@ class GrantFeatureRequest(BaseModel):
     feature_code: str
 
 
+class BatchGrantRequest(BaseModel):
+    user_id: int
+    feature_codes: list[str]
+
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/available")
@@ -99,12 +104,97 @@ async def grant_feature(body: GrantFeatureRequest, user: CurrentUser = Depends(g
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
+        # Validate user exists
+        cur.execute("SELECT id FROM users WHERE id = ?", (body.user_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"User ID {body.user_id} not found")
+
         cur.execute(
             "INSERT OR IGNORE INTO user_features (user_id, feature_code, granted_by) VALUES (?, ?, ?)",
             (body.user_id, body.feature_code, user.id),
         )
         conn.commit()
+        already_had = cur.rowcount == 0
+        if already_had:
+            return {"success": True, "message": f"User {body.user_id} already has feature '{body.feature_code}'"}
         return {"success": True, "message": f"Feature '{body.feature_code}' granted to user {body.user_id}"}
+    finally:
+        conn.close()
+
+
+@router.post("/grant-batch")
+async def grant_features_batch(body: BatchGrantRequest, user: CurrentUser = Depends(get_current_user)):
+    """Grant multiple premium features to a user at once (superadmin only)."""
+    if not user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Superadmin only")
+
+    # Validate all feature codes
+    invalid = [f for f in body.feature_codes if f not in AVAILABLE_FEATURES]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Unknown features: {', '.join(invalid)}")
+
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        # Validate user exists
+        cur.execute("SELECT id FROM users WHERE id = ?", (body.user_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"User ID {body.user_id} not found")
+
+        granted = []
+        skipped = []
+        for code in body.feature_codes:
+            cur.execute(
+                "INSERT OR IGNORE INTO user_features (user_id, feature_code, granted_by) VALUES (?, ?, ?)",
+                (body.user_id, code, user.id),
+            )
+            if cur.rowcount > 0:
+                granted.append(code)
+            else:
+                skipped.append(code)
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": f"{len(granted)} features granted, {len(skipped)} already assigned",
+            "data": {"granted": granted, "skipped": skipped},
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/grant-all")
+async def grant_all_features(body: dict, user: CurrentUser = Depends(get_current_user)):
+    """Grant ALL premium features to a user (superadmin only). Body: {user_id: int}"""
+    if not user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Superadmin only")
+
+    user_id = body.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=422, detail="user_id is required")
+
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"User ID {user_id} not found")
+
+        granted = []
+        for code in AVAILABLE_FEATURES:
+            cur.execute(
+                "INSERT OR IGNORE INTO user_features (user_id, feature_code, granted_by) VALUES (?, ?, ?)",
+                (user_id, code, user.id),
+            )
+            if cur.rowcount > 0:
+                granted.append(code)
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": f"All features granted to user {user_id} ({len(granted)} new)",
+            "data": {"granted": granted, "total_features": len(AVAILABLE_FEATURES)},
+        }
     finally:
         conn.close()
 
@@ -118,10 +208,39 @@ async def revoke_feature(body: GrantFeatureRequest, user: CurrentUser = Depends(
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
+        # Validate user exists
+        cur.execute("SELECT id FROM users WHERE id = ?", (body.user_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"User ID {body.user_id} not found")
+
         cur.execute("DELETE FROM user_features WHERE user_id = ? AND feature_code = ?", (body.user_id, body.feature_code))
         conn.commit()
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Feature not found for this user")
         return {"success": True, "message": f"Feature '{body.feature_code}' revoked from user {body.user_id}"}
+    finally:
+        conn.close()
+
+
+@router.post("/revoke-all")
+async def revoke_all_features(body: dict, user: CurrentUser = Depends(get_current_user)):
+    """Revoke ALL premium features from a user (superadmin only). Body: {user_id: int}"""
+    if not user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Superadmin only")
+
+    user_id = body.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=422, detail="user_id is required")
+
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail=f"User ID {user_id} not found")
+
+        cur.execute("DELETE FROM user_features WHERE user_id = ?", (user_id,))
+        conn.commit()
+        return {"success": True, "message": f"All features revoked from user {user_id} ({cur.rowcount} removed)"}
     finally:
         conn.close()

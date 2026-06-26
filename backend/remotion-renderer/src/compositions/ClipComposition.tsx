@@ -4,6 +4,21 @@ import type { ClipCompositionProps } from "../types";
 import { HookLayer } from "../layers/HookLayer";
 import { SubtitleLayer } from "../layers/SubtitleLayer";
 
+// Dynamic font loader — injects Google Fonts stylesheet
+function useRemotionFont(fontName: string | undefined) {
+  if (!fontName || fontName === "monospace") return;
+  try {
+    const id = `gfont-${fontName.replace(/\s/g, "")}`;
+    if (typeof document !== "undefined" && !document.getElementById(id)) {
+      const link = document.createElement("link");
+      link.id = id;
+      link.rel = "stylesheet";
+      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontName)}:wght@400;500;600;700;800;900&display=swap`;
+      document.head.appendChild(link);
+    }
+  } catch { /* headless may not have document */ }
+}
+
 /**
  * Main clip composition:
  * 1. Base video
@@ -26,6 +41,13 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   const hookDuration = hookConfig.duration || 3.0;
   const hookDurationFrames = Math.floor(hookDuration * fps);
 
+  // Load fonts for subtitle (normal + highlight)
+  useRemotionFont(subtitleConfig.fontFamily || "Poppins");
+  useRemotionFont(hookConfig.fontFamily || "Poppins");
+  if (subtitleConfig.dualStyleEnabled && subtitleConfig.highlightFontFamily) {
+    useRemotionFont(subtitleConfig.highlightFontFamily);
+  }
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {/* Layer 1: Base Video — OffthreadVideo for stability */}
@@ -45,16 +67,16 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         </Sequence>
       )}
 
-      {/* Layer 3: Subtitles (no offset - timestamps from Whisper are already relative to clip start) */}
+      {/* Layer 3: Subtitles (starts AFTER hook to avoid overlap) */}
       {words.length > 0 && (
-        <AbsoluteFill>
+        <Sequence from={hookText ? hookDurationFrames : 0}>
           <SubtitleLayer
             words={words}
             config={subtitleConfig}
             fps={fps}
-            startOffset={0}
+            startOffset={hookText ? -hookDuration : 0}
           />
-        </AbsoluteFill>
+        </Sequence>
       )}
     </AbsoluteFill>
   );

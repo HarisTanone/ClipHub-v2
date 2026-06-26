@@ -33,7 +33,7 @@ class RemotionRenderProgress:
 class RemotionRenderConfig:
     """Configuration for Remotion render."""
     concurrency: int = 2
-    quality: str = "medium"  # low, medium, high
+    quality: str = "high"  # low, medium, high
     enable_threejs: bool = True
     enable_ai_layer: bool = True
     output_format: str = "mp4"  # mp4, webm

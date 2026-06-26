@@ -115,6 +115,7 @@ class YouTubeDownloader(IDownloader):
             cmd += ["--cookies-from-browser", "chrome"]
         cmd += [
             "--geo-bypass",
+            "--extractor-args", "youtube:player_client=ios,web",
             "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "--merge-output-format", "mp4",
             "-o", output_path,
