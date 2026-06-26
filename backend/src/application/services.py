@@ -194,6 +194,9 @@ class JobService:
         # Custom style configs from frontend editor
         hook_style_config: Optional[dict] = None,
         subtitle_style_config: Optional[dict] = None,
+        # Smart features (premium)
+        smart_camera: Optional[bool] = None,
+        smart_subtitle_position: Optional[bool] = None,
     ) -> tuple[Job, bool]:
         """Create job and start pipeline in background."""
 
@@ -220,6 +223,10 @@ class JobService:
             initial_clips_data["hook_style_config"] = hook_style_config
         if subtitle_style_config:
             initial_clips_data["subtitle_style_config"] = subtitle_style_config
+        if smart_camera:
+            initial_clips_data["smart_camera"] = True
+        if smart_subtitle_position:
+            initial_clips_data["smart_subtitle_position"] = True
 
         job = Job(
             job_id=job_id,

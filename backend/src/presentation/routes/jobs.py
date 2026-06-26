@@ -90,6 +90,9 @@ async def create_job(
         # Custom style configs
         hook_style_config=request.hook_style_config,
         subtitle_style_config=request.subtitle_style_config,
+        # Smart features
+        smart_camera=request.smart_camera,
+        smart_subtitle_position=request.smart_subtitle_position,
     )
     return JobResponse(
         job_id=job.job_id,

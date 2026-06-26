@@ -344,11 +344,15 @@ function OtherClipsCarousel({ clips, jobId }: { clips: any[]; jobId: string }) {
                   preload="auto"
                 />
                 <span className="absolute top-1 left-1 bg-black/80 text-[8px] text-white font-bold px-1 py-0.5 rounded">#{c.rank}</span>
+                {c.score && <span className="absolute bottom-1 left-1 bg-emerald-600/90 text-[7px] text-white font-bold px-1 py-0.5 rounded">{c.score}</span>}
                 {c.has_final && <span className="absolute top-1 right-1 bg-emerald-500/90 text-[7px] text-white px-1 py-0.5 rounded">Ready</span>}
               </div>
               <div className="p-1.5">
                 <p className="text-[9px] text-zinc-300 font-medium truncate">{c.hook || `Clip ${c.rank}`}</p>
-                <p className="text-[8px] text-zinc-500">{c.duration ? formatDuration(c.duration) : ""} {c.score ? `• ${c.score}` : ""}</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className="text-[8px] text-zinc-500">{c.duration ? formatDuration(c.duration) : ""}</span>
+                  {c.score && <span className="text-[8px] bg-emerald-500/20 text-emerald-400 font-bold px-1 py-0.5 rounded">{c.score}</span>}
+                </div>
               </div>
             </Link>
           );

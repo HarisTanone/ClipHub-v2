@@ -23,6 +23,9 @@ class CreateJobRequest(BaseModel):
     # Full style configs from Custom Style Editor
     hook_style_config: Optional[dict] = None
     subtitle_style_config: Optional[dict] = None
+    # Smart features (premium)
+    smart_camera: Optional[bool] = None
+    smart_subtitle_position: Optional[bool] = None
 
     @field_validator("youtube_url")
     @classmethod

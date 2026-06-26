@@ -274,3 +274,38 @@ INSERT OR IGNORE INTO hook_animations (id, name, description) VALUES
     ('slide_up', 'Slide Up', 'Text slides up from bottom'),
     ('glitch', 'Glitch Effect', 'RGB glitch with digital distortion'),
     ('typewriter', 'Typewriter', 'Character-by-character reveal');
+
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- v3.1 Premium Features & User Presets
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- ─── User Presets Table ──────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS user_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    hook_style JSON NOT NULL DEFAULT '{}',
+    subtitle_style JSON NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_presets_user ON user_presets(user_id);
+
+-- ─── User Features Table (Premium Access Control) ────────────────────────────
+
+CREATE TABLE IF NOT EXISTS user_features (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    feature_code TEXT NOT NULL,
+    granted_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, feature_code),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (granted_by) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_features_user ON user_features(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_features_code ON user_features(feature_code);
