@@ -277,6 +277,7 @@ export function ClipViewer() {
         onSubtitleChange={setSubtitleStyleConfig}
         aspectRatio="9:16"
         isSuperadmin={user?.is_superadmin}
+        userFeatures={user?.features}
       />
     </div>
   );

@@ -5,18 +5,24 @@ import { cn } from "@/lib/utils";
 interface FeatureLockProps {
   children: React.ReactNode;
   featureName: string;
+  featureCode: string;
   isSuperadmin?: boolean;
+  userFeatures?: string[];
   className?: string;
 }
 
 /**
  * FeatureLock — wraps any UI section with a lock overlay.
- * Superadmin bypasses the lock. Regular users see "Coming Soon" animation on click.
+ * Access granted if: superadmin OR user has the feature_code in their features list.
+ * Regular users without access see "Coming Soon" animation on click.
  */
-export function FeatureLock({ children, featureName, isSuperadmin, className }: FeatureLockProps) {
+export function FeatureLock({ children, featureName, featureCode, isSuperadmin, userFeatures = [], className }: FeatureLockProps) {
   const [showNotif, setShowNotif] = useState(false);
 
-  if (isSuperadmin) {
+  // Superadmin or user has this feature granted
+  const hasAccess = isSuperadmin || userFeatures.includes(featureCode);
+
+  if (hasAccess) {
     return <>{children}</>;
   }
 
@@ -42,6 +48,7 @@ export function FeatureLock({ children, featureName, isSuperadmin, className }: 
             <Lock className="h-4 w-4 text-zinc-500" />
           </div>
           <span className="text-[10px] text-zinc-500 font-medium">{featureName}</span>
+          <span className="text-[8px] text-zinc-600">Premium</span>
         </div>
       </div>
 

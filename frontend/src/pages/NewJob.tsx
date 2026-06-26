@@ -321,6 +321,7 @@ export function NewJob() {
               activeTab={styleTab}
               thumbnailUrl={videoMeta?.thumbnail}
               isSuperadmin={user?.is_superadmin}
+              userFeatures={user?.features}
             />
           </Card>
         </div>

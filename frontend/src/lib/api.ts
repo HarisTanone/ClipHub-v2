@@ -100,6 +100,7 @@ export interface User {
   permissions: string[];
   is_superadmin: boolean;
   is_active: boolean;
+  features: string[];
   created_at: string | null;
   last_login_at: string | null;
 }

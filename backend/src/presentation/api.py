@@ -22,6 +22,7 @@ from src.presentation.routes.styles import router as styles_router
 from src.presentation.routes.remotion import router as remotion_router
 from src.presentation.routes.presets import router as presets_router
 from src.presentation.routes.storage import router as storage_router
+from src.presentation.routes.features import router as features_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -172,6 +173,7 @@ app.include_router(styles_router, prefix="/api")
 app.include_router(remotion_router, prefix="/api")
 app.include_router(presets_router, prefix="/api")
 app.include_router(storage_router, prefix="/api")
+app.include_router(features_router, prefix="/api")
 
 
 @app.get("/health")

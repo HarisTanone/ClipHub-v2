@@ -222,7 +222,7 @@ async def logout(body: RefreshRequest):
 
 @router.get("/me")
 async def get_me(user: CurrentUser = Depends(get_current_user)):
-    """Get current user profile with permissions."""
+    """Get current user profile with permissions and features."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
@@ -235,6 +235,19 @@ async def get_me(user: CurrentUser = Depends(get_current_user)):
         data = cur.fetchone()
         if not data:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # Get granted features
+        features = []
+        if user.is_superadmin:
+            from src.presentation.routes.features import AVAILABLE_FEATURES
+            features = list(AVAILABLE_FEATURES.keys())
+        else:
+            try:
+                cur.execute("SELECT feature_code FROM user_features WHERE user_id = ?", (user.id,))
+                features = [row["feature_code"] for row in cur.fetchall()]
+            except Exception:
+                pass  # Table may not exist yet
+
         return {
             "success": True,
             "data": {
@@ -246,6 +259,7 @@ async def get_me(user: CurrentUser = Depends(get_current_user)):
                 "permissions": user.permissions,
                 "is_superadmin": user.is_superadmin,
                 "is_active": bool(data["is_active"]),
+                "features": features,
                 "created_at": data["created_at"],
                 "last_login_at": data["last_login_at"],
             },
