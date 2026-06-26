@@ -81,6 +81,21 @@ export interface SubtitleStyle {
   highlightGlow: boolean;
   highlightGlowColor: string;
   highlightWords: string[];
+  // Dual style (optional — separate font/style for highlight words)
+  dualStyleEnabled: boolean;
+  highlightFontFamily: string;
+  highlightFontSize: number;
+  highlightFontWeight: string;
+  highlightLetterSpacing: number;
+  highlightItalic: boolean;
+  highlightUppercase: boolean;
+  highlightStrokeEnabled: boolean;
+  highlightStrokeColor: string;
+  highlightStrokeWidth: number;
+  highlightShadowEnabled: boolean;
+  highlightShadowColor: string;
+  highlightShadowBlur: number;
+  // Common
   bgEnabled: boolean;
   bgColor: string;
   bgOpacity: number;
@@ -161,6 +176,19 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   highlightGlow: false,
   highlightGlowColor: "#FFCC00",
   highlightWords: [],
+  dualStyleEnabled: false,
+  highlightFontFamily: "Anton",
+  highlightFontSize: 38,
+  highlightFontWeight: "900",
+  highlightLetterSpacing: 1,
+  highlightItalic: false,
+  highlightUppercase: true,
+  highlightStrokeEnabled: true,
+  highlightStrokeColor: "#000000",
+  highlightStrokeWidth: 3,
+  highlightShadowEnabled: true,
+  highlightShadowColor: "#000000",
+  highlightShadowBlur: 12,
   bgEnabled: true,
   bgColor: "#000000",
   bgOpacity: 0.4,
@@ -653,6 +681,42 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style:
           )}
         </Section>
 
+        <Section title="Dual Font Style (Highlight Words)">
+          <Checkbox label="Use separate style for highlight words" checked={style.dualStyleEnabled} onChange={(v) => update({ dualStyleEnabled: v })} />
+          <p className="text-[9px] text-zinc-600 mt-1 mb-2">Kata-kata penting (MAKANYA, JANGAN, dll) akan menggunakan font & style berbeda dari teks normal.</p>
+          {style.dualStyleEnabled && (
+            <div className="mt-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 space-y-3">
+              <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">Highlight Word Style</p>
+              <div className="grid grid-cols-3 gap-3">
+                <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={["Anton", "Poppins", "Inter", "Montserrat", "Bebas Neue", "Oswald", "Raleway"]} />
+                <SelectSmall label="Weight" value={style.highlightFontWeight} onChange={(v) => update({ highlightFontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                <RangeInput label={`Size: ${style.highlightFontSize}px`} min={24} max={56} value={style.highlightFontSize} onChange={(v) => update({ highlightFontSize: v })} />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <RangeInput label={`Spacing: ${style.highlightLetterSpacing}px`} min={-1} max={8} value={style.highlightLetterSpacing} onChange={(v) => update({ highlightLetterSpacing: v })} />
+                <div className="flex flex-col justify-end"><Checkbox label="UPPERCASE" checked={style.highlightUppercase} onChange={(v) => update({ highlightUppercase: v })} /></div>
+                <div className="flex flex-col justify-end"><Checkbox label="Italic" checked={style.highlightItalic} onChange={(v) => update({ highlightItalic: v })} /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Checkbox label="Stroke" checked={style.highlightStrokeEnabled} onChange={(v) => update({ highlightStrokeEnabled: v })} /></div>
+                <div><Checkbox label="Shadow" checked={style.highlightShadowEnabled} onChange={(v) => update({ highlightShadowEnabled: v })} /></div>
+              </div>
+              {style.highlightStrokeEnabled && (
+                <div className="grid grid-cols-2 gap-3">
+                  <ColorPicker label="Stroke Color" value={style.highlightStrokeColor} onChange={(v) => update({ highlightStrokeColor: v })} />
+                  <RangeInput label={`Width: ${style.highlightStrokeWidth}px`} min={1} max={6} value={style.highlightStrokeWidth} onChange={(v) => update({ highlightStrokeWidth: v })} />
+                </div>
+              )}
+              {style.highlightShadowEnabled && (
+                <div className="grid grid-cols-2 gap-3">
+                  <ColorPicker label="Shadow Color" value={style.highlightShadowColor} onChange={(v) => update({ highlightShadowColor: v })} />
+                  <RangeInput label={`Blur: ${style.highlightShadowBlur}px`} min={0} max={24} value={style.highlightShadowBlur} onChange={(v) => update({ highlightShadowBlur: v })} />
+                </div>
+              )}
+            </div>
+          )}
+        </Section>
+
         <Section title="Background & Stroke">
           <div className="grid grid-cols-2 gap-3">
             <div><Checkbox label="Background" checked={style.bgEnabled} onChange={(v) => update({ bgEnabled: v })} /></div>
@@ -729,28 +793,29 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style:
                 const isHighlight = i === activeWordIdx;
                 const isKeyword = style.highlightWords.includes(w);
                 const shouldHighlight = isHighlight || isKeyword;
-                const fs = Math.max((shouldHighlight ? style.fontSize * style.highlightScale : style.fontSize) * 0.35, 10);
+                const useDual = shouldHighlight && style.dualStyleEnabled;
+                const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
 
                 const hlStyle = style.highlightStyle || "scale";
                 const wordStyles: React.CSSProperties = {
                   color: shouldHighlight ? style.highlightColor : style.color,
                   fontSize: fs,
-                  fontWeight: shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight),
-                  fontFamily: `'${style.fontFamily}', sans-serif`,
-                  fontStyle: style.italic ? "italic" : "normal",
-                  letterSpacing: style.letterSpacing,
-                  textTransform: style.uppercase ? "uppercase" : "none",
+                  fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
+                  fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
+                  fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
+                  letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
+                  textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : "none"),
                   textShadow: [
-                    style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : "",
+                    (useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "",
                     shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : "",
                   ].filter(Boolean).join(", ") || undefined,
-                  WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined,
+                  WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
                   transition: "all 0.2s ease",
                   display: "inline-block",
-                  // Highlight style decorations
-                  ...(shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
-                  ...(shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
-                  ...(shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
+                  // Highlight style decorations (only if NOT dual — dual uses its own complete style)
+                  ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
+                  ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
+                  ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
                 };
 
                 return <span key={i} style={wordStyles}>{w}</span>;
