@@ -607,6 +607,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
   const [activeWordIdx, setActiveWordIdx] = useState(0);
   const [activePreset, setActivePreset] = useState<string | null>(null);
   useGoogleFont(style.fontFamily);
+  useGoogleFont(style.dualStyleEnabled ? style.highlightFontFamily : "");
   const previewAspect = aspectRatio === "16:9" ? "16/9" : aspectRatio === "1:1" ? "1/1" : "9/16";
 
   // Cycle through words for animated preview

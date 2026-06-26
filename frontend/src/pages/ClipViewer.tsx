@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/Input";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
+import { useAuth } from "@/hooks/useAuth";
 import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, type HookStyle, type SubtitleStyle } from "@/components/StyleEditorModal";
 import { jobs, API_BASE, type ClipDetailResponse } from "@/lib/api";
@@ -16,6 +17,7 @@ import { formatDuration, cn } from "@/lib/utils";
 export function ClipViewer() {
   const { jobId, rank } = useParams<{ jobId: string; rank: string }>();
   const toast = useToast();
+  const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const [clip, setClip] = useState<ClipDetailResponse["data"] | null>(null);
@@ -274,6 +276,7 @@ export function ClipViewer() {
         onHookChange={setHookStyleConfig}
         onSubtitleChange={setSubtitleStyleConfig}
         aspectRatio="9:16"
+        isSuperadmin={user?.is_superadmin}
       />
     </div>
   );
