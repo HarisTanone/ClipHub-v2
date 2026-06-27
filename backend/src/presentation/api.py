@@ -99,6 +99,32 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.DOWNLOAD_DIR, exist_ok=True)
     os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
 
+    # ─── Migrate DB schema (add missing columns BEFORE ORM init) ──────────
+    try:
+        from src.infrastructure.db_connection import get_dict_connection
+        conn = get_dict_connection()
+        cur = conn.cursor()
+        # Check and add missing columns
+        cur.execute("PRAGMA table_info(jobs)")
+        job_cols = [row["name"] for row in cur.fetchall()]
+        if "pipeline_version" not in job_cols:
+            cur.execute("ALTER TABLE jobs ADD COLUMN pipeline_version TEXT NOT NULL DEFAULT 'v1'")
+            logger.info("migration: added pipeline_version to jobs table")
+
+        cur.execute("PRAGMA table_info(users)")
+        user_cols = [row["name"] for row in cur.fetchall()]
+        if "is_premium" not in user_cols:
+            cur.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0")
+            logger.info("migration: added is_premium to users table")
+        if "pipeline_override" not in user_cols:
+            cur.execute("ALTER TABLE users ADD COLUMN pipeline_override TEXT DEFAULT NULL")
+            logger.info("migration: added pipeline_override to users table")
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"migration: schema migration failed (non-critical): {e}")
+
     # ─── Initialize SQLite database (create tables if needed) ─────────────
     from src.infrastructure.database import init_db
     await init_db()
