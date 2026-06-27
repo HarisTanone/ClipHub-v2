@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle } from "lucide-react";
+import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -41,6 +41,34 @@ async function createUserApi(payload: any): Promise<boolean> {
 async function deleteUserApi(id: number): Promise<boolean> {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/auth/users/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+  return res.ok;
+}
+
+const PREMIUM_FEATURES = [
+  { code: "dual_subtitle", name: "Dual Font Style" },
+  { code: "smart_camera", name: "Smart Camera" },
+  { code: "smart_subtitle_pos", name: "Smart Subtitle Position" },
+  { code: "threejs_effects", name: "Three.js Effects" },
+  { code: "ai_layer", name: "AI Layer" },
+];
+
+async function getUserFeatures(userId: number): Promise<string[]> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/features/user/${userId}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.data || []).map((f: any) => f.code);
+}
+
+async function grantFeatureApi(userId: number, featureCode: string): Promise<boolean> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/features/grant`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ user_id: userId, feature_code: featureCode }) });
+  return res.ok;
+}
+
+async function revokeFeatureApi(userId: number, featureCode: string): Promise<boolean> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/features/revoke`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ user_id: userId, feature_code: featureCode }) });
   return res.ok;
 }
 
@@ -238,29 +266,79 @@ export function Settings() {
             <Card className="p-0">
               <div className="divide-y divide-zinc-800/30">
                 {users.map((u) => (
-                  <div key={u.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="shrink-0 w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center">
-                      <span className="text-[11px] font-bold text-zinc-400">{(u.full_name || u.email)[0].toUpperCase()}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm text-zinc-200 font-medium truncate">{u.full_name || u.email}</p>
-                        <Badge variant={u.role === "superadmin" ? "success" : "default"} size="sm">{u.role}</Badge>
-                      </div>
-                      <p className="text-[10px] text-zinc-500">{u.email}</p>
-                    </div>
-                    {u.role !== "superadmin" && (
-                      <button type="button" onClick={() => handleDeleteUser(u.id, u.email)} className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
+                  <UserRow key={u.id} user={u} isSuperadmin={isSuperadmin} onDelete={handleDeleteUser} toast={toast} />
                 ))}
               </div>
             </Card>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function UserRow({ user: u, isSuperadmin, onDelete, toast }: { user: any; isSuperadmin: boolean; onDelete: (id: number, email: string) => void; toast: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const [features, setFeatures] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  async function toggleFeature(code: string) {
+    setLoading(true);
+    const hasIt = features.includes(code);
+    const ok = hasIt ? await revokeFeatureApi(u.id, code) : await grantFeatureApi(u.id, code);
+    if (ok) {
+      setFeatures(hasIt ? features.filter(f => f !== code) : [...features, code]);
+      toast.success(`${hasIt ? "Revoked" : "Granted"} ${code} for ${u.email}`);
+    } else {
+      toast.error("Failed");
+    }
+    setLoading(false);
+  }
+
+  function handleExpand() {
+    if (!expanded) {
+      getUserFeatures(u.id).then(setFeatures);
+    }
+    setExpanded(!expanded);
+  }
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div className="shrink-0 w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center">
+          <span className="text-[11px] font-bold text-zinc-400">{(u.full_name || u.email)[0].toUpperCase()}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-zinc-200 font-medium truncate">{u.full_name || u.email}</p>
+            <Badge variant={u.role === "superadmin" ? "success" : "default"} size="sm">{u.role}</Badge>
+          </div>
+          <p className="text-[10px] text-zinc-500">{u.email}</p>
+        </div>
+        {u.role !== "superadmin" && isSuperadmin && (
+          <button type="button" onClick={handleExpand} className={cn("p-1.5 rounded transition-colors", expanded ? "bg-emerald-500/10 text-emerald-400" : "text-zinc-600 hover:text-emerald-400 hover:bg-zinc-800")}>
+            <Shield className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {u.role !== "superadmin" && (
+          <button type="button" onClick={() => onDelete(u.id, u.email)} className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {expanded && u.role !== "superadmin" && (
+        <div className="mt-2 ml-11 flex flex-wrap gap-1.5">
+          {PREMIUM_FEATURES.map((f) => (
+            <button key={f.code} type="button" disabled={loading} onClick={() => toggleFeature(f.code)}
+              className={cn("px-2 py-1 rounded-lg border text-[10px] font-medium transition-all",
+                features.includes(f.code)
+                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-400"
+                  : "border-zinc-700 text-zinc-500 hover:border-zinc-600")}>
+              {f.name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

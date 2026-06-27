@@ -62,6 +62,14 @@ def _stream_video(file_path: str, request: Request, filename: str):
         )
 
 
+async def _check_job_ownership(job, user: CurrentUser):
+    """Verify user owns this job. Superadmin bypasses."""
+    if user.is_superadmin:
+        return
+    if job.user_id and job.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+
+
 @router.post("", status_code=201, response_model=JobResponse)
 async def create_job(
     request: CreateJobRequest,
@@ -123,11 +131,13 @@ async def create_job(
 async def get_job(
     job_id: str,
     service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Ambil status dan data job berdasarkan job_id."""
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+    await _check_job_ownership(job, user)
     return JobResponse(
         job_id=job.job_id,
         youtube_url=job.youtube_url,
@@ -399,15 +409,13 @@ async def list_jobs(
 async def get_job_detail(
     job_id: str,
     service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Get comprehensive job detail including clips, files, and metadata.
-
-    This is the primary endpoint for frontend job detail page.
-    Combines job status + clip data + available files in one call.
-    """
+    """Get comprehensive job detail including clips, files, and metadata."""
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
 
     # Gather available files (supports both structured subdirs and flat layout)
     output_dir = f"{settings.OUTPUT_DIR}/{job_id}"

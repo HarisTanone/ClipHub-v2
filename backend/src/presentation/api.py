@@ -107,6 +107,20 @@ async def lifespan(app: FastAPI):
     from src.infrastructure.db_seeder import seed_database
     seed_database()
 
+    # ─── Migrate orphan jobs (no user_id) to superadmin ───────────────────
+    try:
+        from src.infrastructure.db_connection import get_dict_connection
+        conn = get_dict_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE jobs SET user_id = 1 WHERE user_id IS NULL")
+        migrated = cur.rowcount
+        conn.commit()
+        conn.close()
+        if migrated > 0:
+            logger.info(f"Migrated {migrated} orphan jobs to superadmin (user_id=1)")
+    except Exception as e:
+        logger.warning(f"orphan_job_migration_failed: {e}")
+
     # ─── Recover stale jobs from previous server instance ─────────────────
     await _recover_stale_jobs()
 
