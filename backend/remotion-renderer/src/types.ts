@@ -31,6 +31,8 @@ export interface CreativeDirection {
   // Custom style configs from editor
   hook_style_config?: Record<string, any>;
   subtitle_style_config?: Record<string, any>;
+  // Auto zoom events from prosody analysis
+  zoom_events?: Array<{ time: number; intensity?: number; duration?: number }>;
 }
 
 /** Word-level timestamps from Whisper */

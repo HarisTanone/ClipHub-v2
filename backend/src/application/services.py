@@ -582,6 +582,15 @@ class JobService:
                                     if _fresh.clips_data.get("subtitle_style_config"):
                                         cd_dict["subtitle_style_config"] = _fresh.clips_data["subtitle_style_config"]
                                     job.clips_data = _fresh.clips_data
+
+                            # Add zoom events from prosody analysis
+                            prosody = prosody_results.get(clip.rank)
+                            if prosody and prosody.energy_peaks:
+                                cd_dict["zoom_events"] = [
+                                    {"time": peak.time, "intensity": peak.intensity, "duration": 0.5}
+                                    for peak in prosody.energy_peaks[:8]  # Max 8 zooms per clip
+                                    if peak.time > (cd_dict.get("hook_style_config", {}).get("duration", 3.0))  # Don't zoom during hook
+                                ]
                             
                             result = await self._remotion_adapter.render_clip(
                                 scene_graph=scene_graph.to_dict(),
