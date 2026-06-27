@@ -390,6 +390,10 @@ class V2PipelineService:
             # ═══ Step 9.5: V2 Silero VAD (TAHAP 5) ═══
             self._emit(job_id, "9.5", "v2_vad_refine", "start")
             await self._repo.update_status(job_id, JobStatus.V2_VAD_REFINING)
+
+            # Save original clip starts BEFORE VAD adjusts them (needed for subtitle timing)
+            original_starts = {clip.rank: clip.start for clip in clips}
+
             vad_applied = 0
             if audio_slices:
                 for audio_slice in audio_slices:
@@ -418,7 +422,7 @@ class V2PipelineService:
             self._emit(job_id, 10, "highlights", "start")
             await self._repo.update_status(job_id, JobStatus.HIGHLIGHTING)
             # Convert words_per_clip to the format expected by downstream
-            clips_with_words = self._build_clips_with_words(clips, words_per_clip)
+            clips_with_words = self._build_clips_with_words(clips, words_per_clip, original_starts)
             self._emit(job_id, 10, "highlights", "complete")
 
             # ═══ Step 11+: B-Roll, Hook, Subtitle (REUSE existing pipeline) ═══
@@ -512,14 +516,20 @@ class V2PipelineService:
         return clips
 
     def _build_clips_with_words(
-        self, clips: list[Clip], words_per_clip: dict[int, list[Word]]
+        self, clips: list[Clip], words_per_clip: dict[int, list[Word]],
+        original_starts: dict[int, float] = None,
     ) -> dict[int, list[dict]]:
-        """Convert Word objects to dict format expected by downstream renderers."""
+        """Convert Word objects to dict format expected by downstream renderers.
+        
+        Uses original_starts (pre-VAD) for offset calculation since trim
+        was done with original timestamps, not VAD-adjusted ones.
+        """
         result = {}
         for clip in clips:
             words = words_per_clip.get(clip.rank, [])
-            # Convert to relative timestamps (from clip start)
-            relative_words = SelectiveWhisperTranscriber.words_to_relative(words, clip.start)
+            # Use original start (before VAD adjustment) for offset
+            offset_start = (original_starts or {}).get(clip.rank, clip.start)
+            relative_words = SelectiveWhisperTranscriber.words_to_relative(words, offset_start)
             result[clip.rank] = [
                 {"word": w.word, "start": w.start, "end": w.end, "highlight": w.highlight}
                 for w in relative_words
@@ -557,7 +567,15 @@ class V2PipelineService:
         """Run render steps: B-Roll, Hook, Subtitle.
 
         Uses existing rendering infrastructure (same as V1 pipeline).
+        Applies user's custom style from job.clips_data if available.
         """
+        # ─── Load custom style configs from job ────────────────────────
+        hook_style_config = {}
+        subtitle_style_config = {}
+        if job.clips_data:
+            hook_style_config = job.clips_data.get("hook_style_config", {})
+            subtitle_style_config = job.clips_data.get("subtitle_style_config", {})
+
         # ─── B-Roll Asset Fetching ─────────────────────────────────────
         if job.broll_enabled and self._asset_fetcher:
             self._emit(job_id, 11, "asset_fetch", "start")
@@ -589,24 +607,25 @@ class V2PipelineService:
         # ─── Hook Rendering ────────────────────────────────────────────
         self._emit(job_id, 13, "hook_render", "start")
         await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
+
+        # Determine hook style from user config or creative direction
+        hook_style = hook_style_config.get("animation", "") or creative_direction.hook_animation or "fade_scale"
+
         for clip in clips:
             if not trim_results.get(clip.rank):
                 continue
             in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
             out_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
             try:
-                # Reuse V1's FFmpeg hook burn (overlays hook text onto full clip)
                 from src.presentation.dependencies import get_job_service
                 v1_service = get_job_service()
                 await v1_service._render_hook_ffmpeg(
                     in_path, clip.hook, out_path,
-                    hook_style=creative_direction.hook_animation or "fade_scale",
+                    hook_style=hook_style,
                 )
             except Exception as e:
                 logger.warning(f"[{job_id}] Hook render clip {clip.rank}: {e}")
                 import shutil
-                if not os.path.exists(out_path) and os.path.exists(in_path):
-                    shutil.copy2(in_path, out_path)
                 if not os.path.exists(out_path) and os.path.exists(in_path):
                     shutil.copy2(in_path, out_path)
         self._emit(job_id, 13, "hook_render", "complete")
@@ -614,6 +633,24 @@ class V2PipelineService:
         # ─── Subtitle Rendering ────────────────────────────────────────
         self._emit(job_id, 14, "subtitle_render", "start")
         await self._repo.update_status(job_id, JobStatus.SUBTITLE_RENDERING)
+
+        # Build SubtitleStyleConfig from user's custom config or creative direction
+        from src.domain.entities import SubtitleStyleConfig
+        sub_style = SubtitleStyleConfig(
+            font_family=subtitle_style_config.get("fontFamily", "Poppins"),
+            font_size=int(subtitle_style_config.get("fontSize", 34)),
+            uppercase=subtitle_style_config.get("uppercase", creative_direction.subtitle_uppercase),
+            color=subtitle_style_config.get("color", creative_direction.primary_color),
+            highlight_color=subtitle_style_config.get("highlightColor", creative_direction.secondary_color),
+            position=subtitle_style_config.get("position", creative_direction.subtitle_position or "bottom"),
+            stroke_width=int(subtitle_style_config.get("strokeWidth", 3)),
+            max_words_per_line=int(subtitle_style_config.get("maxWordsPerLine", 3)),
+        )
+
+        # Apply glow if enabled in custom config
+        if subtitle_style_config.get("glowEnabled"):
+            sub_style.shadow_color = f"{sub_style.highlight_color}@0.6"
+
         for clip in clips:
             if not trim_results.get(clip.rank):
                 continue
@@ -623,10 +660,13 @@ class V2PipelineService:
             try:
                 if self._subtitle_renderer and words:
                     self._subtitle_renderer.render_subtitles(
-                        in_path, words, creative_direction, out_path
+                        video_path=in_path,
+                        words=words,
+                        style=sub_style,
+                        output_path=out_path,
+                        start_offset=0.0,
                     )
                 else:
-                    # No words or no renderer → copy as final
                     import shutil
                     if not os.path.exists(out_path) and os.path.exists(in_path):
                         shutil.copy2(in_path, out_path)
