@@ -76,7 +76,50 @@ class YoloReframeEngine(IYoloReframeEngine):
         import cv2
         import numpy as np
 
-        cap = cv2.VideoCapture(video_path)
+        # Transcode to H264 if needed (fixes AV1 decode issues with OpenCV)
+        transcode_path = video_path.rsplit(".", 1)[0] + "_h264_temp.mp4"
+        actual_path = self._ensure_h264(video_path, transcode_path)
+
+        try:
+            return self._detect_and_crop_impl(actual_path, video_path, output_path, target_aspect, autogrid)
+        finally:
+            # Cleanup transcode temp
+            if actual_path != video_path and os.path.exists(transcode_path):
+                os.remove(transcode_path)
+
+    def _ensure_h264(self, video_path: str, transcode_path: str) -> str:
+        """Transcode to H264 if video is AV1/VP9 (OpenCV can't decode reliably)."""
+        try:
+            # Check codec using ffprobe
+            cmd = ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+                   "-show_entries", "stream=codec_name", "-of", "csv=p=0", video_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            codec = result.stdout.strip().lower()
+
+            if codec in ("av1", "vp9", "vp8", "hevc"):
+                # Transcode to H264 (fast, for detection only)
+                cmd = [
+                    "ffmpeg", "-y", "-i", video_path,
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                    "-an",  # No audio needed for detection
+                    "-t", "15",  # Only first 15 seconds needed for sampling
+                    transcode_path,
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode == 0 and os.path.exists(transcode_path):
+                    logger.info(f"yolo_reframe: transcoded {codec}→h264 for detection")
+                    return transcode_path
+
+            return video_path
+        except Exception:
+            return video_path
+
+    def _detect_and_crop_impl(self, detect_path: str, original_path: str, output_path: str, target_aspect: str, autogrid: bool) -> Optional[dict]:
+        """Core detection logic using transcoded (or original) video."""
+        import cv2
+        import numpy as np
+
+        cap = cv2.VideoCapture(detect_path)
         if not cap.isOpened():
             return None
 
@@ -113,24 +156,31 @@ class YoloReframeEngine(IYoloReframeEngine):
 
         # Calculate average person region
         boxes_array = np.array(all_person_boxes)
-        person_count = len(set(range(len(boxes_array))))  # approximate
+
+        # Get original video dimensions for crop (may differ from transcoded)
+        orig_cap = cv2.VideoCapture(original_path)
+        orig_width = int(orig_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        orig_height = int(orig_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        orig_cap.release()
+
+        # Scale detection coordinates if transcoded dimensions differ
+        scale_x = orig_width / width if width > 0 else 1.0
+        scale_y = orig_height / height if height > 0 else 1.0
 
         # Determine crop based on single vs multi speaker
         if autogrid and len(all_person_boxes) >= 4:
-            # Multiple speakers detected — try side-by-side grid
-            return self._render_autogrid(video_path, output_path, width, height, boxes_array)
+            return self._render_autogrid(original_path, output_path, orig_width, orig_height, boxes_array * scale_x)
         else:
             # Single speaker — crop around person center
-            avg_center_x = np.mean(boxes_array[:, [0, 2]]) / 2 + np.mean(boxes_array[:, [0, 2]]) / 2
-            avg_center_x = np.mean((boxes_array[:, 0] + boxes_array[:, 2]) / 2)
+            avg_center_x = np.mean((boxes_array[:, 0] + boxes_array[:, 2]) / 2) * scale_x
 
             # Target crop width for 9:16
-            crop_w = int(height * 9 / 16)
-            crop_x = int(max(0, min(width - crop_w, avg_center_x - crop_w / 2)))
+            crop_w = int(orig_height * 9 / 16)
+            crop_x = int(max(0, min(orig_width - crop_w, avg_center_x - crop_w / 2)))
 
-            crop_filter = f"crop={crop_w}:{height}:{crop_x}:0,scale=1080:1920"
+            crop_filter = f"crop={crop_w}:{orig_height}:{crop_x}:0,scale=1080:1920"
             cmd = [
-                "ffmpeg", "-y", "-i", video_path,
+                "ffmpeg", "-y", "-i", original_path,
                 "-vf", crop_filter,
                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
                 "-c:a", "copy", "-movflags", "+faststart",
