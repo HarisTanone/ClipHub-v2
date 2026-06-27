@@ -367,7 +367,6 @@ class JobService:
                         if adj_start != clip.start or adj_end != clip.end:
                             clip.start = adj_start
                             clip.end = adj_end
-                            clip.duration = adj_end - adj_start
                     logger.info(f"[{job_id}] VAD boundary adjustment applied to {len(clips)} clips")
                 except Exception as e:
                     logger.warning(f"[{job_id}] VAD adjustment failed (non-critical): {e}")
