@@ -93,6 +93,8 @@ async def create_job(
         # Smart features
         smart_camera=request.smart_camera,
         smart_subtitle_position=request.smart_subtitle_position,
+        # User ownership
+        user_id=user.id,
     )
     return JobResponse(
         job_id=job.job_id,
@@ -325,6 +327,7 @@ async def list_jobs(
     limit: int = 20,
     offset: int = 0,
     service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """List jobs with optional status filter and pagination.
 
@@ -332,6 +335,8 @@ async def list_jobs(
     - status: Filter by status (e.g. 'completed', 'failed', 'processing')
     - limit: Max results (default 20, max 100)
     - offset: Pagination offset
+
+    Superadmin sees all jobs. Regular users see only their own.
     """
     from sqlalchemy import select, func, desc
     from src.infrastructure.database import JobModel, async_session
@@ -344,10 +349,16 @@ async def list_jobs(
         if status:
             query = query.where(JobModel.status == status)
 
+        # User isolation: non-superadmin only sees own jobs
+        if not user.is_superadmin:
+            query = query.where(JobModel.user_id == user.id)
+
         # Count total
         count_query = select(func.count()).select_from(JobModel)
         if status:
             count_query = count_query.where(JobModel.status == status)
+        if not user.is_superadmin:
+            count_query = count_query.where(JobModel.user_id == user.id)
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0
 

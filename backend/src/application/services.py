@@ -197,6 +197,8 @@ class JobService:
         # Smart features (premium)
         smart_camera: Optional[bool] = None,
         smart_subtitle_position: Optional[bool] = None,
+        # User ownership
+        user_id: Optional[int] = None,
     ) -> tuple[Job, bool]:
         """Create job and start pipeline in background."""
 
@@ -243,6 +245,7 @@ class JobService:
             threejs_enabled=threejs_enabled if threejs_enabled is not None else settings.REMOTION_ENABLE_THREEJS,
             remotion_quality=remotion_quality or settings.REMOTION_QUALITY,
             clips_data=initial_clips_data if initial_clips_data else None,
+            user_id=user_id,
         )
         await self._repo.create(job)
 

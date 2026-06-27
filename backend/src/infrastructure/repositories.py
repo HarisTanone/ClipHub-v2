@@ -29,6 +29,7 @@ class JobRepository(IJobRepository):
                 ai_layer_enabled=int(job.ai_layer_enabled),
                 threejs_enabled=int(job.threejs_enabled),
                 remotion_quality=job.remotion_quality,
+                user_id=job.user_id,
             )
             session.add(model)
             await session.commit()

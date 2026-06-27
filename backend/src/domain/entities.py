@@ -220,6 +220,7 @@ class Job:
     threejs_enabled: bool = False
     scene_graphs: Optional[dict] = None
     remotion_quality: str = "medium"
+    user_id: Optional[int] = None
 
 
 # ─── Aspect Ratio Routing ─────────────────────────────────────────────────────

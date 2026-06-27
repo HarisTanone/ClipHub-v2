@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 @router.post("/clear")
 async def clear_processing_data(user: CurrentUser = Depends(get_current_user)):
-    """Clear all processing artifacts: tmp/output, tmp/downloads, and job records.
+    """Clear all processing artifacts. Superadmin only."""
+    if not user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Superadmin access required")
 
-    Preserves: user accounts, presets, roles/permissions.
-    """
     removed_dirs = []
     errors = []
 

@@ -249,9 +249,11 @@ interface StyleEditorModalProps {
   thumbnailUrl?: string;
   isSuperadmin?: boolean;
   userFeatures?: string[];
+  activePresetId?: number | null;
+  onPresetSelect?: (id: number) => void;
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, userFeatures }: StyleEditorModalProps) {
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, userFeatures, activePresetId: externalActivePresetId, onPresetSelect }: StyleEditorModalProps) {
   const [tab, setTab] = useState<"presets" | "hook" | "subtitle">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
@@ -273,7 +275,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} userFeatures={userFeatures} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} userFeatures={userFeatures} />}
       </div>
     );
   }
@@ -301,7 +303,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} userFeatures={userFeatures} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} userFeatures={userFeatures} />}
         </div>
       </div>
     </div>
@@ -310,13 +312,16 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
 
 // ─── Presets Tab ─────────────────────────────────────────────────────────────
 
-function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange }: { hookStyle: HookStyle; subtitleStyle: SubtitleStyle; onHookChange: (s: HookStyle) => void; onSubtitleChange: (s: SubtitleStyle) => void }) {
+function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange, externalActiveId, onPresetSelect }: { hookStyle: HookStyle; subtitleStyle: SubtitleStyle; onHookChange: (s: HookStyle) => void; onSubtitleChange: (s: SubtitleStyle) => void; externalActiveId?: number | null; onPresetSelect?: (id: number) => void }) {
   const [userPresets, setUserPresets] = useState<Preset[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveName, setSaveName] = useState("");
   const [saving, setSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
-  const [activePresetId, setActivePresetId] = useState<number | null>(null);
+  const [activePresetId, setActivePresetId] = useState<number | null>(externalActiveId ?? null);
+
+  // Sync from external
+  useEffect(() => { if (externalActiveId !== undefined) setActivePresetId(externalActiveId); }, [externalActiveId]);
 
   useEffect(() => {
     presetsApi.list().then((list) => { setUserPresets(list); setLoading(false); }).catch(() => setLoading(false));
@@ -326,6 +331,7 @@ function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange }
     onHookChange({ ...DEFAULT_HOOK_STYLE, ...preset.hook_style } as HookStyle);
     onSubtitleChange({ ...DEFAULT_SUBTITLE_STYLE, ...preset.subtitle_style } as SubtitleStyle);
     setActivePresetId(preset.id);
+    if (onPresetSelect) onPresetSelect(preset.id);
     setStatusMsg(`Loaded "${preset.name}"`);
     setTimeout(() => setStatusMsg(""), 2000);
   }

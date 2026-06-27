@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
+import { useAuth } from "@/hooks/useAuth";
 import { system, storage, API_BASE, getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +48,8 @@ async function deleteUserApi(id: number): Promise<boolean> {
 
 export function Settings() {
   const toast = useToast();
+  const { user } = useAuth();
+  const isSuperadmin = user?.is_superadmin || false;
   const [tab, setTab] = useState<"general" | "render" | "users">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -112,8 +115,8 @@ export function Settings() {
 
   const tabs = [
     { id: "general" as const, label: "General" },
-    { id: "render" as const, label: "Render Engine" },
-    { id: "users" as const, label: "Users" },
+    ...(isSuperadmin ? [{ id: "render" as const, label: "Render Engine" }] : []),
+    ...(isSuperadmin ? [{ id: "users" as const, label: "Users" }] : []),
   ];
 
   return (
@@ -158,9 +161,15 @@ export function Settings() {
 
             <Card className="p-4">
               <div className="flex items-center gap-1.5 mb-3"><Cpu className="h-3.5 w-3.5 text-zinc-500" /><h3 className="text-xs font-semibold text-zinc-200">Whisper Model</h3></div>
-              <Select value={settings.whisper_model_size} onChange={(e) => handleChange("whisper_model_size", e.target.value)}
-                options={[{ value: "tiny", label: "Tiny (fastest)" }, { value: "base", label: "Base" }, { value: "small", label: "Small" }, { value: "medium", label: "Medium (recommended)" }, { value: "large-v3", label: "Large v3 (best)" }]} />
-              <p className="text-[10px] text-zinc-600 mt-2">Larger = more accurate timestamps, slower.</p>
+              {isSuperadmin ? (
+                <>
+                  <Select value={settings.whisper_model_size} onChange={(e) => handleChange("whisper_model_size", e.target.value)}
+                    options={[{ value: "tiny", label: "Tiny (fastest)" }, { value: "base", label: "Base" }, { value: "small", label: "Small" }, { value: "medium", label: "Medium (recommended)" }, { value: "large-v3", label: "Large v3 (best)" }]} />
+                  <p className="text-[10px] text-zinc-600 mt-2">Larger = more accurate timestamps, slower.</p>
+                </>
+              ) : (
+                <p className="text-[11px] text-zinc-500">Model: <span className="text-zinc-300 font-medium">{settings.whisper_model_size}</span></p>
+              )}
             </Card>
 
             <Card className="p-4">
@@ -173,16 +182,18 @@ export function Settings() {
               </div>
             </Card>
 
-            <Card className="p-4 border-red-500/20">
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
-                <h3 className="text-xs font-semibold text-zinc-200">Clear Storage</h3>
-              </div>
-              <p className="text-[11px] text-zinc-500 mb-3">Delete all job records, output videos, and downloaded files. Presets and user accounts will be preserved.</p>
-              <Button type="button" size="sm" onClick={handleClearStorage} loading={isClearing} className="bg-red-600 hover:bg-red-700 border-red-700" icon={<Trash2 className="h-3.5 w-3.5" />}>
-                Clear All Processing Data
-              </Button>
-            </Card>
+            {isSuperadmin && (
+              <Card className="p-4 border-red-500/20">
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Clear Storage</h3>
+                </div>
+                <p className="text-[11px] text-zinc-500 mb-3">Delete all job records, output videos, and downloaded files. Presets and user accounts will be preserved.</p>
+                <Button type="button" size="sm" onClick={handleClearStorage} loading={isClearing} className="bg-red-600 hover:bg-red-700 border-red-700" icon={<Trash2 className="h-3.5 w-3.5" />}>
+                  Clear All Processing Data
+                </Button>
+              </Card>
+            )}
           </div>
         )}
 

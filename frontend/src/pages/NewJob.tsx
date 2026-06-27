@@ -9,6 +9,7 @@ import { Toggle } from "@/components/ui/Toggle";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, type HookStyle, type SubtitleStyle } from "@/components/StyleEditorModal";
+import { FeatureLock } from "@/components/ui/FeatureLock";
 import { jobs, preview, presets as presetsApi, type VideoPreview, type Preset, API_BASE } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
 
@@ -226,8 +227,12 @@ export function NewJob() {
           <Card className="p-3">
             <label className="block text-[10px] font-medium text-zinc-500 mb-2 uppercase tracking-wider">Smart Features</label>
             <div className="space-y-2">
-              <Toggle label="Smart Camera" description="Photography framing (eye-level, headroom, tracking)" checked={smartCamera} onChange={setSmartCamera} />
-              <Toggle label="Smart Subtitle Position" description="Auto posisi subtitle (hindari wajah)" checked={smartSubtitlePos} onChange={setSmartSubtitlePos} />
+              <FeatureLock featureName="Smart Camera" featureCode="smart_camera" isSuperadmin={user?.is_superadmin} userFeatures={user?.features}>
+                <Toggle label="Smart Camera" description="Photography framing (eye-level, headroom, tracking)" checked={smartCamera} onChange={setSmartCamera} />
+              </FeatureLock>
+              <FeatureLock featureName="Smart Subtitle Position" featureCode="smart_subtitle_pos" isSuperadmin={user?.is_superadmin} userFeatures={user?.features}>
+                <Toggle label="Smart Subtitle Position" description="Auto posisi subtitle (hindari wajah)" checked={smartSubtitlePos} onChange={setSmartSubtitlePos} />
+              </FeatureLock>
             </div>
           </Card>
 
@@ -335,6 +340,13 @@ export function NewJob() {
               thumbnailUrl={videoMeta?.thumbnail}
               isSuperadmin={user?.is_superadmin}
               userFeatures={user?.features}
+              activePresetId={activePresetId}
+              onPresetSelect={(id) => {
+                setActivePresetId(id);
+                // Navigate carousel to page containing selected preset
+                const idx = userPresets.findIndex(p => p.id === id);
+                if (idx >= 0) setPresetPage(Math.floor(idx / presetsPerPage));
+              }}
             />
           </Card>
         </div>
