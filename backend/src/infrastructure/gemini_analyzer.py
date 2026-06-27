@@ -35,6 +35,7 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         self._consecutive_503 = 0
         self._client = None
         self._init_client()
+        logger.info(f"gemini_analyzer_init: model={self._model}, fallback={self._fallback_model}")
 
     def _switch_to_fallback(self) -> None:
         """Switch to fallback model after repeated 503 errors."""
@@ -72,7 +73,7 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         """Run decomposed multi-phase analysis."""
 
         # ═══ Phase 1: Video Understanding (clip selection + creative direction) ═══
-        logger.info("gemini_phase_1: clip selection + creative direction")
+        logger.info(f"gemini_phase_1: clip selection + creative direction (model={self._model}, max_clips={max_clips})")
         phase1_result = self._phase1_clip_selection(video_url, video_duration, max_clips)
 
         if not phase1_result or "clips" not in phase1_result:

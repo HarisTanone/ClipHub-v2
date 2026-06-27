@@ -153,7 +153,9 @@ class GeminiKeyRotator:
             if limited_at is None or (now - limited_at).total_seconds() > self._cooldown_seconds:
                 if idx in self._rate_limited:
                     del self._rate_limited[idx]
-                return self._keys[idx]
+                key = self._keys[idx]
+                logger.debug(f"gemini_using_key: key[{idx}] ...{key[-6:]}")
+                return key
 
             self._current_index = (self._current_index + 1) % len(self._keys)
             tried += 1
@@ -163,10 +165,11 @@ class GeminiKeyRotator:
 
     def mark_rate_limited(self) -> None:
         """Mark current key as rate limited and switch to next."""
+        key = self._keys[self._current_index]
         self._rate_limited[self._current_index] = datetime.now(timezone.utc)
         old_idx = self._current_index
         self._current_index = (self._current_index + 1) % len(self._keys)
-        logger.info(f"gemini_key_rotated: key[{old_idx}] → key[{self._current_index}]")
+        logger.info(f"gemini_key_rotated: key[{old_idx}] (...{key[-6:]}) → key[{self._current_index}] (...{self._keys[self._current_index][-6:]})")
 
     def reset(self) -> None:
         """Reset all rate limit states."""
