@@ -230,6 +230,8 @@ class JobService:
 
         # Store style configs in clips_data for later use during render
         initial_clips_data = {}
+        if force_reprocess:
+            initial_clips_data["force_reprocess"] = True
         if hook_style_config:
             initial_clips_data["hook_style_config"] = hook_style_config
         if subtitle_style_config:
@@ -300,6 +302,14 @@ class JobService:
             job.clips_data = fresh_job.clips_data
         pipeline_start = time.time()
 
+        # ─── Cache setup ──────────────────────────────────────────────
+        from src.infrastructure.cache_manager import CacheManager
+        cache = CacheManager()
+        video_id = cache.extract_video_id(url)
+        force_reprocess = bool(job.clips_data and job.clips_data.get("force_reprocess"))
+        if force_reprocess and video_id:
+            cache.invalidate(video_id)
+
         try:
             # Pre-job: resource check
             if self._resource_monitor:
@@ -318,19 +328,43 @@ class JobService:
                 return
             self._emit(job_id, 1, "validate", "complete", time.time() - pipeline_start)
 
-            # ═══ Step 2: Download ═══
-            self._emit(job_id, 2, "download", "start")
-            await self._repo.update_status(job_id, JobStatus.DOWNLOADING)
-            await self._downloader.download_video(url, video_path)
-            self._emit(job_id, 2, "download", "complete")
+            # ═══ Step 2: Download (SKIP if cached) ═══
+            cached_video = cache.get_video_path(video_id) if video_id else None
+            if cached_video:
+                import shutil
+                if not os.path.exists(video_path):
+                    try:
+                        os.link(cached_video, video_path)
+                    except OSError:
+                        shutil.copy2(cached_video, video_path)
+                logger.info(f"[{job_id}] Download SKIPPED (cached: {video_id})")
+                self._emit(job_id, 2, "download", "complete")
+            else:
+                self._emit(job_id, 2, "download", "start")
+                await self._repo.update_status(job_id, JobStatus.DOWNLOADING)
+                await self._downloader.download_video(url, video_path)
+                if video_id and os.path.exists(video_path):
+                    cache.save_video(video_id, video_path)
+                self._emit(job_id, 2, "download", "complete")
 
-            # ═══ Step 3: Gemini Analysis (direct video URL — no transcript needed) ═══
-            self._emit(job_id, 3, "gemini_analysis", "start")
-            await self._repo.update_status(job_id, JobStatus.ANALYZING)
-            max_clips = self._calc_max_clips(duration)
-            gemini_result = await self._gemini_call(
-                lambda: self._gemini.analyze(url, duration, max_clips)
-            )
+            # ═══ Step 3: Gemini Analysis (SKIP if cached) ═══
+            cached_analysis = cache.load_analysis(video_id, "v1") if video_id else None
+            if cached_analysis:
+                gemini_result = cached_analysis
+                logger.info(f"[{job_id}] Gemini analysis SKIPPED (cached: {len(gemini_result.get('clips', []))} clips)")
+                self._emit(job_id, 3, "gemini_analysis", "complete")
+            else:
+                self._emit(job_id, 3, "gemini_analysis", "start")
+                await self._repo.update_status(job_id, JobStatus.ANALYZING)
+                max_clips = self._calc_max_clips(duration)
+                gemini_result = await self._gemini_call(
+                    lambda: self._gemini.analyze(url, duration, max_clips)
+                )
+                # Save to cache
+                if video_id and gemini_result and "clips" in gemini_result:
+                    cache.save_analysis(video_id, gemini_result, version="v1")
+                self._emit(job_id, 3, "gemini_analysis", "complete")
+
             if "clips" not in gemini_result or not gemini_result["clips"]:
                 await self._repo.update_status(job_id, JobStatus.FAILED, "Gemini tidak menghasilkan clip candidates")
                 return

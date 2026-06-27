@@ -145,8 +145,8 @@ class V2PipelineService:
     async def run_pipeline(self, job: Job) -> None:
         """Execute the V2 pipeline for a job.
 
-        This method handles the full lifecycle: validate → download → V2 analysis
-        → trim → YOLO → V2 whisper → V2 VAD → render steps.
+        Smart cache: skips download/transcript/analysis if cached.
+        force_reprocess in job.clips_data invalidates cache.
         """
         job_id = job.job_id
         url = job.youtube_url
@@ -154,6 +154,16 @@ class V2PipelineService:
         output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
         os.makedirs(output_dir, exist_ok=True)
         pipeline_start = time.time()
+
+        # ─── Cache setup ──────────────────────────────────────────────
+        from src.infrastructure.cache_manager import CacheManager
+        cache = CacheManager()
+        video_id = cache.extract_video_id(url)
+        force_reprocess = bool(job.clips_data and job.clips_data.get("force_reprocess"))
+
+        if force_reprocess and video_id:
+            cache.invalidate(video_id)
+            logger.info(f"[{job_id}] Cache invalidated (force_reprocess)")
 
         try:
             # Pre-job: resource check
@@ -174,37 +184,106 @@ class V2PipelineService:
             job.video_duration = duration
             self._emit(job_id, 1, "validate", "complete")
 
-            # ═══ Step 2: Download ═══
-            self._emit(job_id, 2, "download", "start")
-            await self._repo.update_status(job_id, JobStatus.DOWNLOADING)
-            await self._downloader.download_video(url, video_path)
-            self._emit(job_id, 2, "download", "complete")
+            # ═══ Step 2: Download (SKIP if cached) ═══
+            cached_video = cache.get_video_path(video_id) if video_id else None
+            if cached_video:
+                # Use cached video — just link/copy to job path
+                import shutil
+                if not os.path.exists(video_path):
+                    try:
+                        os.link(cached_video, video_path)
+                    except OSError:
+                        shutil.copy2(cached_video, video_path)
+                logger.info(f"[{job_id}] Download SKIPPED (cached: {video_id})")
+                self._emit(job_id, 2, "download", "complete")
+            else:
+                self._emit(job_id, 2, "download", "start")
+                await self._repo.update_status(job_id, JobStatus.DOWNLOADING)
+                await self._downloader.download_video(url, video_path)
+                # Save to cache
+                if video_id and os.path.exists(video_path):
+                    cache.save_video(video_id, video_path)
+                self._emit(job_id, 2, "download", "complete")
 
-            # ═══ Step 3: V2 Transcript (TAHAP 1) ═══
-            self._emit(job_id, 3, "v2_transcript", "start")
-            await self._repo.update_status(job_id, JobStatus.V2_TRANSCRIBING)
-            try:
-                transcript_result = await self._transcriber.transcribe(url, duration)
-            except TranscriptionError as e:
-                await self._repo.update_status(job_id, JobStatus.FAILED, f"Transcription gagal: {e}")
-                return
-            logger.info(
-                f"[{job_id}] V2 transcript: {len(transcript_result.segments)} segments, "
-                f"source={transcript_result.source}, lang={transcript_result.language}"
-            )
-            self._emit(job_id, 3, "v2_transcript", "complete")
-
-            # ═══ Step 4: V2 Highlight Analysis (TAHAP 2) ═══
-            self._emit(job_id, 4, "v2_highlight_analysis", "start")
-            await self._repo.update_status(job_id, JobStatus.V2_ANALYZING)
-            max_clips = self._calc_max_clips(duration)
-            try:
-                analysis_result = await self._analyzer.analyze_highlights(
-                    transcript_result, duration, max_clips
+            # ═══ Step 3: V2 Transcript (SKIP if cached) ═══
+            cached_transcript = cache.load_transcript(video_id) if video_id else None
+            if cached_transcript:
+                from src.domain.entities import TranscriptSegment
+                transcript_result = TranscriptResult(
+                    segments=[TranscriptSegment(**s) for s in cached_transcript["segments"]],
+                    source=cached_transcript.get("source", "cache"),
+                    language=cached_transcript.get("language", "unknown"),
+                    total_duration=duration,
                 )
-            except GroqAnalyzerError as e:
-                await self._repo.update_status(job_id, JobStatus.FAILED, f"Highlight analysis gagal: {e}")
-                return
+                logger.info(f"[{job_id}] Transcript SKIPPED (cached: {len(transcript_result.segments)} segments)")
+                self._emit(job_id, 3, "v2_transcript", "complete")
+            else:
+                self._emit(job_id, 3, "v2_transcript", "start")
+                await self._repo.update_status(job_id, JobStatus.V2_TRANSCRIBING)
+                try:
+                    transcript_result = await self._transcriber.transcribe(url, duration)
+                except TranscriptionError as e:
+                    await self._repo.update_status(job_id, JobStatus.FAILED, f"Transcription gagal: {e}")
+                    return
+                # Save to cache
+                if video_id:
+                    cache.save_transcript(video_id, {
+                        "segments": [{"text": s.text, "start": s.start, "end": s.end} for s in transcript_result.segments],
+                        "source": transcript_result.source,
+                        "language": transcript_result.language,
+                    })
+                logger.info(
+                    f"[{job_id}] V2 transcript: {len(transcript_result.segments)} segments, "
+                    f"source={transcript_result.source}, lang={transcript_result.language}"
+                )
+                self._emit(job_id, 3, "v2_transcript", "complete")
+
+            # ═══ Step 4: V2 Highlight Analysis (SKIP if cached) ═══
+            cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
+            if cached_analysis:
+                from src.domain.entities import HighlightCandidate
+                analysis_result = HighlightAnalysisResult(
+                    clips=[HighlightCandidate(**c) for c in cached_analysis["clips"]],
+                    creative_direction=cached_analysis.get("creative_direction", {}),
+                    broll_suggestions=cached_analysis.get("broll_suggestions", {}),
+                    model_used=cached_analysis.get("model_used", "cache"),
+                    chunks_processed=cached_analysis.get("chunks_processed", 0),
+                )
+                logger.info(f"[{job_id}] Analysis SKIPPED (cached: {len(analysis_result.clips)} clips)")
+                self._emit(job_id, 4, "v2_highlight_analysis", "complete")
+            else:
+                self._emit(job_id, 4, "v2_highlight_analysis", "start")
+                await self._repo.update_status(job_id, JobStatus.V2_ANALYZING)
+                max_clips = self._calc_max_clips(duration)
+                try:
+                    analysis_result = await self._analyzer.analyze_highlights(
+                        transcript_result, duration, max_clips
+                    )
+                except GroqAnalyzerError as e:
+                    await self._repo.update_status(job_id, JobStatus.FAILED, f"Highlight analysis gagal: {e}")
+                    return
+
+                if not analysis_result.clips:
+                    await self._repo.update_status(job_id, JobStatus.FAILED, "Tidak ada momen viral terdeteksi")
+                    return
+
+                # Save to cache
+                if video_id:
+                    cache.save_analysis(video_id, {
+                        "clips": [{"rank": c.rank, "start": c.start, "end": c.end, "score": c.score,
+                                    "hook": c.hook, "reason": c.reason, "content_type": c.content_type,
+                                    "speaker_energy": c.speaker_energy, "hook_alt": c.hook_alt}
+                                   for c in analysis_result.clips],
+                        "creative_direction": analysis_result.creative_direction,
+                        "broll_suggestions": analysis_result.broll_suggestions,
+                        "model_used": analysis_result.model_used,
+                        "chunks_processed": analysis_result.chunks_processed,
+                    }, version="v2")
+                logger.info(
+                    f"[{job_id}] V2 highlights: {len(analysis_result.clips)} clips, "
+                    f"model={analysis_result.model_used}, chunks={analysis_result.chunks_processed}"
+                )
+                self._emit(job_id, 4, "v2_highlight_analysis", "complete")
 
             if not analysis_result.clips:
                 await self._repo.update_status(job_id, JobStatus.FAILED, "Tidak ada momen viral terdeteksi")
