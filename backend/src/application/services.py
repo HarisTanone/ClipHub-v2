@@ -341,6 +341,21 @@ class JobService:
             await self._repo.update_clips_count(job_id, clips_count, 0, 0)
             self._emit(job_id, 4, "prepare_clips", "complete")
 
+            # ═══ Step 4.5: Hook Optimizer (AI rewrite for viral hooks) ═══
+            try:
+                from src.infrastructure.hook_optimizer import HookOptimizer
+                optimizer = HookOptimizer()
+                optimized = optimizer.optimize_hooks(clips)
+                if optimized:
+                    for clip in clips:
+                        if clip.rank in optimized:
+                            original = clip.hook
+                            clip.hook = optimized[clip.rank]
+                            logger.info(f"[{job_id}] Hook optimized clip {clip.rank}: '{original}' → '{clip.hook}'")
+                    logger.info(f"[{job_id}] Hook optimizer: {len(optimized)}/{clips_count} hooks rewritten")
+            except Exception as e:
+                logger.warning(f"[{job_id}] Hook optimizer failed (non-critical): {e}")
+
             # ═══ Step 5: Aspect Ratio Router ═══
             self._emit(job_id, 5, "aspect_router", "start")
             await self._repo.update_status(job_id, JobStatus.ROUTING)
