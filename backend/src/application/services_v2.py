@@ -516,24 +516,18 @@ class V2PipelineService:
             in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
             out_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
             try:
-                if self._browser_render:
-                    style_config = {
-                        "animation": creative_direction.hook_animation or "fade_scale",
-                        "primary_color": creative_direction.primary_color,
-                        "secondary_color": creative_direction.secondary_color,
-                    }
-                    await self._browser_render.render_hook(
-                        clip.hook, style_config, out_path,
-                        duration_ms=3000, width=1080, height=1920,
-                    )
-                else:
-                    # Fallback: copy without hook (hook rendering requires browser engine)
-                    import shutil
-                    if not os.path.exists(out_path):
-                        shutil.copy2(in_path, out_path)
+                # Reuse V1's FFmpeg hook burn (overlays hook text onto full clip)
+                from src.presentation.dependencies import get_job_service
+                v1_service = get_job_service()
+                await v1_service._render_hook_ffmpeg(
+                    in_path, clip.hook, out_path,
+                    hook_style=creative_direction.hook_animation or "fade_scale",
+                )
             except Exception as e:
                 logger.warning(f"[{job_id}] Hook render clip {clip.rank}: {e}")
                 import shutil
+                if not os.path.exists(out_path) and os.path.exists(in_path):
+                    shutil.copy2(in_path, out_path)
                 if not os.path.exists(out_path) and os.path.exists(in_path):
                     shutil.copy2(in_path, out_path)
         self._emit(job_id, 13, "hook_render", "complete")
