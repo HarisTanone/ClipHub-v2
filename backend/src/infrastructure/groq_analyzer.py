@@ -79,7 +79,7 @@ class GroqAnalyzer(IGroqAnalyzer):
             chunk_end = chunk[-1].end
             chunk_text = " ".join(seg.text for seg in chunk)
 
-            logger.debug(f"v2_analyzer: analyzing chunk {i+1}/{len(chunks)} [{chunk_start:.0f}s-{chunk_end:.0f}s]")
+            logger.info(f"v2_analyzer: analyzing chunk {i+1}/{len(chunks)} [{chunk_start:.0f}s-{chunk_end:.0f}s]")
 
             try:
                 candidates = await asyncio.wait_for(
@@ -95,6 +95,15 @@ class GroqAnalyzer(IGroqAnalyzer):
             except Exception as e:
                 logger.warning(f"v2_analyzer: chunk {i+1} failed: {e}")
 
+            # ─── Rate limit: mandatory delay between chunks ───────────
+            # Groq free tier: 6000 TPM, ~2000 tokens per chunk
+            # After 3 chunks we've used ~6000 tokens → must wait 60s
+            # Safe strategy: wait 20s between chunks (max 3 per minute)
+            if i < len(chunks) - 1:
+                delay = 20  # 20s delay = max 3 chunks/min = 6000 TPM safe
+                logger.info(f"v2_analyzer: rate limit delay {delay}s before chunk {i+2}")
+                await asyncio.sleep(delay)
+
         if not all_candidates:
             raise GroqAnalyzerError("Groq LLM tidak menghasilkan clip candidates dari semua chunks")
 
@@ -103,6 +112,9 @@ class GroqAnalyzer(IGroqAnalyzer):
         logger.info(f"v2_analyzer: {len(ranked_clips)} clips selected from {len(all_candidates)} candidates")
 
         # Generate creative direction + B-Roll in single call
+        # Wait for rate limit reset before Phase B call
+        logger.info("v2_analyzer: waiting 20s before creative direction call (rate limit)")
+        await asyncio.sleep(20)
         try:
             creative_result = await asyncio.wait_for(
                 loop.run_in_executor(
@@ -273,7 +285,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         client = self._get_groq_client()
         model = self._model if not self._using_fallback else self._fallback_model
 
-        for attempt in range(self._max_retries):
+        for attempt in range(max(self._max_retries, 5)):  # At least 5 retries for rate limits
             try:
                 response = client.chat.completions.create(
                     model=model,
@@ -295,10 +307,10 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             except Exception as e:
                 error_str = str(e).lower()
 
-                # Rate limit → wait and retry
+                # Rate limit → wait full minute for TPM reset
                 if "429" in error_str or "rate" in error_str:
-                    wait = (attempt + 1) * 5
-                    logger.warning(f"v2_analyzer: rate limited, waiting {wait}s (attempt {attempt+1})")
+                    wait = 60  # Groq resets limits per minute
+                    logger.warning(f"v2_analyzer: rate limited (429), waiting {wait}s (attempt {attempt+1})")
                     time.sleep(wait)
                     continue
 
@@ -315,7 +327,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                     raise GroqAnalyzerError(f"Groq LLM failed after {self._max_retries} attempts: {e}")
 
                 logger.warning(f"v2_analyzer: attempt {attempt+1} failed: {e}")
-                time.sleep(2)
+                time.sleep(5)
 
         raise GroqAnalyzerError("Groq LLM failed: max retries exceeded")
 

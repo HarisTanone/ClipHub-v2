@@ -230,13 +230,18 @@ class GroqTranscriber(IGroqTranscriber):
             all_segments = []
             detected_language = "unknown"
 
-            for chunk_path, chunk_offset in chunks:
+            for i, (chunk_path, chunk_offset) in enumerate(chunks):
                 segments, lang = await self._groq_whisper_transcribe_chunk(
                     chunk_path, chunk_offset
                 )
                 all_segments.extend(segments)
                 if lang and lang != "unknown":
                     detected_language = lang
+
+                # Rate limit: Groq Whisper has 20 RPM limit
+                # Add 3s delay between chunks to stay safe
+                if i < len(chunks) - 1:
+                    await asyncio.sleep(3)
 
             if not all_segments:
                 raise TranscriptionError("Groq Whisper returned empty transcript")
@@ -367,9 +372,9 @@ class GroqTranscriber(IGroqTranscriber):
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "rate" in error_str:
-                    wait_time = (attempt + 1) * 10
+                    wait_time = 60  # Groq resets limits per minute
                     logger.warning(
-                        f"v2_transcriber: Groq rate limited, waiting {wait_time}s"
+                        f"v2_transcriber: Groq Whisper rate limited (429), waiting {wait_time}s"
                     )
                     await asyncio.sleep(wait_time)
                     continue
