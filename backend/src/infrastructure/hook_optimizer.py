@@ -41,13 +41,15 @@ class HookOptimizer:
         self._client = None
 
     def _init_client(self):
-        """Initialize Gemini client."""
+        """Initialize Gemini client with next available key (avoid same key as main pipeline)."""
         if self._client:
             return
         try:
             from google import genai
             from src.infrastructure.auth import GeminiKeyRotator
             rotator = GeminiKeyRotator()
+            # Rotate to next key to avoid sharing rate limit with main pipeline
+            rotator.mark_rate_limited()
             key = rotator.get_current_key()
             if key:
                 self._client = genai.Client(api_key=key)

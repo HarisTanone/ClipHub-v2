@@ -114,7 +114,7 @@ Analyze the transcript and generate appropriate layer events."""
             genai.configure(api_key=api_key)
             
             self.model = genai.GenerativeModel(
-                model_name="gemini-2.5-flash-preview-05-20",
+                model_name="gemini-2.0-flash",
                 system_instruction=self.SYSTEM_PROMPT,
                 generation_config={
                     "response_mime_type": "application/json",

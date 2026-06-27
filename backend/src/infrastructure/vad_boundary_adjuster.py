@@ -105,7 +105,7 @@ class VADBoundaryAdjuster:
                 return start, end
 
             # Load audio
-            waveform, sample_rate = torchaudio.load(wav_path)
+            waveform, sample_rate = torchaudio.load(wav_path, backend="soundfile")
             if sample_rate != 16000:
                 waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
 
