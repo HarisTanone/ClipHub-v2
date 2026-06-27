@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     WHISPER_USE_GPU: bool = False if PIPELINE_ENV == "local" else True
     WHISPER_MODEL_SIZE: str = "medium"  # tiny, base, small, medium, large-v3
 
+    # === VAD (Voice Activity Detection) ===
+    VAD_ENABLED: bool = True
+    VAD_MIN_SILENCE_MS: int = 300  # minimum silence gap duration to consider
+
     # === Whisper CoreML (Apple Silicon acceleration) ===
     WHISPER_USE_COREML: bool = False
     WHISPER_COREML_MODEL_PATH: str = ""

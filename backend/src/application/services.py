@@ -351,9 +351,27 @@ class JobService:
             logger.info(f"[{job_id}] Pipeline flags: yolo={flags.yolo_enabled}, hook_mode={flags.hook_render_mode}")
             self._emit(job_id, 5, "aspect_router", "complete")
 
-            # ═══ Step 6: Trim Clips ═══
+            # ═══ Step 6: VAD Boundary Adjustment + Trim Clips ═══
             self._emit(job_id, 6, "trim", "start")
             await self._repo.update_status(job_id, JobStatus.TRIMMING)
+
+            # VAD: snap clip boundaries to nearest silence (prevents cutting mid-speech)
+            if settings.VAD_ENABLED:
+                try:
+                    from src.infrastructure.vad_boundary_adjuster import VADBoundaryAdjuster
+                    vad = VADBoundaryAdjuster()
+                    for clip in clips:
+                        adj_start, adj_end = await vad.adjust_clip_boundaries(
+                            video_path, clip.start, clip.end
+                        )
+                        if adj_start != clip.start or adj_end != clip.end:
+                            clip.start = adj_start
+                            clip.end = adj_end
+                            clip.duration = adj_end - adj_start
+                    logger.info(f"[{job_id}] VAD boundary adjustment applied to {len(clips)} clips")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] VAD adjustment failed (non-critical): {e}")
+
             trim_results = await self._trim_all_clips(job_id, video_path, clips, output_dir)
             self._emit(job_id, 6, "trim", "complete")
 
