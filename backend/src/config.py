@@ -130,6 +130,23 @@ class Settings(BaseSettings):
     REMOTION_ENABLE_THREEJS: bool = True
     REMOTION_ENABLE_AI_LAYER: bool = True
 
+    # ─── Groq API (V2 Pipeline) ──────────────────────────────────────────
+    GROQ_API_KEY: str = ""
+    GROQ_WHISPER_MODEL: str = "whisper-large-v3-turbo"
+    GROQ_LLM_MODEL: str = "llama-3.1-8b-instant"
+    GROQ_LLM_FALLBACK_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MAX_RETRIES: int = 3
+    GROQ_TIMEOUT: int = 60
+
+    # ─── V2 Pipeline Settings ────────────────────────────────────────────
+    V2_PIPELINE_ENABLED: bool = True
+    V2_CHUNK_MAX_SECONDS: int = 600
+    V2_CHUNK_MAX_CHARS: int = 4000
+    V2_AUDIO_PADDING_SECONDS: float = 3.0
+    V2_VAD_SEARCH_RADIUS: float = 2.0
+    V2_VAD_MIN_SILENCE_MS: int = 300
+    V2_MAX_AUDIO_CHUNK_MB: int = 25  # Groq Whisper file size limit
+
     # ─── Gemini Multi-Key Support ─────────────────────────────────────────
 
     @property

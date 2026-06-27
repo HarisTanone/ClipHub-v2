@@ -76,6 +76,8 @@ class JobResponse(BaseModel):
     ai_layer_enabled: bool = False
     threejs_enabled: bool = False
     remotion_quality: str = "medium"
+    # V2 pipeline
+    pipeline_version: str = "v1"  # "v1" (Gemini) or "v2" (Groq)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

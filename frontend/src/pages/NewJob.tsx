@@ -227,10 +227,10 @@ export function NewJob() {
           <Card className="p-3">
             <label className="block text-[10px] font-medium text-zinc-500 mb-2 uppercase tracking-wider">Smart Features</label>
             <div className="space-y-2">
-              <FeatureLock featureName="Smart Camera" featureCode="smart_camera" isSuperadmin={user?.is_superadmin} userFeatures={user?.features}>
+              <FeatureLock featureName="Smart Camera" featureCode="smart_camera" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
                 <Toggle label="Smart Camera" description="Photography framing (eye-level, headroom, tracking)" checked={smartCamera} onChange={setSmartCamera} />
               </FeatureLock>
-              <FeatureLock featureName="Smart Subtitle Position" featureCode="smart_subtitle_pos" isSuperadmin={user?.is_superadmin} userFeatures={user?.features}>
+              <FeatureLock featureName="Smart Subtitle Position" featureCode="smart_subtitle_pos" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
                 <Toggle label="Smart Subtitle Position" description="Auto posisi subtitle (hindari wajah)" checked={smartSubtitlePos} onChange={setSmartSubtitlePos} />
               </FeatureLock>
             </div>
@@ -339,6 +339,7 @@ export function NewJob() {
               activeTab={styleTab}
               thumbnailUrl={videoMeta?.thumbnail}
               isSuperadmin={user?.is_superadmin}
+              isPremium={user?.is_premium}
               userFeatures={user?.features}
               activePresetId={activePresetId}
               onPresetSelect={(id) => {

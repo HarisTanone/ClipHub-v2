@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS users (
     hashed_password TEXT NOT NULL,
     full_name TEXT NOT NULL DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 1,
+    is_premium INTEGER NOT NULL DEFAULT 0,
     role_id INTEGER DEFAULT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),

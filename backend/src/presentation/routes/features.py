@@ -1,6 +1,11 @@
-"""Feature Access Control — Superadmin grants/revokes premium features to users."""
+"""Feature Access Control — Premium toggle (simplified).
+
+Premium = true → V1 pipeline (Gemini) + ALL features unlocked
+Premium = false → V2 pipeline (Groq) + features locked
+
+No more granular feature toggles. Single boolean per user.
+"""
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -11,236 +16,187 @@ from src.presentation.auth_deps import CurrentUser, get_current_user
 router = APIRouter(prefix="/features", tags=["features"])
 logger = logging.getLogger(__name__)
 
-# Available premium features
-AVAILABLE_FEATURES = {
-    "dual_subtitle": "Dual Font Style (Highlight Words)",
-    "smart_camera": "Smart Camera (Photography Principles)",
-    "smart_subtitle_pos": "Smart Subtitle Positioning",
-    "threejs_effects": "Three.js 3D Effects",
-    "ai_layer": "AI Generated Layer",
-}
+# All features that premium unlocks (for frontend reference)
+ALL_PREMIUM_FEATURES = [
+    "dual_subtitle",
+    "smart_camera",
+    "smart_subtitle_pos",
+    "threejs_effects",
+    "ai_layer",
+]
 
 
-def _ensure_table():
+def _ensure_column():
+    """Ensure is_premium column exists on users table (migration-safe)."""
     conn = get_dict_connection()
     try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS user_features (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                feature_code TEXT NOT NULL,
-                granted_by INTEGER NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(user_id, feature_code),
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY (granted_by) REFERENCES users(id)
-            )
-        """)
-        conn.commit()
+        cur = conn.cursor()
+        # Check if column exists
+        cur.execute("PRAGMA table_info(users)")
+        columns = [row["name"] for row in cur.fetchall()]
+        if "is_premium" not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+            logger.info("features: added is_premium column to users table")
+    except Exception as e:
+        logger.warning(f"features: migration check failed: {e}")
     finally:
         conn.close()
 
-_ensure_table()
+_ensure_column()
 
 
-class GrantFeatureRequest(BaseModel):
+class SetPremiumRequest(BaseModel):
     user_id: int
-    feature_code: str
-
-
-class BatchGrantRequest(BaseModel):
-    user_id: int
-    feature_codes: list[str]
+    is_premium: bool
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/available")
 async def list_available_features():
-    """List all available premium features."""
-    return {"success": True, "data": AVAILABLE_FEATURES}
+    """List all features that premium unlocks."""
+    return {
+        "success": True,
+        "data": ALL_PREMIUM_FEATURES,
+        "description": "Premium = semua fitur aktif. Non-premium = terkunci.",
+    }
 
 
 @router.get("/my")
 async def get_my_features(user: CurrentUser = Depends(get_current_user)):
-    """Get features granted to current user."""
+    """Get current user premium status and feature access."""
     if user.is_superadmin:
-        return {"success": True, "data": list(AVAILABLE_FEATURES.keys()), "is_superadmin": True}
+        return {
+            "success": True,
+            "is_premium": True,
+            "features": ALL_PREMIUM_FEATURES,
+            "pipeline": "v1",
+        }
 
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT feature_code FROM user_features WHERE user_id = ?", (user.id,))
-        features = [row["feature_code"] for row in cur.fetchall()]
-        return {"success": True, "data": features}
+        cur.execute("SELECT is_premium FROM users WHERE id = ?", (user.id,))
+        row = cur.fetchone()
+        is_premium = bool(row["is_premium"]) if row else False
+
+        return {
+            "success": True,
+            "is_premium": is_premium,
+            "features": ALL_PREMIUM_FEATURES if is_premium else [],
+            "pipeline": "v1" if is_premium else "v2",
+        }
     finally:
         conn.close()
 
 
 @router.get("/user/{user_id}")
-async def get_user_features(user_id: int, user: CurrentUser = Depends(get_current_user)):
-    """Get features for a specific user (superadmin only)."""
+async def get_user_premium_status(user_id: int, user: CurrentUser = Depends(get_current_user)):
+    """Get premium status for a specific user (superadmin only)."""
     if not user.is_superadmin:
         raise HTTPException(status_code=403, detail="Superadmin only")
 
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT feature_code, created_at FROM user_features WHERE user_id = ?", (user_id,))
-        features = [{"code": row["feature_code"], "name": AVAILABLE_FEATURES.get(row["feature_code"], row["feature_code"]), "granted_at": row["created_at"]} for row in cur.fetchall()]
-        return {"success": True, "data": features}
+        cur.execute("SELECT id, email, full_name, is_premium FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"User ID {user_id} not found")
+
+        is_premium = bool(row["is_premium"])
+        return {
+            "success": True,
+            "data": {
+                "user_id": row["id"],
+                "email": row["email"],
+                "full_name": row["full_name"],
+                "is_premium": is_premium,
+                "features": ALL_PREMIUM_FEATURES if is_premium else [],
+                "pipeline": "v1" if is_premium else "v2",
+            },
+        }
     finally:
         conn.close()
 
 
-@router.post("/grant")
-async def grant_feature(body: GrantFeatureRequest, user: CurrentUser = Depends(get_current_user)):
-    """Grant a premium feature to a user (superadmin only)."""
+@router.post("/set-premium")
+async def set_premium_status(body: SetPremiumRequest, user: CurrentUser = Depends(get_current_user)):
+    """Set user premium status (superadmin only).
+
+    is_premium=true → V1 pipeline + all features
+    is_premium=false → V2 pipeline + features locked
+    """
     if not user.is_superadmin:
         raise HTTPException(status_code=403, detail="Superadmin only")
-    if body.feature_code not in AVAILABLE_FEATURES:
-        raise HTTPException(status_code=400, detail=f"Unknown feature: {body.feature_code}")
 
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
-        # Validate user exists
-        cur.execute("SELECT id FROM users WHERE id = ?", (body.user_id,))
-        if not cur.fetchone():
+        cur.execute("SELECT id, email FROM users WHERE id = ?", (body.user_id,))
+        target = cur.fetchone()
+        if not target:
             raise HTTPException(status_code=404, detail=f"User ID {body.user_id} not found")
 
         cur.execute(
-            "INSERT OR IGNORE INTO user_features (user_id, feature_code, granted_by) VALUES (?, ?, ?)",
-            (body.user_id, body.feature_code, user.id),
+            "UPDATE users SET is_premium = ?, updated_at = datetime('now') WHERE id = ?",
+            (1 if body.is_premium else 0, body.user_id),
         )
         conn.commit()
-        already_had = cur.rowcount == 0
-        if already_had:
-            return {"success": True, "message": f"User {body.user_id} already has feature '{body.feature_code}'"}
-        return {"success": True, "message": f"Feature '{body.feature_code}' granted to user {body.user_id}"}
-    finally:
-        conn.close()
 
-
-@router.post("/grant-batch")
-async def grant_features_batch(body: BatchGrantRequest, user: CurrentUser = Depends(get_current_user)):
-    """Grant multiple premium features to a user at once (superadmin only)."""
-    if not user.is_superadmin:
-        raise HTTPException(status_code=403, detail="Superadmin only")
-
-    # Validate all feature codes
-    invalid = [f for f in body.feature_codes if f not in AVAILABLE_FEATURES]
-    if invalid:
-        raise HTTPException(status_code=400, detail=f"Unknown features: {', '.join(invalid)}")
-
-    conn = get_dict_connection()
-    try:
-        cur = conn.cursor()
-        # Validate user exists
-        cur.execute("SELECT id FROM users WHERE id = ?", (body.user_id,))
-        if not cur.fetchone():
-            raise HTTPException(status_code=404, detail=f"User ID {body.user_id} not found")
-
-        granted = []
-        skipped = []
-        for code in body.feature_codes:
-            cur.execute(
-                "INSERT OR IGNORE INTO user_features (user_id, feature_code, granted_by) VALUES (?, ?, ?)",
-                (body.user_id, code, user.id),
-            )
-            if cur.rowcount > 0:
-                granted.append(code)
-            else:
-                skipped.append(code)
-        conn.commit()
+        status = "Premium (V1 Gemini)" if body.is_premium else "Free (V2 Groq)"
+        logger.info(f"features: user {target['email']} set to {status} by admin {user.id}")
 
         return {
             "success": True,
-            "message": f"{len(granted)} features granted, {len(skipped)} already assigned",
-            "data": {"granted": granted, "skipped": skipped},
+            "message": f"User '{target['email']}' → {status}",
+            "data": {
+                "user_id": body.user_id,
+                "is_premium": body.is_premium,
+                "pipeline": "v1" if body.is_premium else "v2",
+                "features": ALL_PREMIUM_FEATURES if body.is_premium else [],
+            },
         }
     finally:
         conn.close()
 
 
-@router.post("/grant-all")
-async def grant_all_features(body: dict, user: CurrentUser = Depends(get_current_user)):
-    """Grant ALL premium features to a user (superadmin only). Body: {user_id: int}"""
+# ─── Legacy Compatibility (kept for backward compat with old frontend) ────────
+
+@router.post("/grant")
+async def grant_feature_legacy(body: dict, user: CurrentUser = Depends(get_current_user)):
+    """Legacy: grant feature → now just sets premium=true."""
     if not user.is_superadmin:
         raise HTTPException(status_code=403, detail="Superadmin only")
-
     user_id = body.get("user_id")
     if not user_id:
-        raise HTTPException(status_code=422, detail="user_id is required")
+        raise HTTPException(status_code=422, detail="user_id required")
 
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
-        if not cur.fetchone():
-            raise HTTPException(status_code=404, detail=f"User ID {user_id} not found")
-
-        granted = []
-        for code in AVAILABLE_FEATURES:
-            cur.execute(
-                "INSERT OR IGNORE INTO user_features (user_id, feature_code, granted_by) VALUES (?, ?, ?)",
-                (user_id, code, user.id),
-            )
-            if cur.rowcount > 0:
-                granted.append(code)
+        cur.execute("UPDATE users SET is_premium = 1 WHERE id = ?", (user_id,))
         conn.commit()
-
-        return {
-            "success": True,
-            "message": f"All features granted to user {user_id} ({len(granted)} new)",
-            "data": {"granted": granted, "total_features": len(AVAILABLE_FEATURES)},
-        }
+        return {"success": True, "message": f"User {user_id} set to premium"}
     finally:
         conn.close()
 
 
 @router.post("/revoke")
-async def revoke_feature(body: GrantFeatureRequest, user: CurrentUser = Depends(get_current_user)):
-    """Revoke a premium feature from a user (superadmin only)."""
+async def revoke_feature_legacy(body: dict, user: CurrentUser = Depends(get_current_user)):
+    """Legacy: revoke feature → now just sets premium=false."""
     if not user.is_superadmin:
         raise HTTPException(status_code=403, detail="Superadmin only")
-
-    conn = get_dict_connection()
-    try:
-        cur = conn.cursor()
-        # Validate user exists
-        cur.execute("SELECT id FROM users WHERE id = ?", (body.user_id,))
-        if not cur.fetchone():
-            raise HTTPException(status_code=404, detail=f"User ID {body.user_id} not found")
-
-        cur.execute("DELETE FROM user_features WHERE user_id = ? AND feature_code = ?", (body.user_id, body.feature_code))
-        conn.commit()
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Feature not found for this user")
-        return {"success": True, "message": f"Feature '{body.feature_code}' revoked from user {body.user_id}"}
-    finally:
-        conn.close()
-
-
-@router.post("/revoke-all")
-async def revoke_all_features(body: dict, user: CurrentUser = Depends(get_current_user)):
-    """Revoke ALL premium features from a user (superadmin only). Body: {user_id: int}"""
-    if not user.is_superadmin:
-        raise HTTPException(status_code=403, detail="Superadmin only")
-
     user_id = body.get("user_id")
     if not user_id:
-        raise HTTPException(status_code=422, detail="user_id is required")
+        raise HTTPException(status_code=422, detail="user_id required")
 
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
-        if not cur.fetchone():
-            raise HTTPException(status_code=404, detail=f"User ID {user_id} not found")
-
-        cur.execute("DELETE FROM user_features WHERE user_id = ?", (user_id,))
+        cur.execute("UPDATE users SET is_premium = 0 WHERE id = ?", (user_id,))
         conn.commit()
-        return {"success": True, "message": f"All features revoked from user {user_id} ({cur.rowcount} removed)"}
+        return {"success": True, "message": f"User {user_id} set to free"}
     finally:
         conn.close()

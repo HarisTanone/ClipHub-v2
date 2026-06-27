@@ -67,6 +67,7 @@ class JobModel(Base):
     remotion_quality: Mapped[str] = mapped_column(String(20), default="medium", nullable=False, server_default="medium")
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     video_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    pipeline_version: Mapped[str] = mapped_column(String(5), default="v1", nullable=False, server_default="v1")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )

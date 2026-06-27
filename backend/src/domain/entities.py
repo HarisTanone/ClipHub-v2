@@ -30,6 +30,12 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     TIMEOUT = "timeout"
+    # ─── V2 Pipeline Statuses ─────────────────────────────────────────
+    V2_TRANSCRIBING = "v2_transcribing"
+    V2_ANALYZING = "v2_analyzing"
+    V2_MICRO_SLICING = "v2_micro_slicing"
+    V2_WORD_TRANSCRIBING = "v2_word_transcribing"
+    V2_VAD_REFINING = "v2_vad_refining"
 
 
 class AspectRatio(str, Enum):
@@ -221,6 +227,7 @@ class Job:
     scene_graphs: Optional[dict] = None
     remotion_quality: str = "medium"
     user_id: Optional[int] = None
+    pipeline_version: str = "v1"  # "v1" (Gemini) or "v2" (Groq)
 
 
 # ─── Aspect Ratio Routing ─────────────────────────────────────────────────────
@@ -327,6 +334,78 @@ class ScaleRecommendation:
     current_workers: int
     recommended_workers: int
     recommendation: str
+
+
+# ─── V2 Pipeline Entities (Groq-based, Non-Premium) ──────────────────────────
+
+@dataclass
+class TranscriptSegment:
+    """A single transcript segment with text and timing."""
+    text: str
+    start: float
+    end: float
+
+
+@dataclass
+class TranscriptResult:
+    """Result from TAHAP 1: Ingestion & Text Extraction."""
+    segments: list[TranscriptSegment]
+    source: str                  # "youtube_api" | "groq_whisper"
+    language: str                # detected/specified language code
+    total_duration: float
+    full_text: str = ""          # concatenated text for LLM analysis
+
+    def __post_init__(self):
+        if not self.full_text and self.segments:
+            self.full_text = " ".join(seg.text for seg in self.segments)
+
+
+@dataclass
+class AudioSlice:
+    """A sliced audio segment extracted for word-level transcription (TAHAP 3)."""
+    clip_rank: int
+    audio_path: str              # path to extracted WAV file
+    original_start: float        # highlight start from Groq LLM
+    original_end: float          # highlight end from Groq LLM
+    padded_start: float          # with -padding applied
+    padded_end: float            # with +padding applied
+    duration: float              # padded_end - padded_start
+
+
+@dataclass
+class HighlightCandidate:
+    """A single highlight candidate from Groq LLM analysis (TAHAP 2)."""
+    rank: int
+    start: float
+    end: float
+    score: int
+    hook: str
+    reason: str
+    content_type: str = "storytelling"      # storytelling/tutorial/rant/debate
+    speaker_energy: str = "medium"          # high/medium/low
+    hook_alt: str = ""
+
+
+@dataclass
+class HighlightAnalysisResult:
+    """Combined result from TAHAP 2: AI Highlight Analysis."""
+    clips: list[HighlightCandidate]
+    creative_direction: dict           # raw dict → will be mapped to CreativeDirection
+    broll_suggestions: dict            # {clip_rank_str: [{at_time, keyword, template, ...}]}
+    model_used: str = ""               # which Groq model was used
+    chunks_processed: int = 0          # how many transcript chunks were analyzed
+
+
+@dataclass
+class VADResult:
+    """Result from TAHAP 5: Voice Activity Detection refinement."""
+    original_start: float
+    original_end: float
+    final_start: float
+    final_end: float
+    shift_start_ms: float = 0.0        # how much start was shifted (ms)
+    shift_end_ms: float = 0.0          # how much end was shifted (ms)
+    used_fallback: bool = False        # True if VAD couldn't find silence
 
 
 @dataclass

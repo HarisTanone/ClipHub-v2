@@ -32,6 +32,8 @@ class UserSettings(BaseModel):
     use_remotion: bool = True
     remotion_ai_layer: bool = True
     remotion_quality: str = "medium"
+    # Pipeline mode (superadmin override)
+    pipeline_mode: str = "v1"  # "v1" (Gemini) or "v2" (Groq)
 
 
 class SystemInfo(BaseModel):
@@ -106,9 +108,22 @@ async def get_settings(user: CurrentUser = Depends(get_current_user)):
         cur = conn.cursor()
         cur.execute("SELECT * FROM user_settings WHERE user_id = ?", (user.id,))
         row = cur.fetchone()
+
+        # Get pipeline_mode from users.pipeline_override (superadmin)
+        pipeline_mode = "v1"
+        if user.is_superadmin:
+            try:
+                cur.execute("SELECT pipeline_override FROM users WHERE id = ?", (user.id,))
+                prow = cur.fetchone()
+                if prow and prow["pipeline_override"]:
+                    pipeline_mode = prow["pipeline_override"]
+            except Exception:
+                pass  # Column may not exist yet
+
         if not row:
-            # Return defaults
-            return {"success": True, "data": UserSettings().model_dump()}
+            defaults = UserSettings(pipeline_mode=pipeline_mode).model_dump()
+            return {"success": True, "data": defaults}
+
         return {
             "success": True,
             "data": {
@@ -121,6 +136,7 @@ async def get_settings(user: CurrentUser = Depends(get_current_user)):
                 "use_remotion": bool(row["use_remotion"]) if "use_remotion" in row.keys() else False,
                 "remotion_ai_layer": bool(row["remotion_ai_layer"]) if "remotion_ai_layer" in row.keys() else False,
                 "remotion_quality": row["remotion_quality"] if "remotion_quality" in row.keys() else "medium",
+                "pipeline_mode": pipeline_mode,
             },
         }
     finally:
@@ -159,6 +175,14 @@ async def update_settings(body: UserSettings, user: CurrentUser = Depends(get_cu
                 body.remotion_quality,
             ),
         )
+
+        # Save pipeline_mode override for superadmin
+        if user.is_superadmin and body.pipeline_mode in ("v1", "v2"):
+            cur.execute(
+                "UPDATE users SET pipeline_override = ? WHERE id = ?",
+                (body.pipeline_mode, user.id),
+            )
+
         conn.commit()
         return {"success": True, "message": "Settings saved"}
     finally:

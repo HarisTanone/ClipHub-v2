@@ -115,3 +115,55 @@ def get_job_service() -> JobService:
         # v3.0 Remotion integration
         remotion_adapter=remotion_adapter,
     )
+
+
+@lru_cache()
+def get_v2_pipeline_service():
+    """Singleton V2PipelineService for non-premium users."""
+    from src.application.services_v2 import V2PipelineService
+    from src.infrastructure.aspect_ratio_router import AspectRatioRouter
+    from src.infrastructure.browser_render_engine import BrowserRenderEngine
+    from src.infrastructure.broll_injector import BRollInjector
+    from src.infrastructure.subtitle_renderer import SubtitleRenderer
+    from src.infrastructure.yolo_reframe_engine import YoloReframeEngine
+    from src.infrastructure.resource_monitor import ResourceMonitor
+    from src.infrastructure.overlap_detector import OverlapDetector
+    from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
+    from src.infrastructure.asset_fetcher import AssetFetcher
+
+    aspect_router = _safe_import(AspectRatioRouter, "V2-AspectRatioRouter")
+    browser_render = _safe_import(BrowserRenderEngine, "V2-BrowserRenderEngine")
+    subtitle_renderer = _safe_import(SubtitleRenderer, "V2-SubtitleRenderer")
+    yolo_reframe = _safe_import(YoloReframeEngine, "V2-YoloReframeEngine")
+    broll_injector = None
+    if browser_render:
+        broll_injector = _safe_import(lambda: BRollInjector(browser_render), "V2-BRollInjector")
+    resource_monitor = _safe_import(ResourceMonitor, "V2-ResourceMonitor")
+    overlap_detector = _safe_import(OverlapDetector, "V2-OverlapDetector")
+    sse_emitter = _safe_import(SSEProgressEmitter, "V2-SSEProgressEmitter")
+    asset_fetcher = _safe_import(AssetFetcher, "V2-AssetFetcher")
+
+    return V2PipelineService(
+        job_repo=JobRepository(),
+        downloader=YouTubeDownloader(),
+        renderer=FFmpegRenderer(),
+        whisper_local=WhisperLocal(),
+        # Shared pipeline components
+        aspect_ratio_router=aspect_router,
+        yolo_reframe_engine=yolo_reframe,
+        browser_render_engine=browser_render,
+        broll_injector=broll_injector,
+        subtitle_renderer=subtitle_renderer,
+        asset_fetcher=asset_fetcher,
+        # Infrastructure
+        sse_emitter=sse_emitter,
+        overlap_detector=overlap_detector,
+        resource_monitor=resource_monitor,
+    )
+
+
+@lru_cache()
+def get_pipeline_router():
+    """Singleton PipelineRouter instance."""
+    from src.infrastructure.pipeline_router import PipelineRouter
+    return PipelineRouter()

@@ -99,8 +99,10 @@ export interface User {
   role_id: number;
   permissions: string[];
   is_superadmin: boolean;
+  is_premium: boolean;
   is_active: boolean;
   features: string[];
+  pipeline: string;
   created_at: string | null;
   last_login_at: string | null;
 }

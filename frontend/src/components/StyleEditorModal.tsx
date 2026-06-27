@@ -248,12 +248,13 @@ interface StyleEditorModalProps {
   activeTab?: "presets" | "hook" | "subtitle";
   thumbnailUrl?: string;
   isSuperadmin?: boolean;
+  isPremium?: boolean;
   userFeatures?: string[];
   activePresetId?: number | null;
   onPresetSelect?: (id: number) => void;
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, userFeatures, activePresetId: externalActivePresetId, onPresetSelect }: StyleEditorModalProps) {
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect }: StyleEditorModalProps) {
   const [tab, setTab] = useState<"presets" | "hook" | "subtitle">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
@@ -275,7 +276,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} userFeatures={userFeatures} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
       </div>
     );
   }
@@ -303,7 +304,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} userFeatures={userFeatures} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
         </div>
       </div>
     </div>
@@ -608,7 +609,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
 
 // ─── Subtitle Editor ─────────────────────────────────────────────────────────
 
-function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadmin, userFeatures }: { style: SubtitleStyle; onChange: (s: SubtitleStyle) => void; aspectRatio: string; thumbnailUrl?: string; isSuperadmin?: boolean; userFeatures?: string[] }) {
+function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadmin, isPremium, userFeatures }: { style: SubtitleStyle; onChange: (s: SubtitleStyle) => void; aspectRatio: string; thumbnailUrl?: string; isSuperadmin?: boolean; isPremium?: boolean; userFeatures?: string[] }) {
   const update = (patch: Partial<SubtitleStyle>) => onChange({ ...style, ...patch });
   const [newWord, setNewWord] = useState("");
   const [activeWordIdx, setActiveWordIdx] = useState(0);
@@ -692,7 +693,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
         </Section>
 
         <Section title="Dual Font Style (Highlight Words)">
-          <FeatureLock featureName="Dual Font Style" featureCode="dual_subtitle" isSuperadmin={isSuperadmin} userFeatures={userFeatures}>
+          <FeatureLock featureName="Dual Font Style" featureCode="dual_subtitle" isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures}>
             <Checkbox label="Use separate style for highlight words" checked={style.dualStyleEnabled} onChange={(v) => update({ dualStyleEnabled: v })} />
             <p className="text-[9px] text-zinc-600 mt-1 mb-2">Kata-kata penting (MAKANYA, JANGAN, dll) akan menggunakan font & style berbeda dari teks normal.</p>
             {style.dualStyleEnabled && (

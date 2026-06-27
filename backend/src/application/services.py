@@ -199,8 +199,17 @@ class JobService:
         smart_subtitle_position: Optional[bool] = None,
         # User ownership
         user_id: Optional[int] = None,
+        # V2 pipeline routing
+        is_superadmin: bool = False,
     ) -> tuple[Job, bool]:
         """Create job and start pipeline in background."""
+
+        # ─── Determine pipeline version (V1 Gemini or V2 Groq) ────────
+        from src.infrastructure.pipeline_router import PipelineRouter
+        router = PipelineRouter()
+        pipeline_version = router.get_pipeline_version(
+            user_id=user_id or 0, is_superadmin=is_superadmin
+        )
 
         # URL deduplication
         if not force_reprocess and self._deduplicator:
@@ -246,6 +255,7 @@ class JobService:
             remotion_quality=remotion_quality or settings.REMOTION_QUALITY,
             clips_data=initial_clips_data if initial_clips_data else None,
             user_id=user_id,
+            pipeline_version=pipeline_version,
         )
         await self._repo.create(job)
 
@@ -253,7 +263,11 @@ class JobService:
         if initial_clips_data:
             await self._repo.update_clips_data(job.job_id, initial_clips_data)
 
-        asyncio.create_task(self._run_guarded(job))
+        # ─── Route to appropriate pipeline ────────────────────────────
+        if pipeline_version == "v2":
+            asyncio.create_task(self._run_v2_guarded(job))
+        else:
+            asyncio.create_task(self._run_guarded(job))
         return job, False
 
     async def get_job(self, job_id: str) -> Optional[Job]:
@@ -262,6 +276,14 @@ class JobService:
     async def _run_guarded(self, job: Job) -> None:
         async with _pipeline_semaphore:
             await self._run_pipeline(job)
+
+    async def _run_v2_guarded(self, job: Job) -> None:
+        """Run V2 pipeline (Groq-based) with semaphore protection."""
+        async with _pipeline_semaphore:
+            from src.application.services_v2 import V2PipelineService
+            from src.presentation.dependencies import get_v2_pipeline_service
+            v2_service = get_v2_pipeline_service()
+            await v2_service.run_pipeline(job)
 
     # ─── Pipeline (16 Steps) ─────────────────────────────────────────────────
 

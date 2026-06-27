@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield } from "lucide-react";
+import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -88,6 +88,7 @@ export function Settings() {
     use_remotion: true,
     remotion_ai_layer: true,
     remotion_quality: "medium",
+    pipeline_mode: "v1" as "v1" | "v2",
   });
 
   // Users
@@ -211,6 +212,36 @@ export function Settings() {
             </Card>
 
             {isSuperadmin && (
+              <Card className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Zap className="h-3.5 w-3.5 text-amber-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Pipeline Mode</h3>
+                </div>
+                <p className="text-[11px] text-zinc-500 mb-3">Switch AI engine untuk processing video Anda sendiri.</p>
+                <div className="flex gap-2">
+                  <button type="button"
+                    onClick={() => handleChange("pipeline_mode", "v1")}
+                    className={cn("flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-all",
+                      settings.pipeline_mode === "v1"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-400"
+                        : "border-zinc-700 text-zinc-500 hover:border-zinc-600")}>
+                    <span className="block text-[10px] opacity-70">Premium</span>
+                    V1 — Gemini
+                  </button>
+                  <button type="button"
+                    onClick={() => handleChange("pipeline_mode", "v2")}
+                    className={cn("flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-all",
+                      settings.pipeline_mode === "v2"
+                        ? "border-blue-500 bg-blue-500/10 text-blue-400"
+                        : "border-zinc-700 text-zinc-500 hover:border-zinc-600")}>
+                    <span className="block text-[10px] opacity-70">Free</span>
+                    V2 — Groq
+                  </button>
+                </div>
+              </Card>
+            )}
+
+            {isSuperadmin && (
               <Card className="p-4 border-red-500/20">
                 <div className="flex items-center gap-2 mb-3">
                   <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
@@ -279,25 +310,35 @@ export function Settings() {
 
 function UserRow({ user: u, isSuperadmin, onDelete, toast }: { user: any; isSuperadmin: boolean; onDelete: (id: number, email: string) => void; toast: any }) {
   const [expanded, setExpanded] = useState(false);
-  const [features, setFeatures] = useState<string[]>([]);
+  const [isPremium, setIsPremium] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  async function toggleFeature(code: string) {
+  async function togglePremium() {
     setLoading(true);
-    const hasIt = features.includes(code);
-    const ok = hasIt ? await revokeFeatureApi(u.id, code) : await grantFeatureApi(u.id, code);
-    if (ok) {
-      setFeatures(hasIt ? features.filter(f => f !== code) : [...features, code]);
-      toast.success(`${hasIt ? "Revoked" : "Granted"} ${code} for ${u.email}`);
+    const newValue = !isPremium;
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/features/set-premium`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ user_id: u.id, is_premium: newValue }),
+    });
+    if (res.ok) {
+      setIsPremium(newValue);
+      toast.success(`${u.email} → ${newValue ? "Premium (V1 Gemini)" : "Free (V2 Groq)"}`);
     } else {
-      toast.error("Failed");
+      toast.error("Failed to update premium status");
     }
     setLoading(false);
   }
 
   function handleExpand() {
     if (!expanded) {
-      getUserFeatures(u.id).then(setFeatures);
+      // Fetch current premium status
+      const token = getToken();
+      fetch(`${API_BASE}/api/features/user/${u.id}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => setIsPremium(d.data?.is_premium || false))
+        .catch(() => { });
     }
     setExpanded(!expanded);
   }
@@ -327,16 +368,24 @@ function UserRow({ user: u, isSuperadmin, onDelete, toast }: { user: any; isSupe
         )}
       </div>
       {expanded && u.role !== "superadmin" && (
-        <div className="mt-2 ml-11 flex flex-wrap gap-1.5">
-          {PREMIUM_FEATURES.map((f) => (
-            <button key={f.code} type="button" disabled={loading} onClick={() => toggleFeature(f.code)}
-              className={cn("px-2 py-1 rounded-lg border text-[10px] font-medium transition-all",
-                features.includes(f.code)
-                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-400"
-                  : "border-zinc-700 text-zinc-500 hover:border-zinc-600")}>
-              {f.name}
-            </button>
-          ))}
+        <div className="mt-2 ml-11 flex items-center gap-3">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={togglePremium}
+            className={cn(
+              "px-3 py-1.5 rounded-lg border text-xs font-medium transition-all flex items-center gap-2",
+              isPremium
+                ? "border-amber-500 bg-amber-500/10 text-amber-400"
+                : "border-zinc-700 text-zinc-500 hover:border-zinc-600"
+            )}
+          >
+            <span className={cn("w-2 h-2 rounded-full", isPremium ? "bg-amber-400" : "bg-zinc-600")} />
+            {isPremium ? "Premium (V1 Gemini)" : "Free (V2 Groq)"}
+          </button>
+          {isPremium && (
+            <span className="text-[10px] text-zinc-600">All features unlocked</span>
+          )}
         </div>
       )}
     </div>

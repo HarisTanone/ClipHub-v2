@@ -103,6 +103,8 @@ async def create_job(
         smart_subtitle_position=request.smart_subtitle_position,
         # User ownership
         user_id=user.id,
+        # V2 pipeline routing
+        is_superadmin=user.is_superadmin,
     )
     return JobResponse(
         job_id=job.job_id,
@@ -122,6 +124,7 @@ async def create_job(
         ai_layer_enabled=job.ai_layer_enabled,
         threejs_enabled=job.threejs_enabled,
         remotion_quality=job.remotion_quality,
+        pipeline_version=job.pipeline_version,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
@@ -149,6 +152,7 @@ async def get_job(
         clips_total=job.clips_total,
         clips_success=job.clips_success,
         clips_failed=job.clips_failed,
+        pipeline_version=job.pipeline_version,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )

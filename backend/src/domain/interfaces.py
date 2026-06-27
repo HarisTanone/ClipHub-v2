@@ -4,7 +4,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from .entities import Clip, Job, JobStatus, PipelineFlags, BRollSuggestion, AssetResult, CreativeDirection
+from .entities import (
+    Clip, Job, JobStatus, PipelineFlags, BRollSuggestion, AssetResult, CreativeDirection,
+    TranscriptResult, AudioSlice, HighlightAnalysisResult,
+)
 
 
 # ─── Core Pipeline Interfaces ─────────────────────────────────────────────────
@@ -229,4 +232,105 @@ class IAssetFetcher(ABC):
         creative_direction: Optional[CreativeDirection] = None,
     ) -> list[BRollSuggestion]:
         """Resolve assets for all suggestions. Attaches asset_result to each. Returns updated list."""
+        ...
+
+
+# ─── V2 Pipeline Interfaces (Groq-based, Non-Premium) ────────────────────────
+
+class IGroqTranscriber(ABC):
+    """TAHAP 1: Ingestion & Text Extraction.
+
+    Primary: YouTube Transcript API (free).
+    Fallback: Groq Whisper API (fast, free tier).
+    """
+
+    @abstractmethod
+    async def transcribe(self, youtube_url: str, video_duration: float) -> TranscriptResult:
+        """Get transcript: YouTube API first, Groq Whisper fallback.
+
+        Args:
+            youtube_url: Full YouTube URL
+            video_duration: Video duration in seconds
+
+        Returns:
+            TranscriptResult with segments, source, language
+
+        Raises:
+            TranscriptionError: If both YouTube API and Groq Whisper fail
+        """
+        ...
+
+
+class IGroqAnalyzer(ABC):
+    """TAHAP 2: AI Highlight Analysis.
+
+    Uses Groq LLM (llama-3.1-8b-instant) to identify viral moments
+    from transcript text. Dynamic chunking for long videos.
+    """
+
+    @abstractmethod
+    async def analyze_highlights(
+        self, transcript: TranscriptResult, video_duration: float, max_clips: int
+    ) -> HighlightAnalysisResult:
+        """Analyze transcript → viral highlight candidates + creative direction.
+
+        Args:
+            transcript: TranscriptResult from TAHAP 1
+            video_duration: Total video duration in seconds
+            max_clips: Maximum number of clips to extract
+
+        Returns:
+            HighlightAnalysisResult with clips, creative_direction, broll_suggestions
+        """
+        ...
+
+
+class IMicroSlicer(ABC):
+    """TAHAP 3: Micro-Slicing.
+
+    Extracts short audio segments from video based on highlight timestamps.
+    Adds ±padding for Whisper context.
+    """
+
+    @abstractmethod
+    async def slice_audio(
+        self, video_path: str, highlights: list[dict], output_dir: str, video_duration: float
+    ) -> list[AudioSlice]:
+        """Extract audio segments for each highlight with padding.
+
+        Args:
+            video_path: Path to downloaded video file
+            highlights: List of {start, end, rank} from Groq analysis
+            output_dir: Directory to write WAV files
+            video_duration: Total video duration for boundary clamping
+
+        Returns:
+            List of AudioSlice with paths and timing info
+        """
+        ...
+
+
+class ISileroVAD(ABC):
+    """TAHAP 5: Voice Activity Detection.
+
+    Refines clip boundaries by finding silence gaps near cut points.
+    Ensures cuts don't happen mid-word.
+    """
+
+    @abstractmethod
+    async def refine_boundaries(
+        self, audio_path: str, target_start: float, target_end: float,
+        search_radius: float = 2.0
+    ) -> tuple[float, float]:
+        """Find nearest silence boundaries around target timestamps.
+
+        Args:
+            audio_path: Path to audio file (WAV 16kHz mono)
+            target_start: Desired start time in seconds (relative to audio file)
+            target_end: Desired end time in seconds (relative to audio file)
+            search_radius: How far to search for silence (seconds)
+
+        Returns:
+            Tuple of (refined_start, refined_end) in seconds
+        """
         ...

@@ -73,6 +73,19 @@ Desktop.ini
 logs/
 *.log
 
+# ─── Test artifacts ───────────────────────────────────────────────────────────
+test-results/
+.pytest_cache/
+htmlcov/
+coverage.xml
+
+# ─── ML Models (too large for git) ───────────────────────────────────────────
+*.pt
+*.bin
+*.onnx
+models/
+torch_hub_cache/
+
 # ─── Security: prevent .git exposure on web server ────────────────────────────
 # Note: .git itself is never tracked by git.
 # On deployment, ensure your reverse proxy blocks /.git/ requests:

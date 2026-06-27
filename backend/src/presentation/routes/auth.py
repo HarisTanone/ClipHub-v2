@@ -223,7 +223,7 @@ async def logout(body: RefreshRequest):
 
 @router.get("/me")
 async def get_me(user: CurrentUser = Depends(get_current_user)):
-    """Get current user profile with permissions and features."""
+    """Get current user profile with premium status."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
@@ -237,17 +237,21 @@ async def get_me(user: CurrentUser = Depends(get_current_user)):
         if not data:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Get granted features
-        features = []
+        # Determine premium status
+        is_premium = False
         if user.is_superadmin:
-            from src.presentation.routes.features import AVAILABLE_FEATURES
-            features = list(AVAILABLE_FEATURES.keys())
+            is_premium = True
         else:
             try:
-                cur.execute("SELECT feature_code FROM user_features WHERE user_id = ?", (user.id,))
-                features = [row["feature_code"] for row in cur.fetchall()]
+                cur.execute("SELECT is_premium FROM users WHERE id = ?", (user.id,))
+                prem_row = cur.fetchone()
+                is_premium = bool(prem_row["is_premium"]) if prem_row else False
             except Exception:
-                pass  # Table may not exist yet
+                pass
+
+        # Premium → all features unlocked, Non-premium → none
+        from src.presentation.routes.features import ALL_PREMIUM_FEATURES
+        features = ALL_PREMIUM_FEATURES if is_premium else []
 
         return {
             "success": True,
@@ -259,8 +263,10 @@ async def get_me(user: CurrentUser = Depends(get_current_user)):
                 "role_id": data["role_id"],
                 "permissions": user.permissions,
                 "is_superadmin": user.is_superadmin,
+                "is_premium": is_premium,
                 "is_active": bool(data["is_active"]),
                 "features": features,
+                "pipeline": "v1" if is_premium else "v2",
                 "created_at": data["created_at"],
                 "last_login_at": data["last_login_at"],
             },
