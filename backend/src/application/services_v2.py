@@ -161,6 +161,11 @@ class V2PipelineService:
         video_id = cache.extract_video_id(url)
         force_reprocess = bool(job.clips_data and job.clips_data.get("force_reprocess"))
 
+        # Re-read clips_data from DB to ensure style configs are available
+        fresh_job = await self._repo.get_by_job_id(job_id)
+        if fresh_job and fresh_job.clips_data:
+            job.clips_data = fresh_job.clips_data
+
         if force_reprocess and video_id:
             cache.invalidate(video_id)
             logger.info(f"[{job_id}] Cache invalidated (force_reprocess)")
@@ -530,6 +535,14 @@ class V2PipelineService:
             # Use original start (before VAD adjustment) for offset
             offset_start = (original_starts or {}).get(clip.rank, clip.start)
             relative_words = SelectiveWhisperTranscriber.words_to_relative(words, offset_start)
+            
+            # Log first few words for debugging timing
+            if relative_words[:3]:
+                logger.debug(
+                    f"v2_words clip {clip.rank}: offset_start={offset_start:.2f}, "
+                    f"first_word='{relative_words[0].word}' @ {relative_words[0].start:.2f}s"
+                )
+            
             result[clip.rank] = [
                 {"word": w.word, "start": w.start, "end": w.end, "highlight": w.highlight}
                 for w in relative_words
@@ -575,6 +588,13 @@ class V2PipelineService:
         if job.clips_data:
             hook_style_config = job.clips_data.get("hook_style_config", {})
             subtitle_style_config = job.clips_data.get("subtitle_style_config", {})
+        
+        logger.info(
+            f"[{job_id}] Render style: hook_anim={hook_style_config.get('animation', 'N/A')}, "
+            f"sub_font={subtitle_style_config.get('fontFamily', 'N/A')}, "
+            f"sub_color={subtitle_style_config.get('color', 'N/A')}, "
+            f"sub_highlight={subtitle_style_config.get('highlightColor', 'N/A')}"
+        )
 
         # ─── B-Roll Asset Fetching ─────────────────────────────────────
         if job.broll_enabled and self._asset_fetcher:
@@ -637,19 +657,24 @@ class V2PipelineService:
         # Build SubtitleStyleConfig from user's custom config or creative direction
         from src.domain.entities import SubtitleStyleConfig
         sub_style = SubtitleStyleConfig(
-            font_family=subtitle_style_config.get("fontFamily", "Poppins"),
-            font_size=int(subtitle_style_config.get("fontSize", 34)),
+            font_family=subtitle_style_config.get("fontFamily", subtitle_style_config.get("font_family", "Poppins")),
+            font_size=int(subtitle_style_config.get("fontSize", subtitle_style_config.get("font_size", 34))),
             uppercase=subtitle_style_config.get("uppercase", creative_direction.subtitle_uppercase),
             color=subtitle_style_config.get("color", creative_direction.primary_color),
-            highlight_color=subtitle_style_config.get("highlightColor", creative_direction.secondary_color),
+            highlight_color=subtitle_style_config.get("highlightColor", subtitle_style_config.get("highlight_color", creative_direction.secondary_color)),
             position=subtitle_style_config.get("position", creative_direction.subtitle_position or "bottom"),
-            stroke_width=int(subtitle_style_config.get("strokeWidth", 3)),
-            max_words_per_line=int(subtitle_style_config.get("maxWordsPerLine", 3)),
+            stroke_width=int(subtitle_style_config.get("strokeWidth", subtitle_style_config.get("stroke_width", 3))),
+            max_words_per_line=int(subtitle_style_config.get("maxWordsPerLine", subtitle_style_config.get("max_words_per_line", 3))),
         )
 
         # Apply glow if enabled in custom config
-        if subtitle_style_config.get("glowEnabled"):
+        if subtitle_style_config.get("glowEnabled") or subtitle_style_config.get("glow_enabled"):
             sub_style.shadow_color = f"{sub_style.highlight_color}@0.6"
+        
+        logger.info(
+            f"[{job_id}] SubtitleStyle: font={sub_style.font_family}, color={sub_style.color}, "
+            f"highlight={sub_style.highlight_color}, position={sub_style.position}"
+        )
 
         for clip in clips:
             if not trim_results.get(clip.rank):
