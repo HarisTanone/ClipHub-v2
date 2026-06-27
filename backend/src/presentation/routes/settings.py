@@ -98,6 +98,25 @@ def _ensure_settings_table():
 _ensure_settings_table()
 
 
+def _ensure_pipeline_override_column():
+    """Ensure pipeline_override column exists on users table."""
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(users)")
+        columns = [row["name"] for row in cur.fetchall()]
+        if "pipeline_override" not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN pipeline_override TEXT DEFAULT NULL")
+            conn.commit()
+            logger.info("settings: added pipeline_override column to users table")
+    except Exception as e:
+        logger.warning(f"settings: pipeline_override migration failed: {e}")
+    finally:
+        conn.close()
+
+_ensure_pipeline_override_column()
+
+
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
 @router.get("")

@@ -27,17 +27,29 @@ ALL_PREMIUM_FEATURES = [
 
 
 def _ensure_column():
-    """Ensure is_premium column exists on users table (migration-safe)."""
+    """Ensure is_premium and pipeline_override columns exist on users table (migration-safe)."""
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
-        # Check if column exists
+        # Check users table columns
         cur.execute("PRAGMA table_info(users)")
         columns = [row["name"] for row in cur.fetchall()]
         if "is_premium" not in columns:
             cur.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0")
             conn.commit()
             logger.info("features: added is_premium column to users table")
+        if "pipeline_override" not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN pipeline_override TEXT DEFAULT NULL")
+            conn.commit()
+            logger.info("features: added pipeline_override column to users table")
+
+        # Check jobs table for pipeline_version
+        cur.execute("PRAGMA table_info(jobs)")
+        job_columns = [row["name"] for row in cur.fetchall()]
+        if "pipeline_version" not in job_columns:
+            cur.execute("ALTER TABLE jobs ADD COLUMN pipeline_version TEXT NOT NULL DEFAULT 'v1'")
+            conn.commit()
+            logger.info("features: added pipeline_version column to jobs table")
     except Exception as e:
         logger.warning(f"features: migration check failed: {e}")
     finally:
