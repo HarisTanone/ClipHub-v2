@@ -702,6 +702,19 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v })} />
             <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
           </div>
+          {/* Line Transition / Subtitle Style */}
+          <div className="mt-3">
+            <label className="text-[10px] text-zinc-500 mb-1.5 block">Subtitle Style</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(["word_pop", "emphasis", "line_reveal"] as const).map(lt => (
+                <button key={lt} type="button" onClick={() => update({ lineTransition: lt })}
+                  className={cn("py-1.5 rounded-lg border text-[10px] font-medium transition-colors",
+                    style.lineTransition === lt ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>
+                  {lt === "word_pop" ? "Word Pop" : lt === "emphasis" ? "Big Keyword" : "Line Reveal"}
+                </button>
+              ))}
+            </div>
+          </div>
         </Section>
 
         <Section title="Colors">
@@ -841,41 +854,60 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
           <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/30 to-zinc-900/50" />
           <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-            <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
-              {["ini", "kata", "penting", "banget"].map((w, i) => {
-                const isHighlight = i === activeWordIdx;
-                const isKeyword = style.highlightWords.includes(w);
-                const shouldHighlight = isHighlight || isKeyword;
-                const useDual = shouldHighlight && style.dualStyleEnabled;
-                const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
+            {style.lineTransition === "emphasis" ? (
+              /* Emphasis style preview: big keyword + small context */
+              <div className="flex flex-col items-center gap-1">
+                <span style={{
+                  color: style.color,
+                  fontSize: Math.max(style.fontSize * 0.25, 9),
+                  fontFamily: `'${style.fontFamily}', sans-serif`,
+                  fontWeight: Number(style.fontWeight),
+                }}>gak banyak</span>
+                <span style={{
+                  color: style.highlightColor,
+                  fontSize: Math.max(style.fontSize * 0.85, 20),
+                  fontFamily: `'${style.fontFamily}', sans-serif`,
+                  fontWeight: 900,
+                  textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined,
+                }}>Animasi</span>
+              </div>
+            ) : (
+              <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
+                {["ini", "kata", "penting", "banget"].map((w, i) => {
+                  const isHighlight = i === activeWordIdx;
+                  const isKeyword = style.highlightWords.includes(w);
+                  const shouldHighlight = isHighlight || isKeyword;
+                  const useDual = shouldHighlight && style.dualStyleEnabled;
+                  const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
 
-                const hlStyle = style.highlightStyle || "scale";
-                const wordStyles: React.CSSProperties = {
-                  color: shouldHighlight ? style.highlightColor : style.color,
-                  fontSize: fs,
-                  fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
-                  fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
-                  fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
-                  letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
-                  textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : "none"),
-                  textShadow: [
-                    (useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "",
-                    shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : "",
-                  ].filter(Boolean).join(", ") || undefined,
-                  WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
-                  transition: "all 0.2s ease",
-                  display: "inline-block",
-                  // Highlight style decorations (only if NOT dual — dual uses its own complete style)
-                  ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
-                  ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
-                  ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
-                };
+                  const hlStyle = style.highlightStyle || "scale";
+                  const wordStyles: React.CSSProperties = {
+                    color: shouldHighlight ? style.highlightColor : style.color,
+                    fontSize: fs,
+                    fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
+                    fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
+                    fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
+                    letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
+                    textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : "none"),
+                    textShadow: [
+                      (useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "",
+                      shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : "",
+                    ].filter(Boolean).join(", ") || undefined,
+                    WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
+                    transition: "all 0.2s ease",
+                    display: "inline-block",
+                    // Highlight style decorations (only if NOT dual — dual uses its own complete style)
+                    ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
+                    ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
+                    ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
+                  };
 
-                return <span key={i} style={wordStyles}>{w}</span>;
-              })}
-            </div>
+                  return <span key={i} style={wordStyles}>{w}</span>;
+                })}
+              </div>
+            )}
           </div>
-          <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600">{style.animationStyle} | {style.position}</p>
+          <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600">{style.lineTransition === "emphasis" ? "emphasis" : style.animationStyle} | {style.position}</p>
         </div>
       </div>
     </div>
