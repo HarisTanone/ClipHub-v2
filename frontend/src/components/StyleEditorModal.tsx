@@ -224,6 +224,10 @@ const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = 
   { id: "typewriter", name: "Typewriter", style: { color: "#00FF88", bgOpacity: 0.75, fontSize: 40, fontFamily: "monospace", animation: "typewriter" } },
   { id: "gradient_gold", name: "Gold Gradient", style: { gradientEnabled: true, gradientFrom: "#FFD700", gradientTo: "#FF8C00", fontSize: 50, fontFamily: "Montserrat", fontWeight: "900" } },
   { id: "boxed", name: "Boxed", style: { boxEnabled: true, boxColor: "#FFFFFF", boxOpacity: 0.15, boxPadding: 24, boxRadius: 12, fontSize: 42 } },
+  { id: "glitch_rgb_preset", name: "RGB Split", style: { color: "#FFFFFF", bgOpacity: 0.7, fontSize: 58, fontFamily: "Anton", uppercase: true, animation: "glitch_rgb" } },
+  { id: "shake_neon_preset", name: "Neon Shake", style: { color: "#00FFCC", bgOpacity: 0.65, fontSize: 54, fontFamily: "Anton", animation: "shake_neon" } },
+  { id: "cinematic_reveal_preset", name: "Cinematic Gold", style: { color: "#FFD700", bgOpacity: 0.8, fontSize: 62, fontFamily: "Montserrat", fontWeight: "700", animation: "cinematic_reveal" } },
+  { id: "danger_bold_preset", name: "Danger Bold", style: { color: "#FF2D2D", bgOpacity: 0.75, fontSize: 70, fontFamily: "Anton", uppercase: true, animation: "danger_bold" } },
 ];
 
 const SUBTITLE_PRESETS: { id: string; name: string; style: Partial<SubtitleStyle> }[] = [
@@ -459,8 +463,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
 
         <Section title="Animation & Timing">
           <div className="grid grid-cols-4 gap-2 mb-3">
-            {["fade_scale", "slide_up", "glitch", "typewriter"].map(a => (
-              <button key={a} type="button" onClick={() => update({ animation: a })} className={cn("py-2 rounded-lg border text-[11px] font-medium transition-colors", style.animation === a ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{a.replace("_", " ")}</button>
+            {["fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold"].map(a => (
+              <button key={a} type="button" onClick={() => update({ animation: a })} className={cn("py-2 rounded-lg border text-[11px] font-medium transition-colors", style.animation === a ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{a.replace(/_/g, " ")}</button>
             ))}
           </div>
           <div className="grid grid-cols-3 gap-3">

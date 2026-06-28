@@ -1100,6 +1100,35 @@ class JobService:
                 "font_pref": ["Inter-Bold.ttf", "Poppins-Bold.ttf"],
                 "bg_opacity": 0.7, "y_expr": "h*0.45-text_h/2",
             },
+            # ─── NEW: Kinetic Typography Styles ───────────────────────────
+            "glitch_rgb": {
+                "fontsize": 58, "fontcolor": "white", "borderw": 0,
+                "bordercolor": "black", "duration": 3.0,
+                "font_pref": ["Anton-Regular.ttf", "BlackOpsOne-Regular.ttf", "BebasNeue-Regular.ttf"],
+                "bg_opacity": 0.7, "y_expr": "h*0.4-text_h/2",
+                "effect": "glitch_rgb",
+            },
+            "shake_neon": {
+                "fontsize": 54, "fontcolor": "#00FFCC", "borderw": 0,
+                "bordercolor": "black", "duration": 3.0,
+                "font_pref": ["Bungee-Regular.ttf", "Anton-Regular.ttf", "BlackOpsOne-Regular.ttf"],
+                "bg_opacity": 0.65, "y_expr": "h*0.4-text_h/2",
+                "effect": "shake_neon",
+            },
+            "cinematic_reveal": {
+                "fontsize": 62, "fontcolor": "#FFD700", "borderw": 0,
+                "bordercolor": "black", "duration": 3.5,
+                "font_pref": ["PlayfairDisplay-Variable.ttf", "Lora-Variable.ttf", "Merriweather-Bold.ttf"],
+                "bg_opacity": 0.8, "y_expr": "h*0.42-text_h/2",
+                "effect": "cinematic_reveal",
+            },
+            "danger_bold": {
+                "fontsize": 70, "fontcolor": "#FF2D2D", "borderw": 6,
+                "bordercolor": "black", "duration": 3.0,
+                "font_pref": ["BlackOpsOne-Regular.ttf", "Anton-Regular.ttf", "ArchivoBlack-Regular.ttf"],
+                "bg_opacity": 0.75, "y_expr": "h*0.38-text_h/2",
+                "effect": "danger_bold",
+            },
         }
 
         style = HOOK_STYLES.get(hook_style, HOOK_STYLES["zoom_punch"])
@@ -1138,16 +1167,122 @@ class JobService:
                 f"if(gt(t\\,{duration - 0.5})\\,({duration}-t)/0.5\\,1))"
             )
 
-            filter_complex = (
-                f"drawbox=x=0:y=0:w=iw:h=ih:color=black@{bg_opacity}:t=fill"
-                f":enable='between(t,0,{duration})',"
-                f"drawtext=textfile='{text_file}'"
-                f":fontsize={fontsize}{font_opt}"
-                f":fontcolor={fontcolor}:borderw={borderw}:bordercolor={bordercolor}"
-                f":x=(w-text_w)/2:y={y_expr}"
-                f":alpha='{alpha_expr}'"
-                f":enable='between(t,0,{duration})'"
-            )
+            # ─── Build filter based on effect type ────────────────────
+            effect = style.get("effect", "")
+
+            if effect == "glitch_rgb":
+                # RGB Split / Chromatic Aberration — 3 text layers with color offset
+                filter_complex = (
+                    f"drawbox=x=0:y=0:w=iw:h=ih:color=black@{bg_opacity}:t=fill"
+                    f":enable='between(t,0,{duration})',"
+                    # Red channel — offset left
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor=#FF0000@0.7:borderw=0"
+                    f":x=(w-text_w)/2-4+sin(t*15)*3:y={y_expr}"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})',"
+                    # Cyan channel — offset right
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor=#00FFFF@0.7:borderw=0"
+                    f":x=(w-text_w)/2+4-sin(t*15)*3:y={y_expr}"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})',"
+                    # Main white text on top
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor=white:borderw=0"
+                    f":x=(w-text_w)/2:y={y_expr}"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})'"
+                )
+
+            elif effect == "shake_neon":
+                # Neon glow with random shake — multiple glow layers + shaking text
+                glow_color = fontcolor  # e.g. #00FFCC
+                filter_complex = (
+                    f"drawbox=x=0:y=0:w=iw:h=ih:color=black@{bg_opacity}:t=fill"
+                    f":enable='between(t,0,{duration})',"
+                    # Glow layer 1 (large, dim)
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor={glow_color}@0.3:borderw=12:bordercolor={glow_color}@0.15"
+                    f":x=(w-text_w)/2:y={y_expr}"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})',"
+                    # Glow layer 2 (medium)
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor={glow_color}@0.5:borderw=6:bordercolor={glow_color}@0.3"
+                    f":x=(w-text_w)/2+sin(t*25)*2:y={y_expr}+cos(t*20)*2"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})',"
+                    # Main text with subtle shake
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor={glow_color}:borderw=0"
+                    f":x=(w-text_w)/2+sin(t*30)*1.5:y={y_expr}+cos(t*35)*1"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})'"
+                )
+
+            elif effect == "cinematic_reveal":
+                # Cinematic letterbox + elegant fade-in from center
+                filter_complex = (
+                    # Letterbox bars (cinematic feel)
+                    f"drawbox=x=0:y=0:w=iw:h=ih*0.12:color=black:t=fill"
+                    f":enable='between(t,0,{duration})',"
+                    f"drawbox=x=0:y=ih*0.88:w=iw:h=ih*0.12:color=black:t=fill"
+                    f":enable='between(t,0,{duration})',"
+                    # Dark overlay
+                    f"drawbox=x=0:y=0:w=iw:h=ih:color=black@{bg_opacity}:t=fill"
+                    f":enable='between(t,0,{duration})',"
+                    # Main text with slow scale-in feel (fontsize expression not supported,
+                    # so we use alpha + position animation for elegance)
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor={fontcolor}:borderw=0"
+                    f":shadowx=2:shadowy=2:shadowcolor=black@0.8"
+                    f":x=(w-text_w)/2:y={y_expr}"
+                    f":alpha='if(lt(t\\,1.0)\\,t/1.0\\,"
+                    f"if(gt(t\\,{duration - 0.8})\\,({duration}-t)/0.8\\,1))'"
+                    f":enable='between(t,0,{duration})'"
+                )
+
+            elif effect == "danger_bold":
+                # Bold red with pulsing border + flash effect
+                filter_complex = (
+                    f"drawbox=x=0:y=0:w=iw:h=ih:color=black@{bg_opacity}:t=fill"
+                    f":enable='between(t,0,{duration})',"
+                    # Red glow behind
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor=#FF0000@0.4:borderw=10:bordercolor=#FF0000@0.2"
+                    f":x=(w-text_w)/2:y={y_expr}"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})',"
+                    # Main text with thick border (pulse simulated by borderw)
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor={fontcolor}:borderw={borderw}:bordercolor=black"
+                    f":x=(w-text_w)/2:y={y_expr}"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})'"
+                )
+
+            else:
+                # Default: original simple style (zoom_punch, fade_scale, etc.)
+                filter_complex = (
+                    f"drawbox=x=0:y=0:w=iw:h=ih:color=black@{bg_opacity}:t=fill"
+                    f":enable='between(t,0,{duration})',"
+                    f"drawtext=textfile='{text_file}'"
+                    f":fontsize={fontsize}{font_opt}"
+                    f":fontcolor={fontcolor}:borderw={borderw}:bordercolor={bordercolor}"
+                    f":x=(w-text_w)/2:y={y_expr}"
+                    f":alpha='{alpha_expr}'"
+                    f":enable='between(t,0,{duration})'"
+                )
 
             cmd = [
                 "ffmpeg", "-y", "-i", video_path,
