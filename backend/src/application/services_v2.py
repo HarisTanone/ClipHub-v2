@@ -390,21 +390,44 @@ class V2PipelineService:
             for clip in clips:
                 if not trim_results.get(clip.rank):
                     continue
-                clip_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                # VAD needs WAV audio — extract from trimmed clip
+                clip_video_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                clip_audio_path = f"{output_dir}/clip_{clip.rank:02d}_vad.wav"
                 try:
+                    # Extract audio for VAD (16kHz mono WAV)
+                    import subprocess
+                    extract_cmd = [
+                        "ffmpeg", "-y", "-i", clip_video_path,
+                        "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+                        "-loglevel", "error", clip_audio_path,
+                    ]
+                    await asyncio.to_thread(
+                        subprocess.run, extract_cmd, capture_output=True, timeout=30
+                    )
+                    
+                    if not os.path.exists(clip_audio_path):
+                        continue
+                    
+                    clip_duration = clip.end - clip.start
                     vad_result = await self._vad.refine_clip_boundaries(
-                        audio_path=clip_path,
-                        original_start=0.0,  # Relative to trimmed clip
-                        original_end=clip.end - clip.start,
+                        audio_path=clip_audio_path,
+                        original_start=0.0,
+                        original_end=clip_duration,
                         padded_start=0.0,
                     )
-                    # VAD adjusts relative to clip — convert back to absolute
+                    
+                    # Apply VAD shift (preserve original for subtitle timing)
                     if not vad_result.used_fallback:
-                        clip.start = clip.start + vad_result.final_start
-                        clip.end = clip.start + vad_result.final_end
+                        orig_start = clip.start
+                        clip.start = orig_start + vad_result.final_start
+                        clip.end = orig_start + vad_result.final_end
                         vad_applied += 1
                 except Exception as e:
                     logger.debug(f"[{job_id}] VAD clip {clip.rank}: {e}")
+                finally:
+                    # Cleanup VAD audio
+                    if os.path.exists(clip_audio_path):
+                        os.remove(clip_audio_path)
             logger.info(f"[{job_id}] V2 VAD refinement: {vad_applied}/{clips_count} clips adjusted")
             self._emit(job_id, "9.5", "v2_vad_refine", "complete")
 

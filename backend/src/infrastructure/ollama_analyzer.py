@@ -128,34 +128,54 @@ class OllamaAnalyzer:
             lines.append(f"[{seg.start:.1f}s] {seg.text}")
         transcript_text = "\n".join(lines)
 
-        prompt = f"""Kamu adalah AI analis konten viral profesional. Baca SELURUH transkrip video berikut dan identifikasi momen-momen PALING MENARIK untuk dijadikan short clip viral.
+        prompt = f"""Kamu adalah AI analis konten viral profesional untuk platform TikTok/Reels/Shorts. Baca SELURUH transkrip video berikut dan identifikasi momen-momen PALING MENARIK untuk dijadikan short clip viral.
 
 VIDEO INFO:
 - Durasi total: {video_duration:.0f} detik
-- Target: Temukan {max_clips} momen terbaik (durasi 45-90 detik per klip)
+- Target: Temukan TEPAT {max_clips} momen terbaik (durasi 45-90 detik per klip)
+- Format timestamp: detik (contoh: 125.5)
 
-TRANSKRIP LENGKAP:
+TRANSKRIP LENGKAP (format: [timestamp] teks):
 {transcript_text}
 
-ATURAN:
-1. Setiap klip harus berdurasi 45-90 detik
+KRITERIA PEMILIHAN CLIP (prioritas tinggi ke rendah):
+1. EMOSI KUAT — momen marah, terharu, kaget, tertawa keras
+2. KONTROVERSI — pendapat yang memicu debat, pernyataan berani
+3. CERITA PRIBADI — pengalaman nyata yang relatable
+4. PLOT TWIST — pembahasan yang berubah arah tiba-tiba
+5. INSIGHT UNIK — informasi mengejutkan, fakta yang jarang diketahui
+6. HUMOR — momen lucu natural, bukan dipaksakan
+
+ATURAN WAJIB:
+1. Durasi setiap klip: 45-90 detik (JANGAN lebih pendek atau lebih panjang)
 2. Klip TIDAK BOLEH OVERLAP satu sama lain
-3. 'start' dan 'end' dalam DETIK (float)
-4. Skor 1-100 berdasarkan potensi viral (emosi, surprise, kontroversi, humor)
-5. Hook = kalimat singkat <60 karakter yang bikin penasaran
-6. Pilih momen yang bisa BERDIRI SENDIRI tanpa konteks tambahan
-7. Prioritaskan: plot twist, cerita emosional, kontroversi, humor, insight unik
+3. Timestamp 'start' = AWAL kalimat (jangan potong di tengah kata)
+4. Timestamp 'end' = AKHIR kalimat (beri jeda 1-2 detik setelah kata terakhir)
+5. Setiap clip harus bisa BERDIRI SENDIRI (penonton mengerti tanpa nonton full video)
 
-OUTPUT HANYA RAW JSON (tanpa penjelasan, tanpa markdown):
-{{"clips": [{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "teks hook viral", "reason": "alasan singkat kenapa viral", "content_type": "storytelling", "speaker_energy": "high"}}]}}"""
+ATURAN HOOK (SANGAT PENTING):
+- Hook HARUS dalam bahasa yang SAMA dengan transkrip
+- Hook HARUS memicu rasa PENASARAN (open loop)
+- Hook HARUS berupa pertanyaan ATAU pernyataan kontroversial
+- Hook MAKSIMAL 50 karakter
+- JANGAN gunakan spoiler (jangan ungkap punchline)
+- Contoh BAGUS: "Ternyata dia bohong selama ini...", "Gue hampir mati karena ini"
+- Contoh BURUK: "Tips editing video", "Cara membuat konten" (terlalu generic)
 
-        raw = await self._call_ollama(prompt, timeout=180.0)  # Longer timeout for full transcript
+OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa komentar):
+{{"clips": [{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "hook text viral", "reason": "alasan singkat", "content_type": "storytelling", "speaker_energy": "high"}}]}}"""
+
+        raw = await self._call_ollama(prompt, timeout=600.0)  # 10 min timeout for full transcript on CPU
         return self._parse_chunk_response(raw, 0.0, video_duration)
 
     # ─── Ollama API Call ──────────────────────────────────────────────────────
 
-    async def _call_ollama(self, prompt: str, timeout: float = 120.0) -> str:
-        """Call local Ollama API. No rate limits!"""
+    async def _call_ollama(self, prompt: str, timeout: float = 300.0) -> str:
+        """Call local Ollama API. No rate limits!
+        
+        Default timeout 300s (5 min) — needed for large transcripts on CPU.
+        CPU at ~8 tok/s needs ~375s for 3000 output tokens.
+        """
         url = f"{self._base_url}/api/generate"
         payload = {
             "model": self._model,
@@ -163,7 +183,8 @@ OUTPUT HANYA RAW JSON (tanpa penjelasan, tanpa markdown):
             "stream": False,
             "options": {
                 "temperature": 0.3,
-                "num_predict": 3000,
+                "num_predict": 4000,
+                "num_ctx": 32768,  # Use 32K context (enough for 1hr video)
             },
         }
 
