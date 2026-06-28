@@ -48,40 +48,59 @@ class OllamaAnalyzer:
     async def analyze_highlights(
         self, transcript: TranscriptResult, video_duration: float, max_clips: int
     ) -> HighlightAnalysisResult:
-        """Analyze transcript → viral highlight candidates + creative direction."""
+        """Analyze transcript → viral highlight candidates + creative direction.
+        
+        Strategy:
+        - If transcript fits in single call (<80K tokens ~40K chars): send ALL at once
+        - If too large: chunk by time (fallback)
+        
+        Single-call is preferred because:
+        - No clip boundary issues between chunks
+        - Better global context for ranking
+        - Faster (1 call vs many)
+        """
 
-        chunks = self._chunk_transcript(transcript.segments)
-        logger.info(
-            f"ollama_analyzer: {len(chunks)} chunks from {video_duration:.0f}s video "
-            f"(max_clips={max_clips}, model={self._model})"
-        )
+        full_text = transcript.full_text
+        estimated_tokens = len(full_text) // 3  # Rough estimate: 1 token ≈ 3 chars
 
-        # ─── Phase A: Analyze each chunk ──────────────────────────────
-        all_candidates = []
-        for i, chunk in enumerate(chunks):
-            chunk_start = chunk[0].start
-            chunk_end = chunk[-1].end
-            chunk_text = " ".join(seg.text for seg in chunk)
-
-            logger.info(f"ollama_analyzer: chunk {i+1}/{len(chunks)} [{chunk_start:.0f}s-{chunk_end:.0f}s]")
-
-            try:
-                candidates = await self._analyze_chunk(
-                    chunk_text, chunk_start, chunk_end,
-                    video_duration, max_clips, i + 1, len(chunks)
-                )
-                all_candidates.extend(candidates)
-            except Exception as e:
-                logger.warning(f"ollama_analyzer: chunk {i+1} failed: {e}")
+        if estimated_tokens < 80000:
+            # ─── Single call (preferred for <2 hour videos) ───────────
+            logger.info(
+                f"ollama_analyzer: SINGLE CALL mode — {len(full_text)} chars, "
+                f"~{estimated_tokens} tokens, duration={video_duration:.0f}s"
+            )
+            all_candidates = await self._analyze_full_transcript(
+                transcript, video_duration, max_clips
+            )
+        else:
+            # ─── Chunked (fallback for very long videos) ──────────────
+            chunks = self._chunk_transcript(transcript.segments)
+            logger.info(
+                f"ollama_analyzer: CHUNKED mode — {len(chunks)} chunks "
+                f"(transcript too large: ~{estimated_tokens} tokens)"
+            )
+            all_candidates = []
+            for i, chunk in enumerate(chunks):
+                chunk_start = chunk[0].start
+                chunk_end = chunk[-1].end
+                chunk_text = " ".join(seg.text for seg in chunk)
+                logger.info(f"ollama_analyzer: chunk {i+1}/{len(chunks)} [{chunk_start:.0f}s-{chunk_end:.0f}s]")
+                try:
+                    candidates = await self._analyze_chunk(
+                        chunk_text, chunk_start, chunk_end,
+                        video_duration, max_clips, i + 1, len(chunks)
+                    )
+                    all_candidates.extend(candidates)
+                except Exception as e:
+                    logger.warning(f"ollama_analyzer: chunk {i+1} failed: {e}")
 
         if not all_candidates:
             raise OllamaAnalyzerError("Ollama tidak menghasilkan clip candidates")
 
-        # ─── Phase B: Rank + Creative Direction ───────────────────────
+        # ─── Rank + Creative Direction ────────────────────────────────
         ranked_clips = self._rank_and_merge(all_candidates, max_clips, video_duration)
         logger.info(f"ollama_analyzer: {len(ranked_clips)} clips selected from {len(all_candidates)} candidates")
 
-        # Generate creative direction
         try:
             creative_result = await self._generate_creative_direction(ranked_clips, video_duration)
         except Exception as e:
@@ -93,8 +112,45 @@ class OllamaAnalyzer:
             creative_direction=creative_result.get("creative_direction", {}),
             broll_suggestions=creative_result.get("broll_suggestions", {}),
             model_used=self._model,
-            chunks_processed=len(chunks),
+            chunks_processed=1 if estimated_tokens < 80000 else len(self._chunk_transcript(transcript.segments)),
         )
+
+    # ─── Full Transcript Analysis (Single Call — Preferred) ───────────────────
+
+    async def _analyze_full_transcript(
+        self, transcript: TranscriptResult, video_duration: float, max_clips: int
+    ) -> list[HighlightCandidate]:
+        """Send ENTIRE transcript in one call. Better results, no boundary issues."""
+
+        # Build condensed transcript with timestamps
+        lines = []
+        for seg in transcript.segments:
+            lines.append(f"[{seg.start:.1f}s] {seg.text}")
+        transcript_text = "\n".join(lines)
+
+        prompt = f"""Kamu adalah AI analis konten viral profesional. Baca SELURUH transkrip video berikut dan identifikasi momen-momen PALING MENARIK untuk dijadikan short clip viral.
+
+VIDEO INFO:
+- Durasi total: {video_duration:.0f} detik
+- Target: Temukan {max_clips} momen terbaik (durasi 45-90 detik per klip)
+
+TRANSKRIP LENGKAP:
+{transcript_text}
+
+ATURAN:
+1. Setiap klip harus berdurasi 45-90 detik
+2. Klip TIDAK BOLEH OVERLAP satu sama lain
+3. 'start' dan 'end' dalam DETIK (float)
+4. Skor 1-100 berdasarkan potensi viral (emosi, surprise, kontroversi, humor)
+5. Hook = kalimat singkat <60 karakter yang bikin penasaran
+6. Pilih momen yang bisa BERDIRI SENDIRI tanpa konteks tambahan
+7. Prioritaskan: plot twist, cerita emosional, kontroversi, humor, insight unik
+
+OUTPUT HANYA RAW JSON (tanpa penjelasan, tanpa markdown):
+{{"clips": [{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "teks hook viral", "reason": "alasan singkat kenapa viral", "content_type": "storytelling", "speaker_energy": "high"}}]}}"""
+
+        raw = await self._call_ollama(prompt, timeout=180.0)  # Longer timeout for full transcript
+        return self._parse_chunk_response(raw, 0.0, video_duration)
 
     # ─── Ollama API Call ──────────────────────────────────────────────────────
 
