@@ -520,6 +520,51 @@ async def cancel_job(
     }
 
 
+@router.delete("/{job_id}")
+async def delete_job(
+    job_id: str,
+    service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Delete a job and all its output files.
+
+    Only works for completed/failed/timeout jobs (terminal states).
+    Superadmin can delete any job. Regular users can only delete their own.
+    """
+    import shutil
+
+    job = await service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
+
+    terminal_statuses = {"completed", "failed", "timeout"}
+    if job.status.value not in terminal_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete job in '{job.status.value}' status. Cancel it first.",
+        )
+
+    # Delete output files
+    output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
+    if os.path.isdir(output_dir):
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+    # Delete download file
+    download_path = f"{settings.DOWNLOAD_DIR}/{job_id}.mp4"
+    if os.path.exists(download_path):
+        os.remove(download_path)
+
+    # Delete from database
+    from src.infrastructure.database import async_session, JobModel
+    from sqlalchemy import delete as sql_delete
+    async with async_session() as session:
+        await session.execute(sql_delete(JobModel).where(JobModel.job_id == job_id))
+        await session.commit()
+
+    return {"success": True, "message": f"Job '{job_id}' deleted"}
+
+
 @router.get("/{job_id}/clips/{clip_rank}/detail")
 async def get_clip_detail(
     job_id: str,

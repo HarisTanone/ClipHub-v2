@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Filter } from "lucide-react";
+import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Filter, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -175,9 +175,29 @@ export function Dashboard() {
                       </div>
                     </div>
 
-                    {/* Status */}
-                    <div className="shrink-0">
+                    {/* Status + Delete */}
+                    <div className="shrink-0 flex items-center gap-2">
                       <Badge variant="status" status={job.status} size="sm" dot>{job.status}</Badge>
+                      {(job.status === "completed" || job.status === "failed" || job.status === "timeout") && (
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (!confirm(`Delete job "${job.video_title || job.job_id}"?\nThis will remove all clips and files.`)) return;
+                            try {
+                              await jobs.delete(job.job_id);
+                              loadData();
+                            } catch (err) {
+                              alert("Failed to delete job");
+                            }
+                          }}
+                          className="p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          title="Delete job"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </Link>
                 );

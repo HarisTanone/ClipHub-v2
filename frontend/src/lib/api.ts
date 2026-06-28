@@ -319,6 +319,10 @@ export const jobs = {
     return request(`/api/jobs/${jobId}/cancel`, { method: "POST" });
   },
 
+  async delete(jobId: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/jobs/${jobId}`, { method: "DELETE" });
+  },
+
   async getProgress(jobId: string): Promise<ProgressResponse> {
     return request<ProgressResponse>(`/api/jobs/${jobId}/progress/poll`);
   },
