@@ -277,6 +277,38 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
     @keyframes popIn { 0%,100% { transform:scale(0.9); opacity:0.5; } 50% { transform:scale(1.05); opacity:1; } }
     @keyframes fadeIn { 0%,100% { opacity:0.3; } 50% { opacity:1; } }
     @keyframes slideInUp { 0%,100% { transform:translateY(4px); opacity:0.4; } 50% { transform:translateY(0); opacity:1; } }
+    @keyframes glitchRgb {
+      0% { text-shadow: -3px 0 #ff0000, 3px 0 #00ffff; transform:translateY(-50%); }
+      20% { text-shadow: 3px 0 #ff0000, -3px 0 #00ffff; transform:translateY(-50%) translateX(2px); }
+      40% { text-shadow: -2px 1px #ff0000, 2px -1px #00ffff; transform:translateY(-50%) translateX(-1px); }
+      60% { text-shadow: 2px -1px #ff0000, -2px 1px #00ffff; transform:translateY(-50%) translateX(1px); }
+      80% { text-shadow: -3px 0 #ff0000, 3px 0 #00ffff; transform:translateY(-50%) translateX(-2px); }
+      100% { text-shadow: 0 0 #ff0000, 0 0 #00ffff; transform:translateY(-50%); }
+    }
+    @keyframes shakeNeon {
+      0%,100% { transform:translateY(-50%) translate(0,0); text-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 40px currentColor; }
+      10% { transform:translateY(-50%) translate(2px,-1px); }
+      20% { transform:translateY(-50%) translate(-1px,2px); }
+      30% { transform:translateY(-50%) translate(1px,1px); text-shadow: 0 0 15px currentColor, 0 0 30px currentColor, 0 0 60px currentColor; }
+      40% { transform:translateY(-50%) translate(-2px,-1px); }
+      50% { transform:translateY(-50%) translate(1px,-2px); text-shadow: 0 0 8px currentColor, 0 0 16px currentColor, 0 0 32px currentColor; }
+      60% { transform:translateY(-50%) translate(-1px,1px); }
+      70% { transform:translateY(-50%) translate(2px,2px); text-shadow: 0 0 12px currentColor, 0 0 24px currentColor, 0 0 48px currentColor; }
+      80% { transform:translateY(-50%) translate(-2px,-2px); }
+      90% { transform:translateY(-50%) translate(1px,-1px); }
+    }
+    @keyframes cinematicReveal {
+      0% { opacity:0; transform:translateY(-50%) scale(0.95); letter-spacing:8px; }
+      30% { opacity:1; transform:translateY(-50%) scale(1); letter-spacing:2px; }
+      80% { opacity:1; transform:translateY(-50%) scale(1); letter-spacing:0px; }
+      100% { opacity:0.9; transform:translateY(-50%) scale(1); }
+    }
+    @keyframes dangerBold {
+      0%,100% { transform:translateY(-50%) scale(1); text-shadow: 0 0 10px #ff0000, 0 0 20px #ff0000; }
+      25% { transform:translateY(-50%) scale(1.03); text-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000, 0 0 60px #ff0000; }
+      50% { transform:translateY(-50%) scale(1); text-shadow: 0 0 5px #ff0000, 0 0 10px #ff0000; }
+      75% { transform:translateY(-50%) scale(1.02); text-shadow: 0 0 15px #ff0000, 0 0 30px #ff0000, 0 0 50px #ff0000; }
+    }
   `;
 
   // Inline mode: just render the content without overlay
@@ -858,6 +890,10 @@ function getHookAnimationClass(animation: string): string {
     case "slide_up": return "animate-[slideUp_2s_ease-in-out_infinite]";
     case "glitch": return "animate-[glitch_0.5s_steps(2)_infinite]";
     case "typewriter": return "animate-[typewriter_3s_steps(20)_infinite]";
+    case "glitch_rgb": return "animate-[glitchRgb_0.8s_steps(3)_infinite]";
+    case "shake_neon": return "animate-[shakeNeon_1.5s_ease-in-out_infinite]";
+    case "cinematic_reveal": return "animate-[cinematicReveal_3s_ease-out_infinite]";
+    case "danger_bold": return "animate-[dangerBold_1.2s_ease-in-out_infinite]";
     default: return "";
   }
 }
