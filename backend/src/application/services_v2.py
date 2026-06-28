@@ -41,10 +41,6 @@ from src.domain.interfaces import (
     IWhisperLocal,
     IYoloReframeEngine,
 )
-from src.infrastructure.groq_transcriber import GroqTranscriber, TranscriptionError
-from src.infrastructure.groq_analyzer import GroqAnalyzer, GroqAnalyzerError
-from src.infrastructure.micro_slicer import MicroSlicer, MicroSlicerError
-from src.infrastructure.selective_whisper import SelectiveWhisperTranscriber
 from src.infrastructure.silero_vad import SileroVADProcessor
 
 if TYPE_CHECKING:
@@ -59,8 +55,8 @@ logger = logging.getLogger(__name__)
 class V2PipelineService:
     """V2 Pipeline orchestrator for non-premium users.
 
-    Replaces Gemini with Groq-based text analysis while reusing
-    existing infrastructure (trim, YOLO, B-Roll, subtitle, render).
+    Fully local pipeline: Faster-Whisper + Ollama LLM + Silero VAD.
+    No external API dependencies.
     """
 
     def __init__(
@@ -70,9 +66,6 @@ class V2PipelineService:
         renderer: IRenderer,
         whisper_local: IWhisperLocal,
         # ─── V2 specific components ──────────────────────────────────
-        groq_transcriber: Optional[GroqTranscriber] = None,
-        groq_analyzer: Optional[GroqAnalyzer] = None,
-        micro_slicer: Optional[MicroSlicer] = None,
         silero_vad: Optional[SileroVADProcessor] = None,
         # ─── Shared pipeline components ──────────────────────────────
         aspect_ratio_router: Optional[IAspectRatioRouter] = None,
@@ -91,11 +84,7 @@ class V2PipelineService:
         self._renderer = renderer
         self._whisper = whisper_local
 
-        # V2 components (create defaults if not provided)
-        self._transcriber = groq_transcriber or GroqTranscriber()
-        self._analyzer = groq_analyzer or GroqAnalyzer()
-        self._micro_slicer = micro_slicer or MicroSlicer()
-        self._selective_whisper = SelectiveWhisperTranscriber(self._whisper)
+        # V2 components
         self._vad = silero_vad or SileroVADProcessor()
 
         # Shared components
