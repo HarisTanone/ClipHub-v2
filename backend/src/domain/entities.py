@@ -481,7 +481,7 @@ class SubtitleStyleConfig:
     start_offset: float = 0.0
     timing_offset: float = 0.0
     word_padding: float = 0.05
-    line_transition: str = "word_pop"
+    line_transition: str = "word_pop"  # word_pop | emphasis | line_reveal
     fade_in: float = 0.1
     fade_out: float = 0.1
     highlight_style: str = "color"

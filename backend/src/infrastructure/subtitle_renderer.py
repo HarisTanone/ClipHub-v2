@@ -64,6 +64,21 @@ class SubtitleRenderer(ISubtitleRenderer):
         offset = start_offset if start_offset > 0 else config.start_offset
         timing_adj = config.timing_offset
 
+        # Route to emphasis style if configured
+        if config.line_transition == "emphasis":
+            return self.render_emphasis_style(
+                video_path=video_path,
+                words=words,
+                output_path=output_path,
+                start_offset=offset,
+                emphasis_color=config.highlight_color or "#FFA500",
+                normal_color=config.color or "#FFFFFF",
+                emphasis_font_size=int(config.font_size * 2.6),  # ~90px if base is 34
+                normal_font_size=int(config.font_size * 0.8),    # ~28px if base is 34
+                font_family=config.font_family,
+                glow_enabled=True,
+            )
+
         # Group words into lines (respecting both word count AND char width)
         lines = self._group_words_into_lines(words, config.max_words_per_line)
         if not lines:
@@ -338,6 +353,177 @@ class SubtitleRenderer(ISubtitleRenderer):
             if os.path.exists(path):
                 return path
         return None
+
+    # ─── Emphasis Style Renderer (Big Keyword + Small Context) ────────────────
+
+    # Indonesian stop words — never selected as emphasis keyword
+    STOP_WORDS = {
+        "yang", "dan", "di", "ke", "dari", "ini", "itu", "dengan", "untuk",
+        "pada", "adalah", "juga", "akan", "sudah", "udah", "gak", "nggak",
+        "tidak", "bukan", "ada", "bisa", "lagi", "kalau", "aja", "sih",
+        "ya", "dong", "deh", "nih", "tuh", "loh", "kan", "pun", "atau",
+        "tapi", "jadi", "saya", "aku", "kamu", "dia", "kita", "mereka",
+        "apa", "siapa", "mana", "kapan", "gimana", "kenapa", "karena",
+        "kayak", "banget", "sama", "terus", "the", "is", "a", "to", "of",
+        "in", "it", "and", "for", "but", "so", "he", "she", "we", "they",
+    }
+
+    def render_emphasis_style(
+        self,
+        video_path: str,
+        words: list,
+        output_path: str,
+        start_offset: float = 3.0,
+        emphasis_color: str = "#FFA500",
+        normal_color: str = "#FFFFFF",
+        emphasis_font_size: int = 90,
+        normal_font_size: int = 28,
+        font_family: str = "Montserrat",
+        glow_enabled: bool = True,
+    ) -> str:
+        """Render emphasis-style subtitles: BIG keyword + small context words.
+
+        Each line group shows:
+        - Small normal words above (context)
+        - BIG emphasis word below (keyword, auto-detected)
+        - Optional glow around emphasis word
+
+        Args:
+            video_path: Input video
+            words: List of word dicts [{word, start, end}]
+            output_path: Output video
+            start_offset: Delay before subtitles start (default 3s for hook)
+            emphasis_color: Color for big keyword (#FFA500 = orange)
+            normal_color: Color for small context words
+            emphasis_font_size: Size of keyword (big)
+            normal_font_size: Size of context words (small)
+            font_family: Font family name
+            glow_enabled: Add glow effect around keyword
+        """
+        if not os.path.exists(video_path):
+            return video_path
+        if not words:
+            return video_path
+
+        # Group words into lines (2-4 words per line)
+        lines = self._group_words_into_lines(words, max_per_line=4)
+        if not lines:
+            return video_path
+
+        # Resolve fonts
+        font_bold = self._resolve_font(font_family, "Bold")
+        font_extrabold = self._resolve_font(font_family, "ExtraBold") or font_bold
+        font_opt_normal = f":fontfile={font_bold}" if font_bold else ""
+        font_opt_emphasis = f":fontfile={font_extrabold}" if font_extrabold else ""
+
+        filter_parts = []
+        # Center position Y for emphasis word
+        emphasis_y = "(h*0.55)"  # Slightly below center
+        normal_y = f"({emphasis_y}-{emphasis_font_size}-10)"  # Above emphasis
+
+        for line in lines:
+            line_start = line[0]["start"] + start_offset
+            line_end = line[-1]["end"] + start_offset
+
+            # Detect emphasis word (longest non-stop-word)
+            emphasis_idx = self._detect_emphasis_word(line)
+            emphasis_word = line[emphasis_idx]["word"]
+            normal_words = [w["word"] for i, w in enumerate(line) if i != emphasis_idx]
+            normal_text = " ".join(normal_words)
+
+            escaped_emphasis = self._escape_drawtext(emphasis_word)
+            escaped_normal = self._escape_drawtext(normal_text)
+
+            # Layer 1: Glow (multiple blurred shadows behind emphasis word)
+            if glow_enabled:
+                for dx, dy in [(0, 0), (2, 2), (-2, -2), (2, -2), (-2, 2)]:
+                    filter_parts.append(
+                        f"drawtext=text='{escaped_emphasis}'"
+                        f":fontsize={emphasis_font_size}"
+                        f"{font_opt_emphasis}"
+                        f":fontcolor={emphasis_color}@0.3"
+                        f":borderw=8:bordercolor={emphasis_color}@0.2"
+                        f":x=(w-text_w)/2+{dx}:y={emphasis_y}+{dy}"
+                        f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
+                    )
+
+            # Layer 2: Emphasis word (big, colored, center)
+            filter_parts.append(
+                f"drawtext=text='{escaped_emphasis}'"
+                f":fontsize={emphasis_font_size}"
+                f"{font_opt_emphasis}"
+                f":fontcolor={emphasis_color}"
+                f":borderw=0"
+                f":x=(w-text_w)/2:y={emphasis_y}"
+                f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
+            )
+
+            # Layer 3: Normal words (small, white, above)
+            if normal_text.strip():
+                filter_parts.append(
+                    f"drawtext=text='{escaped_normal}'"
+                    f":fontsize={normal_font_size}"
+                    f"{font_opt_normal}"
+                    f":fontcolor={normal_color}"
+                    f":borderw=0"
+                    f":x=(w-text_w)/2:y={normal_y}"
+                    f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
+                )
+
+        if not filter_parts:
+            return video_path
+
+        # Limit filter count (FFmpeg has limits)
+        if len(filter_parts) > 200:
+            # Reduce: skip glow layers
+            filter_parts = [f for f in filter_parts if "@0.3" not in f and "@0.2" not in f]
+
+        filter_chain = ",".join(filter_parts)
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-vf", filter_chain,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if result.returncode != 0:
+                logger.error(f"emphasis_subtitle failed: {result.stderr[-300:]}")
+                return video_path
+            logger.info(f"emphasis_subtitle: {len(lines)} lines → {output_path}")
+            return output_path
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.error(f"emphasis_subtitle exception: {e}")
+            return video_path
+
+    def _detect_emphasis_word(self, line: list[dict]) -> int:
+        """Auto-detect which word in a line should be the emphasis (big) word.
+
+        Priority:
+        1. Longest word that is NOT a stop word
+        2. If all are stop words, pick the longest one
+        """
+        best_idx = 0
+        best_score = -1
+
+        for i, w in enumerate(line):
+            word = w.get("word", "").lower().strip()
+            is_stop = word in self.STOP_WORDS
+            length = len(word)
+
+            # Score: non-stop words get +100, then by length
+            score = (0 if is_stop else 100) + length
+
+            if score > best_score:
+                best_score = score
+                best_idx = i
+
+        return best_idx
 
     @staticmethod
     def _escape_drawtext(text: str) -> str:

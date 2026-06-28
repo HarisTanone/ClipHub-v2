@@ -711,6 +711,7 @@ class V2PipelineService:
             position=subtitle_style_config.get("position", creative_direction.subtitle_position or "bottom"),
             stroke_width=int(subtitle_style_config.get("strokeWidth", subtitle_style_config.get("stroke_width", 3))),
             max_words_per_line=int(subtitle_style_config.get("maxWordsPerLine", subtitle_style_config.get("max_words_per_line", 3))),
+            line_transition=subtitle_style_config.get("lineTransition", subtitle_style_config.get("line_transition", "word_pop")),
             # KEY: subtitle starts AFTER hook (3 seconds)
             start_offset=3.0,
         )

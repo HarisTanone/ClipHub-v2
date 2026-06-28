@@ -116,6 +116,7 @@ export interface SubtitleStyle {
   wordSpacing: number;
   animationStyle: "pop" | "fade" | "slide" | "none";
   animationSpeed: number;
+  lineTransition: "word_pop" | "emphasis" | "line_reveal";
 }
 
 export const DEFAULT_HOOK_STYLE: HookStyle = {
@@ -209,6 +210,7 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   wordSpacing: 6,
   animationStyle: "pop",
   animationSpeed: 1.0,
+  lineTransition: "word_pop",
 };
 
 // ─── Presets ─────────────────────────────────────────────────────────────────
@@ -225,13 +227,15 @@ const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = 
 ];
 
 const SUBTITLE_PRESETS: { id: string; name: string; style: Partial<SubtitleStyle> }[] = [
-  { id: "classic", name: "Classic White", style: { color: "#FFFFFF", highlightColor: "#FFCC00", fontSize: 34, bgOpacity: 0.4, animationStyle: "pop" } },
-  { id: "bold_yellow", name: "Bold Yellow", style: { color: "#FFFFFF", highlightColor: "#FFD700", fontSize: 38, highlightScale: 1.3, uppercase: true, animationStyle: "pop" } },
-  { id: "neon", name: "Neon Pop", style: { color: "#FFFFFF", highlightColor: "#00FFCC", fontSize: 32, bgColor: "#001a1a", bgOpacity: 0.6, highlightGlow: true, highlightGlowColor: "#00FFCC" } },
-  { id: "minimal", name: "Minimal", style: { color: "#CCCCCC", highlightColor: "#FFFFFF", fontSize: 30, bgEnabled: false, strokeWidth: 3, animationStyle: "fade" } },
-  { id: "big_impact", name: "Big Impact", style: { color: "#FFFFFF", highlightColor: "#FF4444", fontSize: 42, highlightScale: 1.4, uppercase: true, fontFamily: "Anton", animationStyle: "pop" } },
-  { id: "slide_clean", name: "Slide Clean", style: { color: "#FFFFFF", highlightColor: "#4ECDC4", fontSize: 32, fontFamily: "Inter", animationStyle: "slide", bgRadius: 20 } },
-  { id: "glow_purple", name: "Glow Purple", style: { color: "#FFFFFF", highlightColor: "#A855F7", highlightGlow: true, highlightGlowColor: "#A855F7", fontSize: 36, bgOpacity: 0.3 } },
+  { id: "classic", name: "Classic White", style: { color: "#FFFFFF", highlightColor: "#FFCC00", fontSize: 34, bgOpacity: 0.4, animationStyle: "pop", lineTransition: "word_pop" } },
+  { id: "bold_yellow", name: "Bold Yellow", style: { color: "#FFFFFF", highlightColor: "#FFD700", fontSize: 38, highlightScale: 1.3, uppercase: true, animationStyle: "pop", lineTransition: "word_pop" } },
+  { id: "emphasis_orange", name: "Emphasis Orange", style: { color: "#FFFFFF", highlightColor: "#FFA500", fontSize: 34, bgEnabled: false, strokeEnabled: false, position: "center", lineTransition: "emphasis", highlightGlow: true, highlightGlowColor: "#FFA500" } },
+  { id: "emphasis_green", name: "Emphasis Green", style: { color: "#FFFFFF", highlightColor: "#00FF88", fontSize: 34, bgEnabled: false, strokeEnabled: false, position: "center", lineTransition: "emphasis", highlightGlow: true, highlightGlowColor: "#00FF88" } },
+  { id: "neon", name: "Neon Pop", style: { color: "#FFFFFF", highlightColor: "#00FFCC", fontSize: 32, bgColor: "#001a1a", bgOpacity: 0.6, highlightGlow: true, highlightGlowColor: "#00FFCC", lineTransition: "word_pop" } },
+  { id: "minimal", name: "Minimal", style: { color: "#CCCCCC", highlightColor: "#FFFFFF", fontSize: 30, bgEnabled: false, strokeWidth: 3, animationStyle: "fade", lineTransition: "word_pop" } },
+  { id: "big_impact", name: "Big Impact", style: { color: "#FFFFFF", highlightColor: "#FF4444", fontSize: 42, highlightScale: 1.4, uppercase: true, fontFamily: "Anton", animationStyle: "pop", lineTransition: "word_pop" } },
+  { id: "slide_clean", name: "Slide Clean", style: { color: "#FFFFFF", highlightColor: "#4ECDC4", fontSize: 32, fontFamily: "Inter", animationStyle: "slide", bgRadius: 20, lineTransition: "word_pop" } },
+  { id: "glow_purple", name: "Glow Purple", style: { color: "#FFFFFF", highlightColor: "#A855F7", highlightGlow: true, highlightGlowColor: "#A855F7", fontSize: 36, bgOpacity: 0.3, lineTransition: "word_pop" } },
 ];
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
