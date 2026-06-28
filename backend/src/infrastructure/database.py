@@ -45,6 +45,7 @@ class JobModel(Base):
     job_id: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     youtube_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     video_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
+    video_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="validating")
     render_progress: Mapped[str | None] = mapped_column(String(10), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

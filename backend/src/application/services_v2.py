@@ -171,11 +171,17 @@ class V2PipelineService:
             # ═══ Step 1: Validate ═══
             self._emit(job_id, 1, "validate", "start")
             await self._repo.update_status(job_id, JobStatus.VALIDATING)
-            valid, error, duration = await self._downloader.validate_url(url)
+            valid, error_or_title, duration = await self._downloader.validate_url(url)
             if not valid:
-                await self._repo.update_status(job_id, JobStatus.FAILED, error)
+                await self._repo.update_status(job_id, JobStatus.FAILED, error_or_title)
                 return
             job.video_duration = duration
+            # Save video title if available
+            if error_or_title and valid:
+                try:
+                    await self._repo.update_video_title(job_id, error_or_title)
+                except Exception:
+                    pass  # Non-critical
             self._emit(job_id, 1, "validate", "complete")
 
             # ═══ Step 2: Download (SKIP if cached) ═══

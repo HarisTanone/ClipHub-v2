@@ -56,9 +56,9 @@ export function Dashboard() {
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((j) =>
+        (j.video_title || "").toLowerCase().includes(q) ||
         j.youtube_url.toLowerCase().includes(q) ||
-        j.job_id.toLowerCase().includes(q) ||
-        (j.style_preset || "").toLowerCase().includes(q)
+        j.job_id.toLowerCase().includes(q)
       );
     }
     return list;
@@ -165,10 +165,11 @@ export function Dashboard() {
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-zinc-200 truncate">{truncateUrl(job.youtube_url, 60)}</p>
+                      <p className="text-sm text-zinc-200 truncate">{job.video_title || truncateUrl(job.youtube_url, 60)}</p>
                       <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-0.5">
                         <span className="font-mono">{job.job_id.replace("job_", "").slice(0, 8)}</span>
                         <span>{job.target_aspect_ratio || "9:16"}</span>
+                        {job.pipeline_version && <span className={job.pipeline_version === "v2" ? "text-blue-400" : "text-emerald-400"}>{job.pipeline_version.toUpperCase()}</span>}
                         {job.clips_success > 0 && <span>{job.clips_success}/{job.clips_total} clips</span>}
                         <span>{formatTimeAgo(job.created_at)}</span>
                       </div>

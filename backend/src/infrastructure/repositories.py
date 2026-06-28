@@ -85,6 +85,15 @@ class JobRepository(IJobRepository):
             )
             await session.commit()
 
+    async def update_video_title(self, job_id: str, title: str) -> None:
+        async with async_session() as session:
+            await session.execute(
+                update(JobModel)
+                .where(JobModel.job_id == job_id)
+                .values(video_title=title, updated_at=datetime.utcnow())
+            )
+            await session.commit()
+
     async def update_clips_data(self, job_id: str, clips_data: dict) -> None:
         async with async_session() as session:
             await session.execute(

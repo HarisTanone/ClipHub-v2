@@ -165,6 +165,7 @@ export interface CreateJobPayload {
 export interface JobSummary {
   job_id: string;
   youtube_url: string;
+  video_title: string;
   status: string;
   video_duration: number | null;
   clips_total: number;
@@ -172,6 +173,7 @@ export interface JobSummary {
   clips_failed: number;
   style_preset: string | null;
   target_aspect_ratio: string | null;
+  pipeline_version: string;
   created_at: string | null;
   updated_at: string | null;
 }

@@ -386,6 +386,7 @@ async def list_jobs(
         jobs.append({
             "job_id": model.job_id,
             "youtube_url": model.youtube_url,
+            "video_title": getattr(model, "video_title", None) or "",
             "status": model.status,
             "video_duration": model.video_duration,
             "clips_total": model.clips_total,
@@ -393,6 +394,7 @@ async def list_jobs(
             "clips_failed": model.clips_failed,
             "style_preset": model.style_preset,
             "target_aspect_ratio": model.target_aspect_ratio,
+            "pipeline_version": getattr(model, "pipeline_version", "v1"),
             "created_at": model.created_at.isoformat() if model.created_at else None,
             "updated_at": model.updated_at.isoformat() if model.updated_at else None,
         })

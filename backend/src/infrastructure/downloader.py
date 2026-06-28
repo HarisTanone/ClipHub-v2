@@ -50,7 +50,7 @@ class YouTubeDownloader(IDownloader):
             cmd_args += [
                 "--geo-bypass",
                 "--no-download",
-                "--print", "duration",
+                "--print", "%(duration)s\n%(title)s",
                 "--no-warnings",
                 url,
             ]
@@ -78,8 +78,10 @@ class YouTubeDownloader(IDownloader):
             return False, f"Video tidak dapat diverifikasi: {err[:200]}", None
 
         try:
-            duration = float(stdout.decode().strip())
-        except (ValueError, TypeError):
+            lines = stdout.decode().strip().split("\n")
+            duration = float(lines[0].strip())
+            title = lines[1].strip() if len(lines) > 1 else ""
+        except (ValueError, TypeError, IndexError):
             return False, "Gagal membaca durasi video", None
 
         if duration > settings.MAX_VIDEO_DURATION:
@@ -90,7 +92,7 @@ class YouTubeDownloader(IDownloader):
                 duration,
             )
 
-        return True, None, duration
+        return True, title, duration
 
     async def download_video(self, url: str, output_path: str) -> bool:
         """Download video YouTube menggunakan yt-dlp (+ aria2c di production)."""

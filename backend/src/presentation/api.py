@@ -110,6 +110,9 @@ async def lifespan(app: FastAPI):
         if "pipeline_version" not in job_cols:
             cur.execute("ALTER TABLE jobs ADD COLUMN pipeline_version TEXT NOT NULL DEFAULT 'v1'")
             logger.info("migration: added pipeline_version to jobs table")
+        if "video_title" not in job_cols:
+            cur.execute("ALTER TABLE jobs ADD COLUMN video_title TEXT DEFAULT NULL")
+            logger.info("migration: added video_title to jobs table")
 
         cur.execute("PRAGMA table_info(users)")
         user_cols = [row["name"] for row in cur.fetchall()]

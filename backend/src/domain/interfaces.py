@@ -29,6 +29,9 @@ class IJobRepository(ABC):
     async def update_clips_count(self, job_id: str, total: int, success: int, failed: int) -> None: ...
 
     @abstractmethod
+    async def update_video_title(self, job_id: str, title: str) -> None: ...
+
+    @abstractmethod
     async def update_clips_data(self, job_id: str, clips_data: dict) -> None: ...
 
     @abstractmethod
