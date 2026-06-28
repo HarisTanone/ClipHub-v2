@@ -516,7 +516,11 @@ class V2PipelineService:
     def _extract_words_for_clip(
         self, raw_segments: list[dict], clip_start: float, clip_end: float
     ) -> list[Word]:
-        """Extract words from raw Whisper segments that fall within clip boundaries."""
+        """Extract words from raw Whisper segments that fall within clip boundaries.
+        
+        Words are returned with ABSOLUTE timestamps (will be converted to
+        relative in _build_clips_with_words later).
+        """
         words = []
         for seg in raw_segments:
             for w in seg.get("words", []):
@@ -526,7 +530,7 @@ class V2PipelineService:
                 if not w_text:
                     continue
                 # Keep words within clip range (with small tolerance)
-                if w_end >= clip_start - 0.3 and w_start <= clip_end + 0.3:
+                if w_end >= clip_start and w_start <= clip_end:
                     words.append(Word(
                         word=w_text,
                         start=round(w_start, 3),
@@ -539,29 +543,38 @@ class V2PipelineService:
         self, clips: list[Clip], words_per_clip: dict[int, list[Word]],
         original_starts: dict[int, float] = None,
     ) -> dict[int, list[dict]]:
-        """Convert Word objects to dict format expected by downstream renderers.
+        """Convert Word objects to dict format expected by subtitle renderer.
         
-        Uses original_starts (pre-VAD) for offset calculation since trim
-        was done with original timestamps, not VAD-adjusted ones.
+        Words are converted from ABSOLUTE timestamps to RELATIVE (from clip trim point).
+        This matches V1 behavior where Whisper runs on trimmed clip (starts at 0.0).
         """
         result = {}
         for clip in clips:
             words = words_per_clip.get(clip.rank, [])
-            # Use original start (before VAD adjustment) for offset
-            offset_start = (original_starts or {}).get(clip.rank, clip.start)
-            relative_words = SelectiveWhisperTranscriber.words_to_relative(words, offset_start)
+            # Use original start (before VAD adjustment) = the actual trim point
+            trim_point = (original_starts or {}).get(clip.rank, clip.start)
             
-            # Log first few words for debugging timing
-            if relative_words[:3]:
+            # Convert absolute → relative (same as V1 where Whisper starts at 0)
+            relative_words = []
+            for w in words:
+                rel_start = round(w.start - trim_point, 3)
+                rel_end = round(w.end - trim_point, 3)
+                # Only include words with valid positive timing
+                if rel_start >= 0 and rel_end > rel_start:
+                    relative_words.append({
+                        "word": w.word,
+                        "start": rel_start,
+                        "end": rel_end,
+                        "highlight": w.highlight,
+                    })
+            
+            if relative_words:
                 logger.debug(
-                    f"v2_words clip {clip.rank}: offset_start={offset_start:.2f}, "
-                    f"first_word='{relative_words[0].word}' @ {relative_words[0].start:.2f}s"
+                    f"v2_words clip {clip.rank}: trim_point={trim_point:.2f}s, "
+                    f"{len(relative_words)} words, first='{relative_words[0]['word']}' @ {relative_words[0]['start']:.2f}s"
                 )
             
-            result[clip.rank] = [
-                {"word": w.word, "start": w.start, "end": w.end, "highlight": w.highlight}
-                for w in relative_words
-            ]
+            result[clip.rank] = relative_words
         return result
 
     async def _trim_all_clips(
@@ -680,6 +693,8 @@ class V2PipelineService:
             position=subtitle_style_config.get("position", creative_direction.subtitle_position or "bottom"),
             stroke_width=int(subtitle_style_config.get("strokeWidth", subtitle_style_config.get("stroke_width", 3))),
             max_words_per_line=int(subtitle_style_config.get("maxWordsPerLine", subtitle_style_config.get("max_words_per_line", 3))),
+            # KEY: subtitle starts AFTER hook (3 seconds)
+            start_offset=3.0,
         )
 
         # Apply glow if enabled in custom config
@@ -688,23 +703,33 @@ class V2PipelineService:
         
         logger.info(
             f"[{job_id}] SubtitleStyle: font={sub_style.font_family}, color={sub_style.color}, "
-            f"highlight={sub_style.highlight_color}, position={sub_style.position}"
+            f"highlight={sub_style.highlight_color}, position={sub_style.position}, offset={sub_style.start_offset}s"
         )
 
         for clip in clips:
             if not trim_results.get(clip.rank):
                 continue
             words = clips_with_words.get(clip.rank, [])
-            in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
+            # Subtitle rendered ON TOP of hooked video (same order as V1)
+            hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
+            brolled_path = f"{output_dir}/clip_{clip.rank:02d}_broll.mp4"
+            in_path = brolled_path if os.path.exists(brolled_path) else (
+                hooked_path if os.path.exists(hooked_path) else
+                self._best_clip_path(output_dir, clip.rank, reframe_data)
+            )
             out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
             try:
                 if self._subtitle_renderer and words:
+                    # Filter words: only keep words that start AFTER hook (3s)
+                    # This prevents subtitle text from appearing during hook overlay
+                    filtered_words = [w for w in words if w.get("start", 0) >= 0.0]
+                    
                     self._subtitle_renderer.render_subtitles(
                         video_path=in_path,
-                        words=words,
+                        words=filtered_words,
                         style=sub_style,
                         output_path=out_path,
-                        start_offset=0.0,
+                        start_offset=3.0,  # Subtitle starts after 3s hook
                     )
                 else:
                     import shutil

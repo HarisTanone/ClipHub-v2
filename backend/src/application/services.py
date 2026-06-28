@@ -832,13 +832,14 @@ class JobService:
                                 highlight_color=creative_direction.secondary_color,
                                 uppercase=creative_direction.subtitle_uppercase,
                                 position=creative_direction.subtitle_position,
+                                start_offset=3.0,  # Subtitle starts after 3s hook
                             )
                             self._subtitle_renderer.render_subtitles(
                                 video_path=in_path,
                                 words=words,
                                 style=sub_style,
                                 output_path=out_path,
-                                start_offset=0.0,
+                                start_offset=3.0,  # Subtitle starts after 3s hook
                             )
                             logger.info(f"[{job_id}] Subtitle rendered clip {clip.rank}")
                         except Exception as e:
