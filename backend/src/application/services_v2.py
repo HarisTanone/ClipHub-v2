@@ -192,7 +192,6 @@ class V2PipelineService:
             # ═══ Step 2: Download (SKIP if cached) ═══
             cached_video = cache.get_video_path(video_id) if video_id else None
             if cached_video:
-                # Use cached video — just link/copy to job path
                 import shutil
                 if not os.path.exists(video_path):
                     try:
@@ -205,45 +204,50 @@ class V2PipelineService:
                 self._emit(job_id, 2, "download", "start")
                 await self._repo.update_status(job_id, JobStatus.DOWNLOADING)
                 await self._downloader.download_video(url, video_path)
-                # Save to cache
                 if video_id and os.path.exists(video_path):
                     cache.save_video(video_id, video_path)
                 self._emit(job_id, 2, "download", "complete")
 
-            # ═══ Step 3: V2 Transcript (SKIP if cached) ═══
+            # ═══ Step 3: Faster-Whisper Full Transcription (LOCAL) ═══
             cached_transcript = cache.load_transcript(video_id) if video_id else None
-            if cached_transcript:
+            if cached_transcript and cached_transcript.get("raw_segments"):
                 from src.domain.entities import TranscriptSegment
                 transcript_result = TranscriptResult(
                     segments=[TranscriptSegment(**s) for s in cached_transcript["segments"]],
                     source=cached_transcript.get("source", "cache"),
-                    language=cached_transcript.get("language", "unknown"),
+                    language=cached_transcript.get("language", "id"),
                     total_duration=duration,
                 )
+                raw_whisper_segments = cached_transcript["raw_segments"]
                 logger.info(f"[{job_id}] Transcript SKIPPED (cached: {len(transcript_result.segments)} segments)")
                 self._emit(job_id, 3, "v2_transcript", "complete")
             else:
                 self._emit(job_id, 3, "v2_transcript", "start")
                 await self._repo.update_status(job_id, JobStatus.V2_TRANSCRIBING)
                 try:
-                    transcript_result = await self._transcriber.transcribe(url, duration)
-                except TranscriptionError as e:
+                    from src.infrastructure.local_transcriber import LocalTranscriber
+                    local_transcriber = LocalTranscriber(self._whisper)
+                    transcript_result, raw_whisper_segments = await local_transcriber.transcribe(
+                        video_path, duration
+                    )
+                except Exception as e:
                     await self._repo.update_status(job_id, JobStatus.FAILED, f"Transcription gagal: {e}")
                     return
-                # Save to cache
+                # Save to cache (include raw_segments for word-level reuse)
                 if video_id:
                     cache.save_transcript(video_id, {
                         "segments": [{"text": s.text, "start": s.start, "end": s.end} for s in transcript_result.segments],
+                        "raw_segments": raw_whisper_segments,
                         "source": transcript_result.source,
                         "language": transcript_result.language,
                     })
                 logger.info(
-                    f"[{job_id}] V2 transcript: {len(transcript_result.segments)} segments, "
-                    f"source={transcript_result.source}, lang={transcript_result.language}"
+                    f"[{job_id}] V2 transcript (local): {len(transcript_result.segments)} segments, "
+                    f"{sum(len(s.get('words', [])) for s in raw_whisper_segments)} words"
                 )
                 self._emit(job_id, 3, "v2_transcript", "complete")
 
-            # ═══ Step 4: V2 Highlight Analysis (SKIP if cached) ═══
+            # ═══ Step 4: LLM Highlight Analysis (Ollama LOCAL) ═══
             cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
             if cached_analysis:
                 from src.domain.entities import HighlightCandidate
@@ -261,11 +265,13 @@ class V2PipelineService:
                 await self._repo.update_status(job_id, JobStatus.V2_ANALYZING)
                 max_clips = self._calc_max_clips(duration)
                 try:
-                    analysis_result = await self._analyzer.analyze_highlights(
+                    from src.infrastructure.ollama_analyzer import OllamaAnalyzer, OllamaAnalyzerError
+                    analyzer = OllamaAnalyzer()
+                    analysis_result = await analyzer.analyze_highlights(
                         transcript_result, duration, max_clips
                     )
-                except GroqAnalyzerError as e:
-                    await self._repo.update_status(job_id, JobStatus.FAILED, f"Highlight analysis gagal: {e}")
+                except Exception as e:
+                    await self._repo.update_status(job_id, JobStatus.FAILED, f"LLM analysis gagal: {e}")
                     return
 
                 if not analysis_result.clips:
@@ -285,8 +291,8 @@ class V2PipelineService:
                         "chunks_processed": analysis_result.chunks_processed,
                     }, version="v2")
                 logger.info(
-                    f"[{job_id}] V2 highlights: {len(analysis_result.clips)} clips, "
-                    f"model={analysis_result.model_used}, chunks={analysis_result.chunks_processed}"
+                    f"[{job_id}] V2 analysis (Ollama): {len(analysis_result.clips)} clips, "
+                    f"model={analysis_result.model_used}"
                 )
                 self._emit(job_id, 4, "v2_highlight_analysis", "complete")
 
@@ -342,22 +348,8 @@ class V2PipelineService:
             trim_results = await self._trim_all_clips(job_id, video_path, clips, output_dir)
             self._emit(job_id, 7, "trim", "complete")
 
-            # ═══ Step 7.5: V2 Micro-Slice (TAHAP 3) ═══
-            self._emit(job_id, "7.5", "v2_micro_slice", "start")
-            await self._repo.update_status(job_id, JobStatus.V2_MICRO_SLICING)
-            highlights_for_slice = [
-                {"rank": c.rank, "start": c.start, "end": c.end}
-                for c in clips if trim_results.get(c.rank)
-            ]
-            audio_slices_dir = f"{output_dir}/audio_slices"
-            try:
-                audio_slices = await self._micro_slicer.slice_audio(
-                    video_path, highlights_for_slice, audio_slices_dir, duration
-                )
-            except MicroSlicerError as e:
-                logger.warning(f"[{job_id}] Micro-slicing failed: {e}")
-                audio_slices = []
-            self._emit(job_id, "7.5", "v2_micro_slice", "complete")
+            # ═══ Step 7.5: Skip (no longer needed — full Whisper done in Step 3) ═══
+            audio_slices = []  # Keep variable for VAD compatibility
 
             # ═══ Step 8: YOLO Seg + Reframe (REUSE) ═══
             self._emit(job_id, 8, "yolo_reframe", "start")
@@ -378,21 +370,27 @@ class V2PipelineService:
                         logger.warning(f"[{job_id}] YOLO reframe failed clip {clip.rank}: {e}")
             self._emit(job_id, 8, "yolo_reframe", "complete")
 
-            # ═══ Step 9: V2 Selective Whisper (TAHAP 4) ═══
+            # ═══ Step 9: Word-level timestamps from Whisper (already have them!) ═══
             self._emit(job_id, 9, "v2_selective_whisper", "start")
             await self._repo.update_status(job_id, JobStatus.V2_WORD_TRANSCRIBING)
+
+            # We already have word-level data from full Whisper transcription (Step 3)
+            # Extract words per clip from raw_whisper_segments
             words_per_clip: dict[int, list[Word]] = {}
-            if audio_slices:
-                words_per_clip = await self._selective_whisper.transcribe_all_clips(
-                    audio_slices, max_parallel=settings.MAX_WHISPER_PARALLEL
-                )
+            for clip in clips:
+                if not trim_results.get(clip.rank):
+                    continue
+                clip_words = self._extract_words_for_clip(raw_whisper_segments, clip.start, clip.end)
+                words_per_clip[clip.rank] = clip_words
+
             logger.info(
-                f"[{job_id}] V2 selective whisper: "
-                f"{sum(1 for w in words_per_clip.values() if w)}/{clips_count} clips with words"
+                f"[{job_id}] V2 words extracted: "
+                f"{sum(1 for w in words_per_clip.values() if w)}/{clips_count} clips with words "
+                f"({sum(len(w) for w in words_per_clip.values())} total words)"
             )
             self._emit(job_id, 9, "v2_selective_whisper", "complete")
 
-            # ═══ Step 9.5: V2 Silero VAD (TAHAP 5) ═══
+            # ═══ Step 9.5: V2 Silero VAD ═══
             self._emit(job_id, "9.5", "v2_vad_refine", "start")
             await self._repo.update_status(job_id, JobStatus.V2_VAD_REFINING)
 
@@ -400,25 +398,24 @@ class V2PipelineService:
             original_starts = {clip.rank: clip.start for clip in clips}
 
             vad_applied = 0
-            if audio_slices:
-                for audio_slice in audio_slices:
-                    try:
-                        vad_result = await self._vad.refine_clip_boundaries(
-                            audio_path=audio_slice.audio_path,
-                            original_start=audio_slice.original_start,
-                            original_end=audio_slice.original_end,
-                            padded_start=audio_slice.padded_start,
-                        )
-                        if not vad_result.used_fallback:
-                            # Update clip timestamps
-                            for clip in clips:
-                                if clip.rank == audio_slice.clip_rank:
-                                    clip.start = vad_result.final_start
-                                    clip.end = vad_result.final_end
-                                    vad_applied += 1
-                                    break
-                    except Exception as e:
-                        logger.debug(f"[{job_id}] VAD clip {audio_slice.clip_rank}: {e}")
+            for clip in clips:
+                if not trim_results.get(clip.rank):
+                    continue
+                clip_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                try:
+                    vad_result = await self._vad.refine_clip_boundaries(
+                        audio_path=clip_path,
+                        original_start=0.0,  # Relative to trimmed clip
+                        original_end=clip.end - clip.start,
+                        padded_start=0.0,
+                    )
+                    # VAD adjusts relative to clip — convert back to absolute
+                    if not vad_result.used_fallback:
+                        clip.start = clip.start + vad_result.final_start
+                        clip.end = clip.start + vad_result.final_end
+                        vad_applied += 1
+                except Exception as e:
+                    logger.debug(f"[{job_id}] VAD clip {clip.rank}: {e}")
             logger.info(f"[{job_id}] V2 VAD refinement: {vad_applied}/{clips_count} clips adjusted")
             self._emit(job_id, "9.5", "v2_vad_refine", "complete")
 
@@ -458,10 +455,6 @@ class V2PipelineService:
                 transcript_source=transcript_result.source,
             )
             await self._repo.update_clips_data(job_id, clips_data)
-
-            # Cleanup temp audio slices
-            if audio_slices:
-                self._micro_slicer.cleanup_slices(audio_slices)
 
             total_time = time.time() - pipeline_start
             await self._repo.update_status(job_id, JobStatus.COMPLETED)
@@ -519,6 +512,28 @@ class V2PipelineService:
                 broll_suggestions=broll_suggestions,
             ))
         return clips
+
+    def _extract_words_for_clip(
+        self, raw_segments: list[dict], clip_start: float, clip_end: float
+    ) -> list[Word]:
+        """Extract words from raw Whisper segments that fall within clip boundaries."""
+        words = []
+        for seg in raw_segments:
+            for w in seg.get("words", []):
+                w_start = w.get("start", 0)
+                w_end = w.get("end", 0)
+                w_text = w.get("word", "").strip()
+                if not w_text:
+                    continue
+                # Keep words within clip range (with small tolerance)
+                if w_end >= clip_start - 0.3 and w_start <= clip_end + 0.3:
+                    words.append(Word(
+                        word=w_text,
+                        start=round(w_start, 3),
+                        end=round(w_end, 3),
+                        highlight=False,
+                    ))
+        return words
 
     def _build_clips_with_words(
         self, clips: list[Clip], words_per_clip: dict[int, list[Word]],

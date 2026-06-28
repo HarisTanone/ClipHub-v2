@@ -147,6 +147,10 @@ class Settings(BaseSettings):
     V2_VAD_MIN_SILENCE_MS: int = 300
     V2_MAX_AUDIO_CHUNK_MB: int = 25  # Groq Whisper file size limit
 
+    # ─── Ollama (Local LLM) ──────────────────────────────────────────
+    OLLAMA_BASE_URL: str = "http://100.64.5.96:11434"
+    OLLAMA_MODEL: str = "mistral-nemo:12b"
+
     # ─── Gemini Multi-Key Support ─────────────────────────────────────────
 
     @property
