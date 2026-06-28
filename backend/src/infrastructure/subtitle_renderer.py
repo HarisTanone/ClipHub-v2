@@ -29,6 +29,14 @@ class SubtitleRenderer(ISubtitleRenderer):
     def __init__(self, font_dir: str = "assets/fonts"):
         self._font_dir = font_dir
 
+    def _apply_text_case(self, text: str, config) -> str:
+        """Apply text transform based on config: uppercase or capitalize."""
+        if config.uppercase:
+            return text.upper()
+        if getattr(config, "capitalize", False):
+            return text.title()
+        return text
+
     def render_subtitles(
         self,
         video_path: str,
@@ -95,8 +103,7 @@ class SubtitleRenderer(ISubtitleRenderer):
 
             # Render entire line text as background (dim color) for the full line duration
             line_text = " ".join(w["word"] for w in line)
-            if config.uppercase:
-                line_text = line_text.upper()
+            line_text = self._apply_text_case(line_text, config)
 
             escaped_line = self._escape_drawtext(line_text)
 
@@ -127,9 +134,7 @@ class SubtitleRenderer(ISubtitleRenderer):
             if config.highlight_color and config.highlight_color != config.color:
                 x_offset_chars = 0
                 for w_idx, w in enumerate(line):
-                    word_text = w["word"]
-                    if config.uppercase:
-                        word_text = word_text.upper()
+                    word_text = self._apply_text_case(w["word"], config)
 
                     w_start = w["start"] + offset + timing_adj
                     w_end = w["end"] + offset + timing_adj
@@ -141,8 +146,7 @@ class SubtitleRenderer(ISubtitleRenderer):
                         prefix_text = ""
                     else:
                         prefix_words = [wd["word"] for wd in line[:w_idx]]
-                        if config.uppercase:
-                            prefix_words = [pw.upper() for pw in prefix_words]
+                        prefix_words = [self._apply_text_case(pw, config) for pw in prefix_words]
                         prefix_text = " ".join(prefix_words) + " "
 
                     escaped_word = self._escape_drawtext(word_text)
@@ -229,9 +233,7 @@ class SubtitleRenderer(ISubtitleRenderer):
             line_start = line[0]["start"] + offset + timing_adj
             line_end = line[-1]["end"] + offset + timing_adj
             line_text = " ".join(w["word"] for w in line)
-
-            if config.uppercase:
-                line_text = line_text.upper()
+            line_text = self._apply_text_case(line_text, config)
 
             escaped = self._escape_drawtext(line_text)
 

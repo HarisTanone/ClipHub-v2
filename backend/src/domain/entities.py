@@ -463,6 +463,7 @@ class SubtitleStyleConfig:
     font_size: int = 34
     font_weight: str = "Bold"
     uppercase: bool = False
+    capitalize: bool = False
     color: str = "#FFFFFF"
     highlight_color: str = "#FFCC00"
     background_color: str = ""

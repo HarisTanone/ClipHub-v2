@@ -706,6 +706,7 @@ class V2PipelineService:
             font_family=subtitle_style_config.get("fontFamily", subtitle_style_config.get("font_family", "Poppins")),
             font_size=int(subtitle_style_config.get("fontSize", subtitle_style_config.get("font_size", 34))),
             uppercase=subtitle_style_config.get("uppercase", creative_direction.subtitle_uppercase),
+            capitalize=subtitle_style_config.get("capitalize", False),
             color=subtitle_style_config.get("color", creative_direction.primary_color),
             highlight_color=subtitle_style_config.get("highlightColor", subtitle_style_config.get("highlight_color", creative_direction.secondary_color)),
             position=subtitle_style_config.get("position", creative_direction.subtitle_position or "bottom"),

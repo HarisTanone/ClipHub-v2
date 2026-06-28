@@ -165,6 +165,8 @@ export function ClipViewer() {
                       currentTime={currentTime}
                       hookText={hookText || clip.hook || ""}
                       hookStyle={hookStyleConfig.animation}
+                      hookStyleConfig={hookStyleConfig}
+                      subtitleStyleConfig={subtitleStyleConfig}
                       words={clip.words || []}
                       showHook={showHook}
                       showSubtitles={showSubtitles}

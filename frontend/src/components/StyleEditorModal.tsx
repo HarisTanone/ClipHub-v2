@@ -105,6 +105,7 @@ export interface SubtitleStyle {
   position: "bottom" | "center" | "top";
   positionY: number;
   uppercase: boolean;
+  capitalize: boolean;
   italic: boolean;
   strokeEnabled: boolean;
   strokeColor: string;
@@ -199,6 +200,7 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   position: "bottom",
   positionY: 85,
   uppercase: false,
+  capitalize: false,
   italic: false,
   strokeEnabled: true,
   strokeColor: "#000000",
@@ -270,45 +272,54 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
   if (!open) return null;
 
   const animationStyles = `
-    @keyframes fadeScale { 0%,100% { opacity:0.4; transform:translateY(-50%) scale(0.9); } 50% { opacity:1; transform:translateY(-50%) scale(1); } }
-    @keyframes slideUp { 0%,100% { opacity:0.3; transform:translateY(-40%); } 50% { opacity:1; transform:translateY(-50%); } }
-    @keyframes glitch { 0% { transform:translateY(-50%) translateX(-2px); } 25% { transform:translateY(-50%) translateX(2px); } 50% { transform:translateY(-50%) translateX(-1px); } 75% { transform:translateY(-50%) translateX(1px); } 100% { transform:translateY(-50%); } }
-    @keyframes typewriter { 0% { width:0; overflow:hidden; } 50%,100% { width:100%; } }
+    @keyframes fadeScalePreview { 0%,100% { opacity:0.3; transform:translateY(-50%) scale(0.92); } 50% { opacity:1; transform:translateY(-50%) scale(1); } }
+    @keyframes slideUpPreview { 0%,100% { opacity:0; transform:translateY(-40%); } 20%,80% { opacity:1; transform:translateY(-50%); } }
+    @keyframes slidePunchPreview { 0% { opacity:0; transform:translateY(-50%) translateX(-50px); } 20% { opacity:1; transform:translateY(-50%) translateX(3px) scale(1.02); } 30%,80% { opacity:1; transform:translateY(-50%) translateX(0) scale(1); } 100% { opacity:0; transform:translateY(-50%); } }
+    @keyframes glitchJitter { 0% { transform:translateY(-50%) translate(-2px,0); } 25% { transform:translateY(-50%) translate(2px,1px); } 50% { transform:translateY(-50%) translate(-1px,-1px); } 75% { transform:translateY(-50%) translate(1px,0); } 100% { transform:translateY(-50%); } }
+    @keyframes typewriterReveal { 0% { width:0; } 50%,100% { width:100%; } }
+    @keyframes glitchRedLayer {
+      0%,100% { transform:translate(-4px,0); }
+      25% { transform:translate(-1px,0); }
+      50% { transform:translate(-7px,0); }
+      75% { transform:translate(-2px,1px); }
+    }
+    @keyframes glitchCyanLayer {
+      0%,100% { transform:translate(4px,0); }
+      25% { transform:translate(1px,0); }
+      50% { transform:translate(7px,0); }
+      75% { transform:translate(2px,-1px); }
+    }
+    @keyframes shakeNeonGlow {
+      0%,100% { transform:translate(0,0); }
+      20% { transform:translate(2px,-1px); }
+      40% { transform:translate(-1px,2px); }
+      60% { transform:translate(1px,1px); }
+      80% { transform:translate(-2px,-1px); }
+    }
+    @keyframes shakeNeonMain {
+      0%,100% { transform:translate(0,0); }
+      15% { transform:translate(1.5px,-1px); }
+      30% { transform:translate(-1px,1px); }
+      45% { transform:translate(1px,0.5px); }
+      60% { transform:translate(-1.5px,-0.5px); }
+      75% { transform:translate(0.5px,1px); }
+      90% { transform:translate(-0.5px,-1px); }
+    }
+    @keyframes cinematicRevealText {
+      0% { opacity:0; transform:translateY(-50%) scale(0.96); }
+      25% { opacity:1; transform:translateY(-50%) scale(1); }
+      75% { opacity:1; transform:translateY(-50%) scale(1); }
+      100% { opacity:0; transform:translateY(-50%) scale(0.96); }
+    }
+    @keyframes dangerPulse {
+      0%,100% { transform:translateY(-50%) scale(1); }
+      25% { transform:translateY(-50%) scale(1.03); }
+      50% { transform:translateY(-50%) scale(1); }
+      75% { transform:translateY(-50%) scale(1.02); }
+    }
     @keyframes popIn { 0%,100% { transform:scale(0.9); opacity:0.5; } 50% { transform:scale(1.05); opacity:1; } }
     @keyframes fadeIn { 0%,100% { opacity:0.3; } 50% { opacity:1; } }
     @keyframes slideInUp { 0%,100% { transform:translateY(4px); opacity:0.4; } 50% { transform:translateY(0); opacity:1; } }
-    @keyframes glitchRgb {
-      0% { text-shadow: -3px 0 #ff0000, 3px 0 #00ffff; transform:translateY(-50%); }
-      20% { text-shadow: 3px 0 #ff0000, -3px 0 #00ffff; transform:translateY(-50%) translateX(2px); }
-      40% { text-shadow: -2px 1px #ff0000, 2px -1px #00ffff; transform:translateY(-50%) translateX(-1px); }
-      60% { text-shadow: 2px -1px #ff0000, -2px 1px #00ffff; transform:translateY(-50%) translateX(1px); }
-      80% { text-shadow: -3px 0 #ff0000, 3px 0 #00ffff; transform:translateY(-50%) translateX(-2px); }
-      100% { text-shadow: 0 0 #ff0000, 0 0 #00ffff; transform:translateY(-50%); }
-    }
-    @keyframes shakeNeon {
-      0%,100% { transform:translateY(-50%) translate(0,0); text-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 40px currentColor; }
-      10% { transform:translateY(-50%) translate(2px,-1px); }
-      20% { transform:translateY(-50%) translate(-1px,2px); }
-      30% { transform:translateY(-50%) translate(1px,1px); text-shadow: 0 0 15px currentColor, 0 0 30px currentColor, 0 0 60px currentColor; }
-      40% { transform:translateY(-50%) translate(-2px,-1px); }
-      50% { transform:translateY(-50%) translate(1px,-2px); text-shadow: 0 0 8px currentColor, 0 0 16px currentColor, 0 0 32px currentColor; }
-      60% { transform:translateY(-50%) translate(-1px,1px); }
-      70% { transform:translateY(-50%) translate(2px,2px); text-shadow: 0 0 12px currentColor, 0 0 24px currentColor, 0 0 48px currentColor; }
-      80% { transform:translateY(-50%) translate(-2px,-2px); }
-      90% { transform:translateY(-50%) translate(1px,-1px); }
-    }
-    @keyframes cinematicReveal {
-      0% { opacity:0; transform:translateY(-50%) scale(0.95); letter-spacing:8px; }
-      30% { opacity:1; transform:translateY(-50%) scale(1); letter-spacing:2px; }
-      80% { opacity:1; transform:translateY(-50%) scale(1); letter-spacing:0px; }
-      100% { opacity:0.9; transform:translateY(-50%) scale(1); }
-    }
-    @keyframes dangerBold {
-      0%,100% { transform:translateY(-50%) scale(1); text-shadow: 0 0 10px #ff0000, 0 0 20px #ff0000; }
-      25% { transform:translateY(-50%) scale(1.03); text-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000, 0 0 60px #ff0000; }
-      50% { transform:translateY(-50%) scale(1); text-shadow: 0 0 5px #ff0000, 0 0 10px #ff0000; }
-      75% { transform:translateY(-50%) scale(1.02); text-shadow: 0 0 15px #ff0000, 0 0 30px #ff0000, 0 0 50px #ff0000; }
-    }
   `;
 
   // Inline mode: just render the content without overlay
@@ -466,6 +477,165 @@ function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange, 
   );
 }
 
+// ─── Hook Preview Renderer (matches FFmpeg output visually) ──────────────────
+
+function HookPreviewRenderer({ style }: { style: HookStyle }) {
+  const text = style.text || "Hook text preview here";
+  const fontSize = Math.max(style.fontSize * 0.32, 12);
+  const fontFamily = style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`;
+  const fontWeight = Number(style.fontWeight);
+  const fontStyle = style.italic ? "italic" as const : "normal" as const;
+
+  const baseTextStyle: React.CSSProperties = {
+    fontSize,
+    fontWeight,
+    fontFamily,
+    fontStyle,
+    letterSpacing: style.letterSpacing,
+    lineHeight: style.lineHeight,
+    textTransform: style.uppercase ? "uppercase" : "none",
+    textAlign: style.textAlign,
+    maxWidth: "90%",
+    whiteSpace: "pre-line",
+    wordBreak: "break-word",
+  };
+
+  const textShadow = [
+    style.shadowEnabled ? `${style.shadowX}px ${style.shadowY}px ${style.shadowBlur}px ${style.shadowColor}` : "",
+    style.glowEnabled ? `0 0 ${style.glowSize}px ${style.glowColor}` : "",
+  ].filter(Boolean).join(", ") || undefined;
+
+  const colorStyle: React.CSSProperties = style.gradientEnabled
+    ? { background: `linear-gradient(${style.gradientAngle}deg, ${style.gradientFrom}, ${style.gradientTo})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }
+    : { color: style.color };
+
+  const boxStyle: React.CSSProperties = style.boxEnabled
+    ? { backgroundColor: `${style.boxColor}${Math.round(style.boxOpacity * 255).toString(16).padStart(2, "0")}`, padding: style.boxPadding * 0.4, borderRadius: style.boxRadius }
+    : {};
+
+  const posTop = `${style.positionY}%`;
+
+  switch (style.animation) {
+    case "glitch_rgb": {
+      // 3 separate text layers matching FFmpeg: Red(-4+sin(t*15)*3), Cyan(+4-sin(t*15)*3), White(center)
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            {/* Red channel — animated offset left */}
+            <p className="absolute animate-[glitchRedLayer_0.8s_steps(4)_infinite]" style={{ ...baseTextStyle, color: "#FF0000", opacity: 0.7 }}>{text}</p>
+            {/* Cyan channel — animated offset right */}
+            <p className="absolute animate-[glitchCyanLayer_0.8s_steps(4)_infinite]" style={{ ...baseTextStyle, color: "#00FFFF", opacity: 0.7 }}>{text}</p>
+            {/* Main text on top */}
+            <p className="relative" style={{ ...baseTextStyle, ...colorStyle, ...boxStyle, textShadow }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
+    case "shake_neon": {
+      // Multiple glow layers + shake matching FFmpeg
+      const neonColor = style.color || "#00FFCC";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            {/* Glow layer 1: large dim blur */}
+            <p className="absolute" style={{ ...baseTextStyle, color: neonColor, opacity: 0.3, filter: "blur(3px)", textShadow: `0 0 12px ${neonColor}, 0 0 24px ${neonColor}` }}>{text}</p>
+            {/* Glow layer 2: medium, shaking */}
+            <p className="absolute animate-[shakeNeonGlow_1.2s_ease-in-out_infinite]" style={{ ...baseTextStyle, color: neonColor, opacity: 0.5, textShadow: `0 0 6px ${neonColor}, 0 0 12px ${neonColor}` }}>{text}</p>
+            {/* Main text: subtle shake */}
+            <p className="relative animate-[shakeNeonMain_1.5s_ease-in-out_infinite]" style={{ ...baseTextStyle, color: neonColor, textShadow: `0 0 10px ${neonColor}, 0 0 20px ${neonColor}, 0 0 40px ${neonColor}`, ...boxStyle }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
+    case "cinematic_reveal": {
+      // Letterbox bars + dark overlay + elegant slow fade
+      const revealColor = style.color || "#FFD700";
+      return (
+        <>
+          {/* Letterbox bars */}
+          <div className="absolute top-0 left-0 right-0 z-10" style={{ height: "12%", backgroundColor: "#000" }} />
+          <div className="absolute bottom-0 left-0 right-0 z-10" style={{ height: "12%", backgroundColor: "#000" }} />
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-0 flex items-center justify-center px-4 animate-[cinematicRevealText_3.5s_ease-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <p style={{ ...baseTextStyle, color: revealColor, textShadow: `2px 2px 4px rgba(0,0,0,0.8)${style.glowEnabled ? `, 0 0 ${style.glowSize}px ${style.glowColor}` : ""}`, ...boxStyle }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
+    case "danger_bold": {
+      // Red glow behind + main text with thick border + pulse
+      const dangerColor = style.color || "#FF2D2D";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-0 flex items-center justify-center px-4 animate-[dangerPulse_1.2s_ease-in-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            {/* Red glow behind */}
+            <p className="absolute" style={{ ...baseTextStyle, color: "#FF0000", opacity: 0.4, textShadow: `0 0 10px #FF0000, 0 0 20px #FF0000, 0 0 40px rgba(255,0,0,0.3)` }}>{text}</p>
+            {/* Main text with stroke */}
+            <p className="relative" style={{ ...baseTextStyle, color: dangerColor, WebkitTextStroke: "1.5px black", textShadow: `0 0 10px #FF0000, 0 0 20px rgba(255,0,0,0.5)`, ...boxStyle }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
+    case "typewriter": {
+      // Character reveal animation
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <p className="overflow-hidden whitespace-nowrap animate-[typewriterReveal_3s_steps(20)_infinite]" style={{ ...baseTextStyle, ...colorStyle, ...boxStyle, textShadow, borderRight: "2px solid currentColor" }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
+    case "slide_up":
+    case "slide_punch_framer": {
+      const animClass = style.animation === "slide_up"
+        ? "animate-[slideUpPreview_2s_ease-in-out_infinite]"
+        : "animate-[slidePunchPreview_2s_ease-out_infinite]";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className={cn("absolute inset-0 flex items-center justify-center px-4", animClass)} style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <p style={{ ...baseTextStyle, ...colorStyle, ...boxStyle, textShadow }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
+    case "glitch": {
+      // Simple glitch jitter
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-0 flex items-center justify-center px-4 animate-[glitchJitter_0.5s_steps(2)_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <p style={{ ...baseTextStyle, ...colorStyle, ...boxStyle, textShadow }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
+    case "fade_scale":
+    default: {
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-0 flex items-center justify-center px-4 animate-[fadeScalePreview_2.5s_ease-in-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <p style={{ ...baseTextStyle, ...colorStyle, ...boxStyle, textShadow }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+  }
+}
+
 // ─── Hook Editor ─────────────────────────────────────────────────────────────
 
 function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: HookStyle; onChange: (s: HookStyle) => void; aspectRatio: string; thumbnailUrl?: string }) {
@@ -611,33 +781,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
         <p className="text-[9px] text-zinc-600 mb-3 uppercase tracking-widest shrink-0">Live Preview</p>
         <div className="relative w-full bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: previewAspect }}>
           {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
-          {/* Text with animation */}
-          <div className="absolute inset-0 flex px-4" style={{ justifyContent: style.textAlign === "left" ? "flex-start" : style.textAlign === "right" ? "flex-end" : "center" }}>
-            <div className={cn("w-full flex", getHookAnimationClass(style.animation))} style={{ position: "absolute", top: `${style.positionY}%`, transform: "translateY(-50%)", left: 0, right: 0, justifyContent: style.textAlign === "left" ? "flex-start" : style.textAlign === "right" ? "flex-end" : "center", padding: "0 16px" }}>
-              <p style={{
-                color: style.gradientEnabled ? "transparent" : style.color,
-                background: style.gradientEnabled ? `linear-gradient(${style.gradientAngle}deg, ${style.gradientFrom}, ${style.gradientTo})` : undefined,
-                WebkitBackgroundClip: style.gradientEnabled ? "text" : undefined,
-                fontSize: Math.max(style.fontSize * 0.32, 12),
-                fontWeight: Number(style.fontWeight),
-                fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`,
-                fontStyle: style.italic ? "italic" : "normal",
-                letterSpacing: style.letterSpacing,
-                lineHeight: style.lineHeight,
-                textShadow: [
-                  style.shadowEnabled ? `${style.shadowX}px ${style.shadowY}px ${style.shadowBlur}px ${style.shadowColor}` : "",
-                  style.glowEnabled ? `0 0 ${style.glowSize}px ${style.glowColor}` : "",
-                ].filter(Boolean).join(", ") || undefined,
-                textTransform: style.uppercase ? "uppercase" : "none",
-                textAlign: style.textAlign,
-                maxWidth: "90%",
-                ...(style.boxEnabled ? { backgroundColor: `${style.boxColor}${Math.round(style.boxOpacity * 255).toString(16).padStart(2, "0")}`, padding: style.boxPadding * 0.4, borderRadius: style.boxRadius } : {}),
-              }}>
-                {style.text || "Hook text preview here"}
-              </p>
-            </div>
-          </div>
+          <HookPreviewRenderer style={style} />
           {/* Accent line */}
           {style.lineEnabled && <AccentLinePreview style={style} />}
           <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600">{style.animation.replace("_", " ")} | {style.duration}s</p>
@@ -699,7 +843,8 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
           </div>
           <div className="flex gap-4 mt-3">
-            <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v })} />
+            <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v, capitalize: v ? false : style.capitalize })} />
+            <Checkbox label="Capitalize" checked={style.capitalize} onChange={(v) => update({ capitalize: v, uppercase: v ? false : style.uppercase })} />
             <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
           </div>
           {/* Line Transition / Subtitle Style */}
@@ -888,7 +1033,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                     fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
                     fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
                     letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
-                    textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : "none"),
+                    textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none"),
                     textShadow: [
                       (useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "",
                       shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : "",
@@ -916,16 +1061,18 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
 
 // ─── Animation helpers ───────────────────────────────────────────────────────
 
+// Kept for potential external use — subtitle editor uses getSubAnimationClass
 function getHookAnimationClass(animation: string): string {
   switch (animation) {
-    case "fade_scale": return "animate-[fadeScale_2s_ease-in-out_infinite]";
-    case "slide_up": return "animate-[slideUp_2s_ease-in-out_infinite]";
-    case "glitch": return "animate-[glitch_0.5s_steps(2)_infinite]";
-    case "typewriter": return "animate-[typewriter_3s_steps(20)_infinite]";
-    case "glitch_rgb": return "animate-[glitchRgb_0.8s_steps(3)_infinite]";
-    case "shake_neon": return "animate-[shakeNeon_1.5s_ease-in-out_infinite]";
-    case "cinematic_reveal": return "animate-[cinematicReveal_3s_ease-out_infinite]";
-    case "danger_bold": return "animate-[dangerBold_1.2s_ease-in-out_infinite]";
+    case "fade_scale": return "animate-[fadeScalePreview_2.5s_ease-in-out_infinite]";
+    case "slide_up": return "animate-[slideUpPreview_2s_ease-in-out_infinite]";
+    case "slide_punch_framer": return "animate-[slidePunchPreview_2s_ease-out_infinite]";
+    case "glitch": return "animate-[glitchJitter_0.5s_steps(2)_infinite]";
+    case "typewriter": return "animate-[typewriterReveal_3s_steps(20)_infinite]";
+    case "glitch_rgb": return ""; // uses DOM-based multi-layer render
+    case "shake_neon": return ""; // uses DOM-based multi-layer render
+    case "cinematic_reveal": return "animate-[cinematicRevealText_3.5s_ease-out_infinite]";
+    case "danger_bold": return "animate-[dangerPulse_1.2s_ease-in-out_infinite]";
     default: return "";
   }
 }
