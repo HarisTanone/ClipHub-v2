@@ -587,9 +587,11 @@ class V2PipelineService:
                     })
             
             if relative_words:
-                logger.debug(
+                logger.info(
                     f"v2_words clip {clip.rank}: trim_point={trim_point:.2f}s, "
-                    f"{len(relative_words)} words, first='{relative_words[0]['word']}' @ {relative_words[0]['start']:.2f}s"
+                    f"{len(relative_words)} words, "
+                    f"first='{relative_words[0]['word']}' @ {relative_words[0]['start']:.3f}s, "
+                    f"last='{relative_words[-1]['word']}' @ {relative_words[-1]['start']:.3f}s"
                 )
             
             result[clip.rank] = relative_words
@@ -745,6 +747,16 @@ class V2PipelineService:
                     # Words already have correct relative timestamps, no offset shift needed
                     hook_duration = 3.0
                     filtered_words = [w for w in words if w.get("start", 0) >= hook_duration]
+                    
+                    # Diagnostic: log first 3 words timing for sync verification
+                    if filtered_words:
+                        sample = filtered_words[:3]
+                        logger.info(
+                            f"[{job_id}] Subtitle clip {clip.rank}: "
+                            f"first_word='{sample[0]['word']}' @ {sample[0]['start']:.2f}s, "
+                            f"total={len(filtered_words)} words, "
+                            f"clip_trim_start={clip.start:.2f}s"
+                        )
                     
                     self._subtitle_renderer.render_subtitles(
                         video_path=in_path,

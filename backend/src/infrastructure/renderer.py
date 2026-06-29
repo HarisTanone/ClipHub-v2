@@ -42,7 +42,7 @@ class FFmpegRenderer(IRenderer):
 
         logger.info(
             f"Trimming clip #{clip.rank}: {clip.start:.1f}s → {clip.end:.1f}s "
-            f"({duration:.1f}s) → {output_path}"
+            f"({duration:.1f}s) → {output_path} [re-encode mode]"
         )
 
         proc = await asyncio.create_subprocess_exec(
