@@ -405,59 +405,48 @@ class SubtitleRenderer(ISubtitleRenderer):
                 f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
             )
 
-            # Layer 2: Active word highlight (karaoke style — color each word when spoken)
+            # Layer 2: Active word highlight — show ABOVE base line (centered independently)
+            # This avoids the broken x-position calculation with text_w
             if emphasis_color and emphasis_color != normal_color:
-                x_offset_chars = 0
                 for w_idx, w in enumerate(line):
                     w_start = w["start"] + start_offset
                     w_end = w["end"] + start_offset
                     word_text = w["word"]
                     escaped_word = self._escape_drawtext(word_text)
 
-                    # Calculate x position from prefix width
-                    if w_idx == 0:
-                        x_expr = f"(w-text_w)/2"
-                    else:
-                        prefix = " ".join(wd["word"] for wd in line[:w_idx]) + " "
-                        avg_char_width = (normal_font_size + 4) * 0.55
-                        x_px = int(len(prefix) * avg_char_width)
-                        x_expr = f"(w-text_w)/2+{x_px}"
-
-                    # Determine if THIS word is the emphasis keyword
                     is_emphasis = should_emphasize and w_idx == emphasis_idx
 
                     if is_emphasis:
                         lines_since_emphasis = 0
-                        # Emphasis: glow layer behind
+                        # Emphasis keyword: glow + bigger, ABOVE base line
                         if glow_enabled:
                             filter_parts.append(
                                 f"drawtext=text='{escaped_word}'"
-                                f":fontsize={normal_font_size + 4}"
+                                f":fontsize={normal_font_size + 8}"
                                 f"{font_opt}"
                                 f":fontcolor={emphasis_color}@0.4"
                                 f":borderw=8:bordercolor={emphasis_color}@0.2"
-                                f":x={x_expr}:y={y_pos}"
+                                f":x=(w-text_w)/2:y={y_pos}-{normal_font_size + 14}"
                                 f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                             )
-                        # Emphasis word: colored + bold
                         filter_parts.append(
                             f"drawtext=text='{escaped_word}'"
-                            f":fontsize={normal_font_size + 4}"
+                            f":fontsize={normal_font_size + 8}"
                             f"{font_opt}"
                             f":fontcolor={emphasis_color}"
-                            f":borderw=0"
-                            f":x={x_expr}:y={y_pos}"
+                            f":borderw=1:bordercolor=black@0.5"
+                            f":x=(w-text_w)/2:y={y_pos}-{normal_font_size + 14}"
                             f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                         )
                     else:
-                        # Normal active word: just colored (karaoke highlight)
+                        # Normal active word: highlight color, ABOVE base line
                         filter_parts.append(
                             f"drawtext=text='{escaped_word}'"
                             f":fontsize={normal_font_size + 4}"
                             f"{font_opt}"
                             f":fontcolor={emphasis_color}"
-                            f":borderw=0"
-                            f":x={x_expr}:y={y_pos}"
+                            f":borderw=1:bordercolor=black@0.5"
+                            f":x=(w-text_w)/2:y={y_pos}-{normal_font_size + 14}"
                             f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                         )
 
