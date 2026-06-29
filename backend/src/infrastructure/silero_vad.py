@@ -16,7 +16,6 @@ import os
 from typing import Optional
 
 import torch
-import torchaudio
 
 from src.config import settings
 from src.domain.entities import VADResult
@@ -98,29 +97,15 @@ class SileroVADProcessor(ISileroVAD):
         """Synchronous VAD refinement."""
         self._ensure_model_loaded()
 
-        # Load audio (use soundfile backend to avoid torchcodec dependency)
-        try:
-            waveform, sample_rate = torchaudio.load(audio_path, backend="soundfile")
-        except (RuntimeError, TypeError):
-            # Fallback for older torchaudio versions without backend param
-            try:
-                waveform, sample_rate = torchaudio.load(audio_path)
-            except Exception as e:
-                raise RuntimeError(f"Failed to load audio: {e}")
+        # Load audio using FFmpeg → numpy → torch (no torchcodec/soundfile needed)
+        waveform = self._load_audio_ffmpeg(audio_path)
+        if waveform is None:
+            raise RuntimeError(f"Failed to load audio: {audio_path}")
 
-        # Resample if needed
-        if sample_rate != self._sample_rate:
-            resampler = torchaudio.transforms.Resample(sample_rate, self._sample_rate)
-            waveform = resampler(waveform)
-
-        # Convert to mono if stereo
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-
-        audio_duration = waveform.shape[1] / self._sample_rate
+        audio_duration = waveform.shape[0] / self._sample_rate
 
         # Get speech timestamps from Silero VAD
-        speech_timestamps = self._get_speech_timestamps(waveform[0])
+        speech_timestamps = self._get_speech_timestamps(waveform)
 
         if not speech_timestamps:
             # No speech detected at all — use original timestamps
@@ -140,6 +125,41 @@ class SileroVADProcessor(ISileroVAD):
         )
 
         return refined_start, refined_end
+
+    # ─── Audio Loading (FFmpeg — no torchcodec/soundfile dependency) ─────────
+
+    def _load_audio_ffmpeg(self, audio_path: str) -> Optional[torch.Tensor]:
+        """Load audio as 16kHz mono float32 tensor using FFmpeg subprocess.
+        
+        This avoids all torchaudio backend issues (torchcodec, soundfile).
+        FFmpeg outputs raw PCM → numpy → torch tensor.
+        """
+        import subprocess
+        import numpy as np
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", audio_path,
+            "-ar", str(self._sample_rate),  # 16kHz
+            "-ac", "1",                      # Mono
+            "-f", "s16le",                   # Raw 16-bit PCM
+            "-acodec", "pcm_s16le",
+            "-loglevel", "error",
+            "pipe:1",                        # Output to stdout
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            if result.returncode != 0:
+                logger.error(f"silero_vad: FFmpeg audio load failed: {result.stderr.decode()[:100]}")
+                return None
+
+            # Convert raw PCM bytes → numpy float32 → torch tensor
+            audio_np = np.frombuffer(result.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+            return torch.from_numpy(audio_np)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.error(f"silero_vad: audio load error: {e}")
+            return None
 
     # ─── VAD Processing ───────────────────────────────────────────────────────
 
