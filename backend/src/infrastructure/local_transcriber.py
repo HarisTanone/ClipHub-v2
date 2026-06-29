@@ -99,7 +99,7 @@ class LocalTranscriber:
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None, lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            None, lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         )
 
         if result.returncode != 0:

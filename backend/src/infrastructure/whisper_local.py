@@ -84,17 +84,32 @@ class WhisperLocal(IWhisperLocal):
         return ""
 
     async def transcribe_clip(self, audio_path: str) -> list[dict]:
-        """Transcribe single clip audio → segments with word-level timestamps."""
+        """Transcribe single clip audio → segments with word-level timestamps.
+        
+        Timeout is dynamic based on audio file size to handle long videos (1hr+).
+        Approximate: 16kHz mono WAV = 32KB/sec = ~1.9MB/min.
+        On CPU with int8, processing speed ≈ 2-5x real-time.
+        So timeout = estimated_duration_sec * 1.5, minimum 600s.
+        """
         loop = asyncio.get_event_loop()
         if self._use_faster_whisper:
-            # Add timeout to prevent hanging on large clips
+            # Calculate dynamic timeout based on file size
+            try:
+                file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+                # WAV 16kHz mono 16-bit = ~1.92 MB/min → estimate duration
+                estimated_duration_sec = (file_size_mb / 1.92) * 60
+                # Allow 1.5x real-time processing + buffer
+                timeout = max(600, int(estimated_duration_sec * 1.5))
+            except OSError:
+                timeout = 3600  # 1 hour fallback
+            
             try:
                 return await asyncio.wait_for(
                     loop.run_in_executor(None, self._transcribe_faster_whisper, audio_path),
-                    timeout=300  # 5 minute max per clip
+                    timeout=timeout
                 )
             except asyncio.TimeoutError:
-                logger.error(f"faster_whisper_timeout: {audio_path} exceeded 300s")
+                logger.error(f"faster_whisper_timeout: {audio_path} exceeded {timeout}s")
                 return []
         return await loop.run_in_executor(None, self._transcribe_sync, audio_path)
 
@@ -106,22 +121,28 @@ class WhisperLocal(IWhisperLocal):
             if self._faster_whisper_model is None:
                 model_size = settings.WHISPER_MODEL_SIZE
                 logger.info(f"Loading faster-whisper model: {model_size}")
+                # int8 = 2-3x faster than float32 on CPU with near-identical quality
                 self._faster_whisper_model = WhisperModel(
-                    model_size, device="cpu", compute_type="float32",
+                    model_size, device="cpu", compute_type="int8",
                     num_workers=1, cpu_threads=settings.WHISPER_THREADS
                 )
 
-            # Convert to WAV 16kHz mono (required for reliable transcription)
-            wav_path = audio_path.rsplit(".", 1)[0] + "_whisper.wav"
-            convert_cmd = [
-                "ffmpeg", "-y", "-i", audio_path,
-                "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
-                wav_path
-            ]
-            result = subprocess.run(convert_cmd, capture_output=True, timeout=120)
-            if result.returncode != 0 or not os.path.exists(wav_path):
-                logger.error(f"WAV conversion failed: {result.stderr.decode()[:200]}")
-                return []
+            # Skip WAV conversion if input is already 16kHz mono WAV (from local_transcriber)
+            if audio_path.endswith(".wav"):
+                wav_path = audio_path  # already prepared by local_transcriber
+                wav_is_temp = False
+            else:
+                wav_path = audio_path.rsplit(".", 1)[0] + "_whisper.wav"
+                wav_is_temp = True
+                convert_cmd = [
+                    "ffmpeg", "-y", "-i", audio_path,
+                    "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+                    wav_path
+                ]
+                result = subprocess.run(convert_cmd, capture_output=True, timeout=120)
+                if result.returncode != 0 or not os.path.exists(wav_path):
+                    logger.error(f"WAV conversion failed: {result.stderr.decode()[:200]}")
+                    return []
 
             try:
                 segs, info = self._faster_whisper_model.transcribe(
@@ -151,8 +172,8 @@ class WhisperLocal(IWhisperLocal):
                 logger.info(f"faster_whisper_done: {len(segments)} segments, lang={info.language}")
                 return segments
             finally:
-                # Cleanup WAV file
-                if os.path.exists(wav_path):
+                # Only cleanup temp WAV (not the original audio file)
+                if wav_is_temp and os.path.exists(wav_path):
                     os.remove(wav_path)
 
         except ImportError:
