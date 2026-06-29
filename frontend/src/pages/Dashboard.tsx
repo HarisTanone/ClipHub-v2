@@ -51,7 +51,12 @@ export function Dashboard() {
   const filtered = useMemo(() => {
     let list = jobList;
     if (statusFilter !== "all") {
-      list = list.filter((j) => j.status === statusFilter);
+      if (statusFilter === "processing") {
+        // Match ALL active/in-progress statuses (V1 + V2 pipeline)
+        list = list.filter((j) => j.status !== "completed" && j.status !== "failed" && j.status !== "timeout");
+      } else {
+        list = list.filter((j) => j.status === statusFilter);
+      }
     }
     if (search.trim()) {
       const q = search.toLowerCase();
