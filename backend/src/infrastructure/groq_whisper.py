@@ -361,8 +361,8 @@ class GroqWhisperTranscriber:
         duration = end - start
         cmd = [
             "ffmpeg", "-y",
+            "-ss", str(start),       # Fast seek BEFORE input
             "-i", input_path,
-            "-ss", str(start),
             "-t", str(duration),
             "-ar", "16000",
             "-ac", "1",
@@ -370,9 +370,9 @@ class GroqWhisperTranscriber:
             "-loglevel", "error",
             output_path,
         ]
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(
-            None, lambda: subprocess.run(cmd, capture_output=True, timeout=120)
+            None, lambda: subprocess.run(cmd, capture_output=True, timeout=900)
         )
 
     async def _get_duration(self, file_path: str) -> float:
