@@ -317,7 +317,7 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
                 # Validate timestamps
                 if end <= start or start < 0 or end > video_duration + 10:
                     continue
-                if end - start < 10 or end - start > 180:
+                if end - start < 45 or end - start > 120:
                     continue
 
                 candidates.append(HighlightCandidate(

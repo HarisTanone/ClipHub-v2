@@ -288,14 +288,14 @@ OUTPUT HANYA JSON:"""
                 end = float(clip.get("end", 0))
                 score = int(clip.get("score", 50))
 
-                # Validate timestamps (relaxed: allow 15s-180s clips)
+                # Validate timestamps (enforce 45-120s clips)
                 if start < chunk_start - 5:
                     start = chunk_start
                 if end > chunk_end + 5:
                     end = chunk_end
 
                 duration = end - start
-                if duration < 15 or duration > 180:
+                if duration < 45 or duration > 120:
                     logger.debug(f"ollama_analyzer: skipped clip {start:.1f}-{end:.1f} (duration={duration:.1f}s)")
                     continue
 
@@ -380,7 +380,7 @@ OUTPUT HANYA JSON:"""
             start = float(match.group(2))
             end = float(match.group(3))
             hook = (match.group(4) or "").strip()[:60]
-            if end > start and end - start >= 15:
+            if end > start and end - start >= 45:
                 clips.append({
                     "rank": len(clips) + 1,
                     "score": score,
@@ -401,7 +401,7 @@ OUTPUT HANYA JSON:"""
             for i, match in enumerate(simple_pattern.finditer(text)):
                 start = float(match.group(1))
                 end = float(match.group(2))
-                if end > start and end - start >= 15:
+                if end > start and end - start >= 45:
                     clips.append({
                         "rank": i + 1,
                         "score": 70,

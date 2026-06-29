@@ -354,9 +354,9 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                 if end > chunk_end + 5:
                     end = chunk_end
 
-                # Validate duration (45-90s target, allow 30-120s with tolerance)
+                # Validate duration (45-90s target, enforce 45-120s)
                 duration = end - start
-                if duration < 30 or duration > 120:
+                if duration < 45 or duration > 120:
                     continue
 
                 # Clamp score
