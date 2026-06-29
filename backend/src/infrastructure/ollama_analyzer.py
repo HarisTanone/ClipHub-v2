@@ -165,7 +165,7 @@ ATURAN HOOK (SANGAT PENTING):
 OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa komentar):
 {{"clips": [{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "hook text viral", "reason": "alasan singkat", "content_type": "storytelling", "speaker_energy": "high"}}]}}"""
 
-        raw = await self._call_ollama(prompt, timeout=600.0)  # 10 min timeout for full transcript on CPU
+        raw = await self._call_ollama(prompt, timeout=1800.0)  # 30 min timeout for large transcripts on CPU
         return self._parse_chunk_response(raw, 0.0, video_duration)
 
     # ─── Ollama API Call ──────────────────────────────────────────────────────
@@ -174,9 +174,16 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
         """Call local Ollama API. No rate limits!
         
         Default timeout 300s (5 min) — needed for large transcripts on CPU.
-        CPU at ~8 tok/s needs ~375s for 3000 output tokens.
+        For full-video single-call mode (17K+ tokens), use 1800s.
+        CPU at ~8 tok/s: 17K input prefill + 4K output ≈ 15-20 min.
         """
         url = f"{self._base_url}/api/generate"
+
+        # Dynamic context window: round up to nearest 8K, min 8K, max 128K
+        prompt_chars = len(prompt)
+        estimated_tokens = prompt_chars // 3 + 4096  # input + output buffer
+        num_ctx = min(131072, max(8192, ((estimated_tokens // 8192) + 1) * 8192))
+
         payload = {
             "model": self._model,
             "prompt": prompt,
@@ -184,7 +191,7 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
             "options": {
                 "temperature": 0.3,
                 "num_predict": 4000,
-                "num_ctx": 32768,  # Use 32K context (enough for 1hr video)
+                "num_ctx": num_ctx,
             },
         }
 
