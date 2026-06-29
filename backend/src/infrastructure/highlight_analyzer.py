@@ -11,7 +11,6 @@ If one fails, the next in chain is tried automatically.
 import asyncio
 import json
 import logging
-import time
 from typing import Optional
 
 from src.config import settings
@@ -95,33 +94,53 @@ class HighlightAnalyzer:
     async def _analyze_with_gemini(
         self, transcript: TranscriptResult, video_duration: float, max_clips: int
     ) -> Optional[HighlightAnalysisResult]:
-        """Use Gemini API for highlight analysis (1M token context)."""
+        """Use Gemini API for highlight analysis (1M token context).
+        
+        Uses per-call configure to avoid global state race conditions
+        when MAX_CONCURRENT_JOBS > 1. Each key is tried sequentially.
+        """
         import google.generativeai as genai
+
+        prompt = self._build_prompt(transcript, video_duration, max_clips)
 
         # Rotate through available keys
         for key_idx, api_key in enumerate(self._gemini_keys):
             try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel(settings.GEMINI_MODEL or "gemini-2.0-flash")
-
-                prompt = self._build_prompt(transcript, video_duration, max_clips)
-
-                response = await asyncio.get_running_loop().run_in_executor(
-                    None, lambda: model.generate_content(
-                        prompt,
+                # Thread-safe: each call configures + generates atomically in executor
+                def _gemini_call(key=api_key, p=prompt):
+                    genai.configure(api_key=key)
+                    model = genai.GenerativeModel(settings.GEMINI_MODEL or "gemini-2.0-flash")
+                    return model.generate_content(
+                        p,
                         generation_config=genai.GenerationConfig(
                             temperature=0.3,
                             max_output_tokens=4096,
                         ),
                     )
+
+                response = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(None, _gemini_call),
+                    timeout=120,  # 2 min timeout for Gemini API
                 )
 
-                if not response or not response.text:
+                # Safety filter check — response.text raises ValueError if blocked
+                if not response or not response.candidates:
+                    continue
+                try:
+                    text = response.text
+                except (ValueError, AttributeError):
+                    logger.warning(f"highlight_analyzer: Gemini key {key_idx + 1} response blocked by safety filter")
                     continue
 
-                clips = self._parse_llm_response(response.text, video_duration)
+                if not text:
+                    continue
+
+                clips = self._parse_llm_response(text, video_duration)
                 if clips:
                     return self._build_result(clips, max_clips, video_duration, "gemini")
+            except asyncio.TimeoutError:
+                logger.warning(f"highlight_analyzer: Gemini key {key_idx + 1} timeout (120s)")
+                continue
             except Exception as e:
                 logger.warning(f"highlight_analyzer: Gemini key {key_idx + 1} failed: {e}")
                 continue
@@ -138,28 +157,32 @@ class HighlightAnalyzer:
 
         prompt = self._build_prompt(transcript, video_duration, max_clips)
 
-        # Groq llama-3.3-70b has 128K context
-        estimated_tokens = len(prompt) // 4
+        # Groq llama-3.3-70b has 128K context. Use //3 ratio for non-English safety.
+        estimated_tokens = len(prompt) // 3
         if estimated_tokens > 120000:
-            # Too large for Groq — truncate transcript
             logger.warning(f"highlight_analyzer: Groq input too large ({estimated_tokens} tokens), truncating")
-            prompt = self._build_prompt(transcript, video_duration, max_clips, max_chars=300000)
+            prompt = self._build_prompt(transcript, video_duration, max_clips, max_chars=320000)
 
         client = Groq(api_key=self._groq_key)
         groq_model = settings.GROQ_LLM_FALLBACK_MODEL or "llama-3.3-70b-versatile"
 
         for attempt in range(3):
             try:
-                response = await asyncio.get_running_loop().run_in_executor(
-                    None, lambda: client.chat.completions.create(
-                        model=groq_model,
+                # Capture variables explicitly to avoid late-binding issues
+                def _groq_call(m=groq_model, p=prompt):
+                    return client.chat.completions.create(
+                        model=m,
                         messages=[
                             {"role": "system", "content": "Kamu adalah AI analis konten viral. Output HANYA raw JSON tanpa markdown."},
-                            {"role": "user", "content": prompt},
+                            {"role": "user", "content": p},
                         ],
                         temperature=0.3,
                         max_tokens=4096,
                     )
+
+                response = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(None, _groq_call),
+                    timeout=90,  # 90s timeout for Groq LLM
                 )
 
                 if not response.choices:
@@ -171,8 +194,10 @@ class HighlightAnalyzer:
                     return self._build_result(clips, max_clips, video_duration, f"groq_{groq_model}")
                 return None
 
+            except asyncio.TimeoutError:
+                logger.warning(f"highlight_analyzer: Groq LLM timeout (attempt {attempt + 1})")
+                continue
             except RateLimitError:
-                import time as _t
                 wait = (attempt + 1) * 15
                 logger.warning(f"highlight_analyzer: Groq rate limit, waiting {wait}s")
                 await asyncio.sleep(wait)
