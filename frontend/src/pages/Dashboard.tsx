@@ -8,6 +8,7 @@ import { SkeletonRow } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { jobs, system, type JobSummary } from "@/lib/api";
 import { formatTimeAgo, truncateUrl, formatDuration, cn } from "@/lib/utils";
+import { ModelStatusPanel } from "@/components/ModelStatusPanel";
 
 const PAGE_SIZE = 10;
 
@@ -90,6 +91,11 @@ export function Dashboard() {
         <StatCard icon={<XCircle className="h-4 w-4" />} label="Failed" value={stats.failed} color="red" />
         <StatCard icon={<Clock className="h-4 w-4" />} label="Total Jobs" value={stats.total} color="zinc" />
       </div>
+
+      {/* Model Status (compact) */}
+      <Card className="p-3 shrink-0">
+        <ModelStatusPanel />
+      </Card>
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap shrink-0">

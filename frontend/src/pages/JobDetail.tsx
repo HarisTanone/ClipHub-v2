@@ -13,20 +13,20 @@ import { useProgress } from "@/hooks/useProgress";
 import { formatDuration, formatDate, cn } from "@/lib/utils";
 
 const PIPELINE_STEPS = [
-  { name: "validate", label: "Validate" },
-  { name: "download", label: "Download" },
-  { name: "transcript", label: "Transcript" },
-  { name: "gemini", label: "AI Analysis" },
-  { name: "prepare", label: "Prepare" },
-  { name: "trim", label: "Trim" },
-  { name: "whisper", label: "Whisper" },
-  { name: "highlights", label: "Highlights" },
-  { name: "reframe", label: "Reframe" },
-  { name: "visual_overlay", label: "Overlay" },
-  { name: "thumbnail", label: "Thumbnails" },
-  { name: "finalize", label: "Finalize" },
-  { name: "cdn_upload", label: "Upload" },
-  { name: "assemble", label: "Assemble" },
+  { name: "validate", label: "Validating URL" },
+  { name: "download", label: "Downloading Video" },
+  { name: "transcript", label: "Transcribing Audio" },
+  { name: "gemini", label: "AI Analyzing Highlights" },
+  { name: "prepare", label: "Preparing Clips" },
+  { name: "trim", label: "Trimming Clips" },
+  { name: "whisper", label: "Syncing Words" },
+  { name: "highlights", label: "Processing Highlights" },
+  { name: "reframe", label: "Smart Framing (YOLO)" },
+  { name: "visual_overlay", label: "Rendering Hook & Subtitle" },
+  { name: "thumbnail", label: "Generating Thumbnails" },
+  { name: "finalize", label: "Finalizing" },
+  { name: "cdn_upload", label: "Uploading" },
+  { name: "assemble", label: "Assembling Output" },
 ];
 
 export function JobDetail() {
