@@ -260,8 +260,8 @@ class V2PipelineService:
                 await self._repo.update_status(job_id, JobStatus.V2_ANALYZING)
                 max_clips = self._calc_max_clips(duration)
                 try:
-                    from src.infrastructure.ollama_analyzer import OllamaAnalyzer, OllamaAnalyzerError
-                    analyzer = OllamaAnalyzer()
+                    from src.infrastructure.highlight_analyzer import HighlightAnalyzer, HighlightAnalyzerError
+                    analyzer = HighlightAnalyzer()
                     analysis_result = await analyzer.analyze_highlights(
                         transcript_result, duration, max_clips
                     )
