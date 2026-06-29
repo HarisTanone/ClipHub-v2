@@ -98,8 +98,15 @@ class SileroVADProcessor(ISileroVAD):
         """Synchronous VAD refinement."""
         self._ensure_model_loaded()
 
-        # Load audio
-        waveform, sample_rate = torchaudio.load(audio_path)
+        # Load audio (use soundfile backend to avoid torchcodec dependency)
+        try:
+            waveform, sample_rate = torchaudio.load(audio_path, backend="soundfile")
+        except (RuntimeError, TypeError):
+            # Fallback for older torchaudio versions without backend param
+            try:
+                waveform, sample_rate = torchaudio.load(audio_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to load audio: {e}")
 
         # Resample if needed
         if sample_rate != self._sample_rate:
