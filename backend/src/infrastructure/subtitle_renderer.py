@@ -180,8 +180,8 @@ class SubtitleRenderer(ISubtitleRenderer):
         if not filter_parts:
             return video_path
 
-        # FFmpeg has a limit on filter complexity. If too many filters, batch them.
-        if len(filter_parts) > 80:
+        # FFmpeg can handle ~400+ drawtext filters. Only fall back for extreme cases.
+        if len(filter_parts) > 250:
             # Too many drawtext filters — fall back to line-only mode (no per-word highlight)
             logger.warning(f"subtitle_render: {len(filter_parts)} filters, falling back to line-only mode")
             return self._render_line_only(video_path, words, config, output_path, offset, timing_adj)

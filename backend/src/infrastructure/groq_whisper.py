@@ -352,7 +352,54 @@ class GroqWhisperTranscriber:
                 if os.path.exists(chunk_path):
                     os.remove(chunk_path)
 
+        # Deduplicate words at chunk boundaries (fix non-monotonic timestamps)
+        all_segments = self._deduplicate_chunk_boundaries(all_segments)
         return all_segments
+
+    def _deduplicate_chunk_boundaries(self, segments: list[dict]) -> list[dict]:
+        """Remove duplicate/overlapping words at chunk boundaries.
+        
+        When audio is chunked, words at boundaries can appear in both chunks
+        with slightly different timestamps, causing non-monotonic order.
+        Fix: sort segments by start time, deduplicate overlapping words.
+        """
+        if not segments:
+            return segments
+
+        # Sort segments by start time
+        segments.sort(key=lambda s: s["start"])
+
+        # Deduplicate words within each segment (sort + remove overlaps)
+        for seg in segments:
+            words = seg.get("words", [])
+            if not words:
+                continue
+            # Sort words by start time
+            words.sort(key=lambda w: w["start"])
+            # Remove duplicate words (same word within 0.5s = likely duplicate)
+            deduped = [words[0]]
+            for w in words[1:]:
+                prev = deduped[-1]
+                if w["start"] < prev["start"]:
+                    continue  # Skip non-monotonic
+                if w["word"] == prev["word"] and abs(w["start"] - prev["start"]) < 0.5:
+                    continue  # Skip duplicate
+                deduped.append(w)
+            seg["words"] = deduped
+
+        # Remove duplicate segments (overlapping at chunk boundaries)
+        deduped_segments = [segments[0]]
+        for seg in segments[1:]:
+            prev = deduped_segments[-1]
+            # If this segment starts before previous ends → overlap from chunking
+            if seg["start"] < prev["end"] - 0.3:
+                # Merge: keep the one with more words
+                if len(seg.get("words", [])) > len(prev.get("words", [])):
+                    deduped_segments[-1] = seg
+                continue
+            deduped_segments.append(seg)
+
+        return deduped_segments
 
     async def _extract_chunk_flac(
         self, input_path: str, output_path: str, start: float, end: float
