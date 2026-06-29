@@ -11,10 +11,9 @@ import asyncio
 import logging
 import os
 import subprocess
-from typing import Optional
 
 from src.config import settings
-from src.domain.entities import TranscriptResult, TranscriptSegment, Word
+from src.domain.entities import TranscriptResult, TranscriptSegment
 from src.domain.interfaces import IWhisperLocal
 
 logger = logging.getLogger(__name__)
@@ -70,7 +69,7 @@ class LocalTranscriber:
                 else:
                     logger.warning("local_transcriber: Groq returned empty, falling back to local")
             except Exception as e:
-                logger.warning(f"local_transcriber: Groq failed ({e}), falling back to local")
+                logger.warning(f"local_transcriber: Groq failed ({e}), falling back to local", exc_info=True)
         else:
             logger.info("local_transcriber: Groq API key not set, using local Faster-Whisper")
 
@@ -80,24 +79,32 @@ class LocalTranscriber:
     async def _transcribe_local(self, video_path: str, video_duration: float) -> tuple[TranscriptResult, list[dict]]:
         """Fallback: transcribe using local Faster-Whisper on CPU."""
         # Step 1: Extract audio from video
-        audio_path = video_path.rsplit(".", 1)[0] + "_audio.wav"
+        base, _ = os.path.splitext(video_path)
+        audio_path = base + "_audio.wav"
         await self._extract_audio(video_path, audio_path)
 
-        if not os.path.exists(audio_path):
-            raise RuntimeError(f"Audio extraction failed: {audio_path}")
+        if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+            raise RuntimeError(f"Audio extraction failed or produced empty file: {audio_path}")
 
         logger.info(f"local_transcriber: audio extracted ({os.path.getsize(audio_path) / 1024 / 1024:.1f}MB)")
 
         # Step 2: Run Faster-Whisper on full audio
         try:
             raw_segments = await self._whisper.transcribe_clip(audio_path)
+        except Exception as e:
+            raise RuntimeError(f"Faster-Whisper transcription error: {e}") from e
         finally:
             # Cleanup audio file
             if os.path.exists(audio_path):
                 os.remove(audio_path)
 
         if not raw_segments:
-            raise RuntimeError("Faster-Whisper returned empty transcript")
+            # Empty transcript is valid (music-only clips) — return empty result, don't crash
+            logger.warning("local_transcriber: Faster-Whisper returned empty transcript (no speech detected)")
+            return TranscriptResult(
+                segments=[], source="faster_whisper_local",
+                language="id", total_duration=video_duration,
+            ), []
 
         # Step 3: Convert to TranscriptResult
         transcript = self._build_transcript_result(raw_segments, video_duration, source="faster_whisper_local")
@@ -142,7 +149,7 @@ class LocalTranscriber:
             output_path,
         ]
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         )

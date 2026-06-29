@@ -14,6 +14,17 @@ logger = logging.getLogger(__name__)
 
 
 class WhisperLocal(IWhisperLocal):
+    # Pre-compiled skip patterns for token filtering (performance: avoids 350K+ recompiles)
+    _SKIP_PATTERNS = [
+        re.compile(r"\[_TT_\d+\]"),
+        re.compile(r"\[_BEG_\]"),
+        re.compile(r"\[_END_\]"),
+        re.compile(r"\[_SOT_\]"),
+        re.compile(r"\[_EOT_\]"),
+        re.compile(r"<\|\d+\.\d+\|>"),
+        re.compile(r"\[BLANK_AUDIO\]"),
+    ]
+
     def __init__(self):
         self.model_path = settings.WHISPER_MODEL_PATH
         self.whisper_binary = self._find_binary()
@@ -91,7 +102,7 @@ class WhisperLocal(IWhisperLocal):
         On CPU with int8, processing speed ≈ 2-5x real-time.
         So timeout = estimated_duration_sec * 1.5, minimum 600s.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         if self._use_faster_whisper:
             # Calculate dynamic timeout based on file size
             try:
@@ -257,8 +268,7 @@ class WhisperLocal(IWhisperLocal):
             pass
 
         # Fix trailing commas: ,\n] or ,\n}
-        import re as re_mod
-        fixed = re_mod.sub(r',(\s*[}\]])', r'\1', content)
+        fixed = re.sub(r',(\s*[}\]])', r'\1', content)
         try:
             return json.loads(fixed)
         except json.JSONDecodeError:
@@ -268,10 +278,8 @@ class WhisperLocal(IWhisperLocal):
         try:
             idx = content.find('"transcription"')
             if idx > 0:
-                # Wrap in minimal object
                 arr_start = content.find('[', idx)
                 if arr_start > 0:
-                    # Find matching bracket
                     bracket_count = 0
                     for i in range(arr_start, len(content)):
                         if content[i] == '[':
@@ -280,10 +288,9 @@ class WhisperLocal(IWhisperLocal):
                             bracket_count -= 1
                             if bracket_count == 0:
                                 arr_str = content[arr_start:i+1]
-                                arr_fixed = re_mod.sub(r',(\s*[}\]])', r'\1', arr_str)
+                                arr_fixed = re.sub(r',(\s*[}\]])', r'\1', arr_str)
                                 arr = json.loads(arr_fixed)
                                 return {"transcription": arr}
-                                break
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -362,20 +369,12 @@ class WhisperLocal(IWhisperLocal):
         return segments
 
     def _should_skip_token(self, text: str) -> bool:
-        """Skip special tokens."""
+        """Skip special tokens using pre-compiled patterns."""
         if not text or not text.strip():
             return True
-        skip_patterns = [
-            r"\[_TT_\d+\]",
-            r"\[_BEG_\]",
-            r"\[_END_\]",
-            r"\[_SOT_\]",
-            r"\[_EOT_\]",
-            r"<\|\d+\.\d+\|>",
-            r"\[BLANK_AUDIO\]",
-        ]
-        for pattern in skip_patterns:
-            if re.match(pattern, text.strip()):
+        stripped = text.strip()
+        for pattern in self._SKIP_PATTERNS:
+            if pattern.match(stripped):
                 return True
         return False
 

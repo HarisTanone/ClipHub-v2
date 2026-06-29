@@ -17,7 +17,6 @@ import json
 import logging
 import os
 import subprocess
-import time
 from typing import Optional
 
 from src.config import settings
@@ -46,6 +45,8 @@ class GroqWhisperTranscriber:
     def _get_client(self):
         """Lazy-init Groq client."""
         if self._client is None:
+            if not self._api_key:
+                raise RuntimeError("GROQ_API_KEY not configured")
             from groq import Groq
             self._client = Groq(api_key=self._api_key)
         return self._client
@@ -66,7 +67,8 @@ class GroqWhisperTranscriber:
             return []
 
         # Step 1: Compress to FLAC 16kHz mono
-        flac_path = video_path.rsplit(".", 1)[0] + "_groq.flac"
+        base, _ = os.path.splitext(video_path)
+        flac_path = base + "_groq.flac"
         try:
             await self._compress_to_flac(video_path, flac_path)
 
@@ -135,6 +137,7 @@ class GroqWhisperTranscriber:
     def _call_groq_api(self, audio_path: str, language: str) -> list[dict]:
         """Synchronous Groq API call with retry logic."""
         import time as _time
+        from groq import RateLimitError, APIConnectionError, APIStatusError
 
         for attempt in range(self._max_retries):
             try:
@@ -157,60 +160,65 @@ class GroqWhisperTranscriber:
                 # Parse response into our segment format
                 return self._parse_response(transcription)
 
+            except RateLimitError as e:
+                wait = (attempt + 1) * 10
+                logger.warning(f"groq_whisper: rate limit hit, waiting {wait}s (attempt {attempt + 1})")
+                _time.sleep(wait)
+            except APIConnectionError as e:
+                wait = (attempt + 1) * 5
+                logger.warning(f"groq_whisper: connection error, retry in {wait}s (attempt {attempt + 1})")
+                _time.sleep(wait)
+            except APIStatusError as e:
+                logger.error(f"groq_whisper: API status error (attempt {attempt + 1}): {e.status_code} {e.message}")
+                if attempt == self._max_retries - 1:
+                    return []
+                _time.sleep(3)
             except Exception as e:
-                error_name = type(e).__name__
-                # Check for rate limit
-                if "RateLimitError" in error_name or "rate_limit" in str(e).lower():
-                    wait = (attempt + 1) * 10
-                    logger.warning(f"groq_whisper: rate limit hit, waiting {wait}s (attempt {attempt + 1})")
-                    _time.sleep(wait)
-                elif "APIConnectionError" in error_name or "connection" in str(e).lower():
-                    wait = (attempt + 1) * 5
-                    logger.warning(f"groq_whisper: connection error, retry in {wait}s (attempt {attempt + 1})")
-                    _time.sleep(wait)
-                else:
-                    logger.error(f"groq_whisper: API error (attempt {attempt + 1}): {error_name}: {e}")
-                    if attempt == self._max_retries - 1:
-                        return []
-                    _time.sleep(3)
+                logger.error(f"groq_whisper: unexpected error (attempt {attempt + 1}): {type(e).__name__}: {e}")
+                if attempt == self._max_retries - 1:
+                    return []
+                _time.sleep(3)
 
         return []
 
     def _parse_response(self, transcription) -> list[dict]:
         """Parse Groq transcription response into standardized segment format.
         
-        Groq returns:
+        Groq SDK returns a Pydantic model with:
         - transcription.text (full text)
         - transcription.segments (list of segments with timing)
         - transcription.words (list of words with timing)
         """
         segments = []
 
-        # Get raw data — handle both dict and object responses
+        # Get raw data — handle Pydantic v2 model (groq SDK >=0.9)
         if hasattr(transcription, "segments"):
             raw_segments = transcription.segments or []
-            raw_words = transcription.words or []
+            raw_words = getattr(transcription, "words", None) or []
         elif isinstance(transcription, dict):
             raw_segments = transcription.get("segments", [])
             raw_words = transcription.get("words", [])
         else:
-            # Try JSON parse
+            # Pydantic v2: use model_dump() if available
             try:
-                data = json.loads(transcription.json() if hasattr(transcription, "json") else str(transcription))
+                if hasattr(transcription, "model_dump"):
+                    data = transcription.model_dump()
+                else:
+                    data = json.loads(str(transcription))
                 raw_segments = data.get("segments", [])
                 raw_words = data.get("words", [])
-            except (json.JSONDecodeError, AttributeError):
+            except (json.JSONDecodeError, AttributeError, TypeError):
                 logger.error("groq_whisper: failed to parse response")
                 return []
 
-        # Build word lookup by time for segment assignment
+        # Build word list
         all_words = []
         for w in raw_words:
             word_data = self._extract_word(w)
             if word_data:
                 all_words.append(word_data)
 
-        # Build segments with their words
+        # Build segments with their words (half-open interval matching)
         for seg in raw_segments:
             seg_start = self._get_float(seg, "start", 0)
             seg_end = self._get_float(seg, "end", 0)
@@ -219,10 +227,10 @@ class GroqWhisperTranscriber:
             if not seg_text:
                 continue
 
-            # Find words belonging to this segment
+            # Find words belonging to this segment (word start within segment bounds)
             seg_words = [
                 w for w in all_words
-                if w["start"] >= seg_start - 0.05 and w["end"] <= seg_end + 0.05
+                if w["start"] >= seg_start - 0.01 and w["start"] < seg_end + 0.01
             ]
 
             segments.append({
@@ -303,7 +311,8 @@ class GroqWhisperTranscriber:
             end_time = min((i + 1) * chunk_duration, duration)
 
             # Extract chunk as FLAC
-            chunk_path = video_path.rsplit(".", 1)[0] + f"_chunk{i:02d}.flac"
+            chunk_base, _ = os.path.splitext(video_path)
+            chunk_path = f"{chunk_base}_chunk{i:02d}.flac"
             try:
                 await self._extract_chunk_flac(video_path, chunk_path, start_time, end_time)
 
@@ -327,9 +336,9 @@ class GroqWhisperTranscriber:
                 all_segments.extend(chunk_segments)
                 logger.info(f"groq_whisper: chunk {i + 1}/{num_chunks} done ({len(chunk_segments)} segments)")
 
-                # Small delay between chunks to avoid rate limit
+                # Small delay between chunks to respect rate limit (20 RPM = 3s gap)
                 if i < num_chunks - 1:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(3)
 
             finally:
                 if os.path.exists(chunk_path):
