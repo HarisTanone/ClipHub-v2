@@ -165,6 +165,13 @@ mkdir -p tmp/output tmp/downloads
 
 echo "  ✅ Backend ready"
 
+# ─── Step 3.5: Clear stale caches (force fresh Groq Whisper on next run) ─────
+echo ""
+echo "  Clearing cached transcripts & analysis (force fresh Groq Whisper)..."
+rm -rf "$BACKEND_DIR/tmp/cache/"*/transcript*.json 2>/dev/null || true
+rm -rf "$BACKEND_DIR/tmp/cache/"*/analysis*.json 2>/dev/null || true
+echo "  ✅ Cache cleared (transcripts + analysis)"
+
 # ─── Step 4: Remotion Server ────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

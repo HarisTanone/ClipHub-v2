@@ -764,6 +764,22 @@ class V2PipelineService:
                     shutil.copy2(in_path, out_path)
         self._emit(job_id, 14, "subtitle_render", "complete")
 
+        # ─── Post-render: Verify subtitle sync ────────────────────────────
+        try:
+            from src.infrastructure.subtitle_sync_verifier import SubtitleSyncVerifier
+            verifier = SubtitleSyncVerifier()
+            sync_results = verifier.verify_all_clips(output_dir, clips_with_words, hook_duration=3.0)
+            failed_clips = [r for r, v in sync_results.items() if not v["passed"]]
+            if failed_clips:
+                logger.warning(f"[{job_id}] Subtitle sync issues in clips: {failed_clips}")
+                for rank, v in sync_results.items():
+                    if v.get("issues"):
+                        logger.warning(f"[{job_id}] Clip {rank} sync: {'; '.join(v['issues'])}")
+            else:
+                logger.info(f"[{job_id}] Subtitle sync VERIFIED: all {len(sync_results)} clips OK")
+        except Exception as e:
+            logger.debug(f"[{job_id}] Subtitle sync verification skipped: {e}")
+
     def _best_clip_path(self, output_dir: str, rank: int, reframe_data: dict) -> str:
         """Get the best available clip path (reframed > broll > hooked > base)."""
         candidates = [
