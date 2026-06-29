@@ -165,6 +165,8 @@ class HighlightAnalyzer:
         # Truncate transcript to fit within TPM limit (~8K tokens input max)
         max_input_chars = 24000  # ~8K tokens × 3 chars/token
         prompt = self._build_prompt(transcript, video_duration, max_clips, max_chars=max_input_chars)
+
+        for attempt in range(3):
             try:
                 # Capture variables explicitly to avoid late-binding issues
                 def _groq_call(m=groq_model, p=prompt):
