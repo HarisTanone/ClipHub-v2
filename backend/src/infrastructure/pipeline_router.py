@@ -24,21 +24,26 @@ class PipelineRouter:
         """
         # Global kill switch
         if not settings.V2_PIPELINE_ENABLED:
+            logger.info(f"pipeline_router: V2 disabled globally → V1")
             return False
 
         # Superadmin checks own pipeline_override preference
         if is_superadmin:
             override = self._get_superadmin_override(user_id)
             if override == "v2":
+                logger.info(f"pipeline_router: superadmin override=v2 → V2")
                 return True
+            logger.info(f"pipeline_router: superadmin (no override) → V1")
             return False  # Default V1 for superadmin
 
         # Check is_premium flag on user
         is_premium = self._check_user_premium(user_id)
         if is_premium:
+            logger.info(f"pipeline_router: user {user_id} is premium → V1")
             return False
 
         # Not premium → use V2
+        logger.info(f"pipeline_router: user {user_id} not premium → V2")
         return True
 
     def get_pipeline_version(self, user_id: int, is_superadmin: bool = False) -> str:
@@ -97,11 +102,15 @@ class PipelineRouter:
                 )
                 result = cur.fetchone()
                 if result is None:
+                    logger.info(f"pipeline_router: user {user_id} not found in DB → not premium")
                     return False
-                return bool(result["is_premium"])
+                is_premium = bool(result["is_premium"])
+                logger.info(f"pipeline_router: user {user_id} is_premium={is_premium}")
+                return is_premium
             finally:
                 conn.close()
         except Exception as e:
-            # If DB check fails, default to V1 (safe fallback)
-            logger.warning(f"pipeline_router: premium check failed for user {user_id}: {e}")
-            return True  # Assume premium (V1) on error
+            # If DB check fails, log clearly and default to NOT premium (V2)
+            # Changed from True→False: better to give free user V2 than crash
+            logger.error(f"pipeline_router: premium check FAILED for user {user_id}: {e}")
+            return False

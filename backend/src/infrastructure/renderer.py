@@ -14,21 +14,26 @@ class FFmpegRenderer(IRenderer):
         self, video_path: str, clip: Clip, output_path: str
     ) -> bool:
         """
-        Trim video segment menggunakan FFmpeg.
-        Hanya memotong video — subtitle dan hook overlay akan dihandle oleh Remotion.
+        Trim video segment menggunakan FFmpeg dengan PRECISE seeking.
+        Re-encodes video for exact frame alignment (critical for subtitle sync).
+        Audio copied precisely (unaffected by keyframe seek).
         """
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         duration = clip.end - clip.start
 
-        # Gunakan -ss sebelum -i untuk fast seeking, lalu -t untuk durasi
-        # Stream copy — tidak re-encode, sangat cepat
+        # -ss BEFORE -i = fast seek (to nearest keyframe)
+        # Then re-encode video from exact timestamp (not stream copy)
+        # This ensures subtitle timestamps match audio precisely
         cmd = [
             "ffmpeg",
             "-ss", str(clip.start),
             "-i", video_path,
             "-t", str(duration),
-            "-c", "copy",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "18",
+            "-c:a", "copy",
             "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart",
             "-y",
