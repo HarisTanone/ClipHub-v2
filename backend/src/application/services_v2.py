@@ -713,8 +713,9 @@ class V2PipelineService:
             stroke_width=int(subtitle_style_config.get("strokeWidth", subtitle_style_config.get("stroke_width", 3))),
             max_words_per_line=int(subtitle_style_config.get("maxWordsPerLine", subtitle_style_config.get("max_words_per_line", 3))),
             line_transition=subtitle_style_config.get("lineTransition", subtitle_style_config.get("line_transition", "word_pop")),
-            # KEY: subtitle starts AFTER hook (3 seconds)
-            start_offset=3.0,
+            # V2: words already have correct relative timestamps from full-video Whisper
+            # No offset needed — we filter out hook-period words instead
+            start_offset=0.0,
         )
 
         # Apply glow if enabled in custom config
@@ -740,16 +741,17 @@ class V2PipelineService:
             out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
             try:
                 if self._subtitle_renderer and words:
-                    # Filter words: only keep words that start AFTER hook (3s)
-                    # This prevents subtitle text from appearing during hook overlay
-                    filtered_words = [w for w in words if w.get("start", 0) >= 0.0]
+                    # V2: filter words during hook period (0-3s) — don't overlay with hook text
+                    # Words already have correct relative timestamps, no offset shift needed
+                    hook_duration = 3.0
+                    filtered_words = [w for w in words if w.get("start", 0) >= hook_duration]
                     
                     self._subtitle_renderer.render_subtitles(
                         video_path=in_path,
                         words=filtered_words,
                         style=sub_style,
                         output_path=out_path,
-                        start_offset=3.0,  # Subtitle starts after 3s hook
+                        start_offset=0.0,  # No shift — timestamps are already correct
                     )
                 else:
                     import shutil
