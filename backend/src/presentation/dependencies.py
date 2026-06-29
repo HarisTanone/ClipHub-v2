@@ -143,6 +143,15 @@ def get_v2_pipeline_service():
     sse_emitter = _safe_import(SSEProgressEmitter, "V2-SSEProgressEmitter")
     asset_fetcher = _safe_import(AssetFetcher, "V2-AssetFetcher")
 
+    # ─── Remotion Integration ─────────────────────────────────────────
+    from src.config import settings
+    remotion_adapter = None
+    if settings.USE_REMOTION:
+        from src.infrastructure.remotion_adapter import RemotionAdapter
+        remotion_adapter = _safe_import(RemotionAdapter, "V2-RemotionAdapter")
+        if remotion_adapter:
+            logger.info("[DI] V2 Remotion adapter enabled — render pipeline will use Remotion")
+
     return V2PipelineService(
         job_repo=JobRepository(),
         downloader=YouTubeDownloader(),
@@ -159,6 +168,8 @@ def get_v2_pipeline_service():
         sse_emitter=sse_emitter,
         overlap_detector=overlap_detector,
         resource_monitor=resource_monitor,
+        # Remotion integration
+        remotion_adapter=remotion_adapter,
     )
 
 

@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from src.infrastructure.overlap_detector import OverlapDetector
     from src.infrastructure.ffprobe_validator import FFprobeValidator
     from src.infrastructure.resource_monitor import ResourceMonitor
+    from src.domain.interfaces_remotion import IRemotionRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ class V2PipelineService:
         sse_emitter: Optional["SSEProgressEmitter"] = None,
         overlap_detector: Optional["OverlapDetector"] = None,
         resource_monitor: Optional["ResourceMonitor"] = None,
+        # ─── Remotion Integration ────────────────────────────────────
+        remotion_adapter: Optional["IRemotionRenderer"] = None,
     ):
         self._repo = job_repo
         self._downloader = downloader
@@ -99,6 +102,9 @@ class V2PipelineService:
         self._sse = sse_emitter
         self._overlap_detector = overlap_detector
         self._resource_monitor = resource_monitor
+
+        # Remotion
+        self._remotion_adapter = remotion_adapter
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -643,6 +649,85 @@ class V2PipelineService:
             f"sub_color={subtitle_style_config.get('color', 'N/A')}, "
             f"sub_highlight={subtitle_style_config.get('highlightColor', 'N/A')}"
         )
+
+        # ═══ Route to Remotion if enabled and server healthy ═══
+        use_remotion = False
+        if settings.USE_REMOTION and self._remotion_adapter:
+            try:
+                if await self._remotion_adapter.health_check():
+                    use_remotion = True
+                    logger.info(f"[{job_id}] Remotion server healthy — using Remotion for render")
+                else:
+                    # Try to start server
+                    started = await self._remotion_adapter.start_server()
+                    if started and await self._remotion_adapter.health_check():
+                        use_remotion = True
+                        logger.info(f"[{job_id}] Remotion server started — using Remotion for render")
+                    else:
+                        logger.warning(f"[{job_id}] Remotion unavailable — falling back to FFmpeg")
+            except Exception as e:
+                logger.warning(f"[{job_id}] Remotion health check failed: {e} — falling back to FFmpeg")
+
+        if use_remotion:
+            # ═══ Remotion Path — Single unified render (hook + subtitle) ═══
+            self._emit(job_id, 13, "remotion_render", "start")
+            await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
+
+            from src.domain.interfaces_remotion import RemotionRenderConfig
+
+            render_config = RemotionRenderConfig(
+                concurrency=settings.REMOTION_CONCURRENCY,
+                quality=settings.REMOTION_QUALITY,
+                enable_threejs=settings.REMOTION_ENABLE_THREEJS,
+                enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
+            )
+
+            for clip in clips:
+                if not trim_results.get(clip.rank):
+                    continue
+
+                in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
+                out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+
+                clip_words = clips_with_words.get(clip.rank, [])
+                clip_hook = clip.hook or ""
+                hook_style = hook_style_config.get("animation", "") or creative_direction.hook_animation or "fade_scale"
+
+                # Build creative direction dict with style configs
+                cd_dict = asdict(creative_direction) if creative_direction else {}
+                if hook_style_config:
+                    cd_dict["hook_style_config"] = hook_style_config
+                if subtitle_style_config:
+                    cd_dict["subtitle_style_config"] = subtitle_style_config
+
+                try:
+                    result = await self._remotion_adapter.render_clip(
+                        scene_graph={"clip_rank": clip.rank, "duration": clip.end - clip.start, "layers": []},
+                        creative_direction=cd_dict,
+                        video_path=in_path,
+                        output_path=out_path,
+                        clip_rank=clip.rank,
+                        config=render_config,
+                        words=clip_words,
+                        hook_text=clip_hook,
+                        hook_style=hook_style,
+                    )
+                    if result.success:
+                        logger.info(f"[{job_id}] Remotion rendered clip {clip.rank} ({result.render_time_seconds:.1f}s)")
+                    else:
+                        logger.error(f"[{job_id}] Remotion failed clip {clip.rank}: {result.error_message}")
+                        # Fallback: copy base clip
+                        import shutil
+                        if os.path.exists(in_path) and not os.path.exists(out_path):
+                            shutil.copy2(in_path, out_path)
+                except Exception as e:
+                    logger.exception(f"[{job_id}] Remotion error clip {clip.rank}: {e}")
+                    import shutil
+                    if os.path.exists(in_path) and not os.path.exists(out_path):
+                        shutil.copy2(in_path, out_path)
+
+            self._emit(job_id, 14, "remotion_render", "complete")
+            return  # Skip FFmpeg rendering below
 
         # ─── B-Roll Asset Fetching ─────────────────────────────────────
         if job.broll_enabled and self._asset_fetcher:
