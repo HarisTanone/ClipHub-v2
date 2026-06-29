@@ -178,13 +178,15 @@ def test_full_pipeline_happy_path():
     """Full V2 pipeline with all components mocked."""
     svc = make_mock_service()
 
-    # Mock V2 components
+    # Mock V2 components — now uses LocalTranscriber + OllamaAnalyzer internally
     mock_transcript = TranscriptResult(
-        segments=[TranscriptSegment(text="Hello world", start=0.0, end=5.0)],
-        source="youtube_api", language="id", total_duration=300.0,
+        segments=[TranscriptSegment(text="Hello world", start=50.0, end=55.0)],
+        source="faster_whisper_local", language="id", total_duration=300.0,
     )
-    svc._transcriber = AsyncMock()
-    svc._transcriber.transcribe = AsyncMock(return_value=mock_transcript)
+    raw_whisper_segments = [{"start": 50.0, "end": 55.0, "text": "Hello world", "words": [
+        {"word": "Hello", "start": 52.0, "end": 52.5},
+        {"word": "world", "start": 53.0, "end": 53.5},
+    ]}]
 
     mock_analysis = HighlightAnalysisResult(
         clips=[HighlightCandidate(rank=1, start=50.0, end=110.0, score=85,

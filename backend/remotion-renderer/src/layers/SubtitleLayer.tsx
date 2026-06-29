@@ -1,15 +1,15 @@
 /**
  * SubtitleLayer — Enhanced with official Remotion techniques:
- * - createTikTokStyleCaptions for optimal word grouping
- * - fitText for responsive font sizing
  * - makeTransform for composable animations
  * - paintOrder: "stroke" for clean text outlines
  * - spring() for smooth enter animations
+ * - User's configured fontSize is always respected (no fitText shrinking)
+ * - hexToRgba for reliable background opacity
  */
 import React, { useMemo } from "react";
 import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig, interpolate, spring } from "remotion";
 import { makeTransform, scale, translateY } from "@remotion/animation-utils";
-import { fitText } from "@remotion/layout-utils";
+import { hexToRgba } from "../utils/hexToRgba";
 import type { Word } from "../types";
 
 interface SubtitleConfig {
@@ -66,15 +66,13 @@ interface SubtitleLayerProps {
   words: Word[];
   config: SubtitleConfig;
   fps: number;
-  startOffset?: number;
 }
 
 /**
  * Enhanced subtitle layer — uses manual word grouping for reliability,
  * spring animations, and fitText for responsive sizing.
  */
-export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps, startOffset = 0 }) => {
-  const { width } = useVideoConfig();
+export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps }) => {
 
   const fontFamily = config.fontFamily === "monospace" ? "monospace" : `'${config.fontFamily || "Poppins"}', sans-serif`;
   const fontSize = config.fontSize || 34;
@@ -117,8 +115,8 @@ export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps
     <AbsoluteFill>
       {pages.map((page, index) => {
         const nextPage = pages[index + 1] ?? null;
-        const startFrame = Math.round(((page.startMs / 1000) + startOffset) * fps);
-        const endFrame = Math.round(((page.endMs / 1000) + startOffset) * fps) + 3; // +3 frames buffer
+        const startFrame = Math.round((page.startMs / 1000) * fps);
+        const endFrame = Math.round((page.endMs / 1000) * fps) + 3; // +3 frames buffer
         const durationInFrames = endFrame - startFrame;
         if (durationInFrames <= 0) return null;
 
@@ -132,8 +130,6 @@ export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps
               color={color}
               highlightColor={highlightColor}
               positionY={positionY}
-              viewportWidth={width}
-              startOffset={startOffset}
             />
           </Sequence>
         );
@@ -151,8 +147,6 @@ function SubtitlePage({
   color,
   highlightColor,
   positionY,
-  viewportWidth,
-  startOffset,
 }: {
   page: any;
   config: SubtitleConfig;
@@ -161,8 +155,6 @@ function SubtitlePage({
   color: string;
   highlightColor: string;
   positionY: number;
-  viewportWidth: number;
-  startOffset: number;
 }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -186,21 +178,10 @@ function SubtitlePage({
     translateY(interpolate(enter, [0, 1], [animStyle === "slide" ? 20 : 8, 0])),
   ]);
 
-  // fitText: auto-resize if text is too long for viewport
-  const pageText = page.tokens?.map((t: any) => t.text).join("") || "";
-  const textForFit = config.uppercase ? pageText.toUpperCase() : pageText;
-  let responsiveFontSize = fontSize;
-  try {
-    const fitted = fitText({
-      fontFamily: config.fontFamily || "Poppins",
-      text: textForFit || "placeholder",
-      withinWidth: viewportWidth * 0.85,
-    });
-    responsiveFontSize = Math.min(fontSize, fitted.fontSize);
-  } catch {
-    // fitText may fail in headless — use fontSize directly
-    responsiveFontSize = fontSize;
-  }
+  // Use user's configured fontSize directly — user's preference is king.
+  // fitText is NOT used to shrink below the user's configured value.
+  // CSS word wrapping handles overflow instead of font shrinking.
+  const responsiveFontSize = fontSize;
 
   // Fade opacity
   const opacity = interpolate(frame, [0, 3], [0, 1], { extrapolateRight: "clamp" });
@@ -223,7 +204,7 @@ function SubtitlePage({
           gap: config.wordSpacing || 6,
           transform: enterTransform,
           ...(config.bgEnabled !== false ? {
-            backgroundColor: `${config.bgColor || "#000"}${Math.round((config.bgOpacity ?? 0.4) * 255).toString(16).padStart(2, "0")}`,
+            backgroundColor: hexToRgba(config.bgColor || "#000000", config.bgOpacity ?? 0.4),
             borderRadius: config.bgRadius || 8,
             padding: config.bgPadding || 12,
           } : {}),
@@ -287,7 +268,7 @@ function SubtitlePage({
                 {displayText}
               </span>
             );
-          }) || pageText}
+          }) || (page.tokens?.map((t: any) => t.text).join("") || "")}
         </div>
       </div>
     </AbsoluteFill>

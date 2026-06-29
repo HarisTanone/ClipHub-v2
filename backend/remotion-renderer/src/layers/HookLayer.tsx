@@ -1,7 +1,6 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, spring } from "remotion";
 import { makeTransform, scale as scaleFn, translateY as translateYFn } from "@remotion/animation-utils";
-import { fitText } from "@remotion/layout-utils";
 
 interface HookConfig {
   animation?: string;
@@ -41,6 +40,9 @@ interface HookConfig {
   boxOpacity?: number;
   boxPadding?: number;
   boxRadius?: number;
+  strokeEnabled?: boolean;
+  strokeWidth?: number;
+  strokeColor?: string;
   duration?: number;
   fadeIn?: number;
   fadeOut?: number;
@@ -169,8 +171,10 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
           textShadow: shadows.length ? shadows.join(", ") : undefined,
           textTransform: config.uppercase ? "uppercase" : "none",
           // paintOrder: stroke renders behind fill — cleaner outline
-          paintOrder: "stroke",
-          WebkitTextStroke: `${Math.max(2, fontSize * 0.04)}px rgba(0,0,0,0.8)`,
+          paintOrder: config.strokeEnabled !== false ? "stroke" : undefined,
+          WebkitTextStroke: config.strokeEnabled !== false
+            ? `${config.strokeWidth || Math.max(2, fontSize * 0.04)}px ${config.strokeColor || "rgba(0,0,0,0.8)"}`
+            : undefined,
           ...(config.boxEnabled ? {
             backgroundColor: `${config.boxColor || "#FFF"}${Math.round((config.boxOpacity || 0.1) * 255).toString(16).padStart(2, "0")}`,
             padding: config.boxPadding || 20,
