@@ -162,8 +162,10 @@ ATURAN HOOK (SANGAT PENTING):
 - Contoh BAGUS: "Ternyata dia bohong selama ini...", "Gue hampir mati karena ini"
 - Contoh BURUK: "Tips editing video", "Cara membuat konten" (terlalu generic)
 
-OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa komentar):
-{{"clips": [{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "hook text viral", "reason": "alasan singkat", "content_type": "storytelling", "speaker_energy": "high"}}]}}"""
+OUTPUT FORMAT — WAJIB RAW JSON SAJA. DILARANG menulis penjelasan, markdown, atau komentar apapun. Langsung mulai dengan karakter {{ :
+{{"clips": [{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "hook text viral", "reason": "alasan singkat", "content_type": "storytelling", "speaker_energy": "high"}}]}}
+
+INGAT: Output HARUS dimulai dengan {{ dan diakhiri dengan }}. Tidak ada teks lain."""
 
         raw = await self._call_ollama(prompt, timeout=1800.0)  # 30 min timeout for large transcripts on CPU
         return self._parse_chunk_response(raw, 0.0, video_duration)
@@ -349,8 +351,71 @@ OUTPUT HANYA JSON:"""
                 except json.JSONDecodeError:
                     pass
 
+        # ─── Fallback: parse MARKDOWN format (mistral-nemo often ignores JSON instruction)
+        # Pattern: "**Clip N (rank: X, score: Y)**\n- Start: 278.3s\n- End: 336.3s"
+        clips = self._parse_markdown_clips(raw_text)
+        if clips:
+            return {"clips": clips}
+
         logger.warning(f"ollama_analyzer: failed to parse JSON: {text[:300]}")
         return {}
+
+    def _parse_markdown_clips(self, text: str) -> list[dict]:
+        """Fallback parser for when Ollama returns markdown instead of JSON."""
+        import re
+        clips = []
+
+        # Pattern 1: "**Clip N (rank: X, score: Y)**" + "Start: 278.3s" + "End: 336.3s"
+        # Also handles: "- Start: 278.3s" or "Start: 278.3"
+        clip_pattern = re.compile(
+            r'\*\*Clip\s*\d+.*?(?:score[:\s]*(\d+))?\*\*'
+            r'.*?(?:Start|start)[:\s]*(\d+\.?\d*)s?'
+            r'.*?(?:End|end)[:\s]*(\d+\.?\d*)s?'
+            r'(?:.*?(?:Hook|hook)[:\s]*["\']?([^"\'\n]+))?',
+            re.DOTALL | re.IGNORECASE
+        )
+
+        for match in clip_pattern.finditer(text):
+            score = int(match.group(1)) if match.group(1) else 70
+            start = float(match.group(2))
+            end = float(match.group(3))
+            hook = (match.group(4) or "").strip()[:60]
+            if end > start and end - start >= 15:
+                clips.append({
+                    "rank": len(clips) + 1,
+                    "score": score,
+                    "start": start,
+                    "end": end,
+                    "hook": hook or f"Highlight #{len(clips) + 1}",
+                    "reason": "auto-detected from markdown",
+                    "content_type": "general",
+                    "speaker_energy": "medium",
+                })
+
+        # Pattern 2: simpler "Start: X, End: Y" or numbered list with timestamps
+        if not clips:
+            simple_pattern = re.compile(
+                r'(?:Start|start)[:\s]*(\d+\.?\d*)s?.*?(?:End|end)[:\s]*(\d+\.?\d*)s?',
+                re.IGNORECASE
+            )
+            for i, match in enumerate(simple_pattern.finditer(text)):
+                start = float(match.group(1))
+                end = float(match.group(2))
+                if end > start and end - start >= 15:
+                    clips.append({
+                        "rank": i + 1,
+                        "score": 70,
+                        "start": start,
+                        "end": end,
+                        "hook": f"Highlight #{i + 1}",
+                        "reason": "auto-detected",
+                        "content_type": "general",
+                        "speaker_energy": "medium",
+                    })
+
+        if clips:
+            logger.info(f"ollama_analyzer: parsed {len(clips)} clips from markdown fallback")
+        return clips
 
     # ─── Chunking & Ranking (same logic as before) ────────────────────────────
 
