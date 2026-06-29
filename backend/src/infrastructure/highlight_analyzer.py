@@ -158,12 +158,14 @@ class HighlightAnalyzer:
         """
         from groq import Groq, RateLimitError, APIConnectionError
 
-        # Free tier TPM limits: 8b=20K, 70b=12K. Use 8b for higher limit.
+        # Free tier TPM: 8b=6K, 70b=12K. Use 70b for higher limit.
         client = Groq(api_key=self._groq_key)
-        groq_model = settings.GROQ_LLM_MODEL or "llama-3.1-8b-instant"
+        groq_model = "llama-3.3-70b-versatile"
 
-        # Truncate transcript to fit within TPM limit (~8K tokens input max)
-        max_input_chars = 24000  # ~8K tokens × 3 chars/token
+        # Truncate to fit within 12K TPM (70b model)
+        # Indonesian text: ~1.5-2 chars/token. Use 10K chars ≈ 5-6K tokens
+        # + system prompt + output buffer = within 12K
+        max_input_chars = 10000
         prompt = self._build_prompt(transcript, video_duration, max_clips, max_chars=max_input_chars)
 
         for attempt in range(3):
