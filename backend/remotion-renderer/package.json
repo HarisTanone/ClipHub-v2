@@ -8,8 +8,8 @@
     "render": "npx remotion render ClipComposition",
     "server": "tsx src/server/index.ts",
     "server:dev": "tsx watch src/server/index.ts",
-    "test": "npx vitest run",
-    "test:watch": "npx vitest"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@remotion/animation-utils": "^4.0.242",
