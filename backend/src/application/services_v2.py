@@ -245,7 +245,7 @@ class V2PipelineService:
             # ═══ Step 4: LLM Highlight Analysis (Ollama LOCAL) ═══
             cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
             if cached_analysis:
-                from src.domain.entities import HighlightCandidate
+                from src.domain.entities import HighlightCandidate, HighlightAnalysisResult
                 analysis_result = HighlightAnalysisResult(
                     clips=[HighlightCandidate(**c) for c in cached_analysis["clips"]],
                     creative_direction=cached_analysis.get("creative_direction", {}),
