@@ -718,6 +718,8 @@ class V2PipelineService:
             # V2: words already have correct relative timestamps from full-video Whisper
             # No offset needed — we filter out hook-period words instead
             start_offset=0.0,
+            # Groq Whisper turbo timestamps are ~1s early — compensate
+            timing_offset=1.0,
         )
 
         # Apply glow if enabled in custom config
