@@ -124,8 +124,8 @@ class SubtitleRenderer(ISubtitleRenderer):
                 f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
             )
 
-            # Karaoke highlight: re-render full line in highlight color during each word's time
-            # This avoids x-position overlap bugs from per-word rendering
+            # Word highlighting: render active word at SAME position (no separate line above)
+            # Uses per-word overlay in highlight color during active word time
             if config.highlight_color and config.highlight_color != config.color:
                 for w in line:
                     w_start = w["start"] + offset + timing_adj
@@ -133,14 +133,16 @@ class SubtitleRenderer(ISubtitleRenderer):
                     word_text = self._apply_text_case(w["word"], config)
                     escaped_word = self._escape_drawtext(word_text)
 
-                    # Render ONLY the active word in highlight color ABOVE the base line
+                    # Render active word at SAME y-position, centered horizontally
+                    # This overlays on top of the base line at the same vertical position
                     filter_parts.append(
                         f"drawtext=text='{escaped_word}'"
-                        f":fontsize={int(config.font_size * 1.1)}"
+                        f":fontsize={int(config.font_size * 1.15)}"
                         f"{font_file_opt}"
                         f":fontcolor={config.highlight_color}"
-                        f":borderw={config.stroke_width}:bordercolor={config.stroke_color}"
-                        f":x=(w-text_w)/2:y={y_pos}-{config.font_size + 10}"
+                        f":borderw={config.stroke_width + 1}:bordercolor={config.stroke_color}"
+                        f":shadowx={config.shadow_x}:shadowy={config.shadow_y}:shadowcolor={config.shadow_color}"
+                        f":x=(w-text_w)/2:y={y_pos}"
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                     )
 
@@ -405,8 +407,8 @@ class SubtitleRenderer(ISubtitleRenderer):
                 f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
             )
 
-            # Layer 2: Active word highlight — show ABOVE base line (centered independently)
-            # This avoids the broken x-position calculation with text_w
+            # Layer 2: Active word highlight — overlay at SAME position as base line
+            # Renders on top of base text for in-place color switching
             if emphasis_color and emphasis_color != normal_color:
                 for w_idx, w in enumerate(line):
                     w_start = w["start"] + start_offset
@@ -418,7 +420,7 @@ class SubtitleRenderer(ISubtitleRenderer):
 
                     if is_emphasis:
                         lines_since_emphasis = 0
-                        # Emphasis keyword: glow + bigger, ABOVE base line
+                        # Emphasis keyword: glow + bigger, at SAME position as base line
                         if glow_enabled:
                             filter_parts.append(
                                 f"drawtext=text='{escaped_word}'"
@@ -426,7 +428,7 @@ class SubtitleRenderer(ISubtitleRenderer):
                                 f"{font_opt}"
                                 f":fontcolor={emphasis_color}@0.4"
                                 f":borderw=8:bordercolor={emphasis_color}@0.2"
-                                f":x=(w-text_w)/2:y={y_pos}-{normal_font_size + 14}"
+                                f":x=(w-text_w)/2:y={y_pos}"
                                 f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                             )
                         filter_parts.append(
@@ -435,18 +437,18 @@ class SubtitleRenderer(ISubtitleRenderer):
                             f"{font_opt}"
                             f":fontcolor={emphasis_color}"
                             f":borderw=1:bordercolor=black@0.5"
-                            f":x=(w-text_w)/2:y={y_pos}-{normal_font_size + 14}"
+                            f":x=(w-text_w)/2:y={y_pos}"
                             f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                         )
                     else:
-                        # Normal active word: highlight color, ABOVE base line
+                        # Normal active word: highlight color, at SAME position as base line
                         filter_parts.append(
                             f"drawtext=text='{escaped_word}'"
                             f":fontsize={normal_font_size + 4}"
                             f"{font_opt}"
                             f":fontcolor={emphasis_color}"
                             f":borderw=1:bordercolor=black@0.5"
-                            f":x=(w-text_w)/2:y={y_pos}-{normal_font_size + 14}"
+                            f":x=(w-text_w)/2:y={y_pos}"
                             f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                         )
 
