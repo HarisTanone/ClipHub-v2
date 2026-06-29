@@ -107,17 +107,11 @@ class SubtitleRenderer(ISubtitleRenderer):
 
             escaped_line = self._escape_drawtext(line_text)
 
-            # Background box behind text for readability
-            if config.background_opacity > 0:
-                filter_parts.append(
-                    f"drawbox="
-                    f"x=(w-text_w)/2-10:y={y_pos}-5"
-                    f":w=text_w+20:h=text_h+10"
-                    f":color=black@{config.background_opacity}:t=fill"
-                    f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
-                )
+            # Background: use drawtext box option (drawbox can't access text_w)
+            # Box is added directly to the base text drawtext filter below
 
             # Base line text (normal color - all words shown together)
+            box_opt = f":box=1:boxcolor=black@{config.background_opacity}:boxborderw=8" if config.background_opacity > 0 else ""
             filter_parts.append(
                 f"drawtext=text='{escaped_line}'"
                 f":fontsize={config.font_size}"
@@ -125,6 +119,7 @@ class SubtitleRenderer(ISubtitleRenderer):
                 f":fontcolor={config.color}"
                 f":borderw={config.stroke_width}:bordercolor={config.stroke_color}"
                 f":shadowx={config.shadow_x}:shadowy={config.shadow_y}:shadowcolor={config.shadow_color}"
+                f"{box_opt}"
                 f":x={config.position_x}:y={y_pos}"
                 f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
             )
