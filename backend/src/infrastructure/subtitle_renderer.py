@@ -124,51 +124,23 @@ class SubtitleRenderer(ISubtitleRenderer):
                 f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
             )
 
-            # Highlight active word: render each word individually in highlight_color
-            # during its active time, positioned at the correct x offset
+            # Karaoke highlight: re-render full line in highlight color during each word's time
+            # This avoids x-position overlap bugs from per-word rendering
             if config.highlight_color and config.highlight_color != config.color:
-                x_offset_chars = 0
-                for w_idx, w in enumerate(line):
-                    word_text = self._apply_text_case(w["word"], config)
-
+                for w in line:
                     w_start = w["start"] + offset + timing_adj
                     w_end = w["end"] + offset + timing_adj
-
-                    # Calculate x position: approximate char width
-                    # Use tw (text_width) calculation based on preceding text
-                    if w_idx == 0:
-                        # First word: same x as line
-                        prefix_text = ""
-                    else:
-                        prefix_words = [wd["word"] for wd in line[:w_idx]]
-                        prefix_words = [self._apply_text_case(pw, config) for pw in prefix_words]
-                        prefix_text = " ".join(prefix_words) + " "
-
+                    word_text = self._apply_text_case(w["word"], config)
                     escaped_word = self._escape_drawtext(word_text)
-                    escaped_prefix = self._escape_drawtext(prefix_text) if prefix_text else ""
 
-                    # x position = line_center_x + width_of_prefix
-                    # We use text_w of the full line to center, then offset by prefix width
-                    # Simpler: render highlighted word with x calculated from prefix
-                    if prefix_text:
-                        # Use FFmpeg text_w to calculate position dynamically is complex
-                        # Instead, use approximate pixel offset based on char count
-                        avg_char_width = config.font_size * 0.55  # approximate
-                        x_px = int(len(prefix_text) * avg_char_width)
-                        # Relative to line start position
-                        x_expr = f"(w-text_w)/2+{x_px}"
-                    else:
-                        x_expr = config.position_x
-
-                    # Draw highlighted word on top during its active time
+                    # Render ONLY the active word in highlight color ABOVE the base line
                     filter_parts.append(
                         f"drawtext=text='{escaped_word}'"
-                        f":fontsize={config.font_size}"
+                        f":fontsize={int(config.font_size * 1.1)}"
                         f"{font_file_opt}"
                         f":fontcolor={config.highlight_color}"
                         f":borderw={config.stroke_width}:bordercolor={config.stroke_color}"
-                        f":shadowx={config.shadow_x}:shadowy={config.shadow_y}:shadowcolor={config.shadow_color}"
-                        f":x={x_expr}:y={y_pos}"
+                        f":x=(w-text_w)/2:y={y_pos}-{config.font_size + 10}"
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                     )
 
