@@ -383,115 +383,123 @@ class SubtitleRenderer(ISubtitleRenderer):
         font_family: str = "Montserrat",
         glow_enabled: bool = True,
     ) -> str:
-        """Render emphasis-style subtitles: mostly NORMAL text, with occasional BIG keyword.
+        """Render emphasis-style subtitles — karaoke with occasional keyword glow.
 
         Design:
-        - Most lines: uniform small text (normal karaoke style)
-        - Every 3rd-4th line: if a truly important keyword exists, render it BIG
-        - This creates visual rhythm: small-small-BIG-small-small-BIG
-        
-        Keyword selection: longest non-stop-word with >4 chars.
-        If no word qualifies, render entire line as normal.
+        - ALL text at FIXED BOTTOM position (never jumps)
+        - Normal: white text with stroke (same as regular karaoke)
+        - Active word: colored (highlight_color)
+        - Emphasis keyword (every 3rd line): colored + GLOW effect
+        - Position NEVER changes — no split between top/bottom
         """
         if not os.path.exists(video_path):
             return video_path
         if not words:
             return video_path
 
-        # Group words into lines (3-4 words per line)
+        # Group into lines
         lines = self._group_words_into_lines(words, max_per_line=3)
         if not lines:
             return video_path
 
-        # Resolve fonts
-        font_bold = self._resolve_font(font_family, "Bold")
-        font_extrabold = self._resolve_font(font_family, "ExtraBold") or font_bold
-        font_opt_normal = f":fontfile={font_bold}" if font_bold else ""
-        font_opt_emphasis = f":fontfile={font_extrabold}" if font_extrabold else ""
+        font_path = self._resolve_font(font_family, "Bold")
+        font_opt = f":fontfile={font_path}" if font_path else ""
+        y_pos = "h-text_h-120"  # Fixed bottom position, NEVER changes
 
         filter_parts = []
-        emphasis_y = "(h*0.55)"
-        normal_y = f"({emphasis_y}-{emphasis_font_size}-10)"
-        # Normal-only position (centered, for lines without emphasis)
-        normal_center_y = "(h*0.75)"
-
-        emphasis_interval = 3  # Only emphasize every Nth line
+        emphasis_interval = 3
         lines_since_emphasis = 0
 
-        for line_idx, line in enumerate(lines):
+        for line in lines:
             line_start = line[0]["start"] + start_offset
             line_end = line[-1]["end"] + start_offset
+            line_text = " ".join(w["word"] for w in line)
+            escaped_line = self._escape_drawtext(line_text)
 
-            # Decide if this line gets emphasis treatment
             lines_since_emphasis += 1
+
+            # Detect if this line should have emphasis keyword
             emphasis_idx = self._detect_emphasis_word(line)
             emphasis_word = line[emphasis_idx]["word"] if emphasis_idx >= 0 else ""
-
-            # Only emphasize if: interval met AND word is meaningful (>4 chars)
             should_emphasize = (
                 lines_since_emphasis >= emphasis_interval
                 and len(emphasis_word) > 4
                 and emphasis_word.lower() not in self.STOP_WORDS
             )
 
-            if should_emphasize:
-                lines_since_emphasis = 0
-                normal_words = [w["word"] for i, w in enumerate(line) if i != emphasis_idx]
-                normal_text = " ".join(normal_words)
+            # Layer 1: Base line text (all words, normal color, stroke)
+            filter_parts.append(
+                f"drawtext=text='{escaped_line}'"
+                f":fontsize={normal_font_size + 4}"
+                f"{font_opt}"
+                f":fontcolor={normal_color}"
+                f":borderw=2:bordercolor=black@0.7"
+                f":x=(w-text_w)/2:y={y_pos}"
+                f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
+            )
 
-                escaped_emphasis = self._escape_drawtext(emphasis_word)
-                escaped_normal = self._escape_drawtext(normal_text)
+            # Layer 2: Active word highlight (karaoke style — color each word when spoken)
+            if emphasis_color and emphasis_color != normal_color:
+                x_offset_chars = 0
+                for w_idx, w in enumerate(line):
+                    w_start = w["start"] + start_offset
+                    w_end = w["end"] + start_offset
+                    word_text = w["word"]
+                    escaped_word = self._escape_drawtext(word_text)
 
-                # Glow: just 2 layers (reduced from 5 to stay under filter limit)
-                if glow_enabled:
-                    filter_parts.append(
-                        f"drawtext=text='{escaped_emphasis}'"
-                        f":fontsize={emphasis_font_size}"
-                        f"{font_opt_emphasis}"
-                        f":fontcolor={emphasis_color}@0.3"
-                        f":borderw=10:bordercolor={emphasis_color}@0.15"
-                        f":x=(w-text_w)/2:y={emphasis_y}"
-                        f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
-                    )
+                    # Calculate x position from prefix width
+                    if w_idx == 0:
+                        x_expr = f"(w-text_w)/2"
+                    else:
+                        prefix = " ".join(wd["word"] for wd in line[:w_idx]) + " "
+                        avg_char_width = (normal_font_size + 4) * 0.55
+                        x_px = int(len(prefix) * avg_char_width)
+                        x_expr = f"(w-text_w)/2+{x_px}"
 
-                # Main emphasis word (big, colored)
-                filter_parts.append(
-                    f"drawtext=text='{escaped_emphasis}'"
-                    f":fontsize={emphasis_font_size}"
-                    f"{font_opt_emphasis}"
-                    f":fontcolor={emphasis_color}"
-                    f":borderw=0"
-                    f":x=(w-text_w)/2:y={emphasis_y}"
-                    f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
-                )
+                    # Determine if THIS word is the emphasis keyword
+                    is_emphasis = should_emphasize and w_idx == emphasis_idx
 
-                # Small context words above
-                if normal_text.strip():
-                    filter_parts.append(
-                        f"drawtext=text='{escaped_normal}'"
-                        f":fontsize={normal_font_size}"
-                        f"{font_opt_normal}"
-                        f":fontcolor={normal_color}"
-                        f":borderw=0"
-                        f":x=(w-text_w)/2:y={normal_y}"
-                        f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
-                    )
-            else:
-                # Normal line: all words same size, no emphasis
-                line_text = " ".join(w["word"] for w in line)
-                escaped = self._escape_drawtext(line_text)
-                filter_parts.append(
-                    f"drawtext=text='{escaped}'"
-                    f":fontsize={normal_font_size + 6}"  # slightly larger than context
-                    f"{font_opt_normal}"
-                    f":fontcolor={normal_color}"
-                    f":borderw=2:bordercolor=black@0.6"
-                    f":x=(w-text_w)/2:y={normal_center_y}"
-                    f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
-                )
+                    if is_emphasis:
+                        lines_since_emphasis = 0
+                        # Emphasis: glow layer behind
+                        if glow_enabled:
+                            filter_parts.append(
+                                f"drawtext=text='{escaped_word}'"
+                                f":fontsize={normal_font_size + 4}"
+                                f"{font_opt}"
+                                f":fontcolor={emphasis_color}@0.4"
+                                f":borderw=8:bordercolor={emphasis_color}@0.2"
+                                f":x={x_expr}:y={y_pos}"
+                                f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
+                            )
+                        # Emphasis word: colored + bold
+                        filter_parts.append(
+                            f"drawtext=text='{escaped_word}'"
+                            f":fontsize={normal_font_size + 4}"
+                            f"{font_opt}"
+                            f":fontcolor={emphasis_color}"
+                            f":borderw=0"
+                            f":x={x_expr}:y={y_pos}"
+                            f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
+                        )
+                    else:
+                        # Normal active word: just colored (karaoke highlight)
+                        filter_parts.append(
+                            f"drawtext=text='{escaped_word}'"
+                            f":fontsize={normal_font_size + 4}"
+                            f"{font_opt}"
+                            f":fontcolor={emphasis_color}"
+                            f":borderw=0"
+                            f":x={x_expr}:y={y_pos}"
+                            f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
+                        )
 
         if not filter_parts:
             return video_path
+
+        # Safety: if too many filters, remove glow layers only
+        if len(filter_parts) > 200:
+            filter_parts = [f for f in filter_parts if "@0.4" not in f and "@0.2" not in f]
 
         filter_chain = ",".join(filter_parts)
 
