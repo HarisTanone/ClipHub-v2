@@ -152,21 +152,19 @@ class HighlightAnalyzer:
     async def _analyze_with_groq(
         self, transcript: TranscriptResult, video_duration: float, max_clips: int
     ) -> Optional[HighlightAnalysisResult]:
-        """Use Groq LLM API for highlight analysis (128K context, very fast)."""
+        """Use Groq LLM API for highlight analysis.
+        
+        Uses llama-3.1-8b-instant (20K TPM on free tier) with aggressive truncation.
+        """
         from groq import Groq, RateLimitError, APIConnectionError
 
-        prompt = self._build_prompt(transcript, video_duration, max_clips)
-
-        # Groq llama-3.3-70b has 128K context. Use //3 ratio for non-English safety.
-        estimated_tokens = len(prompt) // 3
-        if estimated_tokens > 120000:
-            logger.warning(f"highlight_analyzer: Groq input too large ({estimated_tokens} tokens), truncating")
-            prompt = self._build_prompt(transcript, video_duration, max_clips, max_chars=320000)
-
+        # Free tier TPM limits: 8b=20K, 70b=12K. Use 8b for higher limit.
         client = Groq(api_key=self._groq_key)
-        groq_model = settings.GROQ_LLM_FALLBACK_MODEL or "llama-3.3-70b-versatile"
+        groq_model = settings.GROQ_LLM_MODEL or "llama-3.1-8b-instant"
 
-        for attempt in range(3):
+        # Truncate transcript to fit within TPM limit (~8K tokens input max)
+        max_input_chars = 24000  # ~8K tokens × 3 chars/token
+        prompt = self._build_prompt(transcript, video_duration, max_clips, max_chars=max_input_chars)
             try:
                 # Capture variables explicitly to avoid late-binding issues
                 def _groq_call(m=groq_model, p=prompt):
