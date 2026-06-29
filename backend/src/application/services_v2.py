@@ -206,7 +206,7 @@ class V2PipelineService:
             # ═══ Step 3: Faster-Whisper Full Transcription (LOCAL) ═══
             cached_transcript = cache.load_transcript(video_id) if video_id else None
             if cached_transcript and cached_transcript.get("raw_segments"):
-                from src.domain.entities import TranscriptSegment
+                from src.domain.entities import TranscriptResult, TranscriptSegment
                 transcript_result = TranscriptResult(
                     segments=[TranscriptSegment(**s) for s in cached_transcript["segments"]],
                     source=cached_transcript.get("source", "cache"),
