@@ -92,10 +92,8 @@ export function Dashboard() {
         <StatCard icon={<Clock className="h-4 w-4" />} label="Total Jobs" value={stats.total} color="zinc" />
       </div>
 
-      {/* Model Status (compact) */}
-      <Card className="p-3 shrink-0">
-        <ModelStatusPanel />
-      </Card>
+      {/* Model Status (compact 4-col grid) */}
+      <ModelStatusPanel />
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap shrink-0">

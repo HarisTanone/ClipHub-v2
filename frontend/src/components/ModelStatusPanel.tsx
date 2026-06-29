@@ -37,81 +37,56 @@ export function ModelStatusPanel() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 py-4">
-        <div className="h-4 w-4 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
-        <span className="text-xs text-zinc-500">Loading models...</span>
+      <div className="flex items-center gap-2 py-2">
+        <div className="h-3 w-3 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
+        <span className="text-[10px] text-zinc-500">Loading...</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-        LLM Models Status
-        <span className="text-[10px] text-zinc-600 font-normal">(auto-refresh 10s)</span>
-      </h3>
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {modelList.map((model) => {
+        const colors = STATUS_COLORS[model.status] || STATUS_COLORS.error;
+        const usagePercent = model.requests_limit > 0
+          ? Math.min(100, (model.requests_today / model.requests_limit) * 100)
+          : 0;
 
-      <div className="grid gap-2">
-        {modelList.map((model) => {
-          const colors = STATUS_COLORS[model.status] || STATUS_COLORS.error;
-          const usagePercent = model.requests_limit > 0
-            ? Math.min(100, (model.requests_today / model.requests_limit) * 100)
-            : 0;
-
-          return (
-            <div
-              key={model.key}
-              className={`rounded-lg border border-zinc-800 p-3 ${colors.bg}`}
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-md bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400">
-                    {PROVIDER_ICONS[model.provider] || "?"}
-                  </span>
-                  <div>
-                    <p className="text-[11px] font-medium text-zinc-200">{model.name}</p>
-                    <p className="text-[9px] text-zinc-500">{model.purpose}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${colors.dot} ${model.status === "available" ? "animate-pulse" : ""}`} />
-                  <span className={`text-[10px] font-medium ${colors.text}`}>
-                    {model.status === "available" ? "Ready" :
-                     model.status === "rate_limited" ? `Wait ${model.cooldown_remaining}s` :
-                     model.status === "exhausted" ? "Exhausted" : "Error"}
-                  </span>
-                </div>
+        return (
+          <div
+            key={model.key}
+            className="rounded-lg border border-zinc-800 px-2.5 py-2 bg-zinc-900/50"
+          >
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded bg-zinc-800 flex items-center justify-center text-[9px] font-bold text-zinc-500">
+                  {PROVIDER_ICONS[model.provider] || "?"}
+                </span>
+                <span className="text-[10px] font-medium text-zinc-300 truncate max-w-[90px]">{model.name.split(" ").slice(0, 2).join(" ")}</span>
               </div>
-
-              {/* Usage bar */}
-              {model.requests_limit > 0 && (
-                <div className="mt-2">
-                  <div className="flex justify-between text-[9px] text-zinc-500 mb-0.5">
-                    <span>{model.requests_today}/{model.requests_limit} requests</span>
-                    {model.tokens_limit > 0 && (
-                      <span>{Math.round(model.tokens_used / 1000)}K/{Math.round(model.tokens_limit / 1000)}K tokens</span>
-                    )}
-                  </div>
-                  <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        usagePercent >= 90 ? "bg-red-500" :
+              <div className="flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 rounded-full ${colors.dot} ${model.status === "available" ? "animate-pulse" : ""}`} />
+              </div>
+            </div>
+            {/* Compact usage */}
+            {model.requests_limit > 0 ? (
+              <div>
+                <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${usagePercent >= 90 ? "bg-red-500" :
                         usagePercent >= 60 ? "bg-amber-500" : "bg-emerald-500"
                       }`}
-                      style={{ width: `${usagePercent}%` }}
-                    />
-                  </div>
+                    style={{ width: `${Math.max(2, usagePercent)}%` }}
+                  />
                 </div>
-              )}
-
-              {/* Error message */}
-              {model.last_error && model.status !== "available" && (
-                <p className="mt-1.5 text-[9px] text-red-400/70 truncate">{model.last_error}</p>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                <span className="text-[8px] text-zinc-600 mt-0.5 block">{model.requests_today}/{model.requests_limit}</span>
+              </div>
+            ) : (
+              <span className="text-[8px] text-zinc-600">unlimited</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
