@@ -270,8 +270,13 @@ OUTPUT HANYA JSON:"""
         self, raw_text: str, chunk_start: float, chunk_end: float
     ) -> list[HighlightCandidate]:
         """Parse Ollama response → list of candidates."""
+        if not raw_text or not raw_text.strip():
+            logger.warning("ollama_analyzer: empty response from Ollama")
+            return []
+
         data = self._parse_json_response(raw_text)
         if not data or "clips" not in data:
+            logger.warning(f"ollama_analyzer: no 'clips' in response (got {list(data.keys()) if data else 'empty'}), raw[:200]={raw_text[:200]}")
             return []
 
         candidates = []
@@ -281,14 +286,15 @@ OUTPUT HANYA JSON:"""
                 end = float(clip.get("end", 0))
                 score = int(clip.get("score", 50))
 
-                # Validate timestamps
+                # Validate timestamps (relaxed: allow 15s-180s clips)
                 if start < chunk_start - 5:
                     start = chunk_start
                 if end > chunk_end + 5:
                     end = chunk_end
 
                 duration = end - start
-                if duration < 30 or duration > 120:
+                if duration < 15 or duration > 180:
+                    logger.debug(f"ollama_analyzer: skipped clip {start:.1f}-{end:.1f} (duration={duration:.1f}s)")
                     continue
 
                 score = max(1, min(100, score))
@@ -309,7 +315,7 @@ OUTPUT HANYA JSON:"""
         return candidates
 
     def _parse_json_response(self, raw_text: str) -> dict:
-        """Parse JSON from Ollama response (tolerant of markdown fences)."""
+        """Parse JSON from Ollama response (tolerant of markdown fences + common LLM errors)."""
         text = raw_text.strip()
 
         # Remove markdown fences
@@ -320,20 +326,31 @@ OUTPUT HANYA JSON:"""
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             text = "\n".join(lines)
+        text = text.replace("```json", "").replace("```", "").strip()
 
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # Try to extract JSON object
-            start_idx = text.find("{")
-            end_idx = text.rfind("}") + 1
-            if start_idx >= 0 and end_idx > start_idx:
+            pass
+
+        # Try to extract JSON object
+        start_idx = text.find("{")
+        end_idx = text.rfind("}") + 1
+        if start_idx >= 0 and end_idx > start_idx:
+            json_str = text[start_idx:end_idx]
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                # Fix trailing commas
+                import re
+                fixed = re.sub(r',\s*([}\]])', r'\1', json_str)
                 try:
-                    return json.loads(text[start_idx:end_idx])
+                    return json.loads(fixed)
                 except json.JSONDecodeError:
                     pass
-            logger.warning(f"ollama_analyzer: failed to parse JSON: {text[:200]}")
-            return {}
+
+        logger.warning(f"ollama_analyzer: failed to parse JSON: {text[:300]}")
+        return {}
 
     # ─── Chunking & Ranking (same logic as before) ────────────────────────────
 
