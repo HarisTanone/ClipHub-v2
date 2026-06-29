@@ -226,3 +226,16 @@ async def get_system_info(user: CurrentUser = Depends(get_current_user)):
             asset_fetch_enabled=settings.ASSET_FETCH_ENABLED,
         ).model_dump(),
     }
+
+
+# ─── Model Status Endpoint ────────────────────────────────────────────────────
+
+@router.get("/models")
+async def get_model_status(user: CurrentUser = Depends(get_current_user)):
+    """Get real-time status of all LLM/API models used in pipeline."""
+    from src.infrastructure.model_status import ModelStatusTracker
+    tracker = ModelStatusTracker()
+    return {
+        "success": True,
+        "models": tracker.get_all_status(),
+    }

@@ -42,34 +42,47 @@ class HighlightAnalyzer:
         """Analyze transcript for viral clips using best available LLM.
         
         Chain: Gemini → Groq LLM → Ollama (local)
+        Skips models that are currently rate-limited.
         """
+        from src.infrastructure.model_status import ModelStatusTracker
+        tracker = ModelStatusTracker()
         errors = []
 
         # ─── 1. Try Gemini (primary — 1M context, very fast) ─────────
-        if self._gemini_keys:
+        if self._gemini_keys and tracker.is_available("gemini"):
             try:
                 logger.info("highlight_analyzer: trying Gemini (primary)")
                 result = await self._analyze_with_gemini(transcript, video_duration, max_clips)
                 if result and result.clips:
                     logger.info(f"highlight_analyzer: Gemini success — {len(result.clips)} clips")
+                    tracker.mark_success("gemini")
                     return result
                 logger.warning("highlight_analyzer: Gemini returned empty result")
             except Exception as e:
                 errors.append(f"Gemini: {e}")
                 logger.warning(f"highlight_analyzer: Gemini failed: {e}")
+                if "429" in str(e) or "quota" in str(e).lower():
+                    tracker.mark_exhausted("gemini", str(e)[:200])
+                else:
+                    tracker.mark_error("gemini", str(e)[:200])
 
         # ─── 2. Try Groq LLM (fast, 128K context) ────────────────────
-        if self._groq_key:
+        if self._groq_key and tracker.is_available("groq_llm"):
             try:
                 logger.info("highlight_analyzer: trying Groq LLM (fallback 1)")
                 result = await self._analyze_with_groq(transcript, video_duration, max_clips)
                 if result and result.clips:
                     logger.info(f"highlight_analyzer: Groq LLM success — {len(result.clips)} clips")
+                    tracker.mark_success("groq_llm")
                     return result
                 logger.warning("highlight_analyzer: Groq LLM returned empty result")
             except Exception as e:
                 errors.append(f"Groq: {e}")
                 logger.warning(f"highlight_analyzer: Groq LLM failed: {e}")
+                if "413" in str(e) or "429" in str(e) or "rate" in str(e).lower():
+                    tracker.mark_rate_limited("groq_llm", 60, str(e)[:200])
+                else:
+                    tracker.mark_error("groq_llm", str(e)[:200])
 
         # ─── 3. Ollama local (last resort — slow but guaranteed) ──────
         try:
@@ -79,10 +92,12 @@ class HighlightAnalyzer:
             result = await analyzer.analyze_highlights(transcript, video_duration, max_clips)
             if result and result.clips:
                 logger.info(f"highlight_analyzer: Ollama success — {len(result.clips)} clips")
+                tracker.mark_success("ollama")
                 return result
         except Exception as e:
             errors.append(f"Ollama: {e}")
             logger.error(f"highlight_analyzer: Ollama failed: {e}")
+            tracker.mark_error("ollama", str(e)[:200])
 
         # All failed
         raise HighlightAnalyzerError(

@@ -3,6 +3,7 @@ import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shi
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ModelStatusPanel } from "@/components/ModelStatusPanel";
 import { Input, Select } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -253,6 +254,11 @@ export function Settings() {
                 </Button>
               </Card>
             )}
+
+            {/* Model Status Panel */}
+            <Card className="p-4 lg:col-span-2">
+              <ModelStatusPanel />
+            </Card>
           </div>
         )}
 

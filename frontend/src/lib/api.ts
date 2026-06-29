@@ -470,3 +470,28 @@ export const storage = {
 };
 
 export { getToken, setTokens, clearTokens, API_BASE };
+
+// ─── Models Status API ───────────────────────────────────────────────────────
+
+export interface ModelStatus {
+  key: string;
+  name: string;
+  provider: string;
+  purpose: string;
+  status: "available" | "rate_limited" | "error" | "exhausted";
+  last_error: string;
+  cooldown_remaining: number;
+  requests_today: number;
+  requests_limit: number;
+  tokens_used: number;
+  tokens_limit: number;
+  last_success: number | null;
+  last_failure: number | null;
+}
+
+export const models = {
+  async getStatus(): Promise<ModelStatus[]> {
+    const res = await request<{ success: boolean; models: ModelStatus[] }>("/api/settings/models");
+    return res.models;
+  },
+};
