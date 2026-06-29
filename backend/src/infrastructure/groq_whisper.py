@@ -129,10 +129,18 @@ class GroqWhisperTranscriber:
 
     async def _transcribe_single(self, flac_path: str, language: str) -> list[dict]:
         """Send single file to Groq API and get word-level transcription."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._call_groq_api, flac_path, language
-        )
+        loop = asyncio.get_running_loop()
+        # Dynamic timeout: 120s base + 1s per MB (large files take longer to upload)
+        file_size_mb = os.path.getsize(flac_path) / (1024 * 1024)
+        timeout = max(120, int(120 + file_size_mb * 2))
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, self._call_groq_api, flac_path, language),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"groq_whisper: single transcription timeout ({timeout}s)")
+            return []
 
     def _call_groq_api(self, audio_path: str, language: str) -> list[dict]:
         """Synchronous Groq API call with retry logic."""
