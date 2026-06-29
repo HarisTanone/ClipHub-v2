@@ -95,6 +95,12 @@ class GroqWhisperTranscriber:
                     f"groq_whisper: {len(segments)} segments, {total_words} words, "
                     f"model={self._model}"
                 )
+                # Track usage
+                try:
+                    from src.infrastructure.model_status import ModelStatusTracker
+                    ModelStatusTracker().mark_success("groq_whisper")
+                except Exception:
+                    pass
             return segments
 
         except Exception as e:

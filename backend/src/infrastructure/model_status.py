@@ -1,18 +1,14 @@
 """ModelStatusTracker — Track LLM/API model availability and rate limit state.
 
-Provides real-time status of all models used in the pipeline:
-- Gemini (4 keys)
-- Groq Whisper
-- Groq LLM
-- Ollama
-
-Tracks: availability, last error, cooldown timer, usage count.
-Exposed via /api/models/status endpoint.
+Persists usage counters to SQLite (survives restart).
+Provides real-time status of all models used in the pipeline.
 """
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,21 +17,21 @@ logger = logging.getLogger(__name__)
 class ModelState:
     """State of a single model/API."""
     name: str
-    provider: str  # "gemini", "groq", "ollama"
-    purpose: str  # "transcription", "analysis", "analysis_fallback"
-    status: str = "available"  # available, rate_limited, error, exhausted
+    provider: str
+    purpose: str
+    status: str = "available"
     last_error: str = ""
-    cooldown_until: float = 0  # unix timestamp when cooldown expires
+    cooldown_until: float = 0
     requests_today: int = 0
-    requests_limit: int = 0  # 0 = unlimited
+    requests_limit: int = 0
     tokens_used: int = 0
-    tokens_limit: int = 0  # 0 = unlimited
+    tokens_limit: int = 0
     last_success: float = 0
     last_failure: float = 0
 
 
 class ModelStatusTracker:
-    """Singleton tracker for all model states."""
+    """Singleton tracker for all model states. Persists to SQLite."""
 
     _instance: Optional["ModelStatusTracker"] = None
 
@@ -51,39 +47,103 @@ class ModelStatusTracker:
         self._initialized = True
         self._models: dict[str, ModelState] = {}
         self._init_models()
+        self._ensure_db_table()
+        self._load_from_db()
 
     def _init_models(self):
         """Initialize all tracked models."""
         self._models = {
             "gemini": ModelState(
-                name="Gemini 3.5 Flash",
-                provider="gemini",
-                purpose="analysis",
-                requests_limit=20,  # per day free tier
-                tokens_limit=1000000,
+                name="Gemini 3.5 Flash", provider="gemini", purpose="analysis",
+                requests_limit=20, tokens_limit=1000000,
             ),
             "groq_whisper": ModelState(
-                name="Groq Whisper Large V3 Turbo",
-                provider="groq",
-                purpose="transcription",
-                requests_limit=2000,  # per day
-                tokens_limit=0,  # no token limit for audio
+                name="Groq Whisper Large V3 Turbo", provider="groq", purpose="transcription",
+                requests_limit=2000, tokens_limit=0,
             ),
             "groq_llm": ModelState(
-                name="Groq LLama 3.3 70B",
-                provider="groq",
-                purpose="analysis_fallback",
-                requests_limit=30,  # per minute
-                tokens_limit=12000,  # TPM
+                name="Groq LLama 3.3 70B", provider="groq", purpose="analysis_fallback",
+                requests_limit=30, tokens_limit=12000,
             ),
             "ollama": ModelState(
-                name="Ollama Mistral Nemo 12B",
-                provider="ollama",
-                purpose="analysis_fallback",
-                requests_limit=0,  # unlimited (local)
-                tokens_limit=0,
+                name="Ollama Mistral Nemo 12B", provider="ollama", purpose="analysis_fallback",
+                requests_limit=0, tokens_limit=0,
             ),
         }
+
+    def _ensure_db_table(self):
+        """Create model_usage table if not exists."""
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            conn = get_dict_connection()
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS model_usage (
+                        model_key TEXT PRIMARY KEY,
+                        requests_today INTEGER DEFAULT 0,
+                        tokens_used INTEGER DEFAULT 0,
+                        last_success REAL DEFAULT 0,
+                        last_failure REAL DEFAULT 0,
+                        last_error TEXT DEFAULT '',
+                        status TEXT DEFAULT 'available',
+                        cooldown_until REAL DEFAULT 0,
+                        updated_date TEXT DEFAULT ''
+                    )
+                """)
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"model_status: db init failed (non-critical): {e}")
+
+    def _load_from_db(self):
+        """Load persisted usage counters from DB."""
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            import datetime
+            today = datetime.date.today().isoformat()
+            conn = get_dict_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM model_usage")
+                rows = cur.fetchall()
+                for row in rows:
+                    key = row["model_key"]
+                    if key in self._models:
+                        m = self._models[key]
+                        # Reset counters if date changed (new day)
+                        if row["updated_date"] == today:
+                            m.requests_today = row["requests_today"]
+                            m.tokens_used = row["tokens_used"]
+                        m.last_success = row["last_success"]
+                        m.last_failure = row["last_failure"]
+                        m.last_error = row["last_error"] or ""
+                        m.status = row["status"] or "available"
+                        m.cooldown_until = row["cooldown_until"]
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"model_status: db load failed (non-critical): {e}")
+
+    def _save_to_db(self, model_key: str):
+        """Persist model state to DB."""
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            import datetime
+            m = self._models[model_key]
+            today = datetime.date.today().isoformat()
+            conn = get_dict_connection()
+            try:
+                conn.execute("""
+                    INSERT OR REPLACE INTO model_usage 
+                    (model_key, requests_today, tokens_used, last_success, last_failure, last_error, status, cooldown_until, updated_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (model_key, m.requests_today, m.tokens_used, m.last_success, m.last_failure, m.last_error, m.status, m.cooldown_until, today))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"model_status: db save failed (non-critical): {e}")
 
     def mark_success(self, model_key: str, tokens_used: int = 0):
         """Mark model as successfully used."""
@@ -95,6 +155,7 @@ class ModelStatusTracker:
         m.requests_today += 1
         m.tokens_used += tokens_used
         m.last_error = ""
+        self._save_to_db(model_key)
 
     def mark_rate_limited(self, model_key: str, retry_after: float = 60, error_msg: str = ""):
         """Mark model as rate limited with cooldown."""
@@ -105,7 +166,7 @@ class ModelStatusTracker:
         m.cooldown_until = time.time() + retry_after
         m.last_failure = time.time()
         m.last_error = error_msg[:200]
-        logger.info(f"model_status: {model_key} rate limited for {retry_after:.0f}s")
+        self._save_to_db(model_key)
 
     def mark_exhausted(self, model_key: str, error_msg: str = ""):
         """Mark model as exhausted (daily quota hit)."""
@@ -115,9 +176,8 @@ class ModelStatusTracker:
         m.status = "exhausted"
         m.last_failure = time.time()
         m.last_error = error_msg[:200]
-        # Cooldown until end of current hour (quota usually resets hourly/daily)
         m.cooldown_until = time.time() + 3600
-        logger.info(f"model_status: {model_key} exhausted")
+        self._save_to_db(model_key)
 
     def mark_error(self, model_key: str, error_msg: str = ""):
         """Mark model as having an error."""
@@ -127,17 +187,18 @@ class ModelStatusTracker:
         m.status = "error"
         m.last_failure = time.time()
         m.last_error = error_msg[:200]
-        m.cooldown_until = time.time() + 30  # short cooldown on error
+        m.cooldown_until = time.time() + 30
+        self._save_to_db(model_key)
 
     def is_available(self, model_key: str) -> bool:
         """Check if model is currently available (not in cooldown)."""
         if model_key not in self._models:
             return True
         m = self._models[model_key]
-        # Auto-recover from cooldown
         if m.cooldown_until > 0 and time.time() >= m.cooldown_until:
             m.status = "available"
             m.cooldown_until = 0
+            self._save_to_db(model_key)
         return m.status == "available"
 
     def get_all_status(self) -> list[dict]:
@@ -145,7 +206,6 @@ class ModelStatusTracker:
         now = time.time()
         result = []
         for key, m in self._models.items():
-            # Auto-recover expired cooldowns
             if m.cooldown_until > 0 and now >= m.cooldown_until:
                 m.status = "available"
                 m.cooldown_until = 0
@@ -168,12 +228,3 @@ class ModelStatusTracker:
                 "last_failure": round(m.last_failure) if m.last_failure else None,
             })
         return result
-
-    def reset_daily(self):
-        """Reset daily counters (call at midnight)."""
-        for m in self._models.values():
-            m.requests_today = 0
-            m.tokens_used = 0
-            if m.status == "exhausted":
-                m.status = "available"
-                m.cooldown_until = 0
