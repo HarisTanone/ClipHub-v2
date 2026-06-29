@@ -182,6 +182,10 @@ export function Dashboard() {
 
                     {/* Status + Delete */}
                     <div className="shrink-0 flex items-center gap-2">
+                      {/* Live progress for active jobs */}
+                      {job.status !== "completed" && job.status !== "failed" && job.status !== "timeout" && (
+                        <JobProgressIndicator jobId={job.job_id} />
+                      )}
                       <Badge variant="status" status={job.status} size="sm" dot>{job.status}</Badge>
                       {(job.status === "completed" || job.status === "failed" || job.status === "timeout") && (
                         <button
@@ -261,5 +265,68 @@ function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label:
         <span className={c.split(" ")[1]}>{icon}</span>
       </div>
     </Card>
+  );
+}
+
+// ─── Live Progress Indicator ─────────────────────────────────────────────────
+
+const STEP_LABELS: Record<string, string> = {
+  validate: "Validating",
+  download: "Downloading",
+  v2_transcript: "Transcribing",
+  transcript: "Transcribing",
+  v2_highlight_analysis: "AI Analyzing",
+  highlight_analysis: "AI Analyzing",
+  gemini_analysis: "AI Analyzing",
+  aspect_router: "Configuring",
+  trim: "Trimming Clips",
+  yolo_reframe: "Smart Framing",
+  v2_selective_whisper: "Word Sync",
+  whisper: "Word Sync",
+  v2_vad_refine: "Refining Cuts",
+  highlights: "Processing",
+  broll: "B-Roll",
+  hook_render: "Rendering Hook",
+  subtitle_render: "Subtitles",
+  encoding: "Encoding",
+  cdn_upload: "Uploading",
+  assemble: "Finalizing",
+};
+
+function JobProgressIndicator({ jobId }: { jobId: string }) {
+  const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const res = await jobs.getProgress(jobId);
+        if (cancelled) return;
+        const p = res.data.progress;
+        const label = STEP_LABELS[p.step_name || ""] || p.step_label || "Processing";
+        setProgress({ pct: p.percentage, label });
+      } catch {
+        // ignore
+      }
+    }
+
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [jobId]);
+
+  if (!progress) return null;
+
+  return (
+    <div className="flex items-center gap-2 mr-2">
+      <div className="w-20 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+          style={{ width: `${progress.pct}%` }}
+        />
+      </div>
+      <span className="text-[9px] text-zinc-400 whitespace-nowrap">{progress.label} {progress.pct}%</span>
+    </div>
   );
 }
