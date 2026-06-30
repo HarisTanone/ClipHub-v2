@@ -61,9 +61,14 @@ class YoloReframeEngine(IYoloReframeEngine):
             logger.error(f"yolo_reframe: input not found {video_path}")
             return {"output_path": video_path, "person_count": 0, "masks_available": False}
 
-        if target_aspect == "16:9":
-            shutil.copy2(video_path, output_path)
-            return {"output_path": output_path, "person_count": 0, "masks_available": False}
+        if target_aspect != "9:16":
+            # YOLO + autogrid only for 9:16 portrait. Others: simple passthrough or center crop.
+            if target_aspect == "1:1":
+                success = await self._center_crop_fallback(video_path, output_path, target_aspect)
+                return {"output_path": output_path if success else video_path, "person_count": 0, "masks_available": False}
+            else:
+                shutil.copy2(video_path, output_path)
+                return {"output_path": output_path, "person_count": 0, "masks_available": False}
 
         if self._load_model():
             try:
@@ -170,9 +175,9 @@ class YoloReframeEngine(IYoloReframeEngine):
             f"multi_speaker_ratio={multi_ratio:.2f}, autogrid={'auto' if is_multi_speaker else 'disabled'}"
         )
 
-        # Auto-split for multi-speaker podcast format
-        # Require strong evidence of 2 speakers: >70% of frames AND at least 5 samples
-        if (autogrid or is_multi_speaker) and multi_speaker_count >= 5:
+        # Autogrid ONLY when user explicitly enables it (no auto-detection)
+        # User must check the "Autogrid" toggle in frontend for this to activate
+        if autogrid and multi_speaker_count >= 5:
             return self._render_autogrid_smooth(
                 original_path, output_path, orig_width, orig_height, frame_centers
             )
@@ -251,7 +256,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             # Expression: smoothly pan from start_x to mid_x over first 3s, then stay
             # This avoids jerky movement — single smooth motion then stable
             # Minimum 3s pan for smooth transition (user requirement: no fast perpindahan)
-            pan_duration = max(3.0, min(5.0, total_dur * 0.3))  # 3-5s pan duration
+            pan_duration = max(3.0, total_dur * 0.3)  # Minimum 3s, no maximum cap
 
             # Ease-out cubic: starts fast, decelerates smoothly
             # Formula: start + (end-start) * (1 - (1 - t/dur)^3)
@@ -281,7 +286,13 @@ class YoloReframeEngine(IYoloReframeEngine):
         width: int, height: int,
         frame_centers: list,
     ) -> Optional[dict]:
-        """Render side-by-side grid for multi-speaker (podcast format)."""
+        """Render 2-grid split: top=left speaker, bottom=right speaker.
+        
+        Design principles:
+        - Each grid shows a DIFFERENT person (left vs right of frame)
+        - Minimal zoom — person should NOT be cut off
+        - Stable framing — use averaged position, no movement
+        """
         # Collect all centers, determine left vs right speakers
         all_centers = []
         for _, centers in frame_centers:
@@ -297,27 +308,37 @@ class YoloReframeEngine(IYoloReframeEngine):
         right_centers = centers_array[centers_array >= midpoint]
 
         if len(left_centers) < 2 or len(right_centers) < 2:
-            # Not clearly 2 speakers — use single center crop
             return None
 
         left_avg = np.mean(left_centers)
         right_avg = np.mean(right_centers)
 
-        # Each speaker: crop tighter (75% of height) centered on person's likely face area
-        # Then scale to half output. This creates a tighter, more engaging framing.
-        crop_h = int(height * 0.75)  # Crop 75% of height (upper portion where face is)
-        crop_y = 0  # Start from top (face area)
+        # Ensure the two crops are clearly showing DIFFERENT persons
+        # Minimum separation between left and right average position
+        if abs(right_avg - left_avg) < width * 0.2:
+            # Speakers too close together — not clearly 2 separate persons
+            logger.info(f"yolo_reframe: speakers too close ({abs(right_avg - left_avg):.0f}px < {width * 0.2:.0f}px), skipping grid")
+            return None
 
-        crop_w_person = int(crop_h * 9 / 16)  # 9:16 ratio per person
-        half_h = 960  # Each speaker gets 1080x960
+        # Each speaker: use FULL height (no aggressive zoom — avoid cutting off person)
+        # Crop width = height * 9/16 (standard 9:16 from full height)
+        crop_w_person = int(height * 9 / 16)
+        half_h = 960  # Each speaker gets 1080x960 in output
 
+        # Center crop on each person — use full height, person stays centered
         left_x = int(max(0, min(width - crop_w_person, left_avg - crop_w_person / 2)))
         right_x = int(max(0, min(width - crop_w_person, right_avg - crop_w_person / 2)))
 
+        # Verify crops don't overlap (each shows different part of frame)
+        if abs(left_x - right_x) < crop_w_person * 0.3:
+            # Crops overlap too much — would show same content in both grids
+            logger.info(f"yolo_reframe: grid crops overlap too much, skipping")
+            return None
+
         filter_complex = (
             f"[0:v]split=2[top][bot];"
-            f"[top]crop={crop_w_person}:{crop_h}:{left_x}:{crop_y},scale=1080:{half_h}[t];"
-            f"[bot]crop={crop_w_person}:{crop_h}:{right_x}:{crop_y},scale=1080:{half_h}[b];"
+            f"[top]crop={crop_w_person}:{height}:{left_x}:0,scale=1080:{half_h}[t];"
+            f"[bot]crop={crop_w_person}:{height}:{right_x}:0,scale=1080:{half_h}[b];"
             f"[t][b]vstack=inputs=2[v]"
         )
 
@@ -331,8 +352,11 @@ class YoloReframeEngine(IYoloReframeEngine):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         if result.returncode == 0 and os.path.exists(output_path):
-            logger.info(f"yolo_reframe: autogrid 2-speaker (left={left_x}, right={right_x})")
-            return {"output_path": output_path, "person_count": 2, "masks_available": False, "method": "autogrid_auto"}
+            logger.info(
+                f"yolo_reframe: autogrid 2-speaker (left_x={left_x}, right_x={right_x}, "
+                f"separation={abs(right_avg - left_avg):.0f}px)"
+            )
+            return {"output_path": output_path, "person_count": 2, "masks_available": False, "method": "autogrid"}
         return None
 
     def _ensure_h264(self, video_path: str, transcode_path: str) -> str:

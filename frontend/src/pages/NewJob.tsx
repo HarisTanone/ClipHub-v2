@@ -23,6 +23,7 @@ export function NewJob() {
   const [forceReprocess, setForceReprocess] = useState(false);
   const [smartCamera, setSmartCamera] = useState(false);
   const [smartSubtitlePos, setSmartSubtitlePos] = useState(false);
+  const [autogridEnabled, setAutogridEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [urlError, setUrlError] = useState("");
 
@@ -137,6 +138,7 @@ export function NewJob() {
         subtitle_style_config: subtitleStyleConfig,
         smart_camera: smartCamera,
         smart_subtitle_position: smartSubtitlePos,
+        autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
       });
       toast.success(`Job created: ${res.job_id}`);
       navigate(`/jobs/${res.job_id}`);
@@ -192,7 +194,7 @@ export function NewJob() {
             <label className="block text-[10px] font-medium text-zinc-500 mb-2 uppercase tracking-wider">Aspect Ratio</label>
             <div className="grid grid-cols-3 gap-1.5">
               {aspectOptions.map((opt) => (
-                <button key={opt.value} type="button" onClick={() => setAspectRatio(opt.value)}
+                <button key={opt.value} type="button" onClick={() => { setAspectRatio(opt.value); if (opt.value !== "9:16") setAutogridEnabled(false); }}
                   className={cn("flex flex-col items-center gap-0.5 rounded-lg border py-2 transition-all",
                     aspectRatio === opt.value ? "border-emerald-500/60 bg-emerald-500/8 text-emerald-400" : "border-zinc-800 text-zinc-500 hover:border-zinc-700")}>
                   <opt.icon className="h-4 w-4" />
@@ -201,6 +203,18 @@ export function NewJob() {
               ))}
             </div>
           </Card>
+
+          {/* Autogrid (only for 9:16) */}
+          {aspectRatio === "9:16" && (
+            <Card className="p-3">
+              <Toggle
+                label="Auto Grid (2 Speaker)"
+                description="Split video into 2 grids when 2 speakers detected (podcast format)"
+                checked={autogridEnabled}
+                onChange={setAutogridEnabled}
+              />
+            </Card>
+          )}
 
           {/* Options */}
           <Card className="p-3">
