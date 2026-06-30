@@ -1,0 +1,137 @@
+{
+  "passed": 26,
+  "failed": 0,
+  "skipped": 0,
+  "details": [
+    {
+      "name": "B1: Segment map built correctly",
+      "status": "PASS",
+      "detail": "Map has 3 entries"
+    },
+    {
+      "name": "B2: Transcript format includes IDs",
+      "status": "PASS",
+      "detail": "Line 0: [S0000 | 00:00] First"
+    },
+    {
+      "name": "B3: Valid ID resolution",
+      "status": "PASS",
+      "detail": "S0001.start=5.5, S0002.end=20.0"
+    },
+    {
+      "name": "B4: Invalid ID returns False in map lookup",
+      "status": "PASS",
+      "detail": "'S9999' in map: False"
+    },
+    {
+      "name": "B5: Fallback to raw timestamps when IDs invalid",
+      "status": "PASS",
+      "detail": "Resolved start: 5.5"
+    },
+    {
+      "name": "C1: Words during hook filtered out",
+      "status": "PASS",
+      "detail": "2 words remain: ['After', 'Hook']"
+    },
+    {
+      "name": "C2: Safety fallback when ALL words filtered",
+      "status": "PASS",
+      "detail": "Fallback triggered: 3 words restored"
+    },
+    {
+      "name": "C3: Empty words \u2192 empty result (no crash)",
+      "status": "PASS",
+      "detail": "OK"
+    },
+    {
+      "name": "C4: Word at start=0.0 filtered by hook",
+      "status": "PASS",
+      "detail": "Correctly filtered"
+    },
+    {
+      "name": "C5: Word at exactly hook boundary (start=3.0) passes",
+      "status": "PASS",
+      "detail": "Passed: [{'word': 'Boundary', 'start': 3.0, 'end': 3.5}]"
+    },
+    {
+      "name": "D1: No persons detected \u2192 triggers fallback",
+      "status": "PASS",
+      "detail": "All frames empty"
+    },
+    {
+      "name": "D2: Single person static \u2192 crop range < 50px",
+      "status": "PASS",
+      "detail": "Range: 0px (static crop)"
+    },
+    {
+      "name": "D3: Single person moving \u2192 crop range > 50px \u2192 smooth pan",
+      "status": "PASS",
+      "detail": "Range: 221px (dynamic pan)"
+    },
+    {
+      "name": "D4: Two speakers detected \u2192 multi_ratio >= 0.7",
+      "status": "PASS",
+      "detail": "Multi ratio: 1.00 (10/10)"
+    },
+    {
+      "name": "D5: Target 16:9 \u2192 skip YOLO (passthrough)",
+      "status": "PASS",
+      "detail": "target=16:9, skip=True"
+    },
+    {
+      "name": "D6: Target 1:1 \u2192 center crop (no YOLO)",
+      "status": "PASS",
+      "detail": "target=1:1, center_crop=True"
+    },
+    {
+      "name": "E1: Reframed clip preferred over base",
+      "status": "PASS",
+      "detail": "Selected: clip_01_reframed.mp4"
+    },
+    {
+      "name": "E2: Hooked clip NEVER used (even if exists)",
+      "status": "PASS",
+      "detail": "Selected: clip_01_reframed.mp4 (hooked exists but ignored)"
+    },
+    {
+      "name": "E3: Falls back to base when reframed missing",
+      "status": "PASS",
+      "detail": "Selected: clip_01.mp4"
+    },
+    {
+      "name": "A1: Normal 5-min video (20 seg, 3 clips)",
+      "status": "PASS",
+      "detail": "Got 3 clips"
+    },
+    {
+      "name": "A2: Long 30-min video (200 seg, 5 clips)",
+      "status": "PASS",
+      "detail": "Got 5 clips"
+    },
+    {
+      "name": "A3: Very short 30s video (3 seg)",
+      "status": "PASS",
+      "detail": "Got 2 clips (OK if 0 \u2014 video too short)"
+    },
+    {
+      "name": "A4: Single segment video",
+      "status": "PASS",
+      "detail": "No crash"
+    },
+    {
+      "name": "A5: Empty transcript (0 segments)",
+      "status": "PASS",
+      "detail": "No crash"
+    },
+    {
+      "name": "A6: Unicode/special characters",
+      "status": "PASS",
+      "detail": "Got 2 clips"
+    },
+    {
+      "name": "A7: Overlapping timestamps",
+      "status": "PASS",
+      "detail": "No crash"
+    }
+  ]
+}
