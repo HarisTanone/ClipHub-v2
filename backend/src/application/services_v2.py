@@ -694,18 +694,12 @@ class V2PipelineService:
                 out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
 
                 clip_words_raw = clips_with_words.get(clip.rank, [])
-                # Configurable timing offset: Groq Whisper + FFmpeg trim can introduce
-                # slight desync. Negative value = subtitle appears earlier (fixes "audio ahead of subtitle")
-                remotion_timing_offset = float(os.environ.get("REMOTION_SUBTITLE_OFFSET", "-0.5"))
-                if remotion_timing_offset != 0:
-                    clip_words = [
-                        {**w, "start": max(0, round(w["start"] + remotion_timing_offset, 3)),
-                         "end": max(0.01, round(w["end"] + remotion_timing_offset, 3))}
-                        for w in clip_words_raw
-                    ]
-                else:
-                    clip_words = clip_words_raw
                 clip_hook = clip.hook or ""
+                
+                # Filter words during hook period — hook overlay (z-index 2) covers subtitles
+                # so words spoken during hook are invisible anyway. Start subtitles AFTER hook.
+                hook_dur = hook_style_config.get("duration", 3.0) if clip_hook else 0
+                clip_words = [w for w in clip_words_raw if w.get("start", 0) >= hook_dur]
                 hook_style = hook_style_config.get("animation", "") or creative_direction.hook_animation or "fade_scale"
 
                 # Build creative direction dict with style configs
