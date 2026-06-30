@@ -50,7 +50,17 @@ class FFmpegRenderer(IRenderer):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate()
+        
+        # Dynamic timeout: 2x clip duration + 30s buffer (minimum 60s)
+        trim_timeout = max(60, int(duration * 2 + 30))
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=trim_timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            logger.error(f"FFmpeg trim timeout after {trim_timeout}s for clip #{clip.rank} ({duration:.1f}s)")
+            raise RuntimeError(
+                f"FFmpeg trim timeout ({trim_timeout}s) for {duration:.1f}s clip"
+            )
 
         if proc.returncode != 0:
             err = stderr.decode().strip()

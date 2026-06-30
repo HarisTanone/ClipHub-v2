@@ -120,6 +120,10 @@ class Settings(BaseSettings):
     # ─── Hook Engine ─────────────────────────────────────────────────────
     HOOK_ENABLE_JALUR_A: bool = False
 
+    # ─── Timeout Settings (seconds) ─────────────────────────────────────
+    GEMINI_TIMEOUT: int = 120
+    GROQ_LLM_TIMEOUT: int = 90
+
     # ─── Remotion Render Engine ──────────────────────────────────────────
     USE_REMOTION: bool = False
     REMOTION_PROJECT_PATH: str = "remotion-renderer"

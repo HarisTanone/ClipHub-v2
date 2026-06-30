@@ -157,6 +157,10 @@ class SubtitleRenderer(ISubtitleRenderer):
 
         filter_chain = ",".join(filter_parts)
 
+        # Dynamic timeout: 3x clip duration + 60s (minimum 120s)
+        clip_dur = words[-1]["end"] - words[0]["start"] if words else 60
+        subtitle_timeout = max(120, int(clip_dur * 3 + 60))
+
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
@@ -168,7 +172,7 @@ class SubtitleRenderer(ISubtitleRenderer):
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=subtitle_timeout)
             if result.returncode != 0:
                 logger.error(f"subtitle_render failed: {result.stderr[-500:]}")
                 # Fallback to simpler render
@@ -176,7 +180,7 @@ class SubtitleRenderer(ISubtitleRenderer):
             logger.info(f"subtitle_render: {len(lines)} lines (highlight mode) → {output_path}")
             return output_path
         except (subprocess.TimeoutExpired, OSError) as e:
-            logger.error(f"subtitle_render exception: {e}")
+            logger.error(f"subtitle_render exception (timeout={subtitle_timeout}s): {e}")
             return video_path
 
     def _render_line_only(
@@ -222,6 +226,10 @@ class SubtitleRenderer(ISubtitleRenderer):
 
         filter_chain = ",".join(filter_parts)
 
+        # Dynamic timeout: 2x clip duration + 60s (minimum 90s)
+        clip_dur = words[-1]["end"] - words[0]["start"] if words else 60
+        line_only_timeout = max(90, int(clip_dur * 2 + 60))
+
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
@@ -233,14 +241,14 @@ class SubtitleRenderer(ISubtitleRenderer):
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=line_only_timeout)
             if result.returncode != 0:
                 logger.error(f"subtitle_render line-only failed: {result.stderr[-300:]}")
                 return video_path
             logger.info(f"subtitle_render: {len(lines)} lines (line-only) → {output_path}")
             return output_path
         except (subprocess.TimeoutExpired, OSError) as e:
-            logger.error(f"subtitle_render exception: {e}")
+            logger.error(f"subtitle_render line-only exception (timeout={line_only_timeout}s): {e}")
             return video_path
 
     def _normalize_style(self, style: Any) -> SubtitleStyleConfig:
@@ -472,14 +480,17 @@ class SubtitleRenderer(ISubtitleRenderer):
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            # Dynamic timeout: 3x clip duration + 60s (minimum 120s)
+            clip_dur = words[-1]["end"] - words[0]["start"] if words else 60
+            emphasis_timeout = max(120, int(clip_dur * 3 + 60))
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=emphasis_timeout)
             if result.returncode != 0:
                 logger.error(f"emphasis_subtitle failed: {result.stderr[-300:]}")
                 return video_path
             logger.info(f"emphasis_subtitle: {len(lines)} lines → {output_path}")
             return output_path
         except (subprocess.TimeoutExpired, OSError) as e:
-            logger.error(f"emphasis_subtitle exception: {e}")
+            logger.error(f"emphasis_subtitle exception (timeout={emphasis_timeout}s): {e}")
             return video_path
 
     def _detect_emphasis_word(self, line: list[dict]) -> int:

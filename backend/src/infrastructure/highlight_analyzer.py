@@ -135,7 +135,7 @@ class HighlightAnalyzer:
 
                 response = await asyncio.wait_for(
                     asyncio.get_running_loop().run_in_executor(None, _gemini_call),
-                    timeout=120,  # 2 min timeout for Gemini API
+                    timeout=settings.GEMINI_TIMEOUT,
                 )
 
                 # Safety filter check — response.text raises ValueError if blocked
@@ -154,7 +154,7 @@ class HighlightAnalyzer:
                 if clips:
                     return self._build_result(clips, max_clips, video_duration, "gemini")
             except asyncio.TimeoutError:
-                logger.warning(f"highlight_analyzer: Gemini key {key_idx + 1} timeout (120s)")
+                logger.warning(f"highlight_analyzer: Gemini key {key_idx + 1} timeout ({settings.GEMINI_TIMEOUT}s)")
                 continue
             except Exception as e:
                 logger.warning(f"highlight_analyzer: Gemini key {key_idx + 1} failed: {e}")
@@ -199,7 +199,7 @@ class HighlightAnalyzer:
 
                 response = await asyncio.wait_for(
                     asyncio.get_running_loop().run_in_executor(None, _groq_call),
-                    timeout=90,  # 90s timeout for Groq LLM
+                    timeout=settings.GROQ_LLM_TIMEOUT,
                 )
 
                 if not response.choices:

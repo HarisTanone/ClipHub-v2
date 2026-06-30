@@ -156,11 +156,15 @@ class RemotionAdapter(IRemotionRenderer):
         try:
             session = await self._get_session()
             
+            # Dynamic timeout: 3x clip duration + 2 min buffer (minimum 5 min)
+            clip_dur = clip_duration if clip_duration > 0 else 60
+            render_timeout = max(300, int(clip_dur * 3 + 120))
+            
             # Send render request (server returns synchronously when done)
             async with session.post(
                 f"{self.base_url}/render",
                 json=payload,
-                timeout=ClientTimeout(total=600),  # 10 min for render
+                timeout=ClientTimeout(total=render_timeout),
             ) as resp:
                 result = await resp.json()
                 
@@ -186,10 +190,10 @@ class RemotionAdapter(IRemotionRenderer):
             
         except asyncio.TimeoutError:
             render_time = time.time() - start_time
-            logger.error(f"[Remotion] Render timeout after {render_time:.1f}s")
+            logger.error(f"[Remotion] Render timeout after {render_time:.1f}s (limit was {render_timeout}s for {clip_dur}s clip)")
             return RemotionRenderResult(
                 success=False,
-                error_message=f"Render timeout after {render_time:.1f}s",
+                error_message=f"Render timeout after {render_time:.1f}s (limit={render_timeout}s, clip={clip_dur}s)",
             )
         except ClientError as e:
             logger.error(f"[Remotion] HTTP error: {e}")
