@@ -693,7 +693,15 @@ class V2PipelineService:
                 in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
                 out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
 
-                clip_words = clips_with_words.get(clip.rank, [])
+                clip_words_raw = clips_with_words.get(clip.rank, [])
+                # Apply timing offset: Groq Whisper turbo timestamps are ~1s early
+                # This compensates by shifting all word timestamps forward by 1.0s
+                timing_offset = 1.0
+                clip_words = [
+                    {**w, "start": round(w["start"] + timing_offset, 3), "end": round(w["end"] + timing_offset, 3)}
+                    for w in clip_words_raw
+                    if w.get("start", 0) + timing_offset >= 0
+                ]
                 clip_hook = clip.hook or ""
                 hook_style = hook_style_config.get("animation", "") or creative_direction.hook_animation or "fade_scale"
 
