@@ -196,14 +196,16 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
             transform: `translateY(-50%) translateX(${Math.sin(frame * 0.5) * 3 - 4}px)`,
             textAlign, padding: "0 40px",
             color: "#ff0000", fontSize, fontWeight, fontFamily,
-            opacity: 0.7,
+            opacity: 0.5,
+            mixBlendMode: "screen",
           }}>{displayText}</div>
           <div style={{
             position: "absolute", top: `${positionY}%`, left: 0, right: 0,
             transform: `translateY(-50%) translateX(${4 - Math.sin(frame * 0.5) * 3}px)`,
             textAlign, padding: "0 40px",
             color: "#00ffff", fontSize, fontWeight, fontFamily,
-            opacity: 0.7,
+            opacity: 0.5,
+            mixBlendMode: "screen",
           }}>{displayText}</div>
         </>
       )}
@@ -217,7 +219,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
             textAlign, padding: "0 40px",
             color: color, fontSize, fontWeight, fontFamily,
             opacity: 0.3,
-            filter: "blur(2px)",
+            filter: "blur(4px)",
             textShadow: `0 0 12px ${color}, 0 0 24px ${color}`,
           }}>{displayText}</div>
           <div style={{
@@ -225,7 +227,8 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
             transform: `translateY(-50%) translate(${Math.sin(frame * 0.8) * 2}px, ${Math.cos(frame * 0.6) * 2}px)`,
             textAlign, padding: "0 40px",
             color: color, fontSize, fontWeight, fontFamily,
-            opacity: 0.5,
+            opacity: 0.35,
+            filter: "blur(1.5px)",
             textShadow: `0 0 6px ${color}, 0 0 12px ${color}`,
           }}>{displayText}</div>
         </>
@@ -246,7 +249,8 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
           transform: `translateY(-50%)`,
           textAlign, padding: "0 40px",
           color: "#FF0000", fontSize, fontWeight, fontFamily,
-          opacity: 0.4,
+          opacity: 0.3,
+          filter: "blur(3px)",
           textShadow: "0 0 10px #FF0000, 0 0 20px #FF0000, 0 0 40px rgba(255,0,0,0.3)",
         }}>{displayText}</div>
       )}

@@ -68,7 +68,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
 
       {/* Layer 2: Subtitles (filtered: no subtitles during hook period) */}
       {words.length > 0 && (
-        <AbsoluteFill style={{ zIndex: 1 }}>
+        <AbsoluteFill style={{ zIndex: 1, pointerEvents: "none" }}>
           <SubtitleLayer
             words={hookText ? words.filter(w => w.start >= hookDuration) : words}
             config={subtitleConfig}
