@@ -1,8 +1,8 @@
 """HighlightAnalyzer — Multi-LLM fallback chain for viral clip analysis.
 
 Strategy:
-1. Gemini (primary) — 1M token context, fast, accurate
-2. Groq LLM (fallback) — 128K context, very fast
+1. Groq LLM (primary) — 128K context, fast, reliable JSON mode
+2. Gemini (fallback) — 1M token context, but often timeout
 3. Ollama local (last resort) — unlimited, slow but guaranteed
 
 Each LLM receives the same prompt and returns the same HighlightAnalysisResult.
@@ -41,35 +41,17 @@ class HighlightAnalyzer:
     ) -> HighlightAnalysisResult:
         """Analyze transcript for viral clips using best available LLM.
         
-        Chain: Gemini → Groq LLM → Ollama (local)
-        Skips models that are currently rate-limited.
+        Chain: Groq LLM (primary) → Gemini (fallback) → Ollama (last resort)
+        Groq is preferred: fast, 128K context, reliable JSON mode.
         """
         from src.infrastructure.model_status import ModelStatusTracker
         tracker = ModelStatusTracker()
         errors = []
 
-        # ─── 1. Try Gemini (primary — 1M context, very fast) ─────────
-        if self._gemini_keys and tracker.is_available("gemini"):
-            try:
-                logger.info("highlight_analyzer: trying Gemini (primary)")
-                result = await self._analyze_with_gemini(transcript, video_duration, max_clips)
-                if result and result.clips:
-                    logger.info(f"highlight_analyzer: Gemini success — {len(result.clips)} clips")
-                    tracker.mark_success("gemini")
-                    return result
-                logger.warning("highlight_analyzer: Gemini returned empty result")
-            except Exception as e:
-                errors.append(f"Gemini: {e}")
-                logger.warning(f"highlight_analyzer: Gemini failed: {e}")
-                if "429" in str(e) or "quota" in str(e).lower():
-                    tracker.mark_exhausted("gemini", str(e)[:200])
-                else:
-                    tracker.mark_error("gemini", str(e)[:200])
-
-        # ─── 2. Try Groq LLM (fast, 128K context) ────────────────────
+        # ─── 1. Try Groq LLM (PRIMARY — fast, 128K context, JSON mode) ────
         if self._groq_key and tracker.is_available("groq_llm"):
             try:
-                logger.info("highlight_analyzer: trying Groq LLM (fallback 1)")
+                logger.info("highlight_analyzer: trying Groq LLM (primary)")
                 result = await self._analyze_with_groq(transcript, video_duration, max_clips)
                 if result and result.clips:
                     logger.info(f"highlight_analyzer: Groq LLM success — {len(result.clips)} clips")
@@ -83,6 +65,24 @@ class HighlightAnalyzer:
                     tracker.mark_rate_limited("groq_llm", 60, str(e)[:200])
                 else:
                     tracker.mark_error("groq_llm", str(e)[:200])
+
+        # ─── 2. Try Gemini (fallback — 1M context, but often timeout) ─────
+        if self._gemini_keys and tracker.is_available("gemini"):
+            try:
+                logger.info("highlight_analyzer: trying Gemini (fallback)")
+                result = await self._analyze_with_gemini(transcript, video_duration, max_clips)
+                if result and result.clips:
+                    logger.info(f"highlight_analyzer: Gemini success — {len(result.clips)} clips")
+                    tracker.mark_success("gemini")
+                    return result
+                logger.warning("highlight_analyzer: Gemini returned empty result")
+            except Exception as e:
+                errors.append(f"Gemini: {e}")
+                logger.warning(f"highlight_analyzer: Gemini failed: {e}")
+                if "429" in str(e) or "quota" in str(e).lower():
+                    tracker.mark_exhausted("gemini", str(e)[:200])
+                else:
+                    tracker.mark_error("gemini", str(e)[:200])
 
         # ─── 3. Ollama local (last resort — slow but guaranteed) ──────
         try:
@@ -169,32 +169,66 @@ class HighlightAnalyzer:
     ) -> Optional[HighlightAnalysisResult]:
         """Use Groq LLM API for highlight analysis.
         
-        Uses llama-3.1-8b-instant (20K TPM on free tier) with aggressive truncation.
+        PRIMARY analysis engine:
+        - Full transcript (no truncation — 128K context supports it)
+        - Optimized compact format (saves 40-60% tokens)
+        - Native JSON mode (response_format=json_object)
+        - llama-3.3-70b-versatile (best quality on Groq)
         """
         from groq import Groq, RateLimitError, APIConnectionError
 
-        # Free tier TPM: 8b=6K, 70b=12K. Use 70b for higher limit.
         client = Groq(api_key=self._groq_key)
         groq_model = "llama-3.3-70b-versatile"
 
-        # Truncate to fit within 12K TPM (70b model)
-        # Indonesian text: ~1.5-2 chars/token. Use 10K chars ≈ 5-6K tokens
-        # + system prompt + output buffer = within 12K
-        max_input_chars = 10000
-        prompt = self._build_prompt(transcript, video_duration, max_clips, max_chars=max_input_chars)
+        # Build compact transcript format (saves tokens vs raw JSON)
+        transcript_lines = []
+        for seg in transcript.segments:
+            mins, secs = divmod(int(seg.start), 60)
+            transcript_lines.append(f"[{mins:02d}:{secs:02d}] {seg.text.strip()}")
+        transcript_text = "\n".join(transcript_lines)
+
+        # Estimate tokens — if too large, truncate from middle (keep start + end)
+        estimated_tokens = len(transcript_text.split()) * 1.3
+        if estimated_tokens > 100000:
+            # Keep first 40% and last 40% (skip middle — least likely to have viral moments)
+            lines = transcript_lines
+            keep = int(len(lines) * 0.4)
+            transcript_text = "\n".join(lines[:keep]) + "\n\n[... bagian tengah dilewati ...]\n\n" + "\n".join(lines[-keep:])
+            logger.info(f"highlight_analyzer: Groq transcript truncated (est {estimated_tokens:.0f} tokens → kept first+last 40%)")
+
+        system_prompt = f"""Kamu adalah AI analis konten viral spesialis podcast/video Indonesia.
+Tugasmu: menganalisis transcript dan mengekstrak {max_clips} potongan (clip) terbaik untuk TikTok/Reels/Shorts.
+
+ATURAN WAJIB:
+1. Output HARUS berupa JSON valid: {{"clips": [...]}}
+2. Duration clip HARUS 45-90 detik (minimum 45, maksimum 90).
+3. Timestamp HARUS berada di dalam range video (0 - {video_duration:.0f} detik).
+4. Start = awal kalimat, End = akhir kalimat + 1-2 detik buffer.
+5. Clip TIDAK BOLEH overlap satu sama lain.
+6. Hook = 3-8 kata, membuat penasaran, BUKAN spoiler.
+
+Format setiap clip:
+{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "teks hook viral", "reason": "alasan singkat", "content_type": "storytelling", "speaker_energy": "high"}}"""
+
+        user_prompt = f"""Video berdurasi {video_duration:.0f} detik. Temukan {max_clips} momen paling viral.
+
+TRANSKRIP:
+{transcript_text}
+
+Ekstrak {max_clips} clip terbaik sekarang. Output JSON saja."""
 
         for attempt in range(3):
             try:
-                # Capture variables explicitly to avoid late-binding issues
-                def _groq_call(m=groq_model, p=prompt):
+                def _groq_call(m=groq_model, s=system_prompt, u=user_prompt):
                     return client.chat.completions.create(
                         model=m,
                         messages=[
-                            {"role": "system", "content": "Kamu adalah AI analis konten viral. Output HANYA raw JSON tanpa markdown."},
-                            {"role": "user", "content": p},
+                            {"role": "system", "content": s},
+                            {"role": "user", "content": u},
                         ],
                         temperature=0.3,
                         max_tokens=4096,
+                        response_format={"type": "json_object"},  # FORCE JSON output
                     )
 
                 response = await asyncio.wait_for(
@@ -206,11 +240,59 @@ class HighlightAnalyzer:
                     return None
 
                 raw_text = response.choices[0].message.content or ""
-                clips = self._parse_llm_response(raw_text, video_duration)
-                if clips:
-                    return self._build_result(clips, max_clips, video_duration, f"groq_{groq_model}")
-                # Log why parsing failed
-                logger.warning(f"highlight_analyzer: Groq LLM returned empty result (raw_text[:150]={raw_text[:150]})")
+                
+                # Parse JSON directly (guaranteed valid JSON from response_format)
+                try:
+                    data = json.loads(raw_text)
+                except json.JSONDecodeError:
+                    logger.warning(f"highlight_analyzer: Groq JSON parse failed despite json_object mode: {raw_text[:200]}")
+                    # Fallback to regex extraction
+                    clips = self._parse_llm_response(raw_text, video_duration)
+                    if clips:
+                        return self._build_result(clips, max_clips, video_duration, f"groq_{groq_model}")
+                    return None
+
+                # Extract clips from parsed JSON
+                raw_clips = data.get("clips", [])
+                if not raw_clips:
+                    logger.warning(f"highlight_analyzer: Groq JSON valid but no 'clips' key. Keys: {list(data.keys())}")
+                    return None
+
+                # Validate and build candidates
+                candidates = []
+                for i, c in enumerate(raw_clips):
+                    try:
+                        start = float(c.get("start", 0))
+                        end = float(c.get("end", 0))
+                        duration = end - start
+
+                        # Validate timestamps
+                        if end <= start or start < 0 or end > video_duration + 10:
+                            logger.debug(f"highlight_analyzer: Groq clip {i} rejected (range): {start:.1f}-{end:.1f}")
+                            continue
+                        if duration < 15 or duration > 180:
+                            logger.debug(f"highlight_analyzer: Groq clip {i} rejected (duration {duration:.1f}s)")
+                            continue
+
+                        candidates.append(HighlightCandidate(
+                            rank=c.get("rank", i + 1),
+                            start=round(start, 2),
+                            end=round(end, 2),
+                            score=min(100, max(0, int(c.get("score", 70)))),
+                            hook=c.get("hook", ""),
+                            reason=c.get("reason", ""),
+                            content_type=c.get("content_type", "general"),
+                            speaker_energy=c.get("speaker_energy", "medium"),
+                            hook_alt=c.get("hook_alt", ""),
+                        ))
+                    except (ValueError, TypeError):
+                        continue
+
+                if candidates:
+                    logger.info(f"highlight_analyzer: Groq produced {len(candidates)} valid clips from {len(raw_clips)} raw")
+                    return self._build_result(candidates, max_clips, video_duration, f"groq_{groq_model}")
+
+                logger.warning(f"highlight_analyzer: Groq {len(raw_clips)} raw clips but 0 passed validation")
                 return None
 
             except asyncio.TimeoutError:

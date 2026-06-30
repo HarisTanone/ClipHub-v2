@@ -122,7 +122,7 @@ class Settings(BaseSettings):
 
     # ─── Timeout Settings (seconds) ─────────────────────────────────────
     GEMINI_TIMEOUT: int = 30  # Fast fail — skip to Groq fallback quickly
-    GROQ_LLM_TIMEOUT: int = 90
+    GROQ_LLM_TIMEOUT: int = 120  # Full transcript analysis needs more time
 
     # ─── Remotion Render Engine ──────────────────────────────────────────
     USE_REMOTION: bool = False
