@@ -181,14 +181,21 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 if [ -d "$REMOTION_DIR" ]; then
     cd "$REMOTION_DIR"
 
+    # Remotion server needs tsx + typescript (in devDependencies) to run
     if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules/.package-lock.json" ]; then
-        echo "  Installing npm dependencies..."
-        npm install --omit=dev 2>/dev/null || npm install
+        echo "  Installing npm dependencies (including tsx/typescript)..."
+        npm install 2>/dev/null || npm install
     else
         echo "  ✅ npm dependencies up to date"
     fi
 
-    echo "  ✅ Remotion ready"
+    # CRITICAL: Clear webpack/remotion bundler cache to force fresh bundle
+    # Without this, old compositions may be cached and used even after code changes
+    echo "  Clearing Remotion bundler cache..."
+    rm -rf "$REMOTION_DIR/node_modules/.cache" 2>/dev/null || true
+    rm -rf /tmp/remotion-* 2>/dev/null || true
+
+    echo "  ✅ Remotion ready (will re-bundle on service start)"
 else
     echo "  ⚠️  Remotion directory not found at $REMOTION_DIR"
 fi
@@ -297,11 +304,28 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Reload and restart
+# Reload and restart (Remotion FIRST — must be ready before backend)
 sudo systemctl daemon-reload
 sudo systemctl enable autocliper-backend autocliper-remotion autocliper-frontend 2>/dev/null || true
-sudo systemctl restart autocliper-backend
+
+# Start Remotion first and wait for bundle to be ready
+echo "  Starting Remotion server (bundling compositions)..."
 sudo systemctl restart autocliper-remotion
+REMOTION_READY=0
+for i in $(seq 1 60); do
+    if curl -s "http://localhost:$REMOTION_PORT/health" 2>/dev/null | grep -q "healthy"; then
+        REMOTION_READY=1
+        echo "  ✅ Remotion bundled and ready (${i}s)"
+        break
+    fi
+    sleep 1
+done
+if [ $REMOTION_READY -eq 0 ]; then
+    echo "  ⚠️  Remotion not ready after 60s — check logs: sudo journalctl -u autocliper-remotion -n 30"
+fi
+
+# Now restart backend (Remotion is ready to handle render requests)
+sudo systemctl restart autocliper-backend
 sudo systemctl restart autocliper-frontend
 
 echo "  ✅ All services registered and started"
