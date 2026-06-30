@@ -319,6 +319,10 @@ class V2PipelineService:
                 analysis_result.broll_suggestions,
                 duration,
             )
+            # Log short clips warning (will be shown in job detail)
+            short_clips = [c for c in clips if (c.end - c.start) < 45]
+            if short_clips:
+                logger.info(f"[{job_id}] {len(short_clips)} clips are shorter than 45s — will still be processed")
             if self._overlap_detector and clips:
                 try:
                     clips = self._overlap_detector.resolve_overlaps(clips)
@@ -770,7 +774,11 @@ class V2PipelineService:
                 if not trim_results.get(clip.rank):
                     continue
 
-                in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
+                # For Remotion: use reframed or base clip ONLY (NOT hooked/brolled)
+                # Remotion will apply hook + subtitle itself — using pre-hooked input would double-apply
+                reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                in_path = reframed_path if os.path.exists(reframed_path) else base_path
                 out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
 
                 clip_words_raw = clips_with_words.get(clip.rank, [])
@@ -780,6 +788,11 @@ class V2PipelineService:
                 # so words spoken during hook are invisible anyway. Start subtitles AFTER hook.
                 hook_dur = hook_style_config.get("duration", 3.0) if clip_hook else 0
                 clip_words = [w for w in clip_words_raw if w.get("start", 0) >= hook_dur]
+                
+                # Safety: if ALL words were filtered, use full list (better than no subtitle)
+                if not clip_words and clip_words_raw:
+                    clip_words = clip_words_raw
+                    logger.warning(f"[{job_id}] Clip {clip.rank}: all words during hook period, using full word list")
                 hook_style = hook_style_config.get("animation", "") or creative_direction.hook_animation or "fade_scale"
 
                 # Build creative direction dict with style configs

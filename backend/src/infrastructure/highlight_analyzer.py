@@ -317,8 +317,13 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
                 # Validate timestamps
                 if end <= start or start < 0 or end > video_duration + 10:
                     continue
-                if end - start < 45 or end - start > 120:
+                if end - start < 15 or end - start > 180:
+                    # Hard reject: too short or too long to be usable
                     continue
+                duration = end - start
+                if duration < 45:
+                    # Soft filter: log warning but still include
+                    logger.debug(f"highlight_analyzer: clip {start:.1f}-{end:.1f} is short ({duration:.1f}s < 45s)")
 
                 candidates.append(HighlightCandidate(
                     rank=c.get("rank", i + 1),

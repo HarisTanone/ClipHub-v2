@@ -182,6 +182,11 @@ export function NewJob() {
                       <p className="text-[9px] text-zinc-500 flex items-center gap-1.5 mt-0.5">
                         <span>{videoMeta.channel}</span><span>{videoMeta.duration_string}</span>
                       </p>
+                      {videoMeta.duration && videoMeta.duration < 45 && (
+                        <p className="text-[9px] text-amber-400 mt-1">
+                          Video pendek — clip yang dihasilkan AI dengan durasi di bawah 15 detik tidak akan diproses.
+                        </p>
+                      )}
                     </div>
                   </div>
                 ) : null}
@@ -209,10 +214,15 @@ export function NewJob() {
             <Card className="p-3">
               <Toggle
                 label="Auto Grid (2 Speaker)"
-                description="Split video into 2 grids when 2 speakers detected (podcast format)"
+                description="Memisahkan video menjadi 2 grid saat 2 pembicara terdeteksi. Hanya aktif jika kedua pembicara cukup terpisah dalam frame."
                 checked={autogridEnabled}
                 onChange={setAutogridEnabled}
               />
+              {autogridEnabled && (
+                <p className="text-[9px] text-zinc-500 mt-2 pl-1 border-l-2 border-zinc-700">
+                  Grid tidak diterapkan pada 3 detik awal (hook period). Jika hanya 1 pembicara terdeteksi, video tetap menggunakan single tracking.
+                </p>
+              )}
             </Card>
           )}
 
