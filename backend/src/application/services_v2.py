@@ -693,9 +693,18 @@ class V2PipelineService:
                 in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
                 out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
 
-                clip_words = clips_with_words.get(clip.rank, [])
-                # No timing offset — Whisper timestamps used directly by Remotion
-                # (timing_offset was only needed for FFmpeg drawtext path)
+                clip_words_raw = clips_with_words.get(clip.rank, [])
+                # Configurable timing offset: Groq Whisper + FFmpeg trim can introduce
+                # slight desync. Negative value = subtitle appears earlier (fixes "audio ahead of subtitle")
+                remotion_timing_offset = float(os.environ.get("REMOTION_SUBTITLE_OFFSET", "-0.5"))
+                if remotion_timing_offset != 0:
+                    clip_words = [
+                        {**w, "start": max(0, round(w["start"] + remotion_timing_offset, 3)),
+                         "end": max(0.01, round(w["end"] + remotion_timing_offset, 3))}
+                        for w in clip_words_raw
+                    ]
+                else:
+                    clip_words = clip_words_raw
                 clip_hook = clip.hook or ""
                 hook_style = hook_style_config.get("animation", "") or creative_direction.hook_animation or "fade_scale"
 
