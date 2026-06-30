@@ -137,9 +137,9 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const positionY = config.positionY ?? 50;
   const textAlign = (config.textAlign || "center") as any;
 
-  // Text shadow
+  // Text shadow (only when explicitly enabled)
   const shadows: string[] = [];
-  if (config.shadowEnabled !== false) {
+  if (config.shadowEnabled) {
     shadows.push(`${config.shadowX || 0}px ${config.shadowY || 4}px ${config.shadowBlur || 12}px ${config.shadowColor || "#000000"}`);
   }
   if (config.glowEnabled) {
@@ -274,9 +274,9 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
           lineHeight: config.lineHeight || 1.3,
           textShadow: shadows.length ? shadows.join(", ") : undefined,
           textTransform: config.uppercase ? "uppercase" : "none",
-          // paintOrder: stroke renders behind fill — cleaner outline
-          paintOrder: config.strokeEnabled !== false ? "stroke" : undefined,
-          WebkitTextStroke: config.strokeEnabled !== false
+          // paintOrder: stroke renders behind fill — cleaner outline (only when explicitly enabled)
+          paintOrder: config.strokeEnabled ? "stroke" : undefined,
+          WebkitTextStroke: config.strokeEnabled
             ? `${config.strokeWidth || Math.max(2, fontSize * 0.04)}px ${config.strokeColor || "rgba(0,0,0,0.8)"}`
             : undefined,
           ...(config.boxEnabled ? {
