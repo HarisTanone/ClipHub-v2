@@ -650,23 +650,27 @@ class V2PipelineService:
             f"sub_highlight={subtitle_style_config.get('highlightColor', 'N/A')}"
         )
 
-        # ═══ Route to Remotion if enabled and server healthy ═══
+        # ═══ Remotion is ALWAYS used for hook+subtitle rendering ═══
+        # FFmpeg subtitle rendering is deprecated — Remotion produces correct karaoke + style
         use_remotion = False
-        if settings.USE_REMOTION and self._remotion_adapter:
+        if self._remotion_adapter:
             try:
                 if await self._remotion_adapter.health_check():
                     use_remotion = True
                     logger.info(f"[{job_id}] Remotion server healthy — using Remotion for render")
                 else:
-                    # Try to start server
+                    # Server not running — start it and wait
+                    logger.info(f"[{job_id}] Remotion server not running — starting...")
                     started = await self._remotion_adapter.start_server()
                     if started and await self._remotion_adapter.health_check():
                         use_remotion = True
-                        logger.info(f"[{job_id}] Remotion server started — using Remotion for render")
+                        logger.info(f"[{job_id}] Remotion server started successfully")
                     else:
-                        logger.warning(f"[{job_id}] Remotion unavailable — falling back to FFmpeg")
+                        logger.error(f"[{job_id}] Failed to start Remotion server — will attempt FFmpeg fallback")
             except Exception as e:
-                logger.warning(f"[{job_id}] Remotion health check failed: {e} — falling back to FFmpeg")
+                logger.error(f"[{job_id}] Remotion startup error: {e} — will attempt FFmpeg fallback")
+        else:
+            logger.warning(f"[{job_id}] No Remotion adapter configured — using FFmpeg fallback")
 
         if use_remotion:
             # ═══ Remotion Path — Single unified render (hook + subtitle) ═══

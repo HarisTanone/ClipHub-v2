@@ -606,15 +606,14 @@ class JobService:
                 self._emit(job_id, 9.5, "ai_layer_gen", "complete")
 
             # ═══ Step 10-12: Render Pipeline Router ═══
-            # If USE_REMOTION=true and adapter available, use Remotion for all rendering
-            # Otherwise, fall back to FFmpeg-based rendering (Step 10: Hook, Step 11: B-Roll, Step 12: Subtitle)
+            # Remotion is ALWAYS used for hook+subtitle. FFmpeg only as catastrophic fallback.
             
+            # ═══ Remotion is ALWAYS used for hook+subtitle rendering ═══
+            # FFmpeg subtitle rendering is deprecated — Remotion produces correct karaoke + style
             use_remotion = False
-            if settings.USE_REMOTION and self._remotion_adapter:
-                # ═══ Remotion Path — Single unified render call ═══
+            if self._remotion_adapter:
+                # Emit status — Remotion render always attempted
                 self._emit(job_id, 10, "remotion_render", "start")
-                await self._repo.update_status(job_id, JobStatus.REMOTION_RENDERING)
-                
                 # Check Remotion server health
                 if await self._remotion_adapter.health_check():
                     use_remotion = True
@@ -697,11 +696,12 @@ class JobService:
                     
                     self._emit(job_id, 12, "remotion_render", "complete")
                 else:
-                    # Try to start server
-                    logger.warning(f"[{job_id}] Remotion server not healthy, attempting to start...")
+                    # Server not running — start it and wait
+                    logger.info(f"[{job_id}] Remotion server not running — starting...")
                     started = await self._remotion_adapter.start_server()
                     if started and await self._remotion_adapter.health_check():
                         use_remotion = True
+                        logger.info(f"[{job_id}] Remotion server started successfully")
                         # Server started, proceed with Remotion render
                         for clip in clips:
                             if not trim_results.get(clip.rank):
@@ -761,7 +761,9 @@ class JobService:
                         
                         self._emit(job_id, 12, "remotion_render", "complete")
                     else:
-                        logger.error(f"[{job_id}] Failed to start Remotion server, falling back to FFmpeg")
+                        logger.error(f"[{job_id}] Failed to start Remotion server — will attempt FFmpeg fallback")
+            else:
+                logger.warning(f"[{job_id}] No Remotion adapter configured — using FFmpeg fallback")
             
             if not use_remotion:
                 # ═══ FFmpeg Path — Multi-step rendering (Hook → B-Roll → Subtitle) ═══

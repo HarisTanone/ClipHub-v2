@@ -76,14 +76,9 @@ def get_job_service() -> JobService:
     batch_highlight = _safe_import(BatchHighlightProcessor, "BatchHighlightProcessor")
     asset_fetcher = _safe_import(AssetFetcher, "AssetFetcher")
 
-    # ─── v3.0 Remotion Integration ────────────────────────────────────────
-    from src.config import settings
-    remotion_adapter = None
-    if settings.USE_REMOTION:
-        from src.infrastructure.remotion_adapter import RemotionAdapter
-        remotion_adapter = _safe_import(RemotionAdapter, "RemotionAdapter")
-        if remotion_adapter:
-            logger.info("[DI] Remotion adapter enabled — render pipeline will use Remotion")
+    # ─── Remotion Integration (ALWAYS enabled for hook+subtitle) ──────
+    from src.infrastructure.remotion_adapter import RemotionAdapter
+    remotion_adapter = _safe_import(RemotionAdapter, "RemotionAdapter")
 
     return JobService(
         job_repo=JobRepository(),
@@ -143,14 +138,9 @@ def get_v2_pipeline_service():
     sse_emitter = _safe_import(SSEProgressEmitter, "V2-SSEProgressEmitter")
     asset_fetcher = _safe_import(AssetFetcher, "V2-AssetFetcher")
 
-    # ─── Remotion Integration ─────────────────────────────────────────
-    from src.config import settings
-    remotion_adapter = None
-    if settings.USE_REMOTION:
-        from src.infrastructure.remotion_adapter import RemotionAdapter
-        remotion_adapter = _safe_import(RemotionAdapter, "V2-RemotionAdapter")
-        if remotion_adapter:
-            logger.info("[DI] V2 Remotion adapter enabled — render pipeline will use Remotion")
+    # ─── Remotion Integration (ALWAYS enabled for hook+subtitle) ──────
+    from src.infrastructure.remotion_adapter import RemotionAdapter
+    remotion_adapter = _safe_import(RemotionAdapter, "V2-RemotionAdapter")
 
     return V2PipelineService(
         job_repo=JobRepository(),
