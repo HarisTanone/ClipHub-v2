@@ -30,7 +30,7 @@ class YoloReframeEngine(IYoloReframeEngine):
     SAMPLE_INTERVAL_SEC = 1.0  # Sample every 1 second
     MAX_SAMPLES = 60        # Max frames to analyze (60 = covers 60s of video)
     CONFIDENCE_THRESHOLD = 0.45  # Person detection confidence
-    MULTI_SPEAKER_THRESHOLD = 0.6  # If >60% of frames have 2+ persons → auto-split
+    MULTI_SPEAKER_THRESHOLD = 0.7  # Must be >70% of frames (stricter to avoid flicker)
 
     def __init__(self, model_path: str = ""):
         self._model_path = model_path or "yolo11n.pt"
@@ -171,7 +171,8 @@ class YoloReframeEngine(IYoloReframeEngine):
         )
 
         # Auto-split for multi-speaker podcast format
-        if (autogrid or is_multi_speaker) and multi_speaker_count >= 3:
+        # Require strong evidence of 2 speakers: >70% of frames AND at least 5 samples
+        if (autogrid or is_multi_speaker) and multi_speaker_count >= 5:
             return self._render_autogrid_smooth(
                 original_path, output_path, orig_width, orig_height, frame_centers
             )
@@ -249,11 +250,15 @@ class YoloReframeEngine(IYoloReframeEngine):
 
             # Expression: smoothly pan from start_x to mid_x over first 3s, then stay
             # This avoids jerky movement — single smooth motion then stable
-            pan_duration = min(3.0, total_dur * 0.3)  # Pan over first 30% or 3s max
+            # Minimum 3s pan for smooth transition (user requirement: no fast perpindahan)
+            pan_duration = max(3.0, min(5.0, total_dur * 0.3))  # 3-5s pan duration
 
+            # Ease-out cubic: starts fast, decelerates smoothly
+            # Formula: start + (end-start) * (1 - (1 - t/dur)^3)
+            # In FFmpeg expression syntax:
             crop_expr = (
                 f"if(lt(t,{pan_duration}),"
-                f"{start_x}+({mid_x}-{start_x})*t/{pan_duration},"
+                f"{start_x}+({mid_x}-{start_x})*(1-pow(1-t/{pan_duration},3)),"
                 f"{mid_x})"
             )
 
@@ -298,17 +303,21 @@ class YoloReframeEngine(IYoloReframeEngine):
         left_avg = np.mean(left_centers)
         right_avg = np.mean(right_centers)
 
-        # Each speaker gets half the output height (1080x960 each → stacked to 1080x1920)
-        crop_w = int(height * 9 / 16)
-        half_h = height // 2
+        # Each speaker: crop tighter (75% of height) centered on person's likely face area
+        # Then scale to half output. This creates a tighter, more engaging framing.
+        crop_h = int(height * 0.75)  # Crop 75% of height (upper portion where face is)
+        crop_y = 0  # Start from top (face area)
 
-        left_x = int(max(0, min(width - crop_w, left_avg - crop_w / 2)))
-        right_x = int(max(0, min(width - crop_w, right_avg - crop_w / 2)))
+        crop_w_person = int(crop_h * 9 / 16)  # 9:16 ratio per person
+        half_h = 960  # Each speaker gets 1080x960
+
+        left_x = int(max(0, min(width - crop_w_person, left_avg - crop_w_person / 2)))
+        right_x = int(max(0, min(width - crop_w_person, right_avg - crop_w_person / 2)))
 
         filter_complex = (
             f"[0:v]split=2[top][bot];"
-            f"[top]crop={crop_w}:{height}:{left_x}:0,scale=1080:{half_h}[t];"
-            f"[bot]crop={crop_w}:{height}:{right_x}:0,scale=1080:{half_h}[b];"
+            f"[top]crop={crop_w_person}:{crop_h}:{left_x}:{crop_y},scale=1080:{half_h}[t];"
+            f"[bot]crop={crop_w_person}:{crop_h}:{right_x}:{crop_y},scale=1080:{half_h}[b];"
             f"[t][b]vstack=inputs=2[v]"
         )
 
