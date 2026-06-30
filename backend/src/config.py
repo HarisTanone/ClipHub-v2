@@ -129,6 +129,7 @@ class Settings(BaseSettings):
     REMOTION_QUALITY: str = "medium"  # low, medium, high
     REMOTION_ENABLE_THREEJS: bool = True
     REMOTION_ENABLE_AI_LAYER: bool = True
+    REMOTION_SUBTITLE_OFFSET: float = -0.5  # seconds — negative = subtitle earlier
 
     # ─── Groq API (V2 Pipeline) ──────────────────────────────────────────
     GROQ_API_KEY: str = ""
