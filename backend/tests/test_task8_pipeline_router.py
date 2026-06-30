@@ -59,16 +59,17 @@ def test_v2_disabled_globally():
     print("  [PASS] V2 disabled globally → V1 for all")
 
 
-def test_db_error_defaults_to_v1():
-    """Database error during premium check → defaults to V1 (safe)."""
+def test_db_error_defaults_to_v2():
+    """Database error during premium check → defaults to V2 (non-premium safe)."""
     router = PipelineRouter()
     with patch(
         "src.infrastructure.pipeline_router.get_dict_connection",
         side_effect=Exception("DB connection failed")
     ):
-        # Should not raise, should return False (assume premium → V1)
-        assert router.should_use_v2(user_id=5, is_superadmin=False) is False
-    print("  [PASS] DB error → safe fallback to V1")
+        # DB error → _check_user_premium returns False → should_use_v2 returns True
+        # Rationale: better to give free pipeline than crash
+        assert router.should_use_v2(user_id=5, is_superadmin=False) is True
+    print("  [PASS] DB error → safe fallback to V2 (non-premium)")
 
 
 def test_get_pipeline_version_v1():
@@ -153,7 +154,7 @@ if __name__ == "__main__":
     test_premium_user_gets_v1()
     test_superadmin_always_v1()
     test_v2_disabled_globally()
-    test_db_error_defaults_to_v1()
+    test_db_error_defaults_to_v2()
     test_get_pipeline_version_v1()
     test_get_pipeline_version_v2()
     # DB check

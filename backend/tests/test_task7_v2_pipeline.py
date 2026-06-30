@@ -67,7 +67,8 @@ def test_calc_max_clips():
     assert svc._calc_max_clips(180) == 5    # >= 3 min, < 10 min
     assert svc._calc_max_clips(300) == 5    # 5 min
     assert svc._calc_max_clips(900) == 8    # 15 min
-    assert svc._calc_max_clips(3600) == 10  # 60 min
+    assert svc._calc_max_clips(1800) == 12  # 30 min (>= 1800, < 3600)
+    assert svc._calc_max_clips(3600) == 15  # 60 min (>= 3600)
     print("  [PASS] _calc_max_clips formula correct")
 
 
@@ -178,16 +179,15 @@ def test_full_pipeline_happy_path():
     """Full V2 pipeline with all components mocked."""
     svc = make_mock_service()
 
-    # Mock V2 components — now uses LocalTranscriber + OllamaAnalyzer internally
+    # Mock TAHAP 1: GroqTranscriber (YouTube API → Groq Whisper)
     mock_transcript = TranscriptResult(
         segments=[TranscriptSegment(text="Hello world", start=50.0, end=55.0)],
-        source="faster_whisper_local", language="id", total_duration=300.0,
+        source="youtube_api", language="id", total_duration=300.0,
     )
-    raw_whisper_segments = [{"start": 50.0, "end": 55.0, "text": "Hello world", "words": [
-        {"word": "Hello", "start": 52.0, "end": 52.5},
-        {"word": "world", "start": 53.0, "end": 53.5},
-    ]}]
+    svc._transcriber = AsyncMock()
+    svc._transcriber.transcribe = AsyncMock(return_value=mock_transcript)
 
+    # Mock TAHAP 2: GroqAnalyzer (Dynamic Chunking + Groq LLM)
     mock_analysis = HighlightAnalysisResult(
         clips=[HighlightCandidate(rank=1, start=50.0, end=110.0, score=85,
                                    hook="Test", reason="Viral")],
@@ -197,6 +197,7 @@ def test_full_pipeline_happy_path():
     svc._analyzer = AsyncMock()
     svc._analyzer.analyze_highlights = AsyncMock(return_value=mock_analysis)
 
+    # Mock TAHAP 3: MicroSlicer
     svc._micro_slicer = AsyncMock()
     svc._micro_slicer.slice_audio = AsyncMock(return_value=[
         AudioSlice(clip_rank=1, audio_path="/tmp/clip.wav",
@@ -205,11 +206,13 @@ def test_full_pipeline_happy_path():
     ])
     svc._micro_slicer.cleanup_slices = MagicMock()
 
+    # Mock TAHAP 4: SelectiveWhisperTranscriber (local Faster-Whisper)
     svc._selective_whisper = AsyncMock()
     svc._selective_whisper.transcribe_all_clips = AsyncMock(return_value={
         1: [Word(word="hello", start=52.0, end=52.5)]
     })
 
+    # Mock TAHAP 5: Silero VAD
     from src.domain.entities import VADResult
     mock_vad_result = VADResult(
         original_start=50.0, original_end=110.0,
@@ -225,7 +228,19 @@ def test_full_pipeline_happy_path():
     async def run():
         with patch("os.path.exists", return_value=True):
             with patch("os.makedirs"):
-                await svc.run_pipeline(job)
+                with patch("shutil.copy2"):
+                    with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                        mock_cache = MockCache.return_value
+                        mock_cache.extract_video_id.return_value = "test"
+                        mock_cache.get_video_path.return_value = "/tmp/cached.mp4"
+                        mock_cache.load_transcript.return_value = None
+                        mock_cache.load_analysis.return_value = None
+                        mock_cache.save_transcript = MagicMock()
+                        mock_cache.save_analysis = MagicMock()
+                        # Mock render and folder structure (we test pipeline orchestration, not rendering)
+                        with patch.object(svc, "_render_clips", new_callable=AsyncMock):
+                            with patch.object(svc, "_create_folder_structure", new_callable=AsyncMock):
+                                await svc.run_pipeline(job)
 
         # Verify status progression
         status_calls = [c.args[1] for c in svc._repo.update_status.call_args_list]
@@ -236,10 +251,14 @@ def test_full_pipeline_happy_path():
         assert JobStatus.V2_VAD_REFINING in status_calls
         assert JobStatus.COMPLETED in status_calls
 
+        # Verify transcript used YouTube API (not Gemini)
+        svc._transcriber.transcribe.assert_called_once()
+
         # Verify clips_data saved
         svc._repo.update_clips_data.assert_called_once()
         saved_data = svc._repo.update_clips_data.call_args[0][1]
         assert saved_data["pipeline_version"] == "v2"
+        assert saved_data["transcript_source"] == "youtube_api"
 
     run_async(run())
     print("  [PASS] Full V2 pipeline happy path")
@@ -260,7 +279,13 @@ def test_pipeline_transcription_failure():
     async def run():
         with patch("os.path.exists", return_value=True):
             with patch("os.makedirs"):
-                await svc.run_pipeline(job)
+                with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                    mock_cache = MockCache.return_value
+                    mock_cache.extract_video_id.return_value = "fail"
+                    mock_cache.get_video_path.return_value = "/tmp/cached.mp4"
+                    mock_cache.load_transcript.return_value = None
+                    mock_cache.load_analysis.return_value = None
+                    await svc.run_pipeline(job)
 
         # Should be marked as FAILED
         last_status_call = svc._repo.update_status.call_args_list[-1]
@@ -293,7 +318,14 @@ def test_pipeline_analysis_failure():
     async def run():
         with patch("os.path.exists", return_value=True):
             with patch("os.makedirs"):
-                await svc.run_pipeline(job)
+                with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                    mock_cache = MockCache.return_value
+                    mock_cache.extract_video_id.return_value = "fail2"
+                    mock_cache.get_video_path.return_value = "/tmp/cached.mp4"
+                    mock_cache.load_transcript.return_value = None
+                    mock_cache.load_analysis.return_value = None
+                    mock_cache.save_transcript = MagicMock()
+                    await svc.run_pipeline(job)
 
         last_status_call = svc._repo.update_status.call_args_list[-1]
         assert last_status_call.args[1] == JobStatus.FAILED
@@ -327,7 +359,15 @@ def test_pipeline_no_clips_found():
     async def run():
         with patch("os.path.exists", return_value=True):
             with patch("os.makedirs"):
-                await svc.run_pipeline(job)
+                with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                    mock_cache = MockCache.return_value
+                    mock_cache.extract_video_id.return_value = "boring"
+                    mock_cache.get_video_path.return_value = "/tmp/cached.mp4"
+                    mock_cache.load_transcript.return_value = None
+                    mock_cache.load_analysis.return_value = None
+                    mock_cache.save_transcript = MagicMock()
+                    mock_cache.save_analysis = MagicMock()
+                    await svc.run_pipeline(job)
 
         last_status_call = svc._repo.update_status.call_args_list[-1]
         assert last_status_call.args[1] == JobStatus.FAILED
@@ -349,7 +389,13 @@ def test_pipeline_validation_failure():
 
     async def run():
         with patch("os.makedirs"):
-            await svc.run_pipeline(job)
+            with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                mock_cache = MockCache.return_value
+                mock_cache.extract_video_id.return_value = None
+                mock_cache.get_video_path.return_value = None
+                mock_cache.load_transcript.return_value = None
+                mock_cache.load_analysis.return_value = None
+                await svc.run_pipeline(job)
 
         last_status_call = svc._repo.update_status.call_args_list[-1]
         assert last_status_call.args[1] == JobStatus.FAILED

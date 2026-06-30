@@ -290,22 +290,36 @@ class YoloReframeEngine(IYoloReframeEngine):
         width: int, height: int,
         frame_centers: list,
     ) -> Optional[dict]:
-        """Render 2-grid split: top=left speaker, bottom=right speaker.
+        """Render dynamic split-grid: first 4s = normal crop, then split when 2+ persons.
         
         Design principles:
+        - First 4 seconds: NO split grid (hook period, show full frame)
+        - After 4s: split ONLY if 2+ persons clearly separated in frame
         - Each grid shows a DIFFERENT person (left vs right of frame)
-        - Minimal zoom — person should NOT be cut off
-        - Stable framing — use averaged position, no movement
+        - Dynamic: number of grids based on detected persons
         """
-        # Collect all centers, determine left vs right speakers
-        all_centers = []
-        for _, centers in frame_centers:
-            all_centers.extend(centers)
+        import cv2
 
-        if len(all_centers) < 4:
+        # Get video FPS for time-based gating
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        
+        # Only use frames AFTER 4 seconds for person detection (skip hook period)
+        min_frame_for_grid = int(fps * 4.0)
+        
+        # Collect centers ONLY from frames after 4s
+        post_hook_centers = []
+        for frame_idx, centers in frame_centers:
+            if frame_idx >= min_frame_for_grid and len(centers) >= 2:
+                post_hook_centers.extend(centers)
+
+        if len(post_hook_centers) < 4:
+            logger.info(f"yolo_reframe: too few multi-person frames after 4s ({len(post_hook_centers)} centers), skipping grid")
             return None
 
-        centers_array = np.array(all_centers)
+        centers_array = np.array(post_hook_centers)
         midpoint = width / 2
 
         left_centers = centers_array[centers_array < midpoint]
@@ -318,35 +332,72 @@ class YoloReframeEngine(IYoloReframeEngine):
         right_avg = np.mean(right_centers)
 
         # Ensure the two crops are clearly showing DIFFERENT persons
-        # Minimum separation between left and right average position
         if abs(right_avg - left_avg) < width * 0.2:
-            # Speakers too close together — not clearly 2 separate persons
             logger.info(f"yolo_reframe: speakers too close ({abs(right_avg - left_avg):.0f}px < {width * 0.2:.0f}px), skipping grid")
             return None
 
-        # Each speaker: use FULL height (no aggressive zoom — avoid cutting off person)
-        # Crop width = height * 9/16 (standard 9:16 from full height)
+        # Each speaker crop dimensions
         crop_w_person = int(height * 9 / 16)
         half_h = 960  # Each speaker gets 1080x960 in output
 
-        # Center crop on each person — use full height, person stays centered
         left_x = int(max(0, min(width - crop_w_person, left_avg - crop_w_person / 2)))
         right_x = int(max(0, min(width - crop_w_person, right_avg - crop_w_person / 2)))
 
-        # Verify crops don't overlap (each shows different part of frame)
+        # Verify crops don't overlap
         if abs(left_x - right_x) < crop_w_person * 0.3:
-            # Crops overlap too much — would show same content in both grids
             logger.info(f"yolo_reframe: grid crops overlap too much, skipping")
             return None
 
+        # Time-gated filter: first 4s shows normal center crop, then switches to split grid
+        # This ensures the hook period (0-4s) has normal framing
+        grid_start_time = 4.0
+        total_duration = total_frames / fps if fps > 0 else 60
+
+        # Use center crop for the primary person in first 4s
+        primary_x = int((left_x + right_x) / 2)  # Center between two speakers
+        primary_x = max(0, min(width - crop_w_person, primary_x))
+
+        # Complex filter: trim into 2 parts, process differently, then concat
         filter_complex = (
-            f"[0:v]split=2[top][bot];"
+            # Part 1: First 4s — normal center crop (1080x1920)
+            f"[0:v]trim=0:{grid_start_time},setpts=PTS-STARTPTS,"
+            f"crop={crop_w_person}:{height}:{primary_x}:0,scale=1080:1920[v1];"
+            # Part 2: After 4s — split grid (2 speakers stacked)
+            f"[0:v]trim={grid_start_time},setpts=PTS-STARTPTS,split=2[top][bot];"
             f"[top]crop={crop_w_person}:{height}:{left_x}:0,scale=1080:{half_h}[t];"
             f"[bot]crop={crop_w_person}:{height}:{right_x}:0,scale=1080:{half_h}[b];"
-            f"[t][b]vstack=inputs=2[v]"
+            f"[t][b]vstack=inputs=2[v2];"
+            # Concat part1 + part2
+            f"[v1][v2]concat=n=2:v=1:a=0[v]"
         )
 
+        # Audio: also split and concat to keep sync
+        audio_filter = (
+            f"[0:a]atrim=0:{grid_start_time},asetpts=PTS-STARTPTS[a1];"
+            f"[0:a]atrim={grid_start_time},asetpts=PTS-STARTPTS[a2];"
+            f"[a1][a2]concat=n=2:v=0:a=1[a]"
+        )
+
+        full_filter = f"{filter_complex};{audio_filter}"
+
         cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-filter_complex", full_filter,
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-c:a", "aac", "-movflags", "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode == 0 and os.path.exists(output_path):
+            logger.info(
+                f"yolo_reframe: autogrid 2-speaker (left_x={left_x}, right_x={right_x}, "
+                f"grid_after={grid_start_time}s, separation={abs(right_avg - left_avg):.0f}px)"
+            )
+            return {"output_path": output_path, "person_count": 2, "masks_available": False, "method": "autogrid_timed"}
+        
+        # Fallback: try without audio filter (in case audio stream missing)
+        cmd_no_audio = [
             "ffmpeg", "-y", "-i", video_path,
             "-filter_complex", filter_complex,
             "-map", "[v]", "-map", "0:a?",
@@ -354,13 +405,10 @@ class YoloReframeEngine(IYoloReframeEngine):
             "-c:a", "copy", "-movflags", "+faststart",
             output_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        result = subprocess.run(cmd_no_audio, capture_output=True, text=True, timeout=180)
         if result.returncode == 0 and os.path.exists(output_path):
-            logger.info(
-                f"yolo_reframe: autogrid 2-speaker (left_x={left_x}, right_x={right_x}, "
-                f"separation={abs(right_avg - left_avg):.0f}px)"
-            )
-            return {"output_path": output_path, "person_count": 2, "masks_available": False, "method": "autogrid"}
+            logger.info(f"yolo_reframe: autogrid 2-speaker (no audio filter fallback)")
+            return {"output_path": output_path, "person_count": 2, "masks_available": False, "method": "autogrid_timed"}
         return None
 
     def _ensure_h264(self, video_path: str, transcode_path: str) -> str:

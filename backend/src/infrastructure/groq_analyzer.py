@@ -187,7 +187,7 @@ class GroqAnalyzer(IGroqAnalyzer):
         video_duration: float, max_clips: int, chunk_num: int, total_chunks: int
     ) -> list[HighlightCandidate]:
         """Analyze a single transcript chunk → identify clip candidates."""
-        clips_per_chunk = max(2, max_clips // max(1, total_chunks) + 1)
+        clips_per_chunk = max(3, (max_clips // max(1, total_chunks)) + 2)
 
         prompt = self._build_chunk_analysis_prompt(
             chunk_text, chunk_start, chunk_end,
@@ -206,14 +206,14 @@ class GroqAnalyzer(IGroqAnalyzer):
 KONTEKS:
 - Video total: {video_duration:.0f} detik
 - Chunk ini: [{start:.1f}s - {end:.1f}s] (bagian {chunk_num} dari {total_chunks})
-- Target: Temukan MAKSIMAL {max_clips} momen viral (durasi 45-90 detik per klip)
+- Target: Temukan MAKSIMAL {max_clips} momen viral (durasi 30-90 detik per klip)
 
 TRANSKRIP:
 {text}
 
 ATURAN PENTING:
 1. Timestamp 'start' dan 'end' HARUS dalam rentang [{start:.1f}, {end:.1f}]
-2. Durasi setiap klip: 45-90 detik
+2. Durasi setiap klip: 30-90 detik
 3. Klip TIDAK BOLEH OVERLAP
 4. 'start' = awal kalimat (jangan potong tengah kata)
 5. 'end' = setelah kalimat selesai
@@ -354,9 +354,9 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                 if end > chunk_end + 5:
                     end = chunk_end
 
-                # Validate duration (45-90s target, enforce 45-120s)
+                # Validate duration (30-90s target, allow up to 120s)
                 duration = end - start
-                if duration < 45 or duration > 120:
+                if duration < 30 or duration > 120:
                     continue
 
                 # Clamp score

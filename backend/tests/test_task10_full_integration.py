@@ -265,7 +265,17 @@ def test_full_v2_pipeline_best_case():
     async def run():
         with patch("os.path.exists", return_value=True):
             with patch("os.makedirs"):
-                await svc.run_pipeline(job)
+                with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                    mock_cache = MockCache.return_value
+                    mock_cache.extract_video_id.return_value = "best"
+                    mock_cache.get_video_path.return_value = "/tmp/cached.mp4"
+                    mock_cache.load_transcript.return_value = None
+                    mock_cache.load_analysis.return_value = None
+                    mock_cache.save_transcript = MagicMock()
+                    mock_cache.save_analysis = MagicMock()
+                    with patch.object(svc, "_render_clips", new_callable=AsyncMock):
+                        with patch.object(svc, "_create_folder_structure", new_callable=AsyncMock):
+                            await svc.run_pipeline(job)
 
         # Verify completion
         status_calls = [c.args[1] for c in svc._repo.update_status.call_args_list]
@@ -307,7 +317,12 @@ def test_worst_case_no_transcript():
 
     async def run():
         with patch("os.makedirs"):
-            await svc.run_pipeline(job)
+            with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                mock_cache = MockCache.return_value
+                mock_cache.extract_video_id.return_value = "worst"
+                mock_cache.get_video_path.return_value = None  # No cached video
+                mock_cache.load_transcript.return_value = None
+                await svc.run_pipeline(job)
         last_call = svc._repo.update_status.call_args_list[-1]
         assert last_call.args[1] == JobStatus.FAILED
         assert "Transcription gagal" in last_call.args[2]
@@ -343,7 +358,14 @@ def test_worst_case_groq_rate_limited():
 
     async def run():
         with patch("os.makedirs"):
-            await svc.run_pipeline(job)
+            with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                mock_cache = MockCache.return_value
+                mock_cache.extract_video_id.return_value = "worst2"
+                mock_cache.get_video_path.return_value = None  # No cached video
+                mock_cache.load_transcript.return_value = None
+                mock_cache.load_analysis.return_value = None
+                mock_cache.save_transcript = MagicMock()
+                await svc.run_pipeline(job)
         last_call = svc._repo.update_status.call_args_list[-1]
         assert last_call.args[1] == JobStatus.FAILED
         assert "Highlight analysis gagal" in last_call.args[2]
@@ -407,7 +429,17 @@ def test_worst_case_partial_whisper_failure():
     async def run():
         with patch("os.path.exists", return_value=True):
             with patch("os.makedirs"):
-                await svc.run_pipeline(job)
+                with patch("src.infrastructure.cache_manager.CacheManager") as MockCache:
+                    mock_cache = MockCache.return_value
+                    mock_cache.extract_video_id.return_value = "partial"
+                    mock_cache.get_video_path.return_value = "/tmp/cached.mp4"
+                    mock_cache.load_transcript.return_value = None
+                    mock_cache.load_analysis.return_value = None
+                    mock_cache.save_transcript = MagicMock()
+                    mock_cache.save_analysis = MagicMock()
+                    with patch.object(svc, "_render_clips", new_callable=AsyncMock):
+                        with patch.object(svc, "_create_folder_structure", new_callable=AsyncMock):
+                            await svc.run_pipeline(job)
         # Should still complete (partial failure is OK)
         status_calls = [c.args[1] for c in svc._repo.update_status.call_args_list]
         assert JobStatus.COMPLETED in status_calls
