@@ -99,7 +99,7 @@ export function VideoPreviewOverlay({
 }: PreviewOverlayProps) {
   // Effective duration from config or default
   const duration = hookStyleConfig?.duration || hookDuration;
-  const subtitleOffset = duration; // subtitles start after hook ends
+  const subtitleOffset = 0; // subtitles render from time 0 (hook is visual overlay via z-index, matching Remotion)
 
   // ─── Hook Rendering ──────────────────────────────────────────────────────
   const hookVisible = showHook && currentTime >= 0 && currentTime < duration && !!hookText;

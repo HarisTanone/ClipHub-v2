@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, spring } from "remotion";
 import { makeTransform, scale as scaleFn, translateY as translateYFn } from "@remotion/animation-utils";
+import { hexToRgba } from "../utils/hexToRgba";
 
 interface HookConfig {
   animation?: string;
@@ -70,12 +71,25 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const fadeOutFrames = Math.floor(fadeOut * fps);
 
   // Opacity animation
-  const opacity = interpolate(
-    frame,
-    [0, fadeInFrames, totalFrames - fadeOutFrames, totalFrames],
-    [0, 1, 1, 0],
-    { extrapolateRight: "clamp", extrapolateLeft: "clamp" }
-  );
+  let opacity: number;
+  if (animation === "cinematic_reveal") {
+    // Cinematic: slower fade (1s in, 0.8s out) matching preview
+    const fadeInSlow = Math.floor(1.0 * fps);
+    const fadeOutSlow = Math.floor(0.8 * fps);
+    opacity = interpolate(
+      frame,
+      [0, fadeInSlow, totalFrames - fadeOutSlow, totalFrames],
+      [0, 1, 1, 0],
+      { extrapolateRight: "clamp", extrapolateLeft: "clamp" }
+    );
+  } else {
+    opacity = interpolate(
+      frame,
+      [0, fadeInFrames, totalFrames - fadeOutFrames, totalFrames],
+      [0, 1, 1, 0],
+      { extrapolateRight: "clamp", extrapolateLeft: "clamp" }
+    );
+  }
 
   // Animation-specific transforms using makeTransform (composable)
   let transform = "";
@@ -87,6 +101,25 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
     transform = makeTransform([translateYFn(ty), scaleFn(interpolate(frame, [0, 10], [0.9, 1], { extrapolateRight: "clamp" }))]);
   } else if (animation === "typewriter") {
     // handled in text display
+  } else if (animation === "glitch_rgb") {
+    // No transform on main text — handled via separate RGB layers in render
+  } else if (animation === "shake_neon") {
+    // Subtle shake via sin/cos (matches preview: sin(t*30)*1.5, cos(t*35)*1)
+    const shakeX = Math.sin(frame * 0.5) * 1.5;
+    const shakeY = Math.cos(frame * 0.6) * 1;
+    transform = `translate(${shakeX}px, ${shakeY}px)`;
+  } else if (animation === "cinematic_reveal") {
+    // No special transform — uses slow fade via opacity
+  } else if (animation === "danger_bold") {
+    // Pulse scale oscillation
+    const pulse = 1 + Math.sin(frame * 0.17) * 0.02;
+    transform = makeTransform([scaleFn(pulse)]);
+  } else if (animation === "slide_punch_framer") {
+    // Slide from left with bounce
+    const slideProgress = Math.min(1, frame / (fps * 0.4));
+    const slideX = (1 - slideProgress) * -100;
+    const bounceScale = slideProgress >= 1 ? 1 : 0.95 + slideProgress * 0.05;
+    transform = `translateX(${slideX}%) scale(${bounceScale})`;
   }
 
   // Typewriter text
@@ -112,6 +145,14 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   if (config.glowEnabled) {
     shadows.push(`0 0 ${config.glowSize || 20}px ${config.glowColor || "#FFCC00"}`);
   }
+  // shake_neon: add neon glow to main text (matching preview behavior)
+  if (animation === "shake_neon") {
+    shadows.push(`0 0 10px ${color}`, `0 0 20px ${color}`, `0 0 40px ${color}`);
+  }
+  // danger_bold: add red glow to main text
+  if (animation === "danger_bold") {
+    shadows.push(`0 0 10px #FF0000`, `0 0 20px rgba(255,0,0,0.5)`);
+  }
 
   // Glitch effect
   const isGlitch = animation === "glitch";
@@ -121,9 +162,9 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   return (
     <AbsoluteFill style={{ opacity }}>
       {/* Background overlay */}
-      <AbsoluteFill style={{ backgroundColor: bgColor, opacity: bgOpacity }} />
+      <AbsoluteFill style={{ backgroundColor: hexToRgba(bgColor, bgOpacity) }} />
 
-      {/* Glitch RGB layers */}
+      {/* Glitch RGB layers (legacy glitch animation) */}
       {glitchActive && (
         <>
           <div style={{
@@ -145,6 +186,69 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
             {displayText}
           </div>
         </>
+      )}
+
+      {/* glitch_rgb animation: persistent RGB channel separation */}
+      {animation === "glitch_rgb" && (
+        <>
+          <div style={{
+            position: "absolute", top: `${positionY}%`, left: 0, right: 0,
+            transform: `translateY(-50%) translateX(${Math.sin(frame * 0.5) * 3 - 4}px)`,
+            textAlign, padding: "0 40px",
+            color: "#ff0000", fontSize, fontWeight, fontFamily,
+            opacity: 0.7,
+          }}>{displayText}</div>
+          <div style={{
+            position: "absolute", top: `${positionY}%`, left: 0, right: 0,
+            transform: `translateY(-50%) translateX(${4 - Math.sin(frame * 0.5) * 3}px)`,
+            textAlign, padding: "0 40px",
+            color: "#00ffff", fontSize, fontWeight, fontFamily,
+            opacity: 0.7,
+          }}>{displayText}</div>
+        </>
+      )}
+
+      {/* shake_neon animation: glow layers */}
+      {animation === "shake_neon" && (
+        <>
+          <div style={{
+            position: "absolute", top: `${positionY}%`, left: 0, right: 0,
+            transform: `translateY(-50%)`,
+            textAlign, padding: "0 40px",
+            color: color, fontSize, fontWeight, fontFamily,
+            opacity: 0.3,
+            filter: "blur(2px)",
+            textShadow: `0 0 12px ${color}, 0 0 24px ${color}`,
+          }}>{displayText}</div>
+          <div style={{
+            position: "absolute", top: `${positionY}%`, left: 0, right: 0,
+            transform: `translateY(-50%) translate(${Math.sin(frame * 0.8) * 2}px, ${Math.cos(frame * 0.6) * 2}px)`,
+            textAlign, padding: "0 40px",
+            color: color, fontSize, fontWeight, fontFamily,
+            opacity: 0.5,
+            textShadow: `0 0 6px ${color}, 0 0 12px ${color}`,
+          }}>{displayText}</div>
+        </>
+      )}
+
+      {/* cinematic_reveal animation: letterbox bars */}
+      {animation === "cinematic_reveal" && (
+        <>
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "12%", backgroundColor: "#000" }} />
+          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "12%", backgroundColor: "#000" }} />
+        </>
+      )}
+
+      {/* danger_bold animation: red glow behind main text */}
+      {animation === "danger_bold" && (
+        <div style={{
+          position: "absolute", top: `${positionY}%`, left: 0, right: 0,
+          transform: `translateY(-50%)`,
+          textAlign, padding: "0 40px",
+          color: "#FF0000", fontSize, fontWeight, fontFamily,
+          opacity: 0.4,
+          textShadow: "0 0 10px #FF0000, 0 0 20px #FF0000, 0 0 40px rgba(255,0,0,0.3)",
+        }}>{displayText}</div>
       )}
 
       {/* Main text */}
