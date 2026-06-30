@@ -396,21 +396,53 @@ class V2PipelineService:
                     except Exception as e:
                         logger.warning(f"[{job_id}] Center-crop fallback error clip {clip.rank}: {e}")
 
-            # ═══ Step 9: Word-level timestamps from Whisper (already have them!) ═══
+            # ═══ Step 9: Whisper on TRIMMED CLIPS (per-clip for accurate timestamps) ═══
             self._emit(job_id, 9, "v2_selective_whisper", "start")
             await self._repo.update_status(job_id, JobStatus.V2_WORD_TRANSCRIBING)
 
-            # We already have word-level data from full Whisper transcription (Step 3)
-            # Extract words per clip from raw_whisper_segments
+            # Run Whisper on each trimmed clip directly — gives word timestamps
+            # perfectly relative to clip start (0.0 = beginning of clip audio)
             words_per_clip: dict[int, list[Word]] = {}
+            from src.infrastructure.groq_whisper import GroqWhisperTranscriber
+            clip_whisper = GroqWhisperTranscriber()
+
             for clip in clips:
                 if not trim_results.get(clip.rank):
                     continue
-                clip_words = self._extract_words_for_clip(raw_whisper_segments, clip.start, clip.end)
-                words_per_clip[clip.rank] = clip_words
+                # Use the reframed clip if available (has correct audio), else raw trimmed
+                clip_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                if not os.path.exists(clip_path):
+                    clip_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+
+                if not os.path.exists(clip_path):
+                    continue
+
+                try:
+                    # Transcribe the trimmed clip — timestamps will be 0-based (relative to clip start)
+                    segments = await clip_whisper.transcribe(clip_path)
+                    clip_words = []
+                    for seg in segments:
+                        for w in seg.get("words", []):
+                            word_text = w.get("word", "").strip()
+                            w_start = w.get("start", 0)
+                            w_end = w.get("end", 0)
+                            if word_text and w_end > w_start:
+                                clip_words.append(Word(
+                                    word=word_text,
+                                    start=round(w_start, 3),
+                                    end=round(w_end, 3),
+                                    highlight=False,
+                                ))
+                    words_per_clip[clip.rank] = clip_words
+                    logger.info(f"[{job_id}] Whisper clip {clip.rank}: {len(clip_words)} words, first='{clip_words[0].word if clip_words else 'N/A'}' @ {clip_words[0].start if clip_words else 0:.3f}s")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Whisper clip {clip.rank} failed: {e}")
+                    # Fallback: extract from full-video timestamps (less accurate)
+                    clip_words = self._extract_words_for_clip(raw_whisper_segments, clip.start, clip.end)
+                    words_per_clip[clip.rank] = clip_words
 
             logger.info(
-                f"[{job_id}] V2 words extracted: "
+                f"[{job_id}] V2 per-clip Whisper: "
                 f"{sum(1 for w in words_per_clip.values() if w)}/{clips_count} clips with words "
                 f"({sum(len(w) for w in words_per_clip.values())} total words)"
             )
@@ -605,21 +637,34 @@ class V2PipelineService:
     ) -> dict[int, list[dict]]:
         """Convert Word objects to dict format expected by subtitle renderer.
         
-        Words are converted from ABSOLUTE timestamps to RELATIVE (from clip trim point).
-        This matches V1 behavior where Whisper runs on trimmed clip (starts at 0.0).
+        If words were transcribed per-clip (start near 0), they're already relative.
+        If words were extracted from full-video (start near clip.start), convert to relative.
         """
         result = {}
         for clip in clips:
             words = words_per_clip.get(clip.rank, [])
-            # Use original start (before VAD adjustment) = the actual trim point
+            if not words:
+                result[clip.rank] = []
+                continue
+
+            # Detect if words are already relative (first word start < 10s = per-clip Whisper)
+            # vs absolute (first word start near clip.start = extracted from full video)
+            first_word_start = words[0].start if words else 0
             trim_point = (original_starts or {}).get(clip.rank, clip.start)
-            
-            # Convert absolute → relative (same as V1 where Whisper starts at 0)
+
+            # If first word is close to 0 (within 10s), words are already per-clip relative
+            already_relative = first_word_start < 10.0
+
             relative_words = []
             for w in words:
-                rel_start = round(w.start - trim_point, 3)
-                rel_end = round(w.end - trim_point, 3)
-                # Only include words with valid positive timing
+                if already_relative:
+                    rel_start = round(w.start, 3)
+                    rel_end = round(w.end, 3)
+                else:
+                    # Convert absolute → relative
+                    rel_start = round(w.start - trim_point, 3)
+                    rel_end = round(w.end - trim_point, 3)
+
                 if rel_start >= 0 and rel_end > rel_start:
                     relative_words.append({
                         "word": w.word,
@@ -627,15 +672,14 @@ class V2PipelineService:
                         "end": rel_end,
                         "highlight": w.highlight,
                     })
-            
+
             if relative_words:
                 logger.info(
-                    f"v2_words clip {clip.rank}: trim_point={trim_point:.2f}s, "
+                    f"v2_words clip {clip.rank}: mode={'per-clip' if already_relative else 'extracted'}, "
                     f"{len(relative_words)} words, "
-                    f"first='{relative_words[0]['word']}' @ {relative_words[0]['start']:.3f}s, "
-                    f"last='{relative_words[-1]['word']}' @ {relative_words[-1]['start']:.3f}s"
+                    f"first='{relative_words[0]['word']}' @ {relative_words[0]['start']:.3f}s"
                 )
-            
+
             result[clip.rank] = relative_words
         return result
 
