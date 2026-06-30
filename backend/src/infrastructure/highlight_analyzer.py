@@ -223,6 +223,7 @@ class HighlightAnalyzer:
 
         system_prompt = f"""Kamu adalah AI analis konten viral spesialis podcast/video Indonesia.
 Tugasmu: menganalisis transcript dan mengekstrak {max_clips} potongan (clip) terbaik untuk TikTok/Reels/Shorts.
+Respons HARUS dalam format JSON valid.
 
 ATURAN WAJIB:
 1. Duration clip HARUS 45-90 detik (minimum 45, maksimum 90).
