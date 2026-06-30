@@ -66,22 +66,22 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         </AbsoluteFill>
       )}
 
-      {/* Layer 2: Subtitles (render from frame 0, using Whisper timestamps directly) */}
+      {/* Layer 2: Subtitles (filtered: no subtitles during hook period) */}
       {words.length > 0 && (
         <AbsoluteFill style={{ zIndex: 1 }}>
           <SubtitleLayer
-            words={words}
+            words={hookText ? words.filter(w => w.start >= hookDuration) : words}
             config={subtitleConfig}
             fps={fps}
           />
         </AbsoluteFill>
       )}
 
-      {/* Layer 3: Hook (first N seconds, renders ABOVE subtitles) */}
+      {/* Layer 3: Hook (first N seconds, renders ABOVE subtitles with full overlay) */}
       {hookText && (
         <Sequence from={0} durationInFrames={hookDurationFrames}>
           <AbsoluteFill style={{ zIndex: 2 }}>
-            <HookLayer text={hookText} config={hookConfig} />
+            <HookLayer text={hookText} config={{ ...hookConfig, animation: hookAnimation || hookConfig.animation }} />
           </AbsoluteFill>
         </Sequence>
       )}
