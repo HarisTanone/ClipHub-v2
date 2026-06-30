@@ -371,6 +371,31 @@ class V2PipelineService:
                         logger.warning(f"[{job_id}] YOLO reframe failed clip {clip.rank}: {e}")
             self._emit(job_id, 8, "yolo_reframe", "complete")
 
+            # Center-crop fallback for 9:16 (when YOLO model unavailable or fails all clips)
+            if flags.yolo_enabled and not reframe_data and job.target_aspect_ratio == "9:16":
+                import subprocess as _sp
+                logger.info(f"[{job_id}] Applying center-crop fallback for 9:16 (YOLO produced no results)")
+                for clip in clips:
+                    if not trim_results.get(clip.rank):
+                        continue
+                    in_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                    out_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                    crop_cmd = [
+                        "ffmpeg", "-y", "-i", in_path,
+                        "-vf", "crop=ih*9/16:ih,scale=1080:1920",
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                        "-c:a", "copy", "-movflags", "+faststart",
+                        out_path,
+                    ]
+                    try:
+                        result = await asyncio.to_thread(
+                            _sp.run, crop_cmd, capture_output=True, text=True, timeout=60
+                        )
+                        if result.returncode == 0 and os.path.exists(out_path):
+                            reframe_data[clip.rank] = {"method": "center_crop_fallback"}
+                    except Exception as e:
+                        logger.warning(f"[{job_id}] Center-crop fallback error clip {clip.rank}: {e}")
+
             # ═══ Step 9: Word-level timestamps from Whisper (already have them!) ═══
             self._emit(job_id, 9, "v2_selective_whisper", "start")
             await self._repo.update_status(job_id, JobStatus.V2_WORD_TRANSCRIBING)
@@ -1005,9 +1030,9 @@ class V2PipelineService:
             if os.path.exists(final_path):
                 shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
 
-        # Generate meta JSON
+        # Generate meta JSON — format matches V1 pipeline exactly
         clips_count = len(clips)
-        success_count = sum(1 for c in clips if trim_results.get(c.rank) and os.path.exists(f"{output_dir}/clip_{c.rank:02d}_final.mp4"))
+        success_count = sum(1 for c in clips if trim_results.get(c.rank))
 
         meta = {
             "job_id": job_id,
@@ -1016,25 +1041,22 @@ class V2PipelineService:
             "clips_total": clips_count,
             "clips_success": success_count,
             "created_at": str(job.created_at) if job.created_at else None,
-            "clips": [],
+            "clips": [
+                {
+                    "rank": c.rank,
+                    "start": c.start,
+                    "end": c.end,
+                    "duration": c.end - c.start,
+                    "hook": c.hook,
+                    "score": c.score,
+                    "words": clips_with_words.get(c.rank, []),
+                }
+                for c in clips
+            ],
         }
 
-        for clip in clips:
-            if not trim_results.get(clip.rank):
-                continue
-            words = clips_with_words.get(clip.rank, [])
-            meta["clips"].append({
-                "rank": clip.rank,
-                "start": clip.start,
-                "end": clip.end,
-                "duration": round(clip.end - clip.start, 2),
-                "hook": clip.hook,
-                "score": clip.score,
-                "words": words,
-            })
-
         meta_path = f"{output_dir}/meta_{job_id}.json"
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json_mod.dump(meta, f, ensure_ascii=False, indent=2)
+        with open(meta_path, "w") as f:
+            json_mod.dump(meta, f, indent=2, default=str)
 
         logger.info(f"[{job_id}] Folder structure created: raw/{success_count}, final/{success_count}, thumbnail/, meta JSON")
