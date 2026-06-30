@@ -190,6 +190,7 @@ INGAT: Output HARUS dimulai dengan {{ dan diakhiri dengan }}. Tidak ada teks lai
             "model": self._model,
             "prompt": prompt,
             "stream": False,
+            "format": "json",  # Force JSON output format (prevents markdown/text responses)
             "options": {
                 "temperature": 0.3,
                 "num_predict": 4000,

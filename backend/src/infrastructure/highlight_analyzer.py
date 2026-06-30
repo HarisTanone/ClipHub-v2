@@ -209,6 +209,8 @@ class HighlightAnalyzer:
                 clips = self._parse_llm_response(raw_text, video_duration)
                 if clips:
                     return self._build_result(clips, max_clips, video_duration, f"groq_{groq_model}")
+                # Log why parsing failed
+                logger.warning(f"highlight_analyzer: Groq LLM returned empty result (raw_text[:150]={raw_text[:150]})")
                 return None
 
             except asyncio.TimeoutError:
@@ -306,6 +308,7 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
 
         raw_clips = data.get("clips", [])
         if not raw_clips:
+            logger.warning(f"highlight_analyzer: JSON parsed but 'clips' array is empty. Keys found: {list(data.keys())}")
             return []
 
         candidates = []

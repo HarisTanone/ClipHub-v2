@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     HOOK_ENABLE_JALUR_A: bool = False
 
     # ─── Timeout Settings (seconds) ─────────────────────────────────────
-    GEMINI_TIMEOUT: int = 120
+    GEMINI_TIMEOUT: int = 30  # Fast fail — skip to Groq fallback quickly
     GROQ_LLM_TIMEOUT: int = 90
 
     # ─── Remotion Render Engine ──────────────────────────────────────────
