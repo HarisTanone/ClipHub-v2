@@ -463,6 +463,17 @@ class V2PipelineService:
                 reframe_data=reframe_data,
             )
 
+            # ═══ Step 12: Folder Structure + Thumbnails + Meta JSON ═══
+            await self._create_folder_structure(
+                job_id=job_id,
+                job=job,
+                clips=clips,
+                clips_with_words=clips_with_words,
+                creative_direction=creative_direction,
+                output_dir=output_dir,
+                trim_results=trim_results,
+            )
+
             # ═══ Final: Assemble results ═══
             success_count = sum(
                 1 for clip in clips
@@ -941,3 +952,89 @@ class V2PipelineService:
             "creative_direction": asdict(creative_direction),
             "clips": clips_output,
         }
+
+    async def _create_folder_structure(
+        self,
+        job_id: str,
+        job: Job,
+        clips: list[Clip],
+        clips_with_words: dict[int, list[dict]],
+        creative_direction: CreativeDirection,
+        output_dir: str,
+        trim_results: dict[int, bool],
+    ) -> None:
+        """Create organized folder structure: raw/, final/, thumbnail/, meta JSON."""
+        import subprocess
+        import shutil
+        import json as json_mod
+
+        thumb_dir = f"{output_dir}/thumbnail"
+        raw_dir = f"{output_dir}/raw"
+        final_dir = f"{output_dir}/final"
+        os.makedirs(thumb_dir, exist_ok=True)
+        os.makedirs(raw_dir, exist_ok=True)
+        os.makedirs(final_dir, exist_ok=True)
+
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            rank = clip.rank
+
+            # Generate thumbnail from final video (seek to 1s)
+            final_path = f"{output_dir}/clip_{rank:02d}_final.mp4"
+            thumb_path = f"{thumb_dir}/clip_{rank:02d}.jpg"
+            if os.path.exists(final_path):
+                thumb_cmd = [
+                    "ffmpeg", "-y", "-i", final_path,
+                    "-ss", "1", "-frames:v", "1",
+                    "-vf", "scale=360:-1",
+                    "-q:v", "3",
+                    thumb_path,
+                ]
+                try:
+                    await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
+                except Exception:
+                    pass
+
+            # Copy raw clip to raw/ folder
+            raw_src = f"{output_dir}/clip_{rank:02d}.mp4"
+            if os.path.exists(raw_src):
+                shutil.copy2(raw_src, f"{raw_dir}/clip_{rank:02d}.mp4")
+
+            # Copy final clip to final/ folder
+            if os.path.exists(final_path):
+                shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
+
+        # Generate meta JSON
+        clips_count = len(clips)
+        success_count = sum(1 for c in clips if trim_results.get(c.rank) and os.path.exists(f"{output_dir}/clip_{c.rank:02d}_final.mp4"))
+
+        meta = {
+            "job_id": job_id,
+            "youtube_url": job.youtube_url,
+            "aspect_ratio": job.target_aspect_ratio,
+            "clips_total": clips_count,
+            "clips_success": success_count,
+            "created_at": str(job.created_at) if job.created_at else None,
+            "clips": [],
+        }
+
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            words = clips_with_words.get(clip.rank, [])
+            meta["clips"].append({
+                "rank": clip.rank,
+                "start": clip.start,
+                "end": clip.end,
+                "duration": round(clip.end - clip.start, 2),
+                "hook": clip.hook,
+                "score": clip.score,
+                "words": words,
+            })
+
+        meta_path = f"{output_dir}/meta_{job_id}.json"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json_mod.dump(meta, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"[{job_id}] Folder structure created: raw/{success_count}, final/{success_count}, thumbnail/, meta JSON")
