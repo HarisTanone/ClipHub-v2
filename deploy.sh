@@ -251,9 +251,13 @@ Type=simple
 User=$DEPLOY_USER
 WorkingDirectory=$BACKEND_DIR
 Environment=PATH=$BACKEND_DIR/venv/bin:/usr/local/bin:/usr/bin
+# Kill any stale process on port before starting (prevents EADDRINUSE)
+ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $BACKEND_PORT/tcp 2>/dev/null || true'
+ExecStartPre=/bin/sleep 1
 ExecStart=$BACKEND_DIR/venv/bin/python -m uvicorn src.presentation.api:app --host 0.0.0.0 --port $BACKEND_PORT --workers 4
 Restart=always
 RestartSec=5
+TimeoutStopSec=10
 StandardOutput=journal
 StandardError=journal
 
@@ -274,9 +278,15 @@ WorkingDirectory=$REMOTION_DIR
 Environment=REMOTION_SERVER_PORT=$REMOTION_PORT
 Environment=NODE_ENV=production
 Environment=PATH=/usr/local/bin:/usr/bin
+# Kill any stale process on port before starting (prevents EADDRINUSE)
+ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $REMOTION_PORT/tcp 2>/dev/null || true'
+ExecStartPre=/bin/sleep 1
 ExecStart=/usr/bin/npx tsx src/server/index.ts
+ExecStop=/bin/sh -c '/usr/bin/fuser -k $REMOTION_PORT/tcp 2>/dev/null || true'
 Restart=always
 RestartSec=5
+# Give process time to release port on stop
+TimeoutStopSec=10
 StandardOutput=journal
 StandardError=journal
 
@@ -294,9 +304,13 @@ After=network.target
 Type=simple
 User=$DEPLOY_USER
 WorkingDirectory=$FRONTEND_DIR
+# Kill any stale process on port before starting (prevents EADDRINUSE)
+ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $FRONTEND_PORT/tcp 2>/dev/null || true'
+ExecStartPre=/bin/sleep 1
 ExecStart=/usr/bin/npx --yes serve dist -l $FRONTEND_PORT -s --no-clipboard
 Restart=always
 RestartSec=5
+TimeoutStopSec=10
 StandardOutput=journal
 StandardError=journal
 
@@ -309,8 +323,14 @@ sudo systemctl daemon-reload
 sudo systemctl enable autocliper-backend autocliper-remotion autocliper-frontend 2>/dev/null || true
 
 # Start Remotion first and wait for bundle to be ready
+echo "  Stopping services (cleanup stale ports)..."
+sudo systemctl stop autocliper-remotion 2>/dev/null || true
+sudo systemctl stop autocliper-backend 2>/dev/null || true
+sudo systemctl stop autocliper-frontend 2>/dev/null || true
+sleep 2
+
 echo "  Starting Remotion server (bundling compositions)..."
-sudo systemctl restart autocliper-remotion
+sudo systemctl start autocliper-remotion
 REMOTION_READY=0
 for i in $(seq 1 60); do
     if curl -s "http://localhost:$REMOTION_PORT/health" 2>/dev/null | grep -q "healthy"; then
@@ -325,8 +345,8 @@ if [ $REMOTION_READY -eq 0 ]; then
 fi
 
 # Now restart backend (Remotion is ready to handle render requests)
-sudo systemctl restart autocliper-backend
-sudo systemctl restart autocliper-frontend
+sudo systemctl start autocliper-backend
+sudo systemctl start autocliper-frontend
 
 echo "  ✅ All services registered and started"
 
