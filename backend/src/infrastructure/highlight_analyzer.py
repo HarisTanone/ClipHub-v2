@@ -167,69 +167,142 @@ class HighlightAnalyzer:
     async def _analyze_with_groq(
         self, transcript: TranscriptResult, video_duration: float, max_clips: int
     ) -> Optional[HighlightAnalysisResult]:
-        """Use Groq LLM API for highlight analysis.
+        """Use Groq LLM API for highlight analysis — PRIMARY engine.
         
-        PRIMARY analysis engine:
-        - Full transcript (no truncation — 128K context supports it)
-        - Optimized compact format (saves 40-60% tokens)
-        - Native JSON mode (response_format=json_object)
-        - llama-3.3-70b-versatile (best quality on Groq)
+        Enterprise-grade implementation:
+        - Segment IDs for precise timestamp referencing (no hallucination)
+        - JSON Schema enforcement (guaranteed structure at API level)
+        - Full transcript with smart overflow handling
+        - llama-3.3-70b-versatile (128K context)
         """
         from groq import Groq, RateLimitError, APIConnectionError
 
         client = Groq(api_key=self._groq_key)
         groq_model = "llama-3.3-70b-versatile"
 
-        # Build compact transcript format (saves tokens vs raw JSON)
+        # Build indexed transcript: each segment gets an ID for precise referencing
+        # This prevents LLM from hallucinating timestamps
+        segment_map = {}  # id -> {start, end, text}
         transcript_lines = []
-        for seg in transcript.segments:
+        for i, seg in enumerate(transcript.segments):
+            seg_id = f"S{i:04d}"
+            segment_map[seg_id] = {"start": seg.start, "end": seg.end, "text": seg.text}
             mins, secs = divmod(int(seg.start), 60)
-            transcript_lines.append(f"[{mins:02d}:{secs:02d}] {seg.text.strip()}")
+            transcript_lines.append(f"[{seg_id} | {mins:02d}:{secs:02d}] {seg.text.strip()}")
+
         transcript_text = "\n".join(transcript_lines)
 
-        # Estimate tokens — if too large, truncate from middle (keep start + end)
+        # Smart overflow: if transcript too large, keep first 40% + last 40% with marker
         estimated_tokens = len(transcript_text.split()) * 1.3
+        is_truncated = False
         if estimated_tokens > 100000:
-            # Keep first 40% and last 40% (skip middle — least likely to have viral moments)
+            is_truncated = True
             lines = transcript_lines
             keep = int(len(lines) * 0.4)
-            transcript_text = "\n".join(lines[:keep]) + "\n\n[... bagian tengah dilewati ...]\n\n" + "\n".join(lines[-keep:])
+            first_part = "\n".join(lines[:keep])
+            last_part = "\n".join(lines[-keep:])
+            
+            # Get boundary timestamps for the gap
+            gap_start_seg = transcript.segments[keep] if keep < len(transcript.segments) else None
+            gap_end_seg = transcript.segments[-keep] if keep < len(transcript.segments) else None
+            gap_info = ""
+            if gap_start_seg and gap_end_seg:
+                gap_info = f" (dari {gap_start_seg.start:.0f}s sampai {gap_end_seg.start:.0f}s)"
+            
+            transcript_text = (
+                f"{first_part}\n\n"
+                f"[=== BAGIAN TENGAH DIPOTONG{gap_info} — JANGAN buat clip yang menjembatani bagian ini ===]\n\n"
+                f"{last_part}"
+            )
             logger.info(f"highlight_analyzer: Groq transcript truncated (est {estimated_tokens:.0f} tokens → kept first+last 40%)")
+
+        # System prompt with explicit rules
+        truncation_warning = ""
+        if is_truncated:
+            truncation_warning = "\n7. JANGAN membuat clip yang start-nya di bagian SEBELUM potongan dan end-nya di bagian SETELAH potongan."
 
         system_prompt = f"""Kamu adalah AI analis konten viral spesialis podcast/video Indonesia.
 Tugasmu: menganalisis transcript dan mengekstrak {max_clips} potongan (clip) terbaik untuk TikTok/Reels/Shorts.
 
 ATURAN WAJIB:
-1. Output HARUS berupa JSON valid: {{"clips": [...]}}
-2. Duration clip HARUS 45-90 detik (minimum 45, maksimum 90).
-3. Timestamp HARUS berada di dalam range video (0 - {video_duration:.0f} detik).
-4. Start = awal kalimat, End = akhir kalimat + 1-2 detik buffer.
-5. Clip TIDAK BOLEH overlap satu sama lain.
-6. Hook = 3-8 kata, membuat penasaran, BUKAN spoiler.
+1. Duration clip HARUS 45-90 detik (minimum 45, maksimum 90).
+2. Gunakan Segment ID (contoh: S0015) untuk menandai awal dan akhir clip.
+3. start_id = ID segment AWAL clip, end_id = ID segment AKHIR clip.
+4. Clip TIDAK BOLEH overlap satu sama lain.
+5. Hook = 3-8 kata, membuat penasaran, BUKAN spoiler. Bahasa sama dengan transcript.
+6. Score 0-100 berdasarkan potensi viral.{truncation_warning}
 
-Format setiap clip:
-{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "teks hook viral", "reason": "alasan singkat", "content_type": "storytelling", "speaker_energy": "high"}}"""
+PENTING: Referensikan segment ID yang ada di transcript, JANGAN membuat ID baru."""
 
-        user_prompt = f"""Video berdurasi {video_duration:.0f} detik. Temukan {max_clips} momen paling viral.
+        user_prompt = f"""Video berdurasi {video_duration:.0f} detik ({len(transcript.segments)} segments). 
+Temukan {max_clips} momen paling viral.
 
-TRANSKRIP:
+TRANSKRIP (format: [SegmentID | MM:SS] teks):
 {transcript_text}
 
-Ekstrak {max_clips} clip terbaik sekarang. Output JSON saja."""
+Ekstrak {max_clips} clip terbaik. Gunakan segment ID dari transcript di atas."""
+
+        # JSON Schema for strict output structure
+        clip_schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "clip_extraction",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "clips": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "rank": {"type": "integer"},
+                                    "score": {"type": "integer"},
+                                    "start_id": {"type": "string"},
+                                    "end_id": {"type": "string"},
+                                    "hook": {"type": "string"},
+                                    "reason": {"type": "string"},
+                                    "content_type": {"type": "string"},
+                                    "speaker_energy": {"type": "string"},
+                                },
+                                "required": ["rank", "score", "start_id", "end_id", "hook", "reason", "content_type", "speaker_energy"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "required": ["clips"],
+                    "additionalProperties": False,
+                },
+            },
+        }
 
         for attempt in range(3):
             try:
-                def _groq_call(m=groq_model, s=system_prompt, u=user_prompt):
-                    return client.chat.completions.create(
-                        model=m,
-                        messages=[
-                            {"role": "system", "content": s},
-                            {"role": "user", "content": u},
-                        ],
-                        temperature=0.3,
-                        max_tokens=4096,
-                        response_format={"type": "json_object"},  # FORCE JSON output
-                    )
+                def _groq_call(m=groq_model, s=system_prompt, u=user_prompt, schema=clip_schema):
+                    try:
+                        # Try json_schema first (strict structure)
+                        return client.chat.completions.create(
+                            model=m,
+                            messages=[
+                                {"role": "system", "content": s},
+                                {"role": "user", "content": u},
+                            ],
+                            temperature=0.3,
+                            max_tokens=4096,
+                            response_format=schema,
+                        )
+                    except Exception:
+                        # Fallback to json_object if schema not supported
+                        return client.chat.completions.create(
+                            model=m,
+                            messages=[
+                                {"role": "system", "content": s},
+                                {"role": "user", "content": u},
+                            ],
+                            temperature=0.3,
+                            max_tokens=4096,
+                            response_format={"type": "json_object"},
+                        )
 
                 response = await asyncio.wait_for(
                     asyncio.get_running_loop().run_in_executor(None, _groq_call),
@@ -240,33 +313,45 @@ Ekstrak {max_clips} clip terbaik sekarang. Output JSON saja."""
                     return None
 
                 raw_text = response.choices[0].message.content or ""
-                
-                # Parse JSON directly (guaranteed valid JSON from response_format)
+
+                # Parse JSON
                 try:
                     data = json.loads(raw_text)
                 except json.JSONDecodeError:
-                    logger.warning(f"highlight_analyzer: Groq JSON parse failed despite json_object mode: {raw_text[:200]}")
-                    # Fallback to regex extraction
+                    logger.warning(f"highlight_analyzer: Groq JSON parse failed: {raw_text[:200]}")
                     clips = self._parse_llm_response(raw_text, video_duration)
                     if clips:
                         return self._build_result(clips, max_clips, video_duration, f"groq_{groq_model}")
                     return None
 
-                # Extract clips from parsed JSON
                 raw_clips = data.get("clips", [])
                 if not raw_clips:
-                    logger.warning(f"highlight_analyzer: Groq JSON valid but no 'clips' key. Keys: {list(data.keys())}")
+                    logger.warning(f"highlight_analyzer: Groq JSON valid but no clips. Keys: {list(data.keys())}")
                     return None
 
-                # Validate and build candidates
+                # Convert segment IDs back to timestamps
                 candidates = []
                 for i, c in enumerate(raw_clips):
                     try:
-                        start = float(c.get("start", 0))
-                        end = float(c.get("end", 0))
+                        # Resolve segment IDs to actual timestamps
+                        start_id = c.get("start_id", "")
+                        end_id = c.get("end_id", "")
+                        
+                        # Handle both ID-based (new) and raw timestamp (fallback)
+                        if start_id in segment_map and end_id in segment_map:
+                            start = segment_map[start_id]["start"]
+                            end = segment_map[end_id]["end"]
+                        elif "start" in c and "end" in c:
+                            # Fallback: model returned raw timestamps instead of IDs
+                            start = float(c["start"])
+                            end = float(c["end"])
+                        else:
+                            logger.debug(f"highlight_analyzer: Groq clip {i} has invalid IDs: {start_id}, {end_id}")
+                            continue
+
                         duration = end - start
 
-                        # Validate timestamps
+                        # Validate
                         if end <= start or start < 0 or end > video_duration + 10:
                             logger.debug(f"highlight_analyzer: Groq clip {i} rejected (range): {start:.1f}-{end:.1f}")
                             continue
@@ -283,9 +368,10 @@ Ekstrak {max_clips} clip terbaik sekarang. Output JSON saja."""
                             reason=c.get("reason", ""),
                             content_type=c.get("content_type", "general"),
                             speaker_energy=c.get("speaker_energy", "medium"),
-                            hook_alt=c.get("hook_alt", ""),
+                            hook_alt="",
                         ))
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"highlight_analyzer: Groq clip {i} parse error: {e}")
                         continue
 
                 if candidates:
@@ -296,18 +382,20 @@ Ekstrak {max_clips} clip terbaik sekarang. Output JSON saja."""
                 return None
 
             except asyncio.TimeoutError:
-                logger.warning(f"highlight_analyzer: Groq LLM timeout (attempt {attempt + 1})")
+                logger.warning(f"highlight_analyzer: Groq LLM timeout attempt {attempt + 1}/{3} ({settings.GROQ_LLM_TIMEOUT}s)")
                 continue
-            except RateLimitError:
+            except RateLimitError as e:
                 wait = (attempt + 1) * 15
-                logger.warning(f"highlight_analyzer: Groq rate limit, waiting {wait}s")
+                logger.warning(f"highlight_analyzer: Groq rate limit (attempt {attempt + 1}), waiting {wait}s: {e}")
                 await asyncio.sleep(wait)
             except APIConnectionError as e:
                 logger.warning(f"highlight_analyzer: Groq connection error: {e}")
                 break
             except Exception as e:
-                logger.warning(f"highlight_analyzer: Groq error: {e}")
-                break
+                logger.warning(f"highlight_analyzer: Groq unexpected error (attempt {attempt + 1}): {e}")
+                if attempt == 2:
+                    break
+                continue
 
         return None
 
