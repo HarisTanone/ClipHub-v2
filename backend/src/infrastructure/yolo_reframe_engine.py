@@ -177,7 +177,11 @@ class YoloReframeEngine(IYoloReframeEngine):
 
         # Autogrid ONLY when user explicitly enables it (no auto-detection)
         # User must check the "Autogrid" toggle in frontend for this to activate
-        if autogrid and multi_speaker_count >= 5:
+        logger.info(
+            f"yolo_reframe: autogrid_param={autogrid} (type={type(autogrid).__name__}), "
+            f"multi_speaker_count={multi_speaker_count}, threshold=5"
+        )
+        if autogrid is True and multi_speaker_count >= 5:
             return self._render_autogrid_smooth(
                 original_path, output_path, orig_width, orig_height, frame_centers
             )

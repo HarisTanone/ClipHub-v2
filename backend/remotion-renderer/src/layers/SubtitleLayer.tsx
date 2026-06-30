@@ -116,7 +116,10 @@ export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps
       {pages.map((page, index) => {
         const nextPage = pages[index + 1] ?? null;
         const startFrame = Math.round((page.startMs / 1000) * fps);
-        const endFrame = Math.round((page.endMs / 1000) * fps) + 3; // +3 frames buffer
+        // End at next page start (prevent double-render overlap) or natural end + small buffer
+        const nextStartFrame = nextPage ? Math.round((nextPage.startMs / 1000) * fps) : Infinity;
+        const naturalEnd = Math.round((page.endMs / 1000) * fps) + 2;
+        const endFrame = Math.min(naturalEnd, nextStartFrame);
         const durationInFrames = endFrame - startFrame;
         if (durationInFrames <= 0) return null;
 

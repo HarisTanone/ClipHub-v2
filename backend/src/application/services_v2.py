@@ -249,7 +249,7 @@ class V2PipelineService:
                 self._emit(job_id, 3, "v2_transcript", "complete")
 
             # ═══ Step 4: LLM Highlight Analysis (Ollama LOCAL) ═══
-            cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
+            cached_analysis = cache.load_analysis(video_id, "v2_segid") if video_id else None
             if cached_analysis:
                 from src.domain.entities import HighlightCandidate, HighlightAnalysisResult
                 analysis_result = HighlightAnalysisResult(
@@ -290,7 +290,7 @@ class V2PipelineService:
                         "broll_suggestions": analysis_result.broll_suggestions,
                         "model_used": analysis_result.model_used,
                         "chunks_processed": analysis_result.chunks_processed,
-                    }, version="v2")
+                    }, version="v2_segid")
                 logger.info(
                     f"[{job_id}] V2 analysis (Ollama): {len(analysis_result.clips)} clips, "
                     f"model={analysis_result.model_used}"
