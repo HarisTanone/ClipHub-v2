@@ -175,6 +175,9 @@ app.post("/render", async (req, res) => {
     console.log(`[remotion-server]   Video URL: ${propsWithUrl.videoPath}`);
     console.log(`[remotion-server]   Duration: ${request.durationInFrames} frames @ ${request.fps}fps`);
     console.log(`[remotion-server]   Quality: ${request.quality} (crf=${qualityConfig.crf})`);
+    console.log(`[remotion-server]   Hook: "${propsWithUrl.hookText?.slice(0, 40)}..." anim=${propsWithUrl.hookAnimation}`);
+    console.log(`[remotion-server]   Hook config: color=${propsWithUrl.creativeDirection?.hook_style_config?.color || 'NOT SET'}, glow=${propsWithUrl.creativeDirection?.hook_style_config?.glowEnabled || false}`);
+    console.log(`[remotion-server]   Words: ${propsWithUrl.words?.length || 0}, firstWord: ${propsWithUrl.words?.[0]?.start || 'N/A'}s`);
 
     // Select composition
     const composition = await selectComposition({

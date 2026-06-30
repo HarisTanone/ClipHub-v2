@@ -685,6 +685,9 @@ class V2PipelineService:
 
         logger.info(
             f"[{job_id}] Render style: hook_anim={hook_style_config.get('animation', 'N/A')}, "
+            f"hook_color={hook_style_config.get('color', 'N/A')}, "
+            f"hook_glow={hook_style_config.get('glowEnabled', 'N/A')}, "
+            f"hook_config_keys={list(hook_style_config.keys()) if hook_style_config else '[]'}, "
             f"sub_font={subtitle_style_config.get('fontFamily', 'N/A')}"
         )
 
@@ -755,10 +758,9 @@ class V2PipelineService:
                           or creative_direction.hook_animation or "fade_scale")
 
             cd_dict = asdict(creative_direction) if creative_direction else {}
-            if hook_style_config:
-                cd_dict["hook_style_config"] = hook_style_config
-            if subtitle_style_config:
-                cd_dict["subtitle_style_config"] = subtitle_style_config
+            # ALWAYS pass style configs to Remotion (even if empty — Remotion handles defaults)
+            cd_dict["hook_style_config"] = hook_style_config
+            cd_dict["subtitle_style_config"] = subtitle_style_config
 
             try:
                 result = await self._remotion_adapter.render_clip(
