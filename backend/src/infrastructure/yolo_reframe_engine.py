@@ -191,13 +191,14 @@ class YoloReframeEngine(IYoloReframeEngine):
             f"yolo_reframe: autogrid_param={autogrid} (type={type(autogrid).__name__}), "
             f"multi_speaker_count={multi_speaker_count}, threshold=5"
         )
-        if autogrid is True and multi_speaker_count >= 5:
-            return self._render_autogrid_smooth(
+        if is_multi_speaker and multi_speaker_count >= 5:
+            # Multi-speaker: always try autogrid first (no frontend toggle needed)
+            grid_result = self._render_autogrid_smooth(
                 original_path, output_path, orig_width, orig_height, frame_centers
             )
-
-        # Multi-speaker WITHOUT autogrid: use union bbox crop (includes all persons)
-        if is_multi_speaker:
+            if grid_result:
+                return grid_result
+            # If autogrid failed (speakers too close, etc.) → try union crop
             return self._render_union_crop(
                 original_path, output_path, orig_width, orig_height, frame_centers, target_aspect
             )
@@ -264,13 +265,13 @@ class YoloReframeEngine(IYoloReframeEngine):
         PADDING_RATIO = 0.15
 
         if union_ratio > UNION_WIDTH_MAX_RATIO:
-            # Speakers too far apart — any crop will cut someone off
-            # → Skip reframe, keep original (safer for podcast wide shots)
+            # Speakers too far apart — switch to 2-grid layout automatically
             logger.info(
-                f"yolo_reframe: union_crop SKIP — speakers too wide "
-                f"(union={union_ratio:.0%} of frame, threshold={UNION_WIDTH_MAX_RATIO:.0%})"
+                f"yolo_reframe: union too wide ({union_ratio:.0%}) → auto-switching to 2-grid"
             )
-            return None
+            return self._render_autogrid_smooth(
+                video_path, output_path, width, height, frame_centers
+            )
 
         # Calculate crop dimensions (target 9:16)
         target_crop_w = int(height * 9 / 16)

@@ -209,22 +209,7 @@ export function NewJob() {
             </div>
           </Card>
 
-          {/* Autogrid (only for 9:16) */}
-          {aspectRatio === "9:16" && (
-            <Card className="p-3">
-              <Toggle
-                label="Auto Grid (2 Speaker)"
-                description="Memisahkan video menjadi 2 grid saat 2 pembicara terdeteksi. Hanya aktif jika kedua pembicara cukup terpisah dalam frame."
-                checked={autogridEnabled}
-                onChange={setAutogridEnabled}
-              />
-              {autogridEnabled && (
-                <p className="text-[9px] text-zinc-500 mt-2 pl-1 border-l-2 border-zinc-700">
-                  Grid tidak diterapkan pada 3 detik awal (hook period). Jika hanya 1 pembicara terdeteksi, video tetap menggunakan single tracking.
-                </p>
-              )}
-            </Card>
-          )}
+          {/* Autogrid removed — now automatic based on multi-speaker detection */}
 
           {/* Options */}
           <Card className="p-3">
