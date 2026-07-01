@@ -660,8 +660,8 @@ class V2PipelineService:
             enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
         )
 
-        # Parallel rendering: 2 clips simultaneously (balance CPU/RAM usage)
-        render_semaphore = asyncio.Semaphore(2)
+        # Parallel rendering: 4 clips simultaneously (i7-13700K 24 threads + 64GB RAM handles this easily)
+        render_semaphore = asyncio.Semaphore(4)
 
         async def render_one_clip(clip):
             async with render_semaphore:

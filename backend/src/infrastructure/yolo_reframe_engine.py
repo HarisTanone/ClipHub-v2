@@ -38,13 +38,22 @@ class YoloReframeEngine(IYoloReframeEngine):
         self._model = None
 
     def _load_model(self):
-        """Lazy-load YOLO model."""
+        """Lazy-load YOLO model (GPU if available)."""
         if self._model is not None:
             return True
         try:
             from ultralytics import YOLO
             self._model = YOLO(self._model_path)
-            logger.info(f"yolo_reframe: model loaded ({self._model_path})")
+            # Force GPU if available
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    self._model.to("cuda")
+                    logger.info(f"yolo_reframe: model loaded ({self._model_path}) [CUDA GPU]")
+                else:
+                    logger.info(f"yolo_reframe: model loaded ({self._model_path}) [CPU]")
+            except Exception:
+                logger.info(f"yolo_reframe: model loaded ({self._model_path}) [CPU fallback]")
             return True
         except Exception as e:
             logger.warning(f"yolo_reframe: failed to load model: {e}")
