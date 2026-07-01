@@ -431,10 +431,17 @@ class YoloReframeEngine(IYoloReframeEngine):
             return None
 
         centers_array = np.array(post_hook_centers)
-        midpoint = width / 2
 
-        left_centers = centers_array[centers_array < midpoint]
-        right_centers = centers_array[centers_array >= midpoint]
+        # Use simple 2-cluster split: sort centers, find the largest gap
+        sorted_centers = np.sort(centers_array)
+        gaps = np.diff(sorted_centers)
+        if len(gaps) == 0:
+            return None
+
+        # Find the biggest gap between consecutive centers — that's where to split
+        split_idx = np.argmax(gaps)
+        left_centers = sorted_centers[:split_idx + 1]
+        right_centers = sorted_centers[split_idx + 1:]
 
         if len(left_centers) < 2 or len(right_centers) < 2:
             return None
@@ -442,9 +449,10 @@ class YoloReframeEngine(IYoloReframeEngine):
         left_avg = np.mean(left_centers)
         right_avg = np.mean(right_centers)
 
-        # Ensure the two crops are clearly showing DIFFERENT persons
-        if abs(right_avg - left_avg) < width * 0.2:
-            logger.info(f"yolo_reframe: speakers too close ({abs(right_avg - left_avg):.0f}px < {width * 0.2:.0f}px), skipping grid")
+        # Minimum separation: 10% of frame width (lowered from 20%)
+        min_separation = width * 0.10
+        if abs(right_avg - left_avg) < min_separation:
+            logger.info(f"yolo_reframe: speakers too close ({abs(right_avg - left_avg):.0f}px < {min_separation:.0f}px), skipping grid")
             return None
 
         # Each speaker crop dimensions
