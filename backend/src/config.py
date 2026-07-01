@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     # === GPU Acceleration ===
     USE_NVENC: bool = True              # Use h264_nvenc for FFmpeg encoding (auto-fallback to libx264)
     NVENC_QUALITY: str = "medium"       # low (fast), medium (balanced), high (best quality)
+    GPU_WHISPER_DEVICE: str = "auto"    # "auto" (detect), "cuda", "cpu"
 
     # === VAD (Voice Activity Detection) ===
     VAD_ENABLED: bool = True

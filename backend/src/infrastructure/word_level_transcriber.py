@@ -274,12 +274,20 @@ class WordLevelTranscriber:
         words = []
         if hasattr(response, "words") and response.words:
             for w in response.words:
-                word_text = (w.word or "").strip()
+                # Groq may return words as dicts or objects — handle both
+                if isinstance(w, dict):
+                    word_text = (w.get("word", "") or "").strip()
+                    w_start = w.get("start", 0)
+                    w_end = w.get("end", 0)
+                else:
+                    word_text = (w.word or "").strip()
+                    w_start = w.start
+                    w_end = w.end
                 if word_text:
                     words.append({
                         "word": word_text,
-                        "start": round(float(w.start), 3),
-                        "end": round(float(w.end), 3),
+                        "start": round(float(w_start), 3),
+                        "end": round(float(w_end), 3),
                     })
 
         return words
