@@ -158,9 +158,9 @@ class WordLevelTranscriber:
     async def _transcribe_one(
         self, rank: int, clip_path: str, language: str
     ) -> dict:
-        """Transcribe a single clip: Groq → Faster-Whisper fallback.
+        """Transcribe a single clip: Faster-Whisper GPU (primary) → Groq API (fallback).
 
-        Returns: {words: [{word, start, end}], source: 'groq'|'faster_whisper'}
+        Returns: {words: [{word, start, end}], source: 'faster_whisper'|'groq'}
         """
         async with self._semaphore:
             if not os.path.exists(clip_path):
@@ -170,24 +170,26 @@ class WordLevelTranscriber:
             audio_path = await self._extract_audio(clip_path)
 
             try:
-                # Primary: Groq Whisper API
-                words = await self._groq_transcribe(audio_path, language)
+                # Primary: Faster-Whisper local GPU (no rate limit, no network)
+                words = await self._faster_whisper_transcribe(audio_path, language)
                 if words:
-                    return {"words": words, "source": "groq"}
-                raise WordLevelTranscriptionError("Groq returned 0 words")
-            except Exception as groq_err:
+                    return {"words": words, "source": "faster_whisper"}
+                raise WordLevelTranscriptionError("Faster-Whisper returned 0 words")
+            except Exception as fw_err:
                 logger.warning(
-                    f"word_level: clip {rank} Groq failed ({groq_err}), "
-                    f"trying Faster-Whisper local..."
+                    f"word_level: clip {rank} Faster-Whisper failed ({fw_err}), "
+                    f"trying Groq API fallback..."
                 )
 
                 try:
-                    # Fallback: Faster-Whisper local
-                    words = await self._faster_whisper_transcribe(audio_path, language)
-                    return {"words": words, "source": "faster_whisper"}
-                except Exception as fw_err:
+                    # Fallback: Groq Whisper API (cloud)
+                    words = await self._groq_transcribe(audio_path, language)
+                    if words:
+                        return {"words": words, "source": "groq"}
+                    raise WordLevelTranscriptionError("Groq returned 0 words")
+                except Exception as groq_err:
                     raise WordLevelTranscriptionError(
-                        f"Both failed. Groq: {groq_err} | FW: {fw_err}"
+                        f"Both failed. FW: {fw_err} | Groq: {groq_err}"
                     )
 
     # ─── Audio Extraction ─────────────────────────────────────────────────────
