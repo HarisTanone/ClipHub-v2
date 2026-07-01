@@ -646,7 +646,7 @@ class V2PipelineService:
         output_dir, trim_results, reframe_data,
         hook_style_config, subtitle_style_config,
     ) -> None:
-        """Render all clips via Remotion server."""
+        """Render all clips via Remotion server (parallel, max 2 concurrent)."""
         self._emit(job_id, 13, "remotion_render", "start")
         await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
 
@@ -658,53 +658,57 @@ class V2PipelineService:
             enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
         )
 
-        for clip in clips:
-            if not trim_results.get(clip.rank):
-                continue
+        # Parallel rendering: 2 clips simultaneously (balance CPU/RAM usage)
+        render_semaphore = asyncio.Semaphore(2)
 
-            reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
-            base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
-            in_path = reframed_path if os.path.exists(reframed_path) else base_path
-            out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+        async def render_one_clip(clip):
+            async with render_semaphore:
+                if not trim_results.get(clip.rank):
+                    return
 
-            clip_words_raw = clips_with_words.get(clip.rank, [])
-            clip_hook = clip.hook or ""
+                reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                in_path = reframed_path if os.path.exists(reframed_path) else base_path
+                out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
 
-            # Send all words to Remotion — ClipComposition.tsx handles hook-period filtering
-            clip_words = clip_words_raw
+                clip_words_raw = clips_with_words.get(clip.rank, [])
+                clip_hook = clip.hook or ""
+                clip_words = clip_words_raw
 
-            hook_style = (hook_style_config.get("animation", "")
-                          or creative_direction.hook_animation or "fade_scale")
+                hook_style = (hook_style_config.get("animation", "")
+                              or creative_direction.hook_animation or "fade_scale")
 
-            cd_dict = asdict(creative_direction) if creative_direction else {}
-            # ALWAYS pass style configs to Remotion (even if empty — Remotion handles defaults)
-            cd_dict["hook_style_config"] = hook_style_config
-            cd_dict["subtitle_style_config"] = subtitle_style_config
+                cd_dict = asdict(creative_direction) if creative_direction else {}
+                cd_dict["hook_style_config"] = hook_style_config
+                cd_dict["subtitle_style_config"] = subtitle_style_config
 
-            try:
-                result = await self._remotion_adapter.render_clip(
-                    scene_graph={"clip_rank": clip.rank, "duration": clip.end - clip.start, "layers": []},
-                    creative_direction=cd_dict,
-                    video_path=in_path,
-                    output_path=out_path,
-                    clip_rank=clip.rank,
-                    config=render_config,
-                    words=clip_words,
-                    hook_text=clip_hook,
-                    hook_style=hook_style,
-                )
-                if result.success:
-                    logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
-                else:
-                    logger.error(f"[{job_id}] Remotion failed clip {clip.rank}: {result.error_message}")
+                try:
+                    result = await self._remotion_adapter.render_clip(
+                        scene_graph={"clip_rank": clip.rank, "duration": clip.end - clip.start, "layers": []},
+                        creative_direction=cd_dict,
+                        video_path=in_path,
+                        output_path=out_path,
+                        clip_rank=clip.rank,
+                        config=render_config,
+                        words=clip_words,
+                        hook_text=clip_hook,
+                        hook_style=hook_style,
+                    )
+                    if result.success:
+                        logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
+                    else:
+                        logger.error(f"[{job_id}] Remotion failed clip {clip.rank}: {result.error_message}")
+                        import shutil
+                        if os.path.exists(in_path) and not os.path.exists(out_path):
+                            shutil.copy2(in_path, out_path)
+                except Exception as e:
+                    logger.exception(f"[{job_id}] Remotion error clip {clip.rank}: {e}")
                     import shutil
                     if os.path.exists(in_path) and not os.path.exists(out_path):
                         shutil.copy2(in_path, out_path)
-            except Exception as e:
-                logger.exception(f"[{job_id}] Remotion error clip {clip.rank}: {e}")
-                import shutil
-                if os.path.exists(in_path) and not os.path.exists(out_path):
-                    shutil.copy2(in_path, out_path)
+
+        # Launch all clips in parallel (semaphore limits to 2 concurrent)
+        await asyncio.gather(*[render_one_clip(clip) for clip in clips])
 
         self._emit(job_id, 14, "remotion_render", "complete")
 
