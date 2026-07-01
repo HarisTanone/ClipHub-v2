@@ -226,7 +226,7 @@ Tugasmu: menganalisis transcript dan mengekstrak {max_clips} potongan (clip) ter
 Respons HARUS dalam format JSON valid.
 
 ATURAN WAJIB:
-1. Duration clip HARUS 45-90 detik (minimum 45, maksimum 90).
+1. Duration clip HARUS 45-120 detik (minimum 45, maksimum 120).
 2. Gunakan Segment ID (contoh: S0015) untuk menandai awal dan akhir clip.
 3. start_id = ID segment AWAL clip, end_id = ID segment AKHIR clip.
 4. Clip TIDAK BOLEH overlap satu sama lain.
@@ -424,7 +424,7 @@ Baca SELURUH transkrip video berikut dan identifikasi momen-momen PALING MENARIK
 
 VIDEO INFO:
 - Durasi total: {video_duration:.0f} detik
-- Target: Temukan TEPAT {max_clips} momen terbaik (durasi 45-90 detik per klip)
+- Target: Temukan TEPAT {max_clips} momen terbaik (durasi 45-120 detik per klip)
 - Format timestamp: detik (contoh: 125.5)
 
 TRANSKRIP LENGKAP:

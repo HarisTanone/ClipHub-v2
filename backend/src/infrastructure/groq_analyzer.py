@@ -74,8 +74,8 @@ class GroqAnalyzer(IGroqAnalyzer):
     # ─── Duration Constants ───────────────────────────────────────────────────
     MIN_CLIP_DURATION = 25.0   # Minimum valid clip duration (seconds)
     MAX_CLIP_DURATION = 120.0  # Maximum valid clip duration (seconds)
-    PROMPT_MIN_DURATION = 30   # Instructed min in prompts (seconds)
-    PROMPT_MAX_DURATION = 90   # Instructed max in prompts (seconds)
+    PROMPT_MIN_DURATION = 45   # Instructed min in prompts (seconds)
+    PROMPT_MAX_DURATION = 120   # Instructed max in prompts (seconds)
     OVERLAP_THRESHOLD = 0.5    # 50% overlap required to consider as duplicate
     CHUNK_OVERLAP_SECONDS = 60 # Overlap between consecutive chunks (seconds)
 
@@ -355,7 +355,7 @@ class GroqAnalyzer(IGroqAnalyzer):
 KONTEKS:
 - Video total: {video_duration:.0f} detik
 - Bagian ini: [{chunk_start:.0f}s - {chunk_end:.0f}s] (chunk {chunk_num}/{total_chunks})
-- Target: Temukan {clips_per_chunk} kandidat clip (durasi 30-90 detik per klip)
+- Target: Temukan {clips_per_chunk} kandidat clip (durasi 45-120 detik per klip)
 
 TRANSKRIP (format: [SegmentID | MM:SS] teks):
 {chunk_text_with_ids}
@@ -364,7 +364,7 @@ ATURAN:
 1. Gunakan SEGMENT ID yang ada di transkrip (contoh: S0015)
 2. "start_id" = Segment ID di mana clip MULAI
 3. "end_id" = Segment ID di mana clip BERAKHIR
-4. Durasi clip harus 30-90 detik
+4. Durasi clip harus 45-120 detik
 5. Score 1-100 berdasarkan potensi viral
 6. "summary" = ringkasan 1 kalimat apa yang terjadi di clip ini
 

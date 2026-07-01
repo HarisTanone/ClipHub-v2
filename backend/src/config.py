@@ -125,7 +125,7 @@ class Settings(BaseSettings):
     GROQ_LLM_TIMEOUT: int = 120  # Full transcript analysis needs more time
 
     # ─── Remotion Render Engine ──────────────────────────────────────────
-    USE_REMOTION: bool = False
+    USE_REMOTION: bool = True
     REMOTION_PROJECT_PATH: str = "remotion-renderer"
     REMOTION_SERVER_URL: str = "http://localhost:3002"
     REMOTION_SERVER_PORT: int = 3002

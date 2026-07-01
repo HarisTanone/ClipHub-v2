@@ -132,7 +132,7 @@ class OllamaAnalyzer:
 
 VIDEO INFO:
 - Durasi total: {video_duration:.0f} detik
-- Target: Temukan TEPAT {max_clips} momen terbaik (durasi 45-90 detik per klip)
+- Target: Temukan TEPAT {max_clips} momen terbaik (durasi 45-120 detik per klip)
 - Format timestamp: detik (contoh: 125.5)
 
 TRANSKRIP LENGKAP (format: [timestamp] teks):
@@ -147,7 +147,7 @@ KRITERIA PEMILIHAN CLIP (prioritas tinggi ke rendah):
 6. HUMOR — momen lucu natural, bukan dipaksakan
 
 ATURAN WAJIB:
-1. Durasi setiap klip: 45-90 detik (JANGAN lebih pendek atau lebih panjang)
+1. Durasi setiap klip: 45-120 detik (JANGAN lebih pendek atau lebih panjang)
 2. Klip TIDAK BOLEH OVERLAP satu sama lain
 3. Timestamp 'start' = AWAL kalimat (jangan potong di tengah kata)
 4. Timestamp 'end' = AKHIR kalimat (beri jeda 1-2 detik setelah kata terakhir)
