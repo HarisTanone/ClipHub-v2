@@ -206,7 +206,7 @@ function SubtitlePage({
           justifyContent: "center",
           gap: config.wordSpacing || 6,
           transform: enterTransform,
-          ...(config.bgEnabled !== false ? {
+          ...(config.bgEnabled === true ? {
             backgroundColor: hexToRgba(config.bgColor || "#000000", config.bgOpacity ?? 0.4),
             borderRadius: config.bgRadius || 8,
             padding: config.bgPadding || 12,
@@ -235,7 +235,7 @@ function SubtitlePage({
 
             // Shadows
             const shadows: string[] = [];
-            if (useDual ? config.highlightShadowEnabled : config.shadowEnabled !== false) {
+            if (useDual ? config.highlightShadowEnabled : config.shadowEnabled === true) {
               shadows.push(`0 0 ${useDual ? (config.highlightShadowBlur || 12) : (config.shadowBlur || 8)}px ${useDual ? (config.highlightShadowColor || "#000") : (config.shadowColor || "#000")}`);
             }
             if (shouldHighlight && config.highlightGlow) {
