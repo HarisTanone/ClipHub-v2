@@ -195,6 +195,13 @@ if [ -d "$REMOTION_DIR" ]; then
     rm -rf "$REMOTION_DIR/node_modules/.cache" 2>/dev/null || true
     rm -rf /tmp/remotion-* 2>/dev/null || true
 
+    # CRITICAL: Fix ownership — prevents EPERM/EACCES when Remotion service
+    # runs as $DEPLOY_USER but npm install/git pull ran as root/sudo
+    echo "  Fixing file ownership..."
+    chown -R $DEPLOY_USER:$DEPLOY_USER "$REMOTION_DIR"
+    chmod +x "$REMOTION_DIR/node_modules/@remotion/compositor-linux-x64-gnu/remotion" 2>/dev/null || true
+    chmod +x "$REMOTION_DIR/node_modules/@remotion/compositor-linux-x64-musl/remotion" 2>/dev/null || true
+
     echo "  ✅ Remotion ready (will re-bundle on service start)"
 else
     echo "  ⚠️  Remotion directory not found at $REMOTION_DIR"
