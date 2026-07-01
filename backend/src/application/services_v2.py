@@ -443,6 +443,14 @@ class V2PipelineService:
                     job_id, JobStatus.FAILED, "Tidak ada clip valid setelah filtering"
                 )
                 return
+
+            # Re-number clips sequentially (1, 2, 3, ...) after filtering
+            # so downstream steps (trim, reframe, render) use contiguous ranks
+            rank_mapping: dict[int, int] = {}  # original_rank → new_sequential_rank
+            for i, clip in enumerate(clips):
+                rank_mapping[clip.rank] = i + 1
+                clip.rank = i + 1
+
             clips_count = len(clips)
             await self._repo.update_clips_count(job_id, clips_count, 0, 0)
             self._emit(job_id, 5, "prepare_clips", "complete")
@@ -509,6 +517,15 @@ class V2PipelineService:
             # ═══ Step 10: Build Word Data for Subtitle Rendering ═══
             self._emit(job_id, 10, "highlights", "start")
             await self._repo.update_status(job_id, JobStatus.HIGHLIGHTING)
+
+            # Remap words_per_clip keys to match new sequential ranks
+            if rank_mapping:
+                remapped_words: dict[int, list[Word]] = {}
+                for old_rank, new_rank in rank_mapping.items():
+                    if old_rank in words_per_clip:
+                        remapped_words[new_rank] = words_per_clip[old_rank]
+                words_per_clip = remapped_words
+
             clips_with_words = self._build_clips_with_words(clips, words_per_clip)
             self._emit(job_id, 10, "highlights", "complete")
 
