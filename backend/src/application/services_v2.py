@@ -401,11 +401,13 @@ class V2PipelineService:
                         logger.warning(f"[{job_id}] YOLO reframe failed clip {clip.rank}: {e}")
             self._emit(job_id, 8, "yolo_reframe", "complete")
 
-            # Center-crop fallback for 9:16
-            if flags.yolo_enabled and not reframe_data and job.target_aspect_ratio == "9:16":
+            # Center-crop fallback for 9:16 — ONLY if YOLO model wasn't loaded
+            # If YOLO ran but returned None (e.g. union_crop decided to skip because
+            # speakers too wide), respect that decision — don't force center-crop
+            if flags.yolo_enabled and not reframe_data and not self._yolo_reframe and job.target_aspect_ratio == "9:16":
                 import subprocess as _sp
                 from src.infrastructure.gpu_encoder import get_video_encoder_args
-                logger.info(f"[{job_id}] Applying center-crop fallback for 9:16")
+                logger.info(f"[{job_id}] Applying center-crop fallback for 9:16 (YOLO not available)")
                 encoder_args = get_video_encoder_args("medium")
                 for clip in clips:
                     if not trim_results.get(clip.rank):

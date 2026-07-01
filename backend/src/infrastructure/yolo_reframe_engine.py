@@ -187,10 +187,110 @@ class YoloReframeEngine(IYoloReframeEngine):
                 original_path, output_path, orig_width, orig_height, frame_centers
             )
 
+        # Multi-speaker WITHOUT autogrid: use union bbox crop (includes all persons)
+        if is_multi_speaker:
+            return self._render_union_crop(
+                original_path, output_path, orig_width, orig_height, frame_centers, target_aspect
+            )
+
         # Single speaker: smooth tracking crop
         return self._render_smooth_crop(
             original_path, output_path, orig_width, orig_height, orig_fps, frame_centers, target_aspect
         )
+
+    def _render_union_crop(
+        self, video_path: str, output_path: str,
+        width: int, height: int,
+        frame_centers: list, target_aspect: str,
+    ) -> Optional[dict]:
+        """Union bbox crop for multi-speaker: crop includes ALL detected persons.
+
+        Strategy:
+        - Compute union bounding box of all persons across sampled frames
+        - If union is too wide (>80% frame) → skip reframe (safer)
+        - Otherwise → crop to union center with generous padding
+        """
+        import cv2
+
+        # Re-detect to get actual bounding boxes (not just centers)
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        sample_interval = max(1, int(fps * self.SAMPLE_INTERVAL_SEC))
+        sample_indices = list(range(0, total_frames, sample_interval))[:self.MAX_SAMPLES]
+
+        all_x1 = []
+        all_x2 = []
+
+        for frame_idx in sample_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            results = self._model(frame, classes=[0], verbose=False)
+            for r in results:
+                if r.boxes is not None:
+                    for box in r.boxes:
+                        conf = float(box.conf[0])
+                        if conf > self.CONFIDENCE_THRESHOLD:
+                            x1, _, x2, _ = box.xyxy[0].cpu().numpy()
+                            all_x1.append(float(x1))
+                            all_x2.append(float(x2))
+
+        cap.release()
+
+        if not all_x1:
+            logger.info("yolo_reframe: union_crop — no valid detections")
+            return None
+
+        # Compute union bbox (average of extremes for stability)
+        union_x1 = np.percentile(all_x1, 10)  # 10th percentile (ignore outliers)
+        union_x2 = np.percentile(all_x2, 90)  # 90th percentile
+        union_w = union_x2 - union_x1
+        union_ratio = union_w / width
+
+        UNION_WIDTH_MAX_RATIO = 0.80
+        PADDING_RATIO = 0.15
+
+        if union_ratio > UNION_WIDTH_MAX_RATIO:
+            # Speakers too far apart — any crop will cut someone off
+            # → Skip reframe, keep original (safer for podcast wide shots)
+            logger.info(
+                f"yolo_reframe: union_crop SKIP — speakers too wide "
+                f"(union={union_ratio:.0%} of frame, threshold={UNION_WIDTH_MAX_RATIO:.0%})"
+            )
+            return None
+
+        # Calculate crop dimensions (target 9:16)
+        target_crop_w = int(height * 9 / 16)
+        union_center = (union_x1 + union_x2) / 2
+
+        # Add padding to union
+        padded_w = int(union_w * (1 + 2 * PADDING_RATIO))
+        crop_w = max(target_crop_w, padded_w)  # At least target width, or padded union
+        crop_w = min(crop_w, width)  # Don't exceed frame
+
+        # Center crop on union center
+        crop_x = int(max(0, min(width - crop_w, union_center - crop_w / 2)))
+
+        crop_filter = f"crop={crop_w}:{height}:{crop_x}:0,scale=1080:1920"
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-vf", crop_filter,
+            *get_video_encoder_args("medium"),
+            "-c:a", "copy", "-movflags", "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode == 0 and os.path.exists(output_path):
+            logger.info(
+                f"yolo_reframe: union_crop OK — union_ratio={union_ratio:.0%}, "
+                f"crop_w={crop_w}, crop_x={crop_x}, center={union_center:.0f}"
+            )
+            return {"output_path": output_path, "person_count": 2, "masks_available": False, "method": "yolo_union_crop"}
+        return None
 
     def _render_smooth_crop(
         self, video_path: str, output_path: str,
