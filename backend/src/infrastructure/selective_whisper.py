@@ -78,10 +78,19 @@ class SelectiveWhisperTranscriber:
             raw_segments, audio_slice
         )
 
-        logger.debug(
-            f"v2_selective_whisper: clip_{audio_slice.clip_rank:03d} → "
-            f"{len(words)} words [{audio_slice.original_start:.1f}s-{audio_slice.original_end:.1f}s]"
-        )
+        if words:
+            coverage = words[-1].end - words[0].start
+            logger.info(
+                f"v2_selective_whisper: clip_{audio_slice.clip_rank:03d} → "
+                f"{len(words)} words, coverage={coverage:.1f}s "
+                f"[{words[0].start:.1f}s-{words[-1].end:.1f}s] "
+                f"(audio slice: {audio_slice.padded_start:.1f}-{audio_slice.padded_end:.1f})"
+            )
+        else:
+            logger.warning(
+                f"v2_selective_whisper: clip_{audio_slice.clip_rank:03d} → "
+                f"0 words! (audio slice: {audio_slice.padded_start:.1f}-{audio_slice.padded_end:.1f})"
+            )
         return words
 
     async def transcribe_all_clips(

@@ -661,10 +661,19 @@ class V2PipelineService:
                     })
 
             if relative_words:
-                logger.debug(
+                last_word = relative_words[-1]
+                logger.info(
                     f"v2_words clip {clip.rank}: "
-                    f"{len(relative_words)} words, "
-                    f"first='{relative_words[0]['word']}' @ {relative_words[0]['start']:.3f}s"
+                    f"{len(relative_words)}/{len(words)} words kept, "
+                    f"clip_duration={clip_duration:.1f}s, "
+                    f"first='{relative_words[0]['word']}' @ {relative_words[0]['start']:.1f}s, "
+                    f"last='{last_word['word']}' @ {last_word['start']:.1f}s"
+                )
+            else:
+                logger.warning(
+                    f"v2_words clip {clip.rank}: "
+                    f"0/{len(words)} words kept! clip_duration={clip_duration:.1f}s, "
+                    f"clip.start={clip.start:.1f}, clip.end={clip.end:.1f}"
                 )
 
             result[clip.rank] = relative_words
