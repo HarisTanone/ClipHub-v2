@@ -37,7 +37,7 @@ export DEBIAN_FRONTEND=noninteractive
 # ─── Configuration ───────────────────────────────────────────────────────────
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$PROJECT_DIR/backend"
-REMOTION_DIR="$BACKEND_DIR/remotion-renderer"
+REMOTION_DIR="$PROJECT_DIR/remotion-renderer"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DEPLOY_USER="${SUDO_USER:-$(whoami)}"
 PYTHON_BIN="python3"

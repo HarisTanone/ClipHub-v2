@@ -49,6 +49,9 @@ frontend/test-results/
 frontend/tsconfig.tsbuildinfo
 
 # ─── Remotion ─────────────────────────────────────────────────────────────────
+remotion-renderer/node_modules/
+remotion-renderer/dist/
+remotion-renderer/output/
 .remotion/
 .cache/
 

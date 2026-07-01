@@ -362,7 +362,9 @@ class RemotionAdapter(IRemotionRenderer):
         project_path = settings.REMOTION_PROJECT_PATH
         if not os.path.isabs(project_path):
             # Make relative to backend directory
-            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            # __file__ is src/infrastructure/remotion_adapter.py
+            # dirname x3: infrastructure → src → backend
+            backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             project_path = os.path.join(backend_dir, project_path)
         
         if not os.path.exists(project_path):
