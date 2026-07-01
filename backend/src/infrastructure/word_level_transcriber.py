@@ -69,11 +69,25 @@ class WordLevelTranscriber:
         if self._faster_whisper_model is None:
             from faster_whisper import WhisperModel
             model_size = settings.WHISPER_MODEL_SIZE  # default: "medium"
-            logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8)...")
+
+            # Try GPU first (much faster), fallback to CPU
+            device = "cpu"
+            compute_type = "int8"
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    device = "cuda"
+                    compute_type = "float16"
+                    logger.info(f"word_level: loading Faster-Whisper {model_size} (CUDA/float16)")
+                else:
+                    logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8)")
+            except ImportError:
+                logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8, no torch)")
+
             self._faster_whisper_model = WhisperModel(
                 model_size,
-                device="cpu",
-                compute_type="int8",
+                device=device,
+                compute_type=compute_type,
                 num_workers=1,
                 cpu_threads=settings.WHISPER_THREADS,
             )

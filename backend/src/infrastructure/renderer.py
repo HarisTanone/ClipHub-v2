@@ -5,6 +5,7 @@ import os
 
 from src.domain.entities import Clip
 from src.domain.interfaces import IRenderer
+from src.infrastructure.gpu_encoder import get_video_encoder_args, get_encoder_name
 
 logger = logging.getLogger(__name__)
 
@@ -16,23 +17,19 @@ class FFmpegRenderer(IRenderer):
         """
         Trim video segment menggunakan FFmpeg dengan PRECISE seeking.
         Re-encodes video for exact frame alignment (critical for subtitle sync).
-        Audio copied precisely (unaffected by keyframe seek).
+        Uses NVENC GPU if available, falls back to libx264.
         """
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         duration = clip.end - clip.start
+        encoder_args = get_video_encoder_args("medium")
 
-        # -ss BEFORE -i = fast seek (to nearest keyframe)
-        # Then re-encode video from exact timestamp (not stream copy)
-        # This ensures subtitle timestamps match audio precisely
         cmd = [
             "ffmpeg",
             "-ss", str(clip.start),
             "-i", video_path,
             "-t", str(duration),
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "18",
+            *encoder_args,
             "-c:a", "copy",
             "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart",
@@ -42,7 +39,7 @@ class FFmpegRenderer(IRenderer):
 
         logger.info(
             f"Trimming clip #{clip.rank}: {clip.start:.1f}s → {clip.end:.1f}s "
-            f"({duration:.1f}s) → {output_path} [re-encode mode]"
+            f"({duration:.1f}s) → {output_path} [{get_encoder_name()}]"
         )
 
         proc = await asyncio.create_subprocess_exec(

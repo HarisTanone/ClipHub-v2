@@ -148,6 +148,17 @@ echo "  Syncing Python dependencies..."
 ./venv/bin/pip install -r requirements.txt -q 2>/dev/null || \
     ./venv/bin/pip install -r requirements.txt
 
+# GPU: Install PyTorch with CUDA 12.1 (compatible with NVIDIA driver 535+)
+# This enables GPU acceleration for: Faster-Whisper, YOLO, torchaudio
+if command -v nvidia-smi &>/dev/null; then
+    echo "  Installing PyTorch with CUDA 12.1 (GPU detected)..."
+    ./venv/bin/pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 -q 2>/dev/null || \
+        ./venv/bin/pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+    echo "  ✅ PyTorch CUDA 12.1 installed"
+else
+    echo "  ℹ️  No GPU detected — using CPU-only PyTorch"
+fi
+
 # Create .env from production template if not exists
 if [ ! -f ".env" ]; then
     if [ -f ".env.production" ]; then

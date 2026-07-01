@@ -404,7 +404,9 @@ class V2PipelineService:
             # Center-crop fallback for 9:16
             if flags.yolo_enabled and not reframe_data and job.target_aspect_ratio == "9:16":
                 import subprocess as _sp
+                from src.infrastructure.gpu_encoder import get_video_encoder_args
                 logger.info(f"[{job_id}] Applying center-crop fallback for 9:16")
+                encoder_args = get_video_encoder_args("medium")
                 for clip in clips:
                     if not trim_results.get(clip.rank):
                         continue
@@ -413,7 +415,7 @@ class V2PipelineService:
                     crop_cmd = [
                         "ffmpeg", "-y", "-i", in_path,
                         "-vf", "crop=ih*9/16:ih,scale=1080:1920",
-                        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                        *encoder_args,
                         "-c:a", "copy", "-movflags", "+faststart",
                         out_path,
                     ]

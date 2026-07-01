@@ -53,8 +53,12 @@ class Settings(BaseSettings):
     WHISPER_MODEL_PATH: str = ""
     WHISPER_BINARY_PATH: str = ""
     WHISPER_THREADS: int = 4 if PIPELINE_ENV == "local" else 6
-    WHISPER_USE_GPU: bool = False if PIPELINE_ENV == "local" else True
+    WHISPER_USE_GPU: bool = True  # Auto-detect: uses CUDA if available, else CPU
     WHISPER_MODEL_SIZE: str = "medium"  # tiny, base, small, medium, large-v3
+
+    # === GPU Acceleration ===
+    USE_NVENC: bool = True              # Use h264_nvenc for FFmpeg encoding (auto-fallback to libx264)
+    NVENC_QUALITY: str = "medium"       # low (fast), medium (balanced), high (best quality)
 
     # === VAD (Voice Activity Detection) ===
     VAD_ENABLED: bool = True

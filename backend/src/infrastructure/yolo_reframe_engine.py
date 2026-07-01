@@ -17,6 +17,7 @@ from typing import Optional
 import numpy as np
 
 from src.domain.interfaces import IYoloReframeEngine
+from src.infrastructure.gpu_encoder import get_video_encoder_args
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             cmd = [
                 "ffmpeg", "-y", "-i", video_path,
                 "-vf", crop_filter,
-                "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                *get_video_encoder_args("medium"),
                 "-c:a", "copy", "-movflags", "+faststart",
                 output_path,
             ]
@@ -275,7 +276,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             cmd = [
                 "ffmpeg", "-y", "-i", video_path,
                 "-vf", crop_filter,
-                "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                *get_video_encoder_args("medium"),
                 "-c:a", "copy", "-movflags", "+faststart",
                 output_path,
             ]
@@ -384,7 +385,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             "ffmpeg", "-y", "-i", video_path,
             "-filter_complex", full_filter,
             "-map", "[v]", "-map", "[a]",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            *get_video_encoder_args("medium"),
             "-c:a", "aac", "-movflags", "+faststart",
             output_path,
         ]
@@ -401,7 +402,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             "ffmpeg", "-y", "-i", video_path,
             "-filter_complex", filter_complex,
             "-map", "[v]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            *get_video_encoder_args("medium"),
             "-c:a", "copy", "-movflags", "+faststart",
             output_path,
         ]
@@ -422,7 +423,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             if codec in ("av1", "vp9", "vp8", "hevc"):
                 cmd = [
                     "ffmpeg", "-y", "-i", video_path,
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                    *get_video_encoder_args("low"),
                     "-an", "-movflags", "+faststart",
                     transcode_path,
                 ]
@@ -448,7 +449,7 @@ class YoloReframeEngine(IYoloReframeEngine):
         cmd = [
             "ffmpeg", "-y", "-i", input_path,
             "-vf", crop_filter,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            *get_video_encoder_args("medium"),
             "-c:a", "copy", "-movflags", "+faststart",
             output_path,
         ]
