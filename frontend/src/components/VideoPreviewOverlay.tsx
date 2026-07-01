@@ -432,6 +432,42 @@ export function VideoPreviewOverlay({
         );
       }
 
+      case "bold_slam": {
+        const entrance = Math.min(1, t / 0.3);
+        const shakeX = t > 0.5 && t < 0.9 ? Math.sin(t * 60) * 3 : 0;
+        const shakeY = t > 0.5 && t < 0.9 ? Math.cos(t * 50) * 3 : 0;
+        const rotate = Math.max(-8 * (1 - Math.min(1, t / 0.35)), 0);
+        const boldSlamStroke = "#16130B";
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ opacity: hookAlpha }}>
+            <div
+              style={{
+                transform: `translate(${shakeX}px, ${shakeY}px) scale(${entrance}) rotate(${-rotate}deg)`,
+                background: cfg?.boxColor || "#FFE600",
+                padding: "20px 36px",
+                borderRadius: 16,
+                border: `5px solid ${boldSlamStroke}`,
+                boxShadow: `8px 8px 0px ${boldSlamStroke}`,
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: "'Arial Black', Impact, sans-serif",
+                  fontWeight: 900,
+                  fontSize: Math.min(fontSize || 48, 36),
+                  lineHeight: 1.15,
+                  color: cfg?.color || "#16130B",
+                  textAlign: "center" as const,
+                  textTransform: "uppercase" as const,
+                }}
+              >
+                {textContent}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       case "fade_scale": {
         // FFmpeg: simple drawtext with alpha fade — we add slight scale for "scale" feel
         const scaleProgress = Math.min(1, t / 0.6);

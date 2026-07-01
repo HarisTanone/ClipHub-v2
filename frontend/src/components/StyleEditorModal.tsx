@@ -317,6 +317,15 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
       50% { transform:translateY(-50%) scale(1); }
       75% { transform:translateY(-50%) scale(1.02); }
     }
+    @keyframes boldSlamPreview {
+      0% { transform:translateY(-50%) scale(0) rotate(-8deg); }
+      20% { transform:translateY(-50%) scale(1.05) rotate(0deg); }
+      30% { transform:translateY(-50%) scale(1) rotate(0deg); }
+      50%,60% { transform:translateY(-50%) translate(2px,-1px) scale(1); }
+      55% { transform:translateY(-50%) translate(-2px,1px) scale(1); }
+      70% { transform:translateY(-50%) scale(1) rotate(0deg); }
+      100% { transform:translateY(-50%) scale(1) rotate(0deg); }
+    }
     @keyframes popIn { 0%,100% { transform:scale(0.9); opacity:0.5; } 50% { transform:scale(1.05); opacity:1; } }
     @keyframes fadeIn { 0%,100% { opacity:0.3; } 50% { opacity:1; } }
     @keyframes slideInUp { 0%,100% { transform:translateY(4px); opacity:0.4; } 50% { transform:translateY(0); opacity:1; } }
@@ -583,6 +592,29 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
       );
     }
 
+    case "bold_slam": {
+      // Bold slam: scale entrance + shake + rotated box
+      const boldSlamColor = style.boxColor || "#FFE600";
+      const boldSlamStroke = "#16130B";
+      const boldSlamText = style.color || "#16130B";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-0 flex items-center justify-center px-4 animate-[boldSlamPreview_2s_ease-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{
+              background: boldSlamColor,
+              padding: "20px 36px",
+              borderRadius: 16,
+              border: `5px solid ${boldSlamStroke}`,
+              boxShadow: `8px 8px 0px ${boldSlamStroke}`,
+            }}>
+              <p style={{ ...baseTextStyle, color: boldSlamText, textTransform: "uppercase" as const }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
     case "typewriter": {
       // Character reveal animation
       return (
@@ -665,7 +697,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
 
         <Section title="Animation & Timing">
           <div className="grid grid-cols-4 gap-2 mb-3">
-            {["fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold"].map(a => (
+            {["fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer", "bold_slam"].map(a => (
               <button key={a} type="button" onClick={() => update({ animation: a })} className={cn("py-2 rounded-lg border text-[11px] font-medium transition-colors", style.animation === a ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{a.replace(/_/g, " ")}</button>
             ))}
           </div>
@@ -1073,6 +1105,7 @@ function getHookAnimationClass(animation: string): string {
     case "shake_neon": return ""; // uses DOM-based multi-layer render
     case "cinematic_reveal": return "animate-[cinematicRevealText_3.5s_ease-out_infinite]";
     case "danger_bold": return "animate-[dangerPulse_1.2s_ease-in-out_infinite]";
+    case "bold_slam": return "animate-[boldSlamPreview_2s_ease-out_infinite]";
     default: return "";
   }
 }
