@@ -640,14 +640,16 @@ class V2PipelineService:
                 continue
 
             # Convert absolute → relative to clip start
+            clip_duration = round(clip.end - clip.start, 3)
             relative_words = []
             for w in words:
                 rel_start = round(w.start - clip.start, 3)
                 rel_end = round(w.end - clip.start, 3)
 
-                # Keep word if it has ANY overlap with clip (handles VAD boundary shift)
-                if rel_end > 0:
-                    rel_start = max(0, rel_start)  # Clamp negative start to 0
+                # Keep word if it overlaps with clip duration [0, clip_duration]
+                if rel_end > 0 and rel_start < clip_duration:
+                    rel_start = max(0, rel_start)  # Clamp start to 0
+                    rel_end = min(rel_end, clip_duration)  # Clamp end to clip duration
                     relative_words.append({
                         "word": w.word,
                         "start": rel_start,
