@@ -132,7 +132,7 @@ class OllamaAnalyzer:
 
 VIDEO INFO:
 - Durasi total: {video_duration:.0f} detik
-- Target: Temukan TEPAT {max_clips} momen terbaik (durasi 45-120 detik per klip)
+- Target: Temukan TEPAT {max_clips} momen terbaik (durasi MINIMUM 45 detik, biarkan cerita selesai utuh)
 - Format timestamp: detik (contoh: 125.5)
 
 TRANSKRIP LENGKAP (format: [timestamp] teks):
@@ -147,7 +147,7 @@ KRITERIA PEMILIHAN CLIP (prioritas tinggi ke rendah):
 6. HUMOR — momen lucu natural, bukan dipaksakan
 
 ATURAN WAJIB:
-1. Durasi setiap klip: 45-120 detik (JANGAN lebih pendek atau lebih panjang)
+1. Durasi setiap klip MINIMUM 45 detik. JANGAN potong di tengah kalimat atau cerita — biarkan topik selesai secara natural sebelum end. Boleh lebih dari 90 detik jika cerita belum tuntas.
 2. Klip TIDAK BOLEH OVERLAP satu sama lain
 3. Timestamp 'start' = AWAL kalimat (jangan potong di tengah kata)
 4. Timestamp 'end' = AKHIR kalimat (beri jeda 1-2 detik setelah kata terakhir)
@@ -289,14 +289,14 @@ OUTPUT HANYA JSON:"""
                 end = float(clip.get("end", 0))
                 score = int(clip.get("score", 50))
 
-                # Validate timestamps (enforce 45-120s clips)
+                # Validate timestamps (enforce min 45s, sanity max 300s)
                 if start < chunk_start - 5:
                     start = chunk_start
                 if end > chunk_end + 5:
                     end = chunk_end
 
                 duration = end - start
-                if duration < 45 or duration > 120:
+                if duration < 45 or duration > 300:
                     logger.debug(f"ollama_analyzer: skipped clip {start:.1f}-{end:.1f} (duration={duration:.1f}s)")
                     continue
 

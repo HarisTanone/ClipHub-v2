@@ -226,7 +226,7 @@ Tugasmu: menganalisis transcript dan mengekstrak {max_clips} potongan (clip) ter
 Respons HARUS dalam format JSON valid.
 
 ATURAN WAJIB:
-1. Duration clip HARUS 45-120 detik (minimum 45, maksimum 120).
+1. Duration clip MINIMUM 45 detik. JANGAN potong di tengah cerita — end_id HARUS di kalimat penutup/konklusi yang natural. Boleh lebih dari 90 detik jika topik belum selesai.
 2. Gunakan Segment ID (contoh: S0015) untuk menandai awal dan akhir clip.
 3. start_id = ID segment AWAL clip, end_id = ID segment AKHIR clip.
 4. Clip TIDAK BOLEH overlap satu sama lain.
@@ -356,7 +356,7 @@ Ekstrak {max_clips} clip terbaik. Gunakan segment ID dari transcript di atas."""
                         if end <= start or start < 0 or end > video_duration + 10:
                             logger.debug(f"highlight_analyzer: Groq clip {i} rejected (range): {start:.1f}-{end:.1f}")
                             continue
-                        if duration < 15 or duration > 180:
+                        if duration < 15 or duration > 300:
                             logger.debug(f"highlight_analyzer: Groq clip {i} rejected (duration {duration:.1f}s)")
                             continue
 
@@ -424,7 +424,7 @@ Baca SELURUH transkrip video berikut dan identifikasi momen-momen PALING MENARIK
 
 VIDEO INFO:
 - Durasi total: {video_duration:.0f} detik
-- Target: Temukan TEPAT {max_clips} momen terbaik (durasi 45-120 detik per klip)
+- Target: Temukan TEPAT {max_clips} momen terbaik (durasi MINIMUM 45 detik, biarkan cerita selesai utuh — jangan potong di bagian penting)
 - Format timestamp: detik (contoh: 125.5)
 
 TRANSKRIP LENGKAP:
@@ -491,8 +491,8 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
                 # Validate timestamps
                 if end <= start or start < 0 or end > video_duration + 10:
                     continue
-                if end - start < 15 or end - start > 180:
-                    # Hard reject: too short or too long to be usable
+                if end - start < 15 or end - start > 300:
+                    # Hard reject: too short (<15s) or absurdly long (>5min)
                     continue
                 duration = end - start
                 if duration < 45:

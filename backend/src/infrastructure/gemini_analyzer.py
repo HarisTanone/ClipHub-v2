@@ -127,7 +127,7 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         prompt = f"""Kamu adalah AI analis video viral profesional. Tonton video ini dan analisis secara mendalam.
 
 DURASI VIDEO: {video_duration:.1f} detik
-TARGET: Temukan maksimal {max_clips} momen PALING VIRAL (durasi 45-120 detik per klip).
+TARGET: Temukan maksimal {max_clips} momen PALING VIRAL (durasi MINIMUM 45 detik — biarkan cerita/argumen SELESAI UTUH, jangan potong di tengah).
 
 ═══ TUGAS 1: CLIP SELECTION ═══
 Identifikasi momen-momen yang:
