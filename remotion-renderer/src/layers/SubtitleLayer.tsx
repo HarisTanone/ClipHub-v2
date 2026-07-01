@@ -80,16 +80,26 @@ export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps
   const highlightColor = config.highlightColor || "#FFCC00";
   const positionY = config.positionY ?? 85;
 
-  // Group words into pages — manual grouping is most reliable with our word format
+  // Group words into pages — uses natural pauses + punctuation, not just word count
   const pages = useMemo(() => {
-    const maxPerLine = config.maxWordsPerLine || 3;
+    const maxPerLine = config.maxWordsPerLine || 4;
+    const PAUSE_THRESHOLD = 0.5; // seconds — gap > this breaks into new page
     const result: any[] = [];
     let current: Word[] = [];
 
-    for (const w of words) {
-      // Break on gap > 0.5s or word count
-      const gapTooLarge = current.length > 0 && w.start - current[current.length - 1].end > 0.5;
-      if (current.length >= maxPerLine || gapTooLarge) {
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      const nextWord = words[i + 1];
+
+      current.push(w);
+
+      const isLastWord = !nextWord;
+      const hasPunctuation = /[.,!?;:]$/.test(w.word);
+      const gapToNext = nextWord ? nextWord.start - w.end : Infinity;
+      const pageIsFull = current.length >= maxPerLine;
+
+      // Break page on: max words, punctuation, natural pause, or last word
+      if (pageIsFull || (hasPunctuation && current.length >= 2) || gapToNext > PAUSE_THRESHOLD || isLastWord) {
         if (current.length > 0) {
           result.push({
             startMs: Math.round(current[0].start * 1000),
@@ -99,14 +109,6 @@ export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps
         }
         current = [];
       }
-      current.push(w);
-    }
-    if (current.length > 0) {
-      result.push({
-        startMs: Math.round(current[0].start * 1000),
-        endMs: Math.round(current[current.length - 1].end * 1000),
-        tokens: current.map(cw => ({ text: cw.word + " ", fromMs: Math.round(cw.start * 1000), toMs: Math.round(cw.end * 1000) })),
-      });
     }
     return result;
   }, [words, config.maxWordsPerLine]);
@@ -223,8 +225,9 @@ function SubtitlePage({
             const useDual = shouldHighlight && config.dualStyleEnabled;
 
             const wordFontSize = useDual
-              ? (config.highlightFontSize || responsiveFontSize * highlightScale)
-              : (shouldHighlight ? responsiveFontSize * highlightScale : responsiveFontSize);
+              ? (config.highlightFontSize || responsiveFontSize)
+              : responsiveFontSize;
+            const wordScale = (!useDual && shouldHighlight) ? highlightScale : 1;
             const wordColor = shouldHighlight ? highlightColor : color;
             const wordWeight = useDual
               ? Number(config.highlightFontWeight || 900)
@@ -265,7 +268,9 @@ function SubtitlePage({
                   ...(!useDual && shouldHighlight && highlightStyleType === "underline" ? { textDecoration: "underline", textDecorationColor: highlightColor, textUnderlineOffset: "4px", textDecorationThickness: "3px" } : {}),
                   ...(!useDual && shouldHighlight && highlightStyleType === "background" ? { backgroundColor: `${highlightColor}30`, borderRadius: 4, padding: "2px 6px" } : {}),
                   ...(!useDual && shouldHighlight && highlightStyleType === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: highlightColor, textDecorationThickness: "3px" } : {}),
-                  transition: "color 0.05s",
+                  transition: "transform 0.1s ease-out, color 0.05s",
+                  transform: wordScale !== 1 ? `scale(${wordScale})` : undefined,
+                  transformOrigin: "center bottom",
                 }}
               >
                 {displayText}

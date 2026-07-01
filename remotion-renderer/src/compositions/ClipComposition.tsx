@@ -94,20 +94,24 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         </AbsoluteFill>
       )}
 
-      {/* L2: Subtitles — words during hook period are filtered out */}
+      {/* L2: Subtitles — words overlapping hook get clamped, not discarded */}
       {words.length > 0 && (
         <AbsoluteFill style={{ zIndex: 1, pointerEvents: "none" }}>
           <SubtitleLayer
-            words={hookText ? words.filter(w => w.start >= hook.duration) : words}
+            words={hookText
+              ? words
+                .filter(w => w.end > hook.duration)
+                .map(w => ({ ...w, start: Math.max(w.start, hook.duration) }))
+              : words}
             config={subtitle.config}
             fps={fps}
           />
         </AbsoluteFill>
       )}
 
-      {/* L3: Hook overlay — renders ABOVE everything during first N seconds */}
+      {/* L3: Hook overlay — renders with fade-out buffer for smooth transition */}
       {hookText && (
-        <Sequence from={0} durationInFrames={hookDurationFrames}>
+        <Sequence from={0} durationInFrames={hookDurationFrames + Math.floor(fps * 0.5)}>
           <AbsoluteFill style={{ zIndex: 2 }}>
             <HookLayer text={hookText} config={hook.config} />
           </AbsoluteFill>

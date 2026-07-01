@@ -650,6 +650,9 @@ class V2PipelineService:
                 if rel_end > 0 and rel_start < clip_duration:
                     rel_start = max(0, rel_start)  # Clamp start to 0
                     rel_end = min(rel_end, clip_duration)  # Clamp end to clip duration
+                    # Ensure minimum display duration (prevent subtitle flicker)
+                    if rel_end - rel_start < 0.3:
+                        rel_end = min(rel_start + 0.3, clip_duration)
                     relative_words.append({
                         "word": w.word,
                         "start": rel_start,
