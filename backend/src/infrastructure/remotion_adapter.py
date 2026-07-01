@@ -116,6 +116,12 @@ class RemotionAdapter(IRemotionRenderer):
         if render_hook_animation not in valid_animations:
             render_hook_animation = "fade_scale"
 
+        # Warn if critical render data is empty
+        if not render_words:
+            logger.warning(f"[Remotion] clip {clip_rank}: words array is EMPTY — subtitles will not render")
+        if not render_hook_text:
+            logger.info(f"[Remotion] clip {clip_rank}: hookText is empty — hook overlay will not render")
+
         # Choose composition based on style config
         hook_cfg = creative_direction.get("hook_style_config", {})
         template_mode = hook_cfg.get("template_mode", "custom")

@@ -628,8 +628,9 @@ class V2PipelineService:
                 rel_start = round(w.start - clip.start, 3)
                 rel_end = round(w.end - clip.start, 3)
 
-                # Only keep words with valid relative timing
-                if rel_start >= 0 and rel_end > rel_start:
+                # Keep word if it has ANY overlap with clip (handles VAD boundary shift)
+                if rel_end > 0:
+                    rel_start = max(0, rel_start)  # Clamp negative start to 0
                     relative_words.append({
                         "word": w.word,
                         "start": rel_start,
@@ -748,11 +749,8 @@ class V2PipelineService:
             clip_words_raw = clips_with_words.get(clip.rank, [])
             clip_hook = clip.hook or ""
 
-            # Filter words during hook period
-            hook_dur = hook_style_config.get("duration", 3.0) if clip_hook else 0
-            clip_words = [w for w in clip_words_raw if w.get("start", 0) >= hook_dur]
-            if not clip_words and clip_words_raw:
-                clip_words = clip_words_raw
+            # Send all words to Remotion — ClipComposition.tsx handles hook-period filtering
+            clip_words = clip_words_raw
 
             hook_style = (hook_style_config.get("animation", "")
                           or creative_direction.hook_animation or "fade_scale")
