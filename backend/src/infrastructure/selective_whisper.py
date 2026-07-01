@@ -118,12 +118,17 @@ class SelectiveWhisperTranscriber:
     def _apply_offset_and_filter(
         self, raw_segments: list[dict], audio_slice: AudioSlice
     ) -> list[Word]:
-        """Apply time offset and filter words to original highlight range.
+        """Apply time offset and keep ALL words within padded audio region.
 
         local_timestamp + padded_start = absolute_timestamp
 
-        Only keeps words that fall within [original_start, original_end]
-        (the actual highlight, not the padded region).
+        Keeps all words from the padded WAV region. Downstream
+        _build_clips_with_words() will filter based on VAD-adjusted
+        clip.start/end — which is the single source of truth for boundaries.
+
+        Previous behavior (BUG): only kept words within [original_start - 0.5,
+        original_end + 0.5]. After VAD shifts clip.start earlier, words in the
+        gap between padded_start and original_start were missing → subtitle desync.
         """
         words = []
         offset = audio_slice.padded_start
@@ -139,12 +144,12 @@ class SelectiveWhisperTranscriber:
                 abs_start = round(w.get("start", 0) + offset, 3)
                 abs_end = round(w.get("end", 0) + offset, 3)
 
-                # Filter: keep only words within the original highlight range
-                # Use slight tolerance (±0.5s) at boundaries
-                if abs_end < audio_slice.original_start - 0.5:
-                    continue  # Word ends before highlight starts
-                if abs_start > audio_slice.original_end + 0.5:
-                    continue  # Word starts after highlight ends
+                # Keep all words within the padded audio extraction region
+                # (VAD may shift clip boundaries into the padding zone)
+                if abs_end < audio_slice.padded_start:
+                    continue  # Word ends before padded region
+                if abs_start > audio_slice.padded_end:
+                    continue  # Word starts after padded region
 
                 words.append(Word(
                     word=word_text,
