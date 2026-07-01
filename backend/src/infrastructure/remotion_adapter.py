@@ -112,7 +112,7 @@ class RemotionAdapter(IRemotionRenderer):
                     break
         
         # Validate hook animation
-        valid_animations = ("fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer")
+        valid_animations = ("fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer", "bold_slam")
         if render_hook_animation not in valid_animations:
             render_hook_animation = "fade_scale"
 

@@ -120,7 +120,7 @@ const RenderRequestSchema = z.object({
     videoPath: z.string(),
     words: z.array(z.any()).default([]),
     hookText: z.string().default(""),
-    hookAnimation: z.enum(["fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer"]).default("fade_scale"),
+    hookAnimation: z.enum(["fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer", "bold_slam"]).default("fade_scale"),
     enableThreeJS: z.boolean().default(false),
     enableAI: z.boolean().default(false),
   }),

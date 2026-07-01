@@ -87,3 +87,6 @@ models/
 # ─── Agent skills (local reference only) ─────────────────────────────────────
 .agents/
 skills-lock.json
+
+# ─── Hook Templates (local reference only, not deployed) ─────────────────────
+remotion-hook-templates/

@@ -120,6 +120,13 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
     const slideX = (1 - slideProgress) * -100;
     const bounceScale = slideProgress >= 1 ? 1 : 0.95 + slideProgress * 0.05;
     transform = `translateX(${slideX}%) scale(${bounceScale})`;
+  } else if (animation === "bold_slam") {
+    // MrBeast-style yellow card slam with bounce + shake
+    const entrance = spring({ frame, fps, config: { damping: 9, stiffness: 180, mass: 0.6 } });
+    const shakeX = frame > 14 && frame < 26 ? Math.sin(frame * 2.2) * 3 : 0;
+    const shakeY = frame > 14 && frame < 26 ? Math.cos(frame * 1.8) * 3 : 0;
+    const rotate = interpolate(frame, [0, 10], [-8, 0], { extrapolateRight: "clamp" });
+    transform = `translate(${shakeX}px, ${shakeY}px) scale(${entrance}) rotate(${rotate}deg)`;
   }
 
   // Typewriter text
@@ -255,44 +262,75 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
         }}>{displayText}</div>
       )}
 
-      {/* Main text */}
-      <div style={{
-        position: "absolute",
-        top: `${positionY}%`,
-        left: 0,
-        right: 0,
-        transform: `translateY(-50%) ${transform}`,
-        textAlign,
-        padding: "0 40px",
-      }}>
-        <span style={{
-          display: "inline-block",
-          color: config.gradientEnabled ? "transparent" : color,
-          background: config.gradientEnabled ? `linear-gradient(${config.gradientAngle || 180}deg, ${config.gradientFrom || "#FFF"}, ${config.gradientTo || "#FFC"})` : undefined,
-          WebkitBackgroundClip: config.gradientEnabled ? "text" : undefined,
-          fontSize,
-          fontWeight,
-          fontFamily,
-          fontStyle: config.italic ? "italic" : "normal",
-          letterSpacing: config.letterSpacing || 0,
-          lineHeight: config.lineHeight || 1.3,
-          textShadow: shadows.length ? shadows.join(", ") : undefined,
-          textTransform: config.uppercase ? "uppercase" : "none",
-          // paintOrder: stroke renders behind fill — cleaner outline (only when explicitly enabled)
-          paintOrder: config.strokeEnabled ? "stroke" : undefined,
-          WebkitTextStroke: config.strokeEnabled
-            ? `${config.strokeWidth || Math.max(2, fontSize * 0.04)}px ${config.strokeColor || "rgba(0,0,0,0.8)"}`
-            : undefined,
-          ...(config.boxEnabled ? {
-            backgroundColor: `${config.boxColor || "#FFF"}${Math.round((config.boxOpacity || 0.1) * 255).toString(16).padStart(2, "0")}`,
-            padding: config.boxPadding || 20,
-            borderRadius: config.boxRadius || 8,
-          } : {}),
+      {/* bold_slam animation: Yellow card with slam entrance */}
+      {animation === "bold_slam" && (
+        <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+          <div style={{
+            transform: `${transform}`,
+            background: config.boxColor || "#FFE600",
+            padding: "48px 72px",
+            borderRadius: 28,
+            border: `10px solid ${config.strokeColor || "#16130B"}`,
+            boxShadow: `14px 14px 0px ${config.strokeColor || "#16130B"}`,
+          }}>
+            {displayText.split("\n").map((line: string, i: number) => (
+              <div key={i} style={{
+                fontFamily: "'Arial Black', Impact, sans-serif",
+                fontWeight: 900,
+                fontSize: config.fontSize || 92,
+                lineHeight: 1.15,
+                color: config.color || "#16130B",
+                textAlign: "center",
+                textTransform: "uppercase",
+                letterSpacing: 1,
+              }}>
+                {line}
+              </div>
+            ))}
+          </div>
+        </AbsoluteFill>
+      )}
+
+      {/* Main text (skipped for bold_slam which has custom card render) */}
+      {animation !== "bold_slam" && (
+        <div style={{
+          position: "absolute",
+          top: `${positionY}%`,
+          left: 0,
+          right: 0,
+          transform: `translateY(-50%) ${transform}`,
+          textAlign,
+          padding: "0 40px",
         }}>
-          {config.uppercase ? displayText.toUpperCase() : displayText}
-          {animation === "typewriter" && frame % 16 < 10 && <span style={{ opacity: 0.7 }}>|</span>}
-        </span>
-      </div>
+          <span style={{
+            display: "inline-block",
+            color: config.gradientEnabled ? "transparent" : color,
+            background: config.gradientEnabled ? `linear-gradient(${config.gradientAngle || 180}deg, ${config.gradientFrom || "#FFF"}, ${config.gradientTo || "#FFC"})` : undefined,
+            WebkitBackgroundClip: config.gradientEnabled ? "text" : undefined,
+            fontSize,
+            fontWeight,
+            fontFamily,
+            fontStyle: config.italic ? "italic" : "normal",
+            letterSpacing: config.letterSpacing || 0,
+            lineHeight: config.lineHeight || 1.3,
+            textShadow: shadows.length ? shadows.join(", ") : undefined,
+            textTransform: config.uppercase ? "uppercase" : "none",
+            // paintOrder: stroke renders behind fill — cleaner outline (only when explicitly enabled)
+            paintOrder: config.strokeEnabled ? "stroke" : undefined,
+            WebkitTextStroke: config.strokeEnabled
+              ? `${config.strokeWidth || Math.max(2, fontSize * 0.04)}px ${config.strokeColor || "rgba(0,0,0,0.8)"}`
+              : undefined,
+            ...(config.boxEnabled ? {
+              backgroundColor: `${config.boxColor || "#FFF"}${Math.round((config.boxOpacity || 0.1) * 255).toString(16).padStart(2, "0")}`,
+              padding: config.boxPadding || 20,
+              borderRadius: config.boxRadius || 8,
+            } : {}),
+          }}>
+            {config.uppercase ? displayText.toUpperCase() : displayText}
+            {animation === "typewriter" && frame % 16 < 10 && <span style={{ opacity: 0.7 }}>|</span>}
+          </span>
+        </div>
+      )}
 
       {/* Accent line */}
       {config.lineEnabled && <AccentLine config={config} />}
