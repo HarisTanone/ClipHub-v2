@@ -147,10 +147,19 @@ class Settings(BaseSettings):
     V2_PIPELINE_ENABLED: bool = True
     V2_CHUNK_MAX_SECONDS: int = 600
     V2_CHUNK_MAX_CHARS: int = 4000
-    V2_AUDIO_PADDING_SECONDS: float = 3.0
-    V2_VAD_SEARCH_RADIUS: float = 2.0
-    V2_VAD_MIN_SILENCE_MS: int = 300
     V2_MAX_AUDIO_CHUNK_MB: int = 25  # Groq Whisper file size limit
+
+    # ─── Word-Level Transcription (on trimmed clips) ─────────────────────
+    WORD_LEVEL_GROQ_MODEL: str = "whisper-large-v3-turbo"
+    WORD_LEVEL_MAX_CONCURRENT: int = 3        # Max parallel Groq Whisper calls
+    WORD_LEVEL_MIN_DELAY: float = 1.5         # Seconds between Groq calls (rate limit)
+    WORD_LEVEL_FALLBACK_LOCAL: bool = True     # Fallback to Faster-Whisper if Groq fails
+    HARD_FAIL_NO_TRANSCRIPT: bool = True       # Fail job if YouTube has no transcript
+
+    # ─── Deprecated (kept for backward compat, not used by pipeline) ─────
+    V2_AUDIO_PADDING_SECONDS: float = 3.0     # Was used by MicroSlicer
+    V2_VAD_SEARCH_RADIUS: float = 2.0         # Was used by Silero VAD
+    V2_VAD_MIN_SILENCE_MS: int = 300           # Was used by Silero VAD
 
     # ─── Ollama (Local LLM) ──────────────────────────────────────────
     OLLAMA_BASE_URL: str = "http://100.64.5.96:11434"

@@ -1,22 +1,21 @@
 """V2PipelineService — Pipeline orchestrator for non-premium users.
 
 Uses GroqTranscriber (YouTube API → Groq Whisper) + GroqAnalyzer (Dynamic Chunking)
-+ MicroSlicer + SelectiveWhisper (local Faster-Whisper) + Silero VAD.
-NO Gemini dependency.
++ WordLevelTranscriber (Groq Whisper on trimmed clips).
+NO Gemini dependency. NO MicroSlicer, NO Silero VAD.
 
 Pipeline Steps (V2):
   1. Validate              — yt-dlp validate URL, extract duration
   2. Download              — Download full video
   3. V2 Transcript         — YouTube API (primary) → Groq Whisper (fallback)
   4. V2 Highlight Analysis — Dynamic Chunking → Groq LLM → Ollama fallback
-  4.5 Micro-Slice          — Extract audio per highlight (±3s padding)
-  4.7 Selective Whisper    — Local Faster-Whisper word-level on micro-slices
-  4.9 VAD Refinement       — Silero VAD natural cut boundaries
   5. Prepare Clips         — Time padding, overlap detection
   6. Aspect Ratio Router   — Set pipeline flags
   7. Trim Clips            — FFmpeg precise re-encode
   8. YOLO Seg + Reframe    — Conditional
-  10+ Hook, Subtitle, Encode (REUSE from V1)
+  9. Word-Level Transcription — Groq Whisper on trimmed clip files
+  10. Build Subtitle Data  — Validate & format words for rendering
+  11+ Hook, Subtitle, Encode (REUSE from V1)
 """
 import asyncio
 import logging
@@ -27,7 +26,7 @@ from typing import Optional, TYPE_CHECKING
 
 from src.config import settings
 from src.domain.entities import (
-    AudioSlice, BRollSuggestion, Clip, CreativeDirection, Job, JobStatus,
+    BRollSuggestion, Clip, CreativeDirection, Job, JobStatus,
     PipelineFlags, VisualCategory, Word,
 )
 from src.domain.interfaces import (
@@ -37,15 +36,12 @@ from src.domain.interfaces import (
     IBrowserRenderEngine,
     IDownloader,
     IGroqAnalyzer,
-    IGroqTranscriber,
     IJobRepository,
-    IMicroSlicer,
     IRenderer,
     ISubtitleRenderer,
     IWhisperLocal,
     IYoloReframeEngine,
 )
-from src.infrastructure.silero_vad import SileroVADProcessor
 
 if TYPE_CHECKING:
     from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
@@ -59,9 +55,9 @@ logger = logging.getLogger(__name__)
 class V2PipelineService:
     """V2 Pipeline orchestrator for non-premium users.
 
-    Architecture: YouTube API → Groq Whisper → Groq LLM → MicroSlicer →
-    Faster-Whisper (local) → Silero VAD → existing render pipeline.
-    NO Gemini. NO per-clip cloud Whisper.
+    Architecture: YouTube API → Groq Whisper → Groq LLM → Trim →
+    WordLevelTranscriber (Groq Whisper on trimmed clips) → render pipeline.
+    NO Gemini. NO MicroSlicer. NO Silero VAD.
     """
 
     def __init__(
@@ -70,8 +66,6 @@ class V2PipelineService:
         downloader: IDownloader,
         renderer: IRenderer,
         whisper_local: IWhisperLocal,
-        # ─── V2 specific components ──────────────────────────────────
-        silero_vad: Optional[SileroVADProcessor] = None,
         # ─── Shared pipeline components ──────────────────────────────
         aspect_ratio_router: Optional[IAspectRatioRouter] = None,
         yolo_reframe_engine: Optional[IYoloReframeEngine] = None,
@@ -92,11 +86,9 @@ class V2PipelineService:
         self._whisper = whisper_local
 
         # V2 components (lazy-init in run_pipeline)
-        self._vad = silero_vad or SileroVADProcessor()
         self._transcriber = None   # GroqTranscriber — lazy
         self._analyzer = None      # GroqAnalyzer — lazy
-        self._micro_slicer = None  # MicroSlicer — lazy
-        self._selective_whisper = None  # SelectiveWhisperTranscriber — lazy
+        self._word_level_transcriber = None  # WordLevelTranscriber — lazy
 
         # Shared components
         self._aspect_router = aspect_ratio_router
@@ -130,19 +122,12 @@ class V2PipelineService:
             self._analyzer = GroqAnalyzer()
         return self._analyzer
 
-    def _get_micro_slicer(self):
-        """Lazy-init MicroSlicer (TAHAP 3)."""
-        if self._micro_slicer is None:
-            from src.infrastructure.micro_slicer import MicroSlicer
-            self._micro_slicer = MicroSlicer()
-        return self._micro_slicer
-
-    def _get_selective_whisper(self):
-        """Lazy-init SelectiveWhisperTranscriber (TAHAP 4)."""
-        if self._selective_whisper is None:
-            from src.infrastructure.selective_whisper import SelectiveWhisperTranscriber
-            self._selective_whisper = SelectiveWhisperTranscriber(self._whisper)
-        return self._selective_whisper
+    def _get_word_level_transcriber(self):
+        """Lazy-init WordLevelTranscriber (Groq Whisper on trimmed clips)."""
+        if self._word_level_transcriber is None:
+            from src.infrastructure.word_level_transcriber import WordLevelTranscriber
+            self._word_level_transcriber = WordLevelTranscriber()
+        return self._word_level_transcriber
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -182,9 +167,9 @@ class V2PipelineService:
 
         Flow:
         1. Validate → 2. Download → 3. YouTube/Groq Transcript →
-        4. Groq LLM Chunked Analysis → 4.5. MicroSlice → 4.7. Selective Whisper →
-        4.9. VAD → 5. Prepare Clips → 6. Route → 7. Trim → 8. YOLO →
-        10+. Hook/Subtitle/Encode
+        4. Groq LLM Chunked Analysis → 5. Prepare Clips → 6. Route →
+        7. Trim → 8. YOLO → 9. Word-Level Transcription → 10. Build Subtitle →
+        11+. Hook/Subtitle/Encode
         """
         job_id = job.job_id
         url = job.youtube_url
@@ -270,9 +255,10 @@ class V2PipelineService:
                     transcriber = self._get_transcriber()
                     transcript_result = await transcriber.transcribe(url, duration)
                 except Exception as e:
-                    await self._repo.update_status(
-                        job_id, JobStatus.FAILED, f"Transcription gagal: {e}"
-                    )
+                    error_msg = str(e)
+                    if "no transcript" in error_msg.lower() or "tidak tersedia" in error_msg.lower():
+                        error_msg = "Video ini tidak memiliki subtitle/caption. Silakan pilih video yang memiliki subtitle."
+                    await self._repo.update_status(job_id, JobStatus.FAILED, error_msg)
                     return
                 # Cache transcript
                 if video_id and transcript_result.segments:
@@ -351,77 +337,6 @@ class V2PipelineService:
                 analysis_result.creative_direction
             ) if analysis_result.creative_direction else CreativeDirection()
 
-            # ═══ Step 4.5: TAHAP 3 — Micro-Slicing ═══
-            self._emit(job_id, "4.5", "v2_micro_slicing", "start")
-            await self._repo.update_status(job_id, JobStatus.V2_MICRO_SLICING)
-            micro_slicer = self._get_micro_slicer()
-            audio_slices: list[AudioSlice] = []
-            try:
-                highlights_for_slicer = [
-                    {"rank": c.rank, "start": c.start, "end": c.end}
-                    for c in analysis_result.clips
-                ]
-                audio_slices = await micro_slicer.slice_audio(
-                    video_path, highlights_for_slicer, output_dir, duration
-                )
-                logger.info(
-                    f"[{job_id}] Micro-sliced: {len(audio_slices)}/{len(analysis_result.clips)} clips"
-                )
-            except Exception as e:
-                logger.warning(f"[{job_id}] Micro-slicing failed: {e} — will skip selective whisper")
-            self._emit(job_id, "4.5", "v2_micro_slicing", "complete")
-
-            # ═══ Step 4.7: TAHAP 4 — Selective Faster-Whisper (word-level) ═══
-            self._emit(job_id, "4.7", "v2_selective_whisper", "start")
-            await self._repo.update_status(job_id, JobStatus.V2_WORD_TRANSCRIBING)
-            words_per_clip: dict[int, list[Word]] = {}
-            if audio_slices:
-                try:
-                    selective_whisper = self._get_selective_whisper()
-                    words_per_clip = await selective_whisper.transcribe_all_clips(
-                        audio_slices, max_parallel=settings.MAX_WHISPER_PARALLEL
-                    )
-                except Exception as e:
-                    logger.warning(f"[{job_id}] Selective Whisper failed: {e}")
-            logger.info(
-                f"[{job_id}] Selective Whisper: "
-                f"{sum(1 for w in words_per_clip.values() if w)}/{len(analysis_result.clips)} clips with words, "
-                f"{sum(len(w) for w in words_per_clip.values())} total words"
-            )
-            self._emit(job_id, "4.7", "v2_selective_whisper", "complete")
-
-            # ═══ Step 4.9: TAHAP 5 — Silero VAD Refinement ═══
-            self._emit(job_id, "4.9", "v2_vad_refine", "start")
-            await self._repo.update_status(job_id, JobStatus.V2_VAD_REFINING)
-            vad_applied = 0
-            for audio_slice in audio_slices:
-                try:
-                    from src.domain.entities import VADResult
-                    vad_result = await self._vad.refine_clip_boundaries(
-                        audio_path=audio_slice.audio_path,
-                        original_start=audio_slice.original_start,
-                        original_end=audio_slice.original_end,
-                        padded_start=audio_slice.padded_start,
-                    )
-                    if not vad_result.used_fallback:
-                        # Update the highlight timestamps with VAD-refined boundaries
-                        for clip_candidate in analysis_result.clips:
-                            if clip_candidate.rank == audio_slice.clip_rank:
-                                clip_candidate.start = vad_result.final_start
-                                clip_candidate.end = vad_result.final_end
-                                vad_applied += 1
-                                break
-                except Exception as e:
-                    logger.debug(f"[{job_id}] VAD clip {audio_slice.clip_rank}: {e}")
-            logger.info(f"[{job_id}] VAD refinement: {vad_applied}/{len(audio_slices)} clips adjusted")
-            self._emit(job_id, "4.9", "v2_vad_refine", "complete")
-
-            # Cleanup micro-slice audio files
-            try:
-                micro_slicer.cleanup_slices(audio_slices)
-            except Exception:
-                pass
-
             # ═══ Step 5: Prepare Clips ═══
             self._emit(job_id, 5, "prepare_clips", "start")
             await self._repo.update_status(job_id, JobStatus.PREPARING)
@@ -445,10 +360,7 @@ class V2PipelineService:
                 return
 
             # Re-number clips sequentially (1, 2, 3, ...) after filtering
-            # so downstream steps (trim, reframe, render) use contiguous ranks
-            rank_mapping: dict[int, int] = {}  # original_rank → new_sequential_rank
             for i, clip in enumerate(clips):
-                rank_mapping[clip.rank] = i + 1
                 clip.rank = i + 1
 
             clips_count = len(clips)
@@ -514,19 +426,50 @@ class V2PipelineService:
                     except Exception as e:
                         logger.warning(f"[{job_id}] Center-crop error clip {clip.rank}: {e}")
 
-            # ═══ Step 10: Build Word Data for Subtitle Rendering ═══
+            # ═══ Step 9: Word-Level Transcription on Trimmed Clips ═══
+            self._emit(job_id, 9, "word_level", "start")
+            await self._repo.update_status(job_id, JobStatus.V2_WORD_TRANSCRIBING)
+            trimmed_ranks = [clip.rank for clip in clips if trim_results.get(clip.rank)]
+            word_level = self._get_word_level_transcriber()
+            words_per_clip: dict[int, list[dict]] = await word_level.transcribe_all_clips(
+                clips_dir=output_dir,
+                clip_ranks=trimmed_ranks,
+                language=transcript_result.language or "id",
+            )
+            logger.info(
+                f"[{job_id}] Word-level: "
+                f"{sum(1 for w in words_per_clip.values() if w)}/{len(trimmed_ranks)} clips with words, "
+                f"{sum(len(w) for w in words_per_clip.values())} total words"
+            )
+            self._emit(job_id, 9, "word_level", "complete")
+
+            # ═══ Step 10: Build Subtitle Data (words already 0-based) ═══
             self._emit(job_id, 10, "highlights", "start")
             await self._repo.update_status(job_id, JobStatus.HIGHLIGHTING)
-
-            # Remap words_per_clip keys to match new sequential ranks
-            if rank_mapping:
-                remapped_words: dict[int, list[Word]] = {}
-                for old_rank, new_rank in rank_mapping.items():
-                    if old_rank in words_per_clip:
-                        remapped_words[new_rank] = words_per_clip[old_rank]
-                words_per_clip = remapped_words
-
-            clips_with_words = self._build_clips_with_words(clips, words_per_clip)
+            clips_with_words: dict[int, list[dict]] = {}
+            for clip in clips:
+                raw_words = words_per_clip.get(clip.rank, [])
+                clip_duration = round(clip.end - clip.start, 3)
+                valid_words = []
+                for w in raw_words:
+                    start = w.get("start", 0)
+                    end = w.get("end", 0)
+                    word_text = w.get("word", "").strip()
+                    if not word_text or end <= start or start < 0:
+                        continue
+                    if start >= clip_duration:
+                        continue
+                    end = min(end, clip_duration)
+                    if end - start < 0.3:
+                        end = min(start + 0.3, clip_duration)
+                    valid_words.append({"word": word_text, "start": start, "end": end, "highlight": False})
+                clips_with_words[clip.rank] = valid_words
+                if valid_words:
+                    logger.info(
+                        f"v2_words clip {clip.rank}: {len(valid_words)} words, "
+                        f"last='{valid_words[-1]['word']}' @ {valid_words[-1]['start']:.1f}s, "
+                        f"clip_duration={clip_duration:.1f}s"
+                    )
             self._emit(job_id, 10, "highlights", "complete")
 
             # ═══ Step 11+: Hook, Subtitle, Encode (REUSE) ═══
@@ -623,61 +566,6 @@ class V2PipelineService:
                 broll_suggestions=broll_suggestions,
             ))
         return clips
-
-    def _build_clips_with_words(
-        self, clips: list[Clip], words_per_clip: dict[int, list[Word]],
-    ) -> dict[int, list[dict]]:
-        """Convert Word objects to dict format for subtitle renderer.
-
-        Words from SelectiveWhisper have ABSOLUTE timestamps.
-        Convert to RELATIVE (from clip start) for subtitle rendering.
-        """
-        result = {}
-        for clip in clips:
-            words = words_per_clip.get(clip.rank, [])
-            if not words:
-                result[clip.rank] = []
-                continue
-
-            # Convert absolute → relative to clip start
-            clip_duration = round(clip.end - clip.start, 3)
-            relative_words = []
-            for w in words:
-                rel_start = round(w.start - clip.start, 3)
-                rel_end = round(w.end - clip.start, 3)
-
-                # Keep word if it overlaps with clip duration [0, clip_duration]
-                if rel_end > 0 and rel_start < clip_duration:
-                    rel_start = max(0, rel_start)  # Clamp start to 0
-                    rel_end = min(rel_end, clip_duration)  # Clamp end to clip duration
-                    # Ensure minimum display duration (prevent subtitle flicker)
-                    if rel_end - rel_start < 0.3:
-                        rel_end = min(rel_start + 0.3, clip_duration)
-                    relative_words.append({
-                        "word": w.word,
-                        "start": rel_start,
-                        "end": rel_end,
-                        "highlight": w.highlight,
-                    })
-
-            if relative_words:
-                last_word = relative_words[-1]
-                logger.info(
-                    f"v2_words clip {clip.rank}: "
-                    f"{len(relative_words)}/{len(words)} words kept, "
-                    f"clip_duration={clip_duration:.1f}s, "
-                    f"first='{relative_words[0]['word']}' @ {relative_words[0]['start']:.1f}s, "
-                    f"last='{last_word['word']}' @ {last_word['start']:.1f}s"
-                )
-            else:
-                logger.warning(
-                    f"v2_words clip {clip.rank}: "
-                    f"0/{len(words)} words kept! clip_duration={clip_duration:.1f}s, "
-                    f"clip.start={clip.start:.1f}, clip.end={clip.end:.1f}"
-                )
-
-            result[clip.rank] = relative_words
-        return result
 
     async def _trim_all_clips(
         self, job_id: str, video_path: str, clips: list[Clip], output_dir: str
@@ -912,7 +800,7 @@ class V2PipelineService:
     def _assemble_clips_data(
         self,
         clips: list[Clip],
-        words_per_clip: dict[int, list[Word]],
+        words_per_clip: dict[int, list[dict]],
         creative_direction: CreativeDirection,
         output_dir: str,
         transcript_source: str = "",
