@@ -72,7 +72,7 @@ class GroqAnalyzer(IGroqAnalyzer):
     """TAHAP 2: Two-Pass highlight analysis with Segment ID anchoring."""
 
     # ─── Duration Constants ───────────────────────────────────────────────────
-    MIN_CLIP_DURATION = 25.0   # Minimum valid clip duration (seconds)
+    MIN_CLIP_DURATION = 45.0   # Minimum valid clip duration (seconds) — enforced hard
     MAX_CLIP_DURATION = 300.0  # Sanity max (5 min) — no artificial cap, AI decides based on content
     PROMPT_MIN_DURATION = 45   # Instructed min in prompts (seconds)
     PROMPT_MAX_DURATION = 180   # Soft suggestion to AI (seconds)

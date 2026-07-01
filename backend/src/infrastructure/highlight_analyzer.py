@@ -356,7 +356,7 @@ Ekstrak {max_clips} clip terbaik. Gunakan segment ID dari transcript di atas."""
                         if end <= start or start < 0 or end > video_duration + 10:
                             logger.debug(f"highlight_analyzer: Groq clip {i} rejected (range): {start:.1f}-{end:.1f}")
                             continue
-                        if duration < 15 or duration > 300:
+                        if duration < 45 or duration > 300:
                             logger.debug(f"highlight_analyzer: Groq clip {i} rejected (duration {duration:.1f}s)")
                             continue
 
@@ -491,13 +491,10 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
                 # Validate timestamps
                 if end <= start or start < 0 or end > video_duration + 10:
                     continue
-                if end - start < 15 or end - start > 300:
-                    # Hard reject: too short (<15s) or absurdly long (>5min)
+                if end - start < 45 or end - start > 300:
+                    # Hard reject: too short (<45s) or absurdly long (>5min)
                     continue
-                duration = end - start
-                if duration < 45:
-                    # Soft filter: log warning but still include
-                    logger.debug(f"highlight_analyzer: clip {start:.1f}-{end:.1f} is short ({duration:.1f}s < 45s)")
+                # Duration is guaranteed >= 45s by the hard reject above
 
                 candidates.append(HighlightCandidate(
                     rank=c.get("rank", i + 1),

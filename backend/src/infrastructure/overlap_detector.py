@@ -16,7 +16,7 @@ class OverlapDetector:
     """
 
     MERGE_THRESHOLD = 3.0  # seconds — overlaps > this get merged
-    MIN_CLIP_DURATION = 0.5  # seconds — clips shorter than this get discarded
+    MIN_CLIP_DURATION = 45.0  # seconds — clips shorter than this get discarded
     MAX_ITERATIONS = 50
 
     def resolve_overlaps(self, clips: List[Clip]) -> List[Clip]:

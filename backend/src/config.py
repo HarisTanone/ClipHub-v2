@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # === Limits ===
     MAX_VIDEO_DURATION: int = 300 if PIPELINE_ENV == "local" else 3600
     DOWNLOAD_TIMEOUT: int = 300 if PIPELINE_ENV == "local" else 600
-    MIN_CLIP_DURATION: float = 5.0
+    MIN_CLIP_DURATION: float = 45.0
 
     # === Paths ===
     OUTPUT_DIR: str = "tmp/output"
