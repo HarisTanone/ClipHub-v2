@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     YOLO_MODEL_PATH: str = "models/yolo11n.pt"
     YOLO_SEG_MODEL: str = "models/yolo11n-seg.pt"
 
+    # === HuggingFace (Pyannote Speaker Diarization) ===
+    HF_TOKEN: str = ""
+
     # === Hook Rendering ===
     HOOK_DEFAULT_STYLE: str = "zoom_punch"  # animation preset name
 
