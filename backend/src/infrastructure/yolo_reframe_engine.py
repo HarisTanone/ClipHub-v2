@@ -31,7 +31,8 @@ class YoloReframeEngine(IYoloReframeEngine):
     SAMPLE_INTERVAL_SEC = 1.0  # Sample every 1 second
     MAX_SAMPLES = 60        # Max frames to analyze (60 = covers 60s of video)
     CONFIDENCE_THRESHOLD = 0.45  # Person detection confidence
-    MULTI_SPEAKER_THRESHOLD = 0.7  # Must be >70% of frames (stricter to avoid flicker)
+    MULTI_SPEAKER_THRESHOLD = 0.35  # Lowered: podcast often has intermittent 2-person detection
+    MIN_MULTI_SPEAKER_FRAMES = 3  # Minimum absolute frames with 2+ persons to trigger grid
 
     def __init__(self, model_path: str = ""):
         self._model_path = model_path or "yolo11n.pt"
@@ -175,23 +176,26 @@ class YoloReframeEngine(IYoloReframeEngine):
             logger.info("yolo_reframe: no persons detected in any frame")
             return None
 
-        # Determine mode: single speaker vs multi-speaker
+        # Determine mode: single speaker vs multi-speaker (dual trigger)
         total_with_detection = sum(1 for _, c in frame_centers if len(c) > 0)
         multi_ratio = multi_speaker_count / max(1, total_with_detection)
-        is_multi_speaker = multi_ratio >= self.MULTI_SPEAKER_THRESHOLD
+        is_multi_speaker = (
+            multi_ratio >= self.MULTI_SPEAKER_THRESHOLD
+            or multi_speaker_count >= self.MIN_MULTI_SPEAKER_FRAMES
+        )
 
         logger.info(
             f"yolo_reframe: {len(frame_centers)} samples, "
-            f"multi_speaker_ratio={multi_ratio:.2f}, autogrid={'auto' if is_multi_speaker else 'disabled'}"
+            f"multi_speaker_count={multi_speaker_count}, "
+            f"multi_ratio={multi_ratio:.2f}, "
+            f"is_multi_speaker={is_multi_speaker}"
         )
 
-        # Autogrid ONLY when user explicitly enables it (no auto-detection)
-        # User must check the "Autogrid" toggle in frontend for this to activate
         logger.info(
             f"yolo_reframe: autogrid_param={autogrid} (type={type(autogrid).__name__}), "
-            f"multi_speaker_count={multi_speaker_count}, threshold=5"
+            f"multi_speaker_count={multi_speaker_count}, threshold={self.MIN_MULTI_SPEAKER_FRAMES}"
         )
-        if is_multi_speaker and multi_speaker_count >= 5:
+        if is_multi_speaker and multi_speaker_count >= self.MIN_MULTI_SPEAKER_FRAMES:
             # Multi-speaker: always try autogrid first (no frontend toggle needed)
             grid_result = self._render_autogrid_smooth(
                 original_path, output_path, orig_width, orig_height, frame_centers
@@ -313,8 +317,14 @@ class YoloReframeEngine(IYoloReframeEngine):
         max_crop_x = width - crop_w
 
         # Build smooth trajectory using EMA
-        # Start with center of video as initial position
-        smooth_x = width / 2.0
+        # Start from first detected person (not center) for immediate lock-on
+        smooth_x = None
+        for _, centers in frame_centers:
+            if centers:
+                smooth_x = centers[0]
+                break
+        if smooth_x is None:
+            smooth_x = width / 2.0
         crop_positions = []  # (frame_idx, crop_x)
 
         for frame_idx, centers in frame_centers:
@@ -338,8 +348,8 @@ class YoloReframeEngine(IYoloReframeEngine):
         crop_range = max(crop_xs) - min(crop_xs)
 
         if crop_range < 50:
-            # Static crop — person barely moves, use single crop position
-            avg_crop_x = int(np.mean(crop_xs))
+            # Static crop — use median (not mean) to avoid empty-center for 2-person content
+            avg_crop_x = int(np.median(crop_xs))
             crop_filter = f"crop={crop_w}:{height}:{avg_crop_x}:0,scale=1080:1920"
             cmd = [
                 "ffmpeg", "-y", "-i", video_path,
@@ -362,7 +372,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             # Calculate initial and average crop X for a gentle pan
             start_x = crop_positions[0][1]
             end_x = crop_positions[-1][1]
-            mid_x = int(np.mean(crop_xs))
+            mid_x = int(np.median(crop_xs))  # Median avoids empty-center for 2-person content
 
             # Smooth pan: start → middle (gentle, professional look)
             # Use linear interpolation over time via FFmpeg expression
@@ -426,8 +436,8 @@ class YoloReframeEngine(IYoloReframeEngine):
             if frame_idx >= min_frame_for_grid and len(centers) >= 2:
                 post_hook_centers.extend(centers)
 
-        if len(post_hook_centers) < 4:
-            logger.info(f"yolo_reframe: too few multi-person frames after 4s ({len(post_hook_centers)} centers), skipping grid")
+        if len(post_hook_centers) < 3:
+            logger.info(f"yolo_reframe: too few multi-person centers after 4s ({len(post_hook_centers)}), skipping grid")
             return None
 
         centers_array = np.array(post_hook_centers)
@@ -443,7 +453,7 @@ class YoloReframeEngine(IYoloReframeEngine):
         left_centers = sorted_centers[:split_idx + 1]
         right_centers = sorted_centers[split_idx + 1:]
 
-        if len(left_centers) < 2 or len(right_centers) < 2:
+        if len(left_centers) < 1 or len(right_centers) < 1:
             return None
 
         left_avg = np.mean(left_centers)
@@ -467,13 +477,15 @@ class YoloReframeEngine(IYoloReframeEngine):
             logger.info(f"yolo_reframe: grid crops overlap too much, skipping")
             return None
 
-        # Time-gated filter: first 4s shows normal center crop, then switches to split grid
-        # This ensures the hook period (0-4s) has normal framing
+        # Time-gated filter: first 4s shows prominent speaker, then switches to split grid
         grid_start_time = 4.0
         total_duration = total_frames / fps if fps > 0 else 60
 
-        # Use center crop for the primary person in first 4s
-        primary_x = int((left_x + right_x) / 2)  # Center between two speakers
+        # Show the speaker with MORE detections during hook (not center between them)
+        if len(left_centers) >= len(right_centers):
+            primary_x = left_x
+        else:
+            primary_x = right_x
         primary_x = max(0, min(width - crop_w_person, primary_x))
 
         # Complex filter: trim into 2 parts, process differently, then concat
