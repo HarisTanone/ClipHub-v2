@@ -195,6 +195,11 @@ class YoloReframeEngine(IYoloReframeEngine):
                         conf = float(box.conf[0])
                         if conf > self.CONFIDENCE_THRESHOLD:
                             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                            # Skip small objects (toys, figurines, monitors)
+                            # Real persons in podcast are tall (>30% of frame height)
+                            box_height_ratio = (y2 - y1) / height
+                            if box_height_ratio < 0.3:
+                                continue
                             cx = ((x1 + x2) / 2) * scale_x
                             cy = (y1 + y2) / 2
                             dets.append((cx, cy))
