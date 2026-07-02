@@ -482,26 +482,45 @@ class PodcastReframeEngine(IReframeEngine):
             left_x = int(np.median(left_positions))
             right_x = int(np.median(right_positions))
             return {"layout": "double", "left_x": left_x, "right_x": right_x, "person_count": person_count}
-        else:
-            # Smart single crop: avoid the "empty middle" problem
-            # When 2 people alternate frames (coexist=0%), median lands between them.
-            # Instead, find the dominant cluster (most frequently seen face position).
-            if person_count >= 2 and len(all_x) > 5:
-                midpoint = width / 2.0
-                left_cluster = [x for x in all_x if x < midpoint]
-                right_cluster = [x for x in all_x if x >= midpoint]
 
-                # Pick the cluster that appears more often (= person shown more)
-                if len(left_cluster) >= len(right_cluster):
-                    crop_x = int(np.median(left_cluster)) if left_cluster else int(np.median(all_x))
-                else:
-                    crop_x = int(np.median(right_cluster)) if right_cluster else int(np.median(all_x))
+        # ─── FORCED GRID: 2 people detected but never in same frame ──────
+        # When coexist=0% but person_count>=2, faces alternate frames.
+        # Instead of single crop (which lands on empty middle), force grid
+        # using left/right cluster positions from per-frame detections.
+        if person_count >= 2 and autogrid and len(all_x) > 5:
+            midpoint = width / 2.0
+            left_cluster = [x for x in all_x if x < midpoint]
+            right_cluster = [x for x in all_x if x >= midpoint]
 
-                logger.info(f"podcast_reframe: cluster-based crop (L={len(left_cluster)}, R={len(right_cluster)}) → x={crop_x}")
+            # Both clusters must have meaningful detections
+            if left_cluster and right_cluster:
+                left_x = int(np.median(left_cluster))
+                right_x = int(np.median(right_cluster))
+                separation = right_x - left_x
+
+                if separation >= width * self.MIN_SEPARATION_RATIO:
+                    logger.info(
+                        f"podcast_reframe: FORCED GRID (coexist={coexist_ratio:.0%} but 2 clusters found, "
+                        f"L={left_x} [{len(left_cluster)} dets], R={right_x} [{len(right_cluster)} dets])"
+                    )
+                    return {"layout": "double", "left_x": left_x, "right_x": right_x, "person_count": person_count}
+
+        # ─── True single person fallback ──────────────────────────────────
+        # Only reach here if genuinely 1 person or clusters too close
+        if person_count >= 2 and len(all_x) > 5:
+            # Still avoid empty middle: pick dominant cluster
+            midpoint = width / 2.0
+            left_cluster = [x for x in all_x if x < midpoint]
+            right_cluster = [x for x in all_x if x >= midpoint]
+            if len(left_cluster) >= len(right_cluster):
+                crop_x = int(np.median(left_cluster)) if left_cluster else int(np.median(all_x))
             else:
-                crop_x = int(np.median(all_x))
+                crop_x = int(np.median(right_cluster)) if right_cluster else int(np.median(all_x))
+            logger.info(f"podcast_reframe: cluster-based single (L={len(left_cluster)}, R={len(right_cluster)}) → x={crop_x}")
+        else:
+            crop_x = int(np.median(all_x))
 
-            return {"layout": "single", "crop_x": crop_x, "person_count": person_count}
+        return {"layout": "single", "crop_x": crop_x, "person_count": person_count}
 
     # ─── Render: Single Crop ──────────────────────────────────────────────
 
