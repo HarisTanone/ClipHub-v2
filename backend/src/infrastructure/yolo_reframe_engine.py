@@ -272,7 +272,7 @@ class YoloReframeEngine(IYoloReframeEngine):
                             f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,split=2[s{i}_a][s{i}_b];"
                             f"[s{i}_a]crop={crop_w_double}:{height}:{X1}:0,scale=1080:960[s{i}_ta];"
                             f"[s{i}_b]crop={crop_w_double}:{height}:{X2}:0,scale=1080:960[s{i}_tb];"
-                            f"[s{i}_ta][s{i}_tb]vstack=inputs=2[{v_out}]"
+                            f"[s{i}_ta][s{i}_tb]vstack=inputs=2,setsar=1[{v_out}]"
                         )
 
             if layout == "single":
@@ -282,7 +282,7 @@ class YoloReframeEngine(IYoloReframeEngine):
 
                 video_filters.append(
                     f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{crop_x}:0,scale=1080:1920[{v_out}]"
+                    f"crop={crop_w_single}:{height}:{crop_x}:0,scale=1080:1920,setsar=1[{v_out}]"
                 )
 
             audio_filters.append(
