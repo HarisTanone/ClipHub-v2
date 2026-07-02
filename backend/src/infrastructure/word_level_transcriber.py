@@ -64,34 +64,46 @@ class WordLevelTranscriber:
             self._groq_client = Groq(api_key=settings.GROQ_API_KEY)
         return self._groq_client
 
+    # Class-level singleton: only ONE model instance across all WordLevelTranscriber instances
+    _shared_fw_model = None
+    _fw_model_lock = None  # Will be initialized on first use
+
     @property
     def faster_whisper_model(self):
-        if self._faster_whisper_model is None:
-            from faster_whisper import WhisperModel
-            model_size = settings.WHISPER_MODEL_SIZE  # default: "medium"
+        # Use class-level singleton to prevent concurrent model loading crash
+        if WordLevelTranscriber._shared_fw_model is not None:
+            return WordLevelTranscriber._shared_fw_model
 
-            # Try GPU first (much faster), fallback to CPU
-            device = "cpu"
-            compute_type = "int8"
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    device = "cuda"
-                    compute_type = "float16"
-                    logger.info(f"word_level: loading Faster-Whisper {model_size} (CUDA/float16)")
-                else:
-                    logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8)")
-            except ImportError:
-                logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8, no torch)")
+        if self._faster_whisper_model is not None:
+            return self._faster_whisper_model
 
-            self._faster_whisper_model = WhisperModel(
-                model_size,
-                device=device,
-                compute_type=compute_type,
-                num_workers=1,
-                cpu_threads=settings.WHISPER_THREADS,
-            )
-        return self._faster_whisper_model
+        from faster_whisper import WhisperModel
+        model_size = settings.WHISPER_MODEL_SIZE
+
+        device = "cpu"
+        compute_type = "int8"
+        try:
+            import torch
+            if torch.cuda.is_available():
+                device = "cuda"
+                compute_type = "float16"
+                logger.info(f"word_level: loading Faster-Whisper {model_size} (CUDA/float16)")
+            else:
+                logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8)")
+        except ImportError:
+            logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8, no torch)")
+
+        model = WhisperModel(
+            model_size,
+            device=device,
+            compute_type=compute_type,
+            num_workers=1,
+            cpu_threads=settings.WHISPER_THREADS,
+        )
+        # Store as class-level singleton
+        WordLevelTranscriber._shared_fw_model = model
+        self._faster_whisper_model = model
+        return model
 
     # ─── Main Entry Point ─────────────────────────────────────────────────────
 

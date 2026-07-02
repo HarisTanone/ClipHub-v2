@@ -98,6 +98,7 @@ class YoloReframeEngine(IYoloReframeEngine):
         video_path: str,
         output_path: str,
         target_aspect: str = "9:16",
+        autogrid_enabled: bool = False,
     ) -> dict:
         """Reframe video with dynamic segment-based person tracking."""
         if not os.path.exists(video_path):
