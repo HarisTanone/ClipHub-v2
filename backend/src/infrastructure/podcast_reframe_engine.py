@@ -157,8 +157,14 @@ class PodcastReframeEngine(IReframeEngine):
                 "pyannote/speaker-diarization-3.1",
                 use_auth_token=self._hf_token,
             )
+            # Use GPU if available (RTX 3070 makes diarization 10-20x faster)
+            import torch
+            if torch.cuda.is_available():
+                self._diarization_pipeline.to(torch.device("cuda"))
+                logger.info("podcast_reframe: Pyannote diarization pipeline loaded [CUDA]")
+            else:
+                logger.info("podcast_reframe: Pyannote diarization pipeline loaded [CPU]")
             self._diarization_available = True
-            logger.info("podcast_reframe: Pyannote diarization pipeline loaded")
             return True
         except Exception as e:
             logger.warning(f"podcast_reframe: Pyannote load failed (face-only mode): {e}")
