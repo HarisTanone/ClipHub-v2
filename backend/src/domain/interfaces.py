@@ -151,7 +151,10 @@ class ISubtitleRenderer(ABC):
 
 
 class IYoloReframeEngine(ABC):
-    """Step 8 — YOLO segmentation + auto-center + auto-grid (9:16 only)."""
+    """Step 8 — Audio-Visual reframing (MediaPipe + Speaker Diarization).
+
+    Legacy name kept for backward compatibility. Use IReframeEngine alias for new code.
+    """
 
     @abstractmethod
     async def process(
@@ -161,8 +164,12 @@ class IYoloReframeEngine(ABC):
         target_aspect: str = "9:16",
         autogrid_enabled: bool = False,
     ) -> dict:
-        """Reframe video with person detection. Returns {output_path, masks_dir, person_count}."""
+        """Reframe video with speaker-aware framing. Returns {output_path, person_count, method}."""
         ...
+
+
+# Semantic alias — prefer this in new code
+IReframeEngine = IYoloReframeEngine
 
 
 # ─── Pipeline Infrastructure Interfaces ───────────────────────────────────────

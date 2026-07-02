@@ -31,7 +31,7 @@ def get_job_service() -> JobService:
     from src.infrastructure.browser_render_engine import BrowserRenderEngine
     from src.infrastructure.broll_injector import BRollInjector
     from src.infrastructure.subtitle_renderer import SubtitleRenderer
-    from src.infrastructure.yolo_reframe_engine import YoloReframeEngine
+    from src.infrastructure.podcast_reframe_engine import PodcastReframeEngine
 
     # ─── Infrastructure Components ────────────────────────────────────────
     from src.infrastructure.cleanup_manager import CleanupManager
@@ -54,7 +54,7 @@ def get_job_service() -> JobService:
     aspect_router = _safe_import(AspectRatioRouter, "AspectRatioRouter")
     browser_render = _safe_import(BrowserRenderEngine, "BrowserRenderEngine")
     subtitle_renderer = _safe_import(SubtitleRenderer, "SubtitleRenderer")
-    yolo_reframe = _safe_import(YoloReframeEngine, "YoloReframeEngine")
+    yolo_reframe = _safe_import(PodcastReframeEngine, "PodcastReframeEngine")
 
     # BRollInjector needs BrowserRenderEngine
     broll_injector = None
@@ -120,7 +120,7 @@ def get_v2_pipeline_service():
     from src.infrastructure.browser_render_engine import BrowserRenderEngine
     from src.infrastructure.broll_injector import BRollInjector
     from src.infrastructure.subtitle_renderer import SubtitleRenderer
-    from src.infrastructure.yolo_reframe_engine import YoloReframeEngine
+    from src.infrastructure.podcast_reframe_engine import PodcastReframeEngine
     from src.infrastructure.resource_monitor import ResourceMonitor
     from src.infrastructure.overlap_detector import OverlapDetector
     from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
@@ -129,7 +129,7 @@ def get_v2_pipeline_service():
     aspect_router = _safe_import(AspectRatioRouter, "V2-AspectRatioRouter")
     browser_render = _safe_import(BrowserRenderEngine, "V2-BrowserRenderEngine")
     subtitle_renderer = _safe_import(SubtitleRenderer, "V2-SubtitleRenderer")
-    yolo_reframe = _safe_import(YoloReframeEngine, "V2-YoloReframeEngine")
+    yolo_reframe = _safe_import(PodcastReframeEngine, "V2-PodcastReframeEngine")
     broll_injector = None
     if browser_render:
         broll_injector = _safe_import(lambda: BRollInjector(browser_render), "V2-BRollInjector")
