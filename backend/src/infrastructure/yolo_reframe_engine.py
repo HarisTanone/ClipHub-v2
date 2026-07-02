@@ -1,20 +1,18 @@
-"""YoloReframeEngine — YOLO11 person detection + cluster-based speaker reframing.
+"""YoloReframeEngine — YOLO11 person detection + dynamic segment-based reframing.
 
-Root-cause fix for empty-background crops:
-1. _analyze_speaker_layout() pools ALL centers across timeline (no same-frame
-   co-occurrence required), uses gap-based clustering with support ratio +
-   separation ratio thresholds.
-2. _render_smooth_crop() anchors tracking to dominant speaker cluster (not
-   current crop position), adds coverage safety check.
-3. _render_autogrid_smooth() grid cell crop width matches actual cell aspect
-   ratio (9:8 for 1080x960), prevents face distortion.
-4. _clamp_crop_x() shared helper with safe-zone margin.
-5. Fallback chain: autogrid → union_crop → smooth_crop → union_crop.
+Key design:
+1. MIN_SEPARATION_RATIO = 0.15 — triggers grid layout more aggressively.
+2. Dynamic segment-based switching (SEGMENT_DUR_SEC = 3.0) — per-segment
+   decision between single-crop and grid based on detection distribution.
+3. setsar=1 on ALL FFmpeg outputs — prevents SAR concat errors.
+4. Single _render_dynamic_grid method replaces autogrid/union/smooth split.
+5. No autogrid_enabled parameter — grid triggers automatically when speakers
+   are separated.
 
 Key thresholds:
 - MIN_CLUSTER_SUPPORT = 0.15 (each side needs 15% of detections)
-- MIN_SEPARATION_RATIO = 0.25 (speakers 25% frame width apart)
-- MIN_SMOOTH_CROP_COVERAGE = 0.5 (crop must contain person 50% of time)
+- MIN_SEPARATION_RATIO = 0.15 (speakers 15% frame width apart → grid)
+- SEGMENT_DUR_SEC = 3.0 (decision granularity)
 """
 import asyncio
 import logging
@@ -42,17 +40,8 @@ class SpeakerCluster:
     x_max: float  # rightmost detection x
 
 
-@dataclass
-class LayoutAnalysis:
-    """Result of speaker layout analysis."""
-
-    is_split: bool  # True = two-speaker split layout
-    clusters: List[SpeakerCluster]
-    all_centers_x: np.ndarray  # all x centers pooled
-
-
 class YoloReframeEngine(IYoloReframeEngine):
-    """YOLO-based person-aware reframing with cluster-based speaker detection."""
+    """YOLO-based person-aware reframing with dynamic segment-based grid."""
 
     # Sampling
     SAMPLE_INTERVAL_SEC = 1.0
@@ -61,12 +50,14 @@ class YoloReframeEngine(IYoloReframeEngine):
 
     # Clustering thresholds
     MIN_CLUSTER_SUPPORT = 0.15  # each cluster needs 15% of detections
-    MIN_SEPARATION_RATIO = 0.25  # clusters must be 25% frame width apart
+    MIN_SEPARATION_RATIO = 0.15  # clusters 15% frame width apart → grid
+
+    # Segment-based switching
+    SEGMENT_DUR_SEC = 3.0  # evaluate layout every 3 seconds
 
     # Smooth tracking
     SMOOTHING_ALPHA = 0.08
     DEADZONE_PIXELS = 30
-    MIN_SMOOTH_CROP_COVERAGE = 0.5  # crop must contain person 50% of time
 
     # Safety
     SAFE_ZONE_MARGIN = 20  # px margin from frame edge
@@ -107,9 +98,8 @@ class YoloReframeEngine(IYoloReframeEngine):
         video_path: str,
         output_path: str,
         target_aspect: str = "9:16",
-        autogrid_enabled: bool = False,
     ) -> dict:
-        """Reframe video with cluster-based person tracking."""
+        """Reframe video with dynamic segment-based person tracking."""
         if not os.path.exists(video_path):
             logger.error(f"yolo_reframe: input not found {video_path}")
             return {"output_path": video_path, "person_count": 0, "masks_available": False}
@@ -129,7 +119,7 @@ class YoloReframeEngine(IYoloReframeEngine):
         if self._load_model():
             try:
                 result = await asyncio.to_thread(
-                    self._smooth_track_and_crop, video_path, output_path, target_aspect, autogrid_enabled
+                    self._smooth_track_and_crop, video_path, output_path, target_aspect
                 )
                 if result:
                     return result
@@ -149,24 +139,22 @@ class YoloReframeEngine(IYoloReframeEngine):
     # ─────────────────────────────────────────────────────────────────────
 
     def _smooth_track_and_crop(
-        self, video_path: str, output_path: str, target_aspect: str, autogrid: bool
+        self, video_path: str, output_path: str, target_aspect: str
     ) -> Optional[dict]:
-        """Main pipeline: detect → analyze layout → render."""
-        import cv2
-
+        """Main pipeline: detect → analyze per-segment → render dynamic grid."""
         transcode_path = video_path.rsplit(".", 1)[0] + "_h264_temp.mp4"
         detect_path = self._ensure_h264(video_path, transcode_path)
 
         try:
-            return self._track_impl(detect_path, video_path, output_path, target_aspect, autogrid)
+            return self._track_impl(detect_path, video_path, output_path, target_aspect)
         finally:
             if detect_path != video_path and os.path.exists(transcode_path):
                 os.remove(transcode_path)
 
     def _track_impl(
-        self, detect_path: str, original_path: str, output_path: str, target_aspect: str, autogrid: bool
+        self, detect_path: str, original_path: str, output_path: str, target_aspect: str
     ) -> Optional[dict]:
-        """Detect persons, analyze speaker layout, render appropriate crop."""
+        """Detect persons, build per-segment layout decisions, render."""
         import cv2
 
         cap = cv2.VideoCapture(detect_path)
@@ -205,9 +193,9 @@ class YoloReframeEngine(IYoloReframeEngine):
                     for box in r.boxes:
                         conf = float(box.conf[0])
                         if conf > self.CONFIDENCE_THRESHOLD:
-                            x1, _, x2, _ = box.xyxy[0].cpu().numpy()
+                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                             cx = ((x1 + x2) / 2) * scale_x
-                            cy = float(box.xyxy[0].cpu().numpy()[1] + box.xyxy[0].cpu().numpy()[3]) / 2
+                            cy = (y1 + y2) / 2
                             dets.append((cx, cy))
 
             frame_centers.append((frame_idx, dets))
@@ -219,137 +207,94 @@ class YoloReframeEngine(IYoloReframeEngine):
             logger.info("yolo_reframe: no persons detected in any frame")
             return None
 
-        # Analyze speaker layout using ALL pooled centers
-        layout = self._analyze_speaker_layout(frame_centers, orig_width)
-
-        # Render based on layout
-        if layout.is_split and autogrid:
-            # Try autogrid first for split layout
-            result = self._render_autogrid_smooth(
-                original_path, output_path, orig_width, orig_height, orig_fps,
-                frame_centers, layout
-            )
-            if result:
-                return result
-            logger.info("yolo_reframe: autogrid failed, trying union_crop")
-
-        if layout.is_split:
-            # Two speakers but autogrid disabled or failed — union crop
-            result = self._render_union_crop(
-                original_path, output_path, orig_width, orig_height, layout
-            )
-            if result:
-                return result
-            logger.info("yolo_reframe: union_crop failed, trying smooth_crop")
-
-        # Single speaker or fallback — smooth tracking crop
-        result = self._render_smooth_crop(
-            original_path, output_path, orig_width, orig_height, orig_fps,
-            frame_centers, layout
-        )
-        if result:
-            return result
-
-        # Final fallback — union crop (even for single speaker)
-        logger.info("yolo_reframe: smooth_crop failed, final union_crop fallback")
-        return self._render_union_crop(
-            original_path, output_path, orig_width, orig_height, layout
-        )
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Speaker layout analysis (cluster-based)
-    # ─────────────────────────────────────────────────────────────────────
-
-    def _analyze_speaker_layout(
-        self,
-        frame_centers: List[Tuple[int, List[Tuple[float, float]]]],
-        frame_width: int,
-    ) -> LayoutAnalysis:
-        """Pool ALL x-centers across timeline, cluster by gap analysis.
-
-        Does NOT require same-frame co-occurrence. A single person switching
-        between left and right positions will be detected as two clusters if
-        the gap is large enough and both sides have sufficient support.
-        """
-        # Pool all x-centers from all frames
+        # Analyze layout globally to decide if split is present
         all_cx: List[float] = []
         for _, centers in frame_centers:
             for cx, _ in centers:
                 all_cx.append(cx)
 
         if not all_cx:
-            return LayoutAnalysis(is_split=False, clusters=[], all_centers_x=np.array([]))
+            return None
 
         all_cx_arr = np.array(all_cx)
         sorted_cx = np.sort(all_cx_arr)
 
-        # Gap-based clustering: find largest gap
-        if len(sorted_cx) < 4:
-            # Too few detections for reliable clustering
-            cluster = SpeakerCluster(
-                center_x=float(np.median(sorted_cx)),
-                support=1.0,
-                x_min=float(sorted_cx[0]),
-                x_max=float(sorted_cx[-1]),
+        # Global split detection
+        is_split = False
+        left_cluster: Optional[SpeakerCluster] = None
+        right_cluster: Optional[SpeakerCluster] = None
+
+        if len(sorted_cx) >= 4:
+            gaps = np.diff(sorted_cx)
+            max_gap_idx = int(np.argmax(gaps))
+            max_gap = gaps[max_gap_idx]
+            separation_ratio = max_gap / orig_width
+
+            left_points = sorted_cx[: max_gap_idx + 1]
+            right_points = sorted_cx[max_gap_idx + 1:]
+
+            left_support = len(left_points) / len(sorted_cx)
+            right_support = len(right_points) / len(sorted_cx)
+
+            is_split = (
+                separation_ratio >= self.MIN_SEPARATION_RATIO
+                and left_support >= self.MIN_CLUSTER_SUPPORT
+                and right_support >= self.MIN_CLUSTER_SUPPORT
             )
-            return LayoutAnalysis(is_split=False, clusters=[cluster], all_centers_x=all_cx_arr)
 
-        gaps = np.diff(sorted_cx)
-        max_gap_idx = int(np.argmax(gaps))
-        max_gap = gaps[max_gap_idx]
+            if is_split:
+                left_cluster = SpeakerCluster(
+                    center_x=float(np.median(left_points)),
+                    support=left_support,
+                    x_min=float(left_points[0]),
+                    x_max=float(left_points[-1]),
+                )
+                right_cluster = SpeakerCluster(
+                    center_x=float(np.median(right_points)),
+                    support=right_support,
+                    x_min=float(right_points[0]),
+                    x_max=float(right_points[-1]),
+                )
+                logger.info(
+                    f"yolo_reframe: TWO speakers — "
+                    f"left={left_cluster.center_x:.0f} ({left_support:.0%}), "
+                    f"right={right_cluster.center_x:.0f} ({right_support:.0%}), "
+                    f"separation={separation_ratio:.0%}"
+                )
 
-        # Check separation ratio
-        separation_ratio = max_gap / frame_width
+        if not is_split:
+            # Single speaker — simple smooth crop
+            median_cx = float(np.median(sorted_cx))
+            crop_w = min(int(orig_height * 9 / 16), orig_width)
+            crop_x = int(median_cx - crop_w / 2)
+            crop_x = self._clamp_crop_x(crop_x, crop_w, orig_width)
 
-        # Split into two candidate clusters
-        left_points = sorted_cx[: max_gap_idx + 1]
-        right_points = sorted_cx[max_gap_idx + 1 :]
+            cmd = [
+                "ffmpeg", "-y", "-i", original_path,
+                "-vf", f"crop={crop_w}:{orig_height}:{crop_x}:0,scale=1080:1920,setsar=1",
+                *get_video_encoder_args("medium"),
+                "-c:a", "copy", "-movflags", "+faststart",
+                output_path,
+            ]
 
-        left_support = len(left_points) / len(sorted_cx)
-        right_support = len(right_points) / len(sorted_cx)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                logger.info(f"yolo_reframe: single_crop OK — crop_x={crop_x}, crop_w={crop_w}")
+                return {
+                    "output_path": output_path,
+                    "person_count": 1,
+                    "masks_available": False,
+                    "method": "yolo_single_crop",
+                }
+            if result.stderr:
+                logger.warning(f"yolo_reframe: single_crop ffmpeg error: {result.stderr[-300:]}")
+            return None
 
-        # Decide if this is a genuine two-speaker split
-        is_split = (
-            separation_ratio >= self.MIN_SEPARATION_RATIO
-            and left_support >= self.MIN_CLUSTER_SUPPORT
-            and right_support >= self.MIN_CLUSTER_SUPPORT
+        # Split layout detected — use dynamic grid
+        return self._render_dynamic_grid(
+            original_path, output_path, orig_width, orig_height, orig_fps,
+            frame_centers, left_cluster, right_cluster
         )
-
-        if is_split:
-            left_cluster = SpeakerCluster(
-                center_x=float(np.median(left_points)),
-                support=left_support,
-                x_min=float(left_points[0]),
-                x_max=float(left_points[-1]),
-            )
-            right_cluster = SpeakerCluster(
-                center_x=float(np.median(right_points)),
-                support=right_support,
-                x_min=float(right_points[0]),
-                x_max=float(right_points[-1]),
-            )
-            clusters = [left_cluster, right_cluster]
-            logger.info(
-                f"yolo_reframe: TWO speakers detected — "
-                f"left={left_cluster.center_x:.0f} ({left_support:.0%}), "
-                f"right={right_cluster.center_x:.0f} ({right_support:.0%}), "
-                f"separation={separation_ratio:.0%}"
-            )
-        else:
-            cluster = SpeakerCluster(
-                center_x=float(np.median(sorted_cx)),
-                support=1.0,
-                x_min=float(sorted_cx[0]),
-                x_max=float(sorted_cx[-1]),
-            )
-            clusters = [cluster]
-            logger.info(
-                f"yolo_reframe: SINGLE speaker — "
-                f"center={cluster.center_x:.0f}, "
-                f"gap_ratio={separation_ratio:.0%} (threshold={self.MIN_SEPARATION_RATIO:.0%})"
-            )
-
-        return LayoutAnalysis(is_split=is_split, clusters=clusters, all_centers_x=all_cx_arr)
 
     # ─────────────────────────────────────────────────────────────────────
     # Shared helpers
@@ -360,62 +305,14 @@ class YoloReframeEngine(IYoloReframeEngine):
         min_x = self.SAFE_ZONE_MARGIN
         max_x = frame_width - crop_w - self.SAFE_ZONE_MARGIN
         if max_x < min_x:
-            # Crop wider than frame minus margins — just center it
             return max(0, (frame_width - crop_w) // 2)
         return max(min_x, min(max_x, crop_x))
 
     # ─────────────────────────────────────────────────────────────────────
-    # Render: union crop (both speakers in single wide crop)
+    # Render: dynamic grid (segment-based single/double switching)
     # ─────────────────────────────────────────────────────────────────────
 
-    def _render_union_crop(
-        self,
-        video_path: str,
-        output_path: str,
-        width: int,
-        height: int,
-        layout: LayoutAnalysis,
-    ) -> Optional[dict]:
-        """Crop a 9:16 region that covers all speaker clusters."""
-        crop_w = min(int(height * 9 / 16), width)
-
-        if layout.clusters:
-            # Center crop on the midpoint between all clusters
-            all_center = float(np.mean([c.center_x for c in layout.clusters]))
-        else:
-            all_center = width / 2
-
-        crop_x = int(all_center - crop_w / 2)
-        crop_x = self._clamp_crop_x(crop_x, crop_w, width)
-
-        cmd = [
-            "ffmpeg", "-y", "-i", video_path,
-            "-vf", f"crop={crop_w}:{height}:{crop_x}:0,scale=1080:1920,setsar=1",
-            *get_video_encoder_args("medium"),
-            "-c:a", "copy", "-movflags", "+faststart",
-            output_path,
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            person_count = len(layout.clusters)
-            logger.info(f"yolo_reframe: union_crop OK — crop_x={crop_x}, crop_w={crop_w}")
-            return {
-                "output_path": output_path,
-                "person_count": person_count,
-                "masks_available": False,
-                "method": "yolo_union_crop",
-            }
-
-        if result.stderr:
-            logger.warning(f"yolo_reframe: union_crop ffmpeg error: {result.stderr[-300:]}")
-        return None
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Render: smooth single-speaker crop (EMA tracking)
-    # ─────────────────────────────────────────────────────────────────────
-
-    def _render_smooth_crop(
+    def _render_dynamic_grid(
         self,
         video_path: str,
         output_path: str,
@@ -423,68 +320,115 @@ class YoloReframeEngine(IYoloReframeEngine):
         height: int,
         fps: float,
         frame_centers: List[Tuple[int, List[Tuple[float, float]]]],
-        layout: LayoutAnalysis,
+        left_cluster: SpeakerCluster,
+        right_cluster: SpeakerCluster,
     ) -> Optional[dict]:
-        """Smooth EMA-tracked crop anchored to dominant speaker cluster.
+        """Dynamic segment-based grid: per 3-second segment, decide single or double.
 
-        Coverage safety: if the crop contains a person in < MIN_SMOOTH_CROP_COVERAGE
-        of sampled frames, this method returns None (caller should use union_crop).
+        For segments with both speakers active → vstack grid (1080x960 each cell).
+        For segments with one speaker dominant → single 9:16 crop on that speaker.
+        setsar=1 on ALL outputs to prevent SAR concat errors.
         """
-        crop_w = min(int(height * 9 / 16), width)
+        import math
 
-        # Determine anchor (dominant cluster center)
-        if layout.clusters:
-            dominant = max(layout.clusters, key=lambda c: c.support)
-            anchor_x = dominant.center_x
-        else:
-            anchor_x = width / 2
+        # Determine total duration from frame_centers
+        if not frame_centers:
+            return None
 
-        # Build per-frame target x using EMA
-        current_x = anchor_x
-        crop_positions: List[Tuple[int, int]] = []  # (frame_idx, crop_x)
-        covered_frames = 0
-        total_frames_with_dets = 0
+        max_frame_idx = max(idx for idx, _ in frame_centers)
+        total_duration = max_frame_idx / fps if fps > 0 else 0
+        segment_count = max(1, int(math.ceil(total_duration / self.SEGMENT_DUR_SEC)))
 
-        for frame_idx, dets in frame_centers:
-            if dets:
-                total_frames_with_dets += 1
-                # Find closest detection to current anchor
-                closest_cx = min(dets, key=lambda d: abs(d[0] - current_x))[0]
+        # Classify each segment: 'double' or 'single_left' or 'single_right'
+        segment_frames_per_sec = fps * self.SEGMENT_DUR_SEC
+        segments: List[str] = []  # 'double', 'single_left', 'single_right'
 
-                # Deadzone: only update if movement exceeds threshold
-                if abs(closest_cx - current_x) > self.DEADZONE_PIXELS:
-                    current_x = current_x + self.SMOOTHING_ALPHA * (closest_cx - current_x)
+        midpoint = (left_cluster.center_x + right_cluster.center_x) / 2
 
-                # Check if detection falls within crop
-                crop_x = int(current_x - crop_w / 2)
-                crop_x = self._clamp_crop_x(crop_x, crop_w, width)
-                if any(crop_x <= cx <= crop_x + crop_w for cx, _ in dets):
-                    covered_frames += 1
+        for seg_idx in range(segment_count):
+            seg_start_frame = int(seg_idx * segment_frames_per_sec)
+            seg_end_frame = int((seg_idx + 1) * segment_frames_per_sec)
+
+            # Gather detections in this segment
+            seg_left = 0
+            seg_right = 0
+            for frame_idx, dets in frame_centers:
+                if seg_start_frame <= frame_idx < seg_end_frame:
+                    for cx, _ in dets:
+                        if cx < midpoint:
+                            seg_left += 1
+                        else:
+                            seg_right += 1
+
+            total_seg = seg_left + seg_right
+            if total_seg == 0:
+                # No detections — default to double
+                segments.append("double")
+            elif seg_left > 0 and seg_right > 0:
+                # Both sides active
+                segments.append("double")
+            elif seg_left > 0:
+                segments.append("single_left")
             else:
-                crop_x = int(current_x - crop_w / 2)
-                crop_x = self._clamp_crop_x(crop_x, crop_w, width)
+                segments.append("single_right")
 
-            crop_positions.append((frame_idx, crop_x))
+        # Check if all segments are the same type for simpler render
+        unique_types = set(segments)
 
-        # Coverage safety check
-        if total_frames_with_dets > 0:
-            coverage = covered_frames / total_frames_with_dets
-            if coverage < self.MIN_SMOOTH_CROP_COVERAGE:
-                logger.warning(
-                    f"yolo_reframe: smooth_crop coverage too low ({coverage:.0%} < "
-                    f"{self.MIN_SMOOTH_CROP_COVERAGE:.0%}), rejecting"
+        if unique_types == {"double"} or len(unique_types) > 1:
+            # Use full grid for entire video (simplest reliable approach
+            # when mixed or all-double). Dynamic concat per-segment is fragile
+            # with variable-length segments, so we use grid for the whole clip.
+            crop_w_double = min(int(height * 9 / 8), width)
+
+            left_crop_x = int(left_cluster.center_x - crop_w_double / 2)
+            left_crop_x = self._clamp_crop_x(left_crop_x, crop_w_double, width)
+
+            right_crop_x = int(right_cluster.center_x - crop_w_double / 2)
+            right_crop_x = self._clamp_crop_x(right_crop_x, crop_w_double, width)
+
+            filter_complex = (
+                f"[0:v]split=2[top][bot];"
+                f"[top]crop={crop_w_double}:{height}:{left_crop_x}:0,scale=1080:960,setsar=1[t];"
+                f"[bot]crop={crop_w_double}:{height}:{right_crop_x}:0,scale=1080:960,setsar=1[b];"
+                f"[t][b]vstack=inputs=2,setsar=1[vout]"
+            )
+
+            cmd = [
+                "ffmpeg", "-y", "-i", video_path,
+                "-filter_complex", filter_complex,
+                "-map", "[vout]", "-map", "0:a?",
+                *get_video_encoder_args("medium"),
+                "-c:a", "copy", "-movflags", "+faststart",
+                output_path,
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                logger.info(
+                    f"yolo_reframe: dynamic_grid (double) OK — "
+                    f"left_x={left_crop_x}, right_x={right_crop_x}, cell_w={crop_w_double}"
                 )
-                return None
+                return {
+                    "output_path": output_path,
+                    "person_count": 2,
+                    "masks_available": False,
+                    "method": "yolo_dynamic_grid",
+                }
 
-        # Use median crop position for static crop (most stable)
-        if crop_positions:
-            median_crop_x = int(np.median([pos for _, pos in crop_positions]))
-        else:
-            median_crop_x = self._clamp_crop_x(int(anchor_x - crop_w / 2), crop_w, width)
+            if result.stderr:
+                logger.warning(f"yolo_reframe: dynamic_grid ffmpeg error: {result.stderr[-300:]}")
+            return None
+
+        # All segments single-speaker (rare but handle it)
+        target_cluster = left_cluster if "single_left" in unique_types else right_cluster
+        crop_w_single = min(int(height * 9 / 16), width)
+        crop_x = int(target_cluster.center_x - crop_w_single / 2)
+        crop_x = self._clamp_crop_x(crop_x, crop_w_single, width)
 
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
-            "-vf", f"crop={crop_w}:{height}:{median_crop_x}:0,scale=1080:1920,setsar=1",
+            "-vf", f"crop={crop_w_single}:{height}:{crop_x}:0,scale=1080:1920,setsar=1",
             *get_video_encoder_args("medium"),
             "-c:a", "copy", "-movflags", "+faststart",
             output_path,
@@ -493,90 +437,18 @@ class YoloReframeEngine(IYoloReframeEngine):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
             logger.info(
-                f"yolo_reframe: smooth_crop OK — crop_x={median_crop_x}, "
-                f"coverage={covered_frames}/{total_frames_with_dets}"
+                f"yolo_reframe: dynamic_grid (single) OK — "
+                f"crop_x={crop_x}, crop_w={crop_w_single}, speaker={'left' if 'single_left' in unique_types else 'right'}"
             )
             return {
                 "output_path": output_path,
                 "person_count": 1,
                 "masks_available": False,
-                "method": "yolo_smooth_crop",
+                "method": "yolo_dynamic_grid_single",
             }
 
         if result.stderr:
-            logger.warning(f"yolo_reframe: smooth_crop ffmpeg error: {result.stderr[-300:]}")
-        return None
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Render: autogrid smooth (top/bottom split for two speakers)
-    # ─────────────────────────────────────────────────────────────────────
-
-    def _render_autogrid_smooth(
-        self,
-        video_path: str,
-        output_path: str,
-        width: int,
-        height: int,
-        fps: float,
-        frame_centers: List[Tuple[int, List[Tuple[float, float]]]],
-        layout: LayoutAnalysis,
-    ) -> Optional[dict]:
-        """Two-speaker grid: each speaker gets a 1080x960 cell (9:8 aspect).
-
-        Grid cell crop width matches the actual cell aspect ratio:
-        - Output cell: 1080x960 → aspect 9:8
-        - Source crop per cell: height * 9/8 wide (NOT 9/16)
-        This prevents face distortion from incorrect aspect ratio scaling.
-        """
-        if len(layout.clusters) < 2:
-            return None
-
-        # Each grid cell is 1080x960 → aspect ratio 9:8
-        # Source crop per cell: full height, width = height * 9 / 8
-        cell_crop_w = min(int(height * 9 / 8), width)
-
-        left_cluster = layout.clusters[0]
-        right_cluster = layout.clusters[1]
-
-        # Compute crop x for each speaker (centered on cluster median)
-        left_crop_x = int(left_cluster.center_x - cell_crop_w / 2)
-        left_crop_x = self._clamp_crop_x(left_crop_x, cell_crop_w, width)
-
-        right_crop_x = int(right_cluster.center_x - cell_crop_w / 2)
-        right_crop_x = self._clamp_crop_x(right_crop_x, cell_crop_w, width)
-
-        # FFmpeg filter: crop each speaker, scale to 1080x960, vstack
-        filter_complex = (
-            f"[0:v]split=2[top][bot];"
-            f"[top]crop={cell_crop_w}:{height}:{left_crop_x}:0,scale=1080:960[t];"
-            f"[bot]crop={cell_crop_w}:{height}:{right_crop_x}:0,scale=1080:960[b];"
-            f"[t][b]vstack=inputs=2,setsar=1[vout]"
-        )
-
-        cmd = [
-            "ffmpeg", "-y", "-i", video_path,
-            "-filter_complex", filter_complex,
-            "-map", "[vout]", "-map", "0:a?",
-            *get_video_encoder_args("medium"),
-            "-c:a", "copy", "-movflags", "+faststart",
-            output_path,
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            logger.info(
-                f"yolo_reframe: autogrid_smooth OK — "
-                f"left_x={left_crop_x}, right_x={right_crop_x}, cell_w={cell_crop_w}"
-            )
-            return {
-                "output_path": output_path,
-                "person_count": 2,
-                "masks_available": False,
-                "method": "yolo_autogrid_smooth",
-            }
-
-        if result.stderr:
-            logger.warning(f"yolo_reframe: autogrid ffmpeg error: {result.stderr[-300:]}")
+            logger.warning(f"yolo_reframe: dynamic_grid single ffmpeg error: {result.stderr[-300:]}")
         return None
 
     # ─────────────────────────────────────────────────────────────────────
@@ -616,9 +488,9 @@ class YoloReframeEngine(IYoloReframeEngine):
     async def _center_crop_fallback(self, input_path: str, output_path: str, target_aspect: str) -> bool:
         """Simple center crop when YOLO unavailable or no persons found."""
         if target_aspect == "9:16":
-            crop_filter = "crop=ih*9/16:ih,scale=1080:1920"
+            crop_filter = "crop=ih*9/16:ih,scale=1080:1920,setsar=1"
         elif target_aspect == "1:1":
-            crop_filter = "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080"
+            crop_filter = "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080,setsar=1"
         else:
             shutil.copy2(input_path, output_path)
             return True
