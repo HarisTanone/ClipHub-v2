@@ -104,6 +104,10 @@ class PodcastReframeEngine(IReframeEngine):
     MIN_SEPARATION_RATIO = 0.15     # Min distance between faces to consider "2 speakers"
     MAX_SEGMENTS_PER_CHUNK = 15     # Max segments in single filter_complex (prevent OOM)
     CROSSFADE_MS = 200              # Audio crossfade duration at segment boundaries
+    MIN_FACE_SIZE_RATIO = 0.04      # Minimum face width as % of frame (reject tiny/far faces)
+    MAX_FACE_SIZE_RATIO = 0.55      # Maximum face width as % of frame (reject poster/monitor)
+    CO_OCCURRENCE_THRESHOLD = 0.20  # Min co-occurrence ratio to confirm 2 separate people
+    MAX_DETECT_WIDTH = 1280         # Downscale frames larger than this before detection
 
     def __init__(self, hf_token: Optional[str] = None):
         """Initialize engine.
@@ -432,11 +436,30 @@ class PodcastReframeEngine(IReframeEngine):
 
                 time_sec = frame_idx / fps
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = self._face_detector.process(frame_rgb)
+
+                # I6: Downscale large frames for performance (4K → 1280px)
+                process_frame = frame_rgb
+                if frame_rgb.shape[1] > self.MAX_DETECT_WIDTH:
+                    scale_factor = self.MAX_DETECT_WIDTH / frame_rgb.shape[1]
+                    new_w = int(frame_rgb.shape[1] * scale_factor)
+                    new_h = int(frame_rgb.shape[0] * scale_factor)
+                    process_frame = cv2.resize(frame_rgb, (new_w, new_h))
+
+                results = self._face_detector.process(process_frame)
 
                 if results.detections:
                     for detection in results.detections:
                         bbox = detection.location_data.relative_bounding_box
+
+                        # I1: Filter by face size — reject too small (far/noise)
+                        # and too large (poster/monitor/painting)
+                        face_w_ratio = bbox.width
+                        if face_w_ratio < self.MIN_FACE_SIZE_RATIO:
+                            continue  # Too small: likely noise or far away object
+                        if face_w_ratio > self.MAX_FACE_SIZE_RATIO:
+                            continue  # Too large: likely poster/monitor/painting
+
+                        # Coordinates are relative (0-1), scale to original frame
                         cx = (bbox.xmin + bbox.width / 2) * det_width * scale_x
                         timed_detections.append(TimedFaceDetection(time=time_sec, face_x=cx))
 
@@ -482,6 +505,29 @@ class PodcastReframeEngine(IReframeEngine):
 
         left_dets = [d for d in timed_detections if d.face_x <= split_threshold]
         right_dets = [d for d in timed_detections if d.face_x > split_threshold]
+
+        # I2: Temporal co-occurrence check — verify both clusters appear
+        # in the SAME frames consistently. If <20% co-occurrence, it's likely
+        # one person moving, not two separate speakers.
+        if left_dets and right_dets:
+            left_times = set(round(d.time, 1) for d in left_dets)
+            right_times = set(round(d.time, 1) for d in right_dets)
+            co_occurrence = len(left_times & right_times)
+            total_times = len(left_times | right_times)
+
+            co_occurrence_ratio = co_occurrence / total_times if total_times > 0 else 0
+
+            if co_occurrence_ratio < self.CO_OCCURRENCE_THRESHOLD:
+                logger.info(
+                    f"podcast_reframe: low co-occurrence ({co_occurrence_ratio:.0%}), "
+                    f"treating as 1 person moving"
+                )
+                return [FaceCluster(
+                    label="center",
+                    median_x=float(np.median([d.face_x for d in timed_detections])),
+                    x_values=[d.face_x for d in timed_detections],
+                    timed_detections=timed_detections,
+                )]
 
         clusters = []
         if left_dets:
@@ -751,9 +797,10 @@ class PodcastReframeEngine(IReframeEngine):
         """Single-pass FFmpeg render (for ≤15 segments)."""
         crop_w_single = min(int(height * 9 / 16), width)
         crop_w_double = min(int((height // 2) * 9 / 8), width)
+        has_audio = self._has_audio_stream(video_path)
 
         video_filters, audio_filters, v_labels, a_labels = self._build_filters(
-            layout_segments, crop_w_single, crop_w_double, width, height
+            layout_segments, crop_w_single, crop_w_double, width, height, has_audio
         )
 
         if not v_labels:
@@ -761,37 +808,49 @@ class PodcastReframeEngine(IReframeEngine):
 
         n = len(v_labels)
         concat_v = "".join(v_labels) + f"concat=n={n}:v=1:a=0[vout]"
-        concat_a = "".join(a_labels) + f"concat=n={n}:v=0:a=1[aout]"
-        filter_complex = ";".join(video_filters + audio_filters + [concat_v, concat_a])
 
-        cmd = [
-            "ffmpeg", "-y", "-i", video_path,
-            "-filter_complex", filter_complex,
-            "-map", "[vout]", "-map", "[aout]",
-            *get_video_encoder_args("medium"),
-            "-c:a", "aac", "-movflags", "+faststart",
-            output_path,
-        ]
+        if has_audio and a_labels:
+            concat_a = "".join(a_labels) + f"concat=n={len(a_labels)}:v=0:a=1[aout]"
+            filter_complex = ";".join(video_filters + audio_filters + [concat_v, concat_a])
+            cmd = [
+                "ffmpeg", "-y", "-i", video_path,
+                "-filter_complex", filter_complex,
+                "-map", "[vout]", "-map", "[aout]",
+                *get_video_encoder_args("medium"),
+                "-c:a", "aac", "-movflags", "+faststart",
+                output_path,
+            ]
+        else:
+            filter_complex = ";".join(video_filters + [concat_v])
+            cmd = [
+                "ffmpeg", "-y", "-i", video_path,
+                "-filter_complex", filter_complex,
+                "-map", "[vout]",
+                *get_video_encoder_args("medium"),
+                "-movflags", "+faststart",
+                output_path,
+            ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
             return self._build_result(output_path, layout_segments)
 
-        # Fallback: no audio filter
-        filter_complex_no_audio = ";".join(video_filters + [concat_v])
-        cmd_no_audio = [
-            "ffmpeg", "-y", "-i", video_path,
-            "-filter_complex", filter_complex_no_audio,
-            "-map", "[vout]", "-map", "0:a?",
-            *get_video_encoder_args("medium"),
-            "-c:a", "copy", "-movflags", "+faststart",
-            output_path,
-        ]
-        result = subprocess.run(cmd_no_audio, capture_output=True, text=True, timeout=300)
+        # Fallback: try video-only if audio failed
+        if has_audio:
+            filter_complex_no_audio = ";".join(video_filters + [concat_v])
+            cmd_no_audio = [
+                "ffmpeg", "-y", "-i", video_path,
+                "-filter_complex", filter_complex_no_audio,
+                "-map", "[vout]", "-map", "0:a?",
+                *get_video_encoder_args("medium"),
+                "-c:a", "copy", "-movflags", "+faststart",
+                output_path,
+            ]
+            result = subprocess.run(cmd_no_audio, capture_output=True, text=True, timeout=300)
 
-        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            return self._build_result(output_path, layout_segments, suffix="_no_audio")
+            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                return self._build_result(output_path, layout_segments, suffix="_no_audio")
 
         if result.stderr:
             logger.warning(f"podcast_reframe: FFmpeg error: {result.stderr[-500:]}")
@@ -812,6 +871,7 @@ class PodcastReframeEngine(IReframeEngine):
         """
         crop_w_single = min(int(height * 9 / 16), width)
         crop_w_double = min(int((height // 2) * 9 / 8), width)
+        has_audio = self._has_audio_stream(video_path)
 
         tmp_dir = tempfile.mkdtemp(prefix="reframe_chunks_")
         chunk_files: List[str] = []
@@ -823,7 +883,7 @@ class PodcastReframeEngine(IReframeEngine):
                 chunk_path = os.path.join(tmp_dir, f"chunk_{chunk_idx:04d}.mp4")
 
                 video_filters, audio_filters, v_labels, a_labels = self._build_filters(
-                    chunk_segs, crop_w_single, crop_w_double, width, height
+                    chunk_segs, crop_w_single, crop_w_double, width, height, has_audio
                 )
 
                 if not v_labels:
@@ -831,17 +891,28 @@ class PodcastReframeEngine(IReframeEngine):
 
                 n = len(v_labels)
                 concat_v = "".join(v_labels) + f"concat=n={n}:v=1:a=0[vout]"
-                concat_a = "".join(a_labels) + f"concat=n={n}:v=0:a=1[aout]"
-                filter_complex = ";".join(video_filters + audio_filters + [concat_v, concat_a])
 
-                cmd = [
-                    "ffmpeg", "-y", "-i", video_path,
-                    "-filter_complex", filter_complex,
-                    "-map", "[vout]", "-map", "[aout]",
-                    *get_video_encoder_args("medium"),
-                    "-c:a", "aac", "-movflags", "+faststart",
-                    chunk_path,
-                ]
+                if has_audio and a_labels:
+                    concat_a = "".join(a_labels) + f"concat=n={len(a_labels)}:v=0:a=1[aout]"
+                    filter_complex = ";".join(video_filters + audio_filters + [concat_v, concat_a])
+                    cmd = [
+                        "ffmpeg", "-y", "-i", video_path,
+                        "-filter_complex", filter_complex,
+                        "-map", "[vout]", "-map", "[aout]",
+                        *get_video_encoder_args("medium"),
+                        "-c:a", "aac", "-movflags", "+faststart",
+                        chunk_path,
+                    ]
+                else:
+                    filter_complex = ";".join(video_filters + [concat_v])
+                    cmd = [
+                        "ffmpeg", "-y", "-i", video_path,
+                        "-filter_complex", filter_complex,
+                        "-map", "[vout]",
+                        *get_video_encoder_args("medium"),
+                        "-movflags", "+faststart",
+                        chunk_path,
+                    ]
 
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
                 if result.returncode == 0 and os.path.exists(chunk_path) and os.path.getsize(chunk_path) > 1000:
@@ -891,12 +962,18 @@ class PodcastReframeEngine(IReframeEngine):
         crop_w_double: int,
         width: int,
         height: int,
+        has_audio: bool = True,
     ) -> Tuple[List[str], List[str], List[str], List[str]]:
-        """Build FFmpeg filter_complex components for a set of segments."""
+        """Build FFmpeg filter_complex components for a set of segments.
+
+        Args:
+            has_audio: If False, skip audio filter generation entirely.
+        """
         video_filters: List[str] = []
         audio_filters: List[str] = []
         v_labels: List[str] = []
         a_labels: List[str] = []
+        fade_sec = self.CROSSFADE_MS / 1000.0
 
         for i, seg in enumerate(segments):
             if seg.end <= seg.start:
@@ -906,35 +983,62 @@ class PodcastReframeEngine(IReframeEngine):
             a_out = f"a{i}"
             start_t = f"{seg.start:.3f}"
             end_t = f"{seg.end:.3f}"
+            seg_duration = seg.end - seg.start
 
             if seg.layout == LayoutType.DOUBLE_GRID:
                 video_filters.append(
                     f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,split=2[s{i}_top][s{i}_bot];"
-                    f"[s{i}_top]crop={crop_w_double}:{height}:{seg.crop_x_left}:0,scale=1080:960[s{i}_t];"
-                    f"[s{i}_bot]crop={crop_w_double}:{height}:{seg.crop_x_right}:0,scale=1080:960[s{i}_b];"
-                    f"[s{i}_t][s{i}_b]vstack=inputs=2[{v_out}]"
+                    f"[s{i}_top]crop={crop_w_double}:{height}:{seg.crop_x_left}:0,scale=1080:960,format=yuv420p[s{i}_t];"
+                    f"[s{i}_bot]crop={crop_w_double}:{height}:{seg.crop_x_right}:0,scale=1080:960,format=yuv420p[s{i}_b];"
+                    f"[s{i}_t][s{i}_b]vstack=inputs=2,setsar=1[{v_out}]"
                 )
             elif seg.layout == LayoutType.SINGLE_LEFT:
                 video_filters.append(
                     f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{seg.crop_x_left}:0,scale=1080:1920[{v_out}]"
+                    f"crop={crop_w_single}:{height}:{seg.crop_x_left}:0,scale=1080:1920,format=yuv420p,setsar=1[{v_out}]"
                 )
             elif seg.layout == LayoutType.SINGLE_RIGHT:
                 video_filters.append(
                     f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{seg.crop_x_right}:0,scale=1080:1920[{v_out}]"
+                    f"crop={crop_w_single}:{height}:{seg.crop_x_right}:0,scale=1080:1920,format=yuv420p,setsar=1[{v_out}]"
                 )
             else:
                 video_filters.append(
                     f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{seg.crop_x_center}:0,scale=1080:1920[{v_out}]"
+                    f"crop={crop_w_single}:{height}:{seg.crop_x_center}:0,scale=1080:1920,format=yuv420p,setsar=1[{v_out}]"
                 )
 
-            audio_filters.append(
-                f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS[{a_out}]"
-            )
+            # C1+C4: Audio with crossfade at boundaries (prevents click/pop)
+            if has_audio:
+                if len(segments) == 1:
+                    # Single segment: no fade needed
+                    audio_filters.append(
+                        f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS[{a_out}]"
+                    )
+                elif i == 0:
+                    # First segment: fade out at end only
+                    fade_out_start = max(0, seg_duration - fade_sec)
+                    audio_filters.append(
+                        f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS,"
+                        f"afade=t=out:st={fade_out_start:.3f}:d={fade_sec:.3f}[{a_out}]"
+                    )
+                elif i == len(segments) - 1:
+                    # Last segment: fade in at start only
+                    audio_filters.append(
+                        f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS,"
+                        f"afade=t=in:st=0:d={fade_sec:.3f}[{a_out}]"
+                    )
+                else:
+                    # Middle segments: fade in + fade out
+                    fade_out_start = max(0, seg_duration - fade_sec)
+                    audio_filters.append(
+                        f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS,"
+                        f"afade=t=in:st=0:d={fade_sec:.3f},"
+                        f"afade=t=out:st={fade_out_start:.3f}:d={fade_sec:.3f}[{a_out}]"
+                    )
+                a_labels.append(f"[{a_out}]")
+
             v_labels.append(f"[{v_out}]")
-            a_labels.append(f"[{a_out}]")
 
         return video_filters, audio_filters, v_labels, a_labels
 
@@ -969,6 +1073,19 @@ class PodcastReframeEngine(IReframeEngine):
     # ─────────────────────────────────────────────────────────────────────────
     # Utilities
     # ─────────────────────────────────────────────────────────────────────────
+
+    def _has_audio_stream(self, video_path: str) -> bool:
+        """Check if video file contains an audio stream."""
+        try:
+            cmd = [
+                "ffprobe", "-v", "quiet", "-select_streams", "a",
+                "-show_entries", "stream=index", "-of", "csv=p=0",
+                video_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            return bool(result.stdout.strip())
+        except Exception:
+            return True  # Assume audio exists if probe fails
 
     def _ensure_h264(self, video_path: str, transcode_path: str) -> str:
         """Transcode non-h264 video for MediaPipe compatibility."""
