@@ -223,6 +223,39 @@ class YoloReframeEngine(IYoloReframeEngine):
             return None
 
         all_cx_arr = np.array(all_cx)
+
+        # Require same-frame co-occurrence: at least 3 frames must have 2+ persons
+        # detected simultaneously. Without this, alternating single-speaker shots
+        # (or one person moving slightly) create fake two-cluster split.
+        same_frame_multi = sum(1 for _, dets in frame_centers if len(dets) >= 2)
+        if same_frame_multi < 3:
+            # Not enough evidence of two people simultaneously on screen
+            # → force single-speaker mode regardless of cluster analysis
+            logger.info(
+                f"yolo_reframe: only {same_frame_multi} frames with 2+ persons "
+                f"(need >= 3) → forcing single_crop"
+            )
+            median_cx = float(np.median(all_cx_arr)) if len(all_cx) > 0 else orig_width / 2
+            crop_w = min(int(orig_height * 9 / 16), orig_width)
+            crop_x = int(median_cx - crop_w / 2)
+            crop_x = self._clamp_crop_x(crop_x, crop_w, orig_width)
+
+            cmd = [
+                "ffmpeg", "-y", "-i", original_path,
+                "-vf", f"crop={crop_w}:{orig_height}:{crop_x}:0,scale=1080:1920,setsar=1",
+                *get_video_encoder_args("medium"),
+                "-c:a", "copy", "-movflags", "+faststart",
+                output_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                logger.info(f"yolo_reframe: single_crop (co-occurrence forced) OK — crop_x={crop_x}")
+                return {"output_path": output_path, "person_count": 1, "masks_available": False, "method": "yolo_single_crop"}
+            return None
+
+        if not all_cx:
+            return None
+
         sorted_cx = np.sort(all_cx_arr)
 
         # Global split detection
@@ -394,7 +427,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             right_crop_x = self._clamp_crop_x(right_crop_x, crop_w_double, width)
 
             filter_complex = (
-                f"[0:v]split=2[top][bot];"
+                f"[0:v]format=yuv420p,split=2[top][bot];"
                 f"[top]crop={crop_w_double}:{height}:{left_crop_x}:0,scale=1080:960,setsar=1[t];"
                 f"[bot]crop={crop_w_double}:{height}:{right_crop_x}:0,scale=1080:960,setsar=1[b];"
                 f"[t][b]vstack=inputs=2,setsar=1[vout]"

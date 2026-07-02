@@ -677,12 +677,20 @@ class V2PipelineService:
                 clip_hook = clip.hook or ""
                 clip_words = clip_words_raw
 
+                # Check if this clip was reframed with grid (2-speaker split)
+                is_grid_mode = False
+                clip_reframe = reframe_data.get(clip.rank)
+                if clip_reframe and isinstance(clip_reframe, dict):
+                    method = clip_reframe.get("method", "")
+                    is_grid_mode = "grid" in method or "double" in method
+
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "fade_scale")
 
                 cd_dict = asdict(creative_direction) if creative_direction else {}
                 cd_dict["hook_style_config"] = hook_style_config
                 cd_dict["subtitle_style_config"] = subtitle_style_config
+                cd_dict["is_grid_mode"] = is_grid_mode
 
                 try:
                     result = await self._remotion_adapter.render_clip(

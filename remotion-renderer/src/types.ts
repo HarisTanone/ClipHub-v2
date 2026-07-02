@@ -33,6 +33,8 @@ export interface CreativeDirection {
   subtitle_style_config?: Record<string, any>;
   // Auto zoom events from prosody analysis
   zoom_events?: Array<{ time: number; intensity?: number; duration?: number }>;
+  // Grid mode flag: true when YOLO detected 2-speaker split layout
+  is_grid_mode?: boolean;
 }
 
 /** Word-level timestamps from Whisper */
