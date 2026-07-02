@@ -219,7 +219,7 @@ class Job:
     hook_style: str = ""
     custom_style: Optional[dict] = None
     broll_enabled: bool = True
-    autogrid_enabled: bool = False
+    autogrid_enabled: bool = True
     # ─── v3.0 Remotion fields ─────────────────────────────────────────────
     use_remotion: bool = False
     ai_layer_enabled: bool = False
@@ -237,11 +237,11 @@ class PipelineFlags:
     """Flags set by AspectRatioRouter (Step 6) controlling pipeline behavior."""
     yolo_enabled: bool = True
     autocenter_enabled: bool = True
-    autogrid_enabled: bool = False
+    autogrid_enabled: bool = True
     hook_render_mode: str = "text_behind"  # "text_behind" or "text_front"
 
     @classmethod
-    def for_portrait(cls, autogrid: bool = False) -> "PipelineFlags":
+    def for_portrait(cls, autogrid: bool = True) -> "PipelineFlags":
         """9:16 — full YOLO pipeline."""
         return cls(
             yolo_enabled=True,
