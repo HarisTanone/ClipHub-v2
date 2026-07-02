@@ -192,10 +192,20 @@ async def refresh_access_token(body: RefreshRequest):
         expires_at = (dt.datetime.utcnow() + dt.timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)).isoformat()
 
         cur.execute("UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?", (token_h,))
-        cur.execute(
-            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
-            (user_id, new_hash, expires_at),
-        )
+        try:
+            cur.execute(
+                "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+                (user_id, new_hash, expires_at),
+            )
+        except Exception:
+            # Race condition: another concurrent request already inserted this hash.
+            # Regenerate token with fresh hash to avoid collision.
+            new_refresh = create_refresh_token(user["id"])
+            new_hash = hash_token(new_refresh)
+            cur.execute(
+                "INSERT OR IGNORE INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+                (user_id, new_hash, expires_at),
+            )
         conn.commit()
 
         return TokenResponse(
