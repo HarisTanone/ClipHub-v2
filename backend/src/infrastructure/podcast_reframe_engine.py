@@ -106,7 +106,7 @@ class PodcastReframeEngine(IReframeEngine):
     CROSSFADE_MS = 200              # Audio crossfade duration at segment boundaries
     MIN_FACE_SIZE_RATIO = 0.04      # Minimum face width as % of frame (reject tiny/far faces)
     MAX_FACE_SIZE_RATIO = 0.55      # Maximum face width as % of frame (reject poster/monitor)
-    CO_OCCURRENCE_THRESHOLD = 0.20  # Min co-occurrence ratio to confirm 2 separate people
+    CO_OCCURRENCE_THRESHOLD = 0.0   # DISABLED — podcast speakers don't always face camera simultaneously
     MAX_DETECT_WIDTH = 1280         # Downscale frames larger than this before detection
 
     def __init__(self, hf_token: Optional[str] = None):
@@ -506,21 +506,17 @@ class PodcastReframeEngine(IReframeEngine):
         left_dets = [d for d in timed_detections if d.face_x <= split_threshold]
         right_dets = [d for d in timed_detections if d.face_x > split_threshold]
 
-        # I2: Temporal co-occurrence check — verify both clusters appear
-        # in the SAME frames consistently. If <20% co-occurrence, it's likely
-        # one person moving, not two separate speakers.
+        # I2: Validate clusters — each cluster must have minimum support
+        # (at least 3 detections per cluster to be considered real)
+        # This replaces the old co-occurrence check which was too aggressive
+        # for podcast content where speakers often face each other
+        MIN_CLUSTER_DETECTIONS = 3
         if left_dets and right_dets:
-            left_times = set(round(d.time, 1) for d in left_dets)
-            right_times = set(round(d.time, 1) for d in right_dets)
-            co_occurrence = len(left_times & right_times)
-            total_times = len(left_times | right_times)
-
-            co_occurrence_ratio = co_occurrence / total_times if total_times > 0 else 0
-
-            if co_occurrence_ratio < self.CO_OCCURRENCE_THRESHOLD:
+            if len(left_dets) < MIN_CLUSTER_DETECTIONS or len(right_dets) < MIN_CLUSTER_DETECTIONS:
+                # One cluster has too few detections — likely noise, treat as 1 person
                 logger.info(
-                    f"podcast_reframe: low co-occurrence ({co_occurrence_ratio:.0%}), "
-                    f"treating as 1 person moving"
+                    f"podcast_reframe: weak cluster (L={len(left_dets)}, R={len(right_dets)}), "
+                    f"treating as 1 person"
                 )
                 return [FaceCluster(
                     label="center",
@@ -626,7 +622,9 @@ class PodcastReframeEngine(IReframeEngine):
                 if has_two_speakers and autogrid_enabled:
                     layout = LayoutType.DOUBLE_GRID
                 elif has_two_speakers:
-                    layout = LayoutType.SINGLE_CENTER
+                    # Without diarization but with 2 faces: use double grid anyway
+                    # (better than centering between them which shows empty space)
+                    layout = LayoutType.DOUBLE_GRID
                 else:
                     layout = LayoutType.SINGLE_CENTER
             elif seg.speaker == "A":
@@ -794,10 +792,21 @@ class PodcastReframeEngine(IReframeEngine):
         height: int,
         layout_segments: List[LayoutSegment],
     ) -> Optional[dict]:
-        """Single-pass FFmpeg render (for ≤15 segments)."""
+        """Single-pass FFmpeg render (for ≤15 segments).
+
+        Optimization: If only 1 segment covering full duration, use simple
+        -vf crop (no trim/concat) to avoid A/V sync issues from keyframe misalignment.
+        """
         crop_w_single = min(int(height * 9 / 16), width)
         crop_w_double = min(int((height // 2) * 9 / 8), width)
         has_audio = self._has_audio_stream(video_path)
+
+        # OPTIMIZATION: Single segment → simple crop (perfect A/V sync)
+        if len(layout_segments) == 1:
+            return self._render_simple(
+                video_path, output_path, width, height,
+                layout_segments[0], crop_w_single, crop_w_double, has_audio
+            )
 
         video_filters, audio_filters, v_labels, a_labels = self._build_filters(
             layout_segments, crop_w_single, crop_w_double, width, height, has_audio
@@ -854,6 +863,59 @@ class PodcastReframeEngine(IReframeEngine):
 
         if result.stderr:
             logger.warning(f"podcast_reframe: FFmpeg error: {result.stderr[-500:]}")
+        return None
+
+    def _render_simple(
+        self,
+        video_path: str,
+        output_path: str,
+        width: int,
+        height: int,
+        segment: LayoutSegment,
+        crop_w_single: int,
+        crop_w_double: int,
+        has_audio: bool,
+    ) -> Optional[dict]:
+        """Simple render for single-segment clips (no trim/concat = perfect A/V sync).
+
+        This avoids the keyframe misalignment that causes video-audio desync
+        when using trim+setpts on a single full-duration segment.
+        """
+        if segment.layout == LayoutType.DOUBLE_GRID:
+            vf = (
+                f"split=2[top][bot];"
+                f"[top]crop={crop_w_double}:{height}:{segment.crop_x_left}:0,scale=1080:960,format=yuv420p[t];"
+                f"[bot]crop={crop_w_double}:{height}:{segment.crop_x_right}:0,scale=1080:960,format=yuv420p[b];"
+                f"[t][b]vstack=inputs=2,setsar=1[vout]"
+            )
+            cmd = [
+                "ffmpeg", "-y", "-i", video_path,
+                "-filter_complex", vf,
+                "-map", "[vout]",
+            ]
+        elif segment.layout == LayoutType.SINGLE_LEFT:
+            vf = f"crop={crop_w_single}:{height}:{segment.crop_x_left}:0,scale=1080:1920,format=yuv420p,setsar=1"
+            cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", vf]
+        elif segment.layout == LayoutType.SINGLE_RIGHT:
+            vf = f"crop={crop_w_single}:{height}:{segment.crop_x_right}:0,scale=1080:1920,format=yuv420p,setsar=1"
+            cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", vf]
+        else:
+            vf = f"crop={crop_w_single}:{height}:{segment.crop_x_center}:0,scale=1080:1920,format=yuv420p,setsar=1"
+            cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", vf]
+
+        # Add encoding args
+        cmd.extend(get_video_encoder_args("medium"))
+        if has_audio:
+            cmd.extend(["-c:a", "aac"])
+        cmd.extend(["-movflags", "+faststart", output_path])
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            return self._build_result(output_path, [segment])
+
+        if result.stderr:
+            logger.warning(f"podcast_reframe: simple render failed: {result.stderr[-300:]}")
         return None
 
     def _render_chunked(
