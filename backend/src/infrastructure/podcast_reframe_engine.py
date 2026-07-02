@@ -304,6 +304,18 @@ class PodcastReframeEngine(IReframeEngine):
                         frame_bboxes.append(face_bbox)
 
             # Update tracker with this frame's detections
+            # First: filter overlapping faces (NMS) to prevent 1 person → 2 detections
+            frame_faces = self._filter_overlapping_faces(frame_faces, width)
+            # Also filter bboxes to match (keep only unique faces)
+            if len(frame_bboxes) > len(frame_faces):
+                # Re-filter bboxes by keeping those whose center_x matches filtered faces
+                filtered_bboxes = []
+                for bbox in frame_bboxes:
+                    cx = bbox.center_x
+                    if any(abs(cx - fx) < width * 0.05 for fx in frame_faces):
+                        filtered_bboxes.append(bbox)
+                frame_bboxes = filtered_bboxes[:len(frame_faces)]
+
             tracked = self._tracker.update(frame_bboxes, frame_idx)
 
             per_frame_faces.append(frame_faces)
@@ -733,6 +745,31 @@ class PodcastReframeEngine(IReframeEngine):
         return self._render_double_grid(video_path, output_path, width, height, fallback_decision)
 
     # ─── Utilities ────────────────────────────────────────────────────────
+
+    MIN_FACE_DISTANCE_RATIO = 0.10  # Minimum 10% frame width between 2 faces to be different people
+
+    def _filter_overlapping_faces(self, faces: List[float], width: int) -> List[float]:
+        """Remove overlapping face detections (NMS for X positions).
+
+        Prevents false positives where 1 person is detected as 2 faces
+        (e.g. face + jaw, or face + ear area).
+
+        Rule: if 2 face X positions are within 10% of frame width,
+        they're the same person → keep only one.
+        """
+        if len(faces) < 2:
+            return faces
+
+        faces_sorted = sorted(faces)
+        unique: List[float] = [faces_sorted[0]]
+        min_distance = width * self.MIN_FACE_DISTANCE_RATIO
+
+        for x in faces_sorted[1:]:
+            if x - unique[-1] >= min_distance:
+                unique.append(x)
+            # else: skip — too close to previous, same person
+
+        return unique
 
     def _clamp_x(self, face_x: int, crop_w: int, frame_w: int) -> int:
         """Clamp crop X so it stays within frame bounds."""
