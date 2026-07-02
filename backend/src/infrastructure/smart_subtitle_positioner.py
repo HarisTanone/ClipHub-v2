@@ -208,3 +208,53 @@ class SmartSubtitlePositioner:
             else:
                 normalized.append(box)
         return normalized
+
+    # ─── Grid-Aware Subtitle Positioning ──────────────────────────────────
+
+    def compute_for_grid(self, grid_layout: str, person_count: int = 2) -> SubtitlePosition:
+        """Compute subtitle position for grid layouts.
+
+        When grid is active, subtitles should be:
+        - Centered horizontally (full width available since each panel shows 1 person)
+        - Positioned at bottom of the ACTIVE SPEAKER panel (top panel)
+
+        Grid layouts:
+        - "speaker_emphasis": 60% top (active) / 40% bottom (listener)
+          → subtitle at ~52% (bottom of active panel = 60%, with margin)
+        - "double": 50% top / 50% bottom
+          → subtitle at ~43% (bottom of top panel = 50%, with margin)
+        - "single" or None: normal positioning (no grid)
+
+        Args:
+            grid_layout: "speaker_emphasis", "double", or "single"
+            person_count: Number of detected persons
+
+        Returns:
+            SubtitlePosition centered for the grid layout
+        """
+        if grid_layout == "speaker_emphasis":
+            # Active speaker panel is top 60% (0-60% of output)
+            # Place subtitle at bottom of active panel with margin
+            return SubtitlePosition(
+                position_y=52.0,       # Just above panel boundary (60% - 8% margin)
+                max_width_pct=85.0,    # Wider allowed — no horizontal face conflict
+                reason="grid_speaker_emphasis_centered",
+                level=6,
+            )
+        elif grid_layout == "double":
+            # Top panel is 50% (0-50% of output)
+            # Place subtitle at bottom of top panel
+            return SubtitlePosition(
+                position_y=43.0,       # Just above panel boundary (50% - 7% margin)
+                max_width_pct=85.0,
+                reason="grid_double_centered",
+                level=6,
+            )
+        else:
+            # No grid — return default position
+            return SubtitlePosition(
+                position_y=85.0,
+                max_width_pct=90.0,
+                reason="no_grid_default",
+                level=1,
+            )

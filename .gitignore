@@ -82,7 +82,10 @@ logs/
 *.bin
 *.onnx
 *.pb
+*.task
+*.tflite
 models/
+backend/models/
 
 # ─── Agent skills (local reference only) ─────────────────────────────────────
 .agents/

@@ -682,7 +682,7 @@ class V2PipelineService:
                 clip_reframe = reframe_data.get(clip.rank)
                 if clip_reframe and isinstance(clip_reframe, dict):
                     method = clip_reframe.get("method", "")
-                    is_grid_mode = "grid" in method or "double" in method
+                    is_grid_mode = "grid" in method or "double" in method or "emphasis" in method
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "fade_scale")
@@ -781,6 +781,23 @@ class V2PipelineService:
             hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
             in_path = hooked_path if os.path.exists(hooked_path) else self._best_clip_path(output_dir, clip.rank, reframe_data)
             out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+
+            # Grid-aware subtitle positioning:
+            # When grid is active, center subtitle at bottom of active speaker panel
+            clip_reframe = reframe_data.get(clip.rank)
+            clip_sub_style = sub_style  # default
+            if clip_reframe and isinstance(clip_reframe, dict):
+                method = clip_reframe.get("method", "")
+                if "speaker_emphasis" in method:
+                    # 60/40 grid: active panel is top 60% (1152px of 1920px)
+                    # Place subtitle at bottom of active panel: y = 1152 - text_h - 40
+                    from dataclasses import replace
+                    clip_sub_style = replace(sub_style, position_y="1152-text_h-40", position_x="(w-text_w)/2")
+                elif "double" in method or "grid" in method:
+                    # 50/50 grid: top panel is 50% (960px of 1920px)
+                    # Place subtitle at bottom of top panel: y = 960 - text_h - 40
+                    from dataclasses import replace
+                    clip_sub_style = replace(sub_style, position_y="960-text_h-40", position_x="(w-text_w)/2")
             try:
                 if self._subtitle_renderer and words:
                     hook_duration = 3.0
@@ -789,7 +806,7 @@ class V2PipelineService:
                         filtered_words = words
                     self._subtitle_renderer.render_subtitles(
                         video_path=in_path, words=filtered_words,
-                        style=sub_style, output_path=out_path, start_offset=0.0,
+                        style=clip_sub_style, output_path=out_path, start_offset=0.0,
                     )
                 else:
                     import shutil

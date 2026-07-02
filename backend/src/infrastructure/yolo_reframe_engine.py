@@ -306,8 +306,11 @@ class YoloReframeEngine(IYoloReframeEngine):
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            # Compute actual person_count from detections (not hardcoded)
+            detected_counts = [len(dets) for _, dets in frame_detections if dets]
+            actual_person_count = int(np.median(detected_counts)) if detected_counts else 1
             logger.info(f"yolo_reframe: dynamic grid OK ({len(merged)} segments)")
-            return {"output_path": output_path, "person_count": 2, "masks_available": False, "method": "yolo_dynamic_grid"}
+            return {"output_path": output_path, "person_count": actual_person_count, "masks_available": False, "method": "yolo_dynamic_grid"}
         
         # Fallback: try without audio filter
         cmd_no_audio = [
@@ -320,8 +323,10 @@ class YoloReframeEngine(IYoloReframeEngine):
         ]
         result = subprocess.run(cmd_no_audio, capture_output=True, text=True, timeout=300)
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            detected_counts = [len(dets) for _, dets in frame_detections if dets]
+            actual_person_count = int(np.median(detected_counts)) if detected_counts else 1
             logger.info(f"yolo_reframe: dynamic grid OK (no audio fallback)")
-            return {"output_path": output_path, "person_count": 2, "masks_available": False, "method": "yolo_dynamic_grid"}
+            return {"output_path": output_path, "person_count": actual_person_count, "masks_available": False, "method": "yolo_dynamic_grid"}
         
         if result.stderr:
             logger.warning(f"yolo_reframe: FFmpeg error: {result.stderr[-500:]}")
