@@ -1,22 +1,20 @@
-"""PodcastReframeEngine — Audio-Visual Active Speaker Framing.
+"""PodcastReframeEngine — Simple & Reliable Face-Based Reframing.
 
-4-Stage Pipeline:
-  Stage 1: Audio Diarization (pyannote.audio) — Who is speaking when?
-  Stage 2: Face Detection (MediaPipe) — Where are the real human faces?
-  Stage 3: Layout Engine — Combine audio + visual to decide single/double grid
-  Stage 4: FFmpeg Dynamic Renderer — Render final 9:16 video with dynamic crops
+Strategy: SIMPLE. Detect faces → decide layout → crop with correct math.
 
-Key advantages over YOLO:
-  - No false positives on action figures/toys/humanoids (MediaPipe requires real face texture)
-  - Audio-driven layout: grid only appears when both speakers actively talk
-  - Smooth pan to active speaker when only one is talking
-  - No PyTorch/glibc thread deadlock (MediaPipe + pyannote are independent)
-  - Much lighter CPU usage
+Rules:
+  - 0 faces detected → center crop fallback
+  - 1 face cluster → single 9:16 crop centered on that face
+  - 2 face clusters (both must appear in SAME frame ≥50% of samples) → double grid
+  - Audio is ALWAYS stream-copied, never re-encoded through filter_complex
+  - Aspect ratio math: 9:16 output = 1080x1920
 
-v2 Improvements:
-  - Chunked FFmpeg rendering to prevent OOM on long videos (>15 segments)
-  - Speaker-Face correlation: maps audio SPEAKER_00 to visual LEFT/RIGHT
-  - Anti-jitter with hold-previous logic and audio crossfade
+Double Grid Math (CORRECT):
+  - Output: 1080x1920 (9:16)
+  - Each panel: 1080x960 (half height)
+  - Source is 16:9 (e.g. 1920x1080)
+  - Per panel: crop 1080x540 from source (9:16 ratio of half), scale to 1080x960
+  - crop_w = height * 9/16, crop_h = height/2 (half of source height per panel)
 """
 import asyncio
 import logging
@@ -25,7 +23,6 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -36,148 +33,43 @@ from src.infrastructure.gpu_encoder import get_video_encoder_args
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Data Models
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class LayoutType(str, Enum):
-    SINGLE_LEFT = "single_left"      # Focus on left speaker
-    SINGLE_RIGHT = "single_right"    # Focus on right speaker
-    SINGLE_CENTER = "single_center"  # Center crop (no clear speaker)
-    DOUBLE_GRID = "double_grid"      # Split top/bottom (both speaking)
-
-
 @dataclass
-class SpeakerSegment:
-    """A time segment where a specific speaker (or both) is active."""
-    start: float
-    end: float
-    speaker: str  # 'A', 'B', 'A_B', 'SILENCE'
-
-
-@dataclass
-class TimedFaceDetection:
-    """A single face detection with timestamp (for speaker-face correlation)."""
-    time: float       # seconds into video
-    face_x: float     # X position in pixels (original resolution)
-
-
-@dataclass
-class FaceCluster:
-    """A detected speaker's face position cluster."""
-    label: str            # 'left', 'right', or 'center'
-    median_x: float       # Median X position in pixels
-    x_values: List[float] = field(default_factory=list)
-    timed_detections: List[TimedFaceDetection] = field(default_factory=list)
-
-
-@dataclass
-class LayoutSegment:
-    """Final layout decision for a time segment."""
-    start: float
-    end: float
-    layout: LayoutType
-    crop_x_left: int = 0   # X position for left speaker crop
-    crop_x_right: int = 0  # X position for right speaker crop
-    crop_x_center: int = 0 # X position for center/single crop
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Main Engine
-# ═══════════════════════════════════════════════════════════════════════════════
+class FacePosition:
+    """Face X position detected in a specific frame."""
+    frame_time: float
+    center_x: float  # pixels, original resolution
 
 
 class PodcastReframeEngine(IReframeEngine):
-    """Audio-Visual Active Speaker Framing for podcast/interview videos.
+    """Simple face-based reframing. No pyannote (unreliable). Pure MediaPipe."""
 
-    Uses pyannote.audio for speaker diarization + MediaPipe for face detection.
-    Falls back to face-only logic if audio diarization is unavailable.
-    """
-
-    # ─── Configuration ─────────────────────────────────────────────────────
-    SAMPLE_INTERVAL_SEC = 1.0       # Sample 1 frame/sec for face detection
-    MAX_SAMPLES = 60                # Max frames to sample
-    FACE_CONFIDENCE = 0.50          # MediaPipe face detection threshold
-    MIN_SEGMENT_DURATION = 3.0      # Minimum segment duration (anti-jitter)
-    SAFE_ZONE_MARGIN_PX = 20        # Keep faces away from edges
-    MIN_SEPARATION_RATIO = 0.15     # Min distance between faces to consider "2 speakers"
-    MAX_SEGMENTS_PER_CHUNK = 15     # Max segments in single filter_complex (prevent OOM)
-    CROSSFADE_MS = 200              # Audio crossfade duration at segment boundaries
-    MIN_FACE_SIZE_RATIO = 0.04      # Minimum face width as % of frame (reject tiny/far faces)
-    MAX_FACE_SIZE_RATIO = 0.55      # Maximum face width as % of frame (reject poster/monitor)
-    CO_OCCURRENCE_THRESHOLD = 0.0   # DISABLED — podcast speakers don't always face camera simultaneously
-    MAX_DETECT_WIDTH = 1280         # Downscale frames larger than this before detection
+    SAMPLE_INTERVAL_SEC = 1.0
+    MAX_SAMPLES = 60
+    FACE_CONFIDENCE = 0.55
+    MIN_FACE_SIZE_RATIO = 0.05
+    MAX_FACE_SIZE_RATIO = 0.50
+    MIN_SEPARATION_RATIO = 0.20  # 20% of frame width to consider "two people"
+    MIN_COEXIST_RATIO = 0.40     # ≥40% of frames must have BOTH faces simultaneously
 
     def __init__(self, hf_token: Optional[str] = None):
-        """Initialize engine.
-
-        Args:
-            hf_token: HuggingFace token for pyannote models. If None,
-                      reads from HF_TOKEN env var. If unavailable, falls back
-                      to face-only mode.
-        """
-        self._hf_token = hf_token or os.environ.get("HF_TOKEN", "")
         self._face_detector = None
-        self._diarization_pipeline = None
-        self._diarization_available = False
-        self._mp_module = None
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Lazy Loading
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _load_face_detector(self) -> bool:
-        """Lazy-load MediaPipe Face Detection."""
         if self._face_detector is not None:
             return True
         try:
             import mediapipe as mp
-            self._mp_module = mp
             self._face_detector = mp.solutions.face_detection.FaceDetection(
                 min_detection_confidence=self.FACE_CONFIDENCE,
-                model_selection=1,  # Optimized for 2-5m distance (podcast)
+                model_selection=1,
             )
-            logger.info("podcast_reframe: MediaPipe Face Detection loaded")
+            logger.info("podcast_reframe: MediaPipe loaded")
             return True
         except Exception as e:
-            logger.warning(f"podcast_reframe: MediaPipe load failed: {e}")
+            logger.warning(f"podcast_reframe: MediaPipe failed: {e}")
             return False
 
-    def _load_diarization(self) -> bool:
-        """Lazy-load pyannote.audio diarization pipeline."""
-        if self._diarization_pipeline is not None:
-            return True
-        if self._diarization_available is False and self._diarization_pipeline is None:
-            pass
-        try:
-            from pyannote.audio import Pipeline as PyannotePipeline
-            if not self._hf_token:
-                logger.info("podcast_reframe: No HF_TOKEN, skipping diarization (face-only mode)")
-                self._diarization_available = False
-                return False
-
-            self._diarization_pipeline = PyannotePipeline.from_pretrained(
-                "pyannote/speaker-diarization-3.1",
-                token=self._hf_token,
-            )
-            # Use GPU if available (RTX 3070 makes diarization 10-20x faster)
-            import torch
-            if torch.cuda.is_available():
-                self._diarization_pipeline.to(torch.device("cuda"))
-                logger.info("podcast_reframe: Pyannote diarization pipeline loaded [CUDA]")
-            else:
-                logger.info("podcast_reframe: Pyannote diarization pipeline loaded [CPU]")
-            self._diarization_available = True
-            return True
-        except Exception as e:
-            logger.warning(f"podcast_reframe: Pyannote load failed (face-only mode): {e}")
-            self._diarization_available = False
-            return False
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Public API (implements IReframeEngine)
-    # ─────────────────────────────────────────────────────────────────────────
+    # ─── Public API ───────────────────────────────────────────────────────
 
     async def process(
         self,
@@ -187,50 +79,30 @@ class PodcastReframeEngine(IReframeEngine):
         autogrid_enabled: bool = False,
         **kwargs,
     ) -> dict:
-        """Reframe video using Audio-Visual Active Speaker detection."""
         if not os.path.exists(video_path):
-            return {"output_path": video_path, "person_count": 0, "method": "error_no_input"}
+            return {"output_path": video_path, "person_count": 0, "method": "error"}
 
         if target_aspect != "9:16":
             success = await self._simple_crop(video_path, output_path, target_aspect)
-            return {
-                "output_path": output_path if success else video_path,
-                "person_count": 0,
-                "method": "simple_crop",
-            }
+            return {"output_path": output_path if success else video_path, "person_count": 0, "method": "simple_crop"}
 
         if not self._load_face_detector():
-            success = await self._center_crop_fallback(video_path, output_path)
-            return {
-                "output_path": output_path if success else video_path,
-                "person_count": 0,
-                "method": "center_crop_fallback",
-            }
+            success = await self._center_crop(video_path, output_path)
+            return {"output_path": output_path if success else video_path, "person_count": 0, "method": "center_crop"}
 
         try:
-            result = await asyncio.to_thread(
-                self._run_pipeline, video_path, output_path, autogrid_enabled
-            )
+            result = await asyncio.to_thread(self._pipeline, video_path, output_path, autogrid_enabled)
             if result:
                 return result
         except Exception as e:
-            logger.warning(f"podcast_reframe: pipeline failed, falling back: {e}")
+            logger.warning(f"podcast_reframe: pipeline error: {e}")
 
-        success = await self._center_crop_fallback(video_path, output_path)
-        return {
-            "output_path": output_path if success else video_path,
-            "person_count": 0,
-            "method": "center_crop_fallback",
-        }
+        success = await self._center_crop(video_path, output_path)
+        return {"output_path": output_path if success else video_path, "person_count": 0, "method": "center_crop_fallback"}
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # 4-Stage Pipeline
-    # ─────────────────────────────────────────────────────────────────────────
+    # ─── Pipeline ─────────────────────────────────────────────────────────
 
-    def _run_pipeline(
-        self, video_path: str, output_path: str, autogrid_enabled: bool
-    ) -> Optional[dict]:
-        """Execute the full 4-stage pipeline (runs in thread)."""
+    def _pipeline(self, video_path: str, output_path: str, autogrid: bool) -> Optional[dict]:
         import cv2
         cv2.setNumThreads(0)
 
@@ -241,972 +113,273 @@ class PodcastReframeEngine(IReframeEngine):
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        duration = total_frames / fps
         cap.release()
 
-        if width <= 0 or height <= 0 or duration <= 0:
+        if width <= 0 or height <= 0:
             return None
 
-        # ═══ Stage 1: Audio Diarization ═══
-        speaker_segments = self._stage1_audio_diarization(video_path, duration)
+        # Detect faces with per-frame info
+        per_frame_faces = self._detect_faces(video_path, width, height, fps, total_frames)
 
-        # ═══ Stage 2: Face Detection (with timestamps for correlation) ═══
-        face_clusters = self._stage2_face_detection(video_path, width, height, fps, total_frames)
-
-        if not face_clusters:
-            logger.info("podcast_reframe: no faces detected, using center crop")
+        if not per_frame_faces:
+            logger.info("podcast_reframe: no faces → center crop")
             return None
 
-        # ═══ Stage 3: Layout Engine (with speaker-face correlation) ═══
-        layout_segments = self._stage3_layout_engine(
-            speaker_segments, face_clusters, width, height, duration, autogrid_enabled
-        )
+        # Decide: 1 person or 2 people?
+        decision = self._decide_layout(per_frame_faces, width, autogrid)
 
-        if not layout_segments:
-            return None
+        # Render
+        if decision["layout"] == "double":
+            return self._render_double_grid(video_path, output_path, width, height, decision)
+        else:
+            return self._render_single_crop(video_path, output_path, width, height, decision)
 
-        # ═══ Stage 4: FFmpeg Render (chunked for long videos) ═══
-        return self._stage4_render(video_path, output_path, width, height, layout_segments)
+    # ─── Face Detection ───────────────────────────────────────────────────
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Stage 1: Audio Diarization
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _stage1_audio_diarization(
-        self, video_path: str, duration: float
-    ) -> List[SpeakerSegment]:
-        """Extract speaker timeline using pyannote.audio.
-
-        Returns list of SpeakerSegment indicating who speaks when.
-        Falls back to uniform 'UNKNOWN' if diarization unavailable.
-        """
-        if not self._load_diarization():
-            logger.info("podcast_reframe: diarization unavailable, using face-only mode")
-            return self._fallback_speaker_segments(duration)
-
-        audio_path = None
-        try:
-            audio_path = self._extract_audio(video_path)
-            if not audio_path:
-                return self._fallback_speaker_segments(duration)
-
-            diarization = self._diarization_pipeline(audio_path)
-
-            raw_segments: List[Tuple[float, float, str]] = []
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
-                raw_segments.append((turn.start, turn.end, speaker))
-
-            if not raw_segments:
-                return self._fallback_speaker_segments(duration)
-
-            # Identify top 2 speakers by total duration
-            speaker_durations: Dict[str, float] = {}
-            for start, end, spk in raw_segments:
-                speaker_durations[spk] = speaker_durations.get(spk, 0) + (end - start)
-
-            top_speakers = sorted(
-                speaker_durations.keys(),
-                key=lambda s: speaker_durations[s],
-                reverse=True,
-            )[:2]
-
-            if len(top_speakers) < 2:
-                return [SpeakerSegment(0.0, duration, "A")]
-
-            spk_map = {top_speakers[0]: "A", top_speakers[1]: "B"}
-
-            return self._build_speaker_timeline(raw_segments, spk_map, duration)
-
-        except Exception as e:
-            logger.warning(f"podcast_reframe: diarization error: {e}")
-            return self._fallback_speaker_segments(duration)
-        finally:
-            if audio_path and os.path.exists(audio_path):
-                os.remove(audio_path)
-
-    def _extract_audio(self, video_path: str) -> Optional[str]:
-        """Extract audio from video to temporary WAV (16kHz mono)."""
-        try:
-            audio_path = tempfile.mktemp(suffix=".wav")
-            cmd = [
-                "ffmpeg", "-y", "-i", video_path,
-                "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-                audio_path,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if result.returncode == 0 and os.path.exists(audio_path):
-                return audio_path
-        except Exception as e:
-            logger.warning(f"podcast_reframe: audio extraction failed: {e}")
-        return None
-
-    def _build_speaker_timeline(
-        self,
-        raw_segments: List[Tuple[float, float, str]],
-        spk_map: Dict[str, str],
-        duration: float,
-    ) -> List[SpeakerSegment]:
-        """Build speaker timeline with overlap detection (500ms slot resolution)."""
-        interval = 0.5
-        num_slots = int(duration / interval) + 1
-
-        slot_a = [False] * num_slots
-        slot_b = [False] * num_slots
-
-        for start, end, spk in raw_segments:
-            mapped = spk_map.get(spk)
-            if not mapped:
-                continue
-            slot_start = int(start / interval)
-            slot_end = int(end / interval)
-            for i in range(max(0, slot_start), min(num_slots, slot_end + 1)):
-                if mapped == "A":
-                    slot_a[i] = True
-                else:
-                    slot_b[i] = True
-
-        slot_labels: List[str] = []
-        for i in range(num_slots):
-            if slot_a[i] and slot_b[i]:
-                slot_labels.append("A_B")
-            elif slot_a[i]:
-                slot_labels.append("A")
-            elif slot_b[i]:
-                slot_labels.append("B")
-            else:
-                slot_labels.append("SILENCE")
-
-        if not slot_labels:
-            return self._fallback_speaker_segments(duration)
-
-        # Merge consecutive same-label slots
-        segments: List[SpeakerSegment] = []
-        current_label = slot_labels[0]
-        current_start = 0.0
-
-        for i in range(1, len(slot_labels)):
-            if slot_labels[i] != current_label:
-                segments.append(SpeakerSegment(current_start, i * interval, current_label))
-                current_label = slot_labels[i]
-                current_start = i * interval
-
-        segments.append(SpeakerSegment(current_start, duration, current_label))
-        return segments
-
-    def _fallback_speaker_segments(self, duration: float) -> List[SpeakerSegment]:
-        """Fallback: treat entire video as unknown speaker (face-only mode)."""
-        return [SpeakerSegment(0.0, duration, "UNKNOWN")]
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Stage 2: Face Detection (MediaPipe) — with timestamps
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _stage2_face_detection(
+    def _detect_faces(
         self, video_path: str, width: int, height: int, fps: float, total_frames: int
-    ) -> List[FaceCluster]:
-        """Detect human faces and cluster into Left/Right with timestamps.
-
-        Returns FaceClusters containing timed_detections for speaker-face correlation.
-        """
+    ) -> List[List[float]]:
+        """Returns list of per-frame face X positions. Each entry = list of X centers for that frame."""
         import cv2
         cv2.setNumThreads(0)
 
-        transcode_path = video_path.rsplit(".", 1)[0] + "_h264_temp.mp4"
-        detect_path = self._ensure_h264(video_path, transcode_path)
-
-        try:
-            cap = cv2.VideoCapture(detect_path)
-            if not cap.isOpened():
-                return []
-
-            det_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            scale_x = width / det_width if det_width > 0 else 1.0
-
-            sample_interval = max(1, int(fps * self.SAMPLE_INTERVAL_SEC))
-            sample_indices = list(range(0, total_frames, sample_interval))[:self.MAX_SAMPLES]
-
-            # Collect timestamped detections
-            timed_detections: List[TimedFaceDetection] = []
-
-            for frame_idx in sample_indices:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = cap.read()
-                if not ret:
-                    continue
-
-                time_sec = frame_idx / fps
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                # I6: Downscale large frames for performance (4K → 1280px)
-                process_frame = frame_rgb
-                if frame_rgb.shape[1] > self.MAX_DETECT_WIDTH:
-                    scale_factor = self.MAX_DETECT_WIDTH / frame_rgb.shape[1]
-                    new_w = int(frame_rgb.shape[1] * scale_factor)
-                    new_h = int(frame_rgb.shape[0] * scale_factor)
-                    process_frame = cv2.resize(frame_rgb, (new_w, new_h))
-
-                results = self._face_detector.process(process_frame)
-
-                if results.detections:
-                    for detection in results.detections:
-                        bbox = detection.location_data.relative_bounding_box
-
-                        # I1: Filter by face size — reject too small (far/noise)
-                        # and too large (poster/monitor/painting)
-                        face_w_ratio = bbox.width
-                        if face_w_ratio < self.MIN_FACE_SIZE_RATIO:
-                            continue  # Too small: likely noise or far away object
-                        if face_w_ratio > self.MAX_FACE_SIZE_RATIO:
-                            continue  # Too large: likely poster/monitor/painting
-
-                        # Coordinates are relative (0-1), scale to original frame
-                        cx = (bbox.xmin + bbox.width / 2) * det_width * scale_x
-                        timed_detections.append(TimedFaceDetection(time=time_sec, face_x=cx))
-
-            cap.release()
-        finally:
-            if detect_path != video_path and os.path.exists(transcode_path):
-                os.remove(transcode_path)
-
-        if not timed_detections:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
             return []
 
-        return self._cluster_faces_timed(timed_detections, width)
+        sample_interval = max(1, int(fps * self.SAMPLE_INTERVAL_SEC))
+        sample_indices = list(range(0, total_frames, sample_interval))[:self.MAX_SAMPLES]
 
-    def _cluster_faces_timed(
-        self, timed_detections: List[TimedFaceDetection], frame_width: int
-    ) -> List[FaceCluster]:
-        """Cluster face detections into Left/Right with timestamp preservation."""
-        all_x = [d.face_x for d in timed_detections]
-        sorted_x = np.sort(all_x)
+        per_frame: List[List[float]] = []
 
-        if len(sorted_x) < 2:
-            return [FaceCluster(
-                label="center",
-                median_x=float(np.median(sorted_x)),
-                x_values=list(sorted_x),
-                timed_detections=timed_detections,
-            )]
-
-        # Find largest gap for 2-cluster split
-        gaps = np.diff(sorted_x)
-        max_gap_idx = int(np.argmax(gaps))
-        max_gap_value = gaps[max_gap_idx]
-
-        if max_gap_value < frame_width * self.MIN_SEPARATION_RATIO:
-            return [FaceCluster(
-                label="center",
-                median_x=float(np.median(sorted_x)),
-                x_values=list(sorted_x),
-                timed_detections=timed_detections,
-            )]
-
-        split_threshold = sorted_x[max_gap_idx]
-
-        left_dets = [d for d in timed_detections if d.face_x <= split_threshold]
-        right_dets = [d for d in timed_detections if d.face_x > split_threshold]
-
-        # I2: Validate clusters — each cluster must have minimum support
-        # (at least 3 detections per cluster to be considered real)
-        # This replaces the old co-occurrence check which was too aggressive
-        # for podcast content where speakers often face each other
-        MIN_CLUSTER_DETECTIONS = 3
-        if left_dets and right_dets:
-            if len(left_dets) < MIN_CLUSTER_DETECTIONS or len(right_dets) < MIN_CLUSTER_DETECTIONS:
-                # One cluster has too few detections — likely noise, treat as 1 person
-                logger.info(
-                    f"podcast_reframe: weak cluster (L={len(left_dets)}, R={len(right_dets)}), "
-                    f"treating as 1 person"
-                )
-                return [FaceCluster(
-                    label="center",
-                    median_x=float(np.median([d.face_x for d in timed_detections])),
-                    x_values=[d.face_x for d in timed_detections],
-                    timed_detections=timed_detections,
-                )]
-
-        clusters = []
-        if left_dets:
-            left_x = [d.face_x for d in left_dets]
-            clusters.append(FaceCluster(
-                label="left",
-                median_x=float(np.median(left_x)),
-                x_values=left_x,
-                timed_detections=left_dets,
-            ))
-        if right_dets:
-            right_x = [d.face_x for d in right_dets]
-            clusters.append(FaceCluster(
-                label="right",
-                median_x=float(np.median(right_x)),
-                x_values=right_x,
-                timed_detections=right_dets,
-            ))
-
-        return clusters
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Stage 3: Layout Engine (with Speaker-Face Correlation)
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _stage3_layout_engine(
-        self,
-        speaker_segments: List[SpeakerSegment],
-        face_clusters: List[FaceCluster],
-        width: int,
-        height: int,
-        duration: float,
-        autogrid_enabled: bool,
-    ) -> List[LayoutSegment]:
-        """Combine audio + visual with speaker-face correlation.
-
-        Speaker-Face Correlation Logic:
-          1. Find solo segments (only A or only B speaking)
-          2. Count face detections per cluster during each speaker's solo time
-          3. Whichever cluster has MORE detections during Speaker A's solo time
-             is mapped to Speaker A (and vice versa)
-          4. If correlation is ambiguous, default: A=LEFT, B=RIGHT
-        """
-        crop_w_single = min(int(height * 9 / 16), width)
-        crop_w_double = min(int((height // 2) * 9 / 8), width)
-
-        left_cluster = next((c for c in face_clusters if c.label == "left"), None)
-        right_cluster = next((c for c in face_clusters if c.label == "right"), None)
-        center_cluster = next((c for c in face_clusters if c.label == "center"), None)
-
-        has_two_speakers = left_cluster is not None and right_cluster is not None
-
-        # ─── Speaker-Face Correlation ─────────────────────────────────────
-        # Determine which audio speaker corresponds to which face position
-        speaker_a_is_left = True  # default assumption
-
-        if has_two_speakers and any(s.speaker in ("A", "B") for s in speaker_segments):
-            speaker_a_is_left = self._correlate_speaker_face(
-                speaker_segments, left_cluster, right_cluster
-            )
-            if not speaker_a_is_left:
-                logger.info("podcast_reframe: correlation found Speaker A = RIGHT face")
-
-        # Calculate crop positions
-        if has_two_speakers:
-            # Apply correlation mapping
-            if speaker_a_is_left:
-                a_cluster, b_cluster = left_cluster, right_cluster
-            else:
-                a_cluster, b_cluster = right_cluster, left_cluster
-
-            a_crop_x = self._calc_crop_x(int(a_cluster.median_x), crop_w_single, width)
-            b_crop_x = self._calc_crop_x(int(b_cluster.median_x), crop_w_single, width)
-            center_x = (a_cluster.median_x + b_cluster.median_x) / 2
-            center_crop_x = self._calc_crop_x(int(center_x), crop_w_single, width)
-            # Double grid: always left=top, right=bottom (visual consistency)
-            left_grid_x = self._calc_crop_x(int(left_cluster.median_x), crop_w_double, width)
-            right_grid_x = self._calc_crop_x(int(right_cluster.median_x), crop_w_double, width)
-        else:
-            median_x = center_cluster.median_x if center_cluster else width / 2
-            a_crop_x = b_crop_x = center_crop_x = self._calc_crop_x(
-                int(median_x), crop_w_single, width
-            )
-            left_grid_x = right_grid_x = self._calc_crop_x(
-                int(median_x), crop_w_double, width
-            )
-
-        # Build layout segments
-        raw_layouts: List[LayoutSegment] = []
-
-        for seg in speaker_segments:
-            if seg.end <= seg.start:
+        for frame_idx in sample_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret:
                 continue
 
-            if seg.speaker == "UNKNOWN":
-                if has_two_speakers and autogrid_enabled:
-                    layout = LayoutType.DOUBLE_GRID
-                elif has_two_speakers:
-                    # Without diarization but with 2 faces: use double grid anyway
-                    # (better than centering between them which shows empty space)
-                    layout = LayoutType.DOUBLE_GRID
-                else:
-                    layout = LayoutType.SINGLE_CENTER
-            elif seg.speaker == "A":
-                layout = LayoutType.SINGLE_LEFT if has_two_speakers else LayoutType.SINGLE_CENTER
-            elif seg.speaker == "B":
-                layout = LayoutType.SINGLE_RIGHT if has_two_speakers else LayoutType.SINGLE_CENTER
-            elif seg.speaker == "A_B":
-                if has_two_speakers and autogrid_enabled:
-                    layout = LayoutType.DOUBLE_GRID
-                else:
-                    layout = LayoutType.SINGLE_CENTER
-            elif seg.speaker == "SILENCE":
-                layout = LayoutType.SINGLE_CENTER
-            else:
-                layout = LayoutType.SINGLE_CENTER
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            raw_layouts.append(LayoutSegment(
-                start=seg.start,
-                end=seg.end,
-                layout=layout,
-                crop_x_left=left_grid_x if layout == LayoutType.DOUBLE_GRID else a_crop_x,
-                crop_x_right=right_grid_x if layout == LayoutType.DOUBLE_GRID else b_crop_x,
-                crop_x_center=center_crop_x,
-            ))
+            # Downscale for speed
+            proc_frame = frame_rgb
+            if frame_rgb.shape[1] > 1280:
+                scale = 1280 / frame_rgb.shape[1]
+                proc_frame = cv2.resize(frame_rgb, (int(frame_rgb.shape[1] * scale), int(frame_rgb.shape[0] * scale)))
 
-        if not raw_layouts:
-            return []
+            results = self._face_detector.process(proc_frame)
 
-        return self._stabilize_segments(raw_layouts, duration)
+            frame_faces: List[float] = []
+            if results.detections:
+                for det in results.detections:
+                    bbox = det.location_data.relative_bounding_box
+                    # Size filter
+                    if bbox.width < self.MIN_FACE_SIZE_RATIO or bbox.width > self.MAX_FACE_SIZE_RATIO:
+                        continue
+                    # X center in original resolution
+                    cx = (bbox.xmin + bbox.width / 2) * width
+                    frame_faces.append(cx)
 
-    def _correlate_speaker_face(
-        self,
-        speaker_segments: List[SpeakerSegment],
-        left_cluster: FaceCluster,
-        right_cluster: FaceCluster,
-    ) -> bool:
-        """Determine if Speaker A corresponds to LEFT face cluster.
+            per_frame.append(frame_faces)
 
-        Strategy: During Speaker A's solo segments, count face detections
-        in left vs right cluster. More detections = that's Speaker A's face.
+        cap.release()
+        return per_frame
 
-        Returns True if Speaker A = LEFT, False if Speaker A = RIGHT.
+    # ─── Layout Decision ──────────────────────────────────────────────────
+
+    def _decide_layout(self, per_frame_faces: List[List[float]], width: int, autogrid: bool) -> dict:
+        """Decide single or double grid based on per-frame face data.
+
+        Key rule: Double grid ONLY if ≥40% of frames show 2+ faces simultaneously
+        AND those faces are ≥20% apart horizontally.
         """
-        # Collect solo-A and solo-B time ranges
-        a_solo_ranges = [(s.start, s.end) for s in speaker_segments if s.speaker == "A"]
-        b_solo_ranges = [(s.start, s.end) for s in speaker_segments if s.speaker == "B"]
+        all_x = [x for frame in per_frame_faces for x in frame]
+        if not all_x:
+            return {"layout": "single", "crop_x": width // 2}
 
-        def count_in_ranges(detections: List[TimedFaceDetection], ranges: List[Tuple[float, float]]) -> int:
-            count = 0
-            for d in detections:
-                for start, end in ranges:
-                    if start <= d.time <= end:
-                        count += 1
-                        break
-            return count
+        # Count frames with 2+ faces that are sufficiently separated
+        multi_face_frames = 0
+        left_positions: List[float] = []
+        right_positions: List[float] = []
 
-        # Count left-cluster detections during A's solo time vs B's solo time
-        left_during_a = count_in_ranges(left_cluster.timed_detections, a_solo_ranges)
-        left_during_b = count_in_ranges(left_cluster.timed_detections, b_solo_ranges)
-        right_during_a = count_in_ranges(right_cluster.timed_detections, a_solo_ranges)
-        right_during_b = count_in_ranges(right_cluster.timed_detections, b_solo_ranges)
+        for frame_faces in per_frame_faces:
+            if len(frame_faces) >= 2:
+                sorted_faces = sorted(frame_faces)
+                leftmost = sorted_faces[0]
+                rightmost = sorted_faces[-1]
+                separation = rightmost - leftmost
 
-        # Score: positive = A is LEFT, negative = A is RIGHT
-        # If left cluster has more detections during A's talking → A is left
-        score_a_left = (left_during_a + right_during_b) - (right_during_a + left_during_b)
+                if separation >= width * self.MIN_SEPARATION_RATIO:
+                    multi_face_frames += 1
+                    left_positions.append(leftmost)
+                    right_positions.append(rightmost)
+
+        total_frames = len(per_frame_faces)
+        coexist_ratio = multi_face_frames / total_frames if total_frames > 0 else 0
 
         logger.info(
-            f"podcast_reframe: speaker-face correlation score={score_a_left} "
-            f"(L_during_A={left_during_a}, R_during_A={right_during_a}, "
-            f"L_during_B={left_during_b}, R_during_B={right_during_b})"
+            f"podcast_reframe: coexist={coexist_ratio:.0%} "
+            f"({multi_face_frames}/{total_frames} frames with 2 separated faces)"
         )
 
-        # If score is 0 (ambiguous), default to A=LEFT
-        return score_a_left >= 0
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Anti-Jitter Stabilization
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _stabilize_segments(
-        self, raw_layouts: List[LayoutSegment], duration: float
-    ) -> List[LayoutSegment]:
-        """Merge short segments with hold-previous logic.
-
-        Improvements over naive absorption:
-          1. Merge consecutive same-layout segments
-          2. Short segments (<3s) hold PREVIOUS layout (not absorbed randomly)
-          3. Prevent orphan single-frame layouts between two identical layouts
-        """
-        if not raw_layouts:
-            return []
-
-        # Step 1: Merge consecutive same-layout
-        merged: List[LayoutSegment] = [raw_layouts[0]]
-        for seg in raw_layouts[1:]:
-            last = merged[-1]
-            if seg.layout == last.layout:
-                last.end = seg.end
-            else:
-                merged.append(seg)
-
-        # Step 2: Hold-previous for short segments
-        # A short segment adopts the layout of the PREVIOUS segment
-        # (keeps visual continuity — camera doesn't jump for brief moments)
-        stabilized: List[LayoutSegment] = []
-        for seg in merged:
-            seg_duration = seg.end - seg.start
-            if seg_duration < self.MIN_SEGMENT_DURATION and stabilized:
-                # Hold previous: extend the previous segment's end time
-                stabilized[-1].end = seg.end
-            else:
-                stabilized.append(seg)
-
-        # Step 3: Re-merge after absorption (may have created adjacent same-layouts)
-        final: List[LayoutSegment] = [stabilized[0]] if stabilized else []
-        for seg in stabilized[1:]:
-            last = final[-1]
-            if seg.layout == last.layout:
-                last.end = seg.end
-            else:
-                final.append(seg)
-
-        # Ensure coverage to end
-        if final:
-            final[-1].end = max(final[-1].end, duration)
-
-        return final
-
-    def _calc_crop_x(self, face_center_x: int, crop_width: int, frame_width: int) -> int:
-        """Calculate crop X position, clamped within safe zone."""
-        crop_x = face_center_x - crop_width // 2
-        min_x = self.SAFE_ZONE_MARGIN_PX
-        max_x = frame_width - crop_width - self.SAFE_ZONE_MARGIN_PX
-        if max_x < min_x:
-            return max(0, (frame_width - crop_width) // 2)
-        return max(min_x, min(max_x, crop_x))
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Stage 4: FFmpeg Dynamic Renderer (Chunked)
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _stage4_render(
-        self,
-        video_path: str,
-        output_path: str,
-        width: int,
-        height: int,
-        layout_segments: List[LayoutSegment],
-    ) -> Optional[dict]:
-        """Render final video with chunked approach for long videos.
-
-        If segments <= MAX_SEGMENTS_PER_CHUNK: single-pass filter_complex (fast)
-        If segments > MAX_SEGMENTS_PER_CHUNK: chunked render + concat demuxer (safe)
-        """
-        if len(layout_segments) <= self.MAX_SEGMENTS_PER_CHUNK:
-            return self._render_single_pass(video_path, output_path, width, height, layout_segments)
+        # Decision
+        if coexist_ratio >= self.MIN_COEXIST_RATIO and autogrid and left_positions:
+            # DOUBLE GRID — confirmed 2 people
+            left_x = int(np.median(left_positions))
+            right_x = int(np.median(right_positions))
+            logger.info(f"podcast_reframe: DOUBLE GRID (left_x={left_x}, right_x={right_x})")
+            return {"layout": "double", "left_x": left_x, "right_x": right_x}
         else:
-            return self._render_chunked(video_path, output_path, width, height, layout_segments)
+            # SINGLE — find the most stable face position
+            median_x = int(np.median(all_x))
+            logger.info(f"podcast_reframe: SINGLE CROP (x={median_x})")
+            return {"layout": "single", "crop_x": median_x}
 
-    def _render_single_pass(
-        self,
-        video_path: str,
-        output_path: str,
-        width: int,
-        height: int,
-        layout_segments: List[LayoutSegment],
+    # ─── Render: Single Crop ──────────────────────────────────────────────
+
+    def _render_single_crop(
+        self, video_path: str, output_path: str, width: int, height: int, decision: dict
     ) -> Optional[dict]:
-        """Single-pass FFmpeg render (for ≤15 segments).
+        """Simple 9:16 crop centered on detected face. Audio stream-copied."""
+        crop_w = min(int(height * 9 / 16), width)
+        crop_x = self._clamp_x(decision["crop_x"], crop_w, width)
 
-        Optimization: If only 1 segment covering full duration, use simple
-        -vf crop (no trim/concat) to avoid A/V sync issues from keyframe misalignment.
-        """
-        crop_w_single = min(int(height * 9 / 16), width)
-        crop_w_double = min(int((height // 2) * 9 / 8), width)
-        has_audio = self._has_audio_stream(video_path)
+        vf = f"crop={crop_w}:{height}:{crop_x}:0,scale=1080:1920,format=yuv420p,setsar=1"
 
-        # OPTIMIZATION: Single segment → simple crop (perfect A/V sync)
-        if len(layout_segments) == 1:
-            return self._render_simple(
-                video_path, output_path, width, height,
-                layout_segments[0], crop_w_single, crop_w_double, has_audio
-            )
-
-        video_filters, audio_filters, v_labels, a_labels = self._build_filters(
-            layout_segments, crop_w_single, crop_w_double, width, height, has_audio
-        )
-
-        if not v_labels:
-            return None
-
-        n = len(v_labels)
-        concat_v = "".join(v_labels) + f"concat=n={n}:v=1:a=0[vout]"
-
-        if has_audio and a_labels:
-            concat_a = "".join(a_labels) + f"concat=n={len(a_labels)}:v=0:a=1[aout]"
-            filter_complex = ";".join(video_filters + audio_filters + [concat_v, concat_a])
-            cmd = [
-                "ffmpeg", "-y", "-i", video_path,
-                "-filter_complex", filter_complex,
-                "-map", "[vout]", "-map", "[aout]",
-                *get_video_encoder_args("medium"),
-                "-c:a", "aac", "-movflags", "+faststart",
-                output_path,
-            ]
-        else:
-            filter_complex = ";".join(video_filters + [concat_v])
-            cmd = [
-                "ffmpeg", "-y", "-i", video_path,
-                "-filter_complex", filter_complex,
-                "-map", "[vout]",
-                *get_video_encoder_args("medium"),
-                "-movflags", "+faststart",
-                output_path,
-            ]
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-vf", vf,
+            *get_video_encoder_args("medium"),
+            "-c:a", "copy",  # NEVER re-encode audio
+            "-movflags", "+faststart",
+            output_path,
+        ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            return self._build_result(output_path, layout_segments)
-
-        # Fallback: try video-only if audio failed
-        if has_audio:
-            filter_complex_no_audio = ";".join(video_filters + [concat_v])
-            cmd_no_audio = [
-                "ffmpeg", "-y", "-i", video_path,
-                "-filter_complex", filter_complex_no_audio,
-                "-map", "[vout]", "-map", "0:a?",
-                *get_video_encoder_args("medium"),
-                "-c:a", "copy", "-movflags", "+faststart",
-                output_path,
-            ]
-            result = subprocess.run(cmd_no_audio, capture_output=True, text=True, timeout=300)
-
-            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-                return self._build_result(output_path, layout_segments, suffix="_no_audio")
+            logger.info(f"podcast_reframe: single crop OK (x={crop_x}, w={crop_w})")
+            return {"output_path": output_path, "person_count": 1, "method": "podcast_single_crop"}
 
         if result.stderr:
-            logger.warning(f"podcast_reframe: FFmpeg error: {result.stderr[-500:]}")
+            logger.warning(f"podcast_reframe: single crop failed: {result.stderr[-300:]}")
         return None
 
-    def _render_simple(
-        self,
-        video_path: str,
-        output_path: str,
-        width: int,
-        height: int,
-        segment: LayoutSegment,
-        crop_w_single: int,
-        crop_w_double: int,
-        has_audio: bool,
+    # ─── Render: Double Grid ──────────────────────────────────────────────
+
+    def _render_double_grid(
+        self, video_path: str, output_path: str, width: int, height: int, decision: dict
     ) -> Optional[dict]:
-        """Simple render for single-segment clips (no trim/concat = perfect A/V sync).
+        """Double grid: top=left speaker, bottom=right speaker.
 
-        This avoids the keyframe misalignment that causes video-audio desync
-        when using trim+setpts on a single full-duration segment.
+        CORRECT MATH:
+          - Output: 1080x1920 (9:16)
+          - Each panel: 1080x960
+          - Per panel aspect = 1080/960 = 9/8
+          - From source: crop_w = height/2 * 9/8 (to maintain 9:8 ratio per panel)
+          - crop_h = height/2 (each person gets half the vertical source)
+          - NO SQUISH: scale maintains aspect because crop ratio = output ratio
+
+        Wait — podcast speakers sit side-by-side in a 16:9 frame.
+        We want to show each person FULL HEIGHT but cropped horizontally.
+        Correct approach: crop a 9:16 column per person, then stack them.
+
+        Per panel: crop (height*9/32) wide x (height/2) tall? No...
+
+        SIMPLEST CORRECT approach for podcast (2 people side-by-side):
+          - Each panel shows one person from full-height source
+          - crop_w per panel = some width centered on face
+          - crop_h per panel = full height
+          - Scale each crop to 1080x960
+          - This WILL cause slight vertical compression (height → 960)
+            but 1080/height ratio must equal 1080/960 ratio for no distortion
+          - For no distortion: crop must be (crop_w)x(crop_w * 960/1080) = crop_w x (crop_w * 8/9)
+
+        FINAL CORRECT: each panel crop = W x H where W:H = 9:8 (= 1080:960)
+          - crop_h = height (full height)
+          - crop_w = height * 9 / 8 (from full height)
+          - If crop_w > width, clamp to width and adjust crop_h = width * 8 / 9
+          - Scale to 1080x960
+          - Stack = 1080x1920 ✓
+          - Aspect ratio preserved ✓
         """
-        if segment.layout == LayoutType.DOUBLE_GRID:
-            vf = (
-                f"split=2[top][bot];"
-                f"[top]crop={crop_w_double}:{height}:{segment.crop_x_left}:0,scale=1080:960,format=yuv420p[t];"
-                f"[bot]crop={crop_w_double}:{height}:{segment.crop_x_right}:0,scale=1080:960,format=yuv420p[b];"
-                f"[t][b]vstack=inputs=2,setsar=1[vout]"
-            )
-            cmd = [
-                "ffmpeg", "-y", "-i", video_path,
-                "-filter_complex", vf,
-                "-map", "[vout]",
-            ]
-        elif segment.layout == LayoutType.SINGLE_LEFT:
-            vf = f"crop={crop_w_single}:{height}:{segment.crop_x_left}:0,scale=1080:1920,format=yuv420p,setsar=1"
-            cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", vf]
-        elif segment.layout == LayoutType.SINGLE_RIGHT:
-            vf = f"crop={crop_w_single}:{height}:{segment.crop_x_right}:0,scale=1080:1920,format=yuv420p,setsar=1"
-            cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", vf]
-        else:
-            vf = f"crop={crop_w_single}:{height}:{segment.crop_x_center}:0,scale=1080:1920,format=yuv420p,setsar=1"
-            cmd = ["ffmpeg", "-y", "-i", video_path, "-vf", vf]
+        # Each panel: 9:8 aspect ratio
+        crop_w = int(height * 9 / 8)
+        crop_h = height
 
-        # Add encoding args
-        cmd.extend(get_video_encoder_args("medium"))
-        if has_audio:
-            cmd.extend(["-c:a", "aac"])
-        cmd.extend(["-movflags", "+faststart", output_path])
+        if crop_w > width:
+            # Source too narrow — adjust
+            crop_w = width
+            crop_h = int(width * 8 / 9)
+
+        left_x = self._clamp_x(decision["left_x"], crop_w, width)
+        right_x = self._clamp_x(decision["right_x"], crop_w, width)
+
+        # Y offset for crop (center vertically if crop_h < height)
+        crop_y = max(0, (height - crop_h) // 2)
+
+        vf = (
+            f"split=2[top][bot];"
+            f"[top]crop={crop_w}:{crop_h}:{left_x}:{crop_y},scale=1080:960,format=yuv420p[t];"
+            f"[bot]crop={crop_w}:{crop_h}:{right_x}:{crop_y},scale=1080:960,format=yuv420p[b];"
+            f"[t][b]vstack=inputs=2,setsar=1[vout]"
+        )
+
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-filter_complex", vf,
+            "-map", "[vout]", "-map", "0:a?",
+            *get_video_encoder_args("medium"),
+            "-c:a", "copy",  # NEVER re-encode audio
+            "-movflags", "+faststart",
+            output_path,
+        ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            return self._build_result(output_path, [segment])
+            logger.info(f"podcast_reframe: double grid OK (L={left_x}, R={right_x}, crop={crop_w}x{crop_h})")
+            return {"output_path": output_path, "person_count": 2, "method": "podcast_double_grid"}
 
         if result.stderr:
-            logger.warning(f"podcast_reframe: simple render failed: {result.stderr[-300:]}")
+            logger.warning(f"podcast_reframe: double grid failed: {result.stderr[-300:]}")
         return None
 
-    def _render_chunked(
-        self,
-        video_path: str,
-        output_path: str,
-        width: int,
-        height: int,
-        layout_segments: List[LayoutSegment],
-    ) -> Optional[dict]:
-        """Chunked render using concat demuxer (for >15 segments).
+    # ─── Utilities ────────────────────────────────────────────────────────
 
-        Prevents OOM and 'Argument list too long' errors on long videos.
-        Each chunk is rendered as a temp file, then joined with stream copy.
-        """
-        crop_w_single = min(int(height * 9 / 16), width)
-        crop_w_double = min(int((height // 2) * 9 / 8), width)
-        has_audio = self._has_audio_stream(video_path)
+    def _clamp_x(self, face_x: int, crop_w: int, frame_w: int) -> int:
+        """Clamp crop X so it stays within frame bounds."""
+        x = face_x - crop_w // 2
+        x = max(0, min(x, frame_w - crop_w))
+        return x
 
-        tmp_dir = tempfile.mkdtemp(prefix="reframe_chunks_")
-        chunk_files: List[str] = []
+    async def _center_crop(self, video_path: str, output_path: str) -> bool:
+        """Center crop to 9:16."""
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-vf", "crop=ih*9/16:ih,scale=1080:1920,format=yuv420p,setsar=1",
+            *get_video_encoder_args("medium"),
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=120)
+        return result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000
 
-        try:
-            # Split segments into chunks
-            for chunk_idx in range(0, len(layout_segments), self.MAX_SEGMENTS_PER_CHUNK):
-                chunk_segs = layout_segments[chunk_idx:chunk_idx + self.MAX_SEGMENTS_PER_CHUNK]
-                chunk_path = os.path.join(tmp_dir, f"chunk_{chunk_idx:04d}.mp4")
-
-                video_filters, audio_filters, v_labels, a_labels = self._build_filters(
-                    chunk_segs, crop_w_single, crop_w_double, width, height, has_audio
-                )
-
-                if not v_labels:
-                    continue
-
-                n = len(v_labels)
-                concat_v = "".join(v_labels) + f"concat=n={n}:v=1:a=0[vout]"
-
-                if has_audio and a_labels:
-                    concat_a = "".join(a_labels) + f"concat=n={len(a_labels)}:v=0:a=1[aout]"
-                    filter_complex = ";".join(video_filters + audio_filters + [concat_v, concat_a])
-                    cmd = [
-                        "ffmpeg", "-y", "-i", video_path,
-                        "-filter_complex", filter_complex,
-                        "-map", "[vout]", "-map", "[aout]",
-                        *get_video_encoder_args("medium"),
-                        "-c:a", "aac", "-movflags", "+faststart",
-                        chunk_path,
-                    ]
-                else:
-                    filter_complex = ";".join(video_filters + [concat_v])
-                    cmd = [
-                        "ffmpeg", "-y", "-i", video_path,
-                        "-filter_complex", filter_complex,
-                        "-map", "[vout]",
-                        *get_video_encoder_args("medium"),
-                        "-movflags", "+faststart",
-                        chunk_path,
-                    ]
-
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                if result.returncode == 0 and os.path.exists(chunk_path) and os.path.getsize(chunk_path) > 1000:
-                    chunk_files.append(chunk_path)
-                else:
-                    logger.warning(f"podcast_reframe: chunk {chunk_idx} failed: {result.stderr[-200:] if result.stderr else 'unknown'}")
-
-            if not chunk_files:
-                return None
-
-            # If only 1 chunk succeeded, just move it
-            if len(chunk_files) == 1:
-                shutil.move(chunk_files[0], output_path)
-                return self._build_result(output_path, layout_segments, suffix="_chunked")
-
-            # Concat all chunks using demuxer (stream copy = instant)
-            concat_list_path = os.path.join(tmp_dir, "concat_list.txt")
-            with open(concat_list_path, "w") as f:
-                for chunk_path in chunk_files:
-                    f.write(f"file '{chunk_path}'\n")
-
-            cmd_concat = [
-                "ffmpeg", "-y",
-                "-f", "concat", "-safe", "0",
-                "-i", concat_list_path,
-                "-c", "copy", "-movflags", "+faststart",
-                output_path,
-            ]
-
-            result = subprocess.run(cmd_concat, capture_output=True, text=True, timeout=120)
-            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-                logger.info(f"podcast_reframe: chunked render OK ({len(chunk_files)} chunks)")
-                return self._build_result(output_path, layout_segments, suffix="_chunked")
-
-            if result.stderr:
-                logger.warning(f"podcast_reframe: concat failed: {result.stderr[-300:]}")
-            return None
-
-        finally:
-            # Cleanup temp files
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    def _build_filters(
-        self,
-        segments: List[LayoutSegment],
-        crop_w_single: int,
-        crop_w_double: int,
-        width: int,
-        height: int,
-        has_audio: bool = True,
-    ) -> Tuple[List[str], List[str], List[str], List[str]]:
-        """Build FFmpeg filter_complex components for a set of segments.
-
-        Args:
-            has_audio: If False, skip audio filter generation entirely.
-        """
-        video_filters: List[str] = []
-        audio_filters: List[str] = []
-        v_labels: List[str] = []
-        a_labels: List[str] = []
-        fade_sec = self.CROSSFADE_MS / 1000.0
-
-        for i, seg in enumerate(segments):
-            if seg.end <= seg.start:
-                continue
-
-            v_out = f"v{i}"
-            a_out = f"a{i}"
-            start_t = f"{seg.start:.3f}"
-            end_t = f"{seg.end:.3f}"
-            seg_duration = seg.end - seg.start
-
-            if seg.layout == LayoutType.DOUBLE_GRID:
-                video_filters.append(
-                    f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,split=2[s{i}_top][s{i}_bot];"
-                    f"[s{i}_top]crop={crop_w_double}:{height}:{seg.crop_x_left}:0,scale=1080:960,format=yuv420p[s{i}_t];"
-                    f"[s{i}_bot]crop={crop_w_double}:{height}:{seg.crop_x_right}:0,scale=1080:960,format=yuv420p[s{i}_b];"
-                    f"[s{i}_t][s{i}_b]vstack=inputs=2,setsar=1[{v_out}]"
-                )
-            elif seg.layout == LayoutType.SINGLE_LEFT:
-                video_filters.append(
-                    f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{seg.crop_x_left}:0,scale=1080:1920,format=yuv420p,setsar=1[{v_out}]"
-                )
-            elif seg.layout == LayoutType.SINGLE_RIGHT:
-                video_filters.append(
-                    f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{seg.crop_x_right}:0,scale=1080:1920,format=yuv420p,setsar=1[{v_out}]"
-                )
-            else:
-                video_filters.append(
-                    f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{seg.crop_x_center}:0,scale=1080:1920,format=yuv420p,setsar=1[{v_out}]"
-                )
-
-            # C1+C4: Audio with crossfade at boundaries (prevents click/pop)
-            if has_audio:
-                if len(segments) == 1:
-                    # Single segment: no fade needed
-                    audio_filters.append(
-                        f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS[{a_out}]"
-                    )
-                elif i == 0:
-                    # First segment: fade out at end only
-                    fade_out_start = max(0, seg_duration - fade_sec)
-                    audio_filters.append(
-                        f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS,"
-                        f"afade=t=out:st={fade_out_start:.3f}:d={fade_sec:.3f}[{a_out}]"
-                    )
-                elif i == len(segments) - 1:
-                    # Last segment: fade in at start only
-                    audio_filters.append(
-                        f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS,"
-                        f"afade=t=in:st=0:d={fade_sec:.3f}[{a_out}]"
-                    )
-                else:
-                    # Middle segments: fade in + fade out
-                    fade_out_start = max(0, seg_duration - fade_sec)
-                    audio_filters.append(
-                        f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS,"
-                        f"afade=t=in:st=0:d={fade_sec:.3f},"
-                        f"afade=t=out:st={fade_out_start:.3f}:d={fade_sec:.3f}[{a_out}]"
-                    )
-                a_labels.append(f"[{a_out}]")
-
-            v_labels.append(f"[{v_out}]")
-
-        return video_filters, audio_filters, v_labels, a_labels
-
-    def _build_result(
-        self,
-        output_path: str,
-        layout_segments: List[LayoutSegment],
-        suffix: str = "",
-    ) -> dict:
-        """Build standardized result dict."""
-        unique_layouts = set(seg.layout for seg in layout_segments)
-        method = "podcast_reframe"
-        if self._diarization_available:
-            method += "_audio_visual"
-        else:
-            method += "_face_only"
-        method += suffix
-
-        logger.info(
-            f"podcast_reframe: OK — {len(layout_segments)} segments, "
-            f"layouts: {[l.value for l in unique_layouts]}"
-        )
-        return {
-            "output_path": output_path,
-            "person_count": 2 if any(seg.layout == LayoutType.DOUBLE_GRID for seg in layout_segments) else 1,
-            "masks_available": False,
-            "method": method,
-            "segments": len(layout_segments),
-            "layouts_used": [l.value for l in unique_layouts],
-        }
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Utilities
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _has_audio_stream(self, video_path: str) -> bool:
-        """Check if video file contains an audio stream."""
-        try:
-            cmd = [
-                "ffprobe", "-v", "quiet", "-select_streams", "a",
-                "-show_entries", "stream=index", "-of", "csv=p=0",
-                video_path,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            return bool(result.stdout.strip())
-        except Exception:
-            return True  # Assume audio exists if probe fails
-
-    def _ensure_h264(self, video_path: str, transcode_path: str) -> str:
-        """Transcode non-h264 video for MediaPipe compatibility."""
-        try:
-            cmd = [
-                "ffprobe", "-v", "quiet", "-select_streams", "v:0",
-                "-show_entries", "stream=codec_name", "-of", "csv=p=0",
-                video_path,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            codec = result.stdout.strip().lower()
-            if codec in ("av1", "vp9", "vp8", "hevc"):
-                cmd = [
-                    "ffmpeg", "-y", "-i", video_path,
-                    *get_video_encoder_args("low"),
-                    "-an", "-movflags", "+faststart",
-                    transcode_path,
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                if result.returncode == 0 and os.path.exists(transcode_path):
-                    return transcode_path
-            return video_path
-        except Exception:
-            return video_path
-
-    async def _simple_crop(self, input_path: str, output_path: str, target_aspect: str) -> bool:
-        """Simple crop for non-9:16 targets (1:1, etc.)."""
+    async def _simple_crop(self, video_path: str, output_path: str, target_aspect: str) -> bool:
+        """Simple crop for non-9:16."""
         if target_aspect == "1:1":
-            crop_filter = "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080"
+            vf = "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080"
         else:
-            shutil.copy2(input_path, output_path)
+            shutil.copy2(video_path, output_path)
             return True
 
         cmd = [
-            "ffmpeg", "-y", "-i", input_path,
-            "-vf", crop_filter,
+            "ffmpeg", "-y", "-i", video_path,
+            "-vf", vf,
             *get_video_encoder_args("medium"),
-            "-c:a", "copy", "-movflags", "+faststart",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
             output_path,
         ]
         result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=120)
-        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            return True
-        if os.path.exists(output_path):
-            os.remove(output_path)
-        return False
-
-    async def _center_crop_fallback(self, input_path: str, output_path: str) -> bool:
-        """Center crop to 9:16 as final fallback."""
-        cmd = [
-            "ffmpeg", "-y", "-i", input_path,
-            "-vf", "crop=ih*9/16:ih,scale=1080:1920",
-            *get_video_encoder_args("medium"),
-            "-c:a", "copy", "-movflags", "+faststart",
-            output_path,
-        ]
-        result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=120)
-        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            return True
-        if os.path.exists(output_path):
-            os.remove(output_path)
-        return False
+        return result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000
