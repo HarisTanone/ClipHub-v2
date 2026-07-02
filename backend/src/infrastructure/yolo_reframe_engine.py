@@ -6,6 +6,7 @@ Fixes:
 - Eliminates PyTorch/OpenCV glibc thread deadlock (Fatal glibc error).
 - Dynamic Segment-Based Grid: Auto switches 1-grid and 2-grid per 3s segment.
 - Grid triggers based on face count and distance.
+- Added format=yuv420p and setsar=1 to fix FFmpeg concat SAR error.
 """
 import asyncio
 import logging
@@ -264,11 +265,12 @@ class YoloReframeEngine(IYoloReframeEngine):
                         X1 = self._clamp_crop_x(X1 - crop_w_double / 2, crop_w_double, width)
                         X2 = self._clamp_crop_x(X2 - crop_w_double / 2, crop_w_double, width)
 
+                        # FIX: Added format=yuv420p and setsar=1 to prevent concat SAR error
                         video_filters.append(
                             f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,split=2[s{i}_a][s{i}_b];"
-                            f"[s{i}_a]crop={crop_w_double}:{height}:{X1}:0,scale=1080:960[s{i}_ta];"
-                            f"[s{i}_b]crop={crop_w_double}:{height}:{X2}:0,scale=1080:960[s{i}_tb];"
-                            f"[s{i}_ta][s{i}_tb]vstack=inputs=2[{v_out}]"
+                            f"[s{i}_a]crop={crop_w_double}:{height}:{X1}:0,scale=1080:960,format=yuv420p[s{i}_ta];"
+                            f"[s{i}_b]crop={crop_w_double}:{height}:{X2}:0,scale=1080:960,format=yuv420p[s{i}_tb];"
+                            f"[s{i}_ta][s{i}_tb]vstack=inputs=2,setsar=1,format=yuv420p[{v_out}]"
                         )
 
             if layout == 'single':
@@ -276,9 +278,10 @@ class YoloReframeEngine(IYoloReframeEngine):
                 X = int(np.median(all_x)) if all_x else width // 2
                 crop_x = self._clamp_crop_x(X - crop_w_single / 2, crop_w_single, width)
 
+                # FIX: Added setsar=1,format=yuv420p
                 video_filters.append(
                     f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{crop_x}:0,scale=1080:1920[{v_out}]"
+                    f"crop={crop_w_single}:{height}:{crop_x}:0,scale=1080:1920,setsar=1,format=yuv420p[{v_out}]"
                 )
 
             audio_filters.append(f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS[{a_out}]")
@@ -325,6 +328,7 @@ class YoloReframeEngine(IYoloReframeEngine):
         return None
 
     def _ensure_h264(self, video_path: str, transcode_path: str) -> str:
+        """Transcode to H264 if video is AV1/VP9 (OpenCV can't decode reliably)."""
         try:
             cmd = ["ffprobe", "-v", "quiet", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "csv=p=0", video_path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -338,6 +342,7 @@ class YoloReframeEngine(IYoloReframeEngine):
             return video_path
 
     async def _center_crop_fallback(self, input_path: str, output_path: str, target_aspect: str) -> bool:
+        """Simple center crop when MediaPipe unavailable or no persons found."""
         if target_aspect == "9:16": crop_filter = "crop=ih*9/16:ih,scale=1080:1920"
         elif target_aspect == "1:1": crop_filter = "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080"
         else: shutil.copy2(input_path, output_path); return True
