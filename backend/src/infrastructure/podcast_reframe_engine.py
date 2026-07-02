@@ -159,7 +159,7 @@ class PodcastReframeEngine(IReframeEngine):
 
             self._diarization_pipeline = PyannotePipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
-                use_auth_token=self._hf_token,
+                token=self._hf_token,
             )
             # Use GPU if available (RTX 3070 makes diarization 10-20x faster)
             import torch
