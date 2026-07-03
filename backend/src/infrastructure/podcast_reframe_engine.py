@@ -549,9 +549,10 @@ class PodcastReframeEngine(IReframeEngine):
 
     # ─── Render: Dynamic Panning (Single Pass, Zero Desync) ─────────────
 
-    PAN_TRANSITION_SEC = 1.0   # Smooth transition duration (1s = cinematic pan)
-    PAN_DEAD_ZONE_PX = 150     # Ignore movements smaller than this (reduce jitter)
-    PAN_HOLD_MIN_SEC = 3.0     # Hold position for at least 3s before next pan
+    PAN_DEAD_ZONE_PX = 250     # Ignore movements < 250px (13% of 1920 — reduce bouncing)
+    PAN_HOLD_MIN_SEC = 5.0     # Hold position for 5s minimum before next pan
+    PAN_CLUSTER_THRESHOLD = 200  # If all detections within 200px spread → lock position
+    PAN_MAX_KEYFRAMES = 10     # Maximum panning movements per clip
 
     def _render_dynamic_panning(
         self,
@@ -594,22 +595,15 @@ class PodcastReframeEngine(IReframeEngine):
                     keyframes.append((t, keyframes[-1][1]))
                 continue
 
-            # NMS already applied during detection, so frame_faces is clean
+            # Determine target face X (which face to follow)
             if len(frame_faces) == 1:
-                # Single face → crop centered on it
                 cx = int(frame_faces[0])
-                crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
-                keyframes.append((t, crop_x))
             else:
-                # Multiple faces → center on the most active one
-                # Use speaker detection if available, otherwise pick dominant cluster
+                # Multiple faces → pick active speaker or closest to last position
                 midpoint = width / 2.0
 
                 if speaker_result and speaker_result.per_frame_speaker:
-                    # Find which speaker is active at this time
-                    # Map frame time to nearest speaker assignment
                     frame_idx_approx = int(t * fps)
-                    # Find closest frame in per_frame_speaker
                     closest_frame = min(
                         speaker_result.per_frame_speaker.keys(),
                         key=lambda f: abs(f - frame_idx_approx),
@@ -617,70 +611,77 @@ class PodcastReframeEngine(IReframeEngine):
                     )
                     if closest_frame is not None:
                         active_speaker = speaker_result.per_frame_speaker[closest_frame]
-                        # Speaker 0 = left, 1 = right
                         if active_speaker == 0:
                             target_faces = [x for x in frame_faces if x < midpoint]
                         else:
                             target_faces = [x for x in frame_faces if x >= midpoint]
-                        if target_faces:
-                            cx = int(np.median(target_faces))
-                        else:
-                            cx = int(np.median(frame_faces))
+                        cx = int(np.median(target_faces)) if target_faces else int(np.median(frame_faces))
                     else:
                         cx = int(np.median(frame_faces))
                 else:
-                    # No speaker data — center on the face closest to last position
                     if keyframes:
                         last_center = keyframes[-1][1] + crop_w // 2
                         cx = int(min(frame_faces, key=lambda x: abs(x - last_center)))
                     else:
                         cx = int(np.median(frame_faces))
 
-                crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
-                keyframes.append((t, crop_x))
+            # 3x3 Grid Centering: face must land in CENTER THIRD of crop window
+            # Center third = crop_x + crop_w/3 to crop_x + 2*crop_w/3
+            # So: crop_x = cx - crop_w/2 (face perfectly centered in middle cell)
+            crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
+            keyframes.append((t, crop_x))
 
         if not keyframes:
             return None
 
-        # Stabilize: apply dead zone + hold minimum to reduce jitter
-        # Only create a new keyframe if:
-        #   1. Movement > PAN_DEAD_ZONE_PX (ignore small jitter)
-        #   2. Time since last pan > PAN_HOLD_MIN_SEC (camera stays put)
-        stabilized: List[Tuple[float, int]] = [keyframes[0]]
-        for t, x in keyframes[1:]:
-            last_t, last_x = stabilized[-1]
-            movement = abs(x - last_x)
-            time_since_last = t - last_t
+        # Stabilize with cluster lock + dead zone + hold minimum
+        # 1. Cluster lock: if all positions within PAN_CLUSTER_THRESHOLD → lock camera
+        all_kf_x = [x for _, x in keyframes]
+        x_spread = max(all_kf_x) - min(all_kf_x) if all_kf_x else 0
 
-            # Only pan if movement is significant AND enough time has passed
-            if movement >= self.PAN_DEAD_ZONE_PX and time_since_last >= self.PAN_HOLD_MIN_SEC:
-                stabilized.append((t, x))
+        if x_spread < self.PAN_CLUSTER_THRESHOLD:
+            # All detections in same area — lock to median (home position)
+            home_x = int(np.median(all_kf_x))
+            logger.info(
+                f"podcast_reframe: CLUSTER LOCK (spread={x_spread}px < {self.PAN_CLUSTER_THRESHOLD}px) "
+                f"→ locked at x={home_x}"
+            )
+            stabilized = [(0.0, home_x)]
+        else:
+            # 2. Dead zone + hold minimum
+            stabilized: List[Tuple[float, int]] = [keyframes[0]]
+            for t, x in keyframes[1:]:
+                last_t, last_x = stabilized[-1]
+                movement = abs(x - last_x)
+                time_since_last = t - last_t
 
-        # Ensure last position is captured for full duration
-        if stabilized[-1][0] < keyframes[-1][0]:
-            stabilized.append(keyframes[-1])
+                if movement >= self.PAN_DEAD_ZONE_PX and time_since_last >= self.PAN_HOLD_MIN_SEC:
+                    stabilized.append((t, x))
 
-        # Limit to max 15 keyframes (FFmpeg expression nesting limit)
-        if len(stabilized) > 15:
-            step = len(stabilized) // 13
-            reduced = [stabilized[0]]
-            for i in range(step, len(stabilized) - 1, step):
-                reduced.append(stabilized[i])
-            reduced.append(stabilized[-1])
-            stabilized = reduced
+            # Ensure last position captured
+            if stabilized[-1][0] < keyframes[-1][0]:
+                stabilized.append(keyframes[-1])
+
+            # Limit to max keyframes
+            if len(stabilized) > self.PAN_MAX_KEYFRAMES:
+                step = len(stabilized) // (self.PAN_MAX_KEYFRAMES - 2)
+                reduced = [stabilized[0]]
+                for i in range(step, len(stabilized) - 1, step):
+                    reduced.append(stabilized[i])
+                reduced.append(stabilized[-1])
+                stabilized = reduced
 
         logger.info(
-            f"podcast_reframe: panning keyframes: {len(keyframes)} raw → {len(stabilized)} stabilized "
+            f"podcast_reframe: panning {len(keyframes)} raw → {len(stabilized)} stabilized "
             f"(dead_zone={self.PAN_DEAD_ZONE_PX}px, hold={self.PAN_HOLD_MIN_SEC}s)"
         )
 
         # 2. Build FFmpeg crop X expression
         if len(stabilized) <= 1 or all(s[1] == stabilized[0][1] for s in stabilized):
-            # No movement — static crop
             crop_x_expr = str(stabilized[0][1])
-            logger.info(f"podcast_reframe: static crop at x={stabilized[0][1]} (no significant panning)")
+            logger.info(f"podcast_reframe: static crop at x={stabilized[0][1]}")
         else:
-            crop_x_expr = self._build_panning_expression(stabilized, self.PAN_TRANSITION_SEC)
+            crop_x_expr = self._build_panning_expression(stabilized, 0)
             for i, (t, x) in enumerate(stabilized):
                 logger.info(f"  pan[{i}] t={t:.1f}s → x={x}")
 
@@ -700,8 +701,8 @@ class PodcastReframeEngine(IReframeEngine):
         ]
 
         logger.info(
-            f"podcast_reframe: DYNAMIC PANNING ({len(deduped)} keyframes, "
-            f"crop_w={crop_w}, transitions={len(deduped)-1})"
+            f"podcast_reframe: DYNAMIC PANNING ({len(stabilized)} keyframes, "
+            f"crop_w={crop_w})"
         )
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -712,7 +713,7 @@ class PodcastReframeEngine(IReframeEngine):
                 "output_path": output_path,
                 "person_count": tracked_data["person_count"],
                 "method": "podcast_dynamic_panning",
-                "keyframes": len(deduped),
+                "keyframes": len(stabilized),
             }
 
         if result.stderr:
