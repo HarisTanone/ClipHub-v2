@@ -13,6 +13,7 @@ import type { HookStyle, SubtitleStyle } from "./StyleEditorModal";
  *   - danger_bold: red glow pulse
  *   - zoom_punch / fade_scale: alpha fade
  *   - slide_punch_framer: slide from off-screen
+ *   - podcast_lower_third / quote_card / waveform_pulse / breaking_tape / mic_drop: podcast hook layouts
  *   - typewriter: char-by-char reveal
  */
 
@@ -185,9 +186,156 @@ export function VideoPreviewOverlay({
       : { color };
 
     const textContent = hookLines.join("\n");
+    const hookTop = `${cfg?.positionY ?? 50}%`;
+    const overlayBg = `rgba(0,0,0,${bgOpacity})`;
 
     // ─── ANIMATION-SPECIFIC RENDERING ──────────────────────────────────
     switch (hookStyle) {
+      case "podcast_lower_third": {
+        const progress = Math.min(1, t / 0.45);
+        const y = (1 - progress) * 56;
+        const accent = cfg?.lineColor || "#16F2B3";
+        const dotOpacity = 0.35 + Math.abs(Math.sin(t * 9)) * 0.65;
+
+        return (
+          <div className="absolute inset-0" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div
+              className="absolute left-[7%] right-[7%] grid items-center"
+              style={{
+                top: hookTop,
+                gridTemplateColumns: "54px 1fr",
+                gap: 12,
+                transform: `translateY(calc(-50% + ${y}px))`,
+                padding: "14px 16px",
+                borderRadius: 16,
+                border: `1px solid ${accent}66`,
+                borderLeft: `6px solid ${accent}`,
+                background: "linear-gradient(90deg, rgba(6,17,31,0.96), rgba(16,24,39,0.82))",
+                boxShadow: `0 18px 38px rgba(0,0,0,0.38), 0 0 22px ${accent}33`,
+              }}
+            >
+              <div className="flex flex-col items-center gap-1.5">
+                <span style={{ width: 11, height: 11, borderRadius: 99, backgroundColor: accent, opacity: dotOpacity, boxShadow: `0 0 14px ${accent}` }} />
+                <span style={{ color: accent, fontSize: 10, fontWeight: 900, letterSpacing: 0 }}>ON AIR</span>
+              </div>
+              <p style={{ ...baseTextStyle, color, textAlign: "left", lineHeight: 1.04, textShadow: textShadowParts.join(", ") || "0 4px 18px rgba(0,0,0,0.65)" }}>
+                {textContent}
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      case "quote_card": {
+        const progress = Math.min(1, t / 0.45);
+        const scale = 0.88 + progress * 0.12;
+        const accent = cfg?.lineColor || "#FF4D2D";
+        const card = cfg?.boxColor || "#F5EFE1";
+
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div
+              style={{
+                position: "relative",
+                width: "78%",
+                padding: "30px 28px 22px",
+                borderRadius: 22,
+                background: card,
+                border: "2px solid rgba(255,255,255,0.72)",
+                boxShadow: "0 28px 58px rgba(0,0,0,0.42)",
+                transform: `scale(${scale}) rotate(-1deg)`,
+              }}
+            >
+              <span style={{ position: "absolute", top: -24, left: 20, color: accent, fontSize: 70, fontFamily: "Georgia, serif", lineHeight: 1 }}>"</span>
+              <p style={{ ...baseTextStyle, color: cfg?.color || "#171717", lineHeight: cfg?.lineHeight || 1.16, textShadow: "none" }}>{textContent}</p>
+              <div style={{ width: "36%", height: 5, borderRadius: 999, margin: "18px auto 0", backgroundColor: accent }} />
+            </div>
+          </div>
+        );
+      }
+
+      case "waveform_pulse": {
+        const waveColor = cfg?.glowColor || cfg?.gradientTo || color || "#14F1D9";
+        const pulse = 1 + Math.sin(t * 5.4) * 0.035;
+        const bars = Array.from({ length: 15 });
+        const waveTextStyle: React.CSSProperties = gradientEnabled
+          ? {
+            background: `linear-gradient(${gradientAngle}deg, ${gradientFrom}, ${gradientTo || waveColor})`,
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+          }
+          : { color };
+
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div style={{ textAlign: "center", transform: `scale(${pulse})`, width: "100%" }}>
+              <div className="flex items-center justify-center" style={{ gap: 5, height: 64, marginBottom: 12 }}>
+                {bars.map((_, i) => {
+                  const h = 20 + Math.abs(Math.sin(t * 8 + i * 0.7)) * (24 + (i % 4) * 5);
+                  return <span key={i} style={{ width: 6, height: h, borderRadius: 99, backgroundColor: waveColor, boxShadow: `0 0 14px ${waveColor}`, opacity: 0.45 + Math.abs(Math.sin(t * 7 + i)) * 0.55 }} />;
+                })}
+              </div>
+              <p style={{ ...baseTextStyle, ...waveTextStyle, textShadow: textShadowParts.join(", ") || `0 0 18px ${waveColor}` }}>{textContent}</p>
+            </div>
+          </div>
+        );
+      }
+
+      case "breaking_tape": {
+        const progress = Math.min(1, t / 0.35);
+        const x = (1 - progress) * -120;
+        const tapeColor = cfg?.boxColor || "#FFDD2D";
+
+        return (
+          <div className="absolute inset-0" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div
+              className="absolute left-[-12%] right-[-12%]"
+              style={{
+                top: hookTop,
+                transform: `translateY(-50%) translateX(${x}px) rotate(-4deg)`,
+                padding: "14px 34px",
+                background: `linear-gradient(90deg, ${tapeColor}, #FFF06A, ${tapeColor})`,
+                borderTop: "4px solid rgba(0,0,0,0.92)",
+                borderBottom: "4px solid rgba(0,0,0,0.92)",
+                boxShadow: "0 22px 44px rgba(0,0,0,0.38)",
+                textAlign: "center",
+              }}
+            >
+              <span style={{ display: "block", color: "#D71920", fontSize: 12, fontWeight: 900, letterSpacing: 0, marginBottom: 4 }}>HOT TAKE</span>
+              <p style={{ ...baseTextStyle, color: cfg?.color || "#111111", lineHeight: 0.98, textShadow: "none" }}>{textContent}</p>
+            </div>
+          </div>
+        );
+      }
+
+      case "mic_drop": {
+        const progress = Math.min(1, t / 0.35);
+        const y = (1 - progress) * -180;
+        const accent = cfg?.boxColor || cfg?.gradientTo || "#FF4D7D";
+        const impact = t > 0.35 && t < 0.8 ? 1 + Math.sin(t * 30) * 0.045 : 1;
+
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div
+              style={{
+                width: "78%",
+                padding: "24px 28px",
+                borderRadius: 999,
+                border: `4px solid ${accent}`,
+                background: "rgba(5,5,7,0.78)",
+                boxShadow: `0 0 34px ${accent}66, inset 0 0 20px rgba(255,255,255,0.08)`,
+                transform: `translateY(${y}px) scale(${impact})`,
+                textAlign: "center",
+              }}
+            >
+              <p style={{ ...baseTextStyle, ...colorStyle, textShadow: textShadowParts.join(", ") || `0 0 22px ${accent}`, lineHeight: 1.02 }}>{textContent}</p>
+            </div>
+            {t > 0.35 && t < 0.8 && <span style={{ position: "absolute", top: "62%", left: "50%", width: `${160 + (t - 0.35) * 520}px`, height: 5, borderRadius: 99, backgroundColor: accent, transform: "translateX(-50%)", boxShadow: `0 0 22px ${accent}`, opacity: 1 - (t - 0.35) / 0.45 }} />}
+          </div>
+        );
+      }
+
       case "glitch_rgb": {
         // FFmpeg: 3 drawtext layers
         // Red: x=(w-text_w)/2-4+sin(t*15)*3, color=#FF0000@0.7
@@ -636,6 +784,57 @@ export function VideoPreviewOverlay({
               </span>
             );
           })}
+        </div>
+      );
+    }
+
+    if (lineTransition === "line_reveal") {
+      return (
+        <div
+          className="absolute left-0 right-0 flex justify-center px-4"
+          style={posStyle}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "center",
+              gap: `${cfg?.wordSpacing || 6}px`,
+              backgroundColor: bgEnabled ? `${bgColor}${Math.round(bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent",
+              borderRadius: bgEnabled ? `${bgRadius}px` : undefined,
+              padding: bgEnabled ? `${cfg?.bgPadding || 12}px` : undefined,
+              borderLeft: `4px solid ${highlightColor}`,
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ width: "100%", height: 3, borderRadius: 999, backgroundColor: highlightColor, marginBottom: 4 }} />
+            {visibleLine.map((w, i) => {
+              const wordStart = w.start + subtitleOffset;
+              const wordEnd = w.end + subtitleOffset;
+              const isActive = currentTime >= wordStart && currentTime <= wordEnd;
+              const isRevealed = currentTime >= wordStart - 0.05;
+              if (!isRevealed) return null;
+              const wordText = applyTextCase(w.word, uppercase, capitalize);
+
+              return (
+                <span
+                  key={`${w.word}-${i}`}
+                  style={{
+                    fontFamily: `'${fontFamily}', sans-serif`,
+                    fontSize: `clamp(12px, ${fontSize * 0.055}vw, ${fontSize}px)`,
+                    fontWeight: isActive ? "900" : fontWeight as any,
+                    color: isActive ? highlightColor : color,
+                    textShadow: strokeEnabled ? `0 0 ${strokeWidth}px ${strokeColor}` : "none",
+                    fontStyle: italic ? "italic" : "normal",
+                    display: "inline-block",
+                    WebkitTextStroke: strokeEnabled ? `${strokeWidth * 0.3}px ${strokeColor}` : undefined,
+                  }}
+                >
+                  {wordText}
+                </span>
+              );
+            })}
+          </div>
         </div>
       );
     }

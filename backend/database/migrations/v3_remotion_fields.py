@@ -142,7 +142,18 @@ def migrate():
             ('fade_scale', 'Fade & Scale', 'Text fades in with scale animation'),
             ('slide_up', 'Slide Up', 'Text slides up from bottom'),
             ('glitch', 'Glitch Effect', 'RGB glitch with digital distortion'),
-            ('typewriter', 'Typewriter', 'Character-by-character reveal')
+            ('typewriter', 'Typewriter', 'Character-by-character reveal'),
+            ('glitch_rgb', 'RGB Split', 'Separated red/cyan channels for fast tech moments'),
+            ('shake_neon', 'Neon Shake', 'Electric glow with subtle jitter'),
+            ('cinematic_reveal', 'Cinematic Reveal', 'Letterbox reveal for dramatic moments'),
+            ('danger_bold', 'Danger Bold', 'Red alert typography with pulsing glow'),
+            ('slide_punch_framer', 'Slide Punch', 'Fast slide-in with a punchy stop'),
+            ('bold_slam', 'Bold Slam', 'Large impact card with a bounce entrance'),
+            ('podcast_lower_third', 'On-Air Lower Third', 'Podcast-style lower third with live on-air badge'),
+            ('quote_card', 'Quote Card', 'Editorial pull-quote card for memorable podcast lines'),
+            ('waveform_pulse', 'Waveform Pulse', 'Audio waveform bars pulsing around the hook'),
+            ('breaking_tape', 'Breaking Tape', 'Diagonal hot-take tape for spicy podcast moments'),
+            ('mic_drop', 'Mic Drop', 'Impact badge drop with a bright hit line')
     """)
     print(f"  ✓ Inserted {cursor.rowcount} hook animations")
     

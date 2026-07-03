@@ -49,6 +49,7 @@ interface SubtitleConfig {
   position?: string;
   positionY?: number;
   uppercase?: boolean;
+  capitalize?: boolean;
   italic?: boolean;
   strokeEnabled?: boolean;
   strokeColor?: string;
@@ -60,6 +61,7 @@ interface SubtitleConfig {
   wordSpacing?: number;
   animationStyle?: string;
   animationSpeed?: number;
+  lineTransition?: string;
 }
 
 interface SubtitleLayerProps {
@@ -165,6 +167,8 @@ function SubtitlePage({
   const { fps } = useVideoConfig();
   const timeInMs = (frame / fps) * 1000;
   const animStyle = config.animationStyle || "pop";
+  const lineTransition = config.lineTransition || "word_pop";
+  const animationSpeed = config.animationSpeed || 1;
   const highlightWords = config.highlightWords || [];
   const highlightScale = config.highlightScale || 1.2;
   const highlightStyleType = config.highlightStyle || "scale";
@@ -174,7 +178,7 @@ function SubtitlePage({
     frame,
     fps,
     config: { damping: 200 },
-    durationInFrames: 6,
+    durationInFrames: Math.max(3, Math.round(6 / animationSpeed)),
   });
 
   // Compute enter transform using makeTransform (composable)
@@ -190,6 +194,31 @@ function SubtitlePage({
 
   // Fade opacity
   const opacity = interpolate(frame, [0, 3], [0, 1], { extrapolateRight: "clamp" });
+  const tokens = page.tokens || [];
+  const activeMatchIndex = tokens.findIndex((t: any) => {
+    const startRel = (t.fromMs || 0) - (page.startMs || 0);
+    const endRel = (t.toMs || 0) - (page.startMs || 0);
+    return startRel <= timeInMs && endRel > timeInMs;
+  });
+  const fallbackIndex = tokens.reduce((best: number, token: any, index: number) => {
+    const current = (token.text || "").trim();
+    const bestText = (tokens[best]?.text || "").trim();
+    return current.length > bestText.length ? index : best;
+  }, 0);
+  const emphasisIndex = activeMatchIndex >= 0 ? activeMatchIndex : fallbackIndex;
+  const emphasisToken = tokens[emphasisIndex];
+  const emphasisWord = (emphasisToken?.text || "").trim();
+  const contextText = tokens
+    .filter((_: any, index: number) => index !== emphasisIndex)
+    .map((token: any) => (token.text || "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+  const applyCase = (word: string, uppercase?: boolean, capitalize?: boolean) => {
+    if (uppercase) return word.toUpperCase();
+    if (capitalize) return word.replace(/\b\w/g, (c) => c.toUpperCase());
+    return word;
+  };
 
   return (
     <AbsoluteFill style={{ opacity }}>
@@ -208,13 +237,58 @@ function SubtitlePage({
           justifyContent: "center",
           gap: config.wordSpacing || 6,
           transform: enterTransform,
+          overflow: lineTransition === "line_reveal" ? "hidden" : undefined,
+          borderLeft: lineTransition === "line_reveal" ? `8px solid ${highlightColor}` : undefined,
           ...(config.bgEnabled === true ? {
             backgroundColor: hexToRgba(config.bgColor || "#000000", config.bgOpacity ?? 0.4),
             borderRadius: config.bgRadius || 8,
             padding: config.bgPadding || 12,
           } : {}),
         }}>
-          {page.tokens?.map((t: any, i: number) => {
+          {lineTransition === "line_reveal" && (
+            <div style={{
+              width: "100%",
+              height: 5,
+              borderRadius: 999,
+              backgroundColor: highlightColor,
+              marginBottom: 8,
+              transformOrigin: "left center",
+              transform: `scaleX(${interpolate(enter, [0, 1], [0.15, 1])})`,
+            }} />
+          )}
+          {lineTransition === "emphasis" ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, textAlign: "center" }}>
+              {contextText && (
+                <span style={{
+                  color,
+                  fontSize: Math.max(18, fontSize * 0.48),
+                  fontWeight: Number(config.fontWeight || 700),
+                  fontFamily,
+                  fontStyle: config.italic ? "italic" : "normal",
+                  letterSpacing: config.letterSpacing || 0,
+                  textShadow: config.shadowEnabled ? `0 0 ${config.shadowBlur || 8}px ${config.shadowColor || "#000"}` : undefined,
+                  WebkitTextStroke: config.strokeEnabled ? `${Math.max(1, (config.strokeWidth || 2) * 0.55)}px ${config.strokeColor || "#000"}` : undefined,
+                }}>{applyCase(contextText, config.uppercase, config.capitalize)}</span>
+              )}
+              <span style={{
+                color: highlightColor,
+                fontSize: config.dualStyleEnabled ? (config.highlightFontSize || fontSize * 1.35) : fontSize * highlightScale * 1.2,
+                fontWeight: config.dualStyleEnabled ? Number(config.highlightFontWeight || 900) : 900,
+                fontFamily: config.dualStyleEnabled ? `'${config.highlightFontFamily || "Anton"}', sans-serif` : fontFamily,
+                fontStyle: config.dualStyleEnabled ? (config.highlightItalic ? "italic" : "normal") : (config.italic ? "italic" : "normal"),
+                letterSpacing: config.dualStyleEnabled ? (config.highlightLetterSpacing || 0) : (config.letterSpacing || 0),
+                textShadow: [
+                  config.highlightGlow ? `0 0 16px ${config.highlightGlowColor || highlightColor}` : "",
+                  (config.dualStyleEnabled ? config.highlightShadowEnabled : config.shadowEnabled) ? `0 0 ${config.dualStyleEnabled ? (config.highlightShadowBlur || 12) : (config.shadowBlur || 8)}px ${config.dualStyleEnabled ? (config.highlightShadowColor || "#000") : (config.shadowColor || "#000")}` : "",
+                ].filter(Boolean).join(", ") || undefined,
+                paintOrder: (config.dualStyleEnabled ? config.highlightStrokeEnabled : config.strokeEnabled) ? "stroke" : undefined,
+                WebkitTextStroke: (config.dualStyleEnabled ? config.highlightStrokeEnabled : config.strokeEnabled)
+                  ? `${config.dualStyleEnabled ? (config.highlightStrokeWidth || 3) : (config.strokeWidth || 2)}px ${config.dualStyleEnabled ? (config.highlightStrokeColor || "#000") : (config.strokeColor || "#000")}`
+                  : undefined,
+                transform: `scale(${interpolate(enter, [0, 1], [0.86, 1])})`,
+              }}>{applyCase(emphasisWord, config.dualStyleEnabled ? config.highlightUppercase : config.uppercase, config.capitalize)}</span>
+            </div>
+          ) : page.tokens?.map((t: any, i: number) => {
             const startRel = (t.fromMs || 0) - (page.startMs || 0);
             const endRel = (t.toMs || 0) - (page.startMs || 0);
             const isActive = startRel <= timeInMs && endRel > timeInMs;
@@ -246,7 +320,7 @@ function SubtitlePage({
             }
 
             const wordUppercase = useDual ? config.highlightUppercase : config.uppercase;
-            const displayText = wordUppercase ? wordText.toUpperCase() : wordText;
+            const displayText = applyCase(wordText, wordUppercase, useDual ? false : config.capitalize);
 
             return (
               <span

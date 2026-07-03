@@ -34,6 +34,7 @@ interface HookConfig {
   linePosition?: string;
   lineColor?: string;
   lineWidth?: number;
+  lineAutoWidth?: boolean;
   lineThickness?: number;
   lineOffset?: number;
   boxEnabled?: boolean;
@@ -133,6 +134,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const displayText = animation === "typewriter"
     ? text.slice(0, Math.floor(interpolate(frame, [0, fps * 1.5], [0, text.length], { extrapolateRight: "clamp" })))
     : text;
+  const renderedText = config.uppercase ? displayText.toUpperCase() : displayText;
 
   // Style values
   const fontFamily = config.fontFamily === "monospace" ? "monospace" : `'${config.fontFamily || "Poppins"}', sans-serif`;
@@ -165,6 +167,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const isGlitch = animation === "glitch";
   const glitchActive = isGlitch && frame % 8 < 2;
   const glitchX = Math.sin(frame * 0.7) * 4;
+  const customRenderAnimations = new Set(["bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse", "breaking_tape", "mic_drop"]);
 
   return (
     <AbsoluteFill style={{ opacity }}>
@@ -291,8 +294,250 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
         </AbsoluteFill>
       )}
 
-      {/* Main text (skipped for bold_slam which has custom card render) */}
-      {animation !== "bold_slam" && (
+      {/* podcast_lower_third animation: podcast lower-third card with on-air badge */}
+      {animation === "podcast_lower_third" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 13, stiffness: 170, mass: 0.7 } });
+        const y = interpolate(Math.min(1, entrance), [0, 1], [96, 0]);
+        const accent = config.lineColor || "#16F2B3";
+        const dotOpacity = 0.35 + Math.abs(Math.sin(frame * 0.18)) * 0.65;
+        return (
+          <AbsoluteFill>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "7%",
+              right: "7%",
+              transform: `translateY(calc(-50% + ${y}px))`,
+              display: "grid",
+              gridTemplateColumns: "92px 1fr",
+              alignItems: "center",
+              gap: 22,
+              padding: "30px 34px",
+              borderRadius: 28,
+              border: `2px solid ${accent}66`,
+              borderLeft: `12px solid ${accent}`,
+              background: "linear-gradient(90deg, rgba(6,17,31,0.96), rgba(16,24,39,0.82))",
+              boxShadow: `0 24px 70px rgba(0,0,0,0.45), 0 0 38px ${accent}33`,
+            }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                <span style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 999,
+                  backgroundColor: accent,
+                  opacity: dotOpacity,
+                  boxShadow: `0 0 26px ${accent}`,
+                }} />
+                <span style={{
+                  color: accent,
+                  fontFamily: "'Inter', sans-serif",
+                  fontWeight: 900,
+                  fontSize: 22,
+                  letterSpacing: 0,
+                }}>ON AIR</span>
+              </div>
+              <div style={{
+                color,
+                fontSize: config.fontSize || 64,
+                fontWeight,
+                fontFamily,
+                lineHeight: 1.02,
+                textAlign: "left",
+                textShadow: shadows.length ? shadows.join(", ") : "0 4px 18px rgba(0,0,0,0.65)",
+                textTransform: "uppercase",
+              }}>{renderedText}</div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* quote_card animation: editorial pull-quote card */}
+      {animation === "quote_card" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 16, stiffness: 120, mass: 0.8 } });
+        const scale = 0.9 + Math.min(1, entrance) * 0.1;
+        const rotate = interpolate(frame, [0, 18], [-2.5, -0.8], { extrapolateRight: "clamp" });
+        const accent = config.lineColor || "#FF4D2D";
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "relative",
+              width: "78%",
+              padding: "76px 72px 58px",
+              borderRadius: 34,
+              background: hexToRgba(config.boxColor || "#F5EFE1", config.boxOpacity ?? 0.96),
+              border: "3px solid rgba(255,255,255,0.72)",
+              boxShadow: "0 36px 90px rgba(0,0,0,0.42)",
+              transform: `scale(${scale}) rotate(${rotate}deg)`,
+            }}>
+              <div style={{
+                position: "absolute",
+                top: -38,
+                left: 42,
+                color: accent,
+                fontFamily: "Georgia, serif",
+                fontWeight: 900,
+                fontSize: 132,
+                lineHeight: 1,
+              }}>"</div>
+              <div style={{
+                color: config.color || "#171717",
+                fontSize: config.fontSize || 58,
+                fontWeight,
+                fontFamily,
+                lineHeight: config.lineHeight || 1.16,
+                textAlign,
+                textShadow: "none",
+                whiteSpace: "pre-line",
+              }}>{renderedText}</div>
+              <div style={{
+                width: "36%",
+                height: 8,
+                borderRadius: 999,
+                margin: "34px auto 0",
+                backgroundColor: accent,
+              }} />
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* waveform_pulse animation: pulsing audio waveform around hook text */}
+      {animation === "waveform_pulse" && (() => {
+        const waveColor = config.glowColor || config.gradientTo || color || "#14F1D9";
+        const pulse = 1 + Math.sin(frame * 0.18) * 0.035;
+        const bars = Array.from({ length: 17 });
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{ position: "absolute", top: `${positionY}%`, left: 0, right: 0, transform: `translateY(-50%) scale(${pulse})`, textAlign: "center" }}>
+              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 9, height: 104, marginBottom: 20 }}>
+                {bars.map((_, i) => {
+                  const bar = 32 + Math.abs(Math.sin(frame * 0.18 + i * 0.72)) * (42 + (i % 4) * 10);
+                  return (
+                    <span key={i} style={{
+                      width: 10,
+                      height: bar,
+                      borderRadius: 999,
+                      backgroundColor: waveColor,
+                      boxShadow: `0 0 22px ${waveColor}`,
+                      opacity: 0.42 + Math.abs(Math.sin(frame * 0.14 + i)) * 0.58,
+                    }} />
+                  );
+                })}
+              </div>
+              <div style={{
+                display: "inline-block",
+                padding: "0 54px",
+                color: config.gradientEnabled ? "transparent" : color,
+                background: config.gradientEnabled ? `linear-gradient(${config.gradientAngle || 180}deg, ${config.gradientFrom || "#FFF"}, ${config.gradientTo || waveColor})` : undefined,
+                WebkitBackgroundClip: config.gradientEnabled ? "text" : undefined,
+                fontSize,
+                fontWeight,
+                fontFamily,
+                lineHeight: config.lineHeight || 1.12,
+                textShadow: shadows.length ? shadows.join(", ") : `0 0 22px ${waveColor}`,
+                textTransform: "uppercase",
+              }}>{renderedText}</div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* breaking_tape animation: diagonal hot-take tape */}
+      {animation === "breaking_tape" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 12, stiffness: 180, mass: 0.7 } });
+        const x = interpolate(Math.min(1, entrance), [0, 1], [-260, 0]);
+        const tapeColor = config.boxColor || "#FFDD2D";
+        return (
+          <AbsoluteFill>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "-12%",
+              right: "-12%",
+              transform: `translateY(-50%) translateX(${x}px) rotate(-4deg)`,
+              padding: "28px 80px",
+              background: `linear-gradient(90deg, ${tapeColor}, #FFF06A, ${tapeColor})`,
+              borderTop: "8px solid rgba(0,0,0,0.92)",
+              borderBottom: "8px solid rgba(0,0,0,0.92)",
+              boxShadow: "0 34px 70px rgba(0,0,0,0.42)",
+              textAlign: "center",
+            }}>
+              <div style={{
+                color: "#D71920",
+                fontFamily: "'Inter', sans-serif",
+                fontWeight: 900,
+                fontSize: 26,
+                letterSpacing: 0,
+                marginBottom: 8,
+              }}>HOT TAKE</div>
+              <div style={{
+                color: config.color || "#111111",
+                fontSize: config.fontSize || 72,
+                fontWeight,
+                fontFamily,
+                lineHeight: 0.98,
+                textTransform: "uppercase",
+                textShadow: "none",
+              }}>{renderedText}</div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* mic_drop animation: falling badge with impact flash */}
+      {animation === "mic_drop" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 8, stiffness: 210, mass: 0.65 } });
+        const y = interpolate(Math.min(1, entrance), [0, 1], [-340, 0]);
+        const rotate = interpolate(frame, [0, 14], [-8, 0], { extrapolateRight: "clamp" });
+        const accent = config.boxColor || config.gradientTo || "#FF4D7D";
+        const impactScale = frame > 10 && frame < 24 ? 1 + Math.sin((frame - 10) * 0.5) * 0.08 : 1;
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "50%",
+              width: "78%",
+              transform: `translate(-50%, calc(-50% + ${y}px)) rotate(${rotate}deg) scale(${impactScale})`,
+              borderRadius: 999,
+              border: `7px solid ${accent}`,
+              background: "rgba(5,5,7,0.78)",
+              boxShadow: `0 0 58px ${accent}66, inset 0 0 32px rgba(255,255,255,0.08)`,
+              padding: "48px 62px",
+              textAlign: "center",
+            }}>
+              <div style={{
+                color: config.gradientEnabled ? "transparent" : color,
+                background: config.gradientEnabled ? `linear-gradient(${config.gradientAngle || 180}deg, ${config.gradientFrom || "#FFF"}, ${config.gradientTo || accent})` : undefined,
+                WebkitBackgroundClip: config.gradientEnabled ? "text" : undefined,
+                fontSize,
+                fontWeight,
+                fontFamily,
+                lineHeight: 1.02,
+                textShadow: shadows.length ? shadows.join(", ") : `0 0 26px ${accent}`,
+                textTransform: "uppercase",
+              }}>{renderedText}</div>
+            </div>
+            {frame > 10 && frame < 28 && (
+              <div style={{
+                position: "absolute",
+                top: `calc(${positionY}% + 130px)`,
+                left: "50%",
+                width: `${interpolate(frame, [10, 28], [120, 560], { extrapolateRight: "clamp" })}px`,
+                height: 8,
+                borderRadius: 999,
+                backgroundColor: accent,
+                opacity: interpolate(frame, [10, 28], [1, 0], { extrapolateRight: "clamp" }),
+                transform: "translateX(-50%)",
+                boxShadow: `0 0 30px ${accent}`,
+              }} />
+            )}
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* Main text (skipped for custom card/layer renders) */}
+      {!customRenderAnimations.has(animation) && (
         <div style={{
           position: "absolute",
           top: `${positionY}%`,
@@ -326,19 +571,19 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               borderRadius: config.boxRadius || 8,
             } : {}),
           }}>
-            {config.uppercase ? displayText.toUpperCase() : displayText}
+            {renderedText}
             {animation === "typewriter" && frame % 16 < 10 && <span style={{ opacity: 0.7 }}>|</span>}
           </span>
         </div>
       )}
 
       {/* Accent line */}
-      {config.lineEnabled && <AccentLine config={config} />}
+      {config.lineEnabled && <AccentLine config={config} text={renderedText} positionY={positionY} />}
     </AbsoluteFill>
   );
 };
 
-function AccentLine({ config }: { config: HookConfig }) {
+function AccentLine({ config, text, positionY }: { config: HookConfig; text: string; positionY: number }) {
   const pos = config.linePosition || "bottom";
   const style: React.CSSProperties = {
     position: "absolute",
@@ -347,14 +592,19 @@ function AccentLine({ config }: { config: HookConfig }) {
 
   const offset = config.lineOffset || 12;
   const thickness = config.lineThickness || 4;
-  const width = `${config.lineWidth || 60}%`;
+  const textLen = text.replace(/\s+/g, "").length || 12;
+  const autoWidth = `${Math.min(Math.max(textLen * 2.2, 20), 72)}%`;
+  const autoHeight = `${Math.min(Math.max(textLen * 1.45, 16), 54)}%`;
+  const width = config.lineAutoWidth ? autoWidth : `${config.lineWidth || 60}%`;
+  const height = config.lineAutoWidth ? autoHeight : `${config.lineWidth || 60}%`;
 
   if (pos === "top") Object.assign(style, { top: offset, left: "50%", transform: "translateX(-50%)", width, height: thickness });
   if (pos === "bottom") Object.assign(style, { bottom: offset, left: "50%", transform: "translateX(-50%)", width, height: thickness });
-  if (pos === "left") Object.assign(style, { left: offset, top: "50%", transform: "translateY(-50%)", height: width, width: thickness });
-  if (pos === "right") Object.assign(style, { right: offset, top: "50%", transform: "translateY(-50%)", height: width, width: thickness });
+  if (pos === "left") Object.assign(style, { left: offset, top: "50%", transform: "translateY(-50%)", height, width: thickness });
+  if (pos === "right") Object.assign(style, { right: offset, top: "50%", transform: "translateY(-50%)", height, width: thickness });
   if (pos === "center-h") Object.assign(style, { top: `calc(50% + ${offset}px)`, left: "50%", transform: "translate(-50%, -50%)", width, height: thickness });
-  if (pos === "center-v") Object.assign(style, { top: "50%", left: `calc(50% + ${offset}px)`, transform: "translate(-50%, -50%)", height: width, width: thickness });
+  if (pos === "center-v") Object.assign(style, { top: "50%", left: `calc(50% + ${offset}px)`, transform: "translate(-50%, -50%)", height, width: thickness });
+  if (pos === "auto-bottom") Object.assign(style, { top: `calc(${positionY}% + ${offset + 56}px)`, left: "50%", transform: "translateX(-50%)", width, height: thickness });
 
   return <div style={style} />;
 }

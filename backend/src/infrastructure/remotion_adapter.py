@@ -71,7 +71,7 @@ class RemotionAdapter(IRemotionRenderer):
             config: Render configuration
             words: Word-level timestamps from Whisper [{word, start, end}]
             hook_text: Hook text to display in first 3 seconds
-            hook_style: Hook animation style (fade_scale, slide_up, glitch, typewriter)
+            hook_style: Hook animation style (fade_scale, slide_up, glitch, typewriter, etc.)
         """
         import time
 
@@ -112,7 +112,23 @@ class RemotionAdapter(IRemotionRenderer):
                     break
         
         # Validate hook animation
-        valid_animations = ("fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer", "bold_slam")
+        valid_animations = (
+            "fade_scale",
+            "slide_up",
+            "glitch",
+            "typewriter",
+            "glitch_rgb",
+            "shake_neon",
+            "cinematic_reveal",
+            "danger_bold",
+            "slide_punch_framer",
+            "bold_slam",
+            "podcast_lower_third",
+            "quote_card",
+            "waveform_pulse",
+            "breaking_tape",
+            "mic_drop",
+        )
         if render_hook_animation not in valid_animations:
             render_hook_animation = "fade_scale"
 

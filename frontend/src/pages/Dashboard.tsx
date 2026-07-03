@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Filter, Trash2 } from "lucide-react";
+import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -72,6 +72,9 @@ export function Dashboard() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const completionRate = stats.total ? Math.round((stats.completed / stats.total) * 100) : 0;
+  const failedRate = stats.total ? Math.round((stats.failed / stats.total) * 100) : 0;
+  const activeJobs = jobList.filter((j) => j.status !== "completed" && j.status !== "failed" && j.status !== "timeout").slice(0, 3);
 
   // Reset page on filter change
   useEffect(() => { setPage(1); }, [search, statusFilter]);
@@ -84,41 +87,93 @@ export function Dashboard() {
 
   return (
     <div className="h-full flex flex-col gap-4">
-      {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
-        <StatCard icon={<Activity className="h-4 w-4" />} label="Active" value={stats.active} color="blue" />
-        <StatCard icon={<CheckCircle className="h-4 w-4" />} label="Completed" value={stats.completed} color="emerald" />
-        <StatCard icon={<XCircle className="h-4 w-4" />} label="Failed" value={stats.failed} color="red" />
-        <StatCard icon={<Clock className="h-4 w-4" />} label="Total Jobs" value={stats.total} color="zinc" />
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3 shrink-0">
+        <Card className="p-4 overflow-hidden">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10 text-emerald-300">
+                  <Radio className="h-4 w-4" />
+                </span>
+                <div>
+                  <h1 className="text-lg font-semibold text-zinc-100">Clip Pipeline</h1>
+                  <p className="text-[11px] text-zinc-500">Monitor jobs, render status, and recent clip output.</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <HealthPill status={health?.status} mode={health?.mode} />
+              <Button variant="ghost" size="xs" onClick={loadData} icon={<RefreshCw className="h-3 w-3" />}>Refresh</Button>
+              <Link to="/jobs/new"><Button size="sm" icon={<PlusCircle className="h-3.5 w-3.5" />}>New Job</Button></Link>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard icon={<Activity className="h-4 w-4" />} label="Active" value={stats.active} color="blue" hint={activeJobs.length ? "Running now" : "Queue idle"} />
+            <StatCard icon={<CheckCircle className="h-4 w-4" />} label="Completed" value={stats.completed} color="emerald" hint={`${completionRate}% success share`} />
+            <StatCard icon={<XCircle className="h-4 w-4" />} label="Failed" value={stats.failed} color="red" hint={`${failedRate}% needs review`} />
+            <StatCard icon={<Clock className="h-4 w-4" />} label="Total Jobs" value={stats.total} color="zinc" hint="All tracked jobs" />
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-zinc-500">Live Queue</p>
+              <p className="mt-1 text-sm font-semibold text-zinc-100">{stats.active} active job{stats.active === 1 ? "" : "s"}</p>
+            </div>
+            <span className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-blue-300">
+              <Sparkles className="h-4 w-4" />
+            </span>
+          </div>
+          <div className="mt-3 space-y-2">
+            {activeJobs.length ? activeJobs.map((job) => (
+              <Link key={job.job_id} to={`/jobs/${job.job_id}`} className="block rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 hover:border-zinc-700">
+                <p className="truncate text-[11px] font-medium text-zinc-200">{job.video_title || truncateUrl(job.youtube_url, 42)}</p>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <span className="font-mono text-[9px] text-zinc-600">{job.job_id.replace("job_", "").slice(0, 8)}</span>
+                  <Badge variant="status" status={job.status} size="sm" dot>{job.status}</Badge>
+                </div>
+              </Link>
+            )) : (
+              <div className="rounded-lg border border-dashed border-zinc-800 py-5 text-center">
+                <Film className="mx-auto h-5 w-5 text-zinc-700" />
+                <p className="mt-2 text-[11px] text-zinc-500">No active render queue</p>
+              </div>
+            )}
+          </div>
+        </Card>
       </div>
 
       {/* Model Status (compact 4-col grid) */}
       <ModelStatusPanel />
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 flex-wrap shrink-0">
+      <Card className="p-3 shrink-0">
+      <div className="flex items-center gap-3 flex-wrap">
         {/* Search */}
-        <div className="relative flex-1 min-w-[200px] max-w-md">
+        <div className="relative flex-1 min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by video title, URL, or job ID..."
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+            placeholder="Search title, URL, or job ID..."
+            className="w-full bg-zinc-950/70 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
 
         {/* Status filter */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 p-1">
+          <SlidersHorizontal className="ml-1 h-3.5 w-3.5 text-zinc-600" />
           {["all", "completed", "failed", "processing"].map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setStatusFilter(s === "processing" ? "processing" : s)}
               className={cn(
-                "px-2.5 py-1.5 rounded-lg text-[10px] font-medium border transition-colors capitalize",
-                statusFilter === s ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400" : "border-zinc-800 text-zinc-500 hover:border-zinc-700"
+                "px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors capitalize",
+                statusFilter === s ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300"
               )}
             >
               {s}
@@ -126,14 +181,21 @@ export function Dashboard() {
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="ghost" size="xs" onClick={loadData} icon={<RefreshCw className="h-3 w-3" />}>Refresh</Button>
-          <Link to="/jobs/new"><Button size="sm" icon={<PlusCircle className="h-3.5 w-3.5" />}>New Job</Button></Link>
+        <div className="ml-auto text-[10px] text-zinc-500">
+          {filtered.length} visible / {jobList.length} total
         </div>
       </div>
+      </Card>
 
       {/* Job list */}
-      <Card className="flex-1 p-0 flex flex-col min-h-0">
+      <Card className="flex-1 p-0 flex flex-col min-h-0 overflow-hidden">
+        <div className="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-100">Jobs</h2>
+            <p className="text-[10px] text-zinc-500">Latest jobs are refreshed automatically.</p>
+          </div>
+          <Badge variant="default" size="sm">{PAGE_SIZE} per page</Badge>
+        </div>
         <div className="flex-1 overflow-y-auto min-h-0">
           {isLoading && !jobList.length ? (
             <div className="px-4 py-3 space-y-2">
@@ -152,34 +214,36 @@ export function Dashboard() {
               action={!search ? <Link to="/jobs/new"><Button size="sm" icon={<PlusCircle className="h-3.5 w-3.5" />}>Create first job</Button></Link> : undefined}
             />
           ) : (
-            <div className="divide-y divide-zinc-800/30">
+            <div className="divide-y divide-zinc-800/40">
               {paginated.map((job) => {
                 const thumb = getYouTubeThumb(job.youtube_url);
                 return (
                   <Link
                     key={job.job_id}
                     to={`/jobs/${job.job_id}`}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/20 transition-colors"
+                    className="group flex items-center gap-3 px-4 py-3 hover:bg-zinc-900/70 transition-colors"
                   >
                     {/* Thumbnail */}
-                    <div className="shrink-0 w-16 h-10 rounded overflow-hidden bg-zinc-800">
+                    <div className="relative shrink-0 w-20 h-12 rounded-lg overflow-hidden bg-zinc-800 border border-zinc-800">
                       {thumb ? (
-                        <img src={thumb} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        <img src={thumb} alt="" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <Activity className="h-3 w-3 text-zinc-700" />
                         </div>
                       )}
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                      <PlayCircle className="absolute bottom-1 right-1 h-3.5 w-3.5 text-white/70 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-zinc-200 truncate">{job.video_title || truncateUrl(job.youtube_url, 60)}</p>
-                      <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-0.5">
+                      <p className="text-sm font-medium text-zinc-200 truncate group-hover:text-zinc-100">{job.video_title || truncateUrl(job.youtube_url, 60)}</p>
+                      <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-1 flex-wrap">
                         <span className="font-mono">{job.job_id.replace("job_", "").slice(0, 8)}</span>
                         <span>{job.target_aspect_ratio || "9:16"}</span>
                         {job.pipeline_version && <span className={job.pipeline_version === "v2" ? "text-blue-400" : "text-emerald-400"}>{job.pipeline_version.toUpperCase()}</span>}
-                        {job.clips_success > 0 && <span>{job.clips_success}/{job.clips_total} clips</span>}
+                        <span>{job.clips_success}/{job.clips_total || 0} clips</span>
                         <span>{formatTimeAgo(job.created_at)}</span>
                       </div>
                     </div>
@@ -251,24 +315,42 @@ export function Dashboard() {
   );
 }
 
-function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number; color: string }) {
+function StatCard({ icon, label, value, color, hint }: { icon: React.ReactNode; label: string; value: number; color: string; hint?: string }) {
   const colors: Record<string, string> = {
-    blue: "border-blue-500/40 text-blue-400",
-    emerald: "border-emerald-500/40 text-emerald-400",
-    red: "border-red-500/40 text-red-400",
-    zinc: "border-zinc-600/40 text-zinc-400",
+    blue: "border-blue-500/30 bg-blue-500/[0.04] text-blue-400",
+    emerald: "border-emerald-500/30 bg-emerald-500/[0.04] text-emerald-400",
+    red: "border-red-500/30 bg-red-500/[0.04] text-red-400",
+    zinc: "border-zinc-700/70 bg-zinc-900/40 text-zinc-400",
   };
   const c = colors[color] || colors.zinc;
+  const [borderColor, bgColor, textColor] = c.split(" ");
   return (
-    <Card className={cn("p-3 border", c.split(" ")[0])}>
+    <Card className={cn("p-3 border rounded-lg", borderColor, bgColor)}>
       <div className="flex items-center justify-between">
-        <div>
+        <div className="min-w-0">
           <p className="text-2xl font-bold text-zinc-100">{value}</p>
           <p className="text-[10px] text-zinc-500 mt-0.5">{label}</p>
         </div>
-        <span className={c.split(" ")[1]}>{icon}</span>
+        <span className={cn("rounded-md border border-current/20 bg-current/10 p-2", textColor)}>{icon}</span>
       </div>
+      {hint && <p className="mt-2 truncate text-[10px] text-zinc-500">{hint}</p>}
     </Card>
+  );
+}
+
+function HealthPill({ status, mode }: { status?: string; mode?: string }) {
+  const healthy = status === "healthy" || status === "ok";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px] font-medium",
+        healthy ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-amber-500/20 bg-amber-500/10 text-amber-300"
+      )}
+    >
+      <span className={cn("h-1.5 w-1.5 rounded-full", healthy ? "bg-emerald-400" : "bg-amber-400")} />
+      {status || "connecting"}
+      {mode && <span className="text-current/60">/ {mode}</span>}
+    </span>
   );
 }
 

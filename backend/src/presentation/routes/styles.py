@@ -9,6 +9,24 @@ from src.infrastructure.database import StylePresetModel, HookAnimationModel, as
 
 router = APIRouter(prefix="/style-presets", tags=["Style Presets"])
 
+BUILTIN_HOOK_ANIMATIONS: tuple[dict[str, str], ...] = (
+    {"id": "fade_scale", "name": "Fade & Scale", "description": "Text fades in with a soft scale animation"},
+    {"id": "slide_up", "name": "Slide Up", "description": "Text slides up from the bottom"},
+    {"id": "glitch", "name": "Glitch Effect", "description": "Digital jitter with a glitch feel"},
+    {"id": "typewriter", "name": "Typewriter", "description": "Character-by-character reveal"},
+    {"id": "glitch_rgb", "name": "RGB Split", "description": "Separated red/cyan channels for fast tech moments"},
+    {"id": "shake_neon", "name": "Neon Shake", "description": "Electric glow with subtle jitter"},
+    {"id": "cinematic_reveal", "name": "Cinematic Reveal", "description": "Letterbox reveal for dramatic moments"},
+    {"id": "danger_bold", "name": "Danger Bold", "description": "Red alert typography with pulsing glow"},
+    {"id": "slide_punch_framer", "name": "Slide Punch", "description": "Fast slide-in with a punchy stop"},
+    {"id": "bold_slam", "name": "Bold Slam", "description": "Large impact card with a bounce entrance"},
+    {"id": "podcast_lower_third", "name": "On-Air Lower Third", "description": "Podcast-style lower third with live on-air badge"},
+    {"id": "quote_card", "name": "Quote Card", "description": "Editorial pull-quote card for memorable podcast lines"},
+    {"id": "waveform_pulse", "name": "Waveform Pulse", "description": "Audio waveform bars pulsing around the hook"},
+    {"id": "breaking_tape", "name": "Breaking Tape", "description": "Diagonal hot-take tape for spicy podcast moments"},
+    {"id": "mic_drop", "name": "Mic Drop", "description": "Impact badge drop with a bright hit line"},
+)
+
 
 # ─── Response Models ──────────────────────────────────────────────────────────
 
@@ -137,16 +155,24 @@ async def list_hook_animations():
             .order_by(HookAnimationModel.name)
         )
         animations = result.scalars().all()
+        by_id = {
+            item["id"]: HookAnimationResponse(
+                id=item["id"],
+                name=item["name"],
+                description=item["description"],
+                preview_url=None,
+            )
+            for item in BUILTIN_HOOK_ANIMATIONS
+        }
+        for animation in animations:
+            by_id[animation.id] = HookAnimationResponse(
+                id=animation.id,
+                name=animation.name,
+                description=animation.description,
+                preview_url=animation.preview_url,
+            )
         
         return HookAnimationListResponse(
-            data=[
-                HookAnimationResponse(
-                    id=a.id,
-                    name=a.name,
-                    description=a.description,
-                    preview_url=a.preview_url,
-                )
-                for a in animations
-            ],
-            total=len(animations),
+            data=sorted(by_id.values(), key=lambda item: item.name),
+            total=len(by_id),
         )

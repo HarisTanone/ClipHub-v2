@@ -1,9 +1,19 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { presets as presetsApi, type Preset } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+type OptionMeta = {
+  label: string;
+  mood: string;
+  accent: string;
+  preview: string;
+  desc: string;
+};
+
+const PAGINATION_PAGE_SIZE = 6;
 
 function useGoogleFont(fontFamily: string) {
   useEffect(() => {
@@ -62,6 +72,9 @@ export interface HookStyle {
   boxOpacity: number;
   boxPadding: number;
   boxRadius: number;
+  strokeEnabled: boolean;
+  strokeColor: string;
+  strokeWidth: number;
   // Duration
   duration: number;
   fadeIn: number;
@@ -160,6 +173,9 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
   boxOpacity: 0.1,
   boxPadding: 20,
   boxRadius: 8,
+  strokeEnabled: false,
+  strokeColor: "#000000",
+  strokeWidth: 3,
   duration: 3.0,
   fadeIn: 0.3,
   fadeOut: 0.3,
@@ -217,6 +233,91 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
 
 // ─── Presets ─────────────────────────────────────────────────────────────────
 
+const FONT_OPTIONS = [
+  "Poppins",
+  "Inter",
+  "Montserrat",
+  "Anton",
+  "Bebas Neue",
+  "Oswald",
+  "Raleway",
+  "Roboto",
+  "Roboto Condensed",
+  "Lato",
+  "Nunito",
+  "Playfair Display",
+  "Merriweather",
+  "Lora",
+  "Barlow Condensed",
+  "Archivo Black",
+  "Black Ops One",
+  "Bungee",
+  "Righteous",
+  "Titillium Web",
+  "Noto Sans",
+  "monospace",
+];
+
+const HOOK_FONT_SUGGESTIONS = ["Barlow Condensed", "Anton", "Archivo Black", "Playfair Display", "Bungee", "Montserrat"];
+const SUBTITLE_FONT_SUGGESTIONS = ["Poppins", "Inter", "Montserrat", "Barlow Condensed", "Roboto Condensed", "Noto Sans"];
+const HIGHLIGHT_FONT_SUGGESTIONS = ["Anton", "Archivo Black", "Bebas Neue", "Bungee", "Barlow Condensed", "Black Ops One"];
+
+const HOOK_ANIMATIONS = [
+  "fade_scale",
+  "slide_up",
+  "glitch",
+  "typewriter",
+  "glitch_rgb",
+  "shake_neon",
+  "cinematic_reveal",
+  "danger_bold",
+  "slide_punch_framer",
+  "bold_slam",
+  "podcast_lower_third",
+  "quote_card",
+  "waveform_pulse",
+  "breaking_tape",
+  "mic_drop",
+];
+
+const HOOK_ANIMATION_META: Record<string, OptionMeta> = {
+  fade_scale: { label: "Fade Scale", mood: "Smooth open", accent: "#7DD3FC", preview: "ZOOM", desc: "Soft masuk, aman untuk hampir semua podcast." },
+  slide_up: { label: "Slide Up", mood: "Clean lift", accent: "#A7F3D0", preview: "UP", desc: "Teks naik cepat tanpa terlalu ramai." },
+  glitch: { label: "Glitch", mood: "Digital cut", accent: "#FB7185", preview: "ERR", desc: "Jitter untuk punchline tech atau kontroversi." },
+  typewriter: { label: "Typewriter", mood: "Reveal", accent: "#34D399", preview: "TYPE", desc: "Reveal per karakter untuk kalimat misterius." },
+  glitch_rgb: { label: "RGB Split", mood: "Tech shock", accent: "#22D3EE", preview: "RGB", desc: "Channel merah/cyan untuk hook yang terasa urgent." },
+  shake_neon: { label: "Neon Shake", mood: "Night talk", accent: "#14F1D9", preview: "NEON", desc: "Glow bergerak untuk momen debat atau reaksi." },
+  cinematic_reveal: { label: "Cinematic", mood: "Serious reveal", accent: "#FACC15", preview: "FILM", desc: "Letterbox dan fade lambat untuk quote penting." },
+  danger_bold: { label: "Danger Bold", mood: "Warning", accent: "#EF4444", preview: "STOP", desc: "Merah kuat untuk kalimat yang tidak boleh diskip." },
+  slide_punch_framer: { label: "Slide Punch", mood: "Fast hook", accent: "#F97316", preview: "PUNCH", desc: "Masuk dari kiri dengan hentakan ringan." },
+  bold_slam: { label: "Bold Slam", mood: "Big impact", accent: "#FDE047", preview: "SLAM", desc: "Kartu besar untuk hook yang sangat tegas." },
+  podcast_lower_third: { label: "On-Air Lower", mood: "Podcast live", accent: "#16F2B3", preview: "LIVE", desc: "Lower-third khas podcast dengan badge on-air." },
+  quote_card: { label: "Quote Card", mood: "Editorial", accent: "#FF4D2D", preview: "QUOTE", desc: "Kartu quote untuk satu kalimat yang memorable." },
+  waveform_pulse: { label: "Waveform", mood: "Audio pulse", accent: "#14F1D9", preview: "WAVE", desc: "Bar audio bergerak supaya terasa seperti momen suara." },
+  breaking_tape: { label: "Breaking Tape", mood: "Hot take", accent: "#FFDD2D", preview: "TAKE", desc: "Tape diagonal untuk opini yang memancing komentar." },
+  mic_drop: { label: "Mic Drop", mood: "Final answer", accent: "#FF4D7D", preview: "DROP", desc: "Badge jatuh dengan impact line." },
+};
+
+const SUBTITLE_ANIMATION_META: Record<SubtitleStyle["animationStyle"], OptionMeta> = {
+  pop: { label: "Pop", mood: "Punchy", accent: "#34D399", preview: "POP", desc: "Kata aktif membesar cepat dan jelas." },
+  fade: { label: "Fade", mood: "Soft", accent: "#93C5FD", preview: "FADE", desc: "Masuk halus untuk podcast yang tenang." },
+  slide: { label: "Slide", mood: "Clean motion", accent: "#FBBF24", preview: "SLIDE", desc: "Naik singkat, enak untuk dialog cepat." },
+  none: { label: "None", mood: "Static", accent: "#A1A1AA", preview: "TEXT", desc: "Tanpa animasi tambahan." },
+};
+
+const SUBTITLE_TRANSITION_META: Record<SubtitleStyle["lineTransition"], OptionMeta> = {
+  word_pop: { label: "Word Pop", mood: "Readable", accent: "#34D399", preview: "word", desc: "Mode standar, highlight mengikuti kata aktif." },
+  emphasis: { label: "Big Keyword", mood: "Keyword hero", accent: "#FACC15", preview: "BIG", desc: "Kata terkuat dibuat besar seperti punchline." },
+  line_reveal: { label: "Line Reveal", mood: "Editorial", accent: "#A78BFA", preview: "LINE", desc: "Baris muncul rapi seperti caption editorial." },
+};
+
+const HIGHLIGHT_STYLE_META: Record<SubtitleStyle["highlightStyle"], OptionMeta> = {
+  scale: { label: "Scale", mood: "Bigger word", accent: "#FACC15", preview: "Aa", desc: "Kata penting membesar." },
+  underline: { label: "Underline", mood: "Marked", accent: "#38BDF8", preview: "__", desc: "Garis bawah untuk penekanan rapi." },
+  background: { label: "Background", mood: "Tag", accent: "#34D399", preview: "BOX", desc: "Highlight seperti label kecil." },
+  strikethrough: { label: "Strike", mood: "Contrarian", accent: "#FB7185", preview: "DEL", desc: "Cocok untuk kontra atau koreksi." },
+};
+
 const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = [
   { id: "bold_white", name: "Bold White", style: { color: "#FFFFFF", bgOpacity: 0.6, fontSize: 52, fontFamily: "Anton", uppercase: true, glowEnabled: false } },
   { id: "neon_green", name: "Neon Green", style: { color: "#00FF88", bgOpacity: 0.7, fontSize: 44, fontFamily: "Inter", glowEnabled: true, glowColor: "#00FF88", glowSize: 25 } },
@@ -230,6 +331,11 @@ const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = 
   { id: "shake_neon_preset", name: "Neon Shake", style: { color: "#00FFCC", bgOpacity: 0.65, fontSize: 54, fontFamily: "Anton", animation: "shake_neon" } },
   { id: "cinematic_reveal_preset", name: "Cinematic Gold", style: { color: "#FFD700", bgOpacity: 0.8, fontSize: 62, fontFamily: "Montserrat", fontWeight: "700", animation: "cinematic_reveal" } },
   { id: "danger_bold_preset", name: "Danger Bold", style: { color: "#FF2D2D", bgOpacity: 0.75, fontSize: 70, fontFamily: "Anton", uppercase: true, animation: "danger_bold" } },
+  { id: "podcast_lower_third_preset", name: "On-Air Lower", style: { animation: "podcast_lower_third", color: "#F8FAFC", bgColor: "#06111F", bgOpacity: 0.42, fontSize: 46, fontFamily: "Barlow Condensed", fontWeight: "900", uppercase: true, position: "bottom", positionY: 78, shadowEnabled: true, shadowBlur: 18, lineEnabled: false, lineColor: "#16F2B3" } },
+  { id: "quote_card_preset", name: "Quote Card", style: { animation: "quote_card", color: "#171717", bgColor: "#0B0F14", bgOpacity: 0.32, boxColor: "#F5EFE1", boxOpacity: 0.96, fontSize: 44, fontFamily: "Playfair Display", fontWeight: "800", lineHeight: 1.18, position: "center", positionY: 50, shadowEnabled: true, shadowBlur: 22, shadowY: 8 } },
+  { id: "waveform_pulse_preset", name: "Waveform Pulse", style: { animation: "waveform_pulse", color: "#EAFDF7", bgColor: "#020617", bgOpacity: 0.58, fontSize: 50, fontFamily: "Montserrat", fontWeight: "900", uppercase: true, glowEnabled: true, glowColor: "#14F1D9", glowSize: 28, gradientEnabled: true, gradientFrom: "#FFFFFF", gradientTo: "#14F1D9" } },
+  { id: "breaking_tape_preset", name: "Breaking Tape", style: { animation: "breaking_tape", color: "#111111", bgColor: "#130A03", bgOpacity: 0.46, boxColor: "#FFDD2D", fontSize: 52, fontFamily: "Archivo Black", fontWeight: "900", uppercase: true, lineEnabled: false, lineColor: "#FF4D2D" } },
+  { id: "mic_drop_preset", name: "Mic Drop", style: { animation: "mic_drop", color: "#FFFFFF", bgColor: "#050507", bgOpacity: 0.52, fontSize: 58, fontFamily: "Anton", fontWeight: "900", uppercase: true, gradientEnabled: true, gradientFrom: "#FFFFFF", gradientTo: "#FF4D7D", glowEnabled: true, glowColor: "#FF4D7D", glowSize: 30, boxColor: "#FF4D7D" } },
 ];
 
 const SUBTITLE_PRESETS: { id: string; name: string; style: Partial<SubtitleStyle> }[] = [
@@ -325,6 +431,39 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
       55% { transform:translateY(-50%) translate(-2px,1px) scale(1); }
       70% { transform:translateY(-50%) scale(1) rotate(0deg); }
       100% { transform:translateY(-50%) scale(1) rotate(0deg); }
+    }
+    @keyframes podcastLowerPreview {
+      0% { opacity:0; transform:translateY(22px) scale(0.98); }
+      18%,82% { opacity:1; transform:translateY(0) scale(1); }
+      100% { opacity:0; transform:translateY(10px) scale(0.99); }
+    }
+    @keyframes podcastOnAirPulse {
+      0%,100% { opacity:0.35; transform:scale(0.85); }
+      50% { opacity:1; transform:scale(1.12); }
+    }
+    @keyframes quoteCardPreview {
+      0% { opacity:0; transform:translateY(-50%) rotate(-2deg) scale(0.88); }
+      20%,82% { opacity:1; transform:translateY(-50%) rotate(-1deg) scale(1); }
+      100% { opacity:0; transform:translateY(-50%) rotate(1deg) scale(0.95); }
+    }
+    @keyframes waveformTextPreview {
+      0%,100% { transform:translateY(-50%) scale(0.98); }
+      50% { transform:translateY(-50%) scale(1.03); }
+    }
+    @keyframes waveformBarPreview {
+      0%,100% { transform:scaleY(0.34); opacity:0.45; }
+      50% { transform:scaleY(1); opacity:1; }
+    }
+    @keyframes breakingTapePreview {
+      0% { opacity:0; transform:translateY(-50%) translateX(-70px) rotate(-4deg); }
+      18%,82% { opacity:1; transform:translateY(-50%) translateX(0) rotate(-4deg); }
+      100% { opacity:0; transform:translateY(-50%) translateX(55px) rotate(-4deg); }
+    }
+    @keyframes micDropPreview {
+      0% { opacity:0; transform:translateY(-95%) scale(1.18) rotate(-8deg); }
+      18% { opacity:1; transform:translateY(-50%) scale(0.94) rotate(2deg); }
+      28%,78% { opacity:1; transform:translateY(-50%) scale(1) rotate(0deg); }
+      100% { opacity:0; transform:translateY(-42%) scale(0.96); }
     }
     @keyframes popIn { 0%,100% { transform:scale(0.9); opacity:0.5; } 50% { transform:scale(1.05); opacity:1; } }
     @keyframes fadeIn { 0%,100% { opacity:0.3; } 50% { opacity:1; } }
@@ -489,7 +628,7 @@ function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange, 
 // ─── Hook Preview Renderer (matches FFmpeg output visually) ──────────────────
 
 function HookPreviewRenderer({ style }: { style: HookStyle }) {
-  const text = style.text || "Hook text preview here";
+  const text = style.text || getHookPreviewSample(style.animation);
   const fontSize = Math.max(style.fontSize * 0.32, 12);
   const fontFamily = style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`;
   const fontWeight = Number(style.fontWeight);
@@ -507,6 +646,8 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
     maxWidth: "90%",
     whiteSpace: "pre-line",
     wordBreak: "break-word",
+    paintOrder: style.strokeEnabled ? "stroke" : undefined,
+    WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor}` : undefined,
   };
 
   const textShadow = [
@@ -525,6 +666,128 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
   const posTop = `${style.positionY}%`;
 
   switch (style.animation) {
+    case "podcast_lower_third": {
+      const accent = style.lineColor || "#16F2B3";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-3 right-3 animate-[podcastLowerPreview_2.8s_ease-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "auto 1fr",
+              gap: 8,
+              alignItems: "center",
+              background: "linear-gradient(90deg, rgba(6,17,31,0.94), rgba(20,28,44,0.78))",
+              border: `1px solid ${accent}55`,
+              borderLeft: `5px solid ${accent}`,
+              borderRadius: 12,
+              boxShadow: `0 12px 30px rgba(0,0,0,0.35), 0 0 18px ${accent}33`,
+              padding: "10px 12px",
+            }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 99, background: accent, boxShadow: `0 0 12px ${accent}`, animation: "podcastOnAirPulse_1s ease-in-out infinite" }} />
+                <span style={{ color: accent, fontSize: 8, fontWeight: 900, letterSpacing: 0 }}>ON AIR</span>
+              </div>
+              <p style={{ ...baseTextStyle, color: style.color, fontSize: Math.max(fontSize * 0.86, 12), textAlign: "left", lineHeight: 1.02, textShadow }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "quote_card": {
+      const cardColor = `${style.boxColor}${Math.round((style.boxOpacity || 0.96) * 255).toString(16).padStart(2, "0")}`;
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-4 animate-[quoteCardPreview_3s_ease-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{
+              position: "relative",
+              background: cardColor,
+              borderRadius: 14,
+              padding: "20px 18px 16px",
+              boxShadow: "0 16px 30px rgba(0,0,0,0.38)",
+              border: "1px solid rgba(255,255,255,0.72)",
+            }}>
+              <span style={{ position: "absolute", top: -13, left: 14, color: "#FF4D2D", fontSize: 36, fontFamily: "Georgia, serif", lineHeight: 1 }}>"</span>
+              <p style={{ ...baseTextStyle, color: style.color || "#171717", fontSize: Math.max(fontSize * 0.82, 13), lineHeight: 1.12, textShadow: "none" }}>{text}</p>
+              <div style={{ width: "38%", height: 3, background: "#FF4D2D", borderRadius: 99, margin: "10px auto 0" }} />
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "waveform_pulse": {
+      const bars = Array.from({ length: 13 });
+      const waveColor = style.glowColor || style.color || "#14F1D9";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-x-0 flex flex-col items-center justify-center gap-3 px-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ display: "flex", gap: 4, height: 34, alignItems: "center" }}>
+              {bars.map((_, i) => (
+                <span key={i} style={{
+                  width: 4,
+                  height: 26 + (i % 4) * 6,
+                  borderRadius: 99,
+                  background: waveColor,
+                  boxShadow: `0 0 12px ${waveColor}`,
+                  transformOrigin: "center",
+                  animation: `waveformBarPreview ${0.72 + (i % 3) * 0.14}s ease-in-out ${i * 0.04}s infinite`,
+                }} />
+              ))}
+            </div>
+            <p className="animate-[waveformTextPreview_1.1s_ease-in-out_infinite]" style={{ ...baseTextStyle, ...colorStyle, ...boxStyle, textShadow }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
+    case "breaking_tape": {
+      const tapeColor = style.boxColor || "#FFDD2D";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-[-8%] right-[-8%] animate-[breakingTapePreview_2.5s_ease-out_infinite]" style={{ top: posTop, transform: "translateY(-50%) rotate(-4deg)" }}>
+            <div style={{
+              background: `linear-gradient(90deg, ${tapeColor}, #FFF06A, ${tapeColor})`,
+              borderTop: "3px solid rgba(0,0,0,0.92)",
+              borderBottom: "3px solid rgba(0,0,0,0.92)",
+              boxShadow: "0 18px 28px rgba(0,0,0,0.32)",
+              padding: "11px 28px",
+              textAlign: "center",
+            }}>
+              <span style={{ display: "block", color: "#D71920", fontSize: 8, fontWeight: 900, letterSpacing: 0 }}>HOT TAKE</span>
+              <p style={{ ...baseTextStyle, color: style.color || "#111111", fontSize: Math.max(fontSize * 0.9, 14), lineHeight: 1, textShadow: "none" }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "mic_drop": {
+      const accent = style.boxColor || style.gradientTo || "#FF4D7D";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-x-0 flex flex-col items-center justify-center px-4 animate-[micDropPreview_2.5s_cubic-bezier(.2,.85,.25,1)_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{
+              position: "relative",
+              borderRadius: 999,
+              border: `3px solid ${accent}`,
+              boxShadow: `0 0 26px ${accent}66, inset 0 0 18px rgba(255,255,255,0.08)`,
+              padding: "18px 22px",
+              background: "rgba(5,5,7,0.74)",
+            }}>
+              <span style={{ position: "absolute", left: "50%", bottom: -16, width: 46, height: 4, transform: "translateX(-50%)", borderRadius: 99, background: accent, boxShadow: `0 0 18px ${accent}` }} />
+              <p style={{ ...baseTextStyle, ...colorStyle, textShadow, fontSize: Math.max(fontSize * 0.82, 14), lineHeight: 1.02 }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
     case "glitch_rgb": {
       // 3 separate text layers matching FFmpeg: Red(-4+sin(t*15)*3), Cyan(+4-sin(t*15)*3), White(center)
       return (
@@ -668,27 +931,181 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
   }
 }
 
+function HookPresetCard({ preset, active, onClick }: { preset: { id: string; name: string; style: Partial<HookStyle> }; active: boolean; onClick: () => void }) {
+  const animation = preset.style.animation || "fade_scale";
+  const meta = HOOK_ANIMATION_META[animation] || HOOK_ANIMATION_META.fade_scale;
+  const font = preset.style.fontFamily || "Poppins";
+  const color = preset.style.gradientEnabled ? preset.style.gradientTo || meta.accent : preset.style.color || meta.accent;
+  return (
+    <button type="button" onClick={onClick}
+      className={cn("group relative min-h-[98px] rounded-lg border p-3 text-left overflow-hidden transition-all",
+        active ? "border-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-400/25" : "border-zinc-800 bg-zinc-900/70 hover:border-zinc-600 hover:bg-zinc-900")}>
+      <div className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${meta.accent}, transparent)` }} />
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={cn("text-[12px] font-semibold truncate", active ? "text-emerald-300" : "text-zinc-200")}>{preset.name}</p>
+          <p className="mt-0.5 text-[9px] text-zinc-500 truncate">{meta.label} / {font}</p>
+        </div>
+        <span className="rounded-md px-1.5 py-0.5 text-[8px] font-black" style={{ color, backgroundColor: `${color}18`, border: `1px solid ${color}44` }}>{meta.preview}</span>
+      </div>
+      <div className="mt-3 flex items-end gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="h-8 rounded-md border border-white/10 bg-black/30 px-2 flex items-center overflow-hidden">
+            <span style={{ color, fontFamily: font === "monospace" ? "monospace" : `'${font}', sans-serif`, fontWeight: Number(preset.style.fontWeight || 800), letterSpacing: 0 }} className="text-[11px] truncate">
+              {getHookPreviewSample(animation)}
+            </span>
+          </div>
+        </div>
+        <span className="text-[8px] text-zinc-600 group-hover:text-zinc-400">{meta.mood}</span>
+      </div>
+    </button>
+  );
+}
+
+function SubtitlePresetCard({ preset, active, onClick }: { preset: { id: string; name: string; style: Partial<SubtitleStyle> }; active: boolean; onClick: () => void }) {
+  const transition = preset.style.lineTransition || "word_pop";
+  const meta = SUBTITLE_TRANSITION_META[transition] || SUBTITLE_TRANSITION_META.word_pop;
+  const font = preset.style.fontFamily || "Poppins";
+  const color = preset.style.highlightColor || meta.accent;
+  return (
+    <button type="button" onClick={onClick}
+      className={cn("group min-h-[92px] rounded-lg border p-3 text-left transition-all",
+        active ? "border-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-400/25" : "border-zinc-800 bg-zinc-900/70 hover:border-zinc-600 hover:bg-zinc-900")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={cn("text-[12px] font-semibold truncate", active ? "text-emerald-300" : "text-zinc-200")}>{preset.name}</p>
+          <p className="mt-0.5 text-[9px] text-zinc-500 truncate">{meta.label} / {font}</p>
+        </div>
+        <span className="h-5 min-w-5 rounded-full border" style={{ backgroundColor: `${color}22`, borderColor: `${color}66` }} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 rounded-md border border-white/10 bg-black/25 px-2 py-2">
+        {["ini", "kata", "penting"].map((word, index) => (
+          <span key={word} style={{ color: index === 1 ? color : preset.style.color || "#FFFFFF", fontFamily: `'${font}', sans-serif`, fontWeight: index === 1 ? 900 : Number(preset.style.fontWeight || 700) }} className={cn("text-[11px]", index === 1 && "scale-110")}>{word}</span>
+        ))}
+      </div>
+    </button>
+  );
+}
+
+function MetaTile({ meta, active, onClick }: { meta: OptionMeta; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={cn("rounded-lg border p-2.5 text-left transition-all min-h-[86px]",
+        active ? "border-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-400/20" : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-600")}>
+      <div className="flex items-center justify-between gap-2">
+        <span className={cn("text-[11px] font-semibold", active ? "text-emerald-300" : "text-zinc-200")}>{meta.label}</span>
+        <span className="rounded px-1.5 py-0.5 text-[8px] font-black" style={{ color: meta.accent, backgroundColor: `${meta.accent}18` }}>{meta.preview}</span>
+      </div>
+      <p className="mt-1 text-[9px] text-zinc-500">{meta.mood}</p>
+      <p className="mt-1.5 line-clamp-2 text-[9px] leading-snug text-zinc-600">{meta.desc}</p>
+    </button>
+  );
+}
+
+function FontChips({ fonts, active, onSelect }: { fonts: string[]; active: string; onSelect: (font: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {fonts.map((font) => (
+        <button key={font} type="button" onClick={() => onSelect(font)}
+          className={cn("rounded-lg border px-2.5 py-1.5 text-[10px] transition-colors",
+            active === font ? "border-emerald-500 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-600")}
+          style={{ fontFamily: font === "monospace" ? "monospace" : `'${font}', sans-serif` }}>
+          {font}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function getPageItems<T>(items: T[], page: number, pageSize = PAGINATION_PAGE_SIZE) {
+  return items.slice((page - 1) * pageSize, page * pageSize);
+}
+
+function getPageForIndex(index: number, pageSize = PAGINATION_PAGE_SIZE) {
+  return index < 0 ? 1 : Math.floor(index / pageSize) + 1;
+}
+
+function PaginationControls({ page, totalItems, onPageChange, label }: { page: number; totalItems: number; onPageChange: (page: number) => void; label: string }) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGINATION_PAGE_SIZE));
+  const start = totalItems === 0 ? 0 : (page - 1) * PAGINATION_PAGE_SIZE + 1;
+  const end = Math.min(page * PAGINATION_PAGE_SIZE, totalItems);
+
+  if (totalPages <= 1) {
+    return (
+      <div className="mt-2 flex justify-end text-[10px] text-zinc-600">
+        {totalItems} {label}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-2.5 py-2">
+      <span className="text-[10px] text-zinc-500">
+        {start}-{end} of {totalItems} {label}
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page === 1}
+          className="rounded-md p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-30"
+          aria-label={`Previous ${label} page`}
+          title="Previous page"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+        <span className="min-w-10 text-center font-mono text-[10px] text-zinc-400">{page}/{totalPages}</span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page === totalPages}
+          className="rounded-md p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-30"
+          aria-label={`Next ${label} page`}
+          title="Next page"
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Hook Editor ─────────────────────────────────────────────────────────────
 
 function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: HookStyle; onChange: (s: HookStyle) => void; aspectRatio: string; thumbnailUrl?: string }) {
   const update = (patch: Partial<HookStyle>) => onChange({ ...style, ...patch });
   const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [presetPage, setPresetPage] = useState(1);
+  const [animationPage, setAnimationPage] = useState(() => getPageForIndex(HOOK_ANIMATIONS.indexOf(style.animation)));
   useGoogleFont(style.fontFamily);
   const previewAspect = aspectRatio === "16:9" ? "16/9" : aspectRatio === "1:1" ? "1/1" : "9/16";
+  const activeAnimation = HOOK_ANIMATION_META[style.animation] || HOOK_ANIMATION_META.fade_scale;
+  const visibleHookPresets = getPageItems(HOOK_PRESETS, presetPage);
+  const visibleHookAnimations = getPageItems(HOOK_ANIMATIONS, animationPage);
+
+  useEffect(() => {
+    setAnimationPage(getPageForIndex(HOOK_ANIMATIONS.indexOf(style.animation)));
+  }, [style.animation]);
 
   return (
-    <div className="grid grid-cols-12 h-full">
-      <div className="col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800">
+    <div className="grid grid-cols-1 xl:grid-cols-12 h-full">
+      <div className="xl:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800">
         {/* Presets */}
         <Section title="Quick Presets">
-          <div className="flex flex-wrap gap-1.5">
-            {HOOK_PRESETS.map(p => (
-              <button key={p.id} type="button" onClick={() => { update(p.style as any); setActivePreset(p.id); }}
-                className={cn("px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors",
-                  activePreset === p.id ? "border-emerald-500 bg-emerald-500/10 text-emerald-400 font-medium" : "border-zinc-700 text-zinc-300 hover:border-emerald-500 hover:text-emerald-400"
-                )}>{p.name}</button>
+          <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
+            {visibleHookPresets.map(p => (
+              <HookPresetCard
+                key={p.id}
+                preset={p}
+                active={activePreset === p.id}
+                onClick={() => {
+                  onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text } as HookStyle);
+                  setActivePreset(p.id);
+                }}
+              />
             ))}
           </div>
+          <PaginationControls page={presetPage} totalItems={HOOK_PRESETS.length} onPageChange={setPresetPage} label="presets" />
         </Section>
 
         <Section title="Hook Text">
@@ -696,27 +1113,38 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
         </Section>
 
         <Section title="Animation & Timing">
-          <div className="grid grid-cols-4 gap-2 mb-3">
-            {["fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer", "bold_slam"].map(a => (
-              <button key={a} type="button" onClick={() => update({ animation: a })} className={cn("py-2 rounded-lg border text-[11px] font-medium transition-colors", style.animation === a ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{a.replace(/_/g, " ")}</button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2 mb-3">
+            {visibleHookAnimations.map(a => (
+              <MetaTile key={a} meta={HOOK_ANIMATION_META[a] || HOOK_ANIMATION_META.fade_scale} active={style.animation === a} onClick={() => update({ animation: a })} />
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
-            <RangeInput label={`Fade In: ${style.fadeIn}s`} min={1} max={10} value={Math.round(style.fadeIn * 10)} onChange={(v) => update({ fadeIn: v / 10 })} />
-            <RangeInput label={`Fade Out: ${style.fadeOut}s`} min={1} max={10} value={Math.round(style.fadeOut * 10)} onChange={(v) => update({ fadeOut: v / 10 })} />
+          <PaginationControls page={animationPage} totalItems={HOOK_ANIMATIONS.length} onPageChange={setAnimationPage} label="animations" />
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold text-zinc-200">{activeAnimation.label}</p>
+                <p className="text-[9px] text-zinc-500">{activeAnimation.desc}</p>
+              </div>
+              <span className="rounded-md px-2 py-1 text-[9px] font-black" style={{ color: activeAnimation.accent, backgroundColor: `${activeAnimation.accent}18` }}>{activeAnimation.mood}</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
+              <RangeInput label={`Fade In: ${style.fadeIn}s`} min={1} max={15} value={Math.round(style.fadeIn * 10)} onChange={(v) => update({ fadeIn: v / 10 })} />
+              <RangeInput label={`Fade Out: ${style.fadeOut}s`} min={1} max={15} value={Math.round(style.fadeOut * 10)} onChange={(v) => update({ fadeOut: v / 10 })} />
+            </div>
           </div>
         </Section>
 
         <Section title="Typography">
-          <div className="grid grid-cols-3 gap-3">
-            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={["Poppins", "Inter", "Montserrat", "Anton", "Bebas Neue", "Oswald", "Raleway", "Roboto", "Lato", "Nunito", "Playfair Display", "Merriweather", "Barlow Condensed", "Archivo Black", "Righteous", "monospace"]} />
+          <FontChips fonts={HOOK_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
+          <div className="grid grid-cols-3 gap-3 mt-3">
+            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS} />
             <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
             <SelectSmall label="Align" value={style.textAlign} onChange={(v) => update({ textAlign: v as any })} options={["center", "left", "right"]} />
           </div>
           <div className="grid grid-cols-3 gap-3 mt-3">
-            <RangeInput label={`Size: ${style.fontSize}px`} min={24} max={80} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
-            <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={-2} max={12} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
+            <RangeInput label={`Size: ${style.fontSize}px`} min={24} max={96} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+            <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={12} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
             <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
           </div>
           <div className="flex gap-4 mt-3">
@@ -731,38 +1159,39 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
             <ColorPicker label="Background" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
           </div>
           <RangeInput label={`BG Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
-          {/* Gradient */}
-          <div className="mt-3">
-            <Checkbox label="Enable text gradient" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} />
-            {style.gradientEnabled && (
-              <div className="grid grid-cols-3 gap-3 mt-2">
-                <ColorPicker label="From" value={style.gradientFrom} onChange={(v) => update({ gradientFrom: v })} />
-                <ColorPicker label="To" value={style.gradientTo} onChange={(v) => update({ gradientTo: v })} />
-                <RangeInput label={`Angle: ${style.gradientAngle}°`} min={0} max={360} value={style.gradientAngle} onChange={(v) => update({ gradientAngle: v })} />
-              </div>
-            )}
-          </div>
-          {/* Shadow */}
-          <div className="mt-3">
-            <Checkbox label="Text shadow" checked={style.shadowEnabled} onChange={(v) => update({ shadowEnabled: v })} />
-            {style.shadowEnabled && (
-              <div className="grid grid-cols-4 gap-3 mt-2">
-                <ColorPicker label="Color" value={style.shadowColor} onChange={(v) => update({ shadowColor: v })} />
-                <RangeInput label={`Blur: ${style.shadowBlur}`} min={0} max={40} value={style.shadowBlur} onChange={(v) => update({ shadowBlur: v })} />
-                <RangeInput label={`X: ${style.shadowX}`} min={-10} max={10} value={style.shadowX} onChange={(v) => update({ shadowX: v })} />
-                <RangeInput label={`Y: ${style.shadowY}`} min={-10} max={10} value={style.shadowY} onChange={(v) => update({ shadowY: v })} />
-              </div>
-            )}
-          </div>
-          {/* Glow */}
-          <div className="mt-3">
-            <Checkbox label="Text glow" checked={style.glowEnabled} onChange={(v) => update({ glowEnabled: v })} />
-            {style.glowEnabled && (
-              <div className="grid grid-cols-2 gap-3 mt-2">
-                <ColorPicker label="Glow Color" value={style.glowColor} onChange={(v) => update({ glowColor: v })} />
-                <RangeInput label={`Glow Size: ${style.glowSize}px`} min={5} max={60} value={style.glowSize} onChange={(v) => update({ glowSize: v })} />
-              </div>
-            )}
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+              <Checkbox label="Text gradient" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} />
+              {style.gradientEnabled && (
+                <div className="mt-2 space-y-2">
+                  <ColorPicker label="From" value={style.gradientFrom} onChange={(v) => update({ gradientFrom: v })} />
+                  <ColorPicker label="To" value={style.gradientTo} onChange={(v) => update({ gradientTo: v })} />
+                  <RangeInput label={`Angle: ${style.gradientAngle}deg`} min={0} max={360} value={style.gradientAngle} onChange={(v) => update({ gradientAngle: v })} />
+                </div>
+              )}
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+              <Checkbox label="Text shadow" checked={style.shadowEnabled} onChange={(v) => update({ shadowEnabled: v })} />
+              {style.shadowEnabled && (
+                <div className="mt-2 space-y-2">
+                  <ColorPicker label="Shadow" value={style.shadowColor} onChange={(v) => update({ shadowColor: v })} />
+                  <RangeInput label={`Blur: ${style.shadowBlur}`} min={0} max={40} value={style.shadowBlur} onChange={(v) => update({ shadowBlur: v })} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <RangeInput label={`X: ${style.shadowX}`} min={-10} max={10} value={style.shadowX} onChange={(v) => update({ shadowX: v })} />
+                    <RangeInput label={`Y: ${style.shadowY}`} min={-10} max={10} value={style.shadowY} onChange={(v) => update({ shadowY: v })} />
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+              <Checkbox label="Text glow" checked={style.glowEnabled} onChange={(v) => update({ glowEnabled: v })} />
+              {style.glowEnabled && (
+                <div className="mt-2 space-y-2">
+                  <ColorPicker label="Glow Color" value={style.glowColor} onChange={(v) => update({ glowColor: v })} />
+                  <RangeInput label={`Glow Size: ${style.glowSize}px`} min={5} max={70} value={style.glowSize} onChange={(v) => update({ glowSize: v })} />
+                </div>
+              )}
+            </div>
           </div>
         </Section>
 
@@ -781,7 +1210,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
             <div className="mt-3 space-y-3">
               <div className="grid grid-cols-7 gap-2">
                 {(["top", "center-h", "bottom", "left", "center-v", "right", "auto-bottom"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ linePosition: p })} className={cn("py-1.5 rounded-lg border text-[10px] font-medium capitalize transition-colors", style.linePosition === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400")}>{p.replace("-h", " ↔").replace("-v", " ↕").replace("auto-bottom", "Auto ↓")}</button>
+                  <button key={p} type="button" onClick={() => update({ linePosition: p })} className={cn("py-1.5 rounded-lg border text-[10px] font-medium capitalize transition-colors", style.linePosition === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400")}>{p.replace("-h", " <>").replace("-v", " ^").replace("auto-bottom", "Auto")}</button>
                 ))}
               </div>
               <Checkbox label="Auto-adjust width (match text)" checked={style.lineAutoWidth} onChange={(v) => update({ lineAutoWidth: v, lineWidth: v ? 80 : style.lineWidth })} />
@@ -795,28 +1224,48 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
           )}
         </Section>
 
-        <Section title="Text Box / Border">
-          <Checkbox label="Enable box around text" checked={style.boxEnabled} onChange={(v) => update({ boxEnabled: v })} />
-          {style.boxEnabled && (
-            <div className="grid grid-cols-4 gap-3 mt-3">
-              <ColorPicker label="Box Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
-              <RangeInput label={`Opacity: ${Math.round(style.boxOpacity * 100)}%`} min={0} max={100} value={Math.round(style.boxOpacity * 100)} onChange={(v) => update({ boxOpacity: v / 100 })} />
-              <RangeInput label={`Padding: ${style.boxPadding}px`} min={4} max={48} value={style.boxPadding} onChange={(v) => update({ boxPadding: v })} />
-              <RangeInput label={`Radius: ${style.boxRadius}px`} min={0} max={24} value={style.boxRadius} onChange={(v) => update({ boxRadius: v })} />
+        <Section title="Text Box / Outline">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+              <Checkbox label="Box around text" checked={style.boxEnabled} onChange={(v) => update({ boxEnabled: v })} />
+              {style.boxEnabled && (
+                <div className="mt-2 space-y-2">
+                  <ColorPicker label="Box Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
+                  <RangeInput label={`Opacity: ${Math.round(style.boxOpacity * 100)}%`} min={0} max={100} value={Math.round(style.boxOpacity * 100)} onChange={(v) => update({ boxOpacity: v / 100 })} />
+                  <RangeInput label={`Padding: ${style.boxPadding}px`} min={4} max={56} value={style.boxPadding} onChange={(v) => update({ boxPadding: v })} />
+                  <RangeInput label={`Radius: ${style.boxRadius}px`} min={0} max={28} value={style.boxRadius} onChange={(v) => update({ boxRadius: v })} />
+                </div>
+              )}
             </div>
-          )}
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+              <Checkbox label="Text outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} />
+              {style.strokeEnabled && (
+                <div className="mt-2 space-y-2">
+                  <ColorPicker label="Outline" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
+                  <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={10} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
+                </div>
+              )}
+            </div>
+          </div>
         </Section>
       </div>
 
       {/* Preview */}
-      <div className="col-span-4 p-4 flex flex-col items-center bg-zinc-950 overflow-y-auto">
-        <p className="text-[9px] text-zinc-600 mb-3 uppercase tracking-widest shrink-0">Live Preview</p>
+      <div className="xl:col-span-4 p-4 flex flex-col items-center bg-zinc-950 overflow-y-auto">
+        <div className="mb-3 flex w-full items-center justify-between gap-2">
+          <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+          <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{activeAnimation.label}</span>
+        </div>
         <div className="relative w-full bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: previewAspect }}>
           {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
           <HookPreviewRenderer style={style} />
           {/* Accent line */}
           {style.lineEnabled && <AccentLinePreview style={style} />}
-          <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600">{style.animation.replace("_", " ")} | {style.duration}s</p>
+          <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600">{style.animation.replace(/_/g, " ")} | {style.duration}s</p>
+        </div>
+        <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.gradientEnabled ? style.gradientTo : style.color }}>{style.gradientEnabled ? "Gradient" : style.color}</p></div>
         </div>
       </div>
     </div>
@@ -830,9 +1279,25 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
   const [newWord, setNewWord] = useState("");
   const [activeWordIdx, setActiveWordIdx] = useState(0);
   const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [presetPage, setPresetPage] = useState(1);
+  const [timingPage, setTimingPage] = useState(1);
   useGoogleFont(style.fontFamily);
   useGoogleFont(style.dualStyleEnabled ? style.highlightFontFamily : "");
   const previewAspect = aspectRatio === "16:9" ? "16/9" : aspectRatio === "1:1" ? "1/1" : "9/16";
+  const subtitleTimingOptions: Array<
+    { kind: "transition"; id: SubtitleStyle["lineTransition"]; meta: OptionMeta } |
+    { kind: "animation"; id: SubtitleStyle["animationStyle"]; meta: OptionMeta }
+  > = [
+    { kind: "transition", id: "word_pop", meta: SUBTITLE_TRANSITION_META.word_pop },
+    { kind: "transition", id: "emphasis", meta: SUBTITLE_TRANSITION_META.emphasis },
+    { kind: "transition", id: "line_reveal", meta: SUBTITLE_TRANSITION_META.line_reveal },
+    { kind: "animation", id: "pop", meta: SUBTITLE_ANIMATION_META.pop },
+    { kind: "animation", id: "fade", meta: SUBTITLE_ANIMATION_META.fade },
+    { kind: "animation", id: "slide", meta: SUBTITLE_ANIMATION_META.slide },
+    { kind: "animation", id: "none", meta: SUBTITLE_ANIMATION_META.none },
+  ];
+  const visibleSubtitlePresets = getPageItems(SUBTITLE_PRESETS, presetPage);
+  const visibleSubtitleTiming = getPageItems(subtitleTimingOptions, timingPage);
 
   // Cycle through words for animated preview
   useEffect(() => {
@@ -850,47 +1315,65 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
   }
 
   return (
-    <div className="grid grid-cols-12 h-full">
-      <div className="col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800">
+    <div className="grid grid-cols-1 xl:grid-cols-12 h-full">
+      <div className="xl:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800">
         <Section title="Quick Presets">
-          <div className="flex flex-wrap gap-1.5">
-            {SUBTITLE_PRESETS.map(p => (
-              <button key={p.id} type="button" onClick={() => { update(p.style as any); setActivePreset(p.id); }}
-                className={cn("px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors",
-                  activePreset === p.id ? "border-emerald-500 bg-emerald-500/10 text-emerald-400 font-medium" : "border-zinc-700 text-zinc-300 hover:border-emerald-500 hover:text-emerald-400"
-                )}>{p.name}</button>
+          <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
+            {visibleSubtitlePresets.map(p => (
+              <SubtitlePresetCard
+                key={p.id}
+                preset={p}
+                active={activePreset === p.id}
+                onClick={() => {
+                  onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords } as SubtitleStyle);
+                  setActivePreset(p.id);
+                }}
+              />
             ))}
+          </div>
+          <PaginationControls page={presetPage} totalItems={SUBTITLE_PRESETS.length} onPageChange={setPresetPage} label="presets" />
+        </Section>
+
+        <Section title="Animation & Timing">
+          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
+            {visibleSubtitleTiming.map((option) => (
+              <div key={`${option.kind}-${option.id}`} className="relative">
+                <MetaTile
+                  meta={option.meta}
+                  active={option.kind === "transition" ? style.lineTransition === option.id : style.animationStyle === option.id}
+                  onClick={() => option.kind === "transition" ? update({ lineTransition: option.id }) : update({ animationStyle: option.id })}
+                />
+                <span className="pointer-events-none absolute bottom-2 right-2 rounded border border-zinc-800 bg-zinc-950/80 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-zinc-500">
+                  {option.kind === "transition" ? "line" : "motion"}
+                </span>
+              </div>
+            ))}
+          </div>
+          <PaginationControls page={timingPage} totalItems={subtitleTimingOptions.length} onPageChange={setTimingPage} label="timing options" />
+          <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <RangeInput label={`Speed: ${style.animationSpeed.toFixed(1)}x`} min={5} max={20} value={Math.round(style.animationSpeed * 10)} onChange={(v) => update({ animationSpeed: v / 10 })} />
+              <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
+              <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
+            </div>
           </div>
         </Section>
 
         <Section title="Typography">
-          <div className="grid grid-cols-3 gap-3">
-            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={["Poppins", "Inter", "Montserrat", "Anton", "Bebas Neue", "Oswald", "Raleway", "Roboto", "Lato", "Nunito", "Playfair Display", "Merriweather", "Barlow Condensed", "Archivo Black", "Righteous"]} />
-            <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
-            <RangeInput label={`Size: ${style.fontSize}px`} min={20} max={52} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
-          </div>
+          <FontChips fonts={SUBTITLE_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
           <div className="grid grid-cols-3 gap-3 mt-3">
-            <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={-1} max={8} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
+            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS.filter((font) => font !== "monospace")} />
+            <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+            <RangeInput label={`Size: ${style.fontSize}px`} min={20} max={60} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={8} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
             <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
-            <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
           </div>
           <div className="flex gap-4 mt-3">
             <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v, capitalize: v ? false : style.capitalize })} />
             <Checkbox label="Capitalize" checked={style.capitalize} onChange={(v) => update({ capitalize: v, uppercase: v ? false : style.uppercase })} />
             <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
-          </div>
-          {/* Line Transition / Subtitle Style */}
-          <div className="mt-3">
-            <label className="text-[10px] text-zinc-500 mb-1.5 block">Subtitle Style</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(["word_pop", "emphasis", "line_reveal"] as const).map(lt => (
-                <button key={lt} type="button" onClick={() => update({ lineTransition: lt })}
-                  className={cn("py-1.5 rounded-lg border text-[10px] font-medium transition-colors",
-                    style.lineTransition === lt ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>
-                  {lt === "word_pop" ? "Word Pop" : lt === "emphasis" ? "Big Keyword" : "Line Reveal"}
-                </button>
-              ))}
-            </div>
           </div>
         </Section>
 
@@ -903,11 +1386,9 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
         </Section>
 
         <Section title="Highlight Effect">
-          <div className="grid grid-cols-4 gap-2 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
             {(["scale", "underline", "background", "strikethrough"] as const).map(s => (
-              <button key={s} type="button" onClick={() => update({ highlightStyle: s })}
-                className={cn("py-1.5 rounded-lg border text-[10px] font-medium capitalize transition-colors",
-                  style.highlightStyle === s ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{s}</button>
+              <MetaTile key={s} meta={HIGHLIGHT_STYLE_META[s]} active={style.highlightStyle === s} onClick={() => update({ highlightStyle: s })} />
             ))}
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -929,13 +1410,14 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             {style.dualStyleEnabled && (
               <div className="mt-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 space-y-3">
                 <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">Highlight Word Style</p>
+                <FontChips fonts={HIGHLIGHT_FONT_SUGGESTIONS} active={style.highlightFontFamily} onSelect={(highlightFontFamily) => update({ highlightFontFamily })} />
                 <div className="grid grid-cols-3 gap-3">
-                  <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={["Anton", "Poppins", "Inter", "Montserrat", "Bebas Neue", "Oswald", "Raleway", "Roboto", "Archivo Black", "Righteous", "Barlow Condensed", "Playfair Display"]} />
+                  <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={FONT_OPTIONS.filter((font) => font !== "monospace")} />
                   <SelectSmall label="Weight" value={style.highlightFontWeight} onChange={(v) => update({ highlightFontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
-                  <RangeInput label={`Size: ${style.highlightFontSize}px`} min={24} max={56} value={style.highlightFontSize} onChange={(v) => update({ highlightFontSize: v })} />
+                  <RangeInput label={`Size: ${style.highlightFontSize}px`} min={24} max={64} value={style.highlightFontSize} onChange={(v) => update({ highlightFontSize: v })} />
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <RangeInput label={`Spacing: ${style.highlightLetterSpacing}px`} min={-1} max={8} value={style.highlightLetterSpacing} onChange={(v) => update({ highlightLetterSpacing: v })} />
+                  <RangeInput label={`Spacing: ${style.highlightLetterSpacing}px`} min={0} max={8} value={style.highlightLetterSpacing} onChange={(v) => update({ highlightLetterSpacing: v })} />
                   <div className="flex flex-col justify-end"><Checkbox label="UPPERCASE" checked={style.highlightUppercase} onChange={(v) => update({ highlightUppercase: v })} /></div>
                   <div className="flex flex-col justify-end"><Checkbox label="Italic" checked={style.highlightItalic} onChange={(v) => update({ highlightItalic: v })} /></div>
                 </div>
@@ -994,16 +1476,6 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             ))}
           </div>
           <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
-          <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={16} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
-        </Section>
-
-        <Section title="Animation">
-          <div className="grid grid-cols-4 gap-2 mb-3">
-            {(["pop", "fade", "slide", "none"] as const).map(a => (
-              <button key={a} type="button" onClick={() => update({ animationStyle: a })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.animationStyle === a ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{a}</button>
-            ))}
-          </div>
-          <RangeInput label={`Speed: ${style.animationSpeed.toFixed(1)}x`} min={5} max={20} value={Math.round(style.animationSpeed * 10)} onChange={(v) => update({ animationSpeed: v / 10 })} />
         </Section>
 
         <Section title="Highlight Words (kata penting)">
@@ -1025,8 +1497,11 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
       </div>
 
       {/* Preview */}
-      <div className="col-span-4 p-4 flex flex-col items-center bg-zinc-950 overflow-y-auto">
-        <p className="text-[9px] text-zinc-600 mb-3 uppercase tracking-widest shrink-0">Live Preview</p>
+      <div className="xl:col-span-4 p-4 flex flex-col items-center bg-zinc-950 overflow-y-auto">
+        <div className="mb-3 flex w-full items-center justify-between gap-2">
+          <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+          <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
+        </div>
         <div className="relative w-full bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: previewAspect }}>
           {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
           <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/30 to-zinc-900/50" />
@@ -1047,6 +1522,32 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                   fontWeight: 900,
                   textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined,
                 }}>Animasi</span>
+              </div>
+            ) : style.lineTransition === "line_reveal" ? (
+              <div className={cn("overflow-hidden", getSubAnimationClass(style.animationStyle))} style={{
+                backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent",
+                padding: style.bgPadding * 0.42,
+                borderRadius: style.bgRadius,
+                borderLeft: `3px solid ${style.highlightColor}`,
+              }}>
+                <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
+                <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
+                  {["ini", "kata", "penting", "banget"].map((w, i) => {
+                    const isHighlight = i === activeWordIdx;
+                    return (
+                      <span key={w} style={{
+                        color: isHighlight ? style.highlightColor : style.color,
+                        fontSize: Math.max(style.fontSize * 0.35, 10),
+                        fontFamily: `'${style.fontFamily}', sans-serif`,
+                        fontWeight: isHighlight ? 900 : Number(style.fontWeight),
+                        letterSpacing: style.letterSpacing,
+                        textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none",
+                        WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined,
+                        textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined,
+                      }}>{w}</span>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
               <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
@@ -1086,6 +1587,10 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           </div>
           <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600">{style.lineTransition === "emphasis" ? "emphasis" : style.animationStyle} | {style.position}</p>
         </div>
+        <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Highlight</span><p className="truncate" style={{ color: style.highlightColor }}>{style.highlightColor}</p></div>
+        </div>
       </div>
     </div>
   );
@@ -1106,7 +1611,27 @@ function getHookAnimationClass(animation: string): string {
     case "cinematic_reveal": return "animate-[cinematicRevealText_3.5s_ease-out_infinite]";
     case "danger_bold": return "animate-[dangerPulse_1.2s_ease-in-out_infinite]";
     case "bold_slam": return "animate-[boldSlamPreview_2s_ease-out_infinite]";
+    case "podcast_lower_third": return "animate-[podcastLowerPreview_2.8s_ease-out_infinite]";
+    case "quote_card": return "animate-[quoteCardPreview_3s_ease-out_infinite]";
+    case "waveform_pulse": return "animate-[waveformTextPreview_1.1s_ease-in-out_infinite]";
+    case "breaking_tape": return "animate-[breakingTapePreview_2.5s_ease-out_infinite]";
+    case "mic_drop": return "animate-[micDropPreview_2.5s_cubic-bezier(.2,.85,.25,1)_infinite]";
     default: return "";
+  }
+}
+
+function getHookPreviewSample(animation: string): string {
+  switch (animation) {
+    case "podcast_lower_third": return "bagian ini bikin hostnya diam";
+    case "quote_card": return "kalimat ini mengubah cara lihat topiknya";
+    case "waveform_pulse": return "dengerin 5 detik ini dulu";
+    case "breaking_tape": return "opini ini bakal kebelah dua";
+    case "mic_drop": return "ini jawaban paling brutalnya";
+    case "cinematic_reveal": return "mereka gak cerita bagian ini";
+    case "danger_bold": return "jangan skip bagian ini";
+    case "shake_neon": return "ini yang bikin rame";
+    case "glitch_rgb": return "ada yang janggal di sini";
+    default: return "hook podcast yang bikin berhenti scroll";
   }
 }
 

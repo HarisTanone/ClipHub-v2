@@ -39,10 +39,10 @@ export function ClipViewer() {
   // Style editor modal (same as NewJob) — load from localStorage
   const [styleModalOpen, setStyleModalOpen] = useState(false);
   const [hookStyleConfig, setHookStyleConfig] = useState<HookStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_hook_style"); return s ? JSON.parse(s) : DEFAULT_HOOK_STYLE; } catch { return DEFAULT_HOOK_STYLE; }
+    try { const s = localStorage.getItem("autocliper_hook_style"); return s ? { ...DEFAULT_HOOK_STYLE, ...JSON.parse(s) } : DEFAULT_HOOK_STYLE; } catch { return DEFAULT_HOOK_STYLE; }
   });
   const [subtitleStyleConfig, setSubtitleStyleConfig] = useState<SubtitleStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? JSON.parse(s) : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
+    try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? { ...DEFAULT_SUBTITLE_STYLE, ...JSON.parse(s) } : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
   });
   const [isRestyling, setIsRestyling] = useState(false);
 
