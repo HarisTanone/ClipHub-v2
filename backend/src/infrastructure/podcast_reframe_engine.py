@@ -198,9 +198,17 @@ class PodcastReframeEngine(IReframeEngine):
             except Exception as e:
                 logger.warning(f"podcast_reframe: speaker detection failed (non-fatal): {e}")
 
-        # Step 3: Layout decision (speaker-aware, static per clip)
-        # Note: Dynamic segment switching (per-second single↔grid) was removed
-        # because FFmpeg trim+concat causes audio desync. Static layout is reliable.
+        # Step 3: Dynamic Panning — single FFmpeg pass with smooth crop tracking
+        # Builds a time-based crop X expression that follows the active face.
+        # No concat, no trim, no desync. Audio always stream-copied.
+        result = self._render_dynamic_panning(
+            video_path, output_path, width, height, fps,
+            tracked_data, speaker_result,
+        )
+        if result:
+            return result
+
+        # Step 4: Fallback to static layout (if panning fails)
         decision = self._decide_layout_v2(
             tracked_data=tracked_data,
             speaker_result=speaker_result,
@@ -534,6 +542,232 @@ class PodcastReframeEngine(IReframeEngine):
             crop_x = int(np.median(all_x))
 
         return {"layout": "single", "crop_x": crop_x, "person_count": person_count}
+
+    # ─── Render: Dynamic Panning (Single Pass, Zero Desync) ─────────────
+
+    PAN_TRANSITION_SEC = 1.0   # Smooth transition duration (1s = cinematic pan)
+    PAN_DEAD_ZONE_PX = 150     # Ignore movements smaller than this (reduce jitter)
+    PAN_HOLD_MIN_SEC = 3.0     # Hold position for at least 3s before next pan
+
+    def _render_dynamic_panning(
+        self,
+        video_path: str,
+        output_path: str,
+        width: int,
+        height: int,
+        fps: float,
+        tracked_data: dict,
+        speaker_result: Optional[ActiveSpeakerResult],
+    ) -> Optional[dict]:
+        """Render with dynamic crop panning — smooth tracking of active face.
+
+        Single FFmpeg command, NO concat, audio stream-copied = zero desync.
+
+        Approach:
+          1. Build per-second target crop X from face detections
+          2. Generate FFmpeg crop expression with time-based interpolation
+          3. Crop smoothly pans from face to face as they appear
+
+        Result: camera "follows" the speaker, smooth panning transitions.
+        """
+        per_frame_faces = tracked_data["per_frame_faces"]
+        if not per_frame_faces or len(per_frame_faces) < 3:
+            return None
+
+        crop_w = min(int(height * 9 / 16), width)
+        max_crop_x = width - crop_w
+
+        # 1. Build target crop X per second
+        # For each sample, determine where crop should be centered
+        keyframes: List[Tuple[float, int]] = []  # (time_sec, target_crop_x)
+
+        for i, frame_faces in enumerate(per_frame_faces):
+            t = i * self.SAMPLE_INTERVAL_SEC
+
+            if not frame_faces:
+                # No face → hold previous position
+                if keyframes:
+                    keyframes.append((t, keyframes[-1][1]))
+                continue
+
+            # NMS already applied during detection, so frame_faces is clean
+            if len(frame_faces) == 1:
+                # Single face → crop centered on it
+                cx = int(frame_faces[0])
+                crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
+                keyframes.append((t, crop_x))
+            else:
+                # Multiple faces → center on the most active one
+                # Use speaker detection if available, otherwise pick dominant cluster
+                midpoint = width / 2.0
+
+                if speaker_result and speaker_result.per_frame_speaker:
+                    # Find which speaker is active at this time
+                    # Map frame time to nearest speaker assignment
+                    frame_idx_approx = int(t * fps)
+                    # Find closest frame in per_frame_speaker
+                    closest_frame = min(
+                        speaker_result.per_frame_speaker.keys(),
+                        key=lambda f: abs(f - frame_idx_approx),
+                        default=None,
+                    )
+                    if closest_frame is not None:
+                        active_speaker = speaker_result.per_frame_speaker[closest_frame]
+                        # Speaker 0 = left, 1 = right
+                        if active_speaker == 0:
+                            target_faces = [x for x in frame_faces if x < midpoint]
+                        else:
+                            target_faces = [x for x in frame_faces if x >= midpoint]
+                        if target_faces:
+                            cx = int(np.median(target_faces))
+                        else:
+                            cx = int(np.median(frame_faces))
+                    else:
+                        cx = int(np.median(frame_faces))
+                else:
+                    # No speaker data — center on the face closest to last position
+                    if keyframes:
+                        last_center = keyframes[-1][1] + crop_w // 2
+                        cx = int(min(frame_faces, key=lambda x: abs(x - last_center)))
+                    else:
+                        cx = int(np.median(frame_faces))
+
+                crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
+                keyframes.append((t, crop_x))
+
+        if not keyframes:
+            return None
+
+        # Stabilize: apply dead zone + hold minimum to reduce jitter
+        # Only create a new keyframe if:
+        #   1. Movement > PAN_DEAD_ZONE_PX (ignore small jitter)
+        #   2. Time since last pan > PAN_HOLD_MIN_SEC (camera stays put)
+        stabilized: List[Tuple[float, int]] = [keyframes[0]]
+        for t, x in keyframes[1:]:
+            last_t, last_x = stabilized[-1]
+            movement = abs(x - last_x)
+            time_since_last = t - last_t
+
+            # Only pan if movement is significant AND enough time has passed
+            if movement >= self.PAN_DEAD_ZONE_PX and time_since_last >= self.PAN_HOLD_MIN_SEC:
+                stabilized.append((t, x))
+
+        # Ensure last position is captured for full duration
+        if stabilized[-1][0] < keyframes[-1][0]:
+            stabilized.append(keyframes[-1])
+
+        # Limit to max 15 keyframes (FFmpeg expression nesting limit)
+        if len(stabilized) > 15:
+            step = len(stabilized) // 13
+            reduced = [stabilized[0]]
+            for i in range(step, len(stabilized) - 1, step):
+                reduced.append(stabilized[i])
+            reduced.append(stabilized[-1])
+            stabilized = reduced
+
+        logger.info(
+            f"podcast_reframe: panning keyframes: {len(keyframes)} raw → {len(stabilized)} stabilized "
+            f"(dead_zone={self.PAN_DEAD_ZONE_PX}px, hold={self.PAN_HOLD_MIN_SEC}s)"
+        )
+
+        # 2. Build FFmpeg crop X expression
+        if len(stabilized) <= 1 or all(s[1] == stabilized[0][1] for s in stabilized):
+            # No movement — static crop
+            crop_x_expr = str(stabilized[0][1])
+            logger.info(f"podcast_reframe: static crop at x={stabilized[0][1]} (no significant panning)")
+        else:
+            crop_x_expr = self._build_panning_expression(stabilized, self.PAN_TRANSITION_SEC)
+            for i, (t, x) in enumerate(stabilized):
+                logger.info(f"  pan[{i}] t={t:.1f}s → x={x}")
+
+        # 3. Render with single FFmpeg command
+        vf = (
+            f"crop={crop_w}:{height}:{crop_x_expr}:0,"
+            f"scale=1080:1920,format=yuv420p,setsar=1"
+        )
+
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-vf", vf,
+            *get_video_encoder_args("medium"),
+            "-c:a", "copy",  # NEVER re-encode audio → zero desync
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+        logger.info(
+            f"podcast_reframe: DYNAMIC PANNING ({len(deduped)} keyframes, "
+            f"crop_w={crop_w}, transitions={len(deduped)-1})"
+        )
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            logger.info(f"podcast_reframe: dynamic panning OK")
+            return {
+                "output_path": output_path,
+                "person_count": tracked_data["person_count"],
+                "method": "podcast_dynamic_panning",
+                "keyframes": len(deduped),
+            }
+
+        if result.stderr:
+            logger.warning(f"podcast_reframe: dynamic panning failed: {result.stderr[-300:]}")
+        return None
+
+    def _build_panning_expression(
+        self, keyframes: List[Tuple[float, int]], transition_sec: float
+    ) -> str:
+        """Build FFmpeg time-based crop X expression with smooth interpolation.
+
+        Generates nested if/lerp expressions:
+          if(lt(t,T1), X0 + (X1-X0)*smooth, if(lt(t,T2), X1 + ...))
+
+        Uses linear interpolation during transition_sec, holds otherwise.
+        """
+        if len(keyframes) <= 1:
+            return str(keyframes[0][1] if keyframes else 0)
+
+        # Build from last to first (nested if structure)
+        # Format: if(lt(t, transition_end), lerp(prev_x, this_x, progress), next_expr)
+        expr = str(keyframes[-1][1])  # Final position (innermost)
+
+        for i in range(len(keyframes) - 2, -1, -1):
+            t_current, x_current = keyframes[i]
+            t_next, x_next = keyframes[i + 1]
+
+            # Transition starts at t_next - transition_sec, ends at t_next
+            t_trans_start = max(t_current, t_next - transition_sec)
+            t_trans_end = t_next
+
+            if x_current == x_next:
+                # No movement — just hold
+                continue
+
+            # During hold (before transition): use x_current
+            # During transition: linear interpolation from x_current to x_next
+            # After transition: handled by next level of nesting
+
+            # lerp formula: x_current + (x_next - x_current) * ((t - t_trans_start) / duration)
+            duration = t_trans_end - t_trans_start
+            if duration <= 0:
+                duration = 0.1
+
+            lerp = (
+                f"{x_current}+({x_next}-{x_current})"
+                f"*clip((t-{t_trans_start:.2f})/{duration:.2f}\\,0\\,1)"
+            )
+
+            # if t < t_trans_start → hold at x_current
+            # if t < t_trans_end → lerp
+            # else → next expression
+            expr = (
+                f"if(lt(t\\,{t_trans_start:.2f})\\,{x_current}\\,"
+                f"if(lt(t\\,{t_trans_end:.2f})\\,{lerp}\\,"
+                f"{expr}))"
+            )
+
+        return f"'{expr}'"
 
     # ─── Render: Single Crop ──────────────────────────────────────────────
 
