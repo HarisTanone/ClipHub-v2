@@ -188,12 +188,16 @@ class PodcastReframeEngine(IReframeEngine):
         speaker_result: Optional[ActiveSpeakerResult] = None
         if person_count >= 2:
             try:
+                # Get VAD segments for audio-gated speaker detection
+                vad_segments = self._get_vad_segments(video_path)
+
                 speaker_result = self._speaker_detector.detect(
                     video_path=video_path,
                     fps=fps,
                     total_frames=total_frames,
                     width=width,
                     height=height,
+                    vad_segments=vad_segments,
                 )
             except Exception as e:
                 logger.warning(f"podcast_reframe: speaker detection failed (non-fatal): {e}")
@@ -975,6 +979,23 @@ class PodcastReframeEngine(IReframeEngine):
             # else: skip — too close to previous, same person
 
         return unique
+
+    def _get_vad_segments(self, video_path: str) -> Optional[List[Dict]]:
+        """Extract speech segments using Silero VAD (if available).
+
+        Returns list of {'start': float, 'end': float} for speech regions,
+        or None if VAD unavailable (fallback: assume continuous speech).
+        """
+        try:
+            from src.infrastructure.silero_vad import SileroVADProcessor
+            vad = SileroVADProcessor()
+            segments = vad.get_speech_timestamps(video_path)
+            if segments:
+                logger.info(f"podcast_reframe: VAD found {len(segments)} speech segments")
+                return segments
+        except Exception as e:
+            logger.debug(f"podcast_reframe: VAD not available ({e}), using continuous speech assumption")
+        return None
 
     def _clamp_x(self, face_x: int, crop_w: int, frame_w: int) -> int:
         """Clamp crop X so it stays within frame bounds."""

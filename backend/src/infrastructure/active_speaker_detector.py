@@ -31,6 +31,7 @@ class FaceSpeechFrame:
     """Speech data for a single face in a single frame."""
     face_id: int
     lip_aperture: float  # normalized lip opening (0 = closed, 1 = wide open)
+    head_motion: float   # normalized head movement (0 = still, 1 = moving fast)
     bbox_x: float        # face center X in pixels
     bbox_y: float        # face center Y in pixels
 
@@ -74,6 +75,11 @@ class ActiveSpeakerDetector:
     HYSTERESIS_SEC = 0.3           # Hold speaker for this long before switching
     MIN_LIP_VARIANCE = 0.002      # Below this → not speaking (both silent)
     DOMINANCE_THRESHOLD = 0.75    # If one speaker talks ≥75% → single crop candidate
+
+    # Multimodal scoring weights
+    LIP_WEIGHT = 0.40              # Lip aperture variance contribution
+    HEAD_WEIGHT = 0.60             # Head motion contribution
+    HEAD_MOTION_NORMALIZE = 20.0   # Head motion in pixels normalized to 0-1 (20px = max)
 
     FACE_MESH_CONFIDENCE = 0.5
     MAX_FACES = 2                  # Optimize for podcast (2 people max)
@@ -152,8 +158,12 @@ class ActiveSpeakerDetector:
         height: int,
         sample_interval_sec: float = 0.2,
         max_samples: int = 150,
+        vad_segments: Optional[List[Dict]] = None,
     ) -> Optional[ActiveSpeakerResult]:
-        """Run active speaker detection on video.
+        """Run multimodal active speaker detection on video.
+
+        Uses: lip aperture (40%) + head motion (60%), gated by audio VAD.
+        When audio is silent (no VAD activity), no one is scored as speaking.
 
         Args:
             video_path: Path to video file
@@ -161,11 +171,10 @@ class ActiveSpeakerDetector:
             total_frames: Total frame count
             width: Frame width
             height: Frame height
-            sample_interval_sec: How often to sample (0.2s = 5 samples/sec for good lip tracking)
+            sample_interval_sec: How often to sample (0.2s = 5 samples/sec)
             max_samples: Maximum frames to process
-
-        Returns:
-            ActiveSpeakerResult or None if detection fails
+            vad_segments: List of {'start': float, 'end': float} from Silero VAD.
+                          If None, assumes continuous speech (fallback).
         """
         if not self._load_model():
             return None
@@ -181,10 +190,19 @@ class ActiveSpeakerDetector:
         sample_indices = list(range(0, total_frames, sample_interval))[:max_samples]
 
         # Collect per-frame lip data
-        # Key: frame_idx → List[FaceSpeechFrame]
         frame_data: List[Tuple[int, List[FaceSpeechFrame]]] = []
 
+        # State for head motion tracking per face position (left/right)
+        prev_nose: Dict[int, Tuple[float, float]] = {}  # face_id → (x, y) in pixels
+
         for frame_idx in sample_indices:
+            t = frame_idx / fps
+
+            # VAD gate: if audio is silent at this time, skip (no one is speaking)
+            if vad_segments and not self._is_audio_active(t, vad_segments):
+                frame_data.append((frame_idx, []))
+                continue
+
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret:
@@ -213,9 +231,19 @@ class ActiveSpeakerDetector:
                         nose = face_landmarks.landmark[1]
                         cx = nose.x * width
                         cy = nose.y * height
+
+                        # Head motion: euclidean distance from previous nose position
+                        head_motion = 0.0
+                        if face_idx in prev_nose:
+                            dx = cx - prev_nose[face_idx][0]
+                            dy = cy - prev_nose[face_idx][1]
+                            head_motion = min((dx**2 + dy**2) ** 0.5 / self.HEAD_MOTION_NORMALIZE, 1.0)
+                        prev_nose[face_idx] = (cx, cy)
+
                         faces_in_frame.append(FaceSpeechFrame(
                             face_id=face_idx,
                             lip_aperture=lip_aperture,
+                            head_motion=head_motion,
                             bbox_x=cx,
                             bbox_y=cy,
                         ))
@@ -227,12 +255,21 @@ class ActiveSpeakerDetector:
                 if result.face_landmarks:
                     for face_idx, landmarks in enumerate(result.face_landmarks):
                         lip_aperture = self._compute_lip_aperture_task(landmarks, proc_frame.shape)
-                        nose = landmarks[1]  # NormalizedLandmark
+                        nose = landmarks[1]
                         cx = nose.x * width
                         cy = nose.y * height
+
+                        head_motion = 0.0
+                        if face_idx in prev_nose:
+                            dx = cx - prev_nose[face_idx][0]
+                            dy = cy - prev_nose[face_idx][1]
+                            head_motion = min((dx**2 + dy**2) ** 0.5 / self.HEAD_MOTION_NORMALIZE, 1.0)
+                        prev_nose[face_idx] = (cx, cy)
+
                         faces_in_frame.append(FaceSpeechFrame(
                             face_id=face_idx,
                             lip_aperture=lip_aperture,
+                            head_motion=head_motion,
                             bbox_x=cx,
                             bbox_y=cy,
                         ))
@@ -358,59 +395,71 @@ class ActiveSpeakerDetector:
         fps: float,
         sample_interval_sec: float,
     ) -> Dict[int, int]:
-        """Compute active speaker per frame using sliding window variance.
+        """Compute active speaker per frame using multimodal sliding window scoring.
+
+        Multimodal score = lip_aperture_variance * 0.4 + head_motion_mean * 0.6
+        Head motion catches speakers whose mouth is covered but head is nodding/moving.
 
         Returns: Dict[frame_idx, active_speaker_face_id]
         """
         window_size = max(3, int(self.SLIDING_WINDOW_SEC / sample_interval_sec))
 
-        # Build time series of lip apertures per face ID
-        face_apertures: Dict[int, List[Tuple[int, float]]] = {}  # face_id → [(frame_idx, aperture)]
+        # Build time series per face ID
+        face_data_series: Dict[int, List[Tuple[int, float, float]]] = {}
+        # face_id → [(frame_idx, lip_aperture, head_motion)]
 
         for frame_idx, faces in frame_data:
             for face in faces:
-                if face.face_id not in face_apertures:
-                    face_apertures[face.face_id] = []
-                face_apertures[face.face_id].append((frame_idx, face.lip_aperture))
+                if face.face_id not in face_data_series:
+                    face_data_series[face.face_id] = []
+                face_data_series[face.face_id].append(
+                    (frame_idx, face.lip_aperture, face.head_motion)
+                )
 
-        if not face_apertures:
+        if not face_data_series:
             return {}
 
-        # For each sample point, compute variance in sliding window per face
+        # For each sample point, compute multimodal score in sliding window per face
         per_frame_speaker: Dict[int, int] = {}
         all_frame_indices = [fi for fi, _ in frame_data]
 
         for i, (frame_idx, faces) in enumerate(frame_data):
-            # Window: [i - window_size//2, i + window_size//2]
             win_start = max(0, i - window_size // 2)
             win_end = min(len(frame_data), i + window_size // 2 + 1)
 
             best_face_id = -1
-            best_variance = -1.0
+            best_score = -1.0
 
-            for face_id, aperture_series in face_apertures.items():
-                # Get apertures within window time range
+            for face_id, series in face_data_series.items():
                 window_frame_start = all_frame_indices[win_start]
                 window_frame_end = all_frame_indices[min(win_end - 1, len(all_frame_indices) - 1)]
 
-                window_apertures = [
-                    ap for fi, ap in aperture_series
+                window_data = [
+                    (lip, head) for fi, lip, head in series
                     if window_frame_start <= fi <= window_frame_end
                 ]
 
-                if len(window_apertures) < 2:
+                if len(window_data) < 2:
                     continue
 
-                variance = float(np.var(window_apertures))
+                # Lip component: variance of aperture (higher variance = talking)
+                lip_values = [d[0] for d in window_data]
+                lip_variance = float(np.var(lip_values))
 
-                if variance > best_variance:
-                    best_variance = variance
+                # Head component: mean of head motion (moving head = engaged/talking)
+                head_values = [d[1] for d in window_data]
+                head_mean = float(np.mean(head_values))
+
+                # Multimodal score
+                score = lip_variance * self.LIP_WEIGHT + head_mean * self.HEAD_WEIGHT
+
+                if score > best_score:
+                    best_score = score
                     best_face_id = face_id
 
-            # Only assign if variance exceeds minimum (someone is actually talking)
-            if best_variance >= self.MIN_LIP_VARIANCE and best_face_id >= 0:
+            # Only assign if score exceeds minimum threshold
+            if best_score >= self.MIN_LIP_VARIANCE and best_face_id >= 0:
                 per_frame_speaker[frame_idx] = best_face_id
-            # else: no one is speaking in this window (both silent)
 
         return per_frame_speaker
 
@@ -473,3 +522,20 @@ class ActiveSpeakerDetector:
         ))
 
         return segments
+
+    def _is_audio_active(self, t: float, vad_segments: List[Dict]) -> bool:
+        """Check if timestamp t falls within any VAD speech segment.
+
+        Args:
+            t: Time in seconds
+            vad_segments: List of {'start': float, 'end': float}
+
+        Returns:
+            True if speech is happening at time t
+        """
+        if not vad_segments:
+            return True  # No VAD data = assume continuous speech (fallback)
+        for seg in vad_segments:
+            if seg.get('start', 0) <= t <= seg.get('end', 0):
+                return True
+        return False
