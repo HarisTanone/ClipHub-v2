@@ -718,54 +718,25 @@ class PodcastReframeEngine(IReframeEngine):
     def _build_panning_expression(
         self, keyframes: List[Tuple[float, int]], transition_sec: float
     ) -> str:
-        """Build FFmpeg time-based crop X expression with smooth interpolation.
+        """Build FFmpeg time-based crop X expression with instant cut.
 
-        Generates nested if/lerp expressions:
-          if(lt(t,T1), X0 + (X1-X0)*smooth, if(lt(t,T2), X1 + ...))
+        Generates nested if expressions — no slide/lerp, just snap to new position:
+          if(lt(t, T1), X0, if(lt(t, T2), X1, X2))
 
-        Uses linear interpolation during transition_sec, holds otherwise.
+        Camera holds at position until next keyframe, then instantly cuts to new X.
         """
         if len(keyframes) <= 1:
             return str(keyframes[0][1] if keyframes else 0)
 
         # Build from last to first (nested if structure)
-        # Format: if(lt(t, transition_end), lerp(prev_x, this_x, progress), next_expr)
         expr = str(keyframes[-1][1])  # Final position (innermost)
 
         for i in range(len(keyframes) - 2, -1, -1):
-            t_current, x_current = keyframes[i]
-            t_next, x_next = keyframes[i + 1]
+            _, x_current = keyframes[i]
+            t_next, _ = keyframes[i + 1]
 
-            # Transition starts at t_next - transition_sec, ends at t_next
-            t_trans_start = max(t_current, t_next - transition_sec)
-            t_trans_end = t_next
-
-            if x_current == x_next:
-                # No movement — just hold
-                continue
-
-            # During hold (before transition): use x_current
-            # During transition: linear interpolation from x_current to x_next
-            # After transition: handled by next level of nesting
-
-            # lerp formula: x_current + (x_next - x_current) * ((t - t_trans_start) / duration)
-            duration = t_trans_end - t_trans_start
-            if duration <= 0:
-                duration = 0.1
-
-            lerp = (
-                f"{x_current}+({x_next}-{x_current})"
-                f"*clip((t-{t_trans_start:.2f})/{duration:.2f}\\,0\\,1)"
-            )
-
-            # if t < t_trans_start → hold at x_current
-            # if t < t_trans_end → lerp
-            # else → next expression
-            expr = (
-                f"if(lt(t\\,{t_trans_start:.2f})\\,{x_current}\\,"
-                f"if(lt(t\\,{t_trans_end:.2f})\\,{lerp}\\,"
-                f"{expr}))"
-            )
+            # Simple: if t < t_next → use x_current, else → next expression
+            expr = f"if(lt(t\\,{t_next:.2f})\\,{x_current}\\,{expr})"
 
         return f"'{expr}'"
 
