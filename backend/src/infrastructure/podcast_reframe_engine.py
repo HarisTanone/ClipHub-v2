@@ -52,8 +52,8 @@ class FaceDetection:
 class PodcastReframeEngine(IReframeEngine):
     """Speaker-aware face-based reframing with person tracking and lip analysis."""
 
-    SAMPLE_INTERVAL_SEC = 1.0
-    MAX_SAMPLES = 60
+    SAMPLE_INTERVAL_SEC = 0.2  # 5fps sampling (5× more precise than 1fps)
+    MAX_SAMPLES = 300  # 5fps × 60s = 300 samples per clip
     FACE_CONFIDENCE = 0.55
     MIN_FACE_SIZE_RATIO = 0.05
     MAX_FACE_SIZE_RATIO = 0.50
@@ -670,10 +670,10 @@ class PodcastReframeEngine(IReframeEngine):
 
     # ─── Render: Dynamic Panning (Single Pass, Zero Desync) ─────────────
 
-    PAN_DEAD_ZONE_PX = 250     # Ignore movements < 250px (13% of 1920 — reduce bouncing)
-    PAN_HOLD_MIN_SEC = 5.0     # Hold position for 5s minimum before next pan
+    PAN_DEAD_ZONE_PX = 150     # Reduced from 250 — denser sampling allows tighter tracking
+    PAN_HOLD_MIN_SEC = 2.0     # Reduced from 5.0 — respond faster to speaker changes
     PAN_CLUSTER_THRESHOLD = 200  # If all detections within 200px spread → lock position
-    PAN_MAX_KEYFRAMES = 10     # Maximum panning movements per clip
+    PAN_MAX_KEYFRAMES = 25     # Increased for denser sampling (more movement allowed)
     PAN_TRANSITION_SEC = 0.4       # Smooth transition seconds (lerp between positions)
 
     def _render_dynamic_panning(
