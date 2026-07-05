@@ -33,6 +33,9 @@ from src.domain.interfaces import IReframeEngine
 from src.infrastructure.gpu_encoder import get_video_encoder_args
 from src.infrastructure.active_speaker_detector import ActiveSpeakerDetector, ActiveSpeakerResult
 from src.infrastructure.person_tracker import SimpleIoUTracker, BBox, TrackedDetection
+from src.infrastructure.speaker_diarizer import SpeakerDiarizer, DiarizationResult
+from src.infrastructure.speaker_face_mapper import SpeakerFaceMapper, MappingResult
+from src.infrastructure.diarization_result_builder import DiarizationResultBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,12 @@ class PodcastReframeEngine(IReframeEngine):
         self._use_legacy_api = False
         self._speaker_detector = ActiveSpeakerDetector()
         self._tracker: Optional[SimpleIoUTracker] = None
+
+        # Diarization components (lazy-init)
+        self._hf_token = hf_token
+        self._diarizer: Optional[SpeakerDiarizer] = None
+        self._face_mapper: Optional[SpeakerFaceMapper] = None
+        self._result_builder = DiarizationResultBuilder()
 
     def _load_face_detector(self) -> bool:
         if self._face_detector is not None:
@@ -187,20 +196,25 @@ class PodcastReframeEngine(IReframeEngine):
         # Step 2: Active Speaker Detection (only if 2+ people)
         speaker_result: Optional[ActiveSpeakerResult] = None
         if person_count >= 2:
-            try:
-                # Get VAD segments for audio-gated speaker detection
-                vad_segments = self._get_vad_segments(video_path)
+            # 2a. Try PyAnnote diarization FIRST (more accurate for speaker identity)
+            speaker_result = self._try_diarization(
+                video_path, tracked_data, fps, total_frames
+            )
 
-                speaker_result = self._speaker_detector.detect(
-                    video_path=video_path,
-                    fps=fps,
-                    total_frames=total_frames,
-                    width=width,
-                    height=height,
-                    vad_segments=vad_segments,
-                )
-            except Exception as e:
-                logger.warning(f"podcast_reframe: speaker detection failed (non-fatal): {e}")
+            # 2b. Fallback: lip+head+VAD (existing method)
+            if speaker_result is None:
+                try:
+                    vad_segments = self._get_vad_segments(video_path)
+                    speaker_result = self._speaker_detector.detect(
+                        video_path=video_path,
+                        fps=fps,
+                        total_frames=total_frames,
+                        width=width,
+                        height=height,
+                        vad_segments=vad_segments,
+                    )
+                except Exception as e:
+                    logger.warning(f"podcast_reframe: lip+head fallback failed (non-fatal): {e}")
 
         # Step 3: Dynamic Panning — single FFmpeg pass with smooth crop tracking
         # Builds a time-based crop X expression that follows the active face.
@@ -228,6 +242,111 @@ class PodcastReframeEngine(IReframeEngine):
             return self._render_double_grid(video_path, output_path, width, height, decision)
         else:
             return self._render_single_crop(video_path, output_path, width, height, decision)
+
+    # ─── Diarization ──────────────────────────────────────────────────────
+
+    def _init_diarizer(self) -> Optional[SpeakerDiarizer]:
+        """Lazy-init diarizer (only if enabled and token available)."""
+        if self._diarizer is not None:
+            return self._diarizer
+
+        from src.config import settings
+
+        if not settings.DIARIZATION_ENABLED:
+            return None
+        
+        hf_token = self._hf_token or settings.HF_TOKEN
+        if not hf_token:
+            logger.info("podcast_reframe: diarization skipped (no HF_TOKEN)")
+            return None
+
+        self._diarizer = SpeakerDiarizer(
+            hf_token=hf_token,
+            model_name=settings.DIARIZATION_MODEL,
+            timeout_sec=settings.DIARIZATION_TIMEOUT_SEC,
+            min_speakers=settings.DIARIZATION_MIN_SPEAKERS,
+            max_speakers=settings.DIARIZATION_MAX_SPEAKERS,
+        )
+        self._face_mapper = SpeakerFaceMapper(
+            confidence_threshold=settings.DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD,
+        )
+        return self._diarizer
+
+    def _try_diarization(
+        self,
+        video_path: str,
+        tracked_data: dict,
+        fps: float,
+        total_frames: int,
+    ) -> Optional[ActiveSpeakerResult]:
+        """Attempt PyAnnote diarization + face mapping.
+
+        Returns ActiveSpeakerResult if successful, None to trigger fallback.
+        Reuses existing per_frame_tracked data — no additional video processing.
+        """
+        diarizer = self._init_diarizer()
+        if diarizer is None or not diarizer.is_available:
+            return None
+
+        try:
+            # Run diarization synchronously (already in thread via _pipeline)
+            import asyncio
+
+            # Create new event loop since we're in a thread
+            loop = asyncio.new_event_loop()
+            try:
+                diarization_result = loop.run_until_complete(
+                    diarizer.diarize(video_path)
+                )
+            finally:
+                loop.close()
+
+            if diarization_result is None:
+                logger.info("podcast_reframe: diarization returned None → fallback to lip+head")
+                return None
+
+            logger.info(
+                f"podcast_reframe: diarization OK — {diarization_result.speaker_count} speakers, "
+                f"{len(diarization_result.segments)} segments"
+            )
+
+            # Build speaker-face mapping using EXISTING tracker data
+            sample_timestamps = [
+                i * self.SAMPLE_INTERVAL_SEC
+                for i in range(len(tracked_data["per_frame_tracked"]))
+            ]
+
+            mapping_result = self._face_mapper.build_mapping(
+                diarization_segments=diarization_result.segments,
+                per_frame_tracked=tracked_data["per_frame_tracked"],
+                sample_timestamps=sample_timestamps,
+                stable_positions=tracked_data["stable_positions"],
+            )
+
+            # Check mapping reliability
+            if not mapping_result.is_reliable:
+                logger.info(
+                    f"podcast_reframe: mapping unreliable "
+                    f"(confidence={mapping_result.overall_confidence:.2f}) → fallback to lip+head"
+                )
+                return None
+
+            # Convert to ActiveSpeakerResult (same interface as lip-based)
+            speaker_result = self._result_builder.build(
+                diarization=diarization_result,
+                mapping=mapping_result,
+                fps=fps,
+                total_frames=total_frames,
+                stable_positions=tracked_data["stable_positions"],
+                sample_interval_sec=self.SAMPLE_INTERVAL_SEC,
+            )
+
+            logger.info("podcast_reframe: ✓ using DIARIZATION-based speaker detection")
+            return speaker_result
+
+        except Exception as e:
+            logger.warning(f"podcast_reframe: diarization pipeline failed: {e}")
+            return None
 
     # ─── Face Detection + Tracking ───────────────────────────────────────
 

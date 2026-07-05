@@ -100,6 +100,14 @@ class Settings(BaseSettings):
     # === HuggingFace (Pyannote Speaker Diarization) ===
     HF_TOKEN: str = ""
 
+    # === Speaker Diarization (PyAnnote) ===
+    DIARIZATION_ENABLED: bool = True
+    DIARIZATION_MODEL: str = "pyannote/speaker-diarization-3.1"
+    DIARIZATION_TIMEOUT_SEC: int = 60
+    DIARIZATION_MIN_SPEAKERS: int = 2
+    DIARIZATION_MAX_SPEAKERS: int = 4
+    DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD: float = 0.5
+
     # === Hook Rendering ===
     HOOK_DEFAULT_STYLE: str = "zoom_punch"  # animation preset name
 
