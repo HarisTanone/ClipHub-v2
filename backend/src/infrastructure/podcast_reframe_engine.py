@@ -52,8 +52,8 @@ class FaceDetection:
 class PodcastReframeEngine(IReframeEngine):
     """Speaker-aware face-based reframing with person tracking and lip analysis."""
 
-    SAMPLE_INTERVAL_SEC = 0.2  # 5fps sampling (5× more precise than 1fps)
-    MAX_SAMPLES = 300  # 5fps × 60s = 300 samples per clip
+    SAMPLE_INTERVAL_SEC = 0.333  # 3fps sampling (3× more precise than 1fps)
+    MAX_SAMPLES = 180  # 3fps × 60s = 180 samples per clip
     FACE_CONFIDENCE = 0.55
     MIN_FACE_SIZE_RATIO = 0.05
     MAX_FACE_SIZE_RATIO = 0.50

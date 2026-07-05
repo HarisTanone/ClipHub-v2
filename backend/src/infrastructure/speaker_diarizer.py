@@ -114,7 +114,7 @@ class SpeakerDiarizer:
 
             pipeline = Pipeline.from_pretrained(
                 self._model_name,
-                use_auth_token=self._hf_token,
+                token=self._hf_token,
             )
             pipeline.to(torch.device(device))
 
