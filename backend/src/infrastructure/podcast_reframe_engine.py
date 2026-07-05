@@ -342,6 +342,8 @@ class PodcastReframeEngine(IReframeEngine):
             )
 
             logger.info("podcast_reframe: ✓ using DIARIZATION-based speaker detection")
+            # Store stable_positions for N-position targeting in panning
+            self._diarization_stable_positions = tracked_data["stable_positions"]
             return speaker_result
 
         except Exception as e:
@@ -672,6 +674,7 @@ class PodcastReframeEngine(IReframeEngine):
     PAN_HOLD_MIN_SEC = 5.0     # Hold position for 5s minimum before next pan
     PAN_CLUSTER_THRESHOLD = 200  # If all detections within 200px spread → lock position
     PAN_MAX_KEYFRAMES = 10     # Maximum panning movements per clip
+    PAN_TRANSITION_SEC = 0.4       # Smooth transition seconds (lerp between positions)
 
     def _render_dynamic_panning(
         self,
@@ -718,9 +721,7 @@ class PodcastReframeEngine(IReframeEngine):
             if len(frame_faces) == 1:
                 cx = int(frame_faces[0])
             else:
-                # Multiple faces → pick active speaker or closest to last position
-                midpoint = width / 2.0
-
+                # Multiple faces → pick active speaker's face
                 if speaker_result and speaker_result.per_frame_speaker:
                     frame_idx_approx = int(t * fps)
                     closest_frame = min(
@@ -730,11 +731,28 @@ class PodcastReframeEngine(IReframeEngine):
                     )
                     if closest_frame is not None:
                         active_speaker = speaker_result.per_frame_speaker[closest_frame]
-                        if active_speaker == 0:
-                            target_faces = [x for x in frame_faces if x < midpoint]
+
+                        # N-POSITION FIX: Use stable_positions to find target X
+                        # instead of binary left/right midpoint split
+                        stable_positions = tracked_data.get("stable_positions", {})
+                        # Build reverse mapping: positional_index → track_id
+                        sorted_tracks = sorted(stable_positions.items(), key=lambda kv: kv[1])
+                        position_to_track = {idx: tid for idx, (tid, _) in enumerate(sorted_tracks)}
+
+                        target_track_id = position_to_track.get(active_speaker)
+                        target_x_hint = stable_positions.get(target_track_id) if target_track_id is not None else None
+
+                        if target_x_hint is not None and frame_faces:
+                            # Pick the face closest to the speaker's known position
+                            cx = int(min(frame_faces, key=lambda x: abs(x - target_x_hint)))
                         else:
-                            target_faces = [x for x in frame_faces if x >= midpoint]
-                        cx = int(np.median(target_faces)) if target_faces else int(np.median(frame_faces))
+                            # Fallback: legacy midpoint behavior
+                            midpoint = width / 2.0
+                            if active_speaker == 0:
+                                target_faces = [x for x in frame_faces if x < midpoint]
+                            else:
+                                target_faces = [x for x in frame_faces if x >= midpoint]
+                            cx = int(np.median(target_faces)) if target_faces else int(np.median(frame_faces))
                     else:
                         cx = int(np.median(frame_faces))
                 else:
@@ -744,10 +762,29 @@ class PodcastReframeEngine(IReframeEngine):
                     else:
                         cx = int(np.median(frame_faces))
 
-            # 3x3 Grid Centering: face must land in CENTER THIRD of crop window
-            # Center third = crop_x + crop_w/3 to crop_x + 2*crop_w/3
-            # So: crop_x = cx - crop_w/2 (face perfectly centered in middle cell)
-            crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
+            # BBOX-AWARE CENTERING: ensure face + margin fits in crop window
+            # Use face width from stable detection data to prevent head cutoff
+            per_frame_tracked = tracked_data.get("per_frame_tracked", [])
+            face_margin_applied = False
+            if i < len(per_frame_tracked) and per_frame_tracked[i]:
+                # Find the tracked detection closest to our target cx
+                best_det = min(per_frame_tracked[i], key=lambda d: abs(d.bbox.center_x - cx))
+                face_w = best_det.bbox.width
+                margin = face_w * 0.6  # 60% extra space around face
+
+                desired_left = best_det.bbox.x1 - margin
+                desired_right = best_det.bbox.x2 + margin
+
+                if (desired_right - desired_left) <= crop_w:
+                    # Face + margin fits in crop → center it properly
+                    crop_x = int((desired_left + desired_right) / 2 - crop_w / 2)
+                    crop_x = max(0, min(crop_x, max_crop_x))
+                    face_margin_applied = True
+
+            if not face_margin_applied:
+                # Standard centering: place face center in middle of crop
+                crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
+
             keyframes.append((t, crop_x))
 
         if not keyframes:
@@ -840,27 +877,55 @@ class PodcastReframeEngine(IReframeEngine):
         return None
 
     def _build_panning_expression(
-        self, keyframes: List[Tuple[float, int]], transition_sec: float
+        self, keyframes: List[Tuple[float, int]], transition_sec: float = 0.0
     ) -> str:
-        """Build FFmpeg time-based crop X expression with instant cut.
+        """Build FFmpeg time-based crop X expression.
 
-        Generates nested if expressions — no slide/lerp, just snap to new position:
-          if(lt(t, T1), X0, if(lt(t, T2), X1, X2))
+        If transition_sec > 0, generates smooth lerp between positions.
+        Otherwise, generates instant snap (original behavior).
 
-        Camera holds at position until next keyframe, then instantly cuts to new X.
+        Smooth transition formula:
+          lerp(a, b, progress) where progress = (t - t_start) / duration
+          In FFmpeg: a + (b - a) * min(1, (t - t_start) / duration)
         """
         if len(keyframes) <= 1:
             return str(keyframes[0][1] if keyframes else 0)
 
-        # Build from last to first (nested if structure)
-        expr = str(keyframes[-1][1])  # Final position (innermost)
+        # Use configured transition time
+        from src.config import settings
+        trans = getattr(settings, 'CENTERING_TRANSITION_SEC', 0.4)
+
+        if trans <= 0:
+            # Original behavior: instant snap
+            expr = str(keyframes[-1][1])
+            for i in range(len(keyframes) - 2, -1, -1):
+                _, x_current = keyframes[i]
+                t_next, _ = keyframes[i + 1]
+                expr = f"if(lt(t\\,{t_next:.2f})\\,{x_current}\\,{expr})"
+            return f"'{expr}'"
+
+        # Smooth transition: lerp between keyframes during transition window
+        # Structure: for each segment, if within transition → lerp, else → hold
+        expr = str(keyframes[-1][1])  # Final position
 
         for i in range(len(keyframes) - 2, -1, -1):
             _, x_current = keyframes[i]
-            t_next, _ = keyframes[i + 1]
+            t_next, x_next = keyframes[i + 1]
+            t_trans_start = t_next - trans  # Transition starts `trans` seconds before keyframe
 
-            # Simple: if t < t_next → use x_current, else → next expression
-            expr = f"if(lt(t\\,{t_next:.2f})\\,{x_current}\\,{expr})"
+            if t_trans_start <= (keyframes[i][0] if i > 0 else 0):
+                # Not enough room for transition — snap
+                expr = f"if(lt(t\\,{t_next:.2f})\\,{x_current}\\,{expr})"
+            else:
+                # Smooth: hold → lerp → next
+                # lerp formula: x_current + (x_next - x_current) * min(1, (t - t_trans_start) / trans)
+                delta = x_next - x_current
+                lerp_expr = f"{x_current}+{delta}*min(1\\,(t-{t_trans_start:.2f})/{trans:.2f})"
+                # if t < t_trans_start → hold x_current
+                # elif t < t_next → lerp
+                # else → next expression
+                inner = f"if(lt(t\\,{t_trans_start:.2f})\\,{x_current}\\,if(lt(t\\,{t_next:.2f})\\,{lerp_expr}\\,{expr}))"
+                expr = inner
 
         return f"'{expr}'"
 

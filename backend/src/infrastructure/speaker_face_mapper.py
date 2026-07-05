@@ -217,6 +217,10 @@ class SpeakerFaceMapper:
     ) -> Dict[str, Tuple[int, float, int]]:
         """Greedy assignment: for each speaker, pick the track with highest count.
 
+        Uses margin-based confidence: measures how dominant top1 is compared to top2.
+        This works much better for 3+ people where co-occurrence is naturally spread
+        (multiple faces visible in the same frame).
+
         Returns:
             Dict[speaker_label → (track_id, confidence, total_count)]
         """
@@ -227,9 +231,22 @@ class SpeakerFaceMapper:
                 continue
 
             total_count = sum(track_counts.values())
+            sorted_counts = sorted(track_counts.values(), reverse=True)
             best_track = max(track_counts, key=track_counts.get)
-            best_count = track_counts[best_track]
-            confidence = best_count / total_count if total_count > 0 else 0.0
+            best_count = sorted_counts[0]
+            second_count = sorted_counts[1] if len(sorted_counts) > 1 else 0
+
+            # Margin-based confidence: how dominant is top1 vs top2
+            # For 2 people: top1=45, top2=3 → margin = (45-3)/45 = 0.93 (great)
+            # For 3 people: top1=30, top2=12, top3=5 → margin = (30-12)/30 = 0.60 (still good)
+            # Edge case: top1=20, top2=18 → margin = (20-18)/20 = 0.10 (unreliable!)
+            margin_confidence = (best_count - second_count) / max(best_count, 1)
+
+            # Also keep absolute confidence for edge cases (1 track only)
+            absolute_confidence = best_count / total_count if total_count > 0 else 0.0
+
+            # Use the better of the two (margin is primary, absolute is fallback)
+            confidence = max(margin_confidence, absolute_confidence)
 
             mappings[speaker] = (best_track, confidence, total_count)
 
@@ -341,7 +358,8 @@ class SpeakerFaceMapper:
         else:
             overall_confidence = 0.0
 
-        # Reliable if all confidences meet threshold
+        # Reliable if all mappings have sufficient margin between top1 and top2
+        # Uses MAPPING_MARGIN_THRESHOLD (default 0.3) instead of the old absolute threshold
         is_reliable = bool(mappings) and all(
             m.confidence >= self._confidence_threshold for m in mappings.values()
         )

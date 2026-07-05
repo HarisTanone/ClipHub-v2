@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     DIARIZATION_MAX_SPEAKERS: int = 4
     DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD: float = 0.5
 
+    # === Centering / Panning Tuning ===
+    CENTERING_TRANSITION_SEC: float = 0.4       # Smooth transition duration when switching speakers
+    CENTERING_FACE_MARGIN_RATIO: float = 0.6    # Extra margin around face bbox (0.6 = 60% of face width)
+    MAPPING_MARGIN_THRESHOLD: float = 0.3       # Min margin between top1 and top2 for reliable mapping
+
     # === Hook Rendering ===
     HOOK_DEFAULT_STYLE: str = "zoom_punch"  # animation preset name
 
