@@ -101,7 +101,7 @@ class RemotionAdapter(IRemotionRenderer):
         
         # Use directly passed hook text, fallback to scene_graph
         render_hook_text = hook_text or ""
-        render_hook_animation = hook_style or "fade_scale"
+        render_hook_animation = hook_style or "podcast_lower_third"
         if not render_hook_text:
             for layer in scene_graph.get("layers", []):
                 if layer.get("layer_id") == "L3_hook":
@@ -110,6 +110,8 @@ class RemotionAdapter(IRemotionRenderer):
                         render_hook_text = events[0].get("content", "")
                         render_hook_animation = events[0].get("event_type", "fade_scale")
                     break
+
+        hook_cfg = creative_direction.get("hook_style_config", {})
         
         # Validate hook animation
         valid_animations = (
@@ -128,9 +130,19 @@ class RemotionAdapter(IRemotionRenderer):
             "waveform_pulse",
             "breaking_tape",
             "mic_drop",
+            "split_panel",
+            "kinetic_stack",
+            "glass_flash",
+            "marker_swipe",
+            "signal_scan",
         )
         if render_hook_animation not in valid_animations:
-            render_hook_animation = "fade_scale"
+            hook_cfg_animation = hook_cfg.get("animation")
+            render_hook_animation = (
+                hook_cfg_animation
+                if hook_cfg_animation in valid_animations
+                else "podcast_lower_third"
+            )
 
         # Warn if critical render data is empty
         if not render_words:
@@ -139,7 +151,6 @@ class RemotionAdapter(IRemotionRenderer):
             logger.info(f"[Remotion] clip {clip_rank}: hookText is empty — hook overlay will not render")
 
         # Choose composition based on style config
-        hook_cfg = creative_direction.get("hook_style_config", {})
         template_mode = hook_cfg.get("template_mode", "custom")
         if template_mode == "tiktok":
             composition_id = "TikTokComposition"

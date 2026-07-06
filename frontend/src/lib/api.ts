@@ -365,7 +365,11 @@ export const jobs = {
     });
   },
 
-  async rerender(jobId: string, rank: number, options?: { hook_text?: string; hook_style?: string }): Promise<any> {
+  async rerender(jobId: string, rank: number, options?: {
+    hook_text?: string;
+    hook_style?: string;
+    hook_style_config?: Record<string, any>;
+  }): Promise<any> {
     return request(`/api/jobs/${jobId}/clips/${rank}/rerender`, {
       method: "POST",
       body: JSON.stringify(options || {}),
@@ -375,7 +379,10 @@ export const jobs = {
   async restyle(jobId: string, rank: number, options: {
     hook_text?: string;
     hook_style?: string;
+    hook_style_config?: Record<string, any>;
+    subtitle_style_config?: Record<string, any>;
     subtitle_enabled?: boolean;
+    broll_enabled?: boolean;
   }): Promise<any> {
     return request(`/api/jobs/${jobId}/clips/${rank}/restyle`, {
       method: "POST",

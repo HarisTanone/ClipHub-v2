@@ -83,14 +83,15 @@ class ActiveSpeakerDetector:
     # Configuration
     SLIDING_WINDOW_SEC = 0.5
     HYSTERESIS_SEC = 0.3
-    MIN_LIP_VARIANCE = 0.002
-    MIN_LIP_AMPLITUDE = 0.03       # Minimum lip movement range to count as speech
+    MIN_LIP_VARIANCE = 0.00008
+    MIN_LIP_AMPLITUDE = 0.012      # Minimum lip movement range to count as speech
     DOMINANCE_THRESHOLD = 0.75
     MAX_YAW_DEG = 40.0             # Beyond this yaw, confidence = 0
 
     # Multimodal scoring weights — LIP is primary signal, head is secondary
-    LIP_WEIGHT = 0.70              # CHANGED from 0.40 — lip variance is most reliable speech indicator
-    HEAD_WEIGHT = 0.30             # CHANGED from 0.60 — head motion is weak proxy, easily confused
+    LIP_VARIANCE_WEIGHT = 0.50
+    LIP_AMPLITUDE_WEIGHT = 0.42
+    HEAD_WEIGHT = 0.08             # Head motion is weak proxy, easily confused by listeners
     HEAD_MOTION_NORMALIZE = 20.0
 
     FACE_MESH_CONFIDENCE = 0.5
@@ -516,11 +517,11 @@ class ActiveSpeakerDetector:
     ) -> Dict[int, int]:
         """Compute active speaker per frame using yaw-aware multimodal scoring.
 
-        Score = (lip_variance * 0.70 + head_motion_mean * 0.30) * pose_confidence
-        
+        Score = dominant lip movement + gated head motion, discounted by pose confidence.
+
         Key improvements over naive scoring:
-        - Lip variance is primary signal (70% weight) — most direct speech indicator
-        - Head motion is secondary (30%) — catches nodding but doesn't dominate
+        - Lip variance and lip amplitude are primary signals — most direct speech indicator
+        - Head motion is only counted when mouth movement is also present
         - Pose confidence discounts faces that are turned (landmark noise)
         - Amplitude gate: lip movement must exceed MIN_LIP_AMPLITUDE to be counted
         
@@ -568,22 +569,23 @@ class ActiveSpeakerDetector:
                 if len(window_data) < 2:
                     continue
 
-                # Lip component: variance of aperture
+                # Lip component: variance + amplitude of aperture. Some podcast
+                # speakers keep a steady open mouth while talking, so amplitude
+                # catches speech that pure variance can miss.
                 lip_values = [d[0] for d in window_data]
                 lip_amplitude = max(lip_values) - min(lip_values)
-                
-                # Amplitude gate: if lips barely moved, it's not speech (noise)
-                if lip_amplitude < self.MIN_LIP_AMPLITUDE:
+                lip_variance = float(np.var(lip_values))
+                lip_activity = min(1.0, lip_amplitude / max(self.MIN_LIP_AMPLITUDE, 1e-6))
+                if lip_amplitude < self.MIN_LIP_AMPLITUDE * 0.5:
                     lip_variance = 0.0
-                else:
-                    lip_variance = float(np.var(lip_values))
+                    lip_activity = 0.0
 
                 # Head component: mean of head motion. Head movement is useful
                 # only as support for real mouth motion; otherwise a listening
                 # nod can beat the actual speaker.
                 head_values = [d[1] for d in window_data]
                 head_mean = float(np.mean(head_values))
-                head_gate = min(1.0, lip_amplitude / self.MIN_LIP_AMPLITUDE)
+                head_gate = lip_activity
                 head_component = head_mean * head_gate
 
                 # Yaw component: average pose confidence in window
@@ -591,8 +593,13 @@ class ActiveSpeakerDetector:
                 avg_yaw = float(np.mean([abs(y) for y in yaw_values]))
                 pose_conf = self._pose_confidence(avg_yaw)
 
-                # Multimodal score WITH pose discount
-                raw_score = lip_variance * self.LIP_WEIGHT + head_component * self.HEAD_WEIGHT
+                # Multimodal score WITH pose discount. Lip signals dominate;
+                # head motion only breaks ties when mouth activity is present.
+                raw_score = (
+                    lip_variance * self.LIP_VARIANCE_WEIGHT
+                    + (lip_activity * self.MIN_LIP_VARIANCE) * self.LIP_AMPLITUDE_WEIGHT
+                    + head_component * self.MIN_LIP_VARIANCE * self.HEAD_WEIGHT
+                )
                 score = raw_score * pose_conf
 
                 if score > best_score:

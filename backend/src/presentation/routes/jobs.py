@@ -948,6 +948,8 @@ class RestyleRequest(BaseModel):
     """Restyle a clip: re-apply hook + broll + subtitle from raw/reframed source."""
     hook_text: Opt[str] = None
     hook_style: Opt[str] = None
+    hook_style_config: Opt[dict] = None
+    subtitle_style_config: Opt[dict] = None
     subtitle_enabled: bool = True
     broll_enabled: bool = True
 
@@ -970,7 +972,6 @@ async def restyle_clip(
     Source: uses reframed clip if available, else raw clip.
     Output: replaces final/clip_{rank}_final.mp4
     """
-    import asyncio
     import logging
     import shutil
 
@@ -1003,9 +1004,27 @@ async def restyle_clip(
         raise HTTPException(status_code=400, detail="Raw clip not found. Run full pipeline first.")
 
     # Resolve parameters
+    root_style_data = job.clips_data if isinstance(job.clips_data, dict) else {}
+    hook_config = (
+        body.hook_style_config if body and body.hook_style_config is not None
+        else clip_data.get("hook_style_config_override")
+        or root_style_data.get("hook_style_config")
+        or {}
+    )
+    subtitle_config = (
+        body.subtitle_style_config if body and body.subtitle_style_config is not None
+        else clip_data.get("subtitle_style_config_override")
+        or root_style_data.get("subtitle_style_config")
+        or {}
+    )
     hook_text = (body.hook_text if body and body.hook_text else clip_data.get("hook", "")).strip()
-    hook_style = (body.hook_style if body and body.hook_style else
-                  clip_data.get("hook_style_override", job.hook_style or settings.HOOK_DEFAULT_STYLE))
+    hook_style = (
+        body.hook_style if body and body.hook_style
+        else clip_data.get("hook_style_override")
+        or hook_config.get("animation")
+        or job.hook_style
+        or settings.HOOK_DEFAULT_STYLE
+    )
     do_subtitle = body.subtitle_enabled if body else True
     do_broll = body.broll_enabled if body else True
 
@@ -1018,24 +1037,24 @@ async def restyle_clip(
     try:
         current_path = source_path
 
-        # Step 1: Hook rendering
-        if hook_text:
-            await service._render_hook_ffmpeg(current_path, hook_text, hooked_path, hook_style=hook_style)
-            if os.path.exists(hooked_path):
-                current_path = hooked_path
-            logger.info(f"[restyle] hook applied clip {clip_rank} style={hook_style}")
-
-        # Step 2: B-Roll overlay (if enabled and brolls exist for this clip)
+        # Step 1: B-Roll overlay (if enabled and brolls exist for this clip).
+        # Remotion is applied after this so hook/subtitle remain on top.
         if do_broll and service._broll_injector:
-            from src.domain.entities import BRollSuggestion, Clip
+            from src.domain.entities import BRollSuggestion, Clip, VisualCategory
             broll_suggestions = []
             for bs in clip_data.get("broll_suggestions", []):
+                try:
+                    visual_category = VisualCategory(bs.get("visual_category", "footage"))
+                except (ValueError, KeyError):
+                    visual_category = VisualCategory.FOOTAGE
+
                 broll_suggestions.append(BRollSuggestion(
+                    at_time=float(bs.get("at_time", 0)),
                     keyword=bs.get("keyword", ""),
-                    at_time=bs.get("at_time", 0),
-                    duration=bs.get("duration", 2.0),
-                    category=bs.get("category", "motion_graphic"),
-                    visual_description=bs.get("visual_description", ""),
+                    template=bs.get("template", "word_pop_typography"),
+                    duration=float(bs.get("duration", 2.0)),
+                    reason=bs.get("reason", ""),
+                    visual_category=visual_category,
                 ))
 
             if broll_suggestions:
@@ -1058,33 +1077,108 @@ async def restyle_clip(
                 except Exception as e:
                     logger.warning(f"[restyle] broll failed clip {clip_rank}: {e}")
 
-        # Step 3: Subtitle rendering (if enabled and words exist)
-        if do_subtitle and clip_data.get("words"):
+        # Step 2: Preferred path — Remotion renders hook + subtitle with the same
+        # style config used by the live preview.
+        remotion_rendered = False
+        clip_duration = float(
+            clip_data.get("duration")
+            or max(0.0, float(clip_data.get("end", 0)) - float(clip_data.get("start", 0)))
+            or 30.0
+        )
+        render_words = clip_data.get("words") or []
+        if do_subtitle and render_words:
             try:
-                if service._subtitle_renderer:
-                    sub_out = final_path
-                    await service._subtitle_renderer.render(
-                        current_path, clip_data["words"], sub_out,
-                        start_offset=3.0,
+                from src.infrastructure.subtitle_words import sanitize_subtitle_words
+                render_words = sanitize_subtitle_words(render_words, clip_duration)
+            except Exception as e:
+                logger.warning(f"[restyle] subtitle word sanitize failed clip {clip_rank}: {e}")
+        else:
+            render_words = []
+
+        remotion_adapter = getattr(service, "_remotion_adapter", None)
+        if remotion_adapter and (hook_text or render_words):
+            try:
+                remotion_ready = await remotion_adapter.health_check()
+                if not remotion_ready and hasattr(remotion_adapter, "start_server"):
+                    started = await remotion_adapter.start_server()
+                    remotion_ready = bool(started and await remotion_adapter.health_check())
+
+                if remotion_ready:
+                    from src.domain.interfaces_remotion import RemotionRenderConfig
+                    render_config = RemotionRenderConfig(
+                        concurrency=settings.REMOTION_CONCURRENCY,
+                        quality=settings.REMOTION_QUALITY,
+                        enable_threejs=settings.REMOTION_ENABLE_THREEJS,
+                        enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
                     )
-                    if os.path.exists(sub_out):
-                        current_path = sub_out
-                    logger.info(f"[restyle] subtitle applied clip {clip_rank}")
-                else:
-                    # No subtitle renderer, copy to final
+                    creative_direction = {
+                        "hook_style_config": hook_config,
+                        "subtitle_style_config": subtitle_config,
+                    }
+                    result = await remotion_adapter.render_clip(
+                        scene_graph={
+                            "clip_rank": clip_rank,
+                            "duration": clip_duration,
+                            "layers": [],
+                        },
+                        creative_direction=creative_direction,
+                        video_path=current_path,
+                        output_path=final_path,
+                        clip_rank=clip_rank,
+                        config=render_config,
+                        words=render_words,
+                        hook_text=hook_text,
+                        hook_style=hook_style,
+                    )
+                    remotion_rendered = bool(result.success and os.path.exists(final_path))
+                    if remotion_rendered:
+                        current_path = final_path
+                        logger.info(f"[restyle] remotion applied clip {clip_rank} style={hook_style}")
+                    else:
+                        logger.warning(
+                            f"[restyle] remotion failed clip {clip_rank}: "
+                            f"{getattr(result, 'error_message', 'unknown error')}"
+                        )
+            except Exception as e:
+                logger.warning(f"[restyle] remotion failed clip {clip_rank}: {e}")
+
+        # Step 3: Fallback path — legacy hook/subtitle renderers.
+        if not remotion_rendered:
+            if hook_text:
+                await service._render_hook_ffmpeg(current_path, hook_text, hooked_path, hook_style=hook_style)
+                if os.path.exists(hooked_path):
+                    current_path = hooked_path
+                logger.info(f"[restyle] legacy hook applied clip {clip_rank} style={hook_style}")
+
+            if do_subtitle and clip_data.get("words"):
+                try:
+                    if service._subtitle_renderer:
+                        await service._subtitle_renderer.render(
+                            current_path,
+                            clip_data["words"],
+                            final_path,
+                            start_offset=3.0,
+                        )
+                        if os.path.exists(final_path):
+                            current_path = final_path
+                        logger.info(f"[restyle] legacy subtitle applied clip {clip_rank}")
+                    else:
+                        shutil.copy2(current_path, final_path)
+                        current_path = final_path
+                except Exception as e:
+                    logger.warning(f"[restyle] subtitle failed clip {clip_rank}: {e}")
                     shutil.copy2(current_path, final_path)
                     current_path = final_path
-            except Exception as e:
-                logger.warning(f"[restyle] subtitle failed clip {clip_rank}: {e}")
+            elif current_path != final_path:
                 shutil.copy2(current_path, final_path)
                 current_path = final_path
-        else:
-            # Copy current to final
-            if current_path != final_path:
-                shutil.copy2(current_path, final_path)
 
         # Update clip_data with applied style
         clip_data["hook_style_override"] = hook_style
+        if hook_config:
+            clip_data["hook_style_config_override"] = hook_config
+        if subtitle_config:
+            clip_data["subtitle_style_config_override"] = subtitle_config
         if body and body.hook_text:
             clip_data["hook"] = body.hook_text
 
@@ -1109,6 +1203,8 @@ async def restyle_clip(
                 "clip_rank": clip_rank,
                 "hook_text": hook_text,
                 "hook_style": hook_style,
+                "hook_style_config": hook_config,
+                "subtitle_style_config": subtitle_config,
                 "subtitle_applied": do_subtitle and bool(clip_data.get("words")),
                 "broll_applied": do_broll and bool(clip_data.get("broll_suggestions")),
                 "output_url": f"/api/jobs/{job_id}/clips/{clip_rank}/final",

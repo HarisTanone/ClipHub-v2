@@ -93,7 +93,9 @@ export function ClipViewer() {
       const res = await jobs.restyle(jobId, clipRank, {
         hook_text: hookText.trim() || undefined,
         hook_style: hookStyleConfig.animation,
-        subtitle_enabled: showSubtitles,
+        hook_style_config: hookStyleConfig,
+        subtitle_style_config: subtitleStyleConfig,
+        subtitle_enabled: true,
       });
       toast.success(res.message || "Restyle started");
       loadClip();

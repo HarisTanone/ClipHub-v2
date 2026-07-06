@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.infrastructure.active_speaker_detector import (
     ActiveSpeakerDetector,
+    ActiveSpeakerResult,
     FaceSpeechFrame,
 )
 from src.infrastructure.person_tracker import BBox, TrackedDetection
@@ -97,6 +98,30 @@ def test_position_model_clusters_recreated_tracks_by_seat():
     assert model["track_to_position"][1] == 1
 
 
+def test_panning_holds_active_speaker_seat_when_only_listener_is_visible():
+    engine = PodcastReframeEngine()
+    speaker_result = ActiveSpeakerResult(
+        segments=[],
+        dominant_speaker_id=0,
+        dominant_ratio=1.0,
+        per_frame_speaker={30: 0},
+        total_speakers=2,
+    )
+
+    cx, target_detection = engine._choose_panning_target_x(
+        frame_faces=[1480],
+        frame_tracked=[TrackedDetection(7, BBox(1430, 100, 1530, 240), 30)],
+        speaker_result=speaker_result,
+        frame_idx_approx=30,
+        position_targets={0: 520, 1: 1480},
+        track_to_position={7: 1},
+        frame_width=1920,
+    )
+
+    assert cx == 520
+    assert target_detection is None
+
+
 def test_ambiguous_diarization_mapping_is_not_reliable():
     mapper = SpeakerFaceMapper(confidence_threshold=0.5)
     segments = [
@@ -129,5 +154,6 @@ if __name__ == "__main__":
     test_head_motion_is_keyed_after_stable_id_assignment()
     test_lip_motion_beats_listener_head_motion()
     test_position_model_clusters_recreated_tracks_by_seat()
+    test_panning_holds_active_speaker_seat_when_only_listener_is_visible()
     test_ambiguous_diarization_mapping_is_not_reliable()
     print("speaker centering tests passed")

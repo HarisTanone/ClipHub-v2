@@ -764,6 +764,78 @@ class PodcastReframeEngine(IReframeEngine):
     PAN_CLUSTER_THRESHOLD = 200  # If all detections within 200px spread → lock position
     PAN_MAX_KEYFRAMES = 25     # Increased for denser sampling (more movement allowed)
     PAN_TRANSITION_SEC = 0.4       # Smooth transition seconds (lerp between positions)
+    SPEAKER_TARGET_MISMATCH_RATIO = 0.18  # Keep known speaker seat if one visible face is far away.
+
+    def _choose_panning_target_x(
+        self,
+        frame_faces: List[float],
+        frame_tracked: List[TrackedDetection],
+        speaker_result: Optional[ActiveSpeakerResult],
+        frame_idx_approx: int,
+        position_targets: Dict[int, float],
+        track_to_position: Dict[int, int],
+        frame_width: int,
+        last_center: Optional[float] = None,
+    ) -> Tuple[Optional[int], Optional[TrackedDetection]]:
+        """Pick the crop center, preferring the active speaker's stable seat."""
+        active_speaker: Optional[int] = None
+        target_x_hint: Optional[float] = None
+
+        if speaker_result and speaker_result.per_frame_speaker:
+            closest_frame = min(
+                speaker_result.per_frame_speaker.keys(),
+                key=lambda f: abs(f - frame_idx_approx),
+                default=None,
+            )
+            if closest_frame is not None:
+                active_speaker = speaker_result.per_frame_speaker[closest_frame]
+                target_x_hint = position_targets.get(active_speaker)
+
+        if active_speaker is not None:
+            matching_detections = [
+                detection for detection in frame_tracked
+                if track_to_position.get(detection.track_id) == active_speaker
+            ]
+            if matching_detections:
+                target_detection = min(
+                    matching_detections,
+                    key=lambda d: abs(
+                        d.bbox.center_x
+                        - (target_x_hint if target_x_hint is not None else d.bbox.center_x)
+                    ),
+                )
+                return int(target_detection.bbox.center_x), target_detection
+
+            if target_x_hint is not None:
+                if not frame_faces:
+                    return int(target_x_hint), None
+
+                nearest_face = float(min(frame_faces, key=lambda x: abs(x - target_x_hint)))
+                mismatch_threshold = frame_width * self.SPEAKER_TARGET_MISMATCH_RATIO
+
+                if len(frame_faces) == 1 and abs(nearest_face - target_x_hint) > mismatch_threshold:
+                    logger.debug(
+                        "podcast_reframe: single visible face is far from active speaker "
+                        "target (face=%.1f, target=%.1f); holding speaker seat",
+                        nearest_face,
+                        target_x_hint,
+                    )
+                    return int(target_x_hint), None
+
+                return int(nearest_face), None
+
+            if frame_faces:
+                sorted_faces = sorted(frame_faces)
+                if 0 <= active_speaker < len(sorted_faces):
+                    return int(sorted_faces[active_speaker]), None
+
+        if not frame_faces:
+            return None, None
+
+        if last_center is not None:
+            return int(min(frame_faces, key=lambda x: abs(x - last_center))), None
+
+        return int(np.median(frame_faces)), None
 
     def _render_dynamic_panning(
         self,
@@ -816,61 +888,24 @@ class PodcastReframeEngine(IReframeEngine):
                 else int(t * fps)
             )
             frame_tracked = per_frame_tracked[i] if i < len(per_frame_tracked) else []
+            last_center = keyframes[-1][1] + crop_w / 2 if keyframes else None
 
-            if not frame_faces:
-                # No face → hold previous position
+            cx, target_detection = self._choose_panning_target_x(
+                frame_faces=frame_faces,
+                frame_tracked=frame_tracked,
+                speaker_result=speaker_result,
+                frame_idx_approx=frame_idx_approx,
+                position_targets=position_targets,
+                track_to_position=track_to_position,
+                frame_width=width,
+                last_center=last_center,
+            )
+
+            if cx is None:
+                # No reliable face or speaker target → hold previous position
                 if keyframes:
                     keyframes.append((t, keyframes[-1][1]))
                 continue
-
-            # Determine target face X (which face to follow)
-            target_detection: Optional[TrackedDetection] = None
-            if len(frame_faces) == 1:
-                cx = int(frame_faces[0])
-            else:
-                # Multiple faces → pick active speaker's face
-                if speaker_result and speaker_result.per_frame_speaker:
-                    closest_frame = min(
-                        speaker_result.per_frame_speaker.keys(),
-                        key=lambda f: abs(f - frame_idx_approx),
-                        default=None,
-                    )
-                    if closest_frame is not None:
-                        active_speaker = speaker_result.per_frame_speaker[closest_frame]
-
-                        target_x_hint = position_targets.get(active_speaker)
-                        matching_detections = [
-                            detection for detection in frame_tracked
-                            if track_to_position.get(detection.track_id) == active_speaker
-                        ]
-
-                        if matching_detections:
-                            target_detection = min(
-                                matching_detections,
-                                key=lambda d: abs(
-                                    d.bbox.center_x
-                                    - (target_x_hint if target_x_hint is not None else d.bbox.center_x)
-                                ),
-                            )
-                            cx = int(target_detection.bbox.center_x)
-                        elif target_x_hint is not None and frame_faces:
-                            # Pick the visible face closest to the speaker's known stable position.
-                            cx = int(min(frame_faces, key=lambda x: abs(x - target_x_hint)))
-                        else:
-                            # Fallback: positional index against current left-to-right faces.
-                            sorted_faces = sorted(frame_faces)
-                            if 0 <= active_speaker < len(sorted_faces):
-                                cx = int(sorted_faces[active_speaker])
-                            else:
-                                cx = int(np.median(frame_faces))
-                    else:
-                        cx = int(np.median(frame_faces))
-                else:
-                    if keyframes:
-                        last_center = keyframes[-1][1] + crop_w // 2
-                        cx = int(min(frame_faces, key=lambda x: abs(x - last_center)))
-                    else:
-                        cx = int(np.median(frame_faces))
 
             # BBOX-AWARE CENTERING: ensure face + margin fits in crop window
             # Use face width from stable detection data to prevent head cutoff
@@ -881,17 +916,19 @@ class PodcastReframeEngine(IReframeEngine):
                     frame_tracked,
                     key=lambda d: abs(d.bbox.center_x - cx),
                 )
-                face_w = best_det.bbox.width
-                margin = face_w * 0.6  # 60% extra space around face
+                mismatch_threshold = width * self.SPEAKER_TARGET_MISMATCH_RATIO
+                if target_detection or abs(best_det.bbox.center_x - cx) <= mismatch_threshold:
+                    face_w = best_det.bbox.width
+                    margin = face_w * 0.6  # 60% extra space around face
 
-                desired_left = best_det.bbox.x1 - margin
-                desired_right = best_det.bbox.x2 + margin
+                    desired_left = best_det.bbox.x1 - margin
+                    desired_right = best_det.bbox.x2 + margin
 
-                if (desired_right - desired_left) <= crop_w:
-                    # Face + margin fits in crop → center it properly
-                    crop_x = int((desired_left + desired_right) / 2 - crop_w / 2)
-                    crop_x = max(0, min(crop_x, max_crop_x))
-                    face_margin_applied = True
+                    if (desired_right - desired_left) <= crop_w:
+                        # Face + margin fits in crop → center it properly
+                        crop_x = int((desired_left + desired_right) / 2 - crop_w / 2)
+                        crop_x = max(0, min(crop_x, max_crop_x))
+                        face_margin_applied = True
 
             if not face_margin_applied:
                 # Standard centering: place face center in middle of crop

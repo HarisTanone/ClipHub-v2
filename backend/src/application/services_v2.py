@@ -680,7 +680,7 @@ class V2PipelineService:
                     grid_subtitle_position_y = resolve_grid_subtitle_position_y(method)
 
                 hook_style = (hook_style_config.get("animation", "")
-                              or creative_direction.hook_animation or "fade_scale")
+                              or creative_direction.hook_animation or "podcast_lower_third")
 
                 cd_dict = asdict(creative_direction) if creative_direction else {}
                 cd_dict["hook_style_config"] = hook_style_config
@@ -730,7 +730,7 @@ class V2PipelineService:
         await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
 
         hook_style = (hook_style_config.get("animation", "")
-                      or creative_direction.hook_animation or "fade_scale")
+                      or creative_direction.hook_animation or "podcast_lower_third")
 
         for clip in clips:
             if not trim_results.get(clip.rank):
