@@ -15,7 +15,7 @@ Pipeline Steps (V2):
   8. YOLO Seg + Reframe    — Conditional
   9. Word-Level Transcription — Groq Whisper on trimmed clip files
   10. Build Subtitle Data  — Validate & format words for rendering
-  11+ Hook, Subtitle, Encode (REUSE from V1)
+  11+ Hook + Subtitle Render — Remotion only, matching preview config
 """
 import asyncio
 import logging
@@ -591,7 +591,7 @@ class V2PipelineService:
         trim_results: dict[int, bool],
         reframe_data: dict,
     ) -> None:
-        """Run render steps: Hook + Subtitle via Remotion or FFmpeg fallback."""
+        """Run hook + subtitle render via Remotion only."""
         # Load custom style configs
         hook_style_config = {}
         subtitle_style_config = {}
@@ -607,7 +607,7 @@ class V2PipelineService:
             f"sub_font={subtitle_style_config.get('fontFamily', 'N/A')}"
         )
 
-        # ═══ Try Remotion first ═══
+        # ═══ Remotion is required for hook + subtitle fidelity ═══
         use_remotion = False
         if self._remotion_adapter:
             try:
@@ -620,16 +620,13 @@ class V2PipelineService:
             except Exception as e:
                 logger.warning(f"[{job_id}] Remotion unavailable: {e}")
 
-        if use_remotion:
-            await self._render_via_remotion(
-                job, job_id, clips, clips_with_words, creative_direction,
-                output_dir, trim_results, reframe_data,
-                hook_style_config, subtitle_style_config,
+        if not use_remotion:
+            raise RuntimeError(
+                "Remotion is required for hook/subtitle rendering. "
+                "FFmpeg fallback is disabled so final output matches preview."
             )
-            return
 
-        # ═══ FFmpeg Fallback ═══
-        await self._render_via_ffmpeg(
+        await self._render_via_remotion(
             job, job_id, clips, clips_with_words, creative_direction,
             output_dir, trim_results, reframe_data,
             hook_style_config, subtitle_style_config,
@@ -654,6 +651,7 @@ class V2PipelineService:
 
         # Parallel rendering: 4 clips simultaneously (i7-13700K 24 threads + 64GB RAM handles this easily)
         render_semaphore = asyncio.Semaphore(4)
+        render_errors: list[str] = []
 
         async def render_one_clip(clip):
             async with render_semaphore:
@@ -704,18 +702,22 @@ class V2PipelineService:
                     if result.success:
                         logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
                     else:
-                        logger.error(f"[{job_id}] Remotion failed clip {clip.rank}: {result.error_message}")
-                        import shutil
-                        if os.path.exists(in_path) and not os.path.exists(out_path):
-                            shutil.copy2(in_path, out_path)
+                        message = f"clip {clip.rank}: {result.error_message or 'unknown Remotion error'}"
+                        logger.error(f"[{job_id}] Remotion failed {message}")
+                        render_errors.append(message)
                 except Exception as e:
-                    logger.exception(f"[{job_id}] Remotion error clip {clip.rank}: {e}")
-                    import shutil
-                    if os.path.exists(in_path) and not os.path.exists(out_path):
-                        shutil.copy2(in_path, out_path)
+                    message = f"clip {clip.rank}: {e}"
+                    logger.exception(f"[{job_id}] Remotion error {message}")
+                    render_errors.append(message)
 
         # Launch all clips in parallel (semaphore limits to 2 concurrent)
         await asyncio.gather(*[render_one_clip(clip) for clip in clips])
+
+        if render_errors:
+            raise RuntimeError(
+                "Remotion hook/subtitle render failed; FFmpeg fallback is disabled: "
+                + "; ".join(render_errors[:5])
+            )
 
         self._emit(job_id, 14, "remotion_render", "complete")
 
@@ -724,97 +726,11 @@ class V2PipelineService:
         output_dir, trim_results, reframe_data,
         hook_style_config, subtitle_style_config,
     ) -> None:
-        """FFmpeg-based hook + subtitle rendering (fallback when Remotion unavailable)."""
-        # ─── Hook Rendering ────────────────────────────────────────────
-        self._emit(job_id, 13, "hook_render", "start")
-        await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
-
-        hook_style = (hook_style_config.get("animation", "")
-                      or creative_direction.hook_animation or "podcast_lower_third")
-
-        for clip in clips:
-            if not trim_results.get(clip.rank):
-                continue
-            in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
-            out_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
-            try:
-                from src.presentation.dependencies import get_job_service
-                v1_service = get_job_service()
-                await v1_service._render_hook_ffmpeg(in_path, clip.hook, out_path, hook_style=hook_style)
-            except Exception as e:
-                logger.warning(f"[{job_id}] Hook render clip {clip.rank}: {e}")
-                import shutil
-                if not os.path.exists(out_path) and os.path.exists(in_path):
-                    shutil.copy2(in_path, out_path)
-        self._emit(job_id, 13, "hook_render", "complete")
-
-        # ─── Subtitle Rendering ────────────────────────────────────────
-        self._emit(job_id, 14, "subtitle_render", "start")
-        await self._repo.update_status(job_id, JobStatus.SUBTITLE_RENDERING)
-
-        from src.domain.entities import SubtitleStyleConfig
-        sub_style = SubtitleStyleConfig(
-            font_family=subtitle_style_config.get("fontFamily", subtitle_style_config.get("font_family", "Poppins")),
-            font_size=int(subtitle_style_config.get("fontSize", subtitle_style_config.get("font_size", 34))),
-            uppercase=subtitle_style_config.get("uppercase", creative_direction.subtitle_uppercase),
-            capitalize=subtitle_style_config.get("capitalize", False),
-            color=subtitle_style_config.get("color", creative_direction.primary_color),
-            highlight_color=subtitle_style_config.get("highlightColor", subtitle_style_config.get("highlight_color", creative_direction.secondary_color)),
-            position=subtitle_style_config.get("position", creative_direction.subtitle_position or "bottom"),
-            stroke_width=int(subtitle_style_config.get("strokeWidth", subtitle_style_config.get("stroke_width", 3))),
-            max_words_per_line=int(subtitle_style_config.get("maxWordsPerLine", subtitle_style_config.get("max_words_per_line", 3))),
-            line_transition=subtitle_style_config.get("lineTransition", subtitle_style_config.get("line_transition", "word_pop")),
-            start_offset=0.0,
-            timing_offset=0.0,  # V2: words from local Whisper are accurate, no offset needed
+        """Deprecated: V2 hook/subtitle must render through Remotion."""
+        raise RuntimeError(
+            "FFmpeg hook/subtitle fallback is disabled for V2. "
+            "Use Remotion so rendered output matches the preview."
         )
-
-        if subtitle_style_config.get("glowEnabled") or subtitle_style_config.get("glow_enabled"):
-            sub_style.shadow_color = f"{sub_style.highlight_color}@0.6"
-
-        for clip in clips:
-            if not trim_results.get(clip.rank):
-                continue
-            words = clips_with_words.get(clip.rank, [])
-            hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
-            in_path = hooked_path if os.path.exists(hooked_path) else self._best_clip_path(output_dir, clip.rank, reframe_data)
-            out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
-
-            # Grid-aware subtitle positioning:
-            # When grid is active, center subtitle at bottom of active speaker panel
-            clip_reframe = reframe_data.get(clip.rank)
-            clip_sub_style = sub_style  # default
-            if clip_reframe and isinstance(clip_reframe, dict):
-                method = clip_reframe.get("method", "")
-                if "speaker_emphasis" in method:
-                    # 60/40 grid: active panel is top 60% (1152px of 1920px)
-                    # Place subtitle at bottom of active panel: y = 1152 - text_h - 40
-                    from dataclasses import replace
-                    clip_sub_style = replace(sub_style, position_y="1152-text_h-40", position_x="(w-text_w)/2")
-                elif "double" in method or "grid" in method:
-                    # 50/50 grid: top panel is 50% (960px of 1920px)
-                    # Place subtitle at bottom of top panel: y = 960 - text_h - 40
-                    from dataclasses import replace
-                    clip_sub_style = replace(sub_style, position_y="960-text_h-40", position_x="(w-text_w)/2")
-            try:
-                if self._subtitle_renderer and words:
-                    hook_duration = 3.0
-                    filtered_words = [w for w in words if w.get("start", 0) >= hook_duration]
-                    if not filtered_words and words:
-                        filtered_words = words
-                    self._subtitle_renderer.render_subtitles(
-                        video_path=in_path, words=filtered_words,
-                        style=clip_sub_style, output_path=out_path, start_offset=0.0,
-                    )
-                else:
-                    import shutil
-                    if not os.path.exists(out_path) and os.path.exists(in_path):
-                        shutil.copy2(in_path, out_path)
-            except Exception as e:
-                logger.warning(f"[{job_id}] Subtitle render clip {clip.rank}: {e}")
-                import shutil
-                if not os.path.exists(out_path) and os.path.exists(in_path):
-                    shutil.copy2(in_path, out_path)
-        self._emit(job_id, 14, "subtitle_render", "complete")
 
     def _best_clip_path(self, output_dir: str, rank: int, reframe_data: dict) -> str:
         """Get best available clip path."""

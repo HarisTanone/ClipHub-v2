@@ -62,6 +62,96 @@ def _stream_video(file_path: str, request: Request, filename: str):
         )
 
 
+def _probe_video_dimensions(video_path: str) -> tuple[int, int]:
+    """Return source video dimensions using ffprobe."""
+    import json
+    import subprocess
+
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "json",
+            video_path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-300:] or "ffprobe failed")
+
+    data = json.loads(result.stdout or "{}")
+    streams = data.get("streams") or []
+    if not streams:
+        raise RuntimeError("video stream not found")
+
+    width = int(streams[0].get("width") or 0)
+    height = int(streams[0].get("height") or 0)
+    if width <= 0 or height <= 0:
+        raise RuntimeError("invalid video dimensions")
+    return width, height
+
+
+def _quality_variant_path(final_path: str, quality: str) -> str:
+    final_dir = os.path.dirname(final_path)
+    base_dir = os.path.dirname(final_dir) if os.path.basename(final_dir) == "final" else final_dir
+    variant_dir = os.path.join(base_dir, "preview_quality")
+    os.makedirs(variant_dir, exist_ok=True)
+
+    name = os.path.splitext(os.path.basename(final_path))[0]
+    return os.path.join(variant_dir, f"{name}_{quality}p.mp4")
+
+
+def _ensure_preview_quality_variant(final_path: str, quality: str) -> str:
+    """Create/cache a lower-resolution final preview video."""
+    import subprocess
+
+    allowed = {"720", "480", "360"}
+    if quality not in allowed:
+        raise ValueError(f"Invalid quality '{quality}'")
+
+    width, height = _probe_video_dimensions(final_path)
+    target = int(quality)
+    source_reference = width if height >= width else height
+    if target >= source_reference:
+        return final_path
+
+    variant_path = _quality_variant_path(final_path, quality)
+    if (
+        os.path.exists(variant_path)
+        and os.path.getsize(variant_path) > 0
+        and os.path.getmtime(variant_path) >= os.path.getmtime(final_path)
+    ):
+        return variant_path
+
+    tmp_path = f"{variant_path}.tmp.{os.getpid()}"
+    scale_expr = f"{target}:-2" if height >= width else f"-2:{target}"
+    crf = {"720": "24", "480": "27", "360": "30"}[quality]
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", final_path,
+        "-vf", f"scale={scale_expr}:flags=lanczos,format=yuv420p",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", crf,
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        tmp_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise RuntimeError(result.stderr[-500:] or "ffmpeg quality transcode failed")
+
+    os.replace(tmp_path, variant_path)
+    return variant_path
+
+
 async def _check_job_ownership(job, user: CurrentUser):
     """Verify user owns this job. Superadmin bypasses."""
     if user.is_superadmin:
@@ -248,9 +338,10 @@ async def get_clip_final(
     job_id: str,
     clip_rank: int,
     request: Request,
+    quality: str = "original",
     service: JobService = Depends(get_job_service),
 ):
-    """Download final encoded clip (final/clip_{n}_final.mp4)."""
+    """Stream final clip, optionally as cached preview quality."""
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
@@ -261,7 +352,22 @@ async def get_clip_final(
     if not os.path.exists(final_path):
         raise HTTPException(status_code=404, detail="File final clip tidak ditemukan")
 
-    return _stream_video(final_path, request, f"clip_{clip_rank}_final.mp4")
+    quality = (quality or "original").lower().replace("p", "")
+    if quality in {"auto", "source"}:
+        quality = "original"
+    if quality != "original":
+        if quality not in {"720", "480", "360"}:
+            raise HTTPException(status_code=400, detail="Quality harus original, 720, 480, atau 360")
+        try:
+            preview_path = _ensure_preview_quality_variant(final_path, quality)
+            if preview_path == final_path:
+                quality = "original"
+            final_path = preview_path
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Gagal membuat preview quality {quality}p: {e}")
+
+    filename_suffix = "" if quality == "original" else f"_{quality}p"
+    return _stream_video(final_path, request, f"clip_{clip_rank}_final{filename_suffix}.mp4")
 
 
 @router.get("/{job_id}/clips/{clip_rank}/thumb")
@@ -782,7 +888,7 @@ async def edit_clip_style(
             "hook_style": body.hook_style,
             "hook_style_config": body.hook_style_config,
         },
-        "message": f"Style override set for clip #{clip_rank}. Call /rerender to apply.",
+        "message": f"Style override set for clip #{clip_rank}. Call /restyle to apply with Remotion.",
     }
 
 
@@ -794,152 +900,14 @@ async def rerender_clip(
     service: JobService = Depends(get_job_service),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Re-render a single clip with current or overridden hook/style.
+    """Deprecated hook-only rerender endpoint.
 
-    This triggers the hook rendering pipeline for just this one clip.
-    Uses the clip's current hook_text and hook_style (or overrides from body).
-
-    Returns immediately with status — rendering happens in background.
+    Hook/subtitle rendering is Remotion-only through /restyle so output matches preview.
     """
-    job = await service.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    if not job.clips_data or "clips" not in job.clips_data:
-        raise HTTPException(status_code=400, detail="Job has no clips data")
-
-    # Find clip
-    clip_data = None
-    for clip in job.clips_data["clips"]:
-        if clip.get("rank") == clip_rank:
-            clip_data = clip
-            break
-
-    if clip_data is None:
-        raise HTTPException(status_code=404, detail=f"Clip #{clip_rank} not found")
-
-    # Check source video exists
-    output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
-    reframed_path = f"{output_dir}/clip_{clip_rank:02d}_reframed.mp4"
-    raw_path = f"{output_dir}/raw/clip_{clip_rank}.mp4"
-    source_path = reframed_path if os.path.exists(reframed_path) else raw_path
-
-    if not os.path.exists(source_path):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Source video not found for clip #{clip_rank}. Run full pipeline first.",
-        )
-
-    # Determine hook_text and style
-    hook_text = body.hook_text if (body and body.hook_text) else clip_data.get("hook", "")
-    hook_style = body.hook_style if (body and body.hook_style) else clip_data.get("hook_style_override", job.style_preset)
-    hook_config = body.hook_style_config if (body and body.hook_style_config) else clip_data.get("hook_style_config_override")
-
-    if not hook_text:
-        raise HTTPException(status_code=400, detail="No hook text available for this clip")
-
-    # Update clip data with overrides if provided
-    if body and body.hook_text:
-        clip_data["hook"] = body.hook_text
-    if body and body.hook_style:
-        clip_data["hook_style_override"] = body.hook_style
-
-    # Perform render (synchronous for now — could be async via queue)
-    import logging
-    logger = logging.getLogger(__name__)
-
-    try:
-        from src.infrastructure.hook_engine.styles import STYLE_REGISTRY
-        from src.infrastructure.hook_engine.styles.hook_style_renderer import HookStyleRenderer
-
-        # Only new styles support HookStyleRenderer
-        if hook_style in STYLE_REGISTRY:
-            renderer = HookStyleRenderer(
-                style_name=hook_style,
-                config_overrides=hook_config,
-            )
-
-            import cv2
-            import numpy as np
-
-            cap = cv2.VideoCapture(source_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            duration = min(renderer.get_total_duration(), 4.0)
-            total_frames = int(duration * fps)
-
-            # Output path
-            os.makedirs(f"{output_dir}/final", exist_ok=True)
-            final_path = f"{output_dir}/final/clip_{clip_rank}_final.mp4"
-
-            import subprocess
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-f", "rawvideo", "-vcodec", "rawvideo",
-                "-s", f"{width}x{height}", "-pix_fmt", "bgr24",
-                "-r", str(fps), "-i", "-",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-                final_path,
-            ]
-            proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-
-            frame_idx = 0
-            try:
-                while frame_idx < total_frames:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    t = frame_idx / fps
-                    result = renderer.process_frame(frame, t, hook_text)
-                    proc.stdin.write(result.tobytes())
-                    frame_idx += 1
-            finally:
-                cap.release()
-                proc.stdin.close()
-                proc.wait(timeout=120)
-
-            if proc.returncode != 0:
-                stderr = proc.stderr.read().decode()[-300:]
-                raise RuntimeError(f"FFmpeg failed: {stderr}")
-
-            # Persist updated clips_data
-            from src.infrastructure.database import async_session, JobModel
-            from sqlalchemy import update as sql_update
-
-            async with async_session() as session:
-                await session.execute(
-                    sql_update(JobModel)
-                    .where(JobModel.job_id == job_id)
-                    .values(clips_data=job.clips_data)
-                )
-                await session.commit()
-
-            return {
-                "success": True,
-                "data": {
-                    "job_id": job_id,
-                    "clip_rank": clip_rank,
-                    "hook_text": hook_text,
-                    "hook_style": hook_style,
-                    "output_path": f"/api/jobs/{job_id}/clips/{clip_rank}/final",
-                    "frames_rendered": frame_idx,
-                    "duration": duration,
-                },
-                "message": f"Clip #{clip_rank} re-rendered successfully",
-            }
-        else:
-            # Legacy style — use existing HookEngine
-            return {
-                "success": False,
-                "message": f"Re-render for legacy style '{hook_style}' — use full pipeline. "
-                           f"Only new styles ({', '.join(STYLE_REGISTRY.keys())}) support per-clip re-render.",
-            }
-
-    except Exception as e:
-        logger.error(f"rerender_clip_error: job={job_id}, clip={clip_rank}, error={e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Re-render failed: {str(e)}")
+    raise HTTPException(
+        status_code=410,
+        detail="Hook-only /rerender is disabled. Use /restyle; it renders hook and subtitle via Remotion.",
+    )
 
 
 # ─── Restyle: Full re-render chain (hook + broll + subtitle) from raw clip ────
@@ -1077,8 +1045,9 @@ async def restyle_clip(
                 except Exception as e:
                     logger.warning(f"[restyle] broll failed clip {clip_rank}: {e}")
 
-        # Step 2: Preferred path — Remotion renders hook + subtitle with the same
-        # style config used by the live preview.
+        # Step 2: Remotion renders hook + subtitle with the same style config
+        # used by the live preview. FFmpeg fallback is intentionally disabled
+        # for hook/subtitle so the final video cannot diverge from preview.
         remotion_rendered = False
         clip_duration = float(
             clip_data.get("duration")
@@ -1142,36 +1111,18 @@ async def restyle_clip(
             except Exception as e:
                 logger.warning(f"[restyle] remotion failed clip {clip_rank}: {e}")
 
-        # Step 3: Fallback path — legacy hook/subtitle renderers.
-        if not remotion_rendered:
-            if hook_text:
-                await service._render_hook_ffmpeg(current_path, hook_text, hooked_path, hook_style=hook_style)
-                if os.path.exists(hooked_path):
-                    current_path = hooked_path
-                logger.info(f"[restyle] legacy hook applied clip {clip_rank} style={hook_style}")
+        if (hook_text or render_words) and not remotion_rendered:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Remotion render failed or is unavailable. "
+                    "Hook/subtitle FFmpeg fallback is disabled so output matches preview."
+                ),
+            )
 
-            if do_subtitle and clip_data.get("words"):
-                try:
-                    if service._subtitle_renderer:
-                        await service._subtitle_renderer.render(
-                            current_path,
-                            clip_data["words"],
-                            final_path,
-                            start_offset=3.0,
-                        )
-                        if os.path.exists(final_path):
-                            current_path = final_path
-                        logger.info(f"[restyle] legacy subtitle applied clip {clip_rank}")
-                    else:
-                        shutil.copy2(current_path, final_path)
-                        current_path = final_path
-                except Exception as e:
-                    logger.warning(f"[restyle] subtitle failed clip {clip_rank}: {e}")
-                    shutil.copy2(current_path, final_path)
-                    current_path = final_path
-            elif current_path != final_path:
-                shutil.copy2(current_path, final_path)
-                current_path = final_path
+        if not hook_text and not render_words and current_path != final_path:
+            shutil.copy2(current_path, final_path)
+            current_path = final_path
 
         # Update clip_data with applied style
         clip_data["hook_style_override"] = hook_style

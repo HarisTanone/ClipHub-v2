@@ -14,11 +14,14 @@ import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, type Hook
 import { jobs, API_BASE, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
 
+type PreviewQuality = "original" | "720" | "480" | "360";
+
 export function ClipViewer() {
   const { jobId, rank } = useParams<{ jobId: string; rank: string }>();
   const toast = useToast();
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const pendingSeekRef = useRef<number | null>(null);
 
   const [clip, setClip] = useState<ClipDetailResponse["data"] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,6 +33,7 @@ export function ClipViewer() {
   const [showSubtitles, setShowSubtitles] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  const [previewQuality, setPreviewQuality] = useState<PreviewQuality>("original");
 
   // Hook editing
   const [isEditingHook, setIsEditingHook] = useState(false);
@@ -103,6 +107,11 @@ export function ClipViewer() {
     finally { setIsRestyling(false); }
   }
 
+  function handlePreviewQualityChange(quality: PreviewQuality) {
+    pendingSeekRef.current = videoRef.current?.currentTime ?? null;
+    setPreviewQuality(quality);
+  }
+
   if (isLoading && !clip) {
     return <div className="space-y-3"><SkeletonCard /><SkeletonCard /></div>;
   }
@@ -115,8 +124,11 @@ export function ClipViewer() {
   }
 
   const rawUrl = clip.urls.raw ? `${API_BASE}${clip.urls.raw}` : null;
-  const finalUrl = clip.urls.final ? `${API_BASE}${clip.urls.final}` : null;
-  const videoUrl = showRaw ? (rawUrl || finalUrl) : (finalUrl || rawUrl);
+  const finalDownloadUrl = clip.urls.final ? `${API_BASE}${clip.urls.final}` : null;
+  const finalPreviewUrl = finalDownloadUrl && !showRaw
+    ? jobs.getClipFinalUrl(jobId!, clipRank, previewQuality)
+    : finalDownloadUrl;
+  const videoUrl = showRaw ? (rawUrl || finalPreviewUrl) : (finalPreviewUrl || rawUrl);
 
   return (
     <div className="h-full flex flex-col">
@@ -158,6 +170,12 @@ export function ClipViewer() {
                     src={videoUrl}
                     className="w-full h-full object-contain"
                     onTimeUpdate={() => videoRef.current && setCurrentTime(videoRef.current.currentTime)}
+                    onLoadedMetadata={() => {
+                      if (videoRef.current && pendingSeekRef.current !== null) {
+                        videoRef.current.currentTime = pendingSeekRef.current;
+                        pendingSeekRef.current = null;
+                      }
+                    }}
                     playsInline
                     preload="auto"
                     controls
@@ -189,9 +207,14 @@ export function ClipViewer() {
             <ToggleBtn label="Preview" active={previewMode} onClick={() => setPreviewMode(!previewMode)} icon={<Eye className="h-3 w-3" />} />
             <ToggleBtn label="Hook" active={showHook} onClick={() => setShowHook(!showHook)} icon={<Type className="h-3 w-3" />} />
             <ToggleBtn label="Sub" active={showSubtitles} onClick={() => setShowSubtitles(!showSubtitles)} icon={<Layers className="h-3 w-3" />} />
+            <QualitySelect
+              value={previewQuality}
+              onChange={handlePreviewQualityChange}
+              disabled={showRaw || !finalDownloadUrl}
+            />
             <div className="ml-auto flex gap-1.5">
               {rawUrl && <a href={rawUrl} download><Button variant="outline" size="xs" icon={<Download className="h-3 w-3" />}>Raw</Button></a>}
-              {finalUrl && <a href={finalUrl} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final</Button></a>}
+              {finalDownloadUrl && <a href={finalDownloadUrl} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final</Button></a>}
             </div>
           </div>
         </div>
@@ -293,6 +316,37 @@ function ToggleBtn({ label, active, onClick, icon, color = "emerald" }: { label:
     <button type="button" onClick={onClick} className={cn("flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition-colors", active ? activeClass : "border-zinc-800 bg-zinc-900/50 text-zinc-500")}>
       {icon}{label}
     </button>
+  );
+}
+
+function QualitySelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: PreviewQuality;
+  onChange: (quality: PreviewQuality) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className={cn(
+      "flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition-colors",
+      disabled ? "border-zinc-900 bg-zinc-950/40 text-zinc-700" : "border-zinc-800 bg-zinc-900/50 text-zinc-400"
+    )}>
+      <span>Quality</span>
+      <select
+        aria-label="Preview quality"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as PreviewQuality)}
+        className="bg-transparent text-zinc-200 outline-none disabled:text-zinc-700"
+      >
+        <option value="original">Original</option>
+        <option value="720">720p</option>
+        <option value="480">480p</option>
+        <option value="360">360p</option>
+      </select>
+    </label>
   );
 }
 

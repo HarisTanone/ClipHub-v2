@@ -945,7 +945,7 @@ function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange, 
   );
 }
 
-// ─── Hook Preview Renderer (matches FFmpeg output visually) ──────────────────
+// ─── Hook Preview Renderer (matches Remotion output visually) ────────────────
 
 function HookPreviewRenderer({ style }: { style: HookStyle }) {
   const text = style.text || getHookPreviewSample(style.animation);
