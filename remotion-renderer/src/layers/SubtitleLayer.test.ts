@@ -1,34 +1,12 @@
 import { describe, it, expect } from "vitest";
+import {
+  groupWordsToSubtitlePages,
+  normaliseSubtitleWords,
+  resolveSubtitleVisualPreset,
+  resolveSubtitlePositionY,
+} from "./SubtitleLayer";
 
 describe("SubtitleLayer - Page Grouping", () => {
-  // Helper: simulate the page grouping logic from SubtitleLayer
-  function groupWordsToPages(words: Array<{word: string; start: number; end: number}>, maxPerLine = 3) {
-    const result: any[] = [];
-    let current: typeof words = [];
-    for (const w of words) {
-      const gapTooLarge = current.length > 0 && w.start - current[current.length - 1].end > 0.5;
-      if (current.length >= maxPerLine || gapTooLarge) {
-        if (current.length > 0) {
-          result.push({
-            startMs: Math.round(current[0].start * 1000),
-            endMs: Math.round(current[current.length - 1].end * 1000),
-            tokens: current.map(cw => ({ text: cw.word + " ", fromMs: Math.round(cw.start * 1000), toMs: Math.round(cw.end * 1000) })),
-          });
-        }
-        current = [];
-      }
-      current.push(w);
-    }
-    if (current.length > 0) {
-      result.push({
-        startMs: Math.round(current[0].start * 1000),
-        endMs: Math.round(current[current.length - 1].end * 1000),
-        tokens: current.map(cw => ({ text: cw.word + " ", fromMs: Math.round(cw.start * 1000), toMs: Math.round(cw.end * 1000) })),
-      });
-    }
-    return result;
-  }
-
   // Helper: calculate startFrame (the fixed version)
   function calcStartFrame(pageStartMs: number, fps: number): number {
     return Math.round((pageStartMs / 1000) * fps);
@@ -43,7 +21,7 @@ describe("SubtitleLayer - Page Grouping", () => {
       { word: "a", start: 1.8, end: 1.9 },
       { word: "test", start: 2.0, end: 2.3 },
     ];
-    const pages = groupWordsToPages(words, 3);
+    const pages = groupWordsToSubtitlePages(words, 3);
     expect(pages).toHaveLength(2);
     expect(pages[0].tokens).toHaveLength(3);
     expect(pages[1].tokens).toHaveLength(3);
@@ -54,7 +32,7 @@ describe("SubtitleLayer - Page Grouping", () => {
       { word: "Hello", start: 0.5, end: 0.8 },
       { word: "world", start: 2.0, end: 2.3 }, // gap > 0.5s
     ];
-    const pages = groupWordsToPages(words, 3);
+    const pages = groupWordsToSubtitlePages(words, 3);
     expect(pages).toHaveLength(2);
     expect(pages[0].tokens).toHaveLength(1);
     expect(pages[1].tokens).toHaveLength(1);
@@ -96,7 +74,7 @@ describe("SubtitleLayer - Page Grouping", () => {
       { word: "the", start: 2.2, end: 2.3 },
       { word: "channel", start: 2.4, end: 2.9 },
     ];
-    const pages = groupWordsToPages(hookPeriodWords, 3);
+    const pages = groupWordsToSubtitlePages(hookPeriodWords, 3);
     for (const page of pages) {
       const frame = calcStartFrame(page.startMs, fps);
       expect(frame).toBeGreaterThanOrEqual(0);
@@ -141,5 +119,44 @@ describe("SubtitleLayer - Page Grouping", () => {
     const startRel1 = token1.fromMs - page.startMs; // 4400 - 4000 = 400
     const endRel1 = token1.toMs - page.startMs; // 4700 - 4000 = 700
     expect(startRel1 <= timeInMs15 && endRel1 > timeInMs15).toBe(true);
+  });
+
+  it("normalises dirty word timing before page grouping", () => {
+    const cleaned = normaliseSubtitleWords([
+      { word: " later ", start: 1.2, end: 1.1 },
+      { word: "first", start: -0.1, end: 0.2 },
+      { word: "first", start: -0.08, end: 0.22 },
+      { word: "", start: 0.3, end: 0.4 },
+      { word: "overlap", start: 0.1, end: 0.5 },
+    ]);
+
+    expect(cleaned.map((w) => w.word)).toEqual(["first", "overlap", "later"]);
+    expect(cleaned[0].start).toBe(0);
+    expect(cleaned[1].start).toBeGreaterThan(cleaned[0].end);
+    expect(cleaned[2].end).toBeGreaterThan(cleaned[2].start);
+  });
+
+  it("resolves subtitle Y from position when positionY is absent", () => {
+    expect(resolveSubtitlePositionY({ position: "top" })).toBe(18);
+    expect(resolveSubtitlePositionY({ position: "center" })).toBe(50);
+    expect(resolveSubtitlePositionY({ position: "bottom" })).toBe(85);
+    expect(resolveSubtitlePositionY({ positionY: 120 })).toBe(94);
+  });
+
+  it("keeps AI-highlighted words in subtitle pages", () => {
+    const pages = groupWordsToSubtitlePages([
+      { word: "normal", start: 0, end: 0.2 },
+      { word: "power", start: 0.3, end: 0.5, highlight: true },
+    ], 4);
+
+    expect(pages[0].tokens[1].highlight).toBe(true);
+  });
+
+  it("resolves visual presets for new and legacy subtitle styles", () => {
+    expect(resolveSubtitleVisualPreset({ stylePreset: "neon_pulse" })).toBe("neon_pulse");
+    expect(resolveSubtitleVisualPreset({ lineTransition: "emphasis" })).toBe("spotlight_keyword");
+    expect(resolveSubtitleVisualPreset({ lineTransition: "line_reveal" })).toBe("editorial_banner");
+    expect(resolveSubtitleVisualPreset({ dualStyleEnabled: true })).toBe("dual_pop");
+    expect(resolveSubtitleVisualPreset({ stylePreset: "bold_yellow" })).toBe("dual_pop");
   });
 });

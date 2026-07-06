@@ -21,13 +21,15 @@ class SSEProgressEmitter:
 
     MAX_CONNECTIONS_PER_JOB = 10
     HEARTBEAT_INTERVAL = 15  # seconds
-    TOTAL_STEPS = 14
+    TOTAL_STEPS = 16
 
     def __init__(self):
         # job_id -> list of asyncio.Queue
         self._connections: Dict[str, list] = defaultdict(list)
         # job_id -> final event (for late-connecting clients)
         self._final_states: Dict[str, dict] = {}
+        # job_id -> latest progress event (for REST polling fallback)
+        self._current_states: Dict[str, dict] = {}
 
     @property
     def connection_count(self) -> Dict[str, int]:
@@ -41,6 +43,10 @@ class SSEProgressEmitter:
     def get_final_state(self, job_id: str) -> Optional[dict]:
         """Get final state for already-completed job."""
         return self._final_states.get(job_id)
+
+    def get_current_state(self, job_id: str) -> Optional[dict]:
+        """Get latest progress state for polling clients."""
+        return self._current_states.get(job_id)
 
     def can_connect(self, job_id: str) -> bool:
         """Check if more connections are allowed for this job."""
@@ -95,6 +101,9 @@ class SSEProgressEmitter:
         # Store final state for late-connecting clients
         if event_type == "job_done":
             self._final_states[job_id] = data
+            self._current_states[job_id] = data
+        elif event_type in ("step_start", "step_complete"):
+            self._current_states[job_id] = data
 
         # Broadcast to all connected queues
         for queue in self._connections.get(job_id, []):
@@ -103,6 +112,20 @@ class SSEProgressEmitter:
             except asyncio.QueueFull:
                 logger.warning("sse_queue_full", extra={"job_id": job_id})
 
+    def _progress_percentage(self, step_number: float, event_type: str) -> int:
+        try:
+            step = float(step_number)
+        except (TypeError, ValueError):
+            step = 0.0
+        step = max(0.0, min(float(self.TOTAL_STEPS), step))
+        if event_type == "step_complete":
+            pct = int((step / self.TOTAL_STEPS) * 100)
+        else:
+            pct = int(((max(step - 1.0, 0.0)) / self.TOTAL_STEPS) * 100)
+        if event_type == "step_start" and step > 0:
+            pct = max(1, pct)
+        return max(0, min(99 if event_type != "job_done" else 100, pct))
+
     def emit_step_start(self, job_id: str, step_number: int, step_name: str) -> None:
         """Emit step_start event."""
         self.emit(job_id, "step_start", {
@@ -110,6 +133,7 @@ class SSEProgressEmitter:
             "step_number": step_number,
             "step_name": step_name,
             "total_steps": self.TOTAL_STEPS,
+            "percentage": self._progress_percentage(step_number, "step_start"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -120,6 +144,7 @@ class SSEProgressEmitter:
             "step_number": step_number,
             "step_name": step_name,
             "total_steps": self.TOTAL_STEPS,
+            "percentage": self._progress_percentage(step_number, "step_complete"),
             "duration_seconds": round(duration_seconds, 2),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
@@ -129,6 +154,10 @@ class SSEProgressEmitter:
         self.emit(job_id, "job_done", {
             "job_id": job_id,
             "final_status": final_status,
+            "step_number": self.TOTAL_STEPS,
+            "step_name": final_status,
+            "total_steps": self.TOTAL_STEPS,
+            "percentage": 100 if final_status in ("completed", "done") else self._current_states.get(job_id, {}).get("percentage", 0),
             "total_duration_seconds": round(total_duration_seconds, 2),
             "clips_count": clips_count,
             "timestamp": datetime.now(timezone.utc).isoformat(),

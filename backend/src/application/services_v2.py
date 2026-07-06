@@ -42,6 +42,10 @@ from src.domain.interfaces import (
     IWhisperLocal,
     IYoloReframeEngine,
 )
+from src.infrastructure.subtitle_words import (
+    grid_subtitle_position_y as resolve_grid_subtitle_position_y,
+    sanitize_subtitle_words,
+)
 
 if TYPE_CHECKING:
     from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
@@ -454,19 +458,7 @@ class V2PipelineService:
             for clip in clips:
                 raw_words = words_per_clip.get(clip.rank, [])
                 clip_duration = round(clip.end - clip.start, 3)
-                valid_words = []
-                for w in raw_words:
-                    start = w.get("start", 0)
-                    end = w.get("end", 0)
-                    word_text = w.get("word", "").strip()
-                    if not word_text or end <= start or start < 0:
-                        continue
-                    if start >= clip_duration:
-                        continue
-                    end = min(end, clip_duration)
-                    if end - start < 0.3:
-                        end = min(start + 0.3, clip_duration)
-                    valid_words.append({"word": word_text, "start": start, "end": end, "highlight": False})
+                valid_words = sanitize_subtitle_words(raw_words, clip_duration)
                 clips_with_words[clip.rank] = valid_words
                 if valid_words:
                     logger.info(
@@ -510,7 +502,7 @@ class V2PipelineService:
             await self._repo.update_clips_count(job_id, clips_count, success_count, failed_count)
 
             clips_data = self._assemble_clips_data(
-                clips, words_per_clip, creative_direction, output_dir,
+                clips, clips_with_words, creative_direction, output_dir,
                 transcript_source=transcript_result.source,
             )
             await self._repo.update_clips_data(job_id, clips_data)
@@ -675,14 +667,17 @@ class V2PipelineService:
 
                 clip_words_raw = clips_with_words.get(clip.rank, [])
                 clip_hook = clip.hook or ""
-                clip_words = clip_words_raw
+                clip_duration = max(0.0, clip.end - clip.start)
+                clip_words = sanitize_subtitle_words(clip_words_raw, clip_duration)
 
                 # Check if this clip was reframed with grid (2-speaker split)
                 is_grid_mode = False
+                grid_subtitle_position_y = None
                 clip_reframe = reframe_data.get(clip.rank)
                 if clip_reframe and isinstance(clip_reframe, dict):
                     method = clip_reframe.get("method", "")
                     is_grid_mode = "grid" in method or "double" in method or "emphasis" in method
+                    grid_subtitle_position_y = resolve_grid_subtitle_position_y(method)
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "fade_scale")
@@ -691,6 +686,8 @@ class V2PipelineService:
                 cd_dict["hook_style_config"] = hook_style_config
                 cd_dict["subtitle_style_config"] = subtitle_style_config
                 cd_dict["is_grid_mode"] = is_grid_mode
+                if grid_subtitle_position_y is not None:
+                    cd_dict["grid_subtitle_position_y"] = grid_subtitle_position_y
 
                 try:
                     result = await self._remotion_adapter.render_clip(
@@ -859,6 +856,7 @@ class V2PipelineService:
                 "hook": clip.hook,
                 "reason": clip.reason,
                 "output_path": final_path,
+                "words": words,
                 "word_count": len(words),
                 "has_subtitles": len(words) > 0,
             })

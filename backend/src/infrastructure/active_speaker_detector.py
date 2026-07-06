@@ -35,6 +35,8 @@ class FaceSpeechFrame:
     bbox_x: float        # face center X in pixels
     bbox_y: float        # face center Y in pixels
     yaw_deg: float = 0.0 # estimated yaw angle (0 = frontal, ±90 = profile)
+    nose_x: float = 0.0  # nose X in pixels, used after stable ID assignment
+    nose_y: float = 0.0  # nose Y in pixels, used after stable ID assignment
 
 
 @dataclass
@@ -92,7 +94,7 @@ class ActiveSpeakerDetector:
     HEAD_MOTION_NORMALIZE = 20.0
 
     FACE_MESH_CONFIDENCE = 0.5
-    MAX_FACES = 2                  # Optimize for podcast (2 people max)
+    MAX_FACES = 4                  # Podcast panels are usually 2 people, but support N-position targeting
 
     def __init__(self):
         self._face_mesh = None
@@ -169,10 +171,11 @@ class ActiveSpeakerDetector:
         sample_interval_sec: float = 0.2,
         max_samples: int = 150,
         vad_segments: Optional[List[Dict]] = None,
+        position_targets: Optional[Dict[int, float]] = None,
     ) -> Optional[ActiveSpeakerResult]:
         """Run multimodal active speaker detection on video.
 
-        Uses: lip aperture (40%) + head motion (60%), gated by audio VAD.
+        Uses: lip aperture (70%) + head motion (30%), gated by audio VAD.
         When audio is silent (no VAD activity), no one is scored as speaking.
 
         Args:
@@ -185,6 +188,8 @@ class ActiveSpeakerDetector:
             max_samples: Maximum frames to process
             vad_segments: List of {'start': float, 'end': float} from Silero VAD.
                           If None, assumes continuous speech (fallback).
+            position_targets: Stable person positions from face tracking, keyed by
+                              positional speaker ID (0=leftmost, 1=next, ...).
         """
         if not self._load_model():
             return None
@@ -201,9 +206,6 @@ class ActiveSpeakerDetector:
 
         # Collect per-frame lip data
         frame_data: List[Tuple[int, List[FaceSpeechFrame]]] = []
-
-        # State for head motion tracking per face position (left/right)
-        prev_nose: Dict[int, Tuple[float, float]] = {}  # face_id → (x, y) in pixels
 
         for frame_idx in sample_indices:
             t = frame_idx / fps
@@ -242,22 +244,16 @@ class ActiveSpeakerDetector:
                         cx = nose.x * width
                         cy = nose.y * height
 
-                        # Head motion: euclidean distance from previous nose position
-                        head_motion = 0.0
-                        if face_idx in prev_nose:
-                            dx = cx - prev_nose[face_idx][0]
-                            dy = cy - prev_nose[face_idx][1]
-                            head_motion = min((dx**2 + dy**2) ** 0.5 / self.HEAD_MOTION_NORMALIZE, 1.0)
-                        prev_nose[face_idx] = (cx, cy)
-
                         yaw = self._estimate_yaw_legacy(face_landmarks)
                         faces_in_frame.append(FaceSpeechFrame(
                             face_id=face_idx,
                             lip_aperture=lip_aperture,
-                            head_motion=head_motion,
+                            head_motion=0.0,
                             bbox_x=cx,
                             bbox_y=cy,
                             yaw_deg=yaw,
+                            nose_x=cx,
+                            nose_y=cy,
                         ))
             else:
                 # Task API: mp.tasks.vision.FaceLandmarker
@@ -271,20 +267,15 @@ class ActiveSpeakerDetector:
                         cx = nose.x * width
                         cy = nose.y * height
 
-                        head_motion = 0.0
-                        if face_idx in prev_nose:
-                            dx = cx - prev_nose[face_idx][0]
-                            dy = cy - prev_nose[face_idx][1]
-                            head_motion = min((dx**2 + dy**2) ** 0.5 / self.HEAD_MOTION_NORMALIZE, 1.0)
-                        prev_nose[face_idx] = (cx, cy)
-
                         faces_in_frame.append(FaceSpeechFrame(
                             face_id=face_idx,
                             lip_aperture=lip_aperture,
-                            head_motion=head_motion,
+                            head_motion=0.0,
                             bbox_x=cx,
                             bbox_y=cy,
                             yaw_deg=self._estimate_yaw_task(landmarks),
+                            nose_x=cx,
+                            nose_y=cy,
                         ))
 
             frame_data.append((frame_idx, faces_in_frame))
@@ -294,8 +285,11 @@ class ActiveSpeakerDetector:
         if not frame_data:
             return None
 
-        # Assign consistent face IDs based on X position (left=0, right=1)
-        frame_data = self._assign_consistent_ids(frame_data, width)
+        # Assign stable positional IDs before measuring head motion. MediaPipe's
+        # per-frame face order is not stable, so head motion must be keyed by
+        # the final left/right/N-position identity rather than raw face_idx.
+        frame_data = self._assign_consistent_ids(frame_data, width, position_targets)
+        frame_data = self._compute_head_motion(frame_data)
 
         # Compute active speaker per frame using sliding window variance
         per_frame_speaker = self._compute_active_speakers(
@@ -429,23 +423,88 @@ class ActiveSpeakerDetector:
         self,
         frame_data: List[Tuple[int, List[FaceSpeechFrame]]],
         frame_width: int,
+        position_targets: Optional[Dict[int, float]] = None,
     ) -> List[Tuple[int, List[FaceSpeechFrame]]]:
-        """Assign consistent face IDs: leftmost face = ID 0, rightmost = ID 1.
+        """Assign consistent positional face IDs.
 
-        Simple heuristic for podcast (2 people, relatively stable positions).
-        Works because podcast participants don't swap seats.
+        If stable targets are available from the IoU tracker, each Face Mesh
+        detection is matched to the nearest target. This keeps lip/head scoring
+        aligned with the same identities used later by auto-centering.
+
+        Fallback: assign visible faces left-to-right for the current frame.
         """
-        midpoint = frame_width / 2.0
+        targets = self._normalise_position_targets(position_targets)
 
         for frame_idx, faces in frame_data:
-            if len(faces) == 2:
-                # Sort by X position: left = 0, right = 1
-                sorted_faces = sorted(faces, key=lambda f: f.bbox_x)
-                sorted_faces[0].face_id = 0
-                sorted_faces[1].face_id = 1
-            elif len(faces) == 1:
-                # Single face — assign based on which side of midpoint
-                faces[0].face_id = 0 if faces[0].bbox_x < midpoint else 1
+            if not faces:
+                continue
+
+            if targets:
+                pairs: List[Tuple[float, int, int]] = []
+                for face_idx, face in enumerate(faces):
+                    for position_id, target_x in targets.items():
+                        pairs.append((abs(face.bbox_x - target_x), position_id, face_idx))
+
+                used_faces: set[int] = set()
+                used_positions: set[int] = set()
+                for _, position_id, face_idx in sorted(pairs):
+                    if face_idx in used_faces or position_id in used_positions:
+                        continue
+                    faces[face_idx].face_id = position_id
+                    used_faces.add(face_idx)
+                    used_positions.add(position_id)
+
+                next_id = max(targets) + 1
+                for face_idx, face in sorted(
+                    enumerate(faces),
+                    key=lambda item: item[1].bbox_x,
+                ):
+                    if face_idx not in used_faces:
+                        face.face_id = next_id
+                        next_id += 1
+                continue
+
+            for position_id, face in enumerate(sorted(faces, key=lambda f: f.bbox_x)):
+                face.face_id = position_id
+
+        return frame_data
+
+    @staticmethod
+    def _normalise_position_targets(
+        position_targets: Optional[Dict[int, float]]
+    ) -> Dict[int, float]:
+        """Return clean positional targets keyed by speaker position ID."""
+        if not position_targets:
+            return {}
+
+        cleaned: Dict[int, float] = {}
+        for key, value in position_targets.items():
+            try:
+                cleaned[int(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return dict(sorted(cleaned.items()))
+
+    def _compute_head_motion(
+        self,
+        frame_data: List[Tuple[int, List[FaceSpeechFrame]]],
+    ) -> List[Tuple[int, List[FaceSpeechFrame]]]:
+        """Compute head motion after stable face IDs have been assigned."""
+        prev_nose: Dict[int, Tuple[float, float]] = {}
+
+        for _, faces in frame_data:
+            for face in faces:
+                prev = prev_nose.get(face.face_id)
+                if prev:
+                    dx = face.nose_x - prev[0]
+                    dy = face.nose_y - prev[1]
+                    face.head_motion = min(
+                        (dx * dx + dy * dy) ** 0.5 / self.HEAD_MOTION_NORMALIZE,
+                        1.0,
+                    )
+                else:
+                    face.head_motion = 0.0
+                prev_nose[face.face_id] = (face.nose_x, face.nose_y)
 
         return frame_data
 
@@ -519,9 +578,13 @@ class ActiveSpeakerDetector:
                 else:
                     lip_variance = float(np.var(lip_values))
 
-                # Head component: mean of head motion
+                # Head component: mean of head motion. Head movement is useful
+                # only as support for real mouth motion; otherwise a listening
+                # nod can beat the actual speaker.
                 head_values = [d[1] for d in window_data]
                 head_mean = float(np.mean(head_values))
+                head_gate = min(1.0, lip_amplitude / self.MIN_LIP_AMPLITUDE)
+                head_component = head_mean * head_gate
 
                 # Yaw component: average pose confidence in window
                 yaw_values = [d[2] for d in window_data]
@@ -529,7 +592,7 @@ class ActiveSpeakerDetector:
                 pose_conf = self._pose_confidence(avg_yaw)
 
                 # Multimodal score WITH pose discount
-                raw_score = lip_variance * self.LIP_WEIGHT + head_mean * self.HEAD_WEIGHT
+                raw_score = lip_variance * self.LIP_WEIGHT + head_component * self.HEAD_WEIGHT
                 score = raw_score * pose_conf
 
                 if score > best_score:

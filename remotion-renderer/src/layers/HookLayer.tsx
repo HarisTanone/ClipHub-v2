@@ -45,6 +45,10 @@ interface HookConfig {
   strokeEnabled?: boolean;
   strokeWidth?: number;
   strokeColor?: string;
+  badgeEnabled?: boolean;
+  badgeText?: string;
+  decorativeElements?: boolean;
+  motionIntensity?: number;
   duration?: number;
   fadeIn?: number;
   fadeOut?: number;
@@ -63,7 +67,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const animation = config.animation || "fade_scale";
+  const animation = config.animation || "podcast_lower_third";
   const duration = config.duration || 3.0;
   const fadeIn = config.fadeIn || 0.3;
   const fadeOut = config.fadeOut || 0.3;
@@ -145,6 +149,10 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const bgOpacity = config.bgOpacity ?? 0.6;
   const positionY = config.positionY ?? 50;
   const textAlign = (config.textAlign || "center") as any;
+  const badgeEnabled = config.badgeEnabled !== false;
+  const badgeText = config.badgeText || "";
+  const decorativeElements = config.decorativeElements !== false;
+  const motionIntensity = Math.max(0, config.motionIntensity ?? 1);
 
   // Text shadow (only when explicitly enabled)
   const shadows: string[] = [];
@@ -167,7 +175,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const isGlitch = animation === "glitch";
   const glitchActive = isGlitch && frame % 8 < 2;
   const glitchX = Math.sin(frame * 0.7) * 4;
-  const customRenderAnimations = new Set(["bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse", "breaking_tape", "mic_drop"]);
+  const customRenderAnimations = new Set(["bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse", "breaking_tape", "mic_drop", "split_panel", "kinetic_stack", "glass_flash", "marker_swipe", "signal_scan"]);
 
   return (
     <AbsoluteFill style={{ opacity }}>
@@ -297,7 +305,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
       {/* podcast_lower_third animation: podcast lower-third card with on-air badge */}
       {animation === "podcast_lower_third" && (() => {
         const entrance = spring({ frame, fps, config: { damping: 13, stiffness: 170, mass: 0.7 } });
-        const y = interpolate(Math.min(1, entrance), [0, 1], [96, 0]);
+        const y = interpolate(Math.min(1, entrance), [0, 1], [96, 0]) + Math.sin(frame * 0.06) * 4 * motionIntensity;
         const accent = config.lineColor || "#16F2B3";
         const dotOpacity = 0.35 + Math.abs(Math.sin(frame * 0.18)) * 0.65;
         return (
@@ -309,7 +317,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               right: "7%",
               transform: `translateY(calc(-50% + ${y}px))`,
               display: "grid",
-              gridTemplateColumns: "92px 1fr",
+              gridTemplateColumns: badgeEnabled ? "92px 1fr" : "1fr",
               alignItems: "center",
               gap: 22,
               padding: "30px 34px",
@@ -319,7 +327,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               background: "linear-gradient(90deg, rgba(6,17,31,0.96), rgba(16,24,39,0.82))",
               boxShadow: `0 24px 70px rgba(0,0,0,0.45), 0 0 38px ${accent}33`,
             }}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+              {badgeEnabled && <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
                 <span style={{
                   width: 24,
                   height: 24,
@@ -334,8 +342,8 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                   fontWeight: 900,
                   fontSize: 22,
                   letterSpacing: 0,
-                }}>ON AIR</span>
-              </div>
+                }}>{badgeText || "ON AIR"}</span>
+              </div>}
               <div style={{
                 color,
                 fontSize: config.fontSize || 64,
@@ -354,8 +362,9 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
       {/* quote_card animation: editorial pull-quote card */}
       {animation === "quote_card" && (() => {
         const entrance = spring({ frame, fps, config: { damping: 16, stiffness: 120, mass: 0.8 } });
-        const scale = 0.9 + Math.min(1, entrance) * 0.1;
-        const rotate = interpolate(frame, [0, 18], [-2.5, -0.8], { extrapolateRight: "clamp" });
+        const scale = 0.9 + Math.min(1, entrance) * 0.1 + Math.sin(frame * 0.055) * 0.01 * motionIntensity;
+        const rotate = interpolate(frame, [0, 18], [-2.5, -0.8], { extrapolateRight: "clamp" }) + Math.sin(frame * 0.045) * 0.35 * motionIntensity;
+        const y = Math.sin(frame * 0.05) * 5 * motionIntensity;
         const accent = config.lineColor || "#FF4D2D";
         return (
           <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
@@ -367,9 +376,9 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               background: hexToRgba(config.boxColor || "#F5EFE1", config.boxOpacity ?? 0.96),
               border: "3px solid rgba(255,255,255,0.72)",
               boxShadow: "0 36px 90px rgba(0,0,0,0.42)",
-              transform: `scale(${scale}) rotate(${rotate}deg)`,
+              transform: `translateY(${y}px) scale(${scale}) rotate(${rotate}deg)`,
             }}>
-              <div style={{
+              {decorativeElements && <div style={{
                 position: "absolute",
                 top: -38,
                 left: 42,
@@ -378,7 +387,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 fontWeight: 900,
                 fontSize: 132,
                 lineHeight: 1,
-              }}>"</div>
+              }}>"</div>}
               <div style={{
                 color: config.color || "#171717",
                 fontSize: config.fontSize || 58,
@@ -389,13 +398,13 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 textShadow: "none",
                 whiteSpace: "pre-line",
               }}>{renderedText}</div>
-              <div style={{
+              {decorativeElements && <div style={{
                 width: "36%",
                 height: 8,
                 borderRadius: 999,
                 margin: "34px auto 0",
                 backgroundColor: accent,
-              }} />
+              }} />}
             </div>
           </AbsoluteFill>
         );
@@ -404,14 +413,15 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
       {/* waveform_pulse animation: pulsing audio waveform around hook text */}
       {animation === "waveform_pulse" && (() => {
         const waveColor = config.glowColor || config.gradientTo || color || "#14F1D9";
-        const pulse = 1 + Math.sin(frame * 0.18) * 0.035;
+        const pulse = 1 + Math.sin(frame * 0.18) * 0.035 * motionIntensity;
         const bars = Array.from({ length: 17 });
         return (
           <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
             <div style={{ position: "absolute", top: `${positionY}%`, left: 0, right: 0, transform: `translateY(-50%) scale(${pulse})`, textAlign: "center" }}>
-              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 9, height: 104, marginBottom: 20 }}>
+              {badgeEnabled && <div style={{ color: waveColor, fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: 24, letterSpacing: 2, marginBottom: 12 }}>{badgeText || "LIVE AUDIO"}</div>}
+              {decorativeElements && <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 9, height: 104, marginBottom: 20 }}>
                 {bars.map((_, i) => {
-                  const bar = 32 + Math.abs(Math.sin(frame * 0.18 + i * 0.72)) * (42 + (i % 4) * 10);
+                  const bar = 32 + Math.abs(Math.sin(frame * (0.12 + motionIntensity * 0.06) + i * 0.72)) * (42 + (i % 4) * 10);
                   return (
                     <span key={i} style={{
                       width: 10,
@@ -423,7 +433,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                     }} />
                   );
                 })}
-              </div>
+              </div>}
               <div style={{
                 display: "inline-block",
                 padding: "0 54px",
@@ -445,7 +455,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
       {/* breaking_tape animation: diagonal hot-take tape */}
       {animation === "breaking_tape" && (() => {
         const entrance = spring({ frame, fps, config: { damping: 12, stiffness: 180, mass: 0.7 } });
-        const x = interpolate(Math.min(1, entrance), [0, 1], [-260, 0]);
+        const x = interpolate(Math.min(1, entrance), [0, 1], [-260, 0]) + Math.sin(frame * 0.07) * 14 * motionIntensity;
         const tapeColor = config.boxColor || "#FFDD2D";
         return (
           <AbsoluteFill>
@@ -457,19 +467,20 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               transform: `translateY(-50%) translateX(${x}px) rotate(-4deg)`,
               padding: "28px 80px",
               background: `linear-gradient(90deg, ${tapeColor}, #FFF06A, ${tapeColor})`,
+              backgroundImage: decorativeElements ? `repeating-linear-gradient(135deg, rgba(0,0,0,0.06) 0 18px, transparent 18px 32px), linear-gradient(90deg, ${tapeColor}, #FFF06A, ${tapeColor})` : undefined,
               borderTop: "8px solid rgba(0,0,0,0.92)",
               borderBottom: "8px solid rgba(0,0,0,0.92)",
               boxShadow: "0 34px 70px rgba(0,0,0,0.42)",
               textAlign: "center",
             }}>
-              <div style={{
+              {badgeEnabled && <div style={{
                 color: "#D71920",
                 fontFamily: "'Inter', sans-serif",
                 fontWeight: 900,
                 fontSize: 26,
                 letterSpacing: 0,
                 marginBottom: 8,
-              }}>HOT TAKE</div>
+              }}>{badgeText || "HOT TAKE"}</div>}
               <div style={{
                 color: config.color || "#111111",
                 fontSize: config.fontSize || 72,
@@ -487,10 +498,10 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
       {/* mic_drop animation: falling badge with impact flash */}
       {animation === "mic_drop" && (() => {
         const entrance = spring({ frame, fps, config: { damping: 8, stiffness: 210, mass: 0.65 } });
-        const y = interpolate(Math.min(1, entrance), [0, 1], [-340, 0]);
+        const y = interpolate(Math.min(1, entrance), [0, 1], [-340, 0]) + Math.sin(frame * 0.07) * 6 * motionIntensity;
         const rotate = interpolate(frame, [0, 14], [-8, 0], { extrapolateRight: "clamp" });
         const accent = config.boxColor || config.gradientTo || "#FF4D7D";
-        const impactScale = frame > 10 && frame < 24 ? 1 + Math.sin((frame - 10) * 0.5) * 0.08 : 1;
+        const impactScale = (frame > 10 && frame < 24 ? 1 + Math.sin((frame - 10) * 0.5) * 0.08 : 1) + Math.sin(frame * 0.08) * 0.012 * motionIntensity;
         return (
           <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
             <div style={{
@@ -506,6 +517,14 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               padding: "48px 62px",
               textAlign: "center",
             }}>
+              {badgeEnabled && <div style={{
+                color: accent,
+                fontFamily: "'Inter', sans-serif",
+                fontWeight: 900,
+                fontSize: 24,
+                letterSpacing: 2,
+                marginBottom: 14,
+              }}>{badgeText || "MIC DROP"}</div>}
               <div style={{
                 color: config.gradientEnabled ? "transparent" : color,
                 background: config.gradientEnabled ? `linear-gradient(${config.gradientAngle || 180}deg, ${config.gradientFrom || "#FFF"}, ${config.gradientTo || accent})` : undefined,
@@ -518,7 +537,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 textTransform: "uppercase",
               }}>{renderedText}</div>
             </div>
-            {frame > 10 && frame < 28 && (
+            {decorativeElements && frame > 10 && frame < 28 && (
               <div style={{
                 position: "absolute",
                 top: `calc(${positionY}% + 130px)`,
@@ -532,6 +551,189 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 boxShadow: `0 0 30px ${accent}`,
               }} />
             )}
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* split_panel animation: two-tone debate panel with customizable label */}
+      {animation === "split_panel" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 15, stiffness: 150, mass: 0.75 } });
+        const x = interpolate(Math.min(1, entrance), [0, 1], [-180, 0]);
+        const y = Math.sin(frame * 0.055) * 5 * motionIntensity;
+        const accent = config.lineColor || "#38BDF8";
+        return (
+          <AbsoluteFill>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "8%",
+              right: "8%",
+              transform: `translateY(calc(-50% + ${y}px)) translateX(${x}px)`,
+              display: "grid",
+              gridTemplateColumns: badgeEnabled ? "118px 1fr" : "1fr",
+              overflow: "hidden",
+              borderRadius: 30,
+              border: `2px solid ${accent}55`,
+              background: hexToRgba(config.boxColor || "#0F172A", config.boxOpacity ?? 0.86),
+              boxShadow: `0 30px 80px rgba(0,0,0,0.48), 0 0 34px ${accent}33`,
+            }}>
+              {badgeEnabled && <div style={{ display: "grid", placeItems: "center", background: accent, color: "#06111F", fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: 24, letterSpacing: 2, textTransform: "uppercase", writingMode: "vertical-rl" }}>{badgeText || "POINT"}</div>}
+              <div style={{ position: "relative", padding: "46px 54px" }}>
+                {decorativeElements && <div style={{ position: "absolute", left: 54, right: 54, bottom: 28, height: 5, borderRadius: 999, background: accent, opacity: 0.8 }} />}
+                <div style={{
+                  color: config.gradientEnabled ? "transparent" : color,
+                  background: config.gradientEnabled ? `linear-gradient(${config.gradientAngle || 180}deg, ${config.gradientFrom || "#FFF"}, ${config.gradientTo || accent})` : undefined,
+                  WebkitBackgroundClip: config.gradientEnabled ? "text" : undefined,
+                  fontSize,
+                  fontWeight,
+                  fontFamily,
+                  lineHeight: config.lineHeight || 1.08,
+                  textAlign: "left",
+                  textShadow: shadows.length ? shadows.join(", ") : "0 5px 20px rgba(0,0,0,0.55)",
+                  textTransform: config.uppercase ? "uppercase" : "none",
+                }}>{renderedText}</div>
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* kinetic_stack animation: stacked word cards */}
+      {animation === "kinetic_stack" && (() => {
+        const words = renderedText.split(/\s+/).filter(Boolean).slice(0, 7);
+        const accent = config.boxColor || "#F97316";
+        const stroke = config.lineColor || "#111827";
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{ position: "absolute", top: `${positionY}%`, left: 0, right: 0, transform: "translateY(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+              {words.map((word, index) => {
+                const entrance = interpolate(frame, [index * 2, index * 2 + 12], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+                const wiggle = Math.sin(frame * 0.09 + index) * 4 * motionIntensity;
+                const side = index % 2 === 0 ? -1 : 1;
+                return (
+                  <div key={`${word}-${index}`} style={{
+                    transform: `translateX(${side * (30 + index * 7) + wiggle}px) rotate(${side * (1.5 + index * 0.25)}deg) scale(${0.8 + entrance * 0.2})`,
+                    opacity: entrance,
+                    background: index % 2 === 0 ? accent : "#F8FAFC",
+                    color: index % 2 === 0 ? (config.color || "#111827") : "#111827",
+                    border: `5px solid ${stroke}`,
+                    boxShadow: `10px 10px 0 ${stroke}`,
+                    borderRadius: 12,
+                    padding: "10px 28px",
+                    fontFamily,
+                    fontWeight,
+                    fontSize: Math.max(42, fontSize * 0.85),
+                    lineHeight: 0.95,
+                    textTransform: "uppercase",
+                  }}>{word}</div>
+                );
+              })}
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* glass_flash animation: glass panel with moving shine */}
+      {animation === "glass_flash" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 18, stiffness: 120, mass: 0.9 } });
+        const accent = config.lineColor || "#C084FC";
+        const shine = interpolate(frame % Math.max(24, Math.round(54 / Math.max(0.25, motionIntensity))), [0, 18, 36], [-120, 20, 120], { extrapolateRight: "clamp" });
+        return (
+          <AbsoluteFill>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "8%",
+              right: "8%",
+              transform: `translateY(-50%) scale(${0.94 + Math.min(1, entrance) * 0.06})`,
+              overflow: "hidden",
+              borderRadius: 36,
+              padding: "58px 60px",
+              background: hexToRgba(config.boxColor || "#FFFFFF", config.boxOpacity ?? 0.14),
+              border: `2px solid ${accent}66`,
+              boxShadow: `0 30px 90px rgba(0,0,0,0.42), 0 0 48px ${accent}33`,
+              backdropFilter: "blur(12px)",
+            }}>
+              {decorativeElements && <div style={{ position: "absolute", top: "-20%", bottom: "-20%", left: `${shine}%`, width: 110, transform: "skewX(-18deg)", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.38), transparent)" }} />}
+              {badgeEnabled && <div style={{ color: accent, fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: 24, letterSpacing: 3, marginBottom: 18 }}>{badgeText || "FOCUS"}</div>}
+              <div style={{
+                color: config.gradientEnabled ? "transparent" : color,
+                background: config.gradientEnabled ? `linear-gradient(${config.gradientAngle || 180}deg, ${config.gradientFrom || "#FFF"}, ${config.gradientTo || accent})` : undefined,
+                WebkitBackgroundClip: config.gradientEnabled ? "text" : undefined,
+                fontSize,
+                fontWeight,
+                fontFamily,
+                lineHeight: config.lineHeight || 1.12,
+                textAlign,
+                textShadow: shadows.length ? shadows.join(", ") : `0 0 24px ${accent}55`,
+              }}>{renderedText}</div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* marker_swipe animation: marker stroke behind text */}
+      {animation === "marker_swipe" && (() => {
+        const accent = config.boxColor || config.lineColor || "#FDE047";
+        const sweep = interpolate(frame, [0, 14], [0, 1], { extrapolateRight: "clamp" });
+        const bob = Math.sin(frame * 0.08) * 4 * motionIntensity;
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{ position: "absolute", top: `${positionY}%`, left: "7%", right: "7%", transform: `translateY(calc(-50% + ${bob}px))`, textAlign }}>
+              <div style={{ position: "relative", display: "inline-block", padding: "12px 24px" }}>
+                {decorativeElements && <div style={{ position: "absolute", left: 0, right: 0, top: "46%", height: "46%", transform: `translateY(-50%) scaleX(${sweep}) rotate(-1deg)`, transformOrigin: "left center", borderRadius: 14, background: hexToRgba(accent, config.boxOpacity ?? 0.86) }} />}
+                {badgeEnabled && <div style={{ position: "relative", color: accent, fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: 22, letterSpacing: 2, marginBottom: 10 }}>{badgeText || "MARKED"}</div>}
+                <div style={{
+                  position: "relative",
+                  color,
+                  fontSize,
+                  fontWeight,
+                  fontFamily,
+                  lineHeight: config.lineHeight || 1.02,
+                  textShadow: shadows.length ? shadows.join(", ") : "0 6px 18px rgba(0,0,0,0.5)",
+                  textTransform: config.uppercase ? "uppercase" : "none",
+                }}>{renderedText}</div>
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* signal_scan animation: digital scanline panel */}
+      {animation === "signal_scan" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } });
+        const accent = config.lineColor || "#22D3EE";
+        const scan = interpolate(frame % Math.max(18, Math.round(42 / Math.max(0.25, motionIntensity))), [0, 21, 42], [-110, 15, 125], { extrapolateRight: "clamp" });
+        return (
+          <AbsoluteFill>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "8%",
+              right: "8%",
+              transform: `translateY(-50%) scale(${0.96 + Math.min(1, entrance) * 0.04})`,
+              overflow: "hidden",
+              padding: "46px 54px",
+              borderRadius: 22,
+              border: `2px solid ${accent}66`,
+              background: hexToRgba(config.boxColor || "#0EA5E9", config.boxOpacity ?? 0.16),
+              boxShadow: `0 0 42px ${accent}33, 0 24px 70px rgba(0,0,0,0.45)`,
+            }}>
+              {decorativeElements && <div style={{ position: "absolute", top: 0, bottom: 0, left: `${scan}%`, width: 90, background: `linear-gradient(90deg, transparent, ${accent}66, transparent)` }} />}
+              {badgeEnabled && <div style={{ color: accent, fontFamily: "'Titillium Web', sans-serif", fontWeight: 900, fontSize: 24, letterSpacing: 3, marginBottom: 14 }}>{badgeText || "SIGNAL"}</div>}
+              <div style={{
+                color: config.gradientEnabled ? "transparent" : color,
+                background: config.gradientEnabled ? `linear-gradient(${config.gradientAngle || 180}deg, ${config.gradientFrom || "#FFF"}, ${config.gradientTo || accent})` : undefined,
+                WebkitBackgroundClip: config.gradientEnabled ? "text" : undefined,
+                fontSize,
+                fontWeight,
+                fontFamily,
+                lineHeight: config.lineHeight || 1.08,
+                textAlign,
+                textShadow: shadows.length ? shadows.join(", ") : `0 0 18px ${accent}`,
+                textTransform: config.uppercase ? "uppercase" : "none",
+              }}>{renderedText}</div>
+            </div>
           </AbsoluteFill>
         );
       })()}

@@ -30,18 +30,20 @@ def get_sse_emitter() -> SSEProgressEmitter:
 PIPELINE_STEPS = [
     {"number": 1, "name": "validate", "label": "Validating URL"},
     {"number": 2, "name": "download", "label": "Downloading Video"},
-    {"number": 3, "name": "transcript", "label": "Fetching Transcript"},
-    {"number": 4, "name": "gemini", "label": "AI Analysis (Gemini)"},
+    {"number": 3, "name": "transcript", "label": "Fetching / Transcribing Transcript"},
+    {"number": 4, "name": "analysis", "label": "AI Highlight Analysis"},
     {"number": 5, "name": "prepare", "label": "Preparing Clips"},
-    {"number": 6, "name": "trim", "label": "Trimming Clips"},
-    {"number": 7, "name": "whisper", "label": "Word-Level Timestamps"},
-    {"number": 8, "name": "highlights", "label": "Highlight Detection"},
-    {"number": 9, "name": "reframe", "label": "Reframe / Crop"},
-    {"number": 10, "name": "visual_overlay", "label": "Subtitles & Overlay"},
-    {"number": 11, "name": "thumbnail", "label": "Thumbnail Generation"},
-    {"number": 12, "name": "finalize", "label": "Finalizing Output"},
-    {"number": 13, "name": "cdn_upload", "label": "CDN Upload"},
-    {"number": 14, "name": "assemble", "label": "Assembling Result"},
+    {"number": 6, "name": "aspect_router", "label": "Routing Aspect Ratio"},
+    {"number": 7, "name": "trim", "label": "Trimming Clips"},
+    {"number": 8, "name": "reframe", "label": "Smart Reframe / Crop"},
+    {"number": 9, "name": "word_level", "label": "Word-Level Timestamps"},
+    {"number": 10, "name": "highlights", "label": "Highlight / Subtitle Data"},
+    {"number": 11, "name": "assets", "label": "Visual Assets"},
+    {"number": 12, "name": "subtitle", "label": "Subtitles & Overlay"},
+    {"number": 13, "name": "remotion_render", "label": "Remotion Rendering"},
+    {"number": 14, "name": "thumbnail", "label": "Thumbnail Generation"},
+    {"number": 15, "name": "finalize", "label": "Finalizing Output"},
+    {"number": 16, "name": "assemble", "label": "Assembling Result"},
 ]
 
 
@@ -51,12 +53,28 @@ def _get_step_from_status(status: str) -> int:
         "validating": 1,
         "downloading": 2,
         "transcribing": 3,
+        "v2_transcribing": 3,
         "analyzing": 4,
-        "rendering": 6,
-        "whisper": 7,
-        "assembling": 14,
+        "v2_analyzing": 4,
+        "preparing": 5,
+        "routing": 6,
+        "trimming": 7,
+        "segmenting": 8,
+        "whisper": 9,
+        "v2_word_transcribing": 9,
+        "highlighting": 10,
+        "v2_micro_slicing": 10,
+        "v2_vad_refining": 10,
+        "broll": 11,
+        "subtitle_rendering": 12,
+        "hook_rendering": 13,
+        "remotion_rendering": 13,
+        "rendering": 13,
+        "encoding": 15,
+        "uploading": 15,
+        "assembling": 16,
         "processing": 6,
-        "completed": 14,
+        "completed": 16,
         "failed": 0,
         "timeout": 0,
         "queued": 0,
@@ -64,13 +82,20 @@ def _get_step_from_status(status: str) -> int:
     return status_step_map.get(status, 0)
 
 
-def _estimate_progress_pct(step_number: int, total_steps: int = 14) -> int:
+def _estimate_progress_pct(step_number: int, total_steps: int = len(PIPELINE_STEPS)) -> int:
     """Estimate overall progress percentage based on current step."""
     if step_number <= 0:
         return 0
     if step_number >= total_steps:
         return 100
     return int((step_number / total_steps) * 100)
+
+
+def _step_info(step_number: int):
+    if 1 <= step_number <= len(PIPELINE_STEPS):
+        step = PIPELINE_STEPS[step_number - 1]
+        return step["name"], step["label"]
+    return None, None
 
 
 # ─── SSE Streaming Endpoint ──────────────────────────────────────────────────
@@ -123,19 +148,36 @@ async def poll_job_progress(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Determine current step
+    total_steps = len(PIPELINE_STEPS)
     current_step = _get_step_from_status(job.status.value)
-    progress_pct = _estimate_progress_pct(current_step)
+    progress_pct = _estimate_progress_pct(current_step, total_steps)
+    step_name, step_label = _step_info(current_step)
 
-    # Check SSE emitter for more precise step info
+    # Prefer the latest SSE/log state so polling matches live progress.
     emitter = get_sse_emitter()
-    final_state = emitter.get_final_state(job_id)
+    latest_state = emitter.get_current_state(job_id) or emitter.get_final_state(job_id)
+    if latest_state:
+        try:
+            latest_step = int(float(latest_state.get("step_number", current_step) or current_step))
+            current_step = max(0, min(total_steps, latest_step))
+        except (TypeError, ValueError):
+            pass
+        try:
+            progress_pct = int(latest_state.get("percentage", progress_pct))
+            progress_pct = max(0, min(100, progress_pct))
+        except (TypeError, ValueError):
+            pass
+        latest_name = latest_state.get("step_name")
+        fallback_name, fallback_label = _step_info(current_step)
+        step_name = latest_name or fallback_name
+        step_label = fallback_label
 
     is_terminal = job.status.value in ("completed", "failed", "timeout")
 
     if is_terminal and job.status.value == "completed":
         progress_pct = 100
-        current_step = 14
+        current_step = total_steps
+        step_name, step_label = _step_info(current_step)
 
     # Check available outputs
     output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
@@ -159,10 +201,10 @@ async def poll_job_progress(
             "is_terminal": is_terminal,
             "progress": {
                 "current_step": current_step,
-                "total_steps": 14,
+                "total_steps": total_steps,
                 "percentage": progress_pct,
-                "step_name": PIPELINE_STEPS[current_step - 1]["name"] if 1 <= current_step <= 14 else None,
-                "step_label": PIPELINE_STEPS[current_step - 1]["label"] if 1 <= current_step <= 14 else None,
+                "step_name": step_name,
+                "step_label": step_label,
             },
             "clips": {
                 "total": job.clips_total,

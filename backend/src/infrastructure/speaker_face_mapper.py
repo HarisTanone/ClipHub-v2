@@ -255,10 +255,12 @@ class SpeakerFaceMapper:
             second_best = sorted(cooccurrence[sp].values(), reverse=True)
             second_count = second_best[1] if len(second_best) > 1 else 0
 
-            # Margin-based confidence
+            # Margin-based confidence. If two visible tracks co-occur equally
+            # with the same audio speaker, the mapping is ambiguous and should
+            # fall back to lip/head detection instead of pretending 50% is OK.
             margin_confidence = (best_count - second_count) / max(best_count, 1)
             absolute_confidence = best_count / total_count if total_count > 0 else 0.0
-            confidence = max(margin_confidence, absolute_confidence)
+            confidence = margin_confidence if len(second_best) > 1 else absolute_confidence
 
             mappings[sp] = (tr, confidence, total_count)
 
@@ -276,7 +278,11 @@ class SpeakerFaceMapper:
             total_count = sum(track_counts.values())
             best_track = max(track_counts, key=track_counts.get)
             best_count = track_counts[best_track]
-            confidence = best_count / total_count if total_count > 0 else 0.0
+            sorted_counts = sorted(track_counts.values(), reverse=True)
+            second_count = sorted_counts[1] if len(sorted_counts) > 1 else 0
+            margin_confidence = (best_count - second_count) / max(best_count, 1)
+            absolute_confidence = best_count / total_count if total_count > 0 else 0.0
+            confidence = margin_confidence if len(sorted_counts) > 1 else absolute_confidence
             mappings[speaker] = (best_track, confidence, total_count)
         return mappings
 
@@ -343,7 +349,11 @@ class SpeakerFaceMapper:
                 track_counts = cooccurrence.get(speaker, {})
                 total_count = sum(track_counts.values())
                 best_count = track_counts.get(track_id, 0)
-                confidence = best_count / total_count if total_count > 0 else 0.0
+                sorted_counts = sorted(track_counts.values(), reverse=True)
+                second_count = sorted_counts[1] if len(sorted_counts) > 1 else 0
+                margin_confidence = (best_count - second_count) / max(best_count, 1)
+                absolute_confidence = best_count / total_count if total_count > 0 else 0.0
+                confidence = margin_confidence if len(sorted_counts) > 1 else absolute_confidence
                 resolved[speaker] = (track_id, confidence, total_count)
             else:
                 logger.warning(

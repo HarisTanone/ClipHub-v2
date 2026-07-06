@@ -15,18 +15,20 @@ import { formatDuration, formatDate, cn } from "@/lib/utils";
 const PIPELINE_STEPS = [
   { name: "validate", label: "Validating URL" },
   { name: "download", label: "Downloading Video" },
-  { name: "transcript", label: "Transcribing Audio" },
-  { name: "gemini", label: "AI Analyzing Highlights" },
+  { name: "transcript", label: "Transcript" },
+  { name: "analysis", label: "AI Analysis" },
   { name: "prepare", label: "Preparing Clips" },
-  { name: "trim", label: "Trimming Clips" },
-  { name: "whisper", label: "Syncing Words" },
-  { name: "highlights", label: "Processing Highlights" },
-  { name: "reframe", label: "Smart Framing (YOLO)" },
-  { name: "visual_overlay", label: "Rendering Hook & Subtitle" },
-  { name: "thumbnail", label: "Generating Thumbnails" },
+  { name: "aspect_router", label: "Aspect Routing" },
+  { name: "trim", label: "Trimming" },
+  { name: "reframe", label: "Smart Framing" },
+  { name: "word_level", label: "Word Sync" },
+  { name: "highlights", label: "Subtitle Data" },
+  { name: "assets", label: "Assets" },
+  { name: "subtitle", label: "Overlay" },
+  { name: "remotion_render", label: "Remotion" },
+  { name: "thumbnail", label: "Thumbnails" },
   { name: "finalize", label: "Finalizing" },
-  { name: "cdn_upload", label: "Uploading" },
-  { name: "assemble", label: "Assembling Output" },
+  { name: "assemble", label: "Assembling" },
 ];
 
 export function JobDetail() {
@@ -113,8 +115,8 @@ export function JobDetail() {
     );
   }
 
-  const currentStep = progress?.currentStep || (isTerminal && data.status === "completed" ? 14 : 0);
-  const percentage = progress?.percentage || (data.status === "completed" ? 100 : 0);
+  const currentStep = progress?.currentStep ?? (isTerminal && data.status === "completed" ? PIPELINE_STEPS.length : 0);
+  const percentage = progress?.percentage ?? (data.status === "completed" ? 100 : 0);
   const readyClips = data.clips?.filter((clip) => clip.has_final).length || 0;
   const clipCompletionRate = data.clips_total ? Math.round((data.clips_success / data.clips_total) * 100) : 0;
   const jobShort = (jobId || data.job_id).replace("job_", "").slice(0, 12);

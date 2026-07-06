@@ -37,6 +37,7 @@ class DiarizationResultBuilder:
         total_frames: int,
         stable_positions: Dict[int, float],
         sample_interval_sec: float = 1.0,
+        track_to_position: Optional[Dict[int, int]] = None,
     ) -> ActiveSpeakerResult:
         """Build ActiveSpeakerResult from diarization and speaker-face mapping.
 
@@ -51,6 +52,8 @@ class DiarizationResultBuilder:
                               panning convention.
             sample_interval_sec: Interval between per-frame samples (seconds).
                                  Default 1.0 means one sample per second.
+            track_to_position: Optional precomputed mapping from raw tracker IDs
+                               to consolidated positional IDs.
 
         Returns:
             ActiveSpeakerResult compatible with the dynamic panning pipeline.
@@ -63,8 +66,14 @@ class DiarizationResultBuilder:
         )
 
         # Build track_id → positional_index (0=leftmost, 1=next, etc.)
-        sorted_track_ids = sorted(stable_positions.keys(), key=lambda tid: stable_positions[tid])
-        track_to_position = {tid: idx for idx, tid in enumerate(sorted_track_ids)}
+        if track_to_position is None:
+            sorted_track_ids = sorted(stable_positions.keys(), key=lambda tid: stable_positions[tid])
+            track_to_position = {tid: idx for idx, tid in enumerate(sorted_track_ids)}
+        else:
+            track_to_position = {
+                int(track_id): int(position_id)
+                for track_id, position_id in track_to_position.items()
+            }
 
         logger.debug(
             f"diarization_result_builder: track_to_position mapping: {track_to_position}"

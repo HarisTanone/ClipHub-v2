@@ -37,7 +37,7 @@ function useSubtitleConfig(creativeDirection: any) {
   return {
     config,
     fontFamily: config.fontFamily || "Poppins",
-    highlightFontFamily: config.dualStyleEnabled ? config.highlightFontFamily : undefined,
+    highlightFontFamily: config.highlightFontFamily,
   };
 }
 
@@ -70,6 +70,9 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
 
   // Grid mode: subtitle at center (between top/bottom panels) instead of bottom
   const isGridMode = creativeDirection.is_grid_mode === true;
+  const gridSubtitlePositionY = typeof creativeDirection.grid_subtitle_position_y === "number"
+    ? creativeDirection.grid_subtitle_position_y
+    : 50;
 
   const hookDurationFrames = Math.floor(hook.duration * fps);
 
@@ -106,7 +109,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
                 .filter(w => w.end > hook.duration)
                 .map(w => ({ ...w, start: Math.max(w.start, hook.duration) }))
               : words}
-            config={isGridMode ? { ...subtitle.config, positionY: 50 } : subtitle.config}
+            config={isGridMode ? { ...subtitle.config, positionY: gridSubtitlePositionY } : subtitle.config}
             fps={fps}
           />
         </AbsoluteFill>

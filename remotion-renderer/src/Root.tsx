@@ -16,7 +16,7 @@ export const RemotionRoot: React.FC = () => {
     videoPath: "",
     words: [],
     hookText: "",
-    hookAnimation: "fade_scale",
+    hookAnimation: "podcast_lower_third",
     enableThreeJS: false,
     enableAI: false,
   };

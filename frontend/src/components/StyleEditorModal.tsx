@@ -15,6 +15,20 @@ type OptionMeta = {
 
 const PAGINATION_PAGE_SIZE = 6;
 
+type SubtitleVisualPreset =
+  | "classic"
+  | "dual_pop"
+  | "neon_pulse"
+  | "meme_impact"
+  | "editorial_banner"
+  | "spotlight_keyword"
+  | "lower_third"
+  | "bubble_chat"
+  | "minimal_clean"
+  | "breaking_tape"
+  | "quote_box"
+  | "documentary";
+
 function useGoogleFont(fontFamily: string) {
   useEffect(() => {
     if (!fontFamily || fontFamily === "monospace") return;
@@ -75,6 +89,11 @@ export interface HookStyle {
   strokeEnabled: boolean;
   strokeColor: string;
   strokeWidth: number;
+  // Custom hook components
+  badgeEnabled: boolean;
+  badgeText: string;
+  decorativeElements: boolean;
+  motionIntensity: number;
   // Duration
   duration: number;
   fadeIn: number;
@@ -82,6 +101,7 @@ export interface HookStyle {
 }
 
 export interface SubtitleStyle {
+  stylePreset: SubtitleVisualPreset;
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
@@ -134,11 +154,11 @@ export interface SubtitleStyle {
 }
 
 export const DEFAULT_HOOK_STYLE: HookStyle = {
-  animation: "fade_scale",
+  animation: "podcast_lower_third",
   text: "",
-  fontFamily: "Poppins",
-  fontSize: 48,
-  fontWeight: "800",
+  fontFamily: "Barlow Condensed",
+  fontSize: 52,
+  fontWeight: "900",
   letterSpacing: 0,
   lineHeight: 1.3,
   color: "#FFFFFF",
@@ -152,18 +172,18 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
   shadowX: 0,
   shadowY: 4,
   glowEnabled: false,
-  glowColor: "#FFCC00",
-  glowSize: 20,
-  bgColor: "#000000",
-  bgOpacity: 0.6,
-  position: "center",
-  positionY: 50,
-  textAlign: "center",
-  uppercase: false,
+  glowColor: "#16F2B3",
+  glowSize: 24,
+  bgColor: "#06111F",
+  bgOpacity: 0.42,
+  position: "bottom",
+  positionY: 78,
+  textAlign: "left",
+  uppercase: true,
   italic: false,
   lineEnabled: false,
   linePosition: "bottom",
-  lineColor: "#FFCC00",
+  lineColor: "#16F2B3",
   lineWidth: 60,
   lineAutoWidth: false,
   lineThickness: 4,
@@ -176,12 +196,17 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
   strokeEnabled: false,
   strokeColor: "#000000",
   strokeWidth: 3,
+  badgeEnabled: true,
+  badgeText: "ON AIR",
+  decorativeElements: true,
+  motionIntensity: 1.0,
   duration: 3.0,
   fadeIn: 0.3,
   fadeOut: 0.3,
 };
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  stylePreset: "classic",
   fontFamily: "Poppins",
   fontSize: 34,
   fontWeight: "700",
@@ -263,39 +288,29 @@ const SUBTITLE_FONT_SUGGESTIONS = ["Poppins", "Inter", "Montserrat", "Barlow Con
 const HIGHLIGHT_FONT_SUGGESTIONS = ["Anton", "Archivo Black", "Bebas Neue", "Bungee", "Barlow Condensed", "Black Ops One"];
 
 const HOOK_ANIMATIONS = [
-  "fade_scale",
-  "slide_up",
-  "glitch",
-  "typewriter",
-  "glitch_rgb",
-  "shake_neon",
-  "cinematic_reveal",
-  "danger_bold",
-  "slide_punch_framer",
-  "bold_slam",
   "podcast_lower_third",
   "quote_card",
   "waveform_pulse",
   "breaking_tape",
   "mic_drop",
+  "split_panel",
+  "kinetic_stack",
+  "glass_flash",
+  "marker_swipe",
+  "signal_scan",
 ];
 
 const HOOK_ANIMATION_META: Record<string, OptionMeta> = {
-  fade_scale: { label: "Fade Scale", mood: "Smooth open", accent: "#7DD3FC", preview: "ZOOM", desc: "Soft masuk, aman untuk hampir semua podcast." },
-  slide_up: { label: "Slide Up", mood: "Clean lift", accent: "#A7F3D0", preview: "UP", desc: "Teks naik cepat tanpa terlalu ramai." },
-  glitch: { label: "Glitch", mood: "Digital cut", accent: "#FB7185", preview: "ERR", desc: "Jitter untuk punchline tech atau kontroversi." },
-  typewriter: { label: "Typewriter", mood: "Reveal", accent: "#34D399", preview: "TYPE", desc: "Reveal per karakter untuk kalimat misterius." },
-  glitch_rgb: { label: "RGB Split", mood: "Tech shock", accent: "#22D3EE", preview: "RGB", desc: "Channel merah/cyan untuk hook yang terasa urgent." },
-  shake_neon: { label: "Neon Shake", mood: "Night talk", accent: "#14F1D9", preview: "NEON", desc: "Glow bergerak untuk momen debat atau reaksi." },
-  cinematic_reveal: { label: "Cinematic", mood: "Serious reveal", accent: "#FACC15", preview: "FILM", desc: "Letterbox dan fade lambat untuk quote penting." },
-  danger_bold: { label: "Danger Bold", mood: "Warning", accent: "#EF4444", preview: "STOP", desc: "Merah kuat untuk kalimat yang tidak boleh diskip." },
-  slide_punch_framer: { label: "Slide Punch", mood: "Fast hook", accent: "#F97316", preview: "PUNCH", desc: "Masuk dari kiri dengan hentakan ringan." },
-  bold_slam: { label: "Bold Slam", mood: "Big impact", accent: "#FDE047", preview: "SLAM", desc: "Kartu besar untuk hook yang sangat tegas." },
   podcast_lower_third: { label: "On-Air Lower", mood: "Podcast live", accent: "#16F2B3", preview: "LIVE", desc: "Lower-third khas podcast dengan badge on-air." },
   quote_card: { label: "Quote Card", mood: "Editorial", accent: "#FF4D2D", preview: "QUOTE", desc: "Kartu quote untuk satu kalimat yang memorable." },
   waveform_pulse: { label: "Waveform", mood: "Audio pulse", accent: "#14F1D9", preview: "WAVE", desc: "Bar audio bergerak supaya terasa seperti momen suara." },
   breaking_tape: { label: "Breaking Tape", mood: "Hot take", accent: "#FFDD2D", preview: "TAKE", desc: "Tape diagonal untuk opini yang memancing komentar." },
   mic_drop: { label: "Mic Drop", mood: "Final answer", accent: "#FF4D7D", preview: "DROP", desc: "Badge jatuh dengan impact line." },
+  split_panel: { label: "Split Panel", mood: "Debate card", accent: "#38BDF8", preview: "SPLIT", desc: "Panel dua sisi dengan rail warna untuk punchline argumentatif." },
+  kinetic_stack: { label: "Kinetic Stack", mood: "Fast stack", accent: "#F97316", preview: "STACK", desc: "Baris teks bertumpuk, masuk bergantian, cocok untuk hook cepat." },
+  glass_flash: { label: "Glass Flash", mood: "Premium glass", accent: "#C084FC", preview: "GLASS", desc: "Panel kaca dengan sweep cahaya dan glow lembut." },
+  marker_swipe: { label: "Marker Swipe", mood: "Highlighted", accent: "#FDE047", preview: "MARK", desc: "Coretan marker bergerak di belakang teks." },
+  signal_scan: { label: "Signal Scan", mood: "Tech signal", accent: "#22D3EE", preview: "SCAN", desc: "Scanline dan pulse digital untuk momen analisis." },
 };
 
 const SUBTITLE_ANIMATION_META: Record<SubtitleStyle["animationStyle"], OptionMeta> = {
@@ -319,35 +334,305 @@ const HIGHLIGHT_STYLE_META: Record<SubtitleStyle["highlightStyle"], OptionMeta> 
 };
 
 const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = [
-  { id: "bold_white", name: "Bold White", style: { color: "#FFFFFF", bgOpacity: 0.6, fontSize: 52, fontFamily: "Anton", uppercase: true, glowEnabled: false } },
-  { id: "neon_green", name: "Neon Green", style: { color: "#00FF88", bgOpacity: 0.7, fontSize: 44, fontFamily: "Inter", glowEnabled: true, glowColor: "#00FF88", glowSize: 25 } },
-  { id: "cinematic", name: "Cinematic", style: { color: "#E0E0E0", bgOpacity: 0.5, fontSize: 46, fontFamily: "Montserrat", lineEnabled: true, lineColor: "#FF4444", linePosition: "bottom", letterSpacing: 2 } },
-  { id: "minimal", name: "Minimal", style: { color: "#FFFFFF", bgOpacity: 0.3, fontSize: 38, fontFamily: "Inter", fontWeight: "500", shadowBlur: 4 } },
-  { id: "glitch_red", name: "Glitch Red", style: { color: "#FF3333", bgOpacity: 0.7, fontSize: 50, fontFamily: "Anton", uppercase: true, animation: "glitch" } },
-  { id: "typewriter", name: "Typewriter", style: { color: "#00FF88", bgOpacity: 0.75, fontSize: 40, fontFamily: "monospace", animation: "typewriter" } },
-  { id: "gradient_gold", name: "Gold Gradient", style: { gradientEnabled: true, gradientFrom: "#FFD700", gradientTo: "#FF8C00", fontSize: 50, fontFamily: "Montserrat", fontWeight: "900" } },
-  { id: "boxed", name: "Boxed", style: { boxEnabled: true, boxColor: "#FFFFFF", boxOpacity: 0.15, boxPadding: 24, boxRadius: 12, fontSize: 42 } },
-  { id: "glitch_rgb_preset", name: "RGB Split", style: { color: "#FFFFFF", bgOpacity: 0.7, fontSize: 58, fontFamily: "Anton", uppercase: true, animation: "glitch_rgb" } },
-  { id: "shake_neon_preset", name: "Neon Shake", style: { color: "#00FFCC", bgOpacity: 0.65, fontSize: 54, fontFamily: "Anton", animation: "shake_neon" } },
-  { id: "cinematic_reveal_preset", name: "Cinematic Gold", style: { color: "#FFD700", bgOpacity: 0.8, fontSize: 62, fontFamily: "Montserrat", fontWeight: "700", animation: "cinematic_reveal" } },
-  { id: "danger_bold_preset", name: "Danger Bold", style: { color: "#FF2D2D", bgOpacity: 0.75, fontSize: 70, fontFamily: "Anton", uppercase: true, animation: "danger_bold" } },
-  { id: "podcast_lower_third_preset", name: "On-Air Lower", style: { animation: "podcast_lower_third", color: "#F8FAFC", bgColor: "#06111F", bgOpacity: 0.42, fontSize: 46, fontFamily: "Barlow Condensed", fontWeight: "900", uppercase: true, position: "bottom", positionY: 78, shadowEnabled: true, shadowBlur: 18, lineEnabled: false, lineColor: "#16F2B3" } },
-  { id: "quote_card_preset", name: "Quote Card", style: { animation: "quote_card", color: "#171717", bgColor: "#0B0F14", bgOpacity: 0.32, boxColor: "#F5EFE1", boxOpacity: 0.96, fontSize: 44, fontFamily: "Playfair Display", fontWeight: "800", lineHeight: 1.18, position: "center", positionY: 50, shadowEnabled: true, shadowBlur: 22, shadowY: 8 } },
-  { id: "waveform_pulse_preset", name: "Waveform Pulse", style: { animation: "waveform_pulse", color: "#EAFDF7", bgColor: "#020617", bgOpacity: 0.58, fontSize: 50, fontFamily: "Montserrat", fontWeight: "900", uppercase: true, glowEnabled: true, glowColor: "#14F1D9", glowSize: 28, gradientEnabled: true, gradientFrom: "#FFFFFF", gradientTo: "#14F1D9" } },
-  { id: "breaking_tape_preset", name: "Breaking Tape", style: { animation: "breaking_tape", color: "#111111", bgColor: "#130A03", bgOpacity: 0.46, boxColor: "#FFDD2D", fontSize: 52, fontFamily: "Archivo Black", fontWeight: "900", uppercase: true, lineEnabled: false, lineColor: "#FF4D2D" } },
-  { id: "mic_drop_preset", name: "Mic Drop", style: { animation: "mic_drop", color: "#FFFFFF", bgColor: "#050507", bgOpacity: 0.52, fontSize: 58, fontFamily: "Anton", fontWeight: "900", uppercase: true, gradientEnabled: true, gradientFrom: "#FFFFFF", gradientTo: "#FF4D7D", glowEnabled: true, glowColor: "#FF4D7D", glowSize: 30, boxColor: "#FF4D7D" } },
+  { id: "podcast_lower_third_preset", name: "On-Air Lower", style: { animation: "podcast_lower_third", color: "#F8FAFC", bgColor: "#06111F", bgOpacity: 0.42, fontSize: 46, fontFamily: "Barlow Condensed", fontWeight: "900", uppercase: true, position: "bottom", positionY: 78, shadowEnabled: true, shadowBlur: 18, lineEnabled: false, lineColor: "#16F2B3", badgeEnabled: true, badgeText: "ON AIR", decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "quote_card_preset", name: "Quote Card", style: { animation: "quote_card", color: "#171717", bgColor: "#0B0F14", bgOpacity: 0.32, boxColor: "#F5EFE1", boxOpacity: 0.96, fontSize: 44, fontFamily: "Playfair Display", fontWeight: "800", lineHeight: 1.18, position: "center", positionY: 50, shadowEnabled: true, shadowBlur: 22, shadowY: 8, lineColor: "#FF4D2D", badgeEnabled: false, badgeText: "QUOTE", decorativeElements: true, motionIntensity: 0.7 } },
+  { id: "waveform_pulse_preset", name: "Waveform Pulse", style: { animation: "waveform_pulse", color: "#EAFDF7", bgColor: "#020617", bgOpacity: 0.58, fontSize: 50, fontFamily: "Montserrat", fontWeight: "900", uppercase: true, glowEnabled: true, glowColor: "#14F1D9", glowSize: 28, gradientEnabled: true, gradientFrom: "#FFFFFF", gradientTo: "#14F1D9", lineColor: "#14F1D9", badgeEnabled: true, badgeText: "LIVE AUDIO", decorativeElements: true, motionIntensity: 1.2 } },
+  { id: "breaking_tape_preset", name: "Breaking Tape", style: { animation: "breaking_tape", color: "#111111", bgColor: "#130A03", bgOpacity: 0.46, boxColor: "#FFDD2D", fontSize: 52, fontFamily: "Archivo Black", fontWeight: "900", uppercase: true, lineEnabled: false, lineColor: "#FF4D2D", badgeEnabled: true, badgeText: "HOT TAKE", decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "mic_drop_preset", name: "Mic Drop", style: { animation: "mic_drop", color: "#FFFFFF", bgColor: "#050507", bgOpacity: 0.52, fontSize: 58, fontFamily: "Anton", fontWeight: "900", uppercase: true, gradientEnabled: true, gradientFrom: "#FFFFFF", gradientTo: "#FF4D7D", glowEnabled: true, glowColor: "#FF4D7D", glowSize: 30, boxColor: "#FF4D7D", lineColor: "#FF4D7D", badgeEnabled: true, badgeText: "MIC DROP", decorativeElements: true, motionIntensity: 1.15 } },
+  { id: "split_panel_preset", name: "Split Panel", style: { animation: "split_panel", color: "#F8FAFC", bgColor: "#07111F", bgOpacity: 0.46, boxColor: "#0F172A", boxOpacity: 0.86, fontSize: 50, fontFamily: "Inter", fontWeight: "900", lineColor: "#38BDF8", shadowEnabled: true, shadowBlur: 20, badgeEnabled: true, badgeText: "POINT", decorativeElements: true, motionIntensity: 0.95, position: "center", positionY: 54 } },
+  { id: "kinetic_stack_preset", name: "Kinetic Stack", style: { animation: "kinetic_stack", color: "#111827", bgColor: "#140D06", bgOpacity: 0.34, boxColor: "#F97316", boxOpacity: 0.95, fontSize: 54, fontFamily: "Archivo Black", fontWeight: "900", uppercase: true, lineColor: "#111827", shadowEnabled: true, shadowBlur: 22, badgeEnabled: false, badgeText: "STACK", decorativeElements: true, motionIntensity: 1.2, position: "center", positionY: 52 } },
+  { id: "glass_flash_preset", name: "Glass Flash", style: { animation: "glass_flash", color: "#F8FAFC", bgColor: "#050816", bgOpacity: 0.52, boxColor: "#FFFFFF", boxOpacity: 0.12, fontSize: 48, fontFamily: "Montserrat", fontWeight: "800", lineColor: "#C084FC", glowEnabled: true, glowColor: "#C084FC", glowSize: 24, badgeEnabled: true, badgeText: "FOCUS", decorativeElements: true, motionIntensity: 0.8 } },
+  { id: "marker_swipe_preset", name: "Marker Swipe", style: { animation: "marker_swipe", color: "#F8FAFC", bgColor: "#080A0F", bgOpacity: 0.48, boxColor: "#FDE047", boxOpacity: 0.86, fontSize: 52, fontFamily: "Bebas Neue", fontWeight: "900", uppercase: true, lineColor: "#FDE047", shadowEnabled: true, shadowBlur: 18, badgeEnabled: false, badgeText: "MARKED", decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "signal_scan_preset", name: "Signal Scan", style: { animation: "signal_scan", color: "#E0F2FE", bgColor: "#020617", bgOpacity: 0.62, boxColor: "#0EA5E9", boxOpacity: 0.16, fontSize: 46, fontFamily: "Titillium Web", fontWeight: "900", uppercase: true, lineColor: "#22D3EE", glowEnabled: true, glowColor: "#22D3EE", glowSize: 20, badgeEnabled: true, badgeText: "SIGNAL", decorativeElements: true, motionIntensity: 1.05 } },
 ];
 
 const SUBTITLE_PRESETS: { id: string; name: string; style: Partial<SubtitleStyle> }[] = [
-  { id: "classic", name: "Classic White", style: { color: "#FFFFFF", highlightColor: "#FFCC00", fontSize: 34, bgOpacity: 0.4, animationStyle: "pop", lineTransition: "word_pop" } },
-  { id: "bold_yellow", name: "Bold Yellow", style: { color: "#FFFFFF", highlightColor: "#FFD700", fontSize: 38, highlightScale: 1.3, uppercase: true, animationStyle: "pop", lineTransition: "word_pop" } },
-  { id: "emphasis_orange", name: "Emphasis Orange", style: { color: "#FFFFFF", highlightColor: "#FFA500", fontSize: 34, bgEnabled: false, strokeEnabled: false, position: "center", lineTransition: "emphasis", highlightGlow: true, highlightGlowColor: "#FFA500" } },
-  { id: "emphasis_green", name: "Emphasis Green", style: { color: "#FFFFFF", highlightColor: "#00FF88", fontSize: 34, bgEnabled: false, strokeEnabled: false, position: "center", lineTransition: "emphasis", highlightGlow: true, highlightGlowColor: "#00FF88" } },
-  { id: "neon", name: "Neon Pop", style: { color: "#FFFFFF", highlightColor: "#00FFCC", fontSize: 32, bgColor: "#001a1a", bgOpacity: 0.6, highlightGlow: true, highlightGlowColor: "#00FFCC", lineTransition: "word_pop" } },
-  { id: "minimal", name: "Minimal", style: { color: "#CCCCCC", highlightColor: "#FFFFFF", fontSize: 30, bgEnabled: false, strokeWidth: 3, animationStyle: "fade", lineTransition: "word_pop" } },
-  { id: "big_impact", name: "Big Impact", style: { color: "#FFFFFF", highlightColor: "#FF4444", fontSize: 42, highlightScale: 1.4, uppercase: true, fontFamily: "Anton", animationStyle: "pop", lineTransition: "word_pop" } },
-  { id: "slide_clean", name: "Slide Clean", style: { color: "#FFFFFF", highlightColor: "#4ECDC4", fontSize: 32, fontFamily: "Inter", animationStyle: "slide", bgRadius: 20, lineTransition: "word_pop" } },
-  { id: "glow_purple", name: "Glow Purple", style: { color: "#FFFFFF", highlightColor: "#A855F7", highlightGlow: true, highlightGlowColor: "#A855F7", fontSize: 36, bgOpacity: 0.3, lineTransition: "word_pop" } },
+  {
+    id: "classic",
+    name: "Classic Karaoke",
+    style: {
+      stylePreset: "classic",
+      color: "#FFFFFF",
+      highlightColor: "#FFCC00",
+      fontSize: 34,
+      bgEnabled: true,
+      bgColor: "#000000",
+      bgOpacity: 0.42,
+      bgRadius: 8,
+      animationStyle: "pop",
+      lineTransition: "word_pop",
+      maxWordsPerLine: 3,
+    },
+  },
+  {
+    id: "dual_pop",
+    name: "Dual Font Pop",
+    style: {
+      stylePreset: "dual_pop",
+      color: "#F8FAFC",
+      highlightColor: "#FDE047",
+      fontFamily: "Inter",
+      fontWeight: "800",
+      fontSize: 34,
+      dualStyleEnabled: true,
+      highlightFontFamily: "Bungee",
+      highlightFontSize: 42,
+      highlightFontWeight: "900",
+      highlightLetterSpacing: 0,
+      highlightUppercase: true,
+      highlightStrokeEnabled: true,
+      highlightStrokeWidth: 3,
+      highlightShadowEnabled: true,
+      bgColor: "#111827",
+      bgOpacity: 0.66,
+      bgRadius: 14,
+      bgPadding: 14,
+      animationStyle: "pop",
+      lineTransition: "word_pop",
+      maxWordsPerLine: 3,
+    },
+  },
+  {
+    id: "neon_pulse",
+    name: "Neon Pulse",
+    style: {
+      stylePreset: "neon_pulse",
+      color: "#ECFEFF",
+      highlightColor: "#22D3EE",
+      fontFamily: "Montserrat",
+      fontWeight: "900",
+      fontSize: 36,
+      dualStyleEnabled: true,
+      highlightFontFamily: "Black Ops One",
+      highlightFontSize: 44,
+      highlightFontWeight: "900",
+      highlightGlow: true,
+      highlightGlowColor: "#22D3EE",
+      highlightShadowEnabled: true,
+      highlightShadowBlur: 18,
+      bgColor: "#020617",
+      bgOpacity: 0.72,
+      bgRadius: 10,
+      strokeEnabled: true,
+      strokeWidth: 2,
+      shadowEnabled: true,
+      shadowBlur: 16,
+      animationStyle: "pop",
+      lineTransition: "word_pop",
+    },
+  },
+  {
+    id: "meme_impact",
+    name: "Meme Impact",
+    style: {
+      stylePreset: "meme_impact",
+      color: "#FFFFFF",
+      highlightColor: "#FF3D3D",
+      fontFamily: "Anton",
+      fontSize: 48,
+      fontWeight: "900",
+      uppercase: true,
+      dualStyleEnabled: true,
+      highlightFontFamily: "Archivo Black",
+      highlightFontSize: 58,
+      highlightFontWeight: "900",
+      highlightUppercase: true,
+      bgEnabled: false,
+      strokeEnabled: true,
+      strokeWidth: 5,
+      shadowEnabled: true,
+      shadowBlur: 18,
+      maxWordsPerLine: 2,
+      animationStyle: "pop",
+      lineTransition: "word_pop",
+    },
+  },
+  {
+    id: "spotlight_keyword",
+    name: "Keyword Spotlight",
+    style: {
+      stylePreset: "spotlight_keyword",
+      color: "#F8FAFC",
+      highlightColor: "#F97316",
+      fontFamily: "Poppins",
+      fontSize: 32,
+      fontWeight: "700",
+      dualStyleEnabled: true,
+      highlightFontFamily: "Anton",
+      highlightFontSize: 72,
+      highlightFontWeight: "900",
+      highlightLetterSpacing: 1,
+      highlightUppercase: true,
+      highlightGlow: true,
+      highlightGlowColor: "#F97316",
+      bgEnabled: false,
+      strokeEnabled: false,
+      position: "center",
+      positionY: 54,
+      animationStyle: "pop",
+      lineTransition: "emphasis",
+      maxWordsPerLine: 4,
+    },
+  },
+  {
+    id: "editorial_banner",
+    name: "Editorial Banner",
+    style: {
+      stylePreset: "editorial_banner",
+      color: "#E5E7EB",
+      highlightColor: "#A78BFA",
+      fontFamily: "Inter",
+      fontSize: 32,
+      fontWeight: "800",
+      bgColor: "#111827",
+      bgOpacity: 0.78,
+      bgRadius: 6,
+      bgPadding: 16,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 14,
+      animationStyle: "slide",
+      lineTransition: "line_reveal",
+      maxWordsPerLine: 5,
+      wordSpacing: 8,
+    },
+  },
+  {
+    id: "lower_third",
+    name: "On-Air Lower",
+    style: {
+      stylePreset: "lower_third",
+      color: "#F8FAFC",
+      highlightColor: "#16F2B3",
+      fontFamily: "Barlow Condensed",
+      fontSize: 40,
+      fontWeight: "900",
+      uppercase: true,
+      bgColor: "#06111F",
+      bgOpacity: 0.82,
+      bgRadius: 6,
+      bgPadding: 16,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 18,
+      position: "bottom",
+      positionY: 78,
+      animationStyle: "slide",
+      lineTransition: "line_reveal",
+      maxWordsPerLine: 5,
+    },
+  },
+  {
+    id: "bubble_chat",
+    name: "Bubble Chat",
+    style: {
+      stylePreset: "bubble_chat",
+      color: "#111827",
+      highlightColor: "#DB2777",
+      fontFamily: "Nunito",
+      fontSize: 34,
+      fontWeight: "900",
+      bgColor: "#F8FAFC",
+      bgOpacity: 0.94,
+      bgRadius: 22,
+      bgPadding: 16,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowColor: "#000000",
+      shadowBlur: 18,
+      highlightStyle: "background",
+      animationStyle: "pop",
+      lineTransition: "word_pop",
+    },
+  },
+  {
+    id: "breaking_tape",
+    name: "Breaking Tape",
+    style: {
+      stylePreset: "breaking_tape",
+      color: "#111111",
+      highlightColor: "#FF2D2D",
+      fontFamily: "Archivo Black",
+      fontSize: 40,
+      fontWeight: "900",
+      uppercase: true,
+      bgColor: "#FFDD2D",
+      bgOpacity: 0.96,
+      bgRadius: 2,
+      bgPadding: 14,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 20,
+      maxWordsPerLine: 4,
+      animationStyle: "slide",
+      lineTransition: "word_pop",
+    },
+  },
+  {
+    id: "quote_box",
+    name: "Quote Box",
+    style: {
+      stylePreset: "quote_box",
+      color: "#1F2937",
+      highlightColor: "#E11D48",
+      fontFamily: "Playfair Display",
+      fontSize: 35,
+      fontWeight: "800",
+      lineHeight: 1.22,
+      bgColor: "#F4F4F5",
+      bgOpacity: 0.92,
+      bgRadius: 4,
+      bgPadding: 18,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 20,
+      animationStyle: "fade",
+      lineTransition: "line_reveal",
+      maxWordsPerLine: 5,
+    },
+  },
+  {
+    id: "minimal_clean",
+    name: "Minimal Clean",
+    style: {
+      stylePreset: "minimal_clean",
+      color: "#F4F4F5",
+      highlightColor: "#FFFFFF",
+      fontFamily: "Inter",
+      fontSize: 30,
+      fontWeight: "700",
+      bgEnabled: false,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 10,
+      animationStyle: "fade",
+      lineTransition: "word_pop",
+      maxWordsPerLine: 5,
+    },
+  },
+  {
+    id: "documentary",
+    name: "Documentary",
+    style: {
+      stylePreset: "documentary",
+      color: "#E5E7EB",
+      highlightColor: "#FBBF24",
+      fontFamily: "Montserrat",
+      fontSize: 31,
+      fontWeight: "700",
+      letterSpacing: 1,
+      bgColor: "#0F172A",
+      bgOpacity: 0.64,
+      bgRadius: 4,
+      bgPadding: 13,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 16,
+      animationStyle: "fade",
+      lineTransition: "line_reveal",
+      maxWordsPerLine: 6,
+    },
+  },
 ];
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
@@ -464,6 +749,41 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
       18% { opacity:1; transform:translateY(-50%) scale(0.94) rotate(2deg); }
       28%,78% { opacity:1; transform:translateY(-50%) scale(1) rotate(0deg); }
       100% { opacity:0; transform:translateY(-42%) scale(0.96); }
+    }
+    @keyframes splitPanelPreview {
+      0% { opacity:0; transform:translateY(-50%) translateX(-32px); }
+      18% { opacity:1; transform:translateY(-50%) translateX(0); }
+      50% { opacity:1; transform:translateY(calc(-50% - 3px)) translateX(0); }
+      82% { opacity:1; transform:translateY(-50%) translateX(0); }
+      100% { opacity:0; transform:translateY(-50%) translateX(24px); }
+    }
+    @keyframes kineticStackPreview {
+      0% { opacity:0; transform:translateY(-50%) scale(0.92) rotate(-2deg); }
+      18%,78% { opacity:1; transform:translateY(-50%) scale(1) rotate(-1deg); }
+      45% { opacity:1; transform:translateY(calc(-50% - 4px)) scale(1.02) rotate(1deg); }
+      100% { opacity:0; transform:translateY(-42%) scale(0.96) rotate(2deg); }
+    }
+    @keyframes glassFlashPreview {
+      0% { opacity:0; transform:translateY(-50%) scale(0.96); }
+      20%,84% { opacity:1; transform:translateY(-50%) scale(1); }
+      52% { opacity:1; transform:translateY(calc(-50% - 3px)) scale(1.01); }
+      100% { opacity:0; transform:translateY(-50%) scale(0.97); }
+    }
+    @keyframes markerSwipePreview {
+      0% { transform:scaleX(0); opacity:0; }
+      18%,78% { transform:scaleX(1); opacity:1; }
+      100% { transform:scaleX(0.15); opacity:0; }
+    }
+    @keyframes signalScanPreview {
+      0% { opacity:0; transform:translateY(-50%) scale(0.98); }
+      20%,82% { opacity:1; transform:translateY(-50%) scale(1); }
+      50% { opacity:1; transform:translateY(calc(-50% - 2px)) scale(1.01); }
+      100% { opacity:0; transform:translateY(-50%) scale(0.98); }
+    }
+    @keyframes signalScanLine {
+      0% { transform:translateX(-120%); opacity:0; }
+      18%,76% { opacity:1; }
+      100% { transform:translateX(120%); opacity:0; }
     }
     @keyframes popIn { 0%,100% { transform:scale(0.9); opacity:0.5; } 50% { transform:scale(1.05); opacity:1; } }
     @keyframes fadeIn { 0%,100% { opacity:0.3; } 50% { opacity:1; } }
@@ -788,6 +1108,89 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
       );
     }
 
+    case "split_panel": {
+      const accent = style.lineColor || "#38BDF8";
+      const panel = `${style.boxColor || "#0F172A"}${Math.round((style.boxOpacity || 0.86) * 255).toString(16).padStart(2, "0")}`;
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-4 animate-[splitPanelPreview_2.6s_ease-in-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: style.badgeEnabled ? "48px 1fr" : "1fr", borderRadius: 12, overflow: "hidden", background: panel, boxShadow: `0 16px 32px rgba(0,0,0,0.34), 0 0 18px ${accent}33`, border: `1px solid ${accent}44` }}>
+              {style.badgeEnabled && <div style={{ background: accent, color: "#06111F", display: "grid", placeItems: "center", fontSize: 8, fontWeight: 900, writingMode: "vertical-rl", textTransform: "uppercase", letterSpacing: 1 }}>{style.badgeText || "POINT"}</div>}
+              <div style={{ padding: "16px 18px", position: "relative" }}>
+                {style.decorativeElements && <span style={{ position: "absolute", left: 16, right: 16, bottom: 8, height: 2, borderRadius: 99, background: accent, opacity: 0.8 }} />}
+                <p style={{ ...baseTextStyle, ...colorStyle, textShadow, fontSize: Math.max(fontSize * 0.9, 14), textAlign: "left" }}>{text}</p>
+              </div>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "kinetic_stack": {
+      const accent = style.boxColor || "#F97316";
+      const words = text.split(/\s+/).filter(Boolean).slice(0, 5);
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-x-4 flex flex-col items-center gap-1.5 animate-[kineticStackPreview_2.4s_ease-in-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            {words.map((word, i) => (
+              <span key={`${word}-${i}`} style={{ ...baseTextStyle, color: style.color, background: i % 2 === 0 ? accent : "#F8FAFC", padding: "3px 12px", borderRadius: 5, boxShadow: `5px 5px 0 ${style.lineColor || "#111827"}`, transform: `translateX(${(i % 2 === 0 ? -1 : 1) * Math.min(24, 7 + i * 4)}px) rotate(${i % 2 === 0 ? -1.5 : 1.5}deg)`, fontSize: Math.max(fontSize * 0.82, 14), lineHeight: 1 }}>
+                {word}
+              </span>
+            ))}
+          </div>
+        </>
+      );
+    }
+
+    case "glass_flash": {
+      const accent = style.lineColor || "#C084FC";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-4 animate-[glassFlashPreview_2.8s_ease-in-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ position: "relative", overflow: "hidden", borderRadius: 18, padding: "22px 18px", background: `${style.boxColor || "#FFFFFF"}${Math.round((style.boxOpacity || 0.14) * 255).toString(16).padStart(2, "0")}`, border: `1px solid ${accent}55`, boxShadow: `0 18px 36px rgba(0,0,0,0.35), 0 0 22px ${accent}33`, backdropFilter: "blur(10px)" }}>
+              {style.decorativeElements && <span className="absolute inset-y-[-20%] w-12 animate-[signalScanLine_2s_ease-in-out_infinite]" style={{ left: 0, background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.42), transparent)", transform: "skewX(-18deg)" }} />}
+              {style.badgeEnabled && <span style={{ color: accent, fontSize: 8, fontWeight: 900, letterSpacing: 1.5 }}>{style.badgeText || "FOCUS"}</span>}
+              <p style={{ ...baseTextStyle, ...colorStyle, textShadow, marginTop: style.badgeEnabled ? 5 : 0 }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "marker_swipe": {
+      const accent = style.boxColor || style.lineColor || "#FDE047";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-x-4 flex justify-center" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ position: "relative", padding: "8px 12px" }}>
+              {style.decorativeElements && <span className="absolute left-0 right-0 top-1/2 h-[54%] origin-left animate-[markerSwipePreview_2.4s_ease-in-out_infinite]" style={{ background: accent, borderRadius: 8, transform: "translateY(-50%)", opacity: style.boxOpacity || 0.86 }} />}
+              <p className="relative" style={{ ...baseTextStyle, color: style.color, textShadow, fontSize: Math.max(fontSize, 16) }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "signal_scan": {
+      const accent = style.lineColor || "#22D3EE";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-4 animate-[signalScanPreview_2.5s_ease-in-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ position: "relative", overflow: "hidden", padding: "18px 18px", borderRadius: 10, border: `1px solid ${accent}66`, background: `${style.boxColor || "#0EA5E9"}${Math.round((style.boxOpacity || 0.16) * 255).toString(16).padStart(2, "0")}`, boxShadow: `0 0 22px ${accent}33` }}>
+              {style.decorativeElements && <span className="absolute inset-y-0 w-10 animate-[signalScanLine_1.6s_linear_infinite]" style={{ left: 0, background: `linear-gradient(90deg, transparent, ${accent}77, transparent)` }} />}
+              {style.badgeEnabled && <span style={{ color: accent, fontSize: 8, fontWeight: 900, letterSpacing: 1.3 }}>{style.badgeText || "SIGNAL"}</span>}
+              <p style={{ ...baseTextStyle, ...colorStyle, textShadow, marginTop: style.badgeEnabled ? 4 : 0 }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
     case "glitch_rgb": {
       // 3 separate text layers matching FFmpeg: Red(-4+sin(t*15)*3), Cyan(+4-sin(t*15)*3), White(center)
       return (
@@ -932,8 +1335,8 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
 }
 
 function HookPresetCard({ preset, active, onClick }: { preset: { id: string; name: string; style: Partial<HookStyle> }; active: boolean; onClick: () => void }) {
-  const animation = preset.style.animation || "fade_scale";
-  const meta = HOOK_ANIMATION_META[animation] || HOOK_ANIMATION_META.fade_scale;
+  const animation = preset.style.animation || "podcast_lower_third";
+  const meta = HOOK_ANIMATION_META[animation] || HOOK_ANIMATION_META.podcast_lower_third;
   const font = preset.style.fontFamily || "Poppins";
   const color = preset.style.gradientEnabled ? preset.style.gradientTo || meta.accent : preset.style.color || meta.accent;
   return (
@@ -967,6 +1370,15 @@ function SubtitlePresetCard({ preset, active, onClick }: { preset: { id: string;
   const meta = SUBTITLE_TRANSITION_META[transition] || SUBTITLE_TRANSITION_META.word_pop;
   const font = preset.style.fontFamily || "Poppins";
   const color = preset.style.highlightColor || meta.accent;
+  const presetKey = preset.style.stylePreset || "classic";
+  const isLightCard = presetKey === "bubble_chat" || presetKey === "breaking_tape" || presetKey === "quote_box";
+  const previewBg = preset.style.bgEnabled === false
+    ? "transparent"
+    : preset.style.bgColor
+      ? `${preset.style.bgColor}${Math.round((preset.style.bgOpacity ?? 0.45) * 255).toString(16).padStart(2, "0")}`
+      : "rgba(0,0,0,0.28)";
+  const previewRadius = presetKey === "breaking_tape" ? 2 : presetKey === "bubble_chat" ? 14 : preset.style.bgRadius ?? 6;
+  const previewTransform = presetKey === "breaking_tape" ? "rotate(-1.5deg)" : undefined;
   return (
     <button type="button" onClick={onClick}
       className={cn("group min-h-[92px] rounded-lg border p-3 text-left transition-all",
@@ -978,9 +1390,43 @@ function SubtitlePresetCard({ preset, active, onClick }: { preset: { id: string;
         </div>
         <span className="h-5 min-w-5 rounded-full border" style={{ backgroundColor: `${color}22`, borderColor: `${color}66` }} />
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 rounded-md border border-white/10 bg-black/25 px-2 py-2">
+      <div
+        className={cn(
+          "relative mt-3 flex flex-wrap items-center justify-center gap-1.5 overflow-hidden border px-2 py-2",
+          isLightCard ? "border-black/10" : "border-white/10",
+          presetKey === "lower_third" && "justify-start",
+        )}
+        style={{
+          backgroundColor: previewBg,
+          borderRadius: previewRadius,
+          transform: previewTransform,
+          boxShadow: presetKey === "neon_pulse" ? `0 0 22px ${color}44` : undefined,
+        }}
+      >
+        {(presetKey === "editorial_banner" || presetKey === "lower_third" || presetKey === "documentary") && (
+          <span className="absolute left-0 top-0 h-full w-1.5" style={{ backgroundColor: color }} />
+        )}
+        {presetKey === "neon_pulse" && (
+          <span className="absolute inset-x-3 top-1 h-0.5 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 12px ${color}` }} />
+        )}
+        {presetKey === "bubble_chat" && (
+          <span className="absolute bottom-[-5px] left-7 h-3 w-3 rotate-45" style={{ backgroundColor: previewBg }} />
+        )}
         {["ini", "kata", "penting"].map((word, index) => (
-          <span key={word} style={{ color: index === 1 ? color : preset.style.color || "#FFFFFF", fontFamily: `'${font}', sans-serif`, fontWeight: index === 1 ? 900 : Number(preset.style.fontWeight || 700) }} className={cn("text-[11px]", index === 1 && "scale-110")}>{word}</span>
+          <span
+            key={word}
+            style={{
+              color: index === 1 ? color : preset.style.color || "#FFFFFF",
+              fontFamily: index === 1 && preset.style.dualStyleEnabled ? `'${preset.style.highlightFontFamily || "Anton"}', sans-serif` : `'${font}', sans-serif`,
+              fontWeight: index === 1 ? 900 : Number(preset.style.fontWeight || 700),
+              WebkitTextStroke: presetKey === "meme_impact" && index !== 1 ? "0.5px #000" : undefined,
+              textShadow: presetKey === "neon_pulse" && index === 1 ? `0 0 10px ${color}` : undefined,
+              textTransform: preset.style.uppercase || (index === 1 && preset.style.highlightUppercase) ? "uppercase" : "none",
+            }}
+            className={cn("relative z-10 text-[11px]", index === 1 && "scale-110")}
+          >
+            {word}
+          </span>
         ))}
       </div>
     </button>
@@ -998,6 +1444,36 @@ function MetaTile({ meta, active, onClick }: { meta: OptionMeta; active: boolean
       </div>
       <p className="mt-1 text-[9px] text-zinc-500">{meta.mood}</p>
       <p className="mt-1.5 line-clamp-2 text-[9px] leading-snug text-zinc-600">{meta.desc}</p>
+    </button>
+  );
+}
+
+function TimingOptionCard({ meta, active, onClick, kind }: { meta: OptionMeta; active: boolean; onClick: () => void; kind: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group relative min-h-[92px] overflow-hidden rounded-lg border p-3 text-left transition-all",
+        active
+          ? "border-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-400/25"
+          : "border-zinc-800 bg-zinc-900/70 hover:border-zinc-600 hover:bg-zinc-900"
+      )}
+    >
+      <div className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${meta.accent}, transparent)` }} />
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={cn("text-[12px] font-semibold", active ? "text-emerald-300" : "text-zinc-200")}>{meta.label}</p>
+          <p className="mt-1 line-clamp-2 text-[9px] leading-snug text-zinc-500">{meta.desc}</p>
+        </div>
+        <span className="rounded-md px-1.5 py-0.5 text-[8px] font-black" style={{ color: meta.accent, backgroundColor: `${meta.accent}18`, border: `1px solid ${meta.accent}44` }}>{meta.preview}</span>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
+          <div className="h-full w-2/3 rounded-full transition-all group-hover:w-full" style={{ backgroundColor: meta.accent }} />
+        </div>
+        <span className="rounded border border-zinc-800 bg-zinc-950/80 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-zinc-500">{kind}</span>
+      </div>
     </button>
   );
 }
@@ -1079,12 +1555,18 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
   const [animationPage, setAnimationPage] = useState(() => getPageForIndex(HOOK_ANIMATIONS.indexOf(style.animation)));
   useGoogleFont(style.fontFamily);
   const previewAspect = aspectRatio === "16:9" ? "16/9" : aspectRatio === "1:1" ? "1/1" : "9/16";
-  const activeAnimation = HOOK_ANIMATION_META[style.animation] || HOOK_ANIMATION_META.fade_scale;
+  const activeAnimation = HOOK_ANIMATION_META[style.animation] || HOOK_ANIMATION_META.podcast_lower_third;
   const visibleHookPresets = getPageItems(HOOK_PRESETS, presetPage);
   const visibleHookAnimations = getPageItems(HOOK_ANIMATIONS, animationPage);
 
   useEffect(() => {
     setAnimationPage(getPageForIndex(HOOK_ANIMATIONS.indexOf(style.animation)));
+  }, [style.animation]);
+
+  useEffect(() => {
+    if (!HOOK_ANIMATIONS.includes(style.animation)) {
+      update({ animation: DEFAULT_HOOK_STYLE.animation });
+    }
   }, [style.animation]);
 
   return (
@@ -1113,24 +1595,47 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
         </Section>
 
         <Section title="Animation & Timing">
-          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2 mb-3">
-            {visibleHookAnimations.map(a => (
-              <MetaTile key={a} meta={HOOK_ANIMATION_META[a] || HOOK_ANIMATION_META.fade_scale} active={style.animation === a} onClick={() => update({ animation: a })} />
-            ))}
-          </div>
-          <PaginationControls page={animationPage} totalItems={HOOK_ANIMATIONS.length} onPageChange={setAnimationPage} label="animations" />
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
+          <div className="mb-3 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
+              <div className="min-w-0">
                 <p className="text-[11px] font-semibold text-zinc-200">{activeAnimation.label}</p>
-                <p className="text-[9px] text-zinc-500">{activeAnimation.desc}</p>
+                <p className="truncate text-[9px] text-zinc-500">{activeAnimation.desc}</p>
               </div>
-              <span className="rounded-md px-2 py-1 text-[9px] font-black" style={{ color: activeAnimation.accent, backgroundColor: `${activeAnimation.accent}18` }}>{activeAnimation.mood}</span>
+              <span className="rounded-md px-2 py-1 text-[9px] font-black" style={{ color: activeAnimation.accent, backgroundColor: `${activeAnimation.accent}18`, border: `1px solid ${activeAnimation.accent}44` }}>{activeAnimation.mood}</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3">
               <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
               <RangeInput label={`Fade In: ${style.fadeIn}s`} min={1} max={15} value={Math.round(style.fadeIn * 10)} onChange={(v) => update({ fadeIn: v / 10 })} />
               <RangeInput label={`Fade Out: ${style.fadeOut}s`} min={1} max={15} value={Math.round(style.fadeOut * 10)} onChange={(v) => update({ fadeOut: v / 10 })} />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
+            {visibleHookAnimations.map(a => (
+              <TimingOptionCard key={a} meta={HOOK_ANIMATION_META[a] || HOOK_ANIMATION_META.podcast_lower_third} active={style.animation === a} onClick={() => update({ animation: a })} kind="hook" />
+            ))}
+          </div>
+          <PaginationControls page={animationPage} totalItems={HOOK_ANIMATIONS.length} onPageChange={setAnimationPage} label="animations" />
+        </Section>
+
+        <Section title="Hook Components">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Checkbox label="Show badge / label" checked={style.badgeEnabled} onChange={(v) => update({ badgeEnabled: v })} />
+                {style.badgeEnabled && (
+                  <input
+                    type="text"
+                    value={style.badgeText}
+                    onChange={(e) => update({ badgeText: e.target.value })}
+                    placeholder="Badge text"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+                  />
+                )}
+              </div>
+              <div className="space-y-2">
+                <Checkbox label="Decorative motion elements" checked={style.decorativeElements} onChange={(v) => update({ decorativeElements: v })} />
+                <RangeInput label={`Motion: ${style.motionIntensity.toFixed(1)}x`} min={0} max={20} value={Math.round(style.motionIntensity * 10)} onChange={(v) => update({ motionIntensity: v / 10 })} />
+              </div>
             </div>
           </div>
         </Section>
@@ -1298,6 +1803,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
   ];
   const visibleSubtitlePresets = getPageItems(SUBTITLE_PRESETS, presetPage);
   const visibleSubtitleTiming = getPageItems(subtitleTimingOptions, timingPage);
+  const activeTimingMeta = SUBTITLE_TRANSITION_META[style.lineTransition] || SUBTITLE_ANIMATION_META[style.animationStyle];
 
   // Cycle through words for animated preview
   useEffect(() => {
@@ -1335,28 +1841,33 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
         </Section>
 
         <Section title="Animation & Timing">
-          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
-            {visibleSubtitleTiming.map((option) => (
-              <div key={`${option.kind}-${option.id}`} className="relative">
-                <MetaTile
-                  meta={option.meta}
-                  active={option.kind === "transition" ? style.lineTransition === option.id : style.animationStyle === option.id}
-                  onClick={() => option.kind === "transition" ? update({ lineTransition: option.id }) : update({ animationStyle: option.id })}
-                />
-                <span className="pointer-events-none absolute bottom-2 right-2 rounded border border-zinc-800 bg-zinc-950/80 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-zinc-500">
-                  {option.kind === "transition" ? "line" : "motion"}
-                </span>
+          <div className="mb-3 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-zinc-200">{activeTimingMeta.label}</p>
+                <p className="truncate text-[9px] text-zinc-500">{activeTimingMeta.desc}</p>
               </div>
-            ))}
-          </div>
-          <PaginationControls page={timingPage} totalItems={subtitleTimingOptions.length} onPageChange={setTimingPage} label="timing options" />
-          <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <span className="rounded-md px-2 py-1 text-[9px] font-black" style={{ color: activeTimingMeta.accent, backgroundColor: `${activeTimingMeta.accent}18`, border: `1px solid ${activeTimingMeta.accent}44` }}>{activeTimingMeta.mood}</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3">
               <RangeInput label={`Speed: ${style.animationSpeed.toFixed(1)}x`} min={5} max={20} value={Math.round(style.animationSpeed * 10)} onChange={(v) => update({ animationSpeed: v / 10 })} />
               <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
               <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
+            {visibleSubtitleTiming.map((option) => (
+              <div key={`${option.kind}-${option.id}`} className="relative">
+                <TimingOptionCard
+                  meta={option.meta}
+                  active={option.kind === "transition" ? style.lineTransition === option.id : style.animationStyle === option.id}
+                  onClick={() => option.kind === "transition" ? update({ lineTransition: option.id }) : update({ animationStyle: option.id })}
+                  kind={option.kind === "transition" ? "line" : "motion"}
+                />
+              </div>
+            ))}
+          </div>
+          <PaginationControls page={timingPage} totalItems={subtitleTimingOptions.length} onPageChange={setTimingPage} label="timing options" />
         </Section>
 
         <Section title="Typography">
@@ -1616,6 +2127,11 @@ function getHookAnimationClass(animation: string): string {
     case "waveform_pulse": return "animate-[waveformTextPreview_1.1s_ease-in-out_infinite]";
     case "breaking_tape": return "animate-[breakingTapePreview_2.5s_ease-out_infinite]";
     case "mic_drop": return "animate-[micDropPreview_2.5s_cubic-bezier(.2,.85,.25,1)_infinite]";
+    case "split_panel": return "animate-[splitPanelPreview_2.6s_ease-in-out_infinite]";
+    case "kinetic_stack": return "animate-[kineticStackPreview_2.4s_ease-in-out_infinite]";
+    case "glass_flash": return "animate-[glassFlashPreview_2.8s_ease-in-out_infinite]";
+    case "marker_swipe": return "animate-[markerSwipePreview_2.4s_ease-in-out_infinite]";
+    case "signal_scan": return "animate-[signalScanPreview_2.5s_ease-in-out_infinite]";
     default: return "";
   }
 }
@@ -1627,6 +2143,11 @@ function getHookPreviewSample(animation: string): string {
     case "waveform_pulse": return "dengerin 5 detik ini dulu";
     case "breaking_tape": return "opini ini bakal kebelah dua";
     case "mic_drop": return "ini jawaban paling brutalnya";
+    case "split_panel": return "dua sisi ini bikin debat panas";
+    case "kinetic_stack": return "ini alasan orang salah paham";
+    case "glass_flash": return "bagian kecil ini paling mahal";
+    case "marker_swipe": return "kalimat ini wajib ditandai";
+    case "signal_scan": return "sinyalnya kelihatan dari sini";
     case "cinematic_reveal": return "mereka gak cerita bagian ini";
     case "danger_bold": return "jangan skip bagian ini";
     case "shake_neon": return "ini yang bikin rame";
