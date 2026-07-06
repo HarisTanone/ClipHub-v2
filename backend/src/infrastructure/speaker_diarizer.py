@@ -124,8 +124,11 @@ class SpeakerDiarizer:
                     self._model_name, use_auth_token=self._hf_token,
                 )
             else:
-                # Last resort: try positional
-                pipeline = Pipeline.from_pretrained(self._model_name, self._hf_token)
+                raise RuntimeError(
+                    f"pyannote.audio Pipeline.from_pretrained has no 'token' or "
+                    f"'use_auth_token' kwarg. Available params: {list(sig.parameters)}. "
+                    f"Check pyannote.audio version installed."
+                )
             pipeline.to(torch.device(device))
 
             self._pipeline = pipeline
