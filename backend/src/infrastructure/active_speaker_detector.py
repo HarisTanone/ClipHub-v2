@@ -62,7 +62,7 @@ class ActiveSpeakerDetector:
     """Detect active speaker via lip movement using MediaPipe Face Mesh.
 
     Designed for podcast format:
-    - 2 people, frontal faces, relatively stable positions
+    - Multiple visible people with relatively stable positions
     - Clear lip visibility
     - Works with the same MediaPipe dependency already in the project
     """
@@ -95,11 +95,18 @@ class ActiveSpeakerDetector:
     HEAD_MOTION_NORMALIZE = 20.0
 
     FACE_MESH_CONFIDENCE = 0.5
-    MAX_FACES = 4                  # Podcast panels are usually 2 people, but support N-position targeting
+    POSITION_PROFILE_MISMATCH = 0.18
 
-    def __init__(self):
+    def __init__(self, max_faces: Optional[int] = None):
         self._face_mesh = None
         self._use_legacy_api = False  # True if mp.solutions available
+        if max_faces is None:
+            try:
+                from src.config import settings
+                max_faces = settings.CENTERING_MAX_FACES
+            except Exception:
+                max_faces = 12
+        self._max_faces = max(1, int(max_faces))
 
     def _load_model(self) -> bool:
         """Lazy-load MediaPipe Face Mesh (compatible with both legacy and task API)."""
@@ -111,13 +118,16 @@ class ActiveSpeakerDetector:
             if hasattr(mp, 'solutions') and hasattr(mp.solutions, 'face_mesh'):
                 self._face_mesh = mp.solutions.face_mesh.FaceMesh(
                     static_image_mode=False,
-                    max_num_faces=self.MAX_FACES,
+                    max_num_faces=self._max_faces,
                     refine_landmarks=True,
                     min_detection_confidence=self.FACE_MESH_CONFIDENCE,
                     min_tracking_confidence=0.5,
                 )
                 self._use_legacy_api = True
-                logger.info("active_speaker: MediaPipe Face Mesh loaded (legacy API)")
+                logger.info(
+                    "active_speaker: MediaPipe Face Mesh loaded "
+                    f"(legacy API, max_faces={self._max_faces})"
+                )
                 return True
             else:
                 # New Task API (mediapipe ≥0.10.30)
@@ -130,14 +140,17 @@ class ActiveSpeakerDetector:
                     options = FaceLandmarkerOptions(
                         base_options=base_options,
                         running_mode=VisionTaskRunningMode.IMAGE,
-                        num_faces=self.MAX_FACES,
+                        num_faces=self._max_faces,
                         min_face_detection_confidence=self.FACE_MESH_CONFIDENCE,
                         min_tracking_confidence=0.5,
                         output_face_blendshapes=False,
                     )
                     self._face_mesh = FaceLandmarker.create_from_options(options)
                     self._use_legacy_api = False
-                    logger.info("active_speaker: MediaPipe FaceLandmarker loaded (task API)")
+                    logger.info(
+                        "active_speaker: MediaPipe FaceLandmarker loaded "
+                        f"(task API, max_faces={self._max_faces})"
+                    )
                     return True
                 except (ImportError, ModuleNotFoundError) as e:
                     logger.warning(f"active_speaker: Task API not available: {e}")
@@ -173,6 +186,7 @@ class ActiveSpeakerDetector:
         max_samples: int = 150,
         vad_segments: Optional[List[Dict]] = None,
         position_targets: Optional[Dict[int, float]] = None,
+        position_target_profiles: Optional[Dict[int, Dict[str, float]]] = None,
     ) -> Optional[ActiveSpeakerResult]:
         """Run multimodal active speaker detection on video.
 
@@ -191,6 +205,9 @@ class ActiveSpeakerDetector:
                           If None, assumes continuous speech (fallback).
             position_targets: Stable person positions from face tracking, keyed by
                               positional speaker ID (0=leftmost, 1=next, ...).
+            position_target_profiles: Stable X/Y/size face profiles keyed by
+                                     positional speaker ID. Used when panelists
+                                     share similar horizontal positions.
         """
         if not self._load_model():
             return None
@@ -289,7 +306,13 @@ class ActiveSpeakerDetector:
         # Assign stable positional IDs before measuring head motion. MediaPipe's
         # per-frame face order is not stable, so head motion must be keyed by
         # the final left/right/N-position identity rather than raw face_idx.
-        frame_data = self._assign_consistent_ids(frame_data, width, position_targets)
+        frame_data = self._assign_consistent_ids(
+            frame_data,
+            width,
+            position_targets=position_targets,
+            position_target_profiles=position_target_profiles,
+            frame_height=height,
+        )
         frame_data = self._compute_head_motion(frame_data)
 
         # Compute active speaker per frame using sliding window variance
@@ -314,11 +337,28 @@ class ActiveSpeakerDetector:
         dominant_ratio = speaker_times.get(dominant_id, 0) / total_time if dominant_id is not None else 0
 
         total_speakers = len(set(s.speaker_id for s in segments))
+        frame_counts: Dict[int, int] = {}
+        for speaker_id in per_frame_speaker.values():
+            frame_counts[speaker_id] = frame_counts.get(speaker_id, 0) + 1
+        frame_counts_log = ", ".join(
+            f"P{speaker_id}:{count}"
+            for speaker_id, count in sorted(frame_counts.items())
+        )
+        segment_log = ", ".join(
+            f"P{s.speaker_id}@{s.start_time:.1f}-{s.end_time:.1f}s"
+            for s in segments[:8]
+        )
+        if len(segments) > 8:
+            segment_log += ", ..."
 
         logger.info(
             f"active_speaker: detected {total_speakers} speakers, "
             f"dominant=ID{dominant_id} ({dominant_ratio:.0%}), "
             f"{len(segments)} segments"
+        )
+        logger.info(
+            "active_speaker: timeline "
+            f"frames={{{frame_counts_log}}}, segments=[{segment_log}]"
         )
 
         return ActiveSpeakerResult(
@@ -425,6 +465,8 @@ class ActiveSpeakerDetector:
         frame_data: List[Tuple[int, List[FaceSpeechFrame]]],
         frame_width: int,
         position_targets: Optional[Dict[int, float]] = None,
+        position_target_profiles: Optional[Dict[int, Dict[str, float]]] = None,
+        frame_height: Optional[int] = None,
     ) -> List[Tuple[int, List[FaceSpeechFrame]]]:
         """Assign consistent positional face IDs.
 
@@ -435,9 +477,46 @@ class ActiveSpeakerDetector:
         Fallback: assign visible faces left-to-right for the current frame.
         """
         targets = self._normalise_position_targets(position_targets)
+        profiles = self._normalise_position_target_profiles(position_target_profiles)
 
         for frame_idx, faces in frame_data:
             if not faces:
+                continue
+
+            if profiles:
+                pairs: List[Tuple[float, int, int]] = []
+                for face_idx, face in enumerate(faces):
+                    for position_id, profile in profiles.items():
+                        pairs.append((
+                            self._face_profile_distance(
+                                face,
+                                profile,
+                                frame_width,
+                                frame_height,
+                            ),
+                            position_id,
+                            face_idx,
+                        ))
+
+                used_faces: set[int] = set()
+                used_positions: set[int] = set()
+                for distance, position_id, face_idx in sorted(pairs):
+                    if face_idx in used_faces or position_id in used_positions:
+                        continue
+                    if distance > self.POSITION_PROFILE_MISMATCH:
+                        continue
+                    faces[face_idx].face_id = position_id
+                    used_faces.add(face_idx)
+                    used_positions.add(position_id)
+
+                next_id = max(profiles) + 1
+                for face_idx, face in sorted(
+                    enumerate(faces),
+                    key=lambda item: (item[1].bbox_x, item[1].bbox_y),
+                ):
+                    if face_idx not in used_faces:
+                        face.face_id = next_id
+                        next_id += 1
                 continue
 
             if targets:
@@ -485,6 +564,55 @@ class ActiveSpeakerDetector:
             except (TypeError, ValueError):
                 continue
         return dict(sorted(cleaned.items()))
+
+    @staticmethod
+    def _normalise_position_target_profiles(
+        position_target_profiles: Optional[Dict[int, Dict[str, float]]],
+        position_targets: Optional[Dict[int, float]] = None,
+    ) -> Dict[int, Dict[str, float]]:
+        """Return clean X/Y/size target profiles keyed by speaker position ID."""
+        cleaned: Dict[int, Dict[str, float]] = {}
+        if position_target_profiles:
+            for key, profile in position_target_profiles.items():
+                if not isinstance(profile, dict):
+                    continue
+                try:
+                    position_id = int(key)
+                    numeric = {
+                        field: float(profile[field])
+                        for field in ("x", "y", "width", "height", "area")
+                        if field in profile
+                    }
+                except (TypeError, ValueError):
+                    continue
+                if "x" in numeric:
+                    cleaned[position_id] = numeric
+
+        if cleaned:
+            return dict(sorted(cleaned.items()))
+
+        if position_targets:
+            for position_id, target_x in position_targets.items():
+                cleaned[int(position_id)] = {"x": float(target_x)}
+
+        return dict(sorted(cleaned.items()))
+
+    @classmethod
+    def _face_profile_distance(
+        cls,
+        face: FaceSpeechFrame,
+        profile: Dict[str, float],
+        frame_width: int,
+        frame_height: Optional[int] = None,
+    ) -> float:
+        """Weighted normalized distance between a Face Mesh detection and a seat profile."""
+        frame_w = max(float(frame_width), 1.0)
+        frame_h = max(float(frame_height or frame_width), 1.0)
+        dx = abs(face.bbox_x - profile.get("x", face.bbox_x)) / frame_w
+        dy = 0.0
+        if "y" in profile:
+            dy = abs(face.bbox_y - profile["y"]) / frame_h
+        return dx + dy * 0.85
 
     def _compute_head_motion(
         self,

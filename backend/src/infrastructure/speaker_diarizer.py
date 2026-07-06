@@ -68,14 +68,14 @@ class SpeakerDiarizer:
         hf_token: str = "",
         model_name: str = "pyannote/speaker-diarization-3.1",
         timeout_sec: int = 60,
-        min_speakers: int = 2,
-        max_speakers: int = 4,
+        min_speakers: Optional[int] = None,
+        max_speakers: Optional[int] = None,
     ):
         self._hf_token = hf_token
         self._model_name = model_name
         self._timeout_sec = timeout_sec
-        self._min_speakers = min_speakers
-        self._max_speakers = max_speakers
+        self._min_speakers = min_speakers if min_speakers and min_speakers > 0 else None
+        self._max_speakers = max_speakers if max_speakers and max_speakers > 0 else None
 
         self._pipeline = None
         self._load_attempted: bool = False
@@ -143,7 +143,12 @@ class SpeakerDiarizer:
 
     # ─── Public API ───────────────────────────────────────────────────────────
 
-    async def diarize(self, video_path: str) -> Optional[DiarizationResult]:
+    async def diarize(
+        self,
+        video_path: str,
+        min_speakers: Optional[int] = None,
+        max_speakers: Optional[int] = None,
+    ) -> Optional[DiarizationResult]:
         """Run speaker diarization on a video/audio file.
 
         Extracts audio to temp WAV, runs PyAnnote with timeout,
@@ -151,6 +156,8 @@ class SpeakerDiarizer:
 
         Args:
             video_path: Path to video or audio file.
+            min_speakers: Optional dynamic lower bound. None means PyAnnote auto.
+            max_speakers: Optional dynamic upper bound. None means PyAnnote auto.
 
         Returns:
             DiarizationResult on success, None on any failure.
@@ -176,8 +183,19 @@ class SpeakerDiarizer:
                 return None
 
             # Step 3: Run diarization with timeout
+            effective_min = (
+                min_speakers if min_speakers and min_speakers > 0 else self._min_speakers
+            )
+            effective_max = (
+                max_speakers if max_speakers and max_speakers > 0 else self._max_speakers
+            )
             diarization = await asyncio.wait_for(
-                asyncio.to_thread(self._run_diarization, audio_path),
+                asyncio.to_thread(
+                    self._run_diarization,
+                    audio_path,
+                    effective_min,
+                    effective_max,
+                ),
                 timeout=self._timeout_sec,
             )
 
@@ -244,7 +262,12 @@ class SpeakerDiarizer:
 
     # ─── Internal Methods ─────────────────────────────────────────────────────
 
-    def _run_diarization(self, audio_path: str):
+    def _run_diarization(
+        self,
+        audio_path: str,
+        min_speakers: Optional[int],
+        max_speakers: Optional[int],
+    ):
         """Synchronous PyAnnote diarization call (run in thread).
 
         Args:
@@ -254,11 +277,17 @@ class SpeakerDiarizer:
             PyAnnote Annotation object or None on failure.
         """
         try:
-            diarization = self._pipeline(
-                audio_path,
-                min_speakers=self._min_speakers,
-                max_speakers=self._max_speakers,
+            kwargs = {}
+            if min_speakers is not None:
+                kwargs["min_speakers"] = min_speakers
+            if max_speakers is not None:
+                kwargs["max_speakers"] = max_speakers
+            logger.info(
+                "speaker_diarizer: running diarization "
+                f"(min_speakers={min_speakers or 'auto'}, "
+                f"max_speakers={max_speakers or 'auto'})"
             )
+            diarization = self._pipeline(audio_path, **kwargs)
             return diarization
         except Exception as e:
             logger.error(f"speaker_diarizer: pipeline execution failed: {e}")

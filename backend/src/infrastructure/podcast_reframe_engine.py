@@ -1,20 +1,16 @@
 """PodcastReframeEngine — Speaker-Aware Face-Based Reframing.
 
-Strategy: Detect faces → Track persons → Detect active speaker → Smart layout.
+Strategy: Detect faces → Track persons → Detect active speaker → Smart crop.
 
 Pipeline:
   1. MediaPipe Face Detection → find faces per frame
   2. IoU Person Tracker → consistent person IDs across frames
   3. Active Speaker Detection (lip movement via Face Mesh) → who is talking
-  4. Layout decision based on speaker analysis:
-     - 1 dominant speaker (≥75% talk time) → single crop on that speaker
-     - 2 balanced speakers → speaker-aware double grid (60/40 emphasis)
-     - 0 faces → center crop fallback
+  4. Dynamic panning keeps the active speaker centered.
 
 Rules:
   - Audio is ALWAYS stream-copied, never re-encoded through filter_complex
   - Aspect ratio math: 9:16 output = 1080x1920
-  - Double grid: active speaker gets 60% height (1080×1152), listener 40% (1080×768)
   - Hysteresis prevents rapid speaker switching (0.3s hold)
   - Person IDs are IoU-tracked, not X-sorted (no swap on movement)
 """
@@ -32,7 +28,7 @@ import numpy as np
 
 from src.domain.interfaces import IReframeEngine
 from src.infrastructure.gpu_encoder import get_video_encoder_args
-from src.infrastructure.active_speaker_detector import ActiveSpeakerDetector, ActiveSpeakerResult
+from src.infrastructure.active_speaker_detector import ActiveSpeakerDetector, ActiveSpeakerResult, SpeakerSegment
 from src.infrastructure.person_tracker import SimpleIoUTracker, BBox, TrackedDetection
 from src.infrastructure.speaker_diarizer import SpeakerDiarizer, DiarizationResult
 from src.infrastructure.speaker_face_mapper import SpeakerFaceMapper, MappingResult
@@ -194,9 +190,10 @@ class PodcastReframeEngine(IReframeEngine):
         person_count = tracked_data["person_count"]
         stable_positions = tracked_data["stable_positions"]
 
-        # Step 2: Active Speaker Detection (only if 2+ people)
+        # Step 2: Active Speaker Detection. A single detected person is already
+        # the active visual target; multiple people require disambiguation.
         speaker_result: Optional[ActiveSpeakerResult] = None
-        if person_count >= 2:
+        if person_count > 1:
             # 2a. Try PyAnnote diarization FIRST (more accurate for speaker identity)
             speaker_result = self._try_diarization(
                 video_path, tracked_data, fps, total_frames
@@ -214,9 +211,23 @@ class PodcastReframeEngine(IReframeEngine):
                         height=height,
                         vad_segments=vad_segments,
                         position_targets=tracked_data.get("position_targets"),
+                        position_target_profiles=tracked_data.get("position_target_profiles"),
                     )
                 except Exception as e:
                     logger.warning(f"podcast_reframe: lip+head fallback failed (non-fatal): {e}")
+        elif person_count == 1:
+            speaker_result = self._build_single_speaker_result(
+                tracked_data=tracked_data,
+                fps=fps,
+                total_frames=total_frames,
+            )
+
+        self._log_active_speaker_summary(
+            speaker_result=speaker_result,
+            tracked_data=tracked_data,
+            fps=fps,
+            total_frames=total_frames,
+        )
 
         # Step 3: Dynamic Panning — single FFmpeg pass with smooth crop tracking
         # Builds a time-based crop X expression that follows the active face.
@@ -266,8 +277,16 @@ class PodcastReframeEngine(IReframeEngine):
             hf_token=hf_token,
             model_name=settings.DIARIZATION_MODEL,
             timeout_sec=settings.DIARIZATION_TIMEOUT_SEC,
-            min_speakers=settings.DIARIZATION_MIN_SPEAKERS,
-            max_speakers=settings.DIARIZATION_MAX_SPEAKERS,
+            min_speakers=(
+                settings.DIARIZATION_MIN_SPEAKERS
+                if settings.DIARIZATION_MIN_SPEAKERS > 0
+                else None
+            ),
+            max_speakers=(
+                settings.DIARIZATION_MAX_SPEAKERS
+                if settings.DIARIZATION_MAX_SPEAKERS > 0
+                else None
+            ),
         )
         self._face_mapper = SpeakerFaceMapper(
             confidence_threshold=settings.DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD,
@@ -297,8 +316,30 @@ class PodcastReframeEngine(IReframeEngine):
             # Create new event loop since we're in a thread
             loop = asyncio.new_event_loop()
             try:
+                from src.config import settings
+                visual_person_count = int(tracked_data.get("person_count") or 0)
+                dynamic_max_speakers = (
+                    settings.DIARIZATION_MAX_SPEAKERS
+                    if settings.DIARIZATION_MAX_SPEAKERS > 0
+                    else (visual_person_count if visual_person_count > 1 else None)
+                )
+                dynamic_min_speakers = (
+                    settings.DIARIZATION_MIN_SPEAKERS
+                    if settings.DIARIZATION_MIN_SPEAKERS > 0
+                    else None
+                )
+                logger.info(
+                    "podcast_reframe: diarization speaker bounds "
+                    f"min={dynamic_min_speakers or 'auto'}, "
+                    f"max={dynamic_max_speakers or 'auto'} "
+                    f"(visible_people={visual_person_count})"
+                )
                 diarization_result = loop.run_until_complete(
-                    diarizer.diarize(video_path)
+                    diarizer.diarize(
+                        video_path,
+                        min_speakers=dynamic_min_speakers,
+                        max_speakers=dynamic_max_speakers,
+                    )
                 )
             finally:
                 loop.close()
@@ -353,6 +394,85 @@ class PodcastReframeEngine(IReframeEngine):
             logger.warning(f"podcast_reframe: diarization pipeline failed: {e}")
             return None
 
+    def _build_single_speaker_result(
+        self,
+        tracked_data: dict,
+        fps: float,
+        total_frames: int,
+    ) -> ActiveSpeakerResult:
+        """Build a speaker result when only one stable person is visible."""
+        duration = total_frames / fps if fps > 0 else 0.0
+        sample_frame_indices = tracked_data.get("sample_frame_indices") or [0]
+        per_frame_speaker = {int(frame_idx): 0 for frame_idx in sample_frame_indices}
+        logger.info(
+            "podcast_reframe: single visible person detected → "
+            "speaker=P0, centering target=P0"
+        )
+        return ActiveSpeakerResult(
+            segments=[
+                SpeakerSegment(
+                    speaker_id=0,
+                    start_time=0.0,
+                    end_time=duration,
+                    confidence=1.0,
+                )
+            ],
+            dominant_speaker_id=0,
+            dominant_ratio=1.0,
+            per_frame_speaker=per_frame_speaker,
+            total_speakers=1,
+        )
+
+    def _log_active_speaker_summary(
+        self,
+        speaker_result: Optional[ActiveSpeakerResult],
+        tracked_data: dict,
+        fps: float,
+        total_frames: int,
+    ) -> None:
+        """Log who the reframe stage thinks is speaking."""
+        if speaker_result is None:
+            logger.info(
+                "podcast_reframe: active speaker unavailable → "
+                "centering will follow visible face motion"
+            )
+            return
+
+        position_profiles = self._normalise_position_profiles(
+            tracked_data.get("position_target_profiles") or {}
+        )
+        frame_counts: Dict[int, int] = {}
+        for speaker_id in speaker_result.per_frame_speaker.values():
+            frame_counts[int(speaker_id)] = frame_counts.get(int(speaker_id), 0) + 1
+
+        counts_log = ", ".join(
+            f"P{speaker_id}:{count}"
+            for speaker_id, count in sorted(frame_counts.items())
+        )
+        positions_log = ", ".join(
+            self._format_profile_log(f"P{speaker_id}", position_profiles[speaker_id])
+            for speaker_id in sorted(position_profiles)
+        )
+        segment_log = ", ".join(
+            f"P{s.speaker_id}@{s.start_time:.1f}-{s.end_time:.1f}s"
+            for s in speaker_result.segments[:10]
+        )
+        if len(speaker_result.segments) > 10:
+            segment_log += ", ..."
+
+        duration = total_frames / fps if fps > 0 else 0.0
+        logger.info(
+            "podcast_reframe: active speaker summary "
+            f"duration={duration:.1f}s, "
+            f"visible_people={tracked_data.get('person_count', 0)}, "
+            f"speakers={speaker_result.total_speakers}, "
+            f"dominant=P{speaker_result.dominant_speaker_id} "
+            f"({speaker_result.dominant_ratio:.0%}), "
+            f"frame_targets={{{counts_log}}}, "
+            f"positions={{{positions_log}}}, "
+            f"segments=[{segment_log}]"
+        )
+
     # ─── Face Detection + Tracking ───────────────────────────────────────
 
     def _detect_and_track_faces(
@@ -366,7 +486,9 @@ class PodcastReframeEngine(IReframeEngine):
                 "per_frame_tracked": List[List[TrackedDetection]],
                 "person_count": int,
                 "stable_positions": Dict[int, float],  # track_id → median X
+                "stable_position_profiles": Dict[int, dict],  # track_id → X/Y/size
                 "position_targets": Dict[int, float],  # position_id → median X
+                "position_target_profiles": Dict[int, dict],  # position_id → X/Y/size
                 "track_to_position": Dict[int, int],   # track_id → position_id
             }
         """
@@ -378,11 +500,14 @@ class PodcastReframeEngine(IReframeEngine):
             return {
                 "per_frame_faces": [],
                 "per_frame_tracked": [],
+                "frame_face_counts": [],
                 "sample_frame_indices": [],
                 "sample_timestamps": [],
                 "person_count": 0,
                 "stable_positions": {},
+                "stable_position_profiles": {},
                 "position_targets": {},
+                "position_target_profiles": {},
                 "track_to_position": {},
             }
 
@@ -391,6 +516,7 @@ class PodcastReframeEngine(IReframeEngine):
 
         per_frame_faces: List[List[float]] = []
         per_frame_tracked: List[List[TrackedDetection]] = []
+        frame_face_counts: List[int] = []
         sample_frame_indices: List[int] = []
         sample_timestamps: List[float] = []
 
@@ -452,49 +578,62 @@ class PodcastReframeEngine(IReframeEngine):
                         face_bbox = BBox(x1, y1, x1 + w_px, y1 + h_px)
                         frame_bboxes.append(face_bbox)
 
-            # Update tracker with this frame's detections
-            # First: filter overlapping faces (NMS) to prevent 1 person → 2 detections
-            frame_faces = self._filter_overlapping_faces(frame_faces, width)
-            # Also filter bboxes to match (keep only unique faces)
-            if len(frame_bboxes) > len(frame_faces):
-                # Re-filter bboxes by keeping those whose center_x matches filtered faces
-                filtered_bboxes = []
-                for bbox in frame_bboxes:
-                    cx = bbox.center_x
-                    if any(abs(cx - fx) < width * 0.05 for fx in frame_faces):
-                        filtered_bboxes.append(bbox)
-                frame_bboxes = filtered_bboxes[:len(frame_faces)]
+            # Update tracker with this frame's detections. Duplicate detector
+            # hits should be removed by actual box overlap, not by X-position
+            # alone; front/back speakers can share almost the same X position.
+            frame_bboxes = self._filter_overlapping_bboxes(frame_bboxes, width, height)
+            frame_faces = [bbox.center_x for bbox in frame_bboxes]
 
             tracked = self._tracker.update(frame_bboxes, frame_idx)
 
             per_frame_faces.append(frame_faces)
             per_frame_tracked.append(tracked)
+            frame_face_counts.append(len(frame_bboxes))
             sample_frame_indices.append(frame_idx)
             sample_timestamps.append(frame_idx / fps)
 
         cap.release()
 
-        position_model = self._build_position_model(per_frame_tracked, width)
+        position_model = self._build_position_model(per_frame_tracked, width, height)
         person_count = position_model["person_count"]
         stable_positions = position_model["stable_positions"]
+        stable_position_profiles = position_model["stable_position_profiles"]
         position_targets = position_model["position_targets"]
+        position_target_profiles = position_model["position_target_profiles"]
         track_to_position = position_model["track_to_position"]
+        max_faces_in_frame = max(frame_face_counts) if frame_face_counts else 0
+        median_faces_in_frame = float(np.median(frame_face_counts)) if frame_face_counts else 0.0
+        frames_with_faces = sum(1 for count in frame_face_counts if count > 0)
+
+        logger.info(
+            "podcast_reframe: face scan "
+            f"samples={len(frame_face_counts)}, "
+            f"frames_with_faces={frames_with_faces}/{len(frame_face_counts)}, "
+            f"faces_per_frame=min/median/max="
+            f"{(min(frame_face_counts) if frame_face_counts else 0)}/"
+            f"{median_faces_in_frame:.1f}/{max_faces_in_frame}"
+        )
 
         logger.info(
             f"podcast_reframe: tracked {len(stable_positions)} unique tracks, "
             f"person_count={person_count}, "
-            f"tracks={{{', '.join(f'T{k}:{v:.0f}' for k, v in stable_positions.items())}}}, "
-            f"positions={{{', '.join(f'P{k}:{v:.0f}' for k, v in position_targets.items())}}}"
+            f"tracks={{{', '.join(self._format_profile_log(f'T{k}', stable_position_profiles.get(k, {'x': v})) for k, v in stable_positions.items())}}}, "
+            f"positions={{{', '.join(self._format_profile_log(f'P{k}', position_target_profiles.get(k, {'x': v})) for k, v in position_targets.items())}}}"
         )
 
         return {
             "per_frame_faces": per_frame_faces,
             "per_frame_tracked": per_frame_tracked,
+            "frame_face_counts": frame_face_counts,
+            "max_faces_in_frame": max_faces_in_frame,
+            "median_faces_in_frame": median_faces_in_frame,
             "sample_frame_indices": sample_frame_indices,
             "sample_timestamps": sample_timestamps,
             "person_count": person_count,
             "stable_positions": stable_positions,
+            "stable_position_profiles": stable_position_profiles,
             "position_targets": position_targets,
+            "position_target_profiles": position_target_profiles,
             "track_to_position": track_to_position,
         }
 
@@ -502,68 +641,102 @@ class PodcastReframeEngine(IReframeEngine):
         self,
         per_frame_tracked: List[List[TrackedDetection]],
         width: int,
+        height: int,
     ) -> dict:
         """Build stable person positions from all sampled tracker output.
 
         The tracker may prune a track if a face disappears near the end of a
         clip. This model keeps historical observations and clusters re-created
-        tracks that land in the same seat, producing stable positional IDs for
-        speaker detection and centering.
+        tracks that land in the same seat. It uses X, Y, and face size so
+        front/back panelists with similar horizontal positions remain distinct.
         """
-        track_positions: Dict[int, List[float]] = defaultdict(list)
+        track_profiles: Dict[int, Dict[str, List[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
 
         for frame_tracked in per_frame_tracked:
             for detection in frame_tracked:
-                track_positions[detection.track_id].append(detection.bbox.center_x)
+                profile = track_profiles[detection.track_id]
+                profile["x"].append(detection.bbox.center_x)
+                profile["y"].append(detection.bbox.center_y)
+                profile["width"].append(detection.bbox.width)
+                profile["height"].append(detection.bbox.height)
+                profile["area"].append(detection.bbox.area)
 
-        if not track_positions:
+        if not track_profiles:
             return {
                 "person_count": 0,
                 "stable_positions": {},
+                "stable_position_profiles": {},
                 "position_targets": {},
+                "position_target_profiles": {},
                 "track_to_position": {},
             }
 
         min_hits = 2 if len(per_frame_tracked) >= 6 else 1
         filtered = {
-            track_id: xs
-            for track_id, xs in track_positions.items()
-            if len(xs) >= min_hits
+            track_id: values
+            for track_id, values in track_profiles.items()
+            if len(values.get("x", [])) >= min_hits
         }
         if not filtered:
-            filtered = dict(track_positions)
+            filtered = dict(track_profiles)
 
+        stable_position_profiles = {
+            track_id: self._median_profile(values)
+            for track_id, values in filtered.items()
+        }
         stable_positions = {
-            track_id: float(np.median(xs))
-            for track_id, xs in filtered.items()
+            track_id: profile["x"]
+            for track_id, profile in stable_position_profiles.items()
         }
 
         clusters: List[dict] = []
-        cluster_threshold = max(width * self.MIN_FACE_DISTANCE_RATIO, 80.0)
+        cluster_threshold = 0.11
 
-        for track_id, median_x in sorted(stable_positions.items(), key=lambda kv: kv[1]):
-            if clusters and abs(median_x - clusters[-1]["center"]) <= cluster_threshold:
-                clusters[-1]["track_ids"].append(track_id)
-                clusters[-1]["positions"].extend(filtered[track_id])
-                clusters[-1]["center"] = float(np.median(clusters[-1]["positions"]))
+        for track_id, profile in sorted(
+            stable_position_profiles.items(),
+            key=lambda kv: (kv[1]["x"], kv[1]["y"]),
+        ):
+            best_cluster_idx: Optional[int] = None
+            best_distance = float("inf")
+            for idx, cluster in enumerate(clusters):
+                distance = self._profile_distance(
+                    profile, cluster["profile"], width, height
+                )
+                if distance < best_distance:
+                    best_distance = distance
+                    best_cluster_idx = idx
+
+            if best_cluster_idx is not None and best_distance <= cluster_threshold:
+                cluster = clusters[best_cluster_idx]
+                cluster["track_ids"].append(track_id)
+                cluster["profiles"].append(profile)
+                cluster["profile"] = self._merge_profiles(cluster["profiles"])
             else:
                 clusters.append({
                     "track_ids": [track_id],
-                    "positions": list(filtered[track_id]),
-                    "center": median_x,
+                    "profiles": [profile],
+                    "profile": dict(profile),
                 })
 
         position_targets: Dict[int, float] = {}
+        position_target_profiles: Dict[int, Dict[str, float]] = {}
         track_to_position: Dict[int, int] = {}
-        for position_id, cluster in enumerate(clusters):
-            position_targets[position_id] = float(np.median(cluster["positions"]))
+        for position_id, cluster in enumerate(
+            sorted(clusters, key=lambda cluster: (cluster["profile"]["x"], cluster["profile"]["y"]))
+        ):
+            position_target_profiles[position_id] = cluster["profile"]
+            position_targets[position_id] = cluster["profile"]["x"]
             for track_id in cluster["track_ids"]:
                 track_to_position[track_id] = position_id
 
         return {
             "person_count": len(position_targets),
             "stable_positions": stable_positions,
+            "stable_position_profiles": stable_position_profiles,
             "position_targets": position_targets,
+            "position_target_profiles": position_target_profiles,
             "track_to_position": track_to_position,
         }
 
@@ -580,7 +753,7 @@ class PodcastReframeEngine(IReframeEngine):
 
         Priority:
           1. If speaker detected and one person dominates (≥75%) → single crop on them
-          2. If 2 speakers balanced + autogrid → speaker_emphasis grid (60/40)
+          2. If no speaker target is available → fallback to visual face clusters
           3. Fallback to legacy logic (X-position based)
         """
         per_frame_faces = tracked_data["per_frame_faces"]
@@ -593,7 +766,7 @@ class PodcastReframeEngine(IReframeEngine):
             return {"layout": "single", "crop_x": width // 2, "person_count": 0}
 
         # ─── Speaker-aware path ───────────────────────────────────────────
-        if speaker_result and person_count >= 2 and (position_targets or stable_positions):
+        if speaker_result and person_count > 1 and (position_targets or stable_positions):
             dominant_id = speaker_result.dominant_speaker_id
             dominant_ratio = speaker_result.dominant_ratio
             sorted_positions = sorted(
@@ -642,7 +815,34 @@ class PodcastReframeEngine(IReframeEngine):
                             "method_detail": "dominant_speaker_single",
                         }
 
-            # Case 2: Balanced speakers → 60/40 emphasis grid
+            # Dynamic panning should handle speaker changes. If it fails and we
+            # still have speaker data, use the latest active speaker as a static
+            # fallback instead of assuming a two-person layout.
+            latest_speaker_id: Optional[int] = None
+            if speaker_result.per_frame_speaker:
+                latest_frame = max(speaker_result.per_frame_speaker)
+                latest_speaker_id = speaker_result.per_frame_speaker[latest_frame]
+            static_speaker_id = (
+                latest_speaker_id
+                if latest_speaker_id is not None
+                else dominant_id
+            )
+            static_speaker_x = position_to_x.get(static_speaker_id)
+            if static_speaker_x is not None:
+                logger.info(
+                    "podcast_reframe: STATIC SPEAKER FALLBACK "
+                    f"(speaker=P{static_speaker_id}, x={static_speaker_x:.0f}, "
+                    f"dominance={dominant_ratio:.0%})"
+                )
+                return {
+                    "layout": "single",
+                    "crop_x": int(static_speaker_x),
+                    "person_count": person_count,
+                    "method_detail": "speaker_static_single",
+                }
+
+            # Legacy visual grid fallback. Normally dynamic panning handles
+            # speaker switching before this path is reached.
             if autogrid and len(sorted_positions) >= 2:
                 left_position_id, left_x = sorted_positions[0]
                 right_position_id, right_x = sorted_positions[1]
@@ -718,11 +918,11 @@ class PodcastReframeEngine(IReframeEngine):
             right_x = int(np.median(right_positions))
             return {"layout": "double", "left_x": left_x, "right_x": right_x, "person_count": person_count}
 
-        # ─── FORCED GRID: 2 people detected but never in same frame ──────
-        # When coexist=0% but person_count>=2, faces alternate frames.
+        # ─── FORCED GRID: multiple people detected but never in same frame ─
+        # When coexist=0% but multiple people are detected, faces alternate frames.
         # Instead of single crop (which lands on empty middle), force grid
         # using left/right cluster positions from per-frame detections.
-        if person_count >= 2 and autogrid and len(all_x) > 5:
+        if person_count > 1 and autogrid and len(all_x) > 5:
             midpoint = width / 2.0
             left_cluster = [x for x in all_x if x < midpoint]
             right_cluster = [x for x in all_x if x >= midpoint]
@@ -735,14 +935,14 @@ class PodcastReframeEngine(IReframeEngine):
 
                 if separation >= width * self.MIN_SEPARATION_RATIO:
                     logger.info(
-                        f"podcast_reframe: FORCED GRID (coexist={coexist_ratio:.0%} but 2 clusters found, "
+                        f"podcast_reframe: FORCED GRID (coexist={coexist_ratio:.0%} but visual clusters found, "
                         f"L={left_x} [{len(left_cluster)} dets], R={right_x} [{len(right_cluster)} dets])"
                     )
                     return {"layout": "double", "left_x": left_x, "right_x": right_x, "person_count": person_count}
 
         # ─── True single person fallback ──────────────────────────────────
         # Only reach here if genuinely 1 person or clusters too close
-        if person_count >= 2 and len(all_x) > 5:
+        if person_count > 1 and len(all_x) > 5:
             # Still avoid empty middle: pick dominant cluster
             midpoint = width / 2.0
             left_cluster = [x for x in all_x if x < midpoint]
@@ -765,6 +965,7 @@ class PodcastReframeEngine(IReframeEngine):
     PAN_MAX_KEYFRAMES = 25     # Increased for denser sampling (more movement allowed)
     PAN_TRANSITION_SEC = 0.4       # Smooth transition seconds (lerp between positions)
     SPEAKER_TARGET_MISMATCH_RATIO = 0.18  # Keep known speaker seat if one visible face is far away.
+    SPEAKER_TARGET_PROFILE_MISMATCH = 0.18  # Normalized X/Y/size mismatch limit for 2D seat matching.
 
     def _choose_panning_target_x(
         self,
@@ -773,13 +974,16 @@ class PodcastReframeEngine(IReframeEngine):
         speaker_result: Optional[ActiveSpeakerResult],
         frame_idx_approx: int,
         position_targets: Dict[int, float],
+        position_target_profiles: Dict[int, Dict[str, float]],
         track_to_position: Dict[int, int],
         frame_width: int,
+        frame_height: int,
         last_center: Optional[float] = None,
-    ) -> Tuple[Optional[int], Optional[TrackedDetection]]:
+    ) -> Tuple[Optional[int], Optional[TrackedDetection], Optional[int], str]:
         """Pick the crop center, preferring the active speaker's stable seat."""
         active_speaker: Optional[int] = None
         target_x_hint: Optional[float] = None
+        target_profile: Optional[Dict[str, float]] = None
 
         if speaker_result and speaker_result.per_frame_speaker:
             closest_frame = min(
@@ -790,6 +994,9 @@ class PodcastReframeEngine(IReframeEngine):
             if closest_frame is not None:
                 active_speaker = speaker_result.per_frame_speaker[closest_frame]
                 target_x_hint = position_targets.get(active_speaker)
+                target_profile = position_target_profiles.get(active_speaker)
+                if target_x_hint is None and target_profile:
+                    target_x_hint = target_profile.get("x")
 
         if active_speaker is not None:
             matching_detections = [
@@ -804,11 +1011,34 @@ class PodcastReframeEngine(IReframeEngine):
                         - (target_x_hint if target_x_hint is not None else d.bbox.center_x)
                     ),
                 )
-                return int(target_detection.bbox.center_x), target_detection
+                return int(target_detection.bbox.center_x), target_detection, active_speaker, "track"
+
+            if target_profile and frame_tracked:
+                target_detection = min(
+                    frame_tracked,
+                    key=lambda d: self._bbox_profile_distance(
+                        d.bbox, target_profile, frame_width, frame_height
+                    ),
+                )
+                profile_distance = self._bbox_profile_distance(
+                    target_detection.bbox, target_profile, frame_width, frame_height
+                )
+                if profile_distance <= self.SPEAKER_TARGET_PROFILE_MISMATCH:
+                    return int(target_detection.bbox.center_x), target_detection, active_speaker, "profile"
+
+                if target_x_hint is not None:
+                    logger.debug(
+                        "podcast_reframe: visible faces do not match active speaker "
+                        "profile P%s (distance=%.3f); holding target seat x=%.1f",
+                        active_speaker,
+                        profile_distance,
+                        target_x_hint,
+                    )
+                    return int(target_x_hint), None, active_speaker, "profile_hold"
 
             if target_x_hint is not None:
                 if not frame_faces:
-                    return int(target_x_hint), None
+                    return int(target_x_hint), None, active_speaker, "seat_hold"
 
                 nearest_face = float(min(frame_faces, key=lambda x: abs(x - target_x_hint)))
                 mismatch_threshold = frame_width * self.SPEAKER_TARGET_MISMATCH_RATIO
@@ -820,22 +1050,22 @@ class PodcastReframeEngine(IReframeEngine):
                         nearest_face,
                         target_x_hint,
                     )
-                    return int(target_x_hint), None
+                    return int(target_x_hint), None, active_speaker, "seat_hold"
 
-                return int(nearest_face), None
+                return int(nearest_face), None, active_speaker, "nearest_x"
 
             if frame_faces:
                 sorted_faces = sorted(frame_faces)
                 if 0 <= active_speaker < len(sorted_faces):
-                    return int(sorted_faces[active_speaker]), None
+                    return int(sorted_faces[active_speaker]), None, active_speaker, "visible_index"
 
         if not frame_faces:
-            return None, None
+            return None, None, active_speaker, "no_face"
 
         if last_center is not None:
-            return int(min(frame_faces, key=lambda x: abs(x - last_center))), None
+            return int(min(frame_faces, key=lambda x: abs(x - last_center))), None, None, "last_center"
 
-        return int(np.median(frame_faces)), None
+        return int(np.median(frame_faces)), None, None, "median_face"
 
     def _render_dynamic_panning(
         self,
@@ -867,7 +1097,8 @@ class PodcastReframeEngine(IReframeEngine):
 
         # 1. Build target crop X per second
         # For each sample, determine where crop should be centered
-        keyframes: List[Tuple[float, int]] = []  # (time_sec, target_crop_x)
+        keyframes: List[Tuple[float, int, Optional[int], str]] = []
+        # (time_sec, target_crop_x, active_position_id, target_source)
         per_frame_tracked = tracked_data.get("per_frame_tracked", [])
         sample_frame_indices = tracked_data.get("sample_frame_indices", [])
         sample_timestamps = tracked_data.get("sample_timestamps", [])
@@ -875,6 +1106,9 @@ class PodcastReframeEngine(IReframeEngine):
             int(k): float(v)
             for k, v in (tracked_data.get("position_targets") or {}).items()
         }
+        position_target_profiles = self._normalise_position_profiles(
+            tracked_data.get("position_target_profiles") or {}
+        )
         track_to_position = {
             int(k): int(v)
             for k, v in (tracked_data.get("track_to_position") or {}).items()
@@ -890,21 +1124,23 @@ class PodcastReframeEngine(IReframeEngine):
             frame_tracked = per_frame_tracked[i] if i < len(per_frame_tracked) else []
             last_center = keyframes[-1][1] + crop_w / 2 if keyframes else None
 
-            cx, target_detection = self._choose_panning_target_x(
+            cx, target_detection, active_position_id, target_source = self._choose_panning_target_x(
                 frame_faces=frame_faces,
                 frame_tracked=frame_tracked,
                 speaker_result=speaker_result,
                 frame_idx_approx=frame_idx_approx,
                 position_targets=position_targets,
+                position_target_profiles=position_target_profiles,
                 track_to_position=track_to_position,
                 frame_width=width,
+                frame_height=height,
                 last_center=last_center,
             )
 
             if cx is None:
                 # No reliable face or speaker target → hold previous position
                 if keyframes:
-                    keyframes.append((t, keyframes[-1][1]))
+                    keyframes.append((t, keyframes[-1][1], keyframes[-1][2], "hold"))
                 continue
 
             # BBOX-AWARE CENTERING: ensure face + margin fits in crop window
@@ -934,14 +1170,14 @@ class PodcastReframeEngine(IReframeEngine):
                 # Standard centering: place face center in middle of crop
                 crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
 
-            keyframes.append((t, crop_x))
+            keyframes.append((t, crop_x, active_position_id, target_source))
 
         if not keyframes:
             return None
 
         # Stabilize with cluster lock + dead zone + hold minimum
         # 1. Cluster lock: if all positions within PAN_CLUSTER_THRESHOLD → lock camera
-        all_kf_x = [x for _, x in keyframes]
+        all_kf_x = [x for _, x, _, _ in keyframes]
         x_spread = max(all_kf_x) - min(all_kf_x) if all_kf_x else 0
 
         if x_spread < self.PAN_CLUSTER_THRESHOLD:
@@ -951,17 +1187,26 @@ class PodcastReframeEngine(IReframeEngine):
                 f"podcast_reframe: CLUSTER LOCK (spread={x_spread}px < {self.PAN_CLUSTER_THRESHOLD}px) "
                 f"→ locked at x={home_x}"
             )
-            stabilized = [(0.0, home_x)]
+            first_speaker = keyframes[0][2] if keyframes else None
+            stabilized = [(0.0, home_x, first_speaker, "cluster_lock")]
         else:
             # 2. Dead zone + hold minimum
-            stabilized: List[Tuple[float, int]] = [keyframes[0]]
-            for t, x in keyframes[1:]:
-                last_t, last_x = stabilized[-1]
+            stabilized: List[Tuple[float, int, Optional[int], str]] = [keyframes[0]]
+            for t, x, speaker_id, source in keyframes[1:]:
+                last_t, last_x, last_speaker_id, _ = stabilized[-1]
                 movement = abs(x - last_x)
                 time_since_last = t - last_t
 
-                if movement >= self.PAN_DEAD_ZONE_PX and time_since_last >= self.PAN_HOLD_MIN_SEC:
-                    stabilized.append((t, x))
+                speaker_changed = (
+                    speaker_id is not None
+                    and last_speaker_id is not None
+                    and speaker_id != last_speaker_id
+                )
+                if (
+                    movement >= self.PAN_DEAD_ZONE_PX
+                    and (time_since_last >= self.PAN_HOLD_MIN_SEC or speaker_changed)
+                ):
+                    stabilized.append((t, x, speaker_id, source))
 
             # Ensure last position captured
             if stabilized[-1][0] < keyframes[-1][0]:
@@ -984,11 +1229,22 @@ class PodcastReframeEngine(IReframeEngine):
         # 2. Build FFmpeg crop X expression
         if len(stabilized) <= 1 or all(s[1] == stabilized[0][1] for s in stabilized):
             crop_x_expr = str(stabilized[0][1])
-            logger.info(f"podcast_reframe: static crop at x={stabilized[0][1]}")
+            logger.info(
+                "podcast_reframe: static crop at "
+                f"x={stabilized[0][1]}, "
+                f"speaker={self._format_position_id(stabilized[0][2])}, "
+                f"source={stabilized[0][3]}"
+            )
         else:
-            crop_x_expr = self._build_panning_expression(stabilized, 0)
-            for i, (t, x) in enumerate(stabilized):
-                logger.info(f"  pan[{i}] t={t:.1f}s → x={x}")
+            crop_x_expr = self._build_panning_expression(
+                [(t, x) for t, x, _, _ in stabilized],
+                0,
+            )
+            for i, (t, x, speaker_id, source) in enumerate(stabilized):
+                logger.info(
+                    f"  pan[{i}] t={t:.1f}s → x={x}, "
+                    f"speaker={self._format_position_id(speaker_id)}, source={source}"
+                )
 
         # 3. Render with single FFmpeg command
         vf = (
@@ -1131,7 +1387,7 @@ class PodcastReframeEngine(IReframeEngine):
 
         Per panel: crop (height*9/32) wide x (height/2) tall? No...
 
-        SIMPLEST CORRECT approach for podcast (2 people side-by-side):
+        SIMPLEST CORRECT approach for side-by-side podcast framing:
           - Each panel shows one person from full-height source
           - crop_w per panel = some width centered on face
           - crop_h per panel = full height
@@ -1290,6 +1546,147 @@ class PodcastReframeEngine(IReframeEngine):
     # ─── Utilities ────────────────────────────────────────────────────────
 
     MIN_FACE_DISTANCE_RATIO = 0.10  # Minimum 10% frame width between 2 faces to be different people
+
+    def _filter_overlapping_bboxes(
+        self,
+        bboxes: List[BBox],
+        width: int,
+        height: int,
+    ) -> List[BBox]:
+        """Remove duplicate face detections using 2D overlap.
+
+        X-only filtering breaks four-person panels where front/back speakers
+        share a similar horizontal position. This keeps boxes unless they are
+        genuinely overlapping or nearly identical in X/Y/size.
+        """
+        if len(bboxes) < 2:
+            return bboxes
+
+        selected: List[BBox] = []
+        center_x_threshold = width * 0.04
+        center_y_threshold = height * 0.06
+
+        for bbox in sorted(bboxes, key=lambda b: b.area, reverse=True):
+            is_duplicate = False
+            for existing in selected:
+                iou = SimpleIoUTracker._compute_iou(bbox, existing)
+                area_ratio = min(bbox.area, existing.area) / max(bbox.area, existing.area, 1.0)
+                center_close = (
+                    abs(bbox.center_x - existing.center_x) <= center_x_threshold
+                    and abs(bbox.center_y - existing.center_y) <= center_y_threshold
+                )
+                if iou >= 0.35 or (center_close and area_ratio >= 0.45):
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                selected.append(bbox)
+
+        return sorted(selected, key=lambda b: (b.center_x, b.center_y))
+
+    @staticmethod
+    def _median_profile(values: Dict[str, List[float]]) -> Dict[str, float]:
+        """Return a median face profile for one tracker ID."""
+        return {
+            "x": float(np.median(values.get("x") or [0.0])),
+            "y": float(np.median(values.get("y") or [0.0])),
+            "width": float(np.median(values.get("width") or [0.0])),
+            "height": float(np.median(values.get("height") or [0.0])),
+            "area": float(np.median(values.get("area") or [0.0])),
+        }
+
+    @staticmethod
+    def _merge_profiles(profiles: List[Dict[str, float]]) -> Dict[str, float]:
+        """Merge multiple track profiles that represent the same seat/person."""
+        return {
+            "x": float(np.median([p.get("x", 0.0) for p in profiles])),
+            "y": float(np.median([p.get("y", 0.0) for p in profiles])),
+            "width": float(np.median([p.get("width", 0.0) for p in profiles])),
+            "height": float(np.median([p.get("height", 0.0) for p in profiles])),
+            "area": float(np.median([p.get("area", 0.0) for p in profiles])),
+        }
+
+    @staticmethod
+    def _profile_distance(
+        a: Dict[str, float],
+        b: Dict[str, float],
+        width: int,
+        height: int,
+    ) -> float:
+        """Weighted normalized distance between two stable face profiles."""
+        frame_w = max(float(width), 1.0)
+        frame_h = max(float(height), 1.0)
+        frame_diag = max((frame_w * frame_w + frame_h * frame_h) ** 0.5, 1.0)
+        size_a = max(a.get("area", 0.0), 0.0) ** 0.5
+        size_b = max(b.get("area", 0.0), 0.0) ** 0.5
+        dx = abs(a.get("x", 0.0) - b.get("x", 0.0)) / frame_w
+        dy = (
+            abs(a["y"] - b["y"]) / frame_h
+            if "y" in a and "y" in b
+            else 0.0
+        )
+        ds = (
+            abs(size_a - size_b) / frame_diag
+            if "area" in a and "area" in b
+            else 0.0
+        )
+        return dx + dy * 0.85 + ds * 0.90
+
+    def _bbox_profile_distance(
+        self,
+        bbox: BBox,
+        profile: Dict[str, float],
+        width: int,
+        height: int,
+    ) -> float:
+        """Distance between a live detection box and a stable speaker profile."""
+        return self._profile_distance(
+            {
+                "x": bbox.center_x,
+                "y": bbox.center_y,
+                "width": bbox.width,
+                "height": bbox.height,
+                "area": bbox.area,
+            },
+            profile,
+            width,
+            height,
+        )
+
+    @staticmethod
+    def _normalise_position_profiles(
+        profiles: Dict[int, Dict[str, float]]
+    ) -> Dict[int, Dict[str, float]]:
+        """Coerce serialized profile keys/values back to numeric form."""
+        cleaned: Dict[int, Dict[str, float]] = {}
+        for key, profile in profiles.items():
+            if not isinstance(profile, dict):
+                continue
+            try:
+                position_id = int(key)
+                cleaned[position_id] = {
+                    field: float(profile[field])
+                    for field in ("x", "y", "width", "height", "area")
+                    if field in profile
+                }
+            except (TypeError, ValueError):
+                continue
+        return cleaned
+
+    @staticmethod
+    def _format_profile_log(label: str, profile: Dict[str, float]) -> str:
+        """Compact log format for 2D face-position debugging."""
+        x = float(profile.get("x", 0.0))
+        y = float(profile.get("y", 0.0))
+        w = float(profile.get("width", 0.0))
+        h = float(profile.get("height", 0.0))
+        if w and h:
+            return f"{label}:({x:.0f},{y:.0f},{w:.0f}x{h:.0f})"
+        return f"{label}:{x:.0f}"
+
+    @staticmethod
+    def _format_position_id(position_id: Optional[int]) -> str:
+        """Log-friendly active speaker/position label."""
+        return f"P{position_id}" if position_id is not None else "auto"
 
     def _filter_overlapping_faces(self, faces: List[float], width: int) -> List[float]:
         """Remove overlapping face detections (NMS for X positions).

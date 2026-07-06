@@ -104,14 +104,15 @@ class Settings(BaseSettings):
     DIARIZATION_ENABLED: bool = True
     DIARIZATION_MODEL: str = "pyannote/speaker-diarization-3.1"
     DIARIZATION_TIMEOUT_SEC: int = 60
-    DIARIZATION_MIN_SPEAKERS: int = 2
-    DIARIZATION_MAX_SPEAKERS: int = 4
+    DIARIZATION_MIN_SPEAKERS: int = 0  # 0 = auto
+    DIARIZATION_MAX_SPEAKERS: int = 0  # 0 = auto/dynamic from visible people
     DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD: float = 0.5
 
     # === Centering / Panning Tuning ===
     CENTERING_TRANSITION_SEC: float = 0.4       # Smooth transition duration when switching speakers
     CENTERING_FACE_MARGIN_RATIO: float = 0.6    # Extra margin around face bbox (0.6 = 60% of face width)
     MAPPING_MARGIN_THRESHOLD: float = 0.3       # Min margin between top1 and top2 for reliable mapping
+    CENTERING_MAX_FACES: int = 12               # Detector capacity only; actual people count is auto-detected
 
     # === Hook Rendering ===
     HOOK_DEFAULT_STYLE: str = "zoom_punch"  # animation preset name

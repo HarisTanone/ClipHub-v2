@@ -15,15 +15,21 @@ from src.infrastructure.speaker_diarizer import DiarizationSegment
 from src.infrastructure.speaker_face_mapper import SpeakerFaceMapper
 
 
-def _speech_frame(face_id: int, x: float, lip: float = 0.05, head: float = 0.0):
+def _speech_frame(
+    face_id: int,
+    x: float,
+    lip: float = 0.05,
+    head: float = 0.0,
+    y: float = 400,
+):
     return FaceSpeechFrame(
         face_id=face_id,
         lip_aperture=lip,
         head_motion=head,
         bbox_x=x,
-        bbox_y=400,
+        bbox_y=y,
         nose_x=x,
-        nose_y=400,
+        nose_y=y,
     )
 
 
@@ -59,6 +65,34 @@ def test_head_motion_is_keyed_after_stable_id_assignment():
     assert second_frame_by_id[1].head_motion == 0.5
 
 
+def test_face_mesh_assignment_uses_2d_profiles_for_front_back_panelists():
+    detector = ActiveSpeakerDetector()
+    frame_data = [
+        (
+            0,
+            [
+                _speech_frame(0, 620, y=690),
+                _speech_frame(1, 625, y=350),
+            ],
+        )
+    ]
+
+    assigned = detector._assign_consistent_ids(
+        frame_data,
+        frame_width=1920,
+        frame_height=1080,
+        position_targets={0: 620, 1: 625},
+        position_target_profiles={
+            0: {"x": 620, "y": 350, "width": 120, "height": 140, "area": 16800},
+            1: {"x": 625, "y": 690, "width": 180, "height": 220, "area": 39600},
+        },
+    )
+
+    by_y = {int(face.bbox_y): face.face_id for face in assigned[0][1]}
+    assert by_y[350] == 0
+    assert by_y[690] == 1
+
+
 def test_lip_motion_beats_listener_head_motion():
     detector = ActiveSpeakerDetector()
     frame_data = [
@@ -90,12 +124,35 @@ def test_position_model_clusters_recreated_tracks_by_seat():
         ],
     ]
 
-    model = engine._build_position_model(tracked, width=1920)
+    model = engine._build_position_model(tracked, width=1920, height=1080)
 
     assert model["person_count"] == 2
     assert model["track_to_position"][0] == 0
     assert model["track_to_position"][2] == 0
     assert model["track_to_position"][1] == 1
+
+
+def test_position_model_keeps_front_back_people_with_similar_x_separate():
+    engine = PodcastReframeEngine()
+    tracked = [
+        [
+            TrackedDetection(0, BBox(560, 250, 680, 390), 0),
+            TrackedDetection(1, BBox(535, 620, 715, 840), 0),
+            TrackedDetection(2, BBox(1240, 250, 1360, 390), 0),
+            TrackedDetection(3, BBox(1215, 620, 1395, 840), 0),
+        ],
+        [
+            TrackedDetection(0, BBox(565, 252, 685, 392), 30),
+            TrackedDetection(1, BBox(540, 622, 720, 842), 30),
+            TrackedDetection(2, BBox(1245, 252, 1365, 392), 30),
+            TrackedDetection(3, BBox(1220, 622, 1400, 842), 30),
+        ],
+    ]
+
+    model = engine._build_position_model(tracked, width=1920, height=1080)
+
+    assert model["person_count"] == 4
+    assert len(set(model["track_to_position"].values())) == 4
 
 
 def test_panning_holds_active_speaker_seat_when_only_listener_is_visible():
@@ -108,18 +165,59 @@ def test_panning_holds_active_speaker_seat_when_only_listener_is_visible():
         total_speakers=2,
     )
 
-    cx, target_detection = engine._choose_panning_target_x(
+    cx, target_detection, active_position_id, target_source = engine._choose_panning_target_x(
         frame_faces=[1480],
         frame_tracked=[TrackedDetection(7, BBox(1430, 100, 1530, 240), 30)],
         speaker_result=speaker_result,
         frame_idx_approx=30,
         position_targets={0: 520, 1: 1480},
+        position_target_profiles={},
         track_to_position={7: 1},
         frame_width=1920,
+        frame_height=1080,
     )
 
     assert cx == 520
     assert target_detection is None
+    assert active_position_id == 0
+    assert target_source == "seat_hold"
+
+
+def test_panning_holds_profile_when_visible_face_is_not_active_speaker():
+    engine = PodcastReframeEngine()
+    speaker_result = ActiveSpeakerResult(
+        segments=[],
+        dominant_speaker_id=0,
+        dominant_ratio=1.0,
+        per_frame_speaker={30: 0},
+        total_speakers=2,
+    )
+
+    cx, target_detection, active_position_id, target_source = engine._choose_panning_target_x(
+        frame_faces=[625],
+        frame_tracked=[TrackedDetection(8, BBox(535, 620, 715, 840), 30)],
+        speaker_result=speaker_result,
+        frame_idx_approx=30,
+        position_targets={0: 620, 1: 625},
+        position_target_profiles={
+            0: {"x": 620, "y": 350, "width": 120, "height": 140, "area": 16800},
+            1: {"x": 625, "y": 690, "width": 180, "height": 220, "area": 39600},
+        },
+        track_to_position={8: 1},
+        frame_width=1920,
+        frame_height=1080,
+    )
+
+    assert cx == 620
+    assert target_detection is None
+    assert active_position_id == 0
+    assert target_source == "profile_hold"
+
+
+def test_active_speaker_detector_uses_configurable_face_capacity():
+    detector = ActiveSpeakerDetector(max_faces=9)
+
+    assert detector._max_faces == 9
 
 
 def test_ambiguous_diarization_mapping_is_not_reliable():
@@ -152,8 +250,12 @@ def test_ambiguous_diarization_mapping_is_not_reliable():
 if __name__ == "__main__":
     test_single_visible_face_uses_stable_position_target()
     test_head_motion_is_keyed_after_stable_id_assignment()
+    test_face_mesh_assignment_uses_2d_profiles_for_front_back_panelists()
     test_lip_motion_beats_listener_head_motion()
     test_position_model_clusters_recreated_tracks_by_seat()
+    test_position_model_keeps_front_back_people_with_similar_x_separate()
     test_panning_holds_active_speaker_seat_when_only_listener_is_visible()
+    test_panning_holds_profile_when_visible_face_is_not_active_speaker()
+    test_active_speaker_detector_uses_configurable_face_capacity()
     test_ambiguous_diarization_mapping_is_not_reliable()
     print("speaker centering tests passed")

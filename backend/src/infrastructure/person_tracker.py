@@ -12,9 +12,9 @@ Algorithm:
   5. Track ID persists across entire video
 
 Optimized for podcast format:
-  - 2 people max (but supports N)
+  - Multiple stable people in the frame
   - Stable positions (IoU works well)
-  - Frontal faces (consistent bbox shape)
+  - Frontal or semi-frontal faces (consistent bbox shape)
 """
 import logging
 from dataclasses import dataclass, field
@@ -90,7 +90,7 @@ class SimpleIoUTracker:
     """IoU-based multi-object tracker. No external dependencies.
 
     Designed for:
-    - Podcast scenes (2 people, stable, frontal)
+    - Podcast scenes with multiple stable people
     - Works with face bounding boxes from MediaPipe
     - Gracefully handles temporary face occlusion
     """
