@@ -20,6 +20,7 @@ Design decisions:
 """
 import asyncio
 import gc
+import inspect
 import logging
 import os
 import tempfile
@@ -112,10 +113,19 @@ class SpeakerDiarizer:
                 f"speaker_diarizer: loading {self._model_name} on {device}"
             )
 
-            pipeline = Pipeline.from_pretrained(
-                self._model_name,
-                token=self._hf_token,
-            )
+            # Auto-detect kwarg name (compatible across pyannote versions)
+            sig = inspect.signature(Pipeline.from_pretrained)
+            if "token" in sig.parameters:
+                pipeline = Pipeline.from_pretrained(
+                    self._model_name, token=self._hf_token,
+                )
+            elif "use_auth_token" in sig.parameters:
+                pipeline = Pipeline.from_pretrained(
+                    self._model_name, use_auth_token=self._hf_token,
+                )
+            else:
+                # Last resort: try positional
+                pipeline = Pipeline.from_pretrained(self._model_name, self._hf_token)
             pipeline.to(torch.device(device))
 
             self._pipeline = pipeline

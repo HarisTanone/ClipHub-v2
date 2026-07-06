@@ -34,6 +34,7 @@ class FaceSpeechFrame:
     head_motion: float   # normalized head movement (0 = still, 1 = moving fast)
     bbox_x: float        # face center X in pixels
     bbox_y: float        # face center Y in pixels
+    yaw_deg: float = 0.0 # estimated yaw angle (0 = frontal, ±90 = profile)
 
 
 @dataclass
@@ -70,16 +71,25 @@ class ActiveSpeakerDetector:
     MOUTH_RIGHT = 78
     MOUTH_LEFT = 308
 
-    # Configuration
-    SLIDING_WINDOW_SEC = 0.5       # Window for variance calculation
-    HYSTERESIS_SEC = 0.3           # Hold speaker for this long before switching
-    MIN_LIP_VARIANCE = 0.002      # Below this → not speaking (both silent)
-    DOMINANCE_THRESHOLD = 0.75    # If one speaker talks ≥75% → single crop candidate
+    # Yaw estimation landmarks
+    NOSE_TIP = 1
+    LEFT_EYE_INNER = 33
+    RIGHT_EYE_INNER = 263
+    CHIN = 152
+    FOREHEAD = 10
 
-    # Multimodal scoring weights
-    LIP_WEIGHT = 0.40              # Lip aperture variance contribution
-    HEAD_WEIGHT = 0.60             # Head motion contribution
-    HEAD_MOTION_NORMALIZE = 20.0   # Head motion in pixels normalized to 0-1 (20px = max)
+    # Configuration
+    SLIDING_WINDOW_SEC = 0.5
+    HYSTERESIS_SEC = 0.3
+    MIN_LIP_VARIANCE = 0.002
+    MIN_LIP_AMPLITUDE = 0.03       # Minimum lip movement range to count as speech
+    DOMINANCE_THRESHOLD = 0.75
+    MAX_YAW_DEG = 40.0             # Beyond this yaw, confidence = 0
+
+    # Multimodal scoring weights — LIP is primary signal, head is secondary
+    LIP_WEIGHT = 0.70              # CHANGED from 0.40 — lip variance is most reliable speech indicator
+    HEAD_WEIGHT = 0.30             # CHANGED from 0.60 — head motion is weak proxy, easily confused
+    HEAD_MOTION_NORMALIZE = 20.0
 
     FACE_MESH_CONFIDENCE = 0.5
     MAX_FACES = 2                  # Optimize for podcast (2 people max)
@@ -240,12 +250,14 @@ class ActiveSpeakerDetector:
                             head_motion = min((dx**2 + dy**2) ** 0.5 / self.HEAD_MOTION_NORMALIZE, 1.0)
                         prev_nose[face_idx] = (cx, cy)
 
+                        yaw = self._estimate_yaw_legacy(face_landmarks)
                         faces_in_frame.append(FaceSpeechFrame(
                             face_id=face_idx,
                             lip_aperture=lip_aperture,
                             head_motion=head_motion,
                             bbox_x=cx,
                             bbox_y=cy,
+                            yaw_deg=yaw,
                         ))
             else:
                 # Task API: mp.tasks.vision.FaceLandmarker
@@ -272,6 +284,7 @@ class ActiveSpeakerDetector:
                             head_motion=head_motion,
                             bbox_x=cx,
                             bbox_y=cy,
+                            yaw_deg=self._estimate_yaw_task(landmarks),
                         ))
 
             frame_data.append((frame_idx, faces_in_frame))
@@ -365,6 +378,53 @@ class ActiveSpeakerDetector:
 
         return vertical_dist / mouth_width
 
+    def _estimate_yaw_legacy(self, face_landmarks) -> float:
+        """Estimate face yaw angle from landmark asymmetry (legacy API).
+        
+        Uses nose-to-eye distances: if nose is closer to one eye than the other,
+        face is rotated. Returns degrees (-90 to +90, 0 = frontal).
+        """
+        landmarks = face_landmarks.landmark
+        nose = landmarks[self.NOSE_TIP]
+        left_eye = landmarks[self.LEFT_EYE_INNER]
+        right_eye = landmarks[self.RIGHT_EYE_INNER]
+
+        d_left = abs(nose.x - left_eye.x)
+        d_right = abs(nose.x - right_eye.x)
+        denom = d_left + d_right
+
+        if denom < 1e-6:
+            return 0.0
+
+        # Asymmetry ratio: 0 = frontal, ±1 = full profile
+        ratio = (d_left - d_right) / denom
+        return ratio * 90.0
+
+    def _estimate_yaw_task(self, landmarks: list) -> float:
+        """Estimate face yaw angle from landmark asymmetry (task API)."""
+        nose = landmarks[self.NOSE_TIP]
+        left_eye = landmarks[self.LEFT_EYE_INNER]
+        right_eye = landmarks[self.RIGHT_EYE_INNER]
+
+        d_left = abs(nose.x - left_eye.x)
+        d_right = abs(nose.x - right_eye.x)
+        denom = d_left + d_right
+
+        if denom < 1e-6:
+            return 0.0
+
+        ratio = (d_left - d_right) / denom
+        return ratio * 90.0
+
+    def _pose_confidence(self, yaw_deg: float) -> float:
+        """Discount factor for face yaw — less reliable landmarks when turned.
+        
+        Frontal (yaw=0°) → confidence 1.0
+        Profile (yaw≥40°) → confidence 0.0
+        Linear decay between.
+        """
+        return max(0.0, 1.0 - abs(yaw_deg) / self.MAX_YAW_DEG)
+
     def _assign_consistent_ids(
         self,
         frame_data: List[Tuple[int, List[FaceSpeechFrame]]],
@@ -395,31 +455,38 @@ class ActiveSpeakerDetector:
         fps: float,
         sample_interval_sec: float,
     ) -> Dict[int, int]:
-        """Compute active speaker per frame using multimodal sliding window scoring.
+        """Compute active speaker per frame using yaw-aware multimodal scoring.
 
-        Multimodal score = lip_aperture_variance * 0.4 + head_motion_mean * 0.6
-        Head motion catches speakers whose mouth is covered but head is nodding/moving.
+        Score = (lip_variance * 0.70 + head_motion_mean * 0.30) * pose_confidence
+        
+        Key improvements over naive scoring:
+        - Lip variance is primary signal (70% weight) — most direct speech indicator
+        - Head motion is secondary (30%) — catches nodding but doesn't dominate
+        - Pose confidence discounts faces that are turned (landmark noise)
+        - Amplitude gate: lip movement must exceed MIN_LIP_AMPLITUDE to be counted
+        
+        This prevents the "listener who turns head" from being scored as speaker.
 
         Returns: Dict[frame_idx, active_speaker_face_id]
         """
         window_size = max(3, int(self.SLIDING_WINDOW_SEC / sample_interval_sec))
 
-        # Build time series per face ID
-        face_data_series: Dict[int, List[Tuple[int, float, float]]] = {}
-        # face_id → [(frame_idx, lip_aperture, head_motion)]
+        # Build time series per face ID (now includes yaw)
+        face_data_series: Dict[int, List[Tuple[int, float, float, float]]] = {}
+        # face_id → [(frame_idx, lip_aperture, head_motion, yaw_deg)]
 
         for frame_idx, faces in frame_data:
             for face in faces:
                 if face.face_id not in face_data_series:
                     face_data_series[face.face_id] = []
                 face_data_series[face.face_id].append(
-                    (frame_idx, face.lip_aperture, face.head_motion)
+                    (frame_idx, face.lip_aperture, face.head_motion, face.yaw_deg)
                 )
 
         if not face_data_series:
             return {}
 
-        # For each sample point, compute multimodal score in sliding window per face
+        # For each sample point, compute yaw-aware multimodal score
         per_frame_speaker: Dict[int, int] = {}
         all_frame_indices = [fi for fi, _ in frame_data]
 
@@ -435,23 +502,35 @@ class ActiveSpeakerDetector:
                 window_frame_end = all_frame_indices[min(win_end - 1, len(all_frame_indices) - 1)]
 
                 window_data = [
-                    (lip, head) for fi, lip, head in series
+                    (lip, head, yaw) for fi, lip, head, yaw in series
                     if window_frame_start <= fi <= window_frame_end
                 ]
 
                 if len(window_data) < 2:
                     continue
 
-                # Lip component: variance of aperture (higher variance = talking)
+                # Lip component: variance of aperture
                 lip_values = [d[0] for d in window_data]
-                lip_variance = float(np.var(lip_values))
+                lip_amplitude = max(lip_values) - min(lip_values)
+                
+                # Amplitude gate: if lips barely moved, it's not speech (noise)
+                if lip_amplitude < self.MIN_LIP_AMPLITUDE:
+                    lip_variance = 0.0
+                else:
+                    lip_variance = float(np.var(lip_values))
 
-                # Head component: mean of head motion (moving head = engaged/talking)
+                # Head component: mean of head motion
                 head_values = [d[1] for d in window_data]
                 head_mean = float(np.mean(head_values))
 
-                # Multimodal score
-                score = lip_variance * self.LIP_WEIGHT + head_mean * self.HEAD_WEIGHT
+                # Yaw component: average pose confidence in window
+                yaw_values = [d[2] for d in window_data]
+                avg_yaw = float(np.mean([abs(y) for y in yaw_values]))
+                pose_conf = self._pose_confidence(avg_yaw)
+
+                # Multimodal score WITH pose discount
+                raw_score = lip_variance * self.LIP_WEIGHT + head_mean * self.HEAD_WEIGHT
+                score = raw_score * pose_conf
 
                 if score > best_score:
                     best_score = score

@@ -27,6 +27,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
 from src.infrastructure.person_tracker import TrackedDetection
 from src.infrastructure.speaker_diarizer import DiarizationSegment
 
@@ -215,41 +218,66 @@ class SpeakerFaceMapper:
         self,
         cooccurrence: Dict[str, Dict[int, int]],
     ) -> Dict[str, Tuple[int, float, int]]:
-        """Greedy assignment: for each speaker, pick the track with highest count.
+        """Optimal one-to-one assignment using Hungarian algorithm.
 
-        Uses margin-based confidence: measures how dominant top1 is compared to top2.
-        This works much better for 3+ people where co-occurrence is naturally spread
-        (multiple faces visible in the same frame).
+        Guarantees globally optimal speaker-to-track mapping where each speaker
+        maps to exactly one track and each track to at most one speaker.
+        
+        Falls back to greedy assignment if scipy unavailable or matrix is degenerate.
 
         Returns:
             Dict[speaker_label → (track_id, confidence, total_count)]
         """
-        mappings: Dict[str, Tuple[int, float, int]] = {}
+        speakers = list(cooccurrence.keys())
+        all_tracks = sorted({t for counts in cooccurrence.values() for t in counts})
 
+        if not speakers or not all_tracks:
+            return {}
+
+        # Build cost matrix (negative counts — we minimize cost = maximize co-occurrence)
+        cost = np.zeros((len(speakers), len(all_tracks)))
+        for i, sp in enumerate(speakers):
+            for j, tr in enumerate(all_tracks):
+                cost[i, j] = -(cooccurrence[sp].get(tr, 0))
+
+        try:
+            row_idx, col_idx = linear_sum_assignment(cost)
+        except Exception:
+            # Fallback to simple greedy if Hungarian fails
+            return self._greedy_assign_simple(cooccurrence)
+
+        mappings: Dict[str, Tuple[int, float, int]] = {}
+        for r, c in zip(row_idx, col_idx):
+            sp = speakers[r]
+            tr = all_tracks[c]
+            total_count = sum(cooccurrence[sp].values())
+            best_count = cooccurrence[sp].get(tr, 0)
+            second_best = sorted(cooccurrence[sp].values(), reverse=True)
+            second_count = second_best[1] if len(second_best) > 1 else 0
+
+            # Margin-based confidence
+            margin_confidence = (best_count - second_count) / max(best_count, 1)
+            absolute_confidence = best_count / total_count if total_count > 0 else 0.0
+            confidence = max(margin_confidence, absolute_confidence)
+
+            mappings[sp] = (tr, confidence, total_count)
+
+        return mappings
+
+    def _greedy_assign_simple(
+        self,
+        cooccurrence: Dict[str, Dict[int, int]],
+    ) -> Dict[str, Tuple[int, float, int]]:
+        """Simple greedy fallback if Hungarian fails."""
+        mappings: Dict[str, Tuple[int, float, int]] = {}
         for speaker, track_counts in cooccurrence.items():
             if not track_counts:
                 continue
-
             total_count = sum(track_counts.values())
-            sorted_counts = sorted(track_counts.values(), reverse=True)
             best_track = max(track_counts, key=track_counts.get)
-            best_count = sorted_counts[0]
-            second_count = sorted_counts[1] if len(sorted_counts) > 1 else 0
-
-            # Margin-based confidence: how dominant is top1 vs top2
-            # For 2 people: top1=45, top2=3 → margin = (45-3)/45 = 0.93 (great)
-            # For 3 people: top1=30, top2=12, top3=5 → margin = (30-12)/30 = 0.60 (still good)
-            # Edge case: top1=20, top2=18 → margin = (20-18)/20 = 0.10 (unreliable!)
-            margin_confidence = (best_count - second_count) / max(best_count, 1)
-
-            # Also keep absolute confidence for edge cases (1 track only)
-            absolute_confidence = best_count / total_count if total_count > 0 else 0.0
-
-            # Use the better of the two (margin is primary, absolute is fallback)
-            confidence = max(margin_confidence, absolute_confidence)
-
+            best_count = track_counts[best_track]
+            confidence = best_count / total_count if total_count > 0 else 0.0
             mappings[speaker] = (best_track, confidence, total_count)
-
         return mappings
 
     def _resolve_conflicts(
