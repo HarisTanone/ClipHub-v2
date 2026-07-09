@@ -57,7 +57,6 @@ class NineRouterClient:
                 else temperature
             ),
             "max_tokens": max_tokens,
-            "stream": False,
         }
         if response_format:
             payload["response_format"] = response_format
@@ -94,7 +93,7 @@ class NineRouterClient:
 
     def _post_chat(self, payload: dict[str, Any]) -> str:
         url = self._chat_url()
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
@@ -158,8 +157,8 @@ class NineRouterClient:
         except (ValueError, NineRouterError):
             pass
 
-        # Some 9router combos return text/event-stream even when stream=false.
-        # Decode the chunks and concatenate assistant delta content.
+        # Some 9router combos return text/event-stream. Decode the chunks and
+        # concatenate assistant delta content.
         sse_content = self._extract_sse_content(text)
         if sse_content:
             return sse_content
@@ -170,7 +169,7 @@ class NineRouterClient:
             data, _ = json.JSONDecoder().raw_decode(text.lstrip())
             if isinstance(data, dict):
                 return self._extract_content(data)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, NineRouterError):
             pass
 
         raise NineRouterError(
