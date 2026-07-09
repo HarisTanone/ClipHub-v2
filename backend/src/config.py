@@ -11,6 +11,7 @@ PIPELINE_ENV = os.getenv("PIPELINE_ENV", "local")
 class Settings(BaseSettings):
     # Environment
     PIPELINE_ENV: str = "local"
+    CORS_ORIGINS: str = ""
 
     # === Model routing ===
     # 9router is the default LLM gateway. Direct provider fallbacks stay off in

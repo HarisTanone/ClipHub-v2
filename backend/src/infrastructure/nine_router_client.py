@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import time
 from typing import Any, Optional
 
@@ -56,6 +57,7 @@ class NineRouterClient:
                 else temperature
             ),
             "max_tokens": max_tokens,
+            "stream": False,
         }
         if response_format:
             payload["response_format"] = response_format
@@ -92,7 +94,7 @@ class NineRouterClient:
 
     def _post_chat(self, payload: dict[str, Any]) -> str:
         url = self._chat_url()
-        headers = {"Content-Type": "application/json"}
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
@@ -110,7 +112,7 @@ class NineRouterClient:
                 if response.status_code >= 400:
                     raise NineRouterError(self._safe_error(response))
 
-                return self._extract_content(response.json())
+                return self._extract_response_content(response)
 
             except httpx.TimeoutException as exc:
                 last_error = f"timeout: {exc}"
@@ -147,6 +149,77 @@ class NineRouterClient:
 
         if not content:
             raise NineRouterError("9router response kosong: content tidak ada")
+        return str(content)
+
+    def _extract_response_content(self, response: httpx.Response) -> str:
+        text = response.text
+        try:
+            return self._extract_content(response.json())
+        except (ValueError, NineRouterError):
+            pass
+
+        # Some 9router combos return text/event-stream even when stream=false.
+        # Decode the chunks and concatenate assistant delta content.
+        sse_content = self._extract_sse_content(text)
+        if sse_content:
+            return sse_content
+
+        # Be tolerant of routers that emit a JSON object followed by a trailing
+        # SSE marker such as "data: [DONE]".
+        try:
+            data, _ = json.JSONDecoder().raw_decode(text.lstrip())
+            if isinstance(data, dict):
+                return self._extract_content(data)
+        except (ValueError, TypeError):
+            pass
+
+        raise NineRouterError(
+            f"9router response tidak bisa diparse: {text[:500]}"
+        )
+
+    def _extract_sse_content(self, text: str) -> str:
+        parts: list[str] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+
+            raw_event = line[5:].strip()
+            if not raw_event or raw_event == "[DONE]":
+                continue
+
+            try:
+                event = json.loads(raw_event)
+            except ValueError:
+                continue
+
+            choices = event.get("choices") or []
+            if not choices:
+                continue
+
+            choice = choices[0]
+            delta = choice.get("delta") or {}
+            content = delta.get("content")
+            if content:
+                parts.append(self._stringify_content(content))
+                continue
+
+            message = choice.get("message") or {}
+            content = message.get("content") or choice.get("text")
+            if content:
+                parts.append(self._stringify_content(content))
+
+        return "".join(parts).strip()
+
+    def _stringify_content(self, content: Any) -> str:
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    parts.append(str(item.get("text", "")))
+                else:
+                    parts.append(str(item))
+            return "".join(parts)
         return str(content)
 
     def _safe_error(self, response: httpx.Response) -> str:

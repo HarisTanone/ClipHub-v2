@@ -87,6 +87,10 @@ logs/
 models/
 backend/models/
 
+# ─── Data Archives / Backups ──────────────────────────────────────────────────
+9router-data-*.tar.gz
+*.tar.gz
+
 # ─── Agent skills (local reference only) ─────────────────────────────────────
 .agents/
 skills-lock.json

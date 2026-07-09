@@ -47,6 +47,9 @@ PYTHON_BIN="python3"
 BACKEND_PORT=8000
 REMOTION_PORT=3002
 FRONTEND_PORT=3001
+PUBLIC_HOST="${PUBLIC_HOST:-100.64.5.96}"
+PUBLIC_FRONTEND_URL="${PUBLIC_FRONTEND_URL:-http://$PUBLIC_HOST:$FRONTEND_PORT}"
+PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-http://$PUBLIC_HOST:$BACKEND_PORT}"
 NINE_ROUTER_PORT="${NINE_ROUTER_PORT:-20128}"
 NINE_ROUTER_HOST="${NINE_ROUTER_HOST:-127.0.0.1}"
 NINE_ROUTER_CLI_VERSION="${NINE_ROUTER_CLI_VERSION:-0.5.20}"
@@ -79,6 +82,18 @@ append_env_if_missing() {
     fi
 }
 
+set_env_value() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    if grep -qE "^${key}=" "$file" 2>/dev/null; then
+        sed -i.bak -E "s|^${key}=.*|${key}=${value}|" "$file"
+        rm -f "$file.bak"
+    else
+        echo "${key}=${value}" >> "$file"
+    fi
+}
+
 echo "═══════════════════════════════════════════════════════════════"
 echo "  AutoCliper v3 — Server Deployment"
 echo "═══════════════════════════════════════════════════════════════"
@@ -87,6 +102,7 @@ echo "  Project:  $PROJECT_DIR"
 echo "  User:     $DEPLOY_USER"
 echo "  Python:   $($PYTHON_BIN --version 2>/dev/null || echo 'not found')"
 echo "  Node:     $(node --version 2>/dev/null || echo 'not found')"
+echo "  Public:   $PUBLIC_FRONTEND_URL"
 echo ""
 
 # ─── Step 1: Git Pull ───────────────────────────────────────────────────────
@@ -232,6 +248,7 @@ if [ -f ".env" ]; then
     append_env_if_missing ".env" "NINE_ROUTER_AI_LAYER_MODEL" "ngentot"
     append_env_if_missing ".env" "NINE_ROUTER_TIMEOUT" "120"
     append_env_if_missing ".env" "NINE_ROUTER_MAX_RETRIES" "3"
+    set_env_value ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000"
 
     LLM_PROVIDER_VAL="$(env_value ".env" "LLM_PROVIDER" "nine_router")"
     NINE_ROUTER_BASE_URL_VAL="$(env_value ".env" "NINE_ROUTER_BASE_URL" "")"
@@ -309,6 +326,11 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 if [ -d "$FRONTEND_DIR" ]; then
     cd "$FRONTEND_DIR"
 
+    # Previous deploys may have created dist/node_modules as root. Vite clears
+    # dist before build, so stale ownership causes EACCES on unlink.
+    echo "  Fixing frontend file ownership..."
+    sudo chown -R $DEPLOY_USER:$DEPLOY_USER "$FRONTEND_DIR"
+
     if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules/.package-lock.json" ]; then
         echo "  Installing npm dependencies..."
         npm install 2>/dev/null || npm install
@@ -317,7 +339,8 @@ if [ -d "$FRONTEND_DIR" ]; then
     fi
 
     echo "  Building production bundle..."
-    npx vite build 2>/dev/null || npx vite build
+    VITE_API_URL="$PUBLIC_BACKEND_URL" npx vite build 2>/dev/null || \
+        VITE_API_URL="$PUBLIC_BACKEND_URL" npx vite build
 
     if [ -d "dist" ] && [ -f "dist/index.html" ]; then
         echo "  ✅ Frontend built"
@@ -589,9 +612,12 @@ echo "  ✅ Deployment Complete!"
 echo ""
 echo "  Services:"
 echo "    9router:   http://127.0.0.1:$NINE_ROUTER_PORT"
-echo "    Backend:   http://192.168.168.58:$BACKEND_PORT"
-echo "    Remotion:  http://192.168.168.58:$REMOTION_PORT"
-echo "    Frontend:  http://192.168.168.58:$FRONTEND_PORT"
+echo "    Backend:   $PUBLIC_BACKEND_URL"
+echo "    Remotion:  http://$PUBLIC_HOST:$REMOTION_PORT"
+echo "    Frontend:  $PUBLIC_FRONTEND_URL"
+echo ""
+echo "  Open:"
+echo "    $PUBLIC_FRONTEND_URL"
 echo ""
 echo "  Logs:"
 echo "    sudo journalctl -u autocliper-9router -f"
