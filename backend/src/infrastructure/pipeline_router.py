@@ -22,6 +22,10 @@ class PipelineRouter:
 
         Returns True if user should use V2, False for V1.
         """
+        if settings.FORCE_V2_PIPELINE:
+            logger.info("pipeline_router: FORCE_V2_PIPELINE=true -> V2")
+            return True
+
         # Global kill switch
         if not settings.V2_PIPELINE_ENABLED:
             logger.info(f"pipeline_router: V2 disabled globally → V1")

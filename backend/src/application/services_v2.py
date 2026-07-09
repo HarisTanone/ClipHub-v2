@@ -1,19 +1,18 @@
-"""V2PipelineService — Pipeline orchestrator for non-premium users.
+"""V2PipelineService — Pipeline orchestrator for transcript-based clipping.
 
-Uses GroqTranscriber (YouTube API → Groq Whisper) + GroqAnalyzer (Dynamic Chunking)
-+ WordLevelTranscriber (Groq Whisper on trimmed clips).
-NO Gemini dependency. NO MicroSlicer, NO Silero VAD.
+Uses YouTube Transcript API/local Whisper + 9router-backed dynamic chunking
++ local word-level transcription. NO Gemini dependency. NO MicroSlicer, NO Silero VAD.
 
 Pipeline Steps (V2):
   1. Validate              — yt-dlp validate URL, extract duration
   2. Download              — Download full video
-  3. V2 Transcript         — YouTube API (primary) → Groq Whisper (fallback)
-  4. V2 Highlight Analysis — Dynamic Chunking → Groq LLM → Ollama fallback
+  3. V2 Transcript         — YouTube API (primary) → local Whisper (fallback)
+  4. V2 Highlight Analysis — Dynamic Chunking → 9router LLM
   5. Prepare Clips         — Time padding, overlap detection
   6. Aspect Ratio Router   — Set pipeline flags
   7. Trim Clips            — FFmpeg precise re-encode
   8. YOLO Seg + Reframe    — Conditional
-  9. Word-Level Transcription — Groq Whisper on trimmed clip files
+  9. Word-Level Transcription — Faster-Whisper on trimmed clip files
   10. Build Subtitle Data  — Validate & format words for rendering
   11+ Hook + Subtitle Render — Remotion only, matching preview config
 """
@@ -59,8 +58,8 @@ logger = logging.getLogger(__name__)
 class V2PipelineService:
     """V2 Pipeline orchestrator for non-premium users.
 
-    Architecture: YouTube API → Groq Whisper → Groq LLM → Trim →
-    WordLevelTranscriber (Groq Whisper on trimmed clips) → render pipeline.
+    Architecture: YouTube API/local Whisper → 9router LLM → Trim →
+    WordLevelTranscriber (local Faster-Whisper) → render pipeline.
     NO Gemini. NO MicroSlicer. NO Silero VAD.
     """
 
@@ -90,9 +89,9 @@ class V2PipelineService:
         self._whisper = whisper_local
 
         # V2 components (lazy-init in run_pipeline)
-        self._transcriber = None   # GroqTranscriber — lazy
-        self._analyzer = None      # GroqAnalyzer — lazy
-        self._word_level_transcriber = None  # WordLevelTranscriber — lazy
+        self._transcriber = None   # Transcript provider — lazy
+        self._analyzer = None      # 9router-backed analyzer — lazy
+        self._word_level_transcriber = None  # Local word-level transcriber — lazy
 
         # Shared components
         self._aspect_router = aspect_ratio_router
@@ -113,21 +112,21 @@ class V2PipelineService:
     # ─── Lazy Component Initialization ────────────────────────────────────────
 
     def _get_transcriber(self):
-        """Lazy-init GroqTranscriber (TAHAP 1)."""
+        """Lazy-init transcript provider (TAHAP 1)."""
         if self._transcriber is None:
             from src.infrastructure.groq_transcriber import GroqTranscriber
             self._transcriber = GroqTranscriber()
         return self._transcriber
 
     def _get_analyzer(self):
-        """Lazy-init GroqAnalyzer (TAHAP 2)."""
+        """Lazy-init 9router-backed analyzer (TAHAP 2)."""
         if self._analyzer is None:
             from src.infrastructure.groq_analyzer import GroqAnalyzer
             self._analyzer = GroqAnalyzer()
         return self._analyzer
 
     def _get_word_level_transcriber(self):
-        """Lazy-init WordLevelTranscriber (Groq Whisper on trimmed clips)."""
+        """Lazy-init WordLevelTranscriber (local Faster-Whisper on trimmed clips)."""
         if self._word_level_transcriber is None:
             from src.infrastructure.word_level_transcriber import WordLevelTranscriber
             self._word_level_transcriber = WordLevelTranscriber()
@@ -170,8 +169,8 @@ class V2PipelineService:
         """Execute the V2 pipeline for a job.
 
         Flow:
-        1. Validate → 2. Download → 3. YouTube/Groq Transcript →
-        4. Groq LLM Chunked Analysis → 5. Prepare Clips → 6. Route →
+        1. Validate → 2. Download → 3. YouTube/local Transcript →
+        4. 9router Chunked Analysis → 5. Prepare Clips → 6. Route →
         7. Trim → 8. YOLO → 9. Word-Level Transcription → 10. Build Subtitle →
         11+. Hook/Subtitle/Encode
         """

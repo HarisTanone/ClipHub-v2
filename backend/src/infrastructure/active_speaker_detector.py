@@ -676,6 +676,7 @@ class ActiveSpeakerDetector:
 
         # For each sample point, compute yaw-aware multimodal score
         per_frame_speaker: Dict[int, int] = {}
+        low_confidence_candidates: List[Tuple[int, int, float]] = []
         all_frame_indices = [fi for fi, _ in frame_data]
 
         for i, (frame_idx, faces) in enumerate(frame_data):
@@ -735,8 +736,31 @@ class ActiveSpeakerDetector:
                     best_face_id = face_id
 
             # Only assign if score exceeds minimum threshold
+            if best_score > 0 and best_face_id >= 0:
+                low_confidence_candidates.append((frame_idx, best_face_id, best_score))
             if best_score >= self.MIN_LIP_VARIANCE and best_face_id >= 0:
                 per_frame_speaker[frame_idx] = best_face_id
+
+        if not per_frame_speaker and low_confidence_candidates:
+            fallback_floor = self.MIN_LIP_VARIANCE * 0.10
+            fallback_candidates = [
+                (frame_idx, face_id, score)
+                for frame_idx, face_id, score in low_confidence_candidates
+                if score >= fallback_floor
+            ]
+            if fallback_candidates:
+                for frame_idx, face_id, _ in fallback_candidates:
+                    per_frame_speaker[frame_idx] = face_id
+                best_frame, best_face_id, best_score = max(
+                    fallback_candidates,
+                    key=lambda item: item[2],
+                )
+                logger.info(
+                    "active_speaker: using low-confidence visual fallback "
+                    f"(frames={len(fallback_candidates)}, best=P{best_face_id} "
+                    f"@frame={best_frame}, score={best_score:.6f}, "
+                    f"threshold={self.MIN_LIP_VARIANCE:.6f})"
+                )
 
         return per_frame_speaker
 

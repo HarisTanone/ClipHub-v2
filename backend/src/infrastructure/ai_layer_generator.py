@@ -1,6 +1,6 @@
-"""AI Layer Generator — Uses Gemini Flash to generate dynamic layer events.
+"""AI Layer Generator — Uses 9router to generate dynamic layer events.
 
-This module integrates Gemini 3.5 Flash to analyze transcript + prosody data
+This module integrates the configured 9router LLM to analyze transcript + prosody data
 and generate AI-enhanced layer events for Remotion rendering.
 
 Capabilities:
@@ -11,12 +11,11 @@ Capabilities:
 - Color palette suggestions based on content mood
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, Optional
 from dataclasses import dataclass, asdict
-
-import google.generativeai as genai
 
 from src.config import settings
 from src.domain.entities import CreativeDirection
@@ -96,36 +95,30 @@ Rules:
 Analyze the transcript and generate appropriate layer events."""
 
     def __init__(self):
-        self.model = None
+        self.client = None
         self._initialized = False
         
     def _ensure_initialized(self):
-        """Lazy initialization of Gemini model."""
+        """Lazy initialization of the 9router client."""
         if self._initialized:
             return
             
-        if not settings.gemini_api_keys:
-            logger.warning("[AILayer] No Gemini API keys configured")
+        if not settings.use_nine_router:
+            logger.warning("[AILayer] LLM_PROVIDER is not nine_router")
             return
             
         try:
-            # Use first API key
-            api_key = settings.gemini_api_keys[0]
-            genai.configure(api_key=api_key)
-            
-            self.model = genai.GenerativeModel(
-                model_name="gemini-2.0-flash",
-                system_instruction=self.SYSTEM_PROMPT,
-                generation_config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.7,
-                    "max_output_tokens": 2048,
-                }
-            )
+            from src.infrastructure.nine_router_client import get_nine_router_client
+
+            client = get_nine_router_client()
+            if not client.is_configured:
+                logger.warning("[AILayer] NINE_ROUTER_BASE_URL not configured")
+                return
+            self.client = client
             self._initialized = True
-            logger.info("[AILayer] Gemini Flash initialized")
+            logger.info("[AILayer] 9router initialized")
         except Exception as e:
-            logger.error(f"[AILayer] Failed to initialize Gemini: {e}")
+            logger.error(f"[AILayer] Failed to initialize 9router: {e}")
             
     async def generate_layer_events(
         self,
@@ -149,7 +142,7 @@ Analyze the transcript and generate appropriate layer events."""
         """
         self._ensure_initialized()
         
-        if not self.model:
+        if not self.client:
             logger.warning("[AILayer] Model not initialized, skipping AI layer")
             return None
             
@@ -165,15 +158,14 @@ Analyze the transcript and generate appropriate layer events."""
         try:
             logger.info(f"[AILayer] Generating events for clip {clip_rank}")
             
-            # Call Gemini
-            response = await self.model.generate_content_async(prompt)
-            
-            if not response.text:
+            response_text = await self._call_router_json(prompt, max_tokens=2048)
+
+            if not response_text:
                 logger.warning(f"[AILayer] Empty response for clip {clip_rank}")
                 return None
                 
             # Parse JSON response
-            data = json.loads(response.text)
+            data = self._parse_json_response(response_text)
             
             # Convert to AILayerOutput
             events = [
@@ -271,7 +263,7 @@ Generate AI layer events for this clip. Focus on enhancing the viewing experienc
         """
         self._ensure_initialized()
         
-        if not self.model:
+        if not self.client:
             return []
             
         prompt = f"""Analyze this transcript and suggest {max_keywords} B-Roll visual keywords that would enhance the video.
@@ -285,12 +277,18 @@ For each keyword, provide:
 3. visual_category: "footage", "icon", or "motion_graphic"
 4. search_prompt: Detailed search prompt for stock footage APIs
 
-Output as JSON array."""
+Output as JSON object: {"items": [...]}."""
 
         try:
-            response = await self.model.generate_content_async(prompt)
-            data = json.loads(response.text)
-            return data if isinstance(data, list) else []
+            response_text = await self._call_router_json(prompt, max_tokens=1200)
+            data = self._parse_json_response(response_text)
+            if isinstance(data, dict):
+                items = data.get("items", [])
+            elif isinstance(data, list):
+                items = data
+            else:
+                items = []
+            return items if isinstance(items, list) else []
         except Exception as e:
             logger.error(f"[AILayer] B-Roll generation error: {e}")
             return []
@@ -313,7 +311,7 @@ Output as JSON array."""
         """
         self._ensure_initialized()
         
-        if not self.model:
+        if not self.client:
             return []
             
         prompt = f"""Analyze the emotional tone throughout this transcript and identify emotion segments.
@@ -329,15 +327,48 @@ For each distinct emotional segment, provide:
 3. intensity: 0.0 - 1.0
 4. suggested_effect: matching Three.js effect
 
-Output as JSON array."""
+Output as JSON object: {"items": [...]}."""
 
         try:
-            response = await self.model.generate_content_async(prompt)
-            data = json.loads(response.text)
-            return data if isinstance(data, list) else []
+            response_text = await self._call_router_json(prompt, max_tokens=1600)
+            data = self._parse_json_response(response_text)
+            if isinstance(data, dict):
+                items = data.get("items", [])
+            elif isinstance(data, list):
+                items = data
+            else:
+                items = []
+            return items if isinstance(items, list) else []
         except Exception as e:
             logger.error(f"[AILayer] Emotion analysis error: {e}")
             return []
+
+    async def _call_router_json(self, prompt: str, max_tokens: int) -> str:
+        """Run a JSON-focused 9router request off the event loop."""
+        if not self.client:
+            return ""
+        return await asyncio.to_thread(
+            self.client.chat,
+            model=settings.NINE_ROUTER_AI_LAYER_MODEL or settings.nine_router_model,
+            messages=[
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+
+    def _parse_json_response(self, raw_text: str) -> Any:
+        text = raw_text.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines)
+        return json.loads(text)
 
 
 # Singleton instance

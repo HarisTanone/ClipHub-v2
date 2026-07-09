@@ -215,6 +215,12 @@ class PodcastReframeEngine(IReframeEngine):
                     )
                 except Exception as e:
                     logger.warning(f"podcast_reframe: lip+head fallback failed (non-fatal): {e}")
+            if speaker_result is None:
+                speaker_result = self._build_visual_fallback_speaker_result(
+                    tracked_data=tracked_data,
+                    fps=fps,
+                    total_frames=total_frames,
+                )
         elif person_count == 1:
             speaker_result = self._build_single_speaker_result(
                 tracked_data=tracked_data,
@@ -277,16 +283,8 @@ class PodcastReframeEngine(IReframeEngine):
             hf_token=hf_token,
             model_name=settings.DIARIZATION_MODEL,
             timeout_sec=settings.DIARIZATION_TIMEOUT_SEC,
-            min_speakers=(
-                settings.DIARIZATION_MIN_SPEAKERS
-                if settings.DIARIZATION_MIN_SPEAKERS > 0
-                else None
-            ),
-            max_speakers=(
-                settings.DIARIZATION_MAX_SPEAKERS
-                if settings.DIARIZATION_MAX_SPEAKERS > 0
-                else None
-            ),
+            min_speakers=None,
+            max_speakers=None,
         )
         self._face_mapper = SpeakerFaceMapper(
             confidence_threshold=settings.DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD,
@@ -316,17 +314,10 @@ class PodcastReframeEngine(IReframeEngine):
             # Create new event loop since we're in a thread
             loop = asyncio.new_event_loop()
             try:
-                from src.config import settings
                 visual_person_count = int(tracked_data.get("person_count") or 0)
+                dynamic_min_speakers = None
                 dynamic_max_speakers = (
-                    settings.DIARIZATION_MAX_SPEAKERS
-                    if settings.DIARIZATION_MAX_SPEAKERS > 0
-                    else (visual_person_count if visual_person_count > 1 else None)
-                )
-                dynamic_min_speakers = (
-                    settings.DIARIZATION_MIN_SPEAKERS
-                    if settings.DIARIZATION_MIN_SPEAKERS > 0
-                    else None
+                    visual_person_count if visual_person_count > 1 else None
                 )
                 logger.info(
                     "podcast_reframe: diarization speaker bounds "
@@ -423,6 +414,79 @@ class PodcastReframeEngine(IReframeEngine):
             total_speakers=1,
         )
 
+    def _build_visual_fallback_speaker_result(
+        self,
+        tracked_data: dict,
+        fps: float,
+        total_frames: int,
+    ) -> Optional[ActiveSpeakerResult]:
+        """Build a conservative visual target when speaker scoring is unavailable."""
+        track_to_position = {
+            int(track_id): int(position_id)
+            for track_id, position_id in (tracked_data.get("track_to_position") or {}).items()
+        }
+        per_frame_tracked = tracked_data.get("per_frame_tracked") or []
+        sample_frame_indices = tracked_data.get("sample_frame_indices") or []
+
+        if not track_to_position or not per_frame_tracked:
+            return None
+
+        position_hits: Dict[int, int] = defaultdict(int)
+        position_areas: Dict[int, List[float]] = defaultdict(list)
+
+        for frame_tracked in per_frame_tracked:
+            for detection in frame_tracked:
+                position_id = track_to_position.get(int(detection.track_id))
+                if position_id is None:
+                    continue
+                position_hits[position_id] += 1
+                position_areas[position_id].append(float(detection.bbox.area))
+
+        if not position_hits:
+            return None
+
+        fallback_position = max(
+            position_hits,
+            key=lambda position_id: (
+                position_hits[position_id],
+                float(np.median(position_areas[position_id]))
+                if position_areas[position_id]
+                else 0.0,
+            ),
+        )
+        duration = total_frames / fps if fps > 0 else 0.0
+        per_frame_speaker = {
+            int(frame_idx): fallback_position
+            for frame_idx in sample_frame_indices
+        }
+        median_area = (
+            float(np.median(position_areas[fallback_position]))
+            if position_areas[fallback_position]
+            else 0.0
+        )
+
+        logger.info(
+            "podcast_reframe: active speaker visual fallback → "
+            f"target=P{fallback_position}, "
+            f"hits={position_hits[fallback_position]}, "
+            f"median_face_area={median_area:.0f}"
+        )
+
+        return ActiveSpeakerResult(
+            segments=[
+                SpeakerSegment(
+                    speaker_id=fallback_position,
+                    start_time=0.0,
+                    end_time=duration,
+                    confidence=0.25,
+                )
+            ],
+            dominant_speaker_id=fallback_position,
+            dominant_ratio=1.0,
+            per_frame_speaker=per_frame_speaker,
+            total_speakers=1,
+        )
+
     def _log_active_speaker_summary(
         self,
         speaker_result: Optional[ActiveSpeakerResult],
@@ -466,7 +530,7 @@ class PodcastReframeEngine(IReframeEngine):
             f"duration={duration:.1f}s, "
             f"visible_people={tracked_data.get('person_count', 0)}, "
             f"speakers={speaker_result.total_speakers}, "
-            f"dominant=P{speaker_result.dominant_speaker_id} "
+            f"dominant={self._format_position_id(speaker_result.dominant_speaker_id)} "
             f"({speaker_result.dominant_ratio:.0%}), "
             f"frame_targets={{{counts_log}}}, "
             f"positions={{{positions_log}}}, "

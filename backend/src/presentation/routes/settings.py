@@ -39,6 +39,9 @@ class UserSettings(BaseModel):
 class SystemInfo(BaseModel):
     version: str
     mode: str
+    llm_provider: str
+    nine_router_model: str
+    force_v2_pipeline: bool
     max_concurrent_jobs: int
     max_whisper_parallel: int
     max_render_workers: int
@@ -216,6 +219,9 @@ async def get_system_info(user: CurrentUser = Depends(get_current_user)):
         "data": SystemInfo(
             version="0.4.0",
             mode=settings.PIPELINE_ENV,
+            llm_provider=settings.LLM_PROVIDER,
+            nine_router_model=settings.nine_router_model,
+            force_v2_pipeline=settings.FORCE_V2_PIPELINE,
             max_concurrent_jobs=settings.MAX_CONCURRENT_JOBS,
             max_whisper_parallel=settings.MAX_WHISPER_PARALLEL,
             max_render_workers=settings.MAX_RENDER_WORKERS,

@@ -1,7 +1,7 @@
-"""GroqWhisperTranscriber — Cloud-based transcription via Groq Whisper API.
+"""GroqWhisperTranscriber — Optional cloud transcription via Groq Whisper API.
 
-Primary transcription method for V2 pipeline (non-premium users).
-Uses Groq's whisper-large-v3-turbo for fast, accurate word-level transcription.
+This module is kept for explicit direct-provider fallback only. It is disabled
+unless ALLOW_DIRECT_PROVIDER_FALLBACKS=true.
 
 Flow:
 1. Compress audio to FLAC 16kHz mono (minimizes file size)
@@ -40,11 +40,13 @@ class GroqWhisperTranscriber:
     @property
     def is_available(self) -> bool:
         """Check if Groq Whisper is configured and available."""
-        return bool(self._api_key)
+        return bool(settings.ALLOW_DIRECT_PROVIDER_FALLBACKS and self._api_key)
 
     def _get_client(self):
         """Lazy-init Groq client."""
         if self._client is None:
+            if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
+                raise RuntimeError("Direct Groq fallback disabled")
             if not self._api_key:
                 raise RuntimeError("GROQ_API_KEY not configured")
             from groq import Groq

@@ -107,6 +107,20 @@ def test_lip_motion_beats_listener_head_motion():
     assert set(speakers.values()) == {1}
 
 
+def test_low_confidence_lip_motion_still_selects_best_speaker():
+    detector = ActiveSpeakerDetector()
+    frame_data = [
+        (0, [_speech_frame(0, 520, lip=0.020), _speech_frame(1, 1480, lip=0.020)]),
+        (6, [_speech_frame(0, 520, lip=0.027), _speech_frame(1, 1480, lip=0.020)]),
+        (12, [_speech_frame(0, 520, lip=0.020), _speech_frame(1, 1480, lip=0.020)]),
+    ]
+
+    speakers = detector._compute_active_speakers(frame_data, fps=30.0, sample_interval_sec=0.2)
+
+    assert speakers
+    assert set(speakers.values()) == {0}
+
+
 def test_position_model_clusters_recreated_tracks_by_seat():
     engine = PodcastReframeEngine()
     tracked = [
@@ -220,6 +234,37 @@ def test_active_speaker_detector_uses_configurable_face_capacity():
     assert detector._max_faces == 9
 
 
+def test_visual_fallback_uses_strongest_stable_position():
+    engine = PodcastReframeEngine()
+    tracked_data = {
+        "track_to_position": {0: 0, 1: 1},
+        "sample_frame_indices": [0, 30, 60],
+        "per_frame_tracked": [
+            [
+                TrackedDetection(0, BBox(470, 100, 570, 240), 0),
+                TrackedDetection(1, BBox(1400, 100, 1560, 280), 0),
+            ],
+            [
+                TrackedDetection(0, BBox(470, 100, 570, 240), 30),
+                TrackedDetection(1, BBox(1400, 100, 1560, 280), 30),
+            ],
+            [
+                TrackedDetection(1, BBox(1400, 100, 1560, 280), 60),
+            ],
+        ],
+    }
+
+    result = engine._build_visual_fallback_speaker_result(
+        tracked_data=tracked_data,
+        fps=30.0,
+        total_frames=90,
+    )
+
+    assert result is not None
+    assert result.dominant_speaker_id == 1
+    assert set(result.per_frame_speaker.values()) == {1}
+
+
 def test_ambiguous_diarization_mapping_is_not_reliable():
     mapper = SpeakerFaceMapper(confidence_threshold=0.5)
     segments = [
@@ -252,10 +297,12 @@ if __name__ == "__main__":
     test_head_motion_is_keyed_after_stable_id_assignment()
     test_face_mesh_assignment_uses_2d_profiles_for_front_back_panelists()
     test_lip_motion_beats_listener_head_motion()
+    test_low_confidence_lip_motion_still_selects_best_speaker()
     test_position_model_clusters_recreated_tracks_by_seat()
     test_position_model_keeps_front_back_people_with_similar_x_separate()
     test_panning_holds_active_speaker_seat_when_only_listener_is_visible()
     test_panning_holds_profile_when_visible_face_is_not_active_speaker()
     test_active_speaker_detector_uses_configurable_face_capacity()
+    test_visual_fallback_uses_strongest_stable_position()
     test_ambiguous_diarization_mapping_is_not_reliable()
     print("speaker centering tests passed")

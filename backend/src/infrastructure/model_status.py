@@ -53,6 +53,10 @@ class ModelStatusTracker:
     def _init_models(self):
         """Initialize all tracked models."""
         self._models = {
+            "nine_router": ModelState(
+                name=f"9router {settings.nine_router_model}", provider="9router", purpose="analysis",
+                requests_limit=0, tokens_limit=0,
+            ),
             "gemini": ModelState(
                 name="Gemini 3.5 Flash", provider="gemini", purpose="analysis",
                 requests_limit=20, tokens_limit=1000000,

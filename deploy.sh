@@ -40,12 +40,44 @@ BACKEND_DIR="$PROJECT_DIR/backend"
 REMOTION_DIR="$PROJECT_DIR/remotion-renderer"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DEPLOY_USER="${SUDO_USER:-$(whoami)}"
+DEPLOY_HOME="$(eval echo "~$DEPLOY_USER" 2>/dev/null || echo "$HOME")"
 PYTHON_BIN="python3"
 
 # Ports (avoiding conflicts with existing services)
 BACKEND_PORT=8000
 REMOTION_PORT=3002
 FRONTEND_PORT=3001
+NINE_ROUTER_PORT="${NINE_ROUTER_PORT:-20128}"
+NINE_ROUTER_HOST="${NINE_ROUTER_HOST:-127.0.0.1}"
+NINE_ROUTER_CLI_VERSION="${NINE_ROUTER_CLI_VERSION:-0.5.20}"
+NINE_ROUTER_DEFAULT_BASE_URL="http://$NINE_ROUTER_HOST:$NINE_ROUTER_PORT/v1"
+CLEAR_AI_CACHE_ON_DEPLOY="${CLEAR_AI_CACHE_ON_DEPLOY:-0}"
+
+env_value() {
+    local file="$1"
+    local key="$2"
+    local default_value="${3:-}"
+    if [ ! -f "$file" ]; then
+        echo "$default_value"
+        return
+    fi
+    local value
+    value="$(grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1 | cut -d'=' -f2- | sed -e 's/^\"//' -e 's/\"$//' -e "s/^'//" -e "s/'$//")"
+    if [ -z "$value" ]; then
+        echo "$default_value"
+    else
+        echo "$value"
+    fi
+}
+
+append_env_if_missing() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    if ! grep -qE "^${key}=" "$file" 2>/dev/null; then
+        echo "${key}=${value}" >> "$file"
+    fi
+}
 
 echo "═══════════════════════════════════════════════════════════════"
 echo "  AutoCliper v3 — Server Deployment"
@@ -128,6 +160,21 @@ echo "  Python: $($PYTHON_BIN --version 2>/dev/null)"
 echo "  Node:   $(node --version 2>/dev/null)"
 echo "  FFmpeg: $(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f3)"
 
+# ─── Step 2.5: 9router CLI ──────────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Step 2.5: 9router CLI"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if command -v 9router &>/dev/null; then
+    echo "  ✅ 9router CLI found: $(command -v 9router)"
+else
+    echo "  Installing 9router@$NINE_ROUTER_CLI_VERSION..."
+    npm install -g "9router@$NINE_ROUTER_CLI_VERSION" --prefer-online 2>/dev/null || \
+        sudo npm install -g "9router@$NINE_ROUTER_CLI_VERSION" --prefer-online
+    echo "  ✅ 9router CLI installed"
+fi
+
 # ─── Step 3: Backend Setup ──────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -171,17 +218,52 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
+# Ensure .env has the 9router-first production keys, even on older servers.
+if [ -f ".env" ]; then
+    append_env_if_missing ".env" "LLM_PROVIDER" "nine_router"
+    append_env_if_missing ".env" "FORCE_V2_PIPELINE" "true"
+    append_env_if_missing ".env" "ALLOW_DIRECT_PROVIDER_FALLBACKS" "false"
+    append_env_if_missing ".env" "TRANSCRIPTION_PROVIDER" "local"
+    append_env_if_missing ".env" "NINE_ROUTER_BASE_URL" "$NINE_ROUTER_DEFAULT_BASE_URL"
+    append_env_if_missing ".env" "NINE_ROUTER_API_KEY" ""
+    append_env_if_missing ".env" "NINE_ROUTER_MODEL" "ngentot"
+    append_env_if_missing ".env" "NINE_ROUTER_PASS1_MODEL" "ngentot"
+    append_env_if_missing ".env" "NINE_ROUTER_PASS2_MODEL" "ngentot"
+    append_env_if_missing ".env" "NINE_ROUTER_AI_LAYER_MODEL" "ngentot"
+    append_env_if_missing ".env" "NINE_ROUTER_TIMEOUT" "120"
+    append_env_if_missing ".env" "NINE_ROUTER_MAX_RETRIES" "3"
+
+    LLM_PROVIDER_VAL="$(env_value ".env" "LLM_PROVIDER" "nine_router")"
+    NINE_ROUTER_BASE_URL_VAL="$(env_value ".env" "NINE_ROUTER_BASE_URL" "")"
+    NINE_ROUTER_API_KEY_VAL="$(env_value ".env" "NINE_ROUTER_API_KEY" "")"
+
+    if [ "$LLM_PROVIDER_VAL" = "nine_router" ] || [ "$LLM_PROVIDER_VAL" = "9router" ] || [ "$LLM_PROVIDER_VAL" = "ninerouter" ]; then
+        if [ -z "$NINE_ROUTER_BASE_URL_VAL" ]; then
+            echo "NINE_ROUTER_BASE_URL=$NINE_ROUTER_DEFAULT_BASE_URL" >> ".env"
+            NINE_ROUTER_BASE_URL_VAL="$NINE_ROUTER_DEFAULT_BASE_URL"
+        fi
+        if [ -z "$NINE_ROUTER_API_KEY_VAL" ]; then
+            echo "  ⚠️  NINE_ROUTER_API_KEY is empty. Continuing because some local 9router installs do not require auth."
+        fi
+        echo "  ✅ 9router configured (model=$(env_value ".env" "NINE_ROUTER_MODEL" "ngentot"), url=$NINE_ROUTER_BASE_URL_VAL)"
+    fi
+fi
+
 # Create directories
-mkdir -p tmp/output tmp/downloads
+mkdir -p data data/asset_cache tmp/output tmp/downloads
 
 echo "  ✅ Backend ready"
 
-# ─── Step 3.5: Clear stale caches (force fresh Groq Whisper on next run) ─────
+# ─── Step 3.5: Optional cache clear ──────────────────────────────────────────
 echo ""
-echo "  Clearing cached transcripts & analysis (force fresh Groq Whisper)..."
-rm -rf "$BACKEND_DIR/tmp/cache/"*/transcript*.json 2>/dev/null || true
-rm -rf "$BACKEND_DIR/tmp/cache/"*/analysis*.json 2>/dev/null || true
-echo "  ✅ Cache cleared (transcripts + analysis)"
+if [ "$CLEAR_AI_CACHE_ON_DEPLOY" = "1" ]; then
+    echo "  Clearing cached transcripts & analysis..."
+    rm -rf "$BACKEND_DIR/tmp/cache/"*/transcript*.json 2>/dev/null || true
+    rm -rf "$BACKEND_DIR/tmp/cache/"*/analysis*.json 2>/dev/null || true
+    echo "  ✅ Cache cleared (transcripts + analysis)"
+else
+    echo "  Keeping cached transcripts & analysis (set CLEAR_AI_CACHE_ON_DEPLOY=1 to clear)"
+fi
 
 # ─── Step 4: Remotion Server ────────────────────────────────────────────────
 echo ""
@@ -268,6 +350,7 @@ After=network.target
 Type=simple
 User=$DEPLOY_USER
 WorkingDirectory=$BACKEND_DIR
+EnvironmentFile=-$BACKEND_DIR/.env
 Environment=PATH=$BACKEND_DIR/venv/bin:/usr/local/bin:/usr/bin
 # Kill any stale process on port before starting (prevents EADDRINUSE)
 ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $BACKEND_PORT/tcp 2>/dev/null || true'
@@ -282,6 +365,34 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# 9router service
+NINE_ROUTER_BIN="$(command -v 9router || true)"
+if [ -n "$NINE_ROUTER_BIN" ]; then
+    sudo tee /etc/systemd/system/autocliper-9router.service > /dev/null << EOF
+[Unit]
+Description=AutoCliper 9router LLM Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=$DEPLOY_USER
+WorkingDirectory=$PROJECT_DIR
+Environment=HOME=$DEPLOY_HOME
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=$NINE_ROUTER_BIN --host $NINE_ROUTER_HOST --port $NINE_ROUTER_PORT --no-browser --skip-update --log
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+else
+    echo "  ⚠️  9router binary not found — skipping autocliper-9router.service"
+fi
 
 # Remotion service
 sudo tee /etc/systemd/system/autocliper-remotion.service > /dev/null << EOF
@@ -338,14 +449,30 @@ EOF
 
 # Reload and restart (Remotion FIRST — must be ready before backend)
 sudo systemctl daemon-reload
-sudo systemctl enable autocliper-backend autocliper-remotion autocliper-frontend 2>/dev/null || true
+sudo systemctl enable autocliper-9router autocliper-backend autocliper-remotion autocliper-frontend 2>/dev/null || true
 
 # Start Remotion first and wait for bundle to be ready
 echo "  Stopping services (cleanup stale ports)..."
+sudo systemctl stop autocliper-9router 2>/dev/null || true
 sudo systemctl stop autocliper-remotion 2>/dev/null || true
 sudo systemctl stop autocliper-backend 2>/dev/null || true
 sudo systemctl stop autocliper-frontend 2>/dev/null || true
 sleep 2
+
+echo "  Starting 9router..."
+sudo systemctl start autocliper-9router 2>/dev/null || true
+NINE_ROUTER_READY=0
+for i in $(seq 1 40); do
+    if curl -s "http://$NINE_ROUTER_HOST:$NINE_ROUTER_PORT" >/dev/null 2>&1; then
+        NINE_ROUTER_READY=1
+        echo "  ✅ 9router ready (${i}s)"
+        break
+    fi
+    sleep 1
+done
+if [ $NINE_ROUTER_READY -eq 0 ]; then
+    echo "  ⚠️  9router not responding yet — check logs: sudo journalctl -u autocliper-9router -n 30"
+fi
 
 echo "  Starting Remotion server (bundling compositions)..."
 sudo systemctl start autocliper-remotion
@@ -444,6 +571,7 @@ check_service() {
 }
 
 check_service "autocliper-backend" "$BACKEND_PORT"
+check_service "autocliper-9router" "$NINE_ROUTER_PORT"
 check_service "autocliper-remotion" "$REMOTION_PORT"
 check_service "autocliper-frontend" "$FRONTEND_PORT"
 
@@ -460,16 +588,19 @@ echo "════════════════════════�
 echo "  ✅ Deployment Complete!"
 echo ""
 echo "  Services:"
+echo "    9router:   http://127.0.0.1:$NINE_ROUTER_PORT"
 echo "    Backend:   http://192.168.168.58:$BACKEND_PORT"
 echo "    Remotion:  http://192.168.168.58:$REMOTION_PORT"
 echo "    Frontend:  http://192.168.168.58:$FRONTEND_PORT"
 echo ""
 echo "  Logs:"
+echo "    sudo journalctl -u autocliper-9router -f"
 echo "    sudo journalctl -u autocliper-backend -f"
 echo "    sudo journalctl -u autocliper-remotion -f"
 echo "    sudo journalctl -u autocliper-frontend -f"
 echo ""
 echo "  Management:"
+echo "    sudo systemctl status autocliper-9router"
 echo "    sudo systemctl status autocliper-backend"
 echo "    sudo systemctl restart autocliper-backend"
 echo "    sudo systemctl stop autocliper-backend"

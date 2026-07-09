@@ -1,11 +1,9 @@
-"""LocalTranscriber — Transcription with Groq API (primary) + Faster-Whisper (fallback).
+"""LocalTranscriber — Transcription with local Faster-Whisper.
 
 Flow:
-1. Try Groq Whisper API (cloud, ~30s for 1hr audio)
-2. If Groq fails → fallback to local Faster-Whisper (CPU, ~20min for 1hr)
+1. Use local Faster-Whisper by default
+2. Optional direct Groq Whisper only when explicitly enabled
 3. Return TranscriptResult with word-level timing
-
-Groq handles compression (FLAC 16kHz mono) and chunking internally.
 """
 import asyncio
 import logging
@@ -20,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class LocalTranscriber:
-    """Transcription orchestrator: Groq API → Faster-Whisper fallback.
+    """Transcription orchestrator: local Faster-Whisper + optional direct fallback.
     
-    Primary: Groq Whisper API (fast, accurate, zero CPU usage)
-    Fallback: Local Faster-Whisper (slow but guaranteed to work offline)
+    Primary: Local Faster-Whisper (offline)
+    Optional fallback: direct Groq Whisper API
     """
 
     def __init__(self, whisper_local: IWhisperLocal):
@@ -41,8 +39,8 @@ class LocalTranscriber:
         """Transcribe full video audio.
 
         Strategy:
-        1. If GROQ_API_KEY configured → use Groq Whisper API (fast)
-        2. If Groq fails or unavailable → fallback to local Faster-Whisper
+        1. Use local Faster-Whisper by default
+        2. Use Groq only if ALLOW_DIRECT_PROVIDER_FALLBACKS=true
 
         Args:
             video_path: Path to downloaded video file
@@ -51,11 +49,21 @@ class LocalTranscriber:
         Returns:
             Tuple of (TranscriptResult for LLM analysis, raw_segments with words for subtitle)
         """
-        # ─── Try Groq Whisper API first (primary) ─────────────────────────
-        groq = self._get_groq()
-        if groq.is_available:
+        try:
+            logger.info("local_transcriber: using local Faster-Whisper")
+            return await self._transcribe_local(video_path, video_duration)
+        except Exception as local_err:
+            if not (settings.ALLOW_DIRECT_PROVIDER_FALLBACKS and settings.GROQ_API_KEY):
+                raise
+
+            logger.warning(
+                f"local_transcriber: local Faster-Whisper failed ({local_err}), "
+                "trying direct Groq fallback",
+                exc_info=True,
+            )
+            groq = self._get_groq()
             try:
-                logger.info("local_transcriber: using Groq Whisper API (primary)")
+                logger.info("local_transcriber: using direct Groq Whisper API")
                 raw_segments = await groq.transcribe(video_path, language="id")
 
                 if raw_segments:
@@ -67,14 +75,10 @@ class LocalTranscriber:
                     )
                     return transcript, raw_segments
                 else:
-                    logger.warning("local_transcriber: Groq returned empty, falling back to local")
+                    logger.warning("local_transcriber: Groq returned empty")
             except Exception as e:
-                logger.warning(f"local_transcriber: Groq failed ({e}), falling back to local", exc_info=True)
-        else:
-            logger.info("local_transcriber: Groq API key not set, using local Faster-Whisper")
-
-        # ─── Fallback: Local Faster-Whisper ───────────────────────────────
-        return await self._transcribe_local(video_path, video_duration)
+                logger.warning(f"local_transcriber: Groq failed ({e})", exc_info=True)
+            raise local_err
 
     async def _transcribe_local(self, video_path: str, video_duration: float) -> tuple[TranscriptResult, list[dict]]:
         """Fallback: transcribe using local Faster-Whisper on CPU."""

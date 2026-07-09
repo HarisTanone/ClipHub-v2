@@ -280,7 +280,7 @@ class JobService:
             await self._run_pipeline(job)
 
     async def _run_v2_guarded(self, job: Job) -> None:
-        """Run V2 pipeline (Groq-based) with semaphore protection."""
+        """Run V2 pipeline with semaphore protection."""
         async with _pipeline_semaphore:
             from src.application.services_v2 import V2PipelineService
             from src.presentation.dependencies import get_v2_pipeline_service

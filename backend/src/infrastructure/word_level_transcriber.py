@@ -1,15 +1,15 @@
 """WordLevelTranscriber — Word-level transcription on TRIMMED clips.
 
-Runs Groq Whisper API on small trimmed clip files (45-180s each).
-Fallback: Faster-Whisper Medium local (CPU/int8).
+Runs Faster-Whisper locally on small trimmed clip files (45-180s each).
+Optional fallback: direct Groq Whisper, only when explicitly enabled.
 
 Key insight: Whisper on a trimmed clip returns 0-based timestamps.
 No offset calculation or relativization needed.
 
 Architecture:
 1. For each trimmed clip_XX.mp4, extract audio as WAV (16kHz mono)
-2. Upload to Groq Whisper API with word-level granularity
-3. If Groq fails (rate limit, error) → fallback to Faster-Whisper local
+2. Transcribe locally with Faster-Whisper word timestamps
+3. Optional direct Groq fallback only when explicitly allowed
 4. Return words with 0-based timestamps (relative to clip start)
 5. Cleanup intermediate WAV files
 """
@@ -57,6 +57,10 @@ class WordLevelTranscriber:
 
     @property
     def groq_client(self):
+        if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
+            raise WordLevelTranscriptionError(
+                "Direct Groq fallback disabled. Local Faster-Whisper is the active provider."
+            )
         if self._groq_client is None:
             from groq import Groq
             if not settings.GROQ_API_KEY:
@@ -193,16 +197,21 @@ class WordLevelTranscriber:
                     f"trying Groq API fallback..."
                 )
 
-                try:
-                    # Fallback: Groq Whisper API (cloud)
-                    words = await self._groq_transcribe(audio_path, language)
-                    if words:
-                        return {"words": words, "source": "groq"}
-                    raise WordLevelTranscriptionError("Groq returned 0 words")
-                except Exception as groq_err:
-                    raise WordLevelTranscriptionError(
-                        f"Both failed. FW: {fw_err} | Groq: {groq_err}"
-                    )
+                if settings.ALLOW_DIRECT_PROVIDER_FALLBACKS and settings.GROQ_API_KEY:
+                    try:
+                        # Fallback: direct Groq Whisper API (cloud)
+                        words = await self._groq_transcribe(audio_path, language)
+                        if words:
+                            return {"words": words, "source": "groq"}
+                        raise WordLevelTranscriptionError("Groq returned 0 words")
+                    except Exception as groq_err:
+                        raise WordLevelTranscriptionError(
+                            f"Both failed. FW: {fw_err} | Groq: {groq_err}"
+                        )
+
+                raise WordLevelTranscriptionError(
+                    f"Faster-Whisper failed and direct provider fallbacks are disabled: {fw_err}"
+                )
 
     # ─── Audio Extraction ─────────────────────────────────────────────────────
 

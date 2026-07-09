@@ -1,19 +1,19 @@
 """GroqTranscriber — TAHAP 1: Ingestion & Text Extraction.
 
 Primary: YouTube Transcript API (free, instant).
-Fallback: Groq Whisper API (fast, free tier — 28,800 audio-sec/day).
+Fallback: local Whisper. Optional direct Groq Whisper can be enabled explicitly.
 
 Architecture:
 1. Try youtube-transcript-api → fetch captions (id → en → auto → any)
 2. If no captions → download audio only (yt-dlp)
-3. Split audio into ≤25MB chunks (FFmpeg)
-4. Send chunks to Groq Whisper API (whisper-large-v3-turbo)
-5. Merge results → TranscriptResult
+3. Transcribe audio locally with Whisper/faster-whisper
+4. Optional: direct Groq Whisper fallback only when explicitly allowed
 """
 import asyncio
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -27,12 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 class TranscriptionError(Exception):
-    """Raised when both YouTube API and Groq Whisper fail."""
+    """Raised when YouTube captions and configured fallback transcription fail."""
     pass
 
 
 class GroqTranscriber(IGroqTranscriber):
-    """TAHAP 1 implementation: YouTube Transcript + Groq Whisper fallback."""
+    """TAHAP 1 implementation: YouTube Transcript + configured fallback."""
 
     # Language priority for YouTube captions
     LANGUAGE_PRIORITY = ["id", "en", "en-US", "en-GB"]
@@ -46,6 +46,8 @@ class GroqTranscriber(IGroqTranscriber):
 
     def _get_groq_client(self):
         """Lazy-init Groq client."""
+        if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
+            raise TranscriptionError("Direct Groq fallback disabled")
         if self._groq_client is None:
             from groq import Groq
             if not settings.GROQ_API_KEY:
@@ -76,24 +78,93 @@ class GroqTranscriber(IGroqTranscriber):
         except Exception as e:
             logger.info(f"v2_transcriber: YouTube API failed — {e}")
 
-        # ─── Path 2: Groq Whisper API (fallback) ─────────────────────
-        logger.info(f"v2_transcriber: falling back to Groq Whisper for {video_id}")
-        try:
-            result = await self._transcribe_via_groq_whisper(youtube_url, video_duration)
-            if result and result.segments:
-                logger.info(
-                    f"v2_transcriber: Groq Whisper success — "
-                    f"{len(result.segments)} segments, lang={result.language}"
-                )
-                return result
-        except Exception as e:
-            logger.error(f"v2_transcriber: Groq Whisper also failed — {e}")
-            raise TranscriptionError(
-                f"Transcription gagal: YouTube API dan Groq Whisper keduanya gagal. "
-                f"Detail: {e}"
-            ) from e
+        errors = []
+        provider = settings.TRANSCRIPTION_PROVIDER.lower().strip()
 
-        raise TranscriptionError("Transcription gagal: tidak ada transcript yang tersedia")
+        # ─── Path 2: Local Whisper (default fallback) ─────────────────
+        if provider in {"local", "auto", "whisper", "faster_whisper"}:
+            logger.info(f"v2_transcriber: falling back to local Whisper for {video_id}")
+            try:
+                result = await self._transcribe_via_local_whisper(youtube_url, video_duration)
+                if result and result.segments:
+                    logger.info(
+                        f"v2_transcriber: local Whisper success — "
+                        f"{len(result.segments)} segments, lang={result.language}"
+                    )
+                    return result
+            except Exception as e:
+                errors.append(f"local Whisper: {e}")
+                logger.error(f"v2_transcriber: local Whisper failed — {e}")
+
+        # ─── Path 3: Optional direct Groq Whisper ─────────────────────
+        if (
+            provider in {"groq", "auto"}
+            and settings.ALLOW_DIRECT_PROVIDER_FALLBACKS
+            and settings.GROQ_API_KEY
+        ):
+            logger.info(f"v2_transcriber: falling back to direct Groq Whisper for {video_id}")
+            try:
+                result = await self._transcribe_via_groq_whisper(youtube_url, video_duration)
+                if result and result.segments:
+                    logger.info(
+                        f"v2_transcriber: Groq Whisper success — "
+                        f"{len(result.segments)} segments, lang={result.language}"
+                    )
+                    return result
+            except Exception as e:
+                errors.append(f"Groq Whisper: {e}")
+                logger.error(f"v2_transcriber: Groq Whisper failed — {e}")
+
+        detail = "; ".join(errors) if errors else "no fallback provider enabled"
+        raise TranscriptionError(
+            f"Transcription gagal: YouTube API tidak tersedia dan fallback gagal. "
+            f"Detail: {detail}"
+        )
+
+    async def _transcribe_via_local_whisper(
+        self, youtube_url: str, video_duration: float
+    ) -> TranscriptResult:
+        """Download audio and transcribe it with the local Whisper backend."""
+        audio_dir = tempfile.mkdtemp(prefix="v2_local_audio_")
+        try:
+            audio_path = await self._download_audio(youtube_url, audio_dir)
+            if not audio_path or not os.path.exists(audio_path):
+                raise TranscriptionError("Audio download failed")
+
+            from src.infrastructure.whisper_local import WhisperLocal
+
+            local_whisper = WhisperLocal()
+            raw_segments = await local_whisper.transcribe_clip(audio_path)
+            segments = []
+            for item in raw_segments:
+                text = str(item.get("text", "")).strip()
+                if not text and item.get("words"):
+                    text = " ".join(
+                        str(w.get("word", "")).strip()
+                        for w in item.get("words", [])
+                        if str(w.get("word", "")).strip()
+                    )
+                if not text:
+                    continue
+                segments.append(
+                    TranscriptSegment(
+                        text=text,
+                        start=round(float(item.get("start", 0.0)), 2),
+                        end=round(float(item.get("end", 0.0)), 2),
+                    )
+                )
+
+            if not segments:
+                raise TranscriptionError("Local Whisper returned empty transcript")
+
+            return TranscriptResult(
+                segments=segments,
+                source="local_whisper",
+                language="id",
+                total_duration=video_duration,
+            )
+        finally:
+            shutil.rmtree(audio_dir, ignore_errors=True)
 
     # ─── YouTube Transcript API ───────────────────────────────────────────────
 

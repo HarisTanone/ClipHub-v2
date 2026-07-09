@@ -12,8 +12,27 @@ class Settings(BaseSettings):
     # Environment
     PIPELINE_ENV: str = "local"
 
+    # === Model routing ===
+    # 9router is the default LLM gateway. Direct provider fallbacks stay off in
+    # production so Gemini/Groq keys are not used accidentally.
+    LLM_PROVIDER: str = "nine_router"
+    FORCE_V2_PIPELINE: bool = True
+    ALLOW_DIRECT_PROVIDER_FALLBACKS: bool = False
+    TRANSCRIPTION_PROVIDER: str = "local"  # youtube_api first, then local whisper
+
     # Database (SQLite)
     DATABASE_URL: str = "sqlite+aiosqlite:///data/autoclip.db"
+
+    # 9router / OpenAI-compatible chat completions API
+    NINE_ROUTER_BASE_URL: str = ""
+    NINE_ROUTER_API_KEY: str = ""
+    NINE_ROUTER_MODEL: str = "ngentot"
+    NINE_ROUTER_PASS1_MODEL: str = "ngentot"
+    NINE_ROUTER_PASS2_MODEL: str = "ngentot"
+    NINE_ROUTER_AI_LAYER_MODEL: str = "ngentot"
+    NINE_ROUTER_TIMEOUT: int = 120
+    NINE_ROUTER_MAX_RETRIES: int = 3
+    NINE_ROUTER_TEMPERATURE: float = 0.3
 
     # Gemini — supports multiple keys: "key1,key2,key3"
     GEMINI_API_KEY: str = ""
@@ -196,6 +215,14 @@ class Settings(BaseSettings):
             return []
         keys = [k.strip() for k in self.GEMINI_API_KEY.split(",") if k.strip()]
         return keys
+
+    @property
+    def use_nine_router(self) -> bool:
+        return self.LLM_PROVIDER.lower() in {"nine_router", "ninerouter", "9router"}
+
+    @property
+    def nine_router_model(self) -> str:
+        return self.NINE_ROUTER_MODEL or "ngentot"
 
     @property
     def is_local(self) -> bool:

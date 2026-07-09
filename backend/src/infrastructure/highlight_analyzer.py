@@ -1,9 +1,9 @@
-"""HighlightAnalyzer — Multi-LLM fallback chain for viral clip analysis.
+"""HighlightAnalyzer — LLM fallback chain for viral clip analysis.
 
 Strategy:
-1. Groq LLM (primary) — 128K context, fast, reliable JSON mode
-2. Gemini (fallback) — 1M token context, but often timeout
-3. Ollama local (last resort) — unlimited, slow but guaranteed
+1. 9router (primary) — OpenAI-compatible model combo
+2. Optional direct providers only when ALLOW_DIRECT_PROVIDER_FALLBACKS=true
+3. Ollama local (last resort) when direct fallbacks are allowed
 
 Each LLM receives the same prompt and returns the same HighlightAnalysisResult.
 If one fails, the next in chain is tried automatically.
@@ -32,6 +32,7 @@ class HighlightAnalyzer:
     """Multi-LLM highlight analyzer with automatic fallback chain."""
 
     def __init__(self):
+        self._use_nine_router = settings.use_nine_router
         self._gemini_keys = settings.gemini_api_keys
         self._groq_key = settings.GROQ_API_KEY
         self._ollama_url = settings.OLLAMA_BASE_URL
@@ -47,6 +48,31 @@ class HighlightAnalyzer:
         from src.infrastructure.model_status import ModelStatusTracker
         tracker = ModelStatusTracker()
         errors = []
+
+        # ─── 1. Try 9router (PRIMARY) ─────────────────────────────────
+        if self._use_nine_router and tracker.is_available("nine_router"):
+            try:
+                logger.info("highlight_analyzer: trying 9router (primary)")
+                result = await self._analyze_with_nine_router(
+                    transcript, video_duration, max_clips
+                )
+                if result and result.clips:
+                    logger.info(f"highlight_analyzer: 9router success — {len(result.clips)} clips")
+                    tracker.mark_success("nine_router")
+                    return result
+                logger.warning("highlight_analyzer: 9router returned empty result")
+            except Exception as e:
+                errors.append(f"9router: {e}")
+                logger.warning(f"highlight_analyzer: 9router failed: {e}")
+                if "429" in str(e) or "rate" in str(e).lower():
+                    tracker.mark_rate_limited("nine_router", 60, str(e)[:200])
+                else:
+                    tracker.mark_error("nine_router", str(e)[:200])
+
+        if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
+            raise HighlightAnalyzerError(
+                f"9router failed and direct provider fallbacks are disabled: {'; '.join(errors)}"
+            )
 
         # ─── 1. Try Groq LLM (PRIMARY — fast, 128K context, JSON mode) ────
         if self._groq_key and tracker.is_available("groq_llm"):
@@ -103,6 +129,37 @@ class HighlightAnalyzer:
         raise HighlightAnalyzerError(
             f"All LLM backends failed: {'; '.join(errors)}"
         )
+
+    # ─── 9router Analysis ───────────────────────────────────────────────────
+
+    async def _analyze_with_nine_router(
+        self, transcript: TranscriptResult, video_duration: float, max_clips: int
+    ) -> Optional[HighlightAnalysisResult]:
+        """Use 9router for transcript-based highlight analysis."""
+        from src.infrastructure.nine_router_client import get_nine_router_client
+
+        prompt = self._build_prompt(transcript, video_duration, max_clips)
+        client = get_nine_router_client()
+
+        def _router_call():
+            return client.chat(
+                model=settings.NINE_ROUTER_PASS2_MODEL or settings.nine_router_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=4096,
+                response_format={"type": "json_object"},
+            )
+
+        raw_text = await asyncio.wait_for(
+            asyncio.get_running_loop().run_in_executor(None, _router_call),
+            timeout=settings.NINE_ROUTER_TIMEOUT,
+        )
+        clips = self._parse_llm_response(raw_text, video_duration)
+        if clips:
+            return self._build_result(
+                clips, max_clips, video_duration, f"9router_{settings.nine_router_model}"
+            )
+        return None
 
     # ─── Gemini Analysis ──────────────────────────────────────────────────────
 

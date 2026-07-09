@@ -1,13 +1,13 @@
-"""GroqAnalyzer — TAHAP 2: AI Highlight Analysis via Groq LLM (Two-Pass).
+"""GroqAnalyzer — TAHAP 2: AI Highlight Analysis via configured LLM router.
 
 Architecture (Two-Pass + Segment ID):
-  Pass 1 (8b per-chunk — fast scanning):
+    Pass 1 (router per-chunk — fast scanning):
     - Chunk transcript with Segment IDs ([S0015 | 02:30] text)
     - Ask 8b to identify candidate clips using start_id/end_id
     - Generates ~5 candidates per chunk (over-generate)
     - Prevents timestamp hallucination via Segment ID anchoring
 
-  Pass 2 (70b global — quality ranking):
+    Pass 2 (router global — quality ranking):
     - Collect ALL candidates from Pass 1 (e.g. 15-20 clips)
     - Send summary to 70b for global re-ranking
     - 70b picks TOP N, assigns final scores, generates quality hooks
@@ -69,7 +69,11 @@ class GroqAnalyzerError(Exception):
 
 
 class GroqAnalyzer(IGroqAnalyzer):
-    """TAHAP 2: Two-Pass highlight analysis with Segment ID anchoring."""
+    """TAHAP 2: Two-Pass highlight analysis with Segment ID anchoring.
+
+    The historical class name is kept for interface compatibility. In 9router
+    deployments, all LLM calls go through 9router's OpenAI-compatible API.
+    """
 
     # ─── Duration Constants ───────────────────────────────────────────────────
     MIN_CLIP_DURATION = 45.0   # Minimum valid clip duration (seconds) — enforced hard
@@ -96,15 +100,26 @@ class GroqAnalyzer(IGroqAnalyzer):
 
     def __init__(self):
         self._groq_client = None
-        self._model_pass1 = settings.GROQ_LLM_MODEL  # 8b — fast scanning
-        self._model_pass2 = settings.GROQ_LLM_FALLBACK_MODEL  # 70b — quality ranking
-        self._max_retries = settings.GROQ_MAX_RETRIES
-        self._timeout = settings.GROQ_TIMEOUT
+        if settings.use_nine_router:
+            self._model_pass1 = settings.NINE_ROUTER_PASS1_MODEL or settings.nine_router_model
+            self._model_pass2 = settings.NINE_ROUTER_PASS2_MODEL or settings.nine_router_model
+            self._max_retries = settings.NINE_ROUTER_MAX_RETRIES
+            self._timeout = settings.NINE_ROUTER_TIMEOUT
+        else:
+            self._model_pass1 = settings.GROQ_LLM_MODEL  # 8b — fast scanning
+            self._model_pass2 = settings.GROQ_LLM_FALLBACK_MODEL  # 70b — quality ranking
+            self._max_retries = settings.GROQ_MAX_RETRIES
+            self._timeout = settings.GROQ_TIMEOUT
         self._chunk_max_seconds = settings.V2_CHUNK_MAX_SECONDS
         self._chunk_max_chars = settings.V2_CHUNK_MAX_CHARS
 
     def _get_groq_client(self):
         """Lazy-init Groq client."""
+        if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
+            raise GroqAnalyzerError(
+                "Direct Groq fallback disabled. Configure NINE_ROUTER_BASE_URL "
+                "or set ALLOW_DIRECT_PROVIDER_FALLBACKS=true explicitly."
+            )
         if self._groq_client is None:
             from groq import Groq
             if not settings.GROQ_API_KEY:
@@ -670,16 +685,63 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
     def _call_groq_llm(
         self, prompt: str, model: Optional[str] = None, max_tokens: int = 3000
     ) -> str:
-        """Call Groq LLM with exponential backoff retry logic.
+        """Call the configured LLM router with exponential backoff retry logic.
 
         Args:
             prompt: The prompt to send
             model: Model to use (defaults to pass1 model)
             max_tokens: Max tokens for response (varies by use case)
         """
-        client = self._get_groq_client()
         use_model = model or self._model_pass1
         total_attempts = max(self._max_retries, 5)
+
+        if settings.use_nine_router:
+            from src.infrastructure.nine_router_client import get_nine_router_client
+
+            client = get_nine_router_client()
+            for attempt in range(total_attempts):
+                try:
+                    return client.chat(
+                        model=use_model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        max_tokens=max_tokens,
+                        response_format={"type": "json_object"},
+                    )
+                except Exception as e:
+                    error_str = str(e).lower()
+
+                    if "429" in error_str or "rate" in error_str:
+                        wait = min(30 * (2 ** attempt), 240)
+                        logger.warning(
+                            f"v2_analyzer: 9router rate limited, waiting {wait}s "
+                            f"(attempt {attempt+1}/{total_attempts}, model={use_model})"
+                        )
+                        time.sleep(wait)
+                        continue
+
+                    if "503" in error_str or "overloaded" in error_str:
+                        if use_model == self._model_pass2 and self._model_pass1 != self._model_pass2:
+                            logger.warning(
+                                f"v2_analyzer: {self._model_pass2} overloaded, "
+                                f"falling back to {self._model_pass1}"
+                            )
+                            use_model = self._model_pass1
+                            time.sleep(5)
+                            continue
+
+                    if attempt >= total_attempts - 1:
+                        raise GroqAnalyzerError(
+                            f"9router LLM failed after {total_attempts} attempts: {e}"
+                        )
+
+                    wait = min(5 * (2 ** attempt), 60)
+                    logger.warning(f"v2_analyzer: attempt {attempt+1} failed: {e}, retry in {wait}s")
+                    time.sleep(wait)
+
+            raise GroqAnalyzerError("9router LLM max retries exceeded")
+
+        client = self._get_groq_client()
 
         for attempt in range(total_attempts):
             try:

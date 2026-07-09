@@ -1,6 +1,6 @@
 """Hook Optimizer — AI rewrite hook text to maximize scroll-stopping power.
 
-Uses Gemini (text-only, cheap) to rewrite hook text into more viral format.
+Uses the configured 9router LLM to rewrite hook text into more viral format.
 Techniques: curiosity gap, shock value, question format, number hook, challenge.
 """
 import json
@@ -35,24 +35,22 @@ REWRITE (1 baris saja):"""
 
 
 class HookOptimizer:
-    """Rewrite hooks using Gemini for maximum viral potential."""
+    """Rewrite hooks using 9router for maximum viral potential."""
 
     def __init__(self):
         self._client = None
 
     def _init_client(self):
-        """Initialize Gemini client with next available key (avoid same key as main pipeline)."""
+        """Initialize the configured 9router client."""
         if self._client:
             return
         try:
-            from google import genai
-            from src.infrastructure.auth import GeminiKeyRotator
-            rotator = GeminiKeyRotator()
-            # Rotate to next key to avoid sharing rate limit with main pipeline
-            rotator.mark_rate_limited()
-            key = rotator.get_current_key()
-            if key:
-                self._client = genai.Client(api_key=key)
+            if not settings.use_nine_router:
+                return
+            from src.infrastructure.nine_router_client import get_nine_router_client
+            client = get_nine_router_client()
+            if client.is_configured:
+                self._client = client
         except Exception as e:
             logger.warning(f"hook_optimizer: failed to init client: {e}")
 
@@ -100,9 +98,7 @@ class HookOptimizer:
         return results
 
     def _batch_optimize(self, hooks: list[tuple[int, str]]) -> Optional[dict[int, str]]:
-        """Optimize all hooks in a single Gemini call."""
-        from google.genai import types
-
+        """Optimize all hooks in a single 9router call."""
         batch_prompt = """Kamu adalah copywriter viral shorts. Rewrite SEMUA hook berikut menjadi lebih SCROLL-STOPPING.
 
 RULES:
@@ -110,47 +106,60 @@ RULES:
 - Gunakan teknik: pertanyaan, shock, angka, tantangan, atau curiosity gap
 - Bahasa Indonesia
 - JANGAN tambah emoji
-- Output JSON array dengan format: [{"rank": N, "hook": "..."}]
+- Output JSON object dengan format: {"hooks": [{"rank": N, "hook": "..."}]}
 
 HOOKS:
 """
         for rank, hook in hooks:
             batch_prompt += f"  {rank}. {hook}\n"
 
-        batch_prompt += "\nOUTPUT (JSON array saja):"
+        batch_prompt += "\nOUTPUT (JSON object saja):"
 
-        response = self._client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=[types.Part.from_text(text=batch_prompt)],
+        text = self._client.chat(
+            model=settings.NINE_ROUTER_AI_LAYER_MODEL or settings.nine_router_model,
+            messages=[{"role": "user", "content": batch_prompt}],
+            temperature=0.3,
+            max_tokens=1200,
+            response_format={"type": "json_object"},
         )
 
-        if not response or not response.text:
+        if not text:
             return None
 
         # Parse JSON response
-        text = response.text.strip()
+        text = text.strip()
         if text.startswith("```"):
             lines = text.split("\n")
             text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
         try:
-            items = json.loads(text)
-            return {item["rank"]: item["hook"] for item in items if "rank" in item and "hook" in item}
+            data = json.loads(text)
+            if isinstance(data, dict):
+                items = data.get("hooks", [])
+            elif isinstance(data, list):
+                items = data
+            else:
+                items = []
+            return {
+                item["rank"]: item["hook"]
+                for item in items
+                if isinstance(item, dict) and "rank" in item and "hook" in item
+            }
         except (json.JSONDecodeError, KeyError):
             return None
 
     def _optimize_single(self, hook_text: str) -> Optional[str]:
         """Optimize a single hook."""
-        from google.genai import types
-
         prompt = OPTIMIZER_PROMPT.format(hook_text=hook_text)
-        response = self._client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=[types.Part.from_text(text=prompt)],
+        result = self._client.chat(
+            model=settings.NINE_ROUTER_AI_LAYER_MODEL or settings.nine_router_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=120,
         )
 
-        if response and response.text:
-            result = response.text.strip().strip('"').strip("'")
+        if result:
+            result = result.strip().strip('"').strip("'")
             # Sanity check — not too long, not empty
             if 3 < len(result) < 100:
                 return result

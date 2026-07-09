@@ -8,8 +8,8 @@ Python FastAPI backend — pipeline orchestrator for YouTube to short-form video
 |-------|-----------|
 | Framework | FastAPI + Uvicorn (port 8000) |
 | Database | SQLite + aiosqlite (WAL mode) |
-| AI Analysis | Gemini 3.5 Flash (multi-key rotation) |
-| Transcription | whisper.cpp medium model |
+| AI Analysis | 9router combo via OpenAI-compatible chat API |
+| Transcription | YouTube captions + local Whisper/faster-whisper |
 | Video | FFmpeg (trim, reframe, encode) |
 | Render Engine | Remotion (via Node.js server on port 3002) |
 | Auth | JWT (access + refresh tokens, bcrypt) |
@@ -42,8 +42,8 @@ src/
 ## Pipeline Flow
 
 ```
-URL → Validate → Download → Gemini Analysis → Prepare Clips →
-Aspect Router → Trim → YOLO Reframe → Whisper Transcription →
+URL → Validate → Download → Transcript → 9router Analysis → Prepare Clips →
+Aspect Router → Trim → Reframe → Local Word Transcription →
 Scene Graph → Remotion Render → Thumbnail → Assemble JSON → Done
 ```
 
@@ -88,7 +88,13 @@ python main.py
 See `.env.example` for full list. Key ones:
 
 ```env
-GEMINI_API_KEY=your_key
+LLM_PROVIDER=nine_router
+FORCE_V2_PIPELINE=true
+ALLOW_DIRECT_PROVIDER_FALLBACKS=false
+TRANSCRIPTION_PROVIDER=local
+NINE_ROUTER_BASE_URL=http://127.0.0.1:20128/v1
+NINE_ROUTER_API_KEY=your_9router_key_if_required
+NINE_ROUTER_MODEL=ngentot
 USE_REMOTION=true
 REMOTION_SERVER_PORT=3002
 SUPERADMIN_EMAIL=admin@autocliper.com

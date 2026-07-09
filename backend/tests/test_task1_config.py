@@ -21,6 +21,15 @@ def test_config_groq_settings():
     print("  [PASS] Groq settings loaded correctly")
 
 
+def test_config_nine_router_settings():
+    assert settings.use_nine_router is True
+    assert settings.FORCE_V2_PIPELINE is True
+    assert settings.ALLOW_DIRECT_PROVIDER_FALLBACKS is False
+    assert settings.TRANSCRIPTION_PROVIDER == "local"
+    assert settings.nine_router_model == "ngentot"
+    print("  [PASS] 9router settings loaded correctly")
+
+
 def test_config_v2_pipeline_settings():
     assert settings.V2_PIPELINE_ENABLED is True
     assert settings.V2_CHUNK_MAX_SECONDS == 600
@@ -143,6 +152,7 @@ def test_existing_entities_not_broken():
 if __name__ == "__main__":
     print("\n=== Task 1 Tests: Config & Dependencies ===\n")
     test_config_groq_settings()
+    test_config_nine_router_settings()
     test_config_v2_pipeline_settings()
     test_transcript_segment_entity()
     test_transcript_result_entity()
