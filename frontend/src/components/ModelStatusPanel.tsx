@@ -45,7 +45,7 @@ export function ModelStatusPanel() {
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
       {modelList.map((model) => {
         const colors = STATUS_COLORS[model.status] || STATUS_COLORS.error;
         const usagePercent = model.requests_limit > 0
@@ -74,7 +74,7 @@ export function ModelStatusPanel() {
                 <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all ${usagePercent >= 90 ? "bg-red-500" :
-                        usagePercent >= 60 ? "bg-amber-500" : "bg-emerald-500"
+                      usagePercent >= 60 ? "bg-amber-500" : "bg-emerald-500"
                       }`}
                     style={{ width: `${Math.max(2, usagePercent)}%` }}
                   />
