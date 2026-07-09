@@ -433,6 +433,22 @@ class V2PipelineService:
                     except Exception as e:
                         logger.warning(f"[{job_id}] Center-crop error clip {clip.rank}: {e}")
 
+            # ═══ Step 8.5: GPU Memory Cleanup (prevent CUDA OOM for Whisper) ═══
+            # PyAnnote + MediaPipe + YOLO consume significant VRAM during reframe.
+            # Release all GPU memory before Faster-Whisper model loads.
+            try:
+                import torch
+                import gc
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                gc.collect()
+                logger.info(f"[{job_id}] GPU memory released after reframe step")
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.warning(f"[{job_id}] GPU cleanup warning (non-critical): {e}")
+
             # ═══ Step 9: Word-Level Transcription on Trimmed Clips ═══
             self._emit(job_id, 9, "word_level", "start")
             await self._repo.update_status(job_id, JobStatus.V2_WORD_TRANSCRIBING)
@@ -648,8 +664,8 @@ class V2PipelineService:
             enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
         )
 
-        # Parallel rendering: 4 clips simultaneously (i7-13700K 24 threads + 64GB RAM handles this easily)
-        render_semaphore = asyncio.Semaphore(4)
+        # Parallel rendering: 2 clips max (prevents Remotion delayRender timeout on long clips)
+        render_semaphore = asyncio.Semaphore(2)
         render_errors: list[str] = []
 
         async def render_one_clip(clip):

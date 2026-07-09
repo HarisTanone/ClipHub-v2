@@ -52,6 +52,9 @@ class WordLevelTranscriber:
         self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENT)
         self._last_groq_call_time = 0.0
         self._rate_limit_lock = asyncio.Lock()
+        # Initialize class-level model lock (safe to call multiple times)
+        if WordLevelTranscriber._fw_model_lock is None:
+            WordLevelTranscriber._fw_model_lock = asyncio.Lock()
 
     # ─── Properties (lazy init) ───────────────────────────────────────────────
 
@@ -70,7 +73,7 @@ class WordLevelTranscriber:
 
     # Class-level singleton: only ONE model instance across all WordLevelTranscriber instances
     _shared_fw_model = None
-    _fw_model_lock = None  # Will be initialized on first use
+    _fw_model_lock: asyncio.Lock = None  # Initialized on first __init__
 
     @property
     def faster_whisper_model(self):
@@ -89,9 +92,20 @@ class WordLevelTranscriber:
         try:
             import torch
             if torch.cuda.is_available():
-                device = "cuda"
-                compute_type = "float16"
-                logger.info(f"word_level: loading Faster-Whisper {model_size} (CUDA/float16)")
+                # Check free VRAM before attempting GPU load
+                free_mem = torch.cuda.mem_get_info()[0] / (1024**3)  # GB
+                if free_mem < 2.5:
+                    logger.warning(
+                        f"word_level: insufficient VRAM ({free_mem:.1f}GB free), "
+                        f"falling back to CPU/int8"
+                    )
+                else:
+                    device = "cuda"
+                    compute_type = "float16"
+                    logger.info(
+                        f"word_level: loading Faster-Whisper {model_size} "
+                        f"(CUDA/float16, {free_mem:.1f}GB free)"
+                    )
             else:
                 logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8)")
         except ImportError:
@@ -320,7 +334,21 @@ class WordLevelTranscriber:
     async def _faster_whisper_transcribe(
         self, audio_path: str, language: str
     ) -> list[dict]:
-        """Local Faster-Whisper fallback (CPU/int8)."""
+        """Local Faster-Whisper with singleton model (prevents concurrent CUDA OOM).
+
+        Uses asyncio.Lock to ensure only one model load at a time,
+        preventing 3x concurrent VRAM allocation that causes OOM.
+        """
+        # Ensure only one model load at a time
+        if WordLevelTranscriber._shared_fw_model is None:
+            if WordLevelTranscriber._fw_model_lock is None:
+                WordLevelTranscriber._fw_model_lock = asyncio.Lock()
+            async with WordLevelTranscriber._fw_model_lock:
+                # Double-check after acquiring lock (another task may have loaded it)
+                if WordLevelTranscriber._shared_fw_model is None:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, lambda: self.faster_whisper_model)
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, self._faster_whisper_call_sync, audio_path, language
