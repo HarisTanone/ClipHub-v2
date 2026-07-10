@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw } from "lucide-react";
+import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -62,8 +62,8 @@ export function JobDetail() {
       setData(detailRes.data);
       setJobData(jobRes);
       setError(null);
-      // Fetch YouTube metadata for the source URL
-      if (detailRes.data.youtube_url && !videoMeta) {
+      // Fetch YouTube metadata only for YouTube source URLs
+      if (detailRes.data.source_type !== "upload" && detailRes.data.youtube_url && !videoMeta) {
         preview.fetchMetadata(detailRes.data.youtube_url).then(setVideoMeta).catch(() => null);
       }
     } catch (e: any) {
@@ -122,6 +122,8 @@ export function JobDetail() {
   const jobShort = (jobId || data.job_id).replace("job_", "").slice(0, 12);
   const stageLabel = progress?.stepLabel || (data.status === "completed" ? "Completed" : isTerminal ? "Stopped" : "Preparing pipeline");
   const createdDate = data.created_at ? formatDate(data.created_at).split(",")[0] : "-";
+  const isUploadSource = data.source_type === "upload";
+  const sourceLabel = data.source_label || data.youtube_url;
 
   return (
     <div className="space-y-3">
@@ -208,7 +210,7 @@ export function JobDetail() {
       )}
 
       <Card className="p-0 overflow-hidden">
-        {videoMeta ? (
+        {videoMeta && !isUploadSource ? (
           <div className="flex flex-col md:flex-row">
             <a
               href={data.youtube_url}
@@ -264,13 +266,20 @@ export function JobDetail() {
           </div>
         ) : (
           <div className="flex items-center justify-between gap-3 p-3">
-            <div className="min-w-0">
-              <p className="text-[11px] text-zinc-500 mb-0.5">Source</p>
-              <p className="text-sm text-zinc-300 truncate">{data.youtube_url}</p>
+            <div className="flex min-w-0 items-center gap-3">
+              <div className={cn("flex h-12 w-16 shrink-0 items-center justify-center rounded-lg border", isUploadSource ? "border-emerald-500/20 bg-emerald-500/[0.04]" : "border-zinc-800 bg-zinc-900")}>
+                {isUploadSource ? <FileVideo className="h-5 w-5 text-emerald-400" /> : <Radio className="h-4 w-4 text-zinc-600" />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] text-zinc-500 mb-0.5">{isUploadSource ? "Upload Video" : "Source"}</p>
+                <p className="text-sm text-zinc-300 truncate">{sourceLabel}</p>
+              </div>
             </div>
-            <a href={data.youtube_url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">
-              <ExternalLink className="h-4 w-4" />
-            </a>
+            {!isUploadSource && (
+              <a href={data.youtube_url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            )}
           </div>
         )}
       </Card>

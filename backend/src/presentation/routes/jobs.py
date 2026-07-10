@@ -1,6 +1,12 @@
 """Job API routes — POST /jobs, GET /jobs/{id}, GET /jobs/{id}/error, GET /jobs/{id}/clips."""
+import json
 import os
-from fastapi import APIRouter, Depends, HTTPException, Request
+import re
+import subprocess
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 from src.application.services import JobService
@@ -12,9 +18,56 @@ from src.presentation.schemas.jobs import (
     CreateJobRequest,
     JobErrorResponse,
     JobResponse,
+    UploadJobOptions,
 )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+ALLOWED_UPLOAD_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
+
+
+def _safe_upload_filename(filename: str | None) -> str:
+    """Return a filesystem-safe display filename."""
+    raw = (filename or "uploaded_video").strip()
+    stem = Path(raw).stem or "uploaded_video"
+    ext = Path(raw).suffix.lower()
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-") or "uploaded_video"
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        ext = ".mp4"
+    return f"{safe_stem[:80]}{ext}"
+
+
+def _source_from_clips_data(clips_data: dict | None, fallback_url: str) -> tuple[str, str]:
+    source = (clips_data or {}).get("source") if isinstance(clips_data, dict) else None
+    if isinstance(source, dict):
+        source_type = str(source.get("type") or "youtube")
+        source_label = str(source.get("filename") or source.get("label") or fallback_url)
+        return source_type, source_label
+    return "youtube", fallback_url
+
+
+def _probe_video_duration(video_path: str) -> float:
+    """Return video duration in seconds using ffprobe."""
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "json",
+            video_path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-300:] or "ffprobe failed")
+
+    data = json.loads(result.stdout or "{}")
+    duration = float((data.get("format") or {}).get("duration") or 0)
+    if duration <= 0:
+        raise RuntimeError("durasi video tidak terbaca")
+    return duration
 
 
 def _stream_video(file_path: str, request: Request, filename: str):
@@ -199,6 +252,8 @@ async def create_job(
     return JobResponse(
         job_id=job.job_id,
         youtube_url=job.youtube_url,
+        source_type="youtube",
+        source_label=job.youtube_url,
         status=job.status.value,
         video_duration=job.video_duration,
         render_progress=job.render_progress,
@@ -220,6 +275,139 @@ async def create_job(
     )
 
 
+@router.post("/upload", status_code=201, response_model=JobResponse)
+async def create_job_from_upload(
+    file: UploadFile = File(...),
+    options_json: str = Form("{}"),
+    service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Buat job baru dari file video upload manual."""
+    original_name = file.filename or "uploaded_video.mp4"
+    ext = Path(original_name).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        allowed = ", ".join(sorted(ALLOWED_UPLOAD_EXTENSIONS))
+        raise HTTPException(status_code=400, detail=f"Format file tidak didukung. Gunakan: {allowed}")
+
+    content_type = (file.content_type or "").lower()
+    if content_type and not (
+        content_type.startswith("video/")
+        or content_type in {"application/octet-stream", "application/x-matroska"}
+    ):
+        raise HTTPException(status_code=400, detail="File upload harus berupa video")
+
+    try:
+        options = UploadJobOptions(**json.loads(options_json or "{}"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Options upload tidak valid")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    upload_id = uuid.uuid4().hex
+    safe_name = _safe_upload_filename(original_name)
+    upload_dir = os.path.join(settings.DOWNLOAD_DIR, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    upload_path = os.path.join(upload_dir, f"{upload_id}_{safe_name}")
+    tmp_path = f"{upload_path}.tmp"
+
+    max_bytes = max(1, int(settings.MAX_UPLOAD_SIZE_MB)) * 1024 * 1024
+    written = 0
+    try:
+        with open(tmp_path, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File terlalu besar. Maksimal {settings.MAX_UPLOAD_SIZE_MB}MB",
+                    )
+                out.write(chunk)
+        os.replace(tmp_path, upload_path)
+
+        if written <= 0:
+            raise HTTPException(status_code=400, detail="File upload kosong")
+
+        try:
+            duration = _probe_video_duration(upload_path)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Video tidak bisa dibaca: {e}")
+
+        if duration > settings.MAX_VIDEO_DURATION:
+            menit = int(duration // 60)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video terlalu panjang ({menit} menit). Maksimal {settings.MAX_VIDEO_DURATION // 60} menit.",
+            )
+
+        pseudo_url = f"upload://{upload_id}/{safe_name}"
+        job, is_cached = await service.create_job(
+            pseudo_url,
+            force_reprocess=True,
+            style_preset=options.style_preset,
+            target_aspect_ratio=options.target_aspect_ratio,
+            hook_engine=options.hook_engine,
+            hook_style=options.hook_style,
+            broll_enabled=options.broll_enabled,
+            autogrid_enabled=options.autogrid_enabled,
+            use_remotion=options.use_remotion,
+            ai_layer_enabled=options.ai_layer_enabled,
+            threejs_enabled=options.threejs_enabled,
+            remotion_quality=options.remotion_quality,
+            hook_style_config=options.hook_style_config,
+            subtitle_style_config=options.subtitle_style_config,
+            smart_camera=options.smart_camera,
+            smart_subtitle_position=options.smart_subtitle_position,
+            user_id=user.id,
+            is_superadmin=user.is_superadmin,
+            source_type="upload",
+            source_video_path=upload_path,
+            source_filename=safe_name,
+            source_duration=duration,
+            source_size_bytes=written,
+        )
+        return JobResponse(
+            job_id=job.job_id,
+            youtube_url=job.youtube_url,
+            source_type="upload",
+            source_label=safe_name,
+            status=job.status.value,
+            video_duration=job.video_duration,
+            render_progress=job.render_progress,
+            error_message=job.error_message,
+            clips_data=job.clips_data,
+            clips_total=job.clips_total,
+            clips_success=job.clips_success,
+            clips_failed=job.clips_failed,
+            is_cached=is_cached,
+            style_preset=job.style_preset,
+            target_aspect_ratio=job.target_aspect_ratio,
+            use_remotion=job.use_remotion,
+            ai_layer_enabled=job.ai_layer_enabled,
+            threejs_enabled=job.threejs_enabled,
+            remotion_quality=job.remotion_quality,
+            pipeline_version=job.pipeline_version,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+    except HTTPException:
+        if os.path.exists(upload_path):
+            try:
+                os.remove(upload_path)
+            except OSError:
+                pass
+        raise
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        await file.close()
+
+
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: str,
@@ -231,9 +419,12 @@ async def get_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
     await _check_job_ownership(job, user)
+    source_type, source_label = _source_from_clips_data(job.clips_data, job.youtube_url)
     return JobResponse(
         job_id=job.job_id,
         youtube_url=job.youtube_url,
+        source_type=source_type,
+        source_label=source_label,
         status=job.status.value,
         video_duration=job.video_duration,
         render_progress=job.render_progress,
@@ -489,9 +680,12 @@ async def list_jobs(
 
     jobs = []
     for model in models:
+        source_type, source_label = _source_from_clips_data(model.clips_data, model.youtube_url)
         jobs.append({
             "job_id": model.job_id,
             "youtube_url": model.youtube_url,
+            "source_type": source_type,
+            "source_label": source_label,
             "video_title": getattr(model, "video_title", None) or "",
             "status": model.status,
             "video_duration": model.video_duration,
@@ -528,6 +722,7 @@ async def get_job_detail(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     await _check_job_ownership(job, user)
+    source_type, source_label = _source_from_clips_data(job.clips_data, job.youtube_url)
 
     # Gather available files (supports both structured subdirs and flat layout)
     output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
@@ -581,6 +776,8 @@ async def get_job_detail(
         "data": {
             "job_id": job.job_id,
             "youtube_url": job.youtube_url,
+            "source_type": source_type,
+            "source_label": source_label,
             "status": job.status.value,
             "video_duration": job.video_duration,
             "style_preset": job.style_preset,
@@ -757,6 +954,7 @@ class EditClipStyleRequest(BaseModel):
     """Override hook style for a specific clip."""
     hook_style: str = Field(..., min_length=1, max_length=50)
     hook_style_config: Opt[dict] = None  # Optional per-clip config overrides
+    subtitle_style_config: Opt[dict] = None  # Optional per-clip subtitle config overrides
 
 
 class RerenderRequest(BaseModel):
@@ -862,6 +1060,8 @@ async def edit_clip_style(
             clip["hook_style_override"] = body.hook_style
             if body.hook_style_config:
                 clip["hook_style_config_override"] = body.hook_style_config
+            if body.subtitle_style_config:
+                clip["subtitle_style_config_override"] = body.subtitle_style_config
             clip_found = True
             break
 
@@ -887,6 +1087,7 @@ async def edit_clip_style(
             "clip_rank": clip_rank,
             "hook_style": body.hook_style,
             "hook_style_config": body.hook_style_config,
+            "subtitle_style_config": body.subtitle_style_config,
         },
         "message": f"Style override set for clip #{clip_rank}. Call /restyle to apply with Remotion.",
     }

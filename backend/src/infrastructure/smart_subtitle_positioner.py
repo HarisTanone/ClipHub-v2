@@ -232,7 +232,16 @@ class SmartSubtitlePositioner:
         Returns:
             SubtitlePosition centered for the grid layout
         """
-        if grid_layout == "speaker_emphasis":
+        if grid_layout == "gaming":
+            # Gameplay top panel is ~65% of the frame; keep captions inside it,
+            # just above the face/person panel.
+            return SubtitlePosition(
+                position_y=58.0,
+                max_width_pct=88.0,
+                reason="grid_gaming_gameplay_panel",
+                level=6,
+            )
+        if grid_layout in ("speaker_emphasis", "group"):
             # Active speaker panel is top 60% (0-60% of output)
             # Place subtitle at bottom of active panel with margin
             return SubtitlePosition(

@@ -149,8 +149,16 @@ class PodcastReframeEngine(IReframeEngine):
             success = await self._center_crop(video_path, output_path)
             return {"output_path": output_path if success else video_path, "person_count": 0, "method": "center_crop"}
 
+        content_profile = kwargs.get("content_profile") or {}
+
         try:
-            result = await asyncio.to_thread(self._pipeline, video_path, output_path, autogrid_enabled)
+            result = await asyncio.to_thread(
+                self._pipeline,
+                video_path,
+                output_path,
+                autogrid_enabled,
+                content_profile,
+            )
             if result:
                 return result
         except Exception as e:
@@ -161,9 +169,20 @@ class PodcastReframeEngine(IReframeEngine):
 
     # ─── Pipeline ─────────────────────────────────────────────────────────
 
-    def _pipeline(self, video_path: str, output_path: str, autogrid: bool) -> Optional[dict]:
+    def _pipeline(
+        self,
+        video_path: str,
+        output_path: str,
+        autogrid: bool,
+        content_profile: Optional[dict] = None,
+    ) -> Optional[dict]:
         import cv2
         cv2.setNumThreads(0)
+        content_profile = content_profile or {}
+        grid_strategy = str(
+            content_profile.get("grid_strategy")
+            or ("visual_auto" if autogrid else "disabled")
+        )
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -235,7 +254,34 @@ class PodcastReframeEngine(IReframeEngine):
             total_frames=total_frames,
         )
 
-        # Step 3: Dynamic Panning — single FFmpeg pass with smooth crop tracking
+        # Step 3: Auto Grid decisions. These run before panning because Auto Grid
+        # means "show multiple visual subjects at once", while panning follows
+        # a single subject over time.
+        if autogrid and grid_strategy == "gaming_gameplay_facecam":
+            result = self._render_gaming_gameplay_facecam_grid(
+                video_path, output_path, width, height, tracked_data
+            )
+            if result:
+                return result
+
+        if autogrid:
+            grid_decision = self._decide_autogrid_layout(
+                tracked_data=tracked_data,
+                speaker_result=speaker_result,
+                width=width,
+            )
+            if grid_decision["layout"] == "group":
+                return self._render_group_grid(
+                    video_path, output_path, width, height, grid_decision
+                )
+            if grid_decision["layout"] == "speaker_emphasis":
+                return self._render_speaker_emphasis_grid(
+                    video_path, output_path, width, height, grid_decision
+                )
+            if grid_decision["layout"] == "double":
+                return self._render_double_grid(video_path, output_path, width, height, grid_decision)
+
+        # Step 4: Dynamic Panning — single FFmpeg pass with smooth crop tracking
         # Builds a time-based crop X expression that follows the active face.
         # No concat, no trim, no desync. Audio always stream-copied.
         result = self._render_dynamic_panning(
@@ -806,6 +852,123 @@ class PodcastReframeEngine(IReframeEngine):
 
     # ─── Layout Decision (Speaker-Aware) ─────────────────────────────────
 
+    def _decide_autogrid_layout(
+        self,
+        tracked_data: dict,
+        speaker_result: Optional[ActiveSpeakerResult],
+        width: int,
+    ) -> dict:
+        """Choose grid only when multiple people are visible in-frame.
+
+        This matches the product rule: if the edit focuses one person at a
+        time, keep a single smart camera. If 2+ people are simultaneously
+        visible, use grid so viewers can read both/all reactions.
+        """
+        per_frame_faces = tracked_data.get("per_frame_faces") or []
+        position_targets = {
+            int(pos_id): float(x)
+            for pos_id, x in (tracked_data.get("position_targets") or {}).items()
+        }
+        person_count = int(tracked_data.get("person_count") or 0)
+
+        if not per_frame_faces or person_count < 2:
+            return {"layout": "single", "person_count": person_count}
+
+        multi_face_frames = 0
+        left_positions: List[float] = []
+        right_positions: List[float] = []
+
+        for frame_faces in per_frame_faces:
+            if len(frame_faces) < 2:
+                continue
+            sorted_faces = sorted(frame_faces)
+            leftmost = sorted_faces[0]
+            rightmost = sorted_faces[-1]
+            separation = rightmost - leftmost
+            if separation >= width * self.MIN_SEPARATION_RATIO:
+                multi_face_frames += 1
+                left_positions.append(leftmost)
+                right_positions.append(rightmost)
+
+        coexist_ratio = multi_face_frames / len(per_frame_faces) if per_frame_faces else 0.0
+        if coexist_ratio < self.MIN_COEXIST_RATIO or not left_positions or not right_positions:
+            logger.info(
+                "podcast_reframe: autogrid skipped "
+                f"(coexist={coexist_ratio:.0%}, visible_people={person_count})"
+            )
+            return {"layout": "single", "person_count": person_count}
+
+        sorted_positions = sorted(position_targets.items(), key=lambda item: item[1])
+        if len(sorted_positions) < 2:
+            left_x = int(np.median(left_positions))
+            right_x = int(np.median(right_positions))
+            sorted_positions = [(0, left_x), (1, right_x)]
+
+        latest_speaker_id: Optional[int] = None
+        if speaker_result and speaker_result.per_frame_speaker:
+            latest_frame = max(speaker_result.per_frame_speaker)
+            latest_speaker_id = int(speaker_result.per_frame_speaker[latest_frame])
+        elif speaker_result and speaker_result.dominant_speaker_id is not None:
+            latest_speaker_id = int(speaker_result.dominant_speaker_id)
+
+        position_to_x = dict(sorted_positions)
+        if latest_speaker_id in position_to_x:
+            active_id = latest_speaker_id
+            active_x = position_to_x[active_id]
+        else:
+            active_id, active_x = sorted_positions[0]
+
+        if person_count >= 3 and len(sorted_positions) >= 3:
+            xs = [x for _, x in sorted_positions]
+            logger.info(
+                "podcast_reframe: AUTO GROUP GRID "
+                f"(people={person_count}, coexist={coexist_ratio:.0%}, active=P{active_id})"
+            )
+            return {
+                "layout": "group",
+                "active_x": int(active_x),
+                "group_x": int(np.median(xs)),
+                "person_count": person_count,
+                "active_track_id": active_id,
+            }
+
+        listener_candidates = [
+            (pos_id, x)
+            for pos_id, x in sorted_positions
+            if pos_id != active_id
+        ]
+        listener_id, listener_x = max(
+            listener_candidates or sorted_positions,
+            key=lambda item: abs(item[1] - active_x),
+        )
+
+        if speaker_result:
+            logger.info(
+                "podcast_reframe: AUTO SPEAKER GRID "
+                f"(active=P{active_id}, listener=P{listener_id}, coexist={coexist_ratio:.0%})"
+            )
+            return {
+                "layout": "speaker_emphasis",
+                "active_x": int(active_x),
+                "listener_x": int(listener_x),
+                "active_track_id": active_id,
+                "listener_track_id": listener_id,
+                "person_count": person_count,
+            }
+
+        left_x = int(min(x for _, x in sorted_positions))
+        right_x = int(max(x for _, x in sorted_positions))
+        logger.info(
+            "podcast_reframe: AUTO DOUBLE GRID "
+            f"(L={left_x}, R={right_x}, coexist={coexist_ratio:.0%})"
+        )
+        return {
+            "layout": "double",
+            "left_x": left_x,
+            "right_x": right_x,
+            "person_count": person_count,
+        }
+
     def _decide_layout_v2(
         self,
         tracked_data: dict,
@@ -981,28 +1144,6 @@ class PodcastReframeEngine(IReframeEngine):
             left_x = int(np.median(left_positions))
             right_x = int(np.median(right_positions))
             return {"layout": "double", "left_x": left_x, "right_x": right_x, "person_count": person_count}
-
-        # ─── FORCED GRID: multiple people detected but never in same frame ─
-        # When coexist=0% but multiple people are detected, faces alternate frames.
-        # Instead of single crop (which lands on empty middle), force grid
-        # using left/right cluster positions from per-frame detections.
-        if person_count > 1 and autogrid and len(all_x) > 5:
-            midpoint = width / 2.0
-            left_cluster = [x for x in all_x if x < midpoint]
-            right_cluster = [x for x in all_x if x >= midpoint]
-
-            # Both clusters must have meaningful detections
-            if left_cluster and right_cluster:
-                left_x = int(np.median(left_cluster))
-                right_x = int(np.median(right_cluster))
-                separation = right_x - left_x
-
-                if separation >= width * self.MIN_SEPARATION_RATIO:
-                    logger.info(
-                        f"podcast_reframe: FORCED GRID (coexist={coexist_ratio:.0%} but visual clusters found, "
-                        f"L={left_x} [{len(left_cluster)} dets], R={right_x} [{len(right_cluster)} dets])"
-                    )
-                    return {"layout": "double", "left_x": left_x, "right_x": right_x, "person_count": person_count}
 
         # ─── True single person fallback ──────────────────────────────────
         # Only reach here if genuinely 1 person or clusters too close
@@ -1334,11 +1475,14 @@ class PodcastReframeEngine(IReframeEngine):
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
             logger.info(f"podcast_reframe: dynamic panning OK")
+            pc = tracked_data["person_count"]
             return {
                 "output_path": output_path,
-                "person_count": tracked_data["person_count"],
+                "person_count": pc,
                 "method": "podcast_dynamic_panning",
                 "keyframes": len(stabilized),
+                "subtitle_position_y": 85.0,
+                "subtitle_max_width_pct": 82.0 if pc >= 2 else 90.0,
             }
 
         if result.stderr:
@@ -1424,10 +1568,151 @@ class PodcastReframeEngine(IReframeEngine):
             pc = decision.get("person_count", 1)
             method_detail = decision.get("method_detail", "podcast_single_crop")
             logger.info(f"podcast_reframe: single crop OK (x={crop_x}, w={crop_w}, method={method_detail})")
-            return {"output_path": output_path, "person_count": pc, "method": method_detail}
+            return {
+                "output_path": output_path,
+                "person_count": pc,
+                "method": method_detail,
+                "subtitle_position_y": 85.0,
+                "subtitle_max_width_pct": 90.0,
+            }
 
         if result.stderr:
             logger.warning(f"podcast_reframe: single crop failed: {result.stderr[-300:]}")
+        return None
+
+    # ─── Render: Gaming Gameplay + Facecam Grid ────────────────────────
+
+    def _render_gaming_gameplay_facecam_grid(
+        self,
+        video_path: str,
+        output_path: str,
+        width: int,
+        height: int,
+        tracked_data: dict,
+    ) -> Optional[dict]:
+        """Gaming grid: gameplay on top, detected person/facecam below."""
+        profile = self._primary_face_profile(tracked_data)
+        if not profile:
+            logger.info("podcast_reframe: gaming grid needs a face → fallback to normal framing")
+            return None
+
+        top_h_out = 1248
+        face_h_out = 672
+        face_crop_x, face_crop_y, face_crop_w, face_crop_h = self._face_panel_crop(
+            profile=profile,
+            frame_w=width,
+            frame_h=height,
+            panel_w=1080,
+            panel_h=face_h_out,
+            face_height_fraction=0.38,
+        )
+
+        vf = (
+            f"split=3[topbg][game][face];"
+            f"[topbg]scale=1080:{top_h_out}:force_original_aspect_ratio=increase,"
+            f"crop=1080:{top_h_out},gblur=sigma=18,eq=brightness=-0.10[bg];"
+            f"[game]scale=1080:{top_h_out}:force_original_aspect_ratio=decrease,"
+            f"format=rgba,pad=1080:{top_h_out}:(ow-iw)/2:(oh-ih)/2:color=black@0[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[top];"
+            f"[face]crop={face_crop_w}:{face_crop_h}:{face_crop_x}:{face_crop_y},"
+            f"scale=1080:{face_h_out},format=yuv420p[person];"
+            f"[top][person]vstack=inputs=2,setsar=1[vout]"
+        )
+
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-filter_complex", vf,
+            "-map", "[vout]", "-map", "0:a?",
+            *get_video_encoder_args("medium"),
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            logger.info(
+                "podcast_reframe: gaming gameplay/facecam grid OK "
+                f"(face_crop={face_crop_w}x{face_crop_h}@{face_crop_x},{face_crop_y})"
+            )
+            return {
+                "output_path": output_path,
+                "person_count": int(tracked_data.get("person_count") or 1),
+                "method": "gaming_gameplay_facecam_grid",
+                "grid_layout": "gaming",
+                "subtitle_position_y": 58.0,
+                "subtitle_max_width_pct": 88.0,
+            }
+
+        if result.stderr:
+            logger.warning(f"podcast_reframe: gaming grid failed: {result.stderr[-300:]}")
+        return None
+
+    # ─── Render: Group Grid (3+ visible people) ────────────────────────
+
+    def _render_group_grid(
+        self, video_path: str, output_path: str, width: int, height: int, decision: dict
+    ) -> Optional[dict]:
+        """Group grid: active speaker top, wider group context below."""
+        active_x = decision["active_x"]
+        group_x = decision["group_x"]
+
+        active_h_out = 1152
+        group_h_out = 768
+
+        active_crop_w = int(height * 15 / 16)
+        active_crop_h = height
+        if active_crop_w > width:
+            active_crop_w = width
+            active_crop_h = int(width * 16 / 15)
+
+        group_crop_w = int(height * 45 / 32)
+        group_crop_h = height
+        if group_crop_w > width:
+            group_crop_w = width
+            group_crop_h = int(width * 32 / 45)
+
+        active_crop_x = self._clamp_x(active_x, active_crop_w, width)
+        group_crop_x = self._clamp_x(group_x, group_crop_w, width)
+        active_crop_y = max(0, (height - active_crop_h) // 2)
+        group_crop_y = max(0, (height - group_crop_h) // 2)
+
+        vf = (
+            f"split=2[active][group];"
+            f"[active]crop={active_crop_w}:{active_crop_h}:{active_crop_x}:{active_crop_y},"
+            f"scale=1080:{active_h_out},format=yuv420p[a];"
+            f"[group]crop={group_crop_w}:{group_crop_h}:{group_crop_x}:{group_crop_y},"
+            f"scale=1080:{group_h_out},format=yuv420p,eq=brightness=-0.04[g];"
+            f"[a][g]vstack=inputs=2,setsar=1[vout]"
+        )
+
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-filter_complex", vf,
+            "-map", "[vout]", "-map", "0:a?",
+            *get_video_encoder_args("medium"),
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            pc = decision.get("person_count", 3)
+            logger.info(
+                f"podcast_reframe: group grid OK (people={pc}, active=x{active_x}, group=x{group_x})"
+            )
+            return {
+                "output_path": output_path,
+                "person_count": pc,
+                "method": "podcast_group_grid",
+                "active_speaker_track": decision.get("active_track_id"),
+                "subtitle_position_y": 52.0,
+                "subtitle_max_width_pct": 84.0,
+            }
+
+        if result.stderr:
+            logger.warning(f"podcast_reframe: group grid failed: {result.stderr[-300:]}")
         return None
 
     # ─── Render: Double Grid ──────────────────────────────────────────────
@@ -1505,7 +1790,13 @@ class PodcastReframeEngine(IReframeEngine):
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
             pc = decision.get("person_count", 2)
             logger.info(f"podcast_reframe: double grid OK (L={left_x}, R={right_x}, crop={crop_w}x{crop_h})")
-            return {"output_path": output_path, "person_count": pc, "method": "podcast_double_grid"}
+            return {
+                "output_path": output_path,
+                "person_count": pc,
+                "method": "podcast_double_grid",
+                "subtitle_position_y": 43.0,
+                "subtitle_max_width_pct": 85.0,
+            }
 
         if result.stderr:
             logger.warning(f"podcast_reframe: double grid failed: {result.stderr[-300:]}")
@@ -1594,6 +1885,8 @@ class PodcastReframeEngine(IReframeEngine):
                 "person_count": pc,
                 "method": "podcast_speaker_emphasis",
                 "active_speaker_track": decision.get("active_track_id"),
+                "subtitle_position_y": 52.0,
+                "subtitle_max_width_pct": 85.0,
             }
 
         # Fallback: try equal 50/50 grid if emphasis fails
@@ -1608,6 +1901,56 @@ class PodcastReframeEngine(IReframeEngine):
         return self._render_double_grid(video_path, output_path, width, height, fallback_decision)
 
     # ─── Utilities ────────────────────────────────────────────────────────
+
+    def _primary_face_profile(self, tracked_data: dict) -> Optional[dict]:
+        """Pick the most useful face profile for a person/facecam panel."""
+        profiles = self._normalise_position_profiles(
+            tracked_data.get("position_target_profiles") or {}
+        )
+        if not profiles:
+            profiles = self._normalise_position_profiles(
+                tracked_data.get("stable_position_profiles") or {}
+            )
+        if not profiles:
+            return None
+        return max(
+            profiles.values(),
+            key=lambda profile: float(profile.get("area", 0.0)),
+        )
+
+    def _face_panel_crop(
+        self,
+        profile: dict,
+        frame_w: int,
+        frame_h: int,
+        panel_w: int,
+        panel_h: int,
+        face_height_fraction: float,
+    ) -> Tuple[int, int, int, int]:
+        """Compute a tight crop around a face while preserving panel aspect."""
+        aspect = panel_w / panel_h
+        face_h = max(1.0, float(profile.get("height", frame_h * 0.2)))
+        crop_h = max(face_h / max(0.2, face_height_fraction), frame_h * 0.18)
+        crop_h = min(float(frame_h), crop_h)
+        crop_w = crop_h * aspect
+        if crop_w > frame_w:
+            crop_w = float(frame_w)
+            crop_h = crop_w / aspect
+
+        crop_w_i = self._even(crop_w)
+        crop_h_i = self._even(crop_h)
+        center_x = float(profile.get("x", frame_w / 2))
+        center_y = float(profile.get("y", frame_h / 2))
+
+        # Slight upward bias: eyes sit above center, so leave more room below.
+        crop_x = int(center_x - crop_w_i / 2)
+        crop_y = int(center_y - crop_h_i * 0.42)
+        crop_x = max(0, min(frame_w - crop_w_i, crop_x))
+        crop_y = max(0, min(frame_h - crop_h_i, crop_y))
+        return self._even(crop_x), self._even(crop_y), crop_w_i, crop_h_i
+
+    def _even(self, value: float) -> int:
+        return max(2, int(value) // 2 * 2)
 
     MIN_FACE_DISTANCE_RATIO = 0.10  # Minimum 10% frame width between 2 faces to be different people
 

@@ -163,6 +163,7 @@ class IYoloReframeEngine(ABC):
         output_path: str,
         target_aspect: str = "9:16",
         autogrid_enabled: bool = False,
+        **kwargs,
     ) -> dict:
         """Reframe video with speaker-aware framing. Returns {output_path, person_count, method}."""
         ...

@@ -75,6 +75,44 @@ async function request<T>(
   return res.json();
 }
 
+async function requestForm<T>(
+  path: string,
+  formData: FormData,
+  options: RequestInit = {}
+): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  let token = getToken();
+
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  let res = await fetch(url, { ...options, method: options.method || "POST", body: formData, headers });
+
+  if (res.status === 401 && token) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      headers["Authorization"] = `Bearer ${newToken}`;
+      res = await fetch(url, { ...options, method: options.method || "POST", body: formData, headers });
+    } else {
+      clearTokens();
+      window.location.href = "/login";
+      throw new Error("Session expired");
+    }
+  }
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new ApiError(res.status, error.detail || "Request failed");
+  }
+
+  return res.json();
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -162,9 +200,13 @@ export interface CreateJobPayload {
   smart_subtitle_position?: boolean;
 }
 
+export type UploadJobPayload = Omit<CreateJobPayload, "youtube_url">;
+
 export interface JobSummary {
   job_id: string;
   youtube_url: string;
+  source_type?: string;
+  source_label?: string;
   video_title: string;
   status: string;
   video_duration: number | null;
@@ -192,6 +234,8 @@ export interface JobListResponse {
 export interface JobResponse {
   job_id: string;
   youtube_url: string;
+  source_type?: string;
+  source_label?: string;
   status: string;
   video_duration: number | null;
   render_progress: string | null;
@@ -232,6 +276,8 @@ export interface JobDetailResponse {
   data: {
     job_id: string;
     youtube_url: string;
+    source_type?: string;
+    source_label?: string;
     status: string;
     video_duration: number | null;
     style_preset: string | null;
@@ -315,6 +361,13 @@ export const jobs = {
     });
   },
 
+  async createUpload(file: File, payload: UploadJobPayload): Promise<JobResponse> {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("options_json", JSON.stringify(payload));
+    return requestForm<JobResponse>("/api/jobs/upload", formData);
+  },
+
   async cancel(jobId: string): Promise<{ success: boolean; message: string }> {
     return request(`/api/jobs/${jobId}/cancel`, { method: "POST" });
   },
@@ -359,10 +412,10 @@ export const jobs = {
     });
   },
 
-  async editStyle(jobId: string, rank: number, hookStyle: string, config?: any): Promise<any> {
+  async editStyle(jobId: string, rank: number, hookStyle: string, config?: any, subtitleConfig?: any): Promise<any> {
     return request(`/api/jobs/${jobId}/clips/${rank}/style`, {
       method: "PATCH",
-      body: JSON.stringify({ hook_style: hookStyle, hook_style_config: config }),
+      body: JSON.stringify({ hook_style: hookStyle, hook_style_config: config, subtitle_style_config: subtitleConfig }),
     });
   },
 

@@ -30,6 +30,7 @@ class JobRepository(IJobRepository):
                 threejs_enabled=int(job.threejs_enabled),
                 remotion_quality=job.remotion_quality,
                 user_id=job.user_id,
+                pipeline_version=job.pipeline_version,
             )
             session.add(model)
             await session.commit()
@@ -147,6 +148,8 @@ class JobRepository(IJobRepository):
             threejs_enabled=bool(model.threejs_enabled),
             scene_graphs=model.scene_graphs,
             remotion_quality=model.remotion_quality or "medium",
+            user_id=model.user_id,
+            pipeline_version=model.pipeline_version or "v1",
             created_at=model.created_at,
             updated_at=model.updated_at,
         )

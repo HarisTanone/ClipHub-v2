@@ -61,6 +61,7 @@ class Settings(BaseSettings):
 
     # === Limits ===
     MAX_VIDEO_DURATION: int = 300 if PIPELINE_ENV == "local" else 3600
+    MAX_UPLOAD_SIZE_MB: int = 2048 if PIPELINE_ENV == "local" else 5120
     DOWNLOAD_TIMEOUT: int = 300 if PIPELINE_ENV == "local" else 600
     MIN_CLIP_DURATION: float = 45.0
 

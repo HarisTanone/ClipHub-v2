@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Eye, User, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save } from "lucide-react";
+import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -18,6 +18,9 @@ export function NewJob() {
   const toast = useToast();
   const { user } = useAuth();
   const [url, setUrl] = useState("");
+  const [sourceMode, setSourceMode] = useState<"youtube" | "upload">("youtube");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [templateMode] = useState<"custom">("custom");
   const [forceReprocess, setForceReprocess] = useState(false);
@@ -98,6 +101,21 @@ export function NewJob() {
     return true;
   }
 
+  function validateUpload(file: File | null): boolean {
+    if (!file) { setUploadError("Video file required"); return false; }
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    if (!["mp4", "mov", "m4v", "mkv", "webm"].includes(ext)) {
+      setUploadError("Use MP4, MOV, MKV, or WEBM");
+      return false;
+    }
+    if (file.size <= 0) {
+      setUploadError("File is empty");
+      return false;
+    }
+    setUploadError("");
+    return true;
+  }
+
   function handleUrlChange(value: string) {
     setUrl(value);
     if (urlError) validateUrl(value);
@@ -115,31 +133,36 @@ export function NewJob() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!validateUrl(url)) return;
+    if (sourceMode === "youtube" && !validateUrl(url)) return;
+    if (sourceMode === "upload" && !validateUpload(uploadFile)) return;
     setIsSubmitting(true);
-    // Auto-prefix https:// if missing
-    let submitUrl = url.trim();
-    if (!submitUrl.startsWith("http")) {
-      submitUrl = "https://www." + submitUrl;
-    } else if (submitUrl.startsWith("http://")) {
-      submitUrl = submitUrl.replace("http://", "https://");
-    }
+    const jobOptions = {
+      target_aspect_ratio: aspectRatio,
+      hook_style: hookStyleConfig.animation || undefined,
+      force_reprocess: sourceMode === "youtube" ? forceReprocess : true,
+      use_remotion: true,
+      ai_layer_enabled: true,
+      threejs_enabled: false,
+      remotion_quality: "medium",
+      hook_style_config: { ...hookStyleConfig, template_mode: templateMode },
+      subtitle_style_config: subtitleStyleConfig,
+      smart_camera: smartCamera,
+      smart_subtitle_position: smartSubtitlePos,
+      autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
+    };
     try {
-      const res = await jobs.create({
-        youtube_url: submitUrl,
-        target_aspect_ratio: aspectRatio,
-        hook_style: hookStyleConfig.animation || undefined,
-        force_reprocess: forceReprocess,
-        use_remotion: true,
-        ai_layer_enabled: true,
-        threejs_enabled: false,
-        remotion_quality: "medium",
-        hook_style_config: { ...hookStyleConfig, template_mode: templateMode },
-        subtitle_style_config: subtitleStyleConfig,
-        smart_camera: smartCamera,
-        smart_subtitle_position: smartSubtitlePos,
-        autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
-      });
+      let res;
+      if (sourceMode === "upload" && uploadFile) {
+        res = await jobs.createUpload(uploadFile, jobOptions);
+      } else {
+        let submitUrl = url.trim();
+        if (!submitUrl.startsWith("http")) {
+          submitUrl = "https://www." + submitUrl;
+        } else if (submitUrl.startsWith("http://")) {
+          submitUrl = submitUrl.replace("http://", "https://");
+        }
+        res = await jobs.create({ youtube_url: submitUrl, ...jobOptions });
+      }
       toast.success(`Job created: ${res.job_id}`);
       navigate(`/jobs/${res.job_id}`);
     } catch (e: any) {
@@ -167,29 +190,86 @@ export function NewJob() {
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-hidden">
         {/* Left: URL + Config (col-4) */}
         <div className="lg:col-span-4 space-y-3 overflow-y-auto">
-          {/* URL */}
+          {/* Source */}
           <Card className="p-3">
-            <Input label="YouTube URL" placeholder="https://youtube.com/watch?v=..." type="url" value={url} onChange={(e) => handleUrlChange(e.target.value)} error={urlError} />
-            {(isLoadingPreview || videoMeta) && (
-              <div className="mt-2 rounded-lg border border-zinc-800/60 bg-zinc-900/50 overflow-hidden">
-                {isLoadingPreview && !videoMeta ? (
-                  <div className="flex items-center gap-2 p-2"><div className="h-3 w-3 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" /><span className="text-[10px] text-zinc-500">Loading...</span></div>
-                ) : videoMeta ? (
-                  <div className="flex gap-2 p-2">
-                    <img src={videoMeta.thumbnail} alt="" className="shrink-0 w-20 h-12 rounded object-cover" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] text-zinc-200 font-medium line-clamp-1">{videoMeta.title}</p>
-                      <p className="text-[9px] text-zinc-500 flex items-center gap-1.5 mt-0.5">
-                        <span>{videoMeta.channel}</span><span>{videoMeta.duration_string}</span>
-                      </p>
-                      {videoMeta.duration && videoMeta.duration < 45 && (
-                        <p className="text-[9px] text-amber-400 mt-1">
-                          Video pendek — clip yang dihasilkan AI dengan durasi di bawah 15 detik tidak akan diproses.
-                        </p>
-                      )}
-                    </div>
+            <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg border border-zinc-800 bg-zinc-950/70 p-1">
+              <button
+                type="button"
+                onClick={() => setSourceMode("youtube")}
+                className={cn("flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors", sourceMode === "youtube" ? "bg-emerald-600 text-white" : "text-zinc-500 hover:text-zinc-300")}
+              >
+                <Youtube className="h-3.5 w-3.5" /> YouTube URL
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSourceMode("upload");
+                  setUrlError("");
+                  setVideoMeta(null);
+                }}
+                className={cn("flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors", sourceMode === "upload" ? "bg-emerald-600 text-white" : "text-zinc-500 hover:text-zinc-300")}
+              >
+                <UploadCloud className="h-3.5 w-3.5" /> Upload Video
+              </button>
+            </div>
+
+            {sourceMode === "youtube" ? (
+              <>
+                <Input label="YouTube URL" placeholder="https://youtube.com/watch?v=..." type="url" value={url} onChange={(e) => handleUrlChange(e.target.value)} error={urlError} />
+                {(isLoadingPreview || videoMeta) && (
+                  <div className="mt-2 rounded-lg border border-zinc-800/60 bg-zinc-900/50 overflow-hidden">
+                    {isLoadingPreview && !videoMeta ? (
+                      <div className="flex items-center gap-2 p-2"><div className="h-3 w-3 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" /><span className="text-[10px] text-zinc-500">Loading...</span></div>
+                    ) : videoMeta ? (
+                      <div className="flex gap-2 p-2">
+                        <img src={videoMeta.thumbnail} alt="" className="shrink-0 w-20 h-12 rounded object-cover" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] text-zinc-200 font-medium line-clamp-1">{videoMeta.title}</p>
+                          <p className="text-[9px] text-zinc-500 flex items-center gap-1.5 mt-0.5">
+                            <span>{videoMeta.channel}</span><span>{videoMeta.duration_string}</span>
+                          </p>
+                          {videoMeta.duration && videoMeta.duration < 45 && (
+                            <p className="text-[9px] text-amber-400 mt-1">
+                              Video pendek — clip yang dihasilkan AI dengan durasi di bawah 15 detik tidak akan diproses.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
+                )}
+              </>
+            ) : (
+              <div className="space-y-2">
+                <label className={cn("group flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-3 py-4 text-center transition-colors", uploadFile ? "border-emerald-500/40 bg-emerald-500/[0.04]" : "border-zinc-700 bg-zinc-900/40 hover:border-zinc-600")}>
+                  <input
+                    key={uploadFile ? uploadFile.name : "empty-upload"}
+                    type="file"
+                    accept="video/mp4,video/quicktime,video/x-m4v,video/x-matroska,video/webm,.mp4,.mov,.m4v,.mkv,.webm"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      setUploadFile(file);
+                      if (file) validateUpload(file);
+                    }}
+                  />
+                  <UploadCloud className={cn("mb-2 h-6 w-6", uploadFile ? "text-emerald-400" : "text-zinc-600 group-hover:text-zinc-400")} />
+                  <span className="text-xs font-medium text-zinc-300">{uploadFile ? "Video selected" : "Choose video file"}</span>
+                  <span className="mt-1 text-[10px] text-zinc-600">MP4, MOV, MKV, WEBM</span>
+                </label>
+                {uploadFile && (
+                  <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
+                    <FileVideo className="h-4 w-4 shrink-0 text-emerald-400" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[11px] font-medium text-zinc-200">{uploadFile.name}</p>
+                      <p className="text-[9px] text-zinc-600">{(uploadFile.size / 1024 / 1024).toFixed(1)} MB</p>
+                    </div>
+                    <button type="button" onClick={() => { setUploadFile(null); setUploadError(""); }} className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+                {uploadError && <p className="text-[10px] text-red-400">{uploadError}</p>}
               </div>
             )}
           </Card>
@@ -209,12 +289,10 @@ export function NewJob() {
             </div>
           </Card>
 
-          {/* Autogrid removed — now automatic based on multi-speaker detection */}
-
           {/* Options */}
           <Card className="p-3">
-            <Toggle label="Force Reprocess" description={videoMeta?.cache?.has_cache ? "Video sudah pernah diproses. Aktifkan untuk proses ulang dari awal." : "Proses ulang meski video sudah pernah diproses"} checked={forceReprocess} onChange={setForceReprocess} />
-            {videoMeta?.cache && (
+            <Toggle label="Force Reprocess" description={sourceMode === "upload" ? "Upload manual selalu diproses sebagai job baru." : videoMeta?.cache?.has_cache ? "Video sudah pernah diproses. Aktifkan untuk proses ulang dari awal." : "Proses ulang meski video sudah pernah diproses"} checked={sourceMode === "upload" ? true : forceReprocess} onChange={setForceReprocess} disabled={sourceMode === "upload"} />
+            {sourceMode === "youtube" && videoMeta?.cache && (
               <div className={cn("mt-2 rounded-lg px-2.5 py-2 text-[10px]", videoMeta.cache.has_cache ? "bg-amber-500/8 border border-amber-500/20" : "bg-zinc-800/50 border border-zinc-800")}>
                 {videoMeta.cache.has_cache ? (
                   <div className="space-y-0.5">
@@ -241,6 +319,15 @@ export function NewJob() {
               </FeatureLock>
               <FeatureLock featureName="Smart Subtitle Position" featureCode="smart_subtitle_pos" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
                 <Toggle label="Smart Subtitle Position" description="Auto posisi subtitle (hindari wajah)" checked={smartSubtitlePos} onChange={setSmartSubtitlePos} />
+              </FeatureLock>
+              <FeatureLock featureName="Auto Grid" featureCode="auto_grid" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
+                <Toggle
+                  label="Auto-Grid"
+                  description="Deteksi gaming/podcast: grid otomatis saat layout lebih kuat dari single crop"
+                  checked={autogridEnabled}
+                  onChange={setAutogridEnabled}
+                  disabled={aspectRatio !== "9:16"}
+                />
               </FeatureLock>
             </div>
           </Card>

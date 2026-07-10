@@ -72,7 +72,11 @@ def sanitize_subtitle_words(
 
 def grid_subtitle_position_y(method: str) -> Optional[float]:
     """Return Remotion subtitle Y% for grid reframing methods."""
+    if "gameplay_facecam" in method or "gaming" in method:
+        return 58.0
     if "speaker_emphasis" in method or "emphasis" in method:
+        return 52.0
+    if "group_grid" in method:
         return 52.0
     if "double" in method or "grid" in method:
         return 43.0

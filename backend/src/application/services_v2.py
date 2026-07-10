@@ -17,8 +17,11 @@ Pipeline Steps (V2):
   11+ Hook + Subtitle Render — Remotion only, matching preview config
 """
 import asyncio
+import json
 import logging
 import os
+import shutil
+import subprocess
 import time
 from dataclasses import asdict
 from typing import Optional, TYPE_CHECKING
@@ -40,6 +43,12 @@ from src.domain.interfaces import (
     ISubtitleRenderer,
     IWhisperLocal,
     IYoloReframeEngine,
+)
+from src.infrastructure.content_intelligence import ContentIntelligence
+from src.infrastructure.smart_subtitle_style import (
+    apply_smart_word_highlights,
+    build_smart_editorial_subtitle_style,
+    smart_editorial_enabled,
 )
 from src.infrastructure.subtitle_words import (
     grid_subtitle_position_y as resolve_grid_subtitle_position_y,
@@ -163,6 +172,57 @@ class V2PipelineService:
             n = min(n, limit)
         return n
 
+    def _source_info(self, job: Job) -> dict:
+        if isinstance(job.clips_data, dict) and isinstance(job.clips_data.get("source"), dict):
+            return job.clips_data["source"]
+        return {"type": "youtube", "url": job.youtube_url}
+
+    def _is_upload_source(self, job: Job) -> bool:
+        return self._source_info(job).get("type") == "upload"
+
+    def _probe_local_duration(self, video_path: str) -> float:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                video_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-300:] or "ffprobe failed")
+        data = json.loads(result.stdout or "{}")
+        duration = float((data.get("format") or {}).get("duration") or 0)
+        if duration <= 0:
+            raise RuntimeError("durasi video tidak terbaca")
+        return duration
+
+    async def _prepare_uploaded_video(self, job: Job, video_path: str) -> tuple[str, float]:
+        source = self._source_info(job)
+        source_path = str(source.get("path") or "")
+        if not source_path or not os.path.exists(source_path):
+            raise FileNotFoundError("File upload tidak ditemukan")
+
+        os.makedirs(os.path.dirname(video_path), exist_ok=True)
+        if os.path.abspath(source_path) != os.path.abspath(video_path):
+            try:
+                os.link(source_path, video_path)
+            except OSError:
+                shutil.copy2(source_path, video_path)
+
+        duration = float(source.get("duration") or 0) or self._probe_local_duration(video_path)
+        if duration > settings.MAX_VIDEO_DURATION:
+            minutes = int(duration // 60)
+            raise RuntimeError(
+                f"Video terlalu panjang ({minutes} menit). Maksimal {settings.MAX_VIDEO_DURATION // 60} menit."
+            )
+        title = str(source.get("filename") or os.path.basename(source_path) or "Uploaded video")
+        return title, duration
+
     # ─── Main Pipeline ────────────────────────────────────────────────────────
 
     async def run_pipeline(self, job: Job) -> None:
@@ -179,18 +239,21 @@ class V2PipelineService:
         video_path = f"{settings.DOWNLOAD_DIR}/{job_id}.mp4"
         output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
         os.makedirs(output_dir, exist_ok=True)
+        video_title = ""
         pipeline_start = time.time()
 
         # ─── Cache setup ──────────────────────────────────────────────
         from src.infrastructure.cache_manager import CacheManager
         cache = CacheManager()
-        video_id = cache.extract_video_id(url)
-        force_reprocess = bool(job.clips_data and job.clips_data.get("force_reprocess"))
 
         # Re-read clips_data from DB for style configs
         fresh_job = await self._repo.get_by_job_id(job_id)
         if fresh_job and fresh_job.clips_data:
             job.clips_data = fresh_job.clips_data
+
+        is_upload_source = self._is_upload_source(job)
+        video_id = None if is_upload_source else cache.extract_video_id(url)
+        force_reprocess = bool(job.clips_data and job.clips_data.get("force_reprocess"))
 
         if force_reprocess and video_id:
             cache.invalidate(video_id)
@@ -208,21 +271,37 @@ class V2PipelineService:
             # ═══ Step 1: Validate ═══
             self._emit(job_id, 1, "validate", "start")
             await self._repo.update_status(job_id, JobStatus.VALIDATING)
-            valid, error_or_title, duration = await self._downloader.validate_url(url)
-            if not valid:
-                await self._repo.update_status(job_id, JobStatus.FAILED, error_or_title)
-                return
-            job.video_duration = duration
-            if error_or_title and valid:
+            if is_upload_source:
                 try:
-                    await self._repo.update_video_title(job_id, error_or_title)
+                    video_title, duration = await self._prepare_uploaded_video(job, video_path)
+                except Exception as e:
+                    await self._repo.update_status(job_id, JobStatus.FAILED, str(e)[:512])
+                    return
+                job.video_duration = duration
+                try:
+                    await self._repo.update_video_title(job_id, video_title)
                 except Exception:
                     pass
+            else:
+                valid, error_or_title, duration = await self._downloader.validate_url(url)
+                if not valid:
+                    await self._repo.update_status(job_id, JobStatus.FAILED, error_or_title)
+                    return
+                video_title = error_or_title or ""
+                job.video_duration = duration
+                if error_or_title and valid:
+                    try:
+                        await self._repo.update_video_title(job_id, error_or_title)
+                    except Exception:
+                        pass
             self._emit(job_id, 1, "validate", "complete")
 
             # ═══ Step 2: Download (SKIP if cached) ═══
             cached_video = cache.get_video_path(video_id) if video_id else None
-            if cached_video:
+            if is_upload_source:
+                self._emit(job_id, 2, "download", "complete")
+                logger.info(f"[{job_id}] Upload source ready: {video_path}")
+            elif cached_video:
                 import shutil
                 if not os.path.exists(video_path):
                     try:
@@ -255,8 +334,16 @@ class V2PipelineService:
                 self._emit(job_id, 3, "v2_transcript", "start")
                 await self._repo.update_status(job_id, JobStatus.V2_TRANSCRIBING)
                 try:
-                    transcriber = self._get_transcriber()
-                    transcript_result = await transcriber.transcribe(url, duration)
+                    if is_upload_source:
+                        from src.infrastructure.local_transcriber import LocalTranscriber
+                        transcript_result, _raw_segments = await LocalTranscriber(self._whisper).transcribe(
+                            video_path, duration
+                        )
+                        if not transcript_result.segments:
+                            raise RuntimeError("Tidak ada suara/transkrip terdeteksi di video upload")
+                    else:
+                        transcriber = self._get_transcriber()
+                        transcript_result = await transcriber.transcribe(url, duration)
                 except Exception as e:
                     error_msg = str(e)
                     if "no transcript" in error_msg.lower() or "tidak tersedia" in error_msg.lower():
@@ -340,6 +427,31 @@ class V2PipelineService:
                 analysis_result.creative_direction
             ) if analysis_result.creative_direction else CreativeDirection()
 
+            content_profile = ContentIntelligence().detect(
+                metadata={"title": video_title, "url": url},
+                transcript_text=transcript_result.full_text,
+                clip_hints=[asdict(c) for c in analysis_result.clips],
+                autogrid_enabled=job.autogrid_enabled,
+            )
+            merged_clips_data = dict(job.clips_data or {})
+            merged_clips_data["content_profile"] = content_profile.to_dict()
+            merged_clips_data["smart_features"] = {
+                "smart_camera": bool(merged_clips_data.get("smart_camera")),
+                "smart_subtitle_position": bool(merged_clips_data.get("smart_subtitle_position")),
+                "auto_grid": bool(job.autogrid_enabled),
+                "smart_subtitle_template": bool(
+                    merged_clips_data.get("smart_camera")
+                    and merged_clips_data.get("smart_subtitle_position")
+                ),
+                "render_engine": "remotion",
+            }
+            job.clips_data = merged_clips_data
+            await self._repo.update_clips_data(job_id, merged_clips_data)
+            logger.info(
+                f"[{job_id}] Content profile: type={content_profile.content_type}, "
+                f"confidence={content_profile.confidence}, grid={content_profile.grid_strategy}"
+            )
+
             # ═══ Step 5: Prepare Clips ═══
             self._emit(job_id, 5, "prepare_clips", "start")
             await self._repo.update_status(job_id, JobStatus.PREPARING)
@@ -397,7 +509,13 @@ class V2PipelineService:
                     out_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
                     try:
                         result = await self._yolo_reframe.process(
-                            in_path, out_path, job.target_aspect_ratio, flags.autogrid_enabled
+                            in_path,
+                            out_path,
+                            job.target_aspect_ratio,
+                            flags.autogrid_enabled,
+                            content_profile=(job.clips_data or {}).get("content_profile", {}),
+                            smart_camera=bool((job.clips_data or {}).get("smart_camera")),
+                            smart_subtitle_position=bool((job.clips_data or {}).get("smart_subtitle_position")),
                         )
                         reframe_data[clip.rank] = result
                     except Exception as e:
@@ -474,6 +592,13 @@ class V2PipelineService:
                 raw_words = words_per_clip.get(clip.rank, [])
                 clip_duration = round(clip.end - clip.start, 3)
                 valid_words = sanitize_subtitle_words(raw_words, clip_duration)
+                if smart_editorial_enabled(job.clips_data):
+                    valid_words = apply_smart_word_highlights(
+                        valid_words,
+                        hook_text=clip.hook,
+                        reason_text=clip.reason,
+                        content_profile=(job.clips_data or {}).get("content_profile", {}),
+                    )
                 clips_with_words[clip.rank] = valid_words
                 if valid_words:
                     logger.info(
@@ -520,6 +645,23 @@ class V2PipelineService:
                 clips, clips_with_words, creative_direction, output_dir,
                 transcript_source=transcript_result.source,
             )
+            if job.clips_data:
+                for key in (
+                    "hook_style_config",
+                    "content_profile",
+                    "smart_features",
+                    "source",
+                    "source_type",
+                ):
+                    if job.clips_data.get(key):
+                        clips_data[key] = job.clips_data[key]
+                if smart_editorial_enabled(job.clips_data):
+                    clips_data["subtitle_style_config"] = build_smart_editorial_subtitle_style(
+                        job.clips_data.get("subtitle_style_config", {}),
+                        job.clips_data.get("content_profile", {}),
+                    )
+                elif job.clips_data.get("subtitle_style_config"):
+                    clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
             await self._repo.update_clips_data(job_id, clips_data)
 
             total_time = time.time() - pipeline_start
@@ -613,6 +755,11 @@ class V2PipelineService:
         if job.clips_data:
             hook_style_config = job.clips_data.get("hook_style_config", {})
             subtitle_style_config = job.clips_data.get("subtitle_style_config", {})
+            if smart_editorial_enabled(job.clips_data):
+                subtitle_style_config = build_smart_editorial_subtitle_style(
+                    subtitle_style_config,
+                    job.clips_data.get("content_profile", {}),
+                )
 
         logger.info(
             f"[{job_id}] Render style: hook_anim={hook_style_config.get('animation', 'N/A')}, "
@@ -689,8 +836,16 @@ class V2PipelineService:
                 clip_reframe = reframe_data.get(clip.rank)
                 if clip_reframe and isinstance(clip_reframe, dict):
                     method = clip_reframe.get("method", "")
-                    is_grid_mode = "grid" in method or "double" in method or "emphasis" in method
-                    grid_subtitle_position_y = resolve_grid_subtitle_position_y(method)
+                    is_grid_mode = (
+                        "grid" in method
+                        or "double" in method
+                        or "emphasis" in method
+                        or "gameplay_facecam" in method
+                    )
+                    grid_subtitle_position_y = (
+                        clip_reframe.get("subtitle_position_y")
+                        or resolve_grid_subtitle_position_y(method)
+                    )
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")
@@ -699,8 +854,22 @@ class V2PipelineService:
                 cd_dict["hook_style_config"] = hook_style_config
                 cd_dict["subtitle_style_config"] = subtitle_style_config
                 cd_dict["is_grid_mode"] = is_grid_mode
+                cd_dict["content_profile"] = (job.clips_data or {}).get("content_profile", {})
+                cd_dict["smart_features"] = (job.clips_data or {}).get("smart_features", {})
+                if clip_reframe and isinstance(clip_reframe, dict):
+                    cd_dict["reframe_method"] = clip_reframe.get("method", "")
+                    max_width = clip_reframe.get("subtitle_max_width_pct")
+                    if max_width is not None:
+                        cd_dict["grid_subtitle_max_width_pct"] = float(max_width)
+                    if (job.clips_data or {}).get("smart_subtitle_position"):
+                        sub_config = dict(cd_dict.get("subtitle_style_config") or {})
+                        if grid_subtitle_position_y is not None:
+                            sub_config["positionY"] = float(grid_subtitle_position_y)
+                        if max_width is not None:
+                            sub_config["maxWidthPct"] = float(max_width)
+                        cd_dict["subtitle_style_config"] = sub_config
                 if grid_subtitle_position_y is not None:
-                    cd_dict["grid_subtitle_position_y"] = grid_subtitle_position_y
+                    cd_dict["grid_subtitle_position_y"] = float(grid_subtitle_position_y)
 
                 try:
                     result = await self._remotion_adapter.render_clip(

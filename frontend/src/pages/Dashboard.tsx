@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle } from "lucide-react";
+import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle, FileVideo } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -63,6 +63,7 @@ export function Dashboard() {
       const q = search.toLowerCase();
       list = list.filter((j) =>
         (j.video_title || "").toLowerCase().includes(q) ||
+        (j.source_label || "").toLowerCase().includes(q) ||
         j.youtube_url.toLowerCase().includes(q) ||
         j.job_id.toLowerCase().includes(q)
       );
@@ -83,6 +84,10 @@ export function Dashboard() {
   function getYouTubeThumb(url: string): string | null {
     const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
     return match ? `https://i.ytimg.com/vi/${match[1]}/default.jpg` : null;
+  }
+
+  function getSourceLabel(job: JobSummary): string {
+    return job.video_title || job.source_label || truncateUrl(job.youtube_url, 60);
   }
 
   return (
@@ -210,13 +215,14 @@ export function Dashboard() {
             <EmptyState
               icon={<Inbox className="h-8 w-8" />}
               title={search ? "No results" : "No jobs yet"}
-              description={search ? "Try a different search term" : "Submit a YouTube URL to generate clips"}
+              description={search ? "Try a different search term" : "Submit a YouTube URL or upload a video to generate clips"}
               action={!search ? <Link to="/jobs/new"><Button size="sm" icon={<PlusCircle className="h-3.5 w-3.5" />}>Create first job</Button></Link> : undefined}
             />
           ) : (
             <div className="divide-y divide-zinc-800/40">
               {paginated.map((job) => {
-                const thumb = getYouTubeThumb(job.youtube_url);
+                const isUpload = job.source_type === "upload";
+                const thumb = isUpload ? null : getYouTubeThumb(job.youtube_url);
                 return (
                   <Link
                     key={job.job_id}
@@ -227,6 +233,10 @@ export function Dashboard() {
                     <div className="relative shrink-0 w-20 h-12 rounded-lg overflow-hidden bg-zinc-800 border border-zinc-800">
                       {thumb ? (
                         <img src={thumb} alt="" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
+                      ) : isUpload ? (
+                        <div className="w-full h-full flex items-center justify-center bg-emerald-500/[0.04]">
+                          <FileVideo className="h-4 w-4 text-emerald-400" />
+                        </div>
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <Activity className="h-3 w-3 text-zinc-700" />
@@ -238,8 +248,9 @@ export function Dashboard() {
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-zinc-200 truncate group-hover:text-zinc-100">{job.video_title || truncateUrl(job.youtube_url, 60)}</p>
+                      <p className="text-sm font-medium text-zinc-200 truncate group-hover:text-zinc-100">{getSourceLabel(job)}</p>
                       <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-1 flex-wrap">
+                        <span className={isUpload ? "text-emerald-400" : "text-red-400"}>{isUpload ? "UPLOAD" : "YOUTUBE"}</span>
                         <span className="font-mono">{job.job_id.replace("job_", "").slice(0, 8)}</span>
                         <span>{job.target_aspect_ratio || "9:16"}</span>
                         {job.pipeline_version && <span className={job.pipeline_version === "v2" ? "text-blue-400" : "text-emerald-400"}>{job.pipeline_version.toUpperCase()}</span>}

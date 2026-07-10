@@ -73,6 +73,16 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   const gridSubtitlePositionY = typeof creativeDirection.grid_subtitle_position_y === "number"
     ? creativeDirection.grid_subtitle_position_y
     : 50;
+  const gridSubtitleMaxWidthPct = typeof creativeDirection.grid_subtitle_max_width_pct === "number"
+    ? creativeDirection.grid_subtitle_max_width_pct
+    : undefined;
+  const subtitleConfig = isGridMode
+    ? {
+      ...subtitle.config,
+      positionY: gridSubtitlePositionY,
+      ...(gridSubtitleMaxWidthPct ? { maxWidthPct: gridSubtitleMaxWidthPct } : {}),
+    }
+    : subtitle.config;
 
   const hookDurationFrames = Math.floor(hook.duration * fps);
 
@@ -109,7 +119,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
                 .filter(w => w.end > hook.duration)
                 .map(w => ({ ...w, start: Math.max(w.start, hook.duration) }))
               : words}
-            config={isGridMode ? { ...subtitle.config, positionY: gridSubtitlePositionY } : subtitle.config}
+            config={subtitleConfig}
             fps={fps}
           />
         </AbsoluteFill>

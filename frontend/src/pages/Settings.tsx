@@ -48,6 +48,7 @@ const PREMIUM_FEATURES = [
   { code: "dual_subtitle", name: "Dual Font Style" },
   { code: "smart_camera", name: "Smart Camera" },
   { code: "smart_subtitle_pos", name: "Smart Subtitle Position" },
+  { code: "auto_grid", name: "Auto Grid" },
   { code: "threejs_effects", name: "Three.js Effects" },
   { code: "ai_layer", name: "AI Layer" },
 ];

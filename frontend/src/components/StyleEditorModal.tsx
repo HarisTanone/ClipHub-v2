@@ -333,6 +333,39 @@ const HIGHLIGHT_STYLE_META: Record<SubtitleStyle["highlightStyle"], OptionMeta> 
   strikethrough: { label: "Strike", mood: "Contrarian", accent: "#FB7185", preview: "DEL", desc: "Cocok untuk kontra atau koreksi." },
 };
 
+type HookCapabilities = {
+  badge: boolean;
+  decorative: boolean;
+  gradient: boolean;
+  panel: boolean;
+  outline: boolean;
+};
+
+const DEFAULT_HOOK_CAPABILITIES: HookCapabilities = {
+  badge: true,
+  decorative: true,
+  gradient: true,
+  panel: false,
+  outline: true,
+};
+
+const HOOK_CAPABILITIES: Record<string, HookCapabilities> = {
+  podcast_lower_third: { badge: true, decorative: true, gradient: false, panel: false, outline: false },
+  quote_card: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
+  waveform_pulse: { badge: true, decorative: true, gradient: true, panel: false, outline: false },
+  breaking_tape: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
+  mic_drop: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
+  split_panel: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
+  kinetic_stack: { badge: false, decorative: false, gradient: false, panel: true, outline: false },
+  glass_flash: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
+  marker_swipe: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
+  signal_scan: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
+};
+
+function hookCapabilities(animation: string): HookCapabilities {
+  return HOOK_CAPABILITIES[animation] || DEFAULT_HOOK_CAPABILITIES;
+}
+
 const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = [
   { id: "podcast_lower_third_preset", name: "On-Air Lower", style: { animation: "podcast_lower_third", color: "#F8FAFC", bgColor: "#06111F", bgOpacity: 0.42, fontSize: 46, fontFamily: "Barlow Condensed", fontWeight: "900", uppercase: true, position: "bottom", positionY: 78, shadowEnabled: true, shadowBlur: 18, lineEnabled: false, lineColor: "#16F2B3", badgeEnabled: true, badgeText: "ON AIR", decorativeElements: true, motionIntensity: 1.0 } },
   { id: "quote_card_preset", name: "Quote Card", style: { animation: "quote_card", color: "#171717", bgColor: "#0B0F14", bgOpacity: 0.32, boxColor: "#F5EFE1", boxOpacity: 0.96, fontSize: 44, fontFamily: "Playfair Display", fontWeight: "800", lineHeight: 1.18, position: "center", positionY: 50, shadowEnabled: true, shadowBlur: 22, shadowY: 8, lineColor: "#FF4D2D", badgeEnabled: false, badgeText: "QUOTE", decorativeElements: true, motionIntensity: 0.7 } },
@@ -1556,6 +1589,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
   useGoogleFont(style.fontFamily);
   const previewAspect = aspectRatio === "16:9" ? "16/9" : aspectRatio === "1:1" ? "1/1" : "9/16";
   const activeAnimation = HOOK_ANIMATION_META[style.animation] || HOOK_ANIMATION_META.podcast_lower_third;
+  const capabilities = hookCapabilities(style.animation);
+  const isModernHookStyle = Boolean(HOOK_CAPABILITIES[style.animation]);
   const visibleHookPresets = getPageItems(HOOK_PRESETS, presetPage);
   const visibleHookAnimations = getPageItems(HOOK_ANIMATIONS, animationPage);
 
@@ -1621,8 +1656,9 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
           <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Checkbox label="Show badge / label" checked={style.badgeEnabled} onChange={(v) => update({ badgeEnabled: v })} />
-                {style.badgeEnabled && (
+                <Checkbox label="Show badge / label" checked={style.badgeEnabled} onChange={(v) => update({ badgeEnabled: v })} disabled={!capabilities.badge} />
+                {!capabilities.badge && <UnavailableHint text="Style ini tidak memakai badge." />}
+                {style.badgeEnabled && capabilities.badge && (
                   <input
                     type="text"
                     value={style.badgeText}
@@ -1633,7 +1669,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
                 )}
               </div>
               <div className="space-y-2">
-                <Checkbox label="Decorative motion elements" checked={style.decorativeElements} onChange={(v) => update({ decorativeElements: v })} />
+                <Checkbox label="Decorative motion elements" checked={style.decorativeElements} onChange={(v) => update({ decorativeElements: v })} disabled={!capabilities.decorative} />
+                {!capabilities.decorative && <UnavailableHint text="Style ini memakai motion utama tanpa dekorasi tambahan." />}
                 <RangeInput label={`Motion: ${style.motionIntensity.toFixed(1)}x`} min={0} max={20} value={Math.round(style.motionIntensity * 10)} onChange={(v) => update({ motionIntensity: v / 10 })} />
               </div>
             </div>
@@ -1662,12 +1699,14 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
           <div className="grid grid-cols-2 gap-3">
             <ColorPicker label="Text Color" value={style.color} onChange={(v) => update({ color: v })} />
             <ColorPicker label="Background" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
+            {isModernHookStyle && <ColorPicker label="Template Accent" value={style.lineColor} onChange={(v) => update({ lineColor: v })} />}
           </div>
           <RangeInput label={`BG Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
           <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              <Checkbox label="Text gradient" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} />
-              {style.gradientEnabled && (
+              <Checkbox label="Text gradient" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} disabled={!capabilities.gradient} />
+              {!capabilities.gradient && <UnavailableHint text="Style ini memakai warna solid dari template." />}
+              {style.gradientEnabled && capabilities.gradient && (
                 <div className="mt-2 space-y-2">
                   <ColorPicker label="From" value={style.gradientFrom} onChange={(v) => update({ gradientFrom: v })} />
                   <ColorPicker label="To" value={style.gradientTo} onChange={(v) => update({ gradientTo: v })} />
@@ -1732,19 +1771,32 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl }: { style: Hoo
         <Section title="Text Box / Outline">
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              <Checkbox label="Box around text" checked={style.boxEnabled} onChange={(v) => update({ boxEnabled: v })} />
-              {style.boxEnabled && (
-                <div className="mt-2 space-y-2">
-                  <ColorPicker label="Box Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
+              {capabilities.panel ? (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-medium text-zinc-400">Panel / accent surface</p>
+                  <ColorPicker label="Panel Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
                   <RangeInput label={`Opacity: ${Math.round(style.boxOpacity * 100)}%`} min={0} max={100} value={Math.round(style.boxOpacity * 100)} onChange={(v) => update({ boxOpacity: v / 100 })} />
-                  <RangeInput label={`Padding: ${style.boxPadding}px`} min={4} max={56} value={style.boxPadding} onChange={(v) => update({ boxPadding: v })} />
-                  <RangeInput label={`Radius: ${style.boxRadius}px`} min={0} max={28} value={style.boxRadius} onChange={(v) => update({ boxRadius: v })} />
                 </div>
+              ) : isModernHookStyle ? (
+                <UnavailableHint text="Template hook ini tidak memakai box/panel tambahan." />
+              ) : (
+                <>
+                  <Checkbox label="Box around text" checked={style.boxEnabled} onChange={(v) => update({ boxEnabled: v })} />
+                  {style.boxEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Box Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
+                      <RangeInput label={`Opacity: ${Math.round(style.boxOpacity * 100)}%`} min={0} max={100} value={Math.round(style.boxOpacity * 100)} onChange={(v) => update({ boxOpacity: v / 100 })} />
+                      <RangeInput label={`Padding: ${style.boxPadding}px`} min={4} max={56} value={style.boxPadding} onChange={(v) => update({ boxPadding: v })} />
+                      <RangeInput label={`Radius: ${style.boxRadius}px`} min={0} max={28} value={style.boxRadius} onChange={(v) => update({ boxRadius: v })} />
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              <Checkbox label="Text outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} />
-              {style.strokeEnabled && (
+              <Checkbox label="Text outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} disabled={!capabilities.outline} />
+              {!capabilities.outline && <UnavailableHint text="Outline tidak dipakai oleh template hook ini." />}
+              {style.strokeEnabled && capabilities.outline && (
                 <div className="mt-2 space-y-2">
                   <ColorPicker label="Outline" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
                   <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={10} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
@@ -2191,6 +2243,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   return <div><h4 className="text-[11px] font-semibold text-zinc-300 mb-2 uppercase tracking-wider">{title}</h4>{children}</div>;
 }
 
+function UnavailableHint({ text }: { text: string }) {
+  return <p className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1 text-[9px] text-zinc-600">{text}</p>;
+}
+
 function ColorPicker({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <div>
@@ -2218,10 +2274,10 @@ function RangeInput({ label, min, max, value, onChange }: { label: string; min: 
   );
 }
 
-function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function Checkbox({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/20" />
+    <label className={cn("flex items-center gap-2", disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer")}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/20 disabled:cursor-not-allowed" />
       <span className="text-[11px] text-zinc-400">{label}</span>
     </label>
   );

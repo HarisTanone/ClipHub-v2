@@ -105,6 +105,7 @@ class SmartCameraEngine:
         video_path: str,
         output_path: str,
         target_aspect: str = "9:16",
+        **kwargs,
     ) -> SmartCameraResult:
         """Smart reframe with photography principles."""
         if not os.path.exists(video_path):

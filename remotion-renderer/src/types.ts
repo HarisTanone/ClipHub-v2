@@ -36,6 +36,10 @@ export interface CreativeDirection {
   // Grid mode flag: true when YOLO detected 2-speaker split layout
   is_grid_mode?: boolean;
   grid_subtitle_position_y?: number;
+  grid_subtitle_max_width_pct?: number;
+  reframe_method?: string;
+  content_profile?: Record<string, any>;
+  smart_features?: Record<string, any>;
 }
 
 /** Word-level timestamps from Whisper */

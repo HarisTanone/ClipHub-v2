@@ -5,8 +5,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, field_validator
 
 
-class CreateJobRequest(BaseModel):
-    youtube_url: str
+class JobOptionsBase(BaseModel):
     force_reprocess: bool = False
     style_preset: str = ""
     target_aspect_ratio: str = "9:16"  # "9:16", "16:9", "1:1"
@@ -26,13 +25,6 @@ class CreateJobRequest(BaseModel):
     # Smart features (premium)
     smart_camera: Optional[bool] = None
     smart_subtitle_position: Optional[bool] = None
-
-    @field_validator("youtube_url")
-    @classmethod
-    def url_not_empty(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError("URL tidak boleh kosong")
-        return v.strip()
 
     @field_validator("target_aspect_ratio")
     @classmethod
@@ -56,9 +48,26 @@ class CreateJobRequest(BaseModel):
         return v
 
 
+class CreateJobRequest(JobOptionsBase):
+    youtube_url: str
+
+    @field_validator("youtube_url")
+    @classmethod
+    def url_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("URL tidak boleh kosong")
+        return v.strip()
+
+
+class UploadJobOptions(JobOptionsBase):
+    force_reprocess: bool = True
+
+
 class JobResponse(BaseModel):
     job_id: str
     youtube_url: str
+    source_type: str = "youtube"
+    source_label: Optional[str] = None
     status: str
     video_duration: Optional[float] = None
     render_progress: Optional[str] = None
