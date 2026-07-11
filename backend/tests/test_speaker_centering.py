@@ -1,6 +1,9 @@
 """Tests for speaker-aware centering identity glue."""
 import os
 import sys
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -169,6 +172,100 @@ def test_position_model_keeps_front_back_people_with_similar_x_separate():
     assert len(set(model["track_to_position"].values())) == 4
 
 
+def test_autogrid_rejects_duplicate_tracks_mapped_to_one_person():
+    engine = PodcastReframeEngine()
+    tracked_data = {
+        "person_count": 1,
+        "position_targets": {0: 520},
+        "track_to_position": {10: 0, 11: 0},
+        "per_frame_tracked": [
+            [
+                TrackedDetection(10, BBox(450, 100, 590, 260), 0),
+                TrackedDetection(11, BBox(455, 105, 595, 265), 0),
+            ]
+            for _ in range(8)
+        ],
+    }
+
+    decision = engine._decide_autogrid_layout(tracked_data, None, width=1920)
+
+    assert decision["layout"] == "single"
+
+
+def test_autogrid_requires_two_unique_people_visible_together():
+    engine = PodcastReframeEngine()
+    tracked_data = {
+        "person_count": 2,
+        "position_targets": {0: 480, 1: 1460},
+        "track_to_position": {10: 0, 20: 1},
+        "per_frame_tracked": [
+            [
+                TrackedDetection(10, BBox(410, 100, 550, 260), frame),
+                TrackedDetection(20, BBox(1390, 100, 1530, 260), frame),
+            ]
+            for frame in range(8)
+        ],
+    }
+
+    decision = engine._decide_autogrid_layout(tracked_data, None, width=1920)
+
+    assert decision["layout"] == "double"
+    assert decision["top_track_id"] != decision["bottom_track_id"]
+    assert engine.GRID_PANEL_HEIGHT == 960
+
+
+def test_autogrid_rejects_people_who_never_share_a_frame():
+    engine = PodcastReframeEngine()
+    tracked_data = {
+        "person_count": 2,
+        "position_targets": {0: 480, 1: 1460},
+        "track_to_position": {10: 0, 20: 1},
+        "per_frame_tracked": [
+            [TrackedDetection(10, BBox(410, 100, 550, 260), frame)]
+            if frame < 4
+            else [TrackedDetection(20, BBox(1390, 100, 1530, 260), frame)]
+            for frame in range(8)
+        ],
+    }
+
+    decision = engine._decide_autogrid_layout(tracked_data, None, width=1920)
+
+    assert decision["layout"] == "single"
+
+
+def test_grid_renderer_uses_two_equal_960px_panels():
+    engine = PodcastReframeEngine()
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        output_path = command[-1]
+        with open(output_path, "wb") as output:
+            output.write(b"0" * 1200)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        output_path = os.path.join(temp_dir, "grid.mp4")
+        with patch("src.infrastructure.podcast_reframe_engine.subprocess.run", side_effect=fake_run):
+            result = engine._render_double_grid(
+                "input.mp4",
+                output_path,
+                width=1920,
+                height=1080,
+                decision={
+                    "top_x": 480,
+                    "bottom_x": 1460,
+                    "top_track_id": 0,
+                    "bottom_track_id": 1,
+                    "person_count": 2,
+                },
+            )
+
+    filter_graph = captured["command"][captured["command"].index("-filter_complex") + 1]
+    assert filter_graph.count("scale=1080:960") == 2
+    assert result["grid_panel_height"] == 960
+
+
 def test_panning_holds_active_speaker_seat_when_only_listener_is_visible():
     engine = PodcastReframeEngine()
     speaker_result = ActiveSpeakerResult(
@@ -300,6 +397,10 @@ if __name__ == "__main__":
     test_low_confidence_lip_motion_still_selects_best_speaker()
     test_position_model_clusters_recreated_tracks_by_seat()
     test_position_model_keeps_front_back_people_with_similar_x_separate()
+    test_autogrid_rejects_duplicate_tracks_mapped_to_one_person()
+    test_autogrid_requires_two_unique_people_visible_together()
+    test_autogrid_rejects_people_who_never_share_a_frame()
+    test_grid_renderer_uses_two_equal_960px_panels()
     test_panning_holds_active_speaker_seat_when_only_listener_is_visible()
     test_panning_holds_profile_when_visible_face_is_not_active_speaker()
     test_active_speaker_detector_uses_configurable_face_capacity()

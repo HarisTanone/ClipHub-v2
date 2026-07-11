@@ -68,22 +68,6 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   const hook = useHookConfig(creativeDirection, hookAnimation);
   const subtitle = useSubtitleConfig(creativeDirection);
 
-  // Grid mode: subtitle at center (between top/bottom panels) instead of bottom
-  const isGridMode = creativeDirection.is_grid_mode === true;
-  const gridSubtitlePositionY = typeof creativeDirection.grid_subtitle_position_y === "number"
-    ? creativeDirection.grid_subtitle_position_y
-    : 50;
-  const gridSubtitleMaxWidthPct = typeof creativeDirection.grid_subtitle_max_width_pct === "number"
-    ? creativeDirection.grid_subtitle_max_width_pct
-    : undefined;
-  const subtitleConfig = isGridMode
-    ? {
-      ...subtitle.config,
-      positionY: gridSubtitlePositionY,
-      ...(gridSubtitleMaxWidthPct ? { maxWidthPct: gridSubtitleMaxWidthPct } : {}),
-    }
-    : subtitle.config;
-
   const hookDurationFrames = Math.floor(hook.duration * fps);
 
   // ─── Font loading (isolated per component) ───────────────────────
@@ -119,7 +103,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
                 .filter(w => w.end > hook.duration)
                 .map(w => ({ ...w, start: Math.max(w.start, hook.duration) }))
               : words}
-            config={subtitleConfig}
+            config={subtitle.config}
             fps={fps}
           />
         </AbsoluteFill>

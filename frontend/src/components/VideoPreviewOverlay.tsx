@@ -527,6 +527,58 @@ export function VideoPreviewOverlay({
         );
       }
 
+      case "comment_reply": {
+        const panel = cfg?.boxColor || "#FFFFFF";
+        const accent = cfg?.lineColor || "#18181B";
+        return (
+          <div className="absolute inset-0" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div style={{ position: "absolute", top: hookTop, left: "7%", right: "13%", transform: "translateY(-50%)", borderRadius: 18, padding: "18px 20px", background: panel, boxShadow: "0 20px 44px rgba(0,0,0,.36)" }}>
+              <span style={{ display: "block", marginBottom: 6, color: `${accent}99`, fontSize: 10, fontWeight: 700 }}>{cfg?.badgeText || "replying to @viewer"}</span>
+              <p style={{ ...baseTextStyle, color: cfg?.color || "#18181B", textAlign: "left", textShadow: "none" }}>{textContent}</p>
+              <span style={{ position: "absolute", left: 28, bottom: -9, width: 20, height: 20, background: panel, transform: "rotate(45deg)" }} />
+            </div>
+          </div>
+        );
+      }
+
+      case "search_prompt": {
+        const accent = cfg?.lineColor || "#22D3EE";
+        return (
+          <div className="absolute inset-0" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div style={{ position: "absolute", top: hookTop, left: "6%", right: "6%", transform: "translateY(-50%)", display: "grid", gridTemplateColumns: "36px 1fr 28px", alignItems: "center", gap: 10, padding: "14px 18px", borderRadius: 999, background: cfg?.boxColor || "#0F172A", border: `1px solid ${accent}66` }}>
+              <span style={{ color: accent, fontSize: 24 }}>⌕</span>
+              <p style={{ ...baseTextStyle, color, textAlign: "left", textShadow: textShadowParts.join(", ") }}>{textContent}</p>
+              <span style={{ color: accent, fontSize: 20 }}>↗</span>
+            </div>
+          </div>
+        );
+      }
+
+      case "countdown_list": {
+        const accent = cfg?.boxColor || "#FACC15";
+        const ink = cfg?.lineColor || "#111827";
+        return (
+          <div className="absolute inset-0" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div style={{ position: "absolute", top: hookTop, left: "7%", right: "7%", transform: "translateY(-50%)", display: "grid", gridTemplateColumns: "82px 1fr", overflow: "hidden", borderRadius: 16, border: `4px solid ${ink}`, boxShadow: `8px 8px 0 ${ink}` }}>
+              <span style={{ display: "grid", placeItems: "center", background: accent, color: ink, fontSize: 38, fontWeight: 1000 }}>{cfg?.badgeText || "03"}</span>
+              <p style={{ ...baseTextStyle, color: cfg?.color || ink, background: "#F8FAFC", padding: "18px", textAlign: "left", textShadow: "none" }}>{textContent}</p>
+            </div>
+          </div>
+        );
+      }
+
+      case "pov_stamp": {
+        const accent = cfg?.boxColor || "#FB7185";
+        return (
+          <div className="absolute inset-0" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div style={{ position: "absolute", top: hookTop, left: "8%", right: "8%", transform: "translateY(-50%) rotate(-2deg)" }}>
+              <span style={{ display: "inline-block", marginBottom: 8, padding: "6px 12px", borderRadius: 7, background: accent, color: "#FFFFFF", fontSize: 13, fontWeight: 1000 }}>{cfg?.badgeText || "POV"}</span>
+              <p style={{ ...baseTextStyle, color, padding: "16px 18px", borderRadius: 10, border: `2px solid ${accent}`, background: "rgba(18,7,12,.8)", textAlign: "left", textShadow: textShadowParts.join(", ") }}>{textContent}</p>
+            </div>
+          </div>
+        );
+      }
+
       case "typewriter": {
         // FFmpeg: character-by-character isn't native, but the style uses green monospace
         // We simulate by revealing chars over time
@@ -694,6 +746,7 @@ export function VideoPreviewOverlay({
     const highlightGlowColor = cfg?.highlightGlowColor || highlightColor;
     const lineTransition = cfg?.lineTransition || "word_pop";
     const position = cfg?.position || "bottom";
+    const visualPreset = cfg?.stylePreset || "classic";
 
     // Group words into lines (matching backend logic)
     const lines: Word[][] = [];
@@ -736,12 +789,23 @@ export function VideoPreviewOverlay({
     const visibleLine = lines[visibleLineIdx];
 
     // Position style
-    const posStyle: React.CSSProperties =
-      position === "top"
+    const posStyle: React.CSSProperties = typeof cfg?.positionY === "number"
+      ? { top: `${cfg.positionY}%`, bottom: "auto", transform: "translateY(-50%)" }
+      : position === "top"
         ? { top: "8%", bottom: "auto" }
         : position === "center"
           ? { top: "50%", bottom: "auto", transform: "translateY(-50%)" }
           : { bottom: "12%" };
+
+    const presetPanelStyle: React.CSSProperties = visualPreset === "caption_strip"
+      ? { width: "100%", borderRadius: 0, borderTop: `3px solid ${highlightColor}`, borderBottom: `3px solid ${highlightColor}66` }
+      : visualPreset === "gradient_glass"
+        ? { background: `linear-gradient(120deg, ${bgColor}CC, ${highlightColor}55)`, border: `1px solid ${highlightColor}88`, backdropFilter: "blur(8px)", borderRadius: 18 }
+        : visualPreset === "terminal_type"
+          ? { border: `1px solid ${highlightColor}99`, borderTop: `7px solid ${highlightColor}66`, boxShadow: `0 0 18px ${highlightColor}33` }
+          : visualPreset === "comic_burst"
+            ? { filter: "drop-shadow(5px 6px 0 rgba(17,24,39,.8))" }
+            : {};
 
     // ─── Emphasis mode: big keyword + small context ─────────────────────
     if (lineTransition === "emphasis") {
@@ -805,6 +869,7 @@ export function VideoPreviewOverlay({
               padding: bgEnabled ? `${cfg?.bgPadding || 12}px` : undefined,
               borderLeft: `4px solid ${highlightColor}`,
               overflow: "hidden",
+              ...presetPanelStyle,
             }}
           >
             <div style={{ width: "100%", height: 3, borderRadius: 999, backgroundColor: highlightColor, marginBottom: 4 }} />
@@ -819,7 +884,7 @@ export function VideoPreviewOverlay({
               return (
                 <span
                   key={`${w.word}-${i}`}
-                  style={{
+            style={{
                     fontFamily: `'${fontFamily}', sans-serif`,
                     fontSize: `clamp(12px, ${fontSize * 0.055}vw, ${fontSize}px)`,
                     fontWeight: isActive ? "900" : fontWeight as any,
@@ -853,8 +918,9 @@ export function VideoPreviewOverlay({
             gap: `${cfg?.wordSpacing || 6}px`,
             backgroundColor: bgEnabled ? `${bgColor}${Math.round(bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent",
             borderRadius: bgEnabled ? `${bgRadius}px` : undefined,
-            padding: bgEnabled ? `${cfg?.bgPadding || 12}px` : undefined,
-          }}
+              padding: bgEnabled ? `${cfg?.bgPadding || 12}px` : undefined,
+              ...presetPanelStyle,
+            }}
         >
           {visibleLine.map((w, i) => {
             const wordStart = w.start + subtitleOffset;
@@ -882,13 +948,17 @@ export function VideoPreviewOverlay({
                   fontFamily: `'${fontFamily}', sans-serif`,
                   fontSize: `clamp(12px, ${fontSize * 0.055}vw, ${fontSize}px)`,
                   fontWeight: fontWeight as any,
-                  color: isActive ? highlightColor : color,
+                  color: visualPreset === "word_tiles" ? (isActive ? "#18181B" : "#FFFFFF") : isActive ? highlightColor : color,
                   transform: isActive ? `scale(${highlightScale})` : "scale(1)",
                   textShadow: wordShadow.join(", ") || "none",
                   fontStyle: italic ? "italic" : "normal",
                   display: "inline-block",
                   transition: "color 0.1s, transform 0.1s",
                   WebkitTextStroke: strokeEnabled ? `${strokeWidth * 0.3}px ${strokeColor}` : undefined,
+                  backgroundColor: visualPreset === "word_tiles" ? (isActive ? highlightColor : color) : undefined,
+                  borderRadius: visualPreset === "word_tiles" ? 6 : undefined,
+                  padding: visualPreset === "word_tiles" ? "4px 8px" : undefined,
+                  rotate: visualPreset === "comic_burst" && isActive ? "-3deg" : undefined,
                 }}
               >
                 {wordText}

@@ -54,7 +54,7 @@ class ModelStatusTracker:
         """Initialize all tracked models."""
         self._models = {
             "nine_router": ModelState(
-                name=f"9router {settings.nine_router_model}", provider="9router", purpose="analysis",
+                name=f"9router {settings.NINE_ROUTER_PASS2_MODEL or settings.nine_router_model}", provider="9router", purpose="highlight_analysis",
                 requests_limit=0, tokens_limit=0,
             ),
             "gemini": ModelState(

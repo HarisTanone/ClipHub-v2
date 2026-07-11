@@ -46,14 +46,6 @@ from src.domain.interfaces import (
 )
 from src.domain.interfaces_remotion import IRemotionRenderer
 from src.infrastructure.content_intelligence import ContentIntelligence
-from src.infrastructure.smart_subtitle_style import (
-    apply_smart_word_highlights,
-    build_smart_editorial_subtitle_style,
-    smart_editorial_enabled,
-)
-from src.infrastructure.subtitle_words import (
-    grid_subtitle_position_y as resolve_grid_subtitle_position_y,
-)
 from src.infrastructure.step_timer import StepTimer
 
 if TYPE_CHECKING:
@@ -203,9 +195,6 @@ class JobService:
         # Custom style configs from frontend editor
         hook_style_config: Optional[dict] = None,
         subtitle_style_config: Optional[dict] = None,
-        # Smart features (premium)
-        smart_camera: Optional[bool] = None,
-        smart_subtitle_position: Optional[bool] = None,
         # User ownership
         user_id: Optional[int] = None,
         # V2 pipeline routing
@@ -254,10 +243,6 @@ class JobService:
             initial_clips_data["hook_style_config"] = hook_style_config
         if subtitle_style_config:
             initial_clips_data["subtitle_style_config"] = subtitle_style_config
-        if smart_camera:
-            initial_clips_data["smart_camera"] = True
-        if smart_subtitle_position:
-            initial_clips_data["smart_subtitle_position"] = True
         if is_upload_source:
             initial_clips_data["source"] = {
                 "type": "upload",
@@ -430,16 +415,6 @@ class JobService:
             )
             merged_clips_data = dict(job.clips_data or {})
             merged_clips_data["content_profile"] = content_profile.to_dict()
-            merged_clips_data["smart_features"] = {
-                "smart_camera": bool(merged_clips_data.get("smart_camera")),
-                "smart_subtitle_position": bool(merged_clips_data.get("smart_subtitle_position")),
-                "auto_grid": bool(job.autogrid_enabled),
-                "smart_subtitle_template": bool(
-                    merged_clips_data.get("smart_camera")
-                    and merged_clips_data.get("smart_subtitle_position")
-                ),
-                "render_engine": "remotion",
-            }
             job.clips_data = merged_clips_data
             await self._repo.update_clips_data(job_id, merged_clips_data)
             logger.info(
@@ -531,8 +506,6 @@ class JobService:
                             job.target_aspect_ratio,
                             flags.autogrid_enabled,
                             content_profile=(job.clips_data or {}).get("content_profile", {}),
-                            smart_camera=bool((job.clips_data or {}).get("smart_camera")),
-                            smart_subtitle_position=bool((job.clips_data or {}).get("smart_subtitle_position")),
                         )
                         reframe_data[clip.rank] = result
                     except Exception as e:
@@ -575,7 +548,6 @@ class JobService:
             self._emit(job_id, 8, "whisper", "start")
             await self._repo.update_status(job_id, JobStatus.WHISPER)
             clips_with_words = await self._whisper_all_clips(job_id, clips, output_dir, trim_results)
-            self._apply_smart_word_highlights(job, clips, clips_with_words)
             self._emit(job_id, 8, "whisper", "complete")
 
             # ═══ Step 8.5: Prosody Analysis (detect silence gaps + energy peaks) ═══
@@ -737,7 +709,7 @@ class JobService:
                                     for peak in prosody.energy_peaks[:8]  # Max 8 zooms per clip
                                     if peak.time > (cd_dict.get("hook_style_config", {}).get("duration", 3.0))  # Don't zoom during hook
                                 ]
-                            self._apply_smart_render_metadata(
+                            self._apply_reframe_metadata(
                                 cd_dict, job, reframe_data.get(clip.rank)
                             )
                             
@@ -807,7 +779,7 @@ class JobService:
                                         cd_dict["hook_style_config"] = job.clips_data["hook_style_config"]
                                     if job.clips_data.get("subtitle_style_config"):
                                         cd_dict["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
-                                self._apply_smart_render_metadata(
+                                self._apply_reframe_metadata(
                                     cd_dict, job, reframe_data.get(clip.rank)
                                 )
                                 
@@ -842,11 +814,6 @@ class JobService:
                 logger.warning(f"[{job_id}] No Remotion adapter configured — using FFmpeg fallback")
             
             if not use_remotion:
-                if smart_editorial_enabled(job.clips_data):
-                    raise RuntimeError(
-                        "Smart Camera + Smart Subtitle Position requires Remotion; "
-                        "Remotion server unavailable."
-                    )
                 # ═══ FFmpeg Path — Multi-step rendering (Hook → B-Roll → Subtitle) ═══
                 
                 # ═══ Step 10: Hook Rendering (burn hook text onto first 3s of clip) ═══
@@ -1059,17 +1026,10 @@ class JobService:
             if job.clips_data:
                 if job.clips_data.get("hook_style_config"):
                     clips_data["hook_style_config"] = job.clips_data["hook_style_config"]
-                if smart_editorial_enabled(job.clips_data):
-                    clips_data["subtitle_style_config"] = build_smart_editorial_subtitle_style(
-                        job.clips_data.get("subtitle_style_config", {}),
-                        job.clips_data.get("content_profile", {}),
-                    )
-                elif job.clips_data.get("subtitle_style_config"):
+                if job.clips_data.get("subtitle_style_config"):
                     clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
                 if job.clips_data.get("content_profile"):
                     clips_data["content_profile"] = job.clips_data["content_profile"]
-                if job.clips_data.get("smart_features"):
-                    clips_data["smart_features"] = job.clips_data["smart_features"]
                 if job.clips_data.get("source"):
                     clips_data["source"] = job.clips_data["source"]
                 if job.clips_data.get("source_type"):
@@ -1099,94 +1059,20 @@ class JobService:
 
     # ─── Pipeline Helpers ─────────────────────────────────────────────────────
 
-    def _apply_smart_render_metadata(
+    def _apply_reframe_metadata(
         self,
         creative_direction: dict,
         job: Job,
         clip_reframe: Optional[dict],
     ) -> None:
-        """Attach smart-camera/grid/subtitle decisions to Remotion props."""
+        """Attach read-only reframe information without overriding user style."""
         clips_data = job.clips_data or {}
-        smart_subtitle = bool(clips_data.get("smart_subtitle_position"))
         creative_direction["content_profile"] = clips_data.get("content_profile", {})
-        creative_direction["smart_features"] = clips_data.get("smart_features", {})
-
-        method = ""
-        subtitle_y = None
-        subtitle_max_width = None
-        is_grid_mode = False
-
-        if isinstance(clip_reframe, dict):
-            method = str(clip_reframe.get("method", "") or "")
-            is_grid_mode = (
-                "grid" in method
-                or "double" in method
-                or "emphasis" in method
-                or "gameplay_facecam" in method
-            )
-            subtitle_y = clip_reframe.get("subtitle_position_y")
-            subtitle_max_width = clip_reframe.get("subtitle_max_width_pct")
-
-        resolved_grid_y = resolve_grid_subtitle_position_y(method)
-        if subtitle_y is None and resolved_grid_y is not None:
-            subtitle_y = resolved_grid_y
-
-        creative_direction["is_grid_mode"] = is_grid_mode
-        creative_direction["reframe_method"] = method
-        if subtitle_y is not None:
-            creative_direction["grid_subtitle_position_y"] = float(subtitle_y)
-        if subtitle_max_width is not None:
-            creative_direction["grid_subtitle_max_width_pct"] = float(subtitle_max_width)
-
-        if smart_subtitle and (subtitle_y is not None or subtitle_max_width is not None):
-            sub_config = dict(creative_direction.get("subtitle_style_config") or {})
-            if smart_editorial_enabled(clips_data):
-                sub_config = build_smart_editorial_subtitle_style(
-                    sub_config,
-                    clips_data.get("content_profile", {}),
-                    position_y=float(subtitle_y) if subtitle_y is not None else None,
-                    max_width_pct=float(subtitle_max_width) if subtitle_max_width is not None else None,
-                )
-            if subtitle_y is not None:
-                sub_config["positionY"] = float(subtitle_y)
-            if subtitle_max_width is not None:
-                sub_config["maxWidthPct"] = float(subtitle_max_width)
-            creative_direction["subtitle_style_config"] = sub_config
-        elif smart_editorial_enabled(clips_data):
-            creative_direction["subtitle_style_config"] = build_smart_editorial_subtitle_style(
-                creative_direction.get("subtitle_style_config") or {},
-                clips_data.get("content_profile", {}),
-            )
-
-    def _apply_smart_word_highlights(
-        self,
-        job: Job,
-        clips: list[Clip],
-        clips_with_words: list[dict],
-    ) -> None:
-        """Mutate Whisper words with semantic highlights for smart subtitles."""
-        if not smart_editorial_enabled(job.clips_data):
-            return
-
-        content_profile = (job.clips_data or {}).get("content_profile", {})
-        clip_by_rank = {clip.rank: clip for clip in clips}
-        for clip_data in clips_with_words:
-            if not clip_data.get("_success"):
-                continue
-            clip = clip_by_rank.get(clip_data.get("rank"))
-            if clip is None:
-                continue
-            flat_words = self._get_words_for_clip(clip, clips_with_words)
-            highlighted = apply_smart_word_highlights(
-                flat_words,
-                hook_text=clip.hook,
-                reason_text=clip.reason,
-                content_profile=content_profile,
-            )
-            clip_data["words"] = highlighted
-            clip_data["_smart_highlights"] = sum(
-                1 for word in highlighted if word.get("highlight")
-            )
+        creative_direction["reframe_method"] = (
+            str(clip_reframe.get("method", "") or "")
+            if isinstance(clip_reframe, dict)
+            else ""
+        )
 
     def _best_clip_path(self, output_dir: str, rank: int, reframe_data: dict) -> str:
         """Get best available clip path. Always verify file exists AND has content."""

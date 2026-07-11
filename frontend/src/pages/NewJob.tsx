@@ -24,8 +24,6 @@ export function NewJob() {
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [templateMode] = useState<"custom">("custom");
   const [forceReprocess, setForceReprocess] = useState(false);
-  const [smartCamera, setSmartCamera] = useState(false);
-  const [smartSubtitlePos, setSmartSubtitlePos] = useState(false);
   const [autogridEnabled, setAutogridEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [urlError, setUrlError] = useState("");
@@ -146,8 +144,6 @@ export function NewJob() {
       remotion_quality: "medium",
       hook_style_config: { ...hookStyleConfig, template_mode: templateMode },
       subtitle_style_config: subtitleStyleConfig,
-      smart_camera: smartCamera,
-      smart_subtitle_position: smartSubtitlePos,
       autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
     };
     try {
@@ -314,16 +310,10 @@ export function NewJob() {
           <Card className="p-3">
             <label className="block text-[10px] font-medium text-zinc-500 mb-2 uppercase tracking-wider">Smart Features</label>
             <div className="space-y-2">
-              <FeatureLock featureName="Smart Camera" featureCode="smart_camera" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
-                <Toggle label="Smart Camera" description="Photography framing (eye-level, headroom, tracking)" checked={smartCamera} onChange={setSmartCamera} />
-              </FeatureLock>
-              <FeatureLock featureName="Smart Subtitle Position" featureCode="smart_subtitle_pos" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
-                <Toggle label="Smart Subtitle Position" description="Auto posisi subtitle (hindari wajah)" checked={smartSubtitlePos} onChange={setSmartSubtitlePos} />
-              </FeatureLock>
               <FeatureLock featureName="Auto Grid" featureCode="auto_grid" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
                 <Toggle
                   label="Auto-Grid"
-                  description="Deteksi gaming/podcast: grid otomatis saat layout lebih kuat dari single crop"
+                  description="Grid 50:50 hanya saat dua orang berbeda terlihat bersamaan"
                   checked={autogridEnabled}
                   onChange={setAutogridEnabled}
                   disabled={aspectRatio !== "9:16"}

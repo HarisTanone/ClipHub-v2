@@ -9,6 +9,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
 };
 
 const PROVIDER_ICONS: Record<string, string> = {
+  "9router": "9",
   gemini: "G",
   groq: "Q",
   ollama: "O",
@@ -44,8 +45,21 @@ export function ModelStatusPanel() {
     );
   }
 
+  const nineRouter = modelList.find((model) => model.provider === "9router" || model.key === "nine_router");
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+    <div className="space-y-2">
+      {nineRouter && (
+        <div className="flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-cyan-500/15 text-[10px] font-black text-cyan-300">9R</span>
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-cyan-500">9router model aktif</p>
+            <p className="truncate text-[11px] font-medium text-zinc-200">{nineRouter.name.replace(/^9router\s*/i, "")}</p>
+          </div>
+          <span className={`ml-auto h-2 w-2 rounded-full ${(STATUS_COLORS[nineRouter.status] || STATUS_COLORS.error).dot}`} />
+        </div>
+      )}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
       {modelList.map((model) => {
         const colors = STATUS_COLORS[model.status] || STATUS_COLORS.error;
         const usagePercent = model.requests_limit > 0
@@ -62,7 +76,7 @@ export function ModelStatusPanel() {
                 <span className="w-5 h-5 rounded bg-zinc-800 flex items-center justify-center text-[9px] font-bold text-zinc-500">
                   {PROVIDER_ICONS[model.provider] || "?"}
                 </span>
-                <span className="text-[10px] font-medium text-zinc-300 truncate max-w-[90px]">{model.name.split(" ").slice(0, 2).join(" ")}</span>
+                <span className="text-[10px] font-medium text-zinc-300 truncate max-w-[90px]">{model.provider === "9router" ? model.name.replace(/^9router\s*/i, "") : model.name.split(" ").slice(0, 2).join(" ")}</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className={`w-1.5 h-1.5 rounded-full ${colors.dot} ${model.status === "available" ? "animate-pulse" : ""}`} />
@@ -87,6 +101,7 @@ export function ModelStatusPanel() {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

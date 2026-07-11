@@ -128,11 +128,10 @@ def test_premium_pipeline_in_available_features():
     """ALL_PREMIUM_FEATURES is registered for premium unlock."""
     from src.presentation.routes.features import ALL_PREMIUM_FEATURES
     assert "dual_subtitle" in ALL_PREMIUM_FEATURES
-    assert "smart_camera" in ALL_PREMIUM_FEATURES
     assert "auto_grid" in ALL_PREMIUM_FEATURES
     assert "ai_layer" in ALL_PREMIUM_FEATURES
-    assert len(ALL_PREMIUM_FEATURES) == 6
-    print("  [PASS] ALL_PREMIUM_FEATURES has 6 features")
+    assert len(ALL_PREMIUM_FEATURES) == 4
+    print("  [PASS] ALL_PREMIUM_FEATURES has 4 features")
 
 
 # ─── Job Entity Tests ─────────────────────────────────────────────────────────

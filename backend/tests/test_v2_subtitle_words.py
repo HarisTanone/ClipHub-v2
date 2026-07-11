@@ -4,10 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.infrastructure.subtitle_words import (
-    grid_subtitle_position_y,
-    sanitize_subtitle_words,
-)
+from src.infrastructure.subtitle_words import sanitize_subtitle_words
 
 
 def test_sanitize_subtitle_words_sorts_clamps_and_dedupes():
@@ -30,15 +27,6 @@ def test_sanitize_subtitle_words_sorts_clamps_and_dedupes():
     assert all(w["end"] > w["start"] for w in words)
 
 
-def test_grid_subtitle_position_for_remotion():
-    assert grid_subtitle_position_y("podcast_speaker_emphasis") == 52.0
-    assert grid_subtitle_position_y("podcast_double_grid") == 43.0
-    assert grid_subtitle_position_y("podcast_group_grid") == 52.0
-    assert grid_subtitle_position_y("gaming_gameplay_facecam_grid") == 58.0
-    assert grid_subtitle_position_y("podcast_dynamic_panning") is None
-
-
 if __name__ == "__main__":
     test_sanitize_subtitle_words_sorts_clamps_and_dedupes()
-    test_grid_subtitle_position_for_remotion()
     print("v2 subtitle word tests passed")

@@ -113,12 +113,12 @@ class YoloReframeEngine(IYoloReframeEngine):
         transcode_path = video_path.rsplit(".", 1)[0] + "_h264_temp.mp4"
         detect_path = self._ensure_h264(video_path, transcode_path)
         try:
-            return self._track_impl(detect_path, video_path, output_path)
+            return self._track_impl(detect_path, video_path, output_path, autogrid)
         finally:
             if detect_path != video_path and os.path.exists(transcode_path):
                 os.remove(transcode_path)
 
-    def _track_impl(self, detect_path: str, original_path: str, output_path: str) -> Optional[dict]:
+    def _track_impl(self, detect_path: str, original_path: str, output_path: str, autogrid: bool) -> Optional[dict]:
         """Detect faces using MediaPipe, divide video into time segments, render dynamic grid."""
         import cv2
         # FIX: Prevent glibc mutex crash
@@ -171,7 +171,10 @@ class YoloReframeEngine(IYoloReframeEngine):
         cap.release()
         if not frame_detections or all(len(d) == 0 for _, d in frame_detections): return None
 
-        return self._render_dynamic_grid(original_path, output_path, orig_width, orig_height, fps, frame_detections)
+        return self._render_dynamic_grid(
+            original_path, output_path, orig_width, orig_height, fps,
+            frame_detections, autogrid,
+        )
 
     def _clamp_crop_x(self, crop_x: int, crop_w: int, frame_width: int) -> int:
         min_x = self.SAFE_ZONE_MARGIN_PX
@@ -181,7 +184,8 @@ class YoloReframeEngine(IYoloReframeEngine):
 
     def _render_dynamic_grid(
         self, video_path: str, output_path: str, width: int, height: int, fps: float,
-        frame_detections: List[Tuple[float, List[Tuple[float, float]]]]
+        frame_detections: List[Tuple[float, List[Tuple[float, float]]]],
+        autogrid: bool,
     ) -> Optional[dict]:
         """Dynamically switches between 1-grid (9:16) and 2-grid (top/bottom) per time segment."""
         
@@ -195,7 +199,7 @@ class YoloReframeEngine(IYoloReframeEngine):
 
         for t, dets in frame_detections:
             desired = 'single'
-            if len(dets) >= 2:
+            if autogrid and len(dets) >= 2:
                 xs = [d[0] for d in dets]
                 dist = max(xs) - min(xs)
                 if dist > width * self.MIN_SEPARATION_RATIO:

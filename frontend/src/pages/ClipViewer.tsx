@@ -49,6 +49,7 @@ export function ClipViewer() {
     try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? { ...DEFAULT_SUBTITLE_STYLE, ...JSON.parse(s) } : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
   });
   const [isRestyling, setIsRestyling] = useState(false);
+  const [videoRevision, setVideoRevision] = useState(0);
 
   // Other clips from same job
   const [otherClips, setOtherClips] = useState<any[]>([]);
@@ -65,6 +66,12 @@ export function ClipViewer() {
       ]);
       setClip(clipRes.data);
       setHookText(clipRes.data.hook || "");
+      if (clipRes.data.hook_style_config && Object.keys(clipRes.data.hook_style_config).length > 0) {
+        setHookStyleConfig({ ...DEFAULT_HOOK_STYLE, ...clipRes.data.hook_style_config } as HookStyle);
+      }
+      if (clipRes.data.subtitle_style_config && Object.keys(clipRes.data.subtitle_style_config).length > 0) {
+        setSubtitleStyleConfig({ ...DEFAULT_SUBTITLE_STYLE, ...clipRes.data.subtitle_style_config } as SubtitleStyle);
+      }
       // Set other clips (exclude current)
       const allClips = detailRes.data.clips || [];
       setOtherClips(allClips.filter((c: any) => c.rank !== clipRank));
@@ -101,8 +108,11 @@ export function ClipViewer() {
         subtitle_style_config: subtitleStyleConfig,
         subtitle_enabled: true,
       });
-      toast.success(res.message || "Restyle started");
-      loadClip();
+      setShowRaw(false);
+      setPreviewMode(false);
+      setVideoRevision(Date.now());
+      await loadClip();
+      toast.success(res.message || `Clip #${clipRank} updated`);
     } catch (e: any) { toast.error(e.message || "Restyle failed"); }
     finally { setIsRestyling(false); }
   }
@@ -128,7 +138,10 @@ export function ClipViewer() {
   const finalPreviewUrl = finalDownloadUrl && !showRaw
     ? jobs.getClipFinalUrl(jobId!, clipRank, previewQuality)
     : finalDownloadUrl;
-  const videoUrl = showRaw ? (rawUrl || finalPreviewUrl) : (finalPreviewUrl || rawUrl);
+  const versionedFinalUrl = finalPreviewUrl
+    ? `${finalPreviewUrl}${finalPreviewUrl.includes("?") ? "&" : "?"}v=${videoRevision}`
+    : null;
+  const videoUrl = showRaw ? (rawUrl || versionedFinalUrl) : (versionedFinalUrl || rawUrl);
 
   return (
     <div className="h-full flex flex-col">

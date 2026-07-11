@@ -27,7 +27,12 @@ type SubtitleVisualPreset =
   | "minimal_clean"
   | "breaking_tape"
   | "quote_box"
-  | "documentary";
+  | "documentary"
+  | "caption_strip"
+  | "word_tiles"
+  | "gradient_glass"
+  | "comic_burst"
+  | "terminal_type";
 
 function useGoogleFont(fontFamily: string) {
   useEffect(() => {
@@ -298,6 +303,10 @@ const HOOK_ANIMATIONS = [
   "glass_flash",
   "marker_swipe",
   "signal_scan",
+  "comment_reply",
+  "search_prompt",
+  "countdown_list",
+  "pov_stamp",
 ];
 
 const HOOK_ANIMATION_META: Record<string, OptionMeta> = {
@@ -311,6 +320,10 @@ const HOOK_ANIMATION_META: Record<string, OptionMeta> = {
   glass_flash: { label: "Glass Flash", mood: "Premium glass", accent: "#C084FC", preview: "GLASS", desc: "Panel kaca dengan sweep cahaya dan glow lembut." },
   marker_swipe: { label: "Marker Swipe", mood: "Highlighted", accent: "#FDE047", preview: "MARK", desc: "Coretan marker bergerak di belakang teks." },
   signal_scan: { label: "Signal Scan", mood: "Tech signal", accent: "#22D3EE", preview: "SCAN", desc: "Scanline dan pulse digital untuk momen analisis." },
+  comment_reply: { label: "Reply Comment", mood: "TikTok native", accent: "#F8FAFC", preview: "REPLY", desc: "Bubble balasan komentar sebagai konteks hook langsung." },
+  search_prompt: { label: "Search Prompt", mood: "Discovery", accent: "#22D3EE", preview: "SEARCH", desc: "Search bar ala discovery untuk memancing rasa ingin tahu." },
+  countdown_list: { label: "Countdown List", mood: "Retention", accent: "#FACC15", preview: "03", desc: "Nomor besar dan progress rail untuk hook listicle." },
+  pov_stamp: { label: "POV Stamp", mood: "Creator POV", accent: "#FB7185", preview: "POV", desc: "Stamp POV yang menjaga konteks cerita sejak detik pertama." },
 };
 
 const SUBTITLE_ANIMATION_META: Record<SubtitleStyle["animationStyle"], OptionMeta> = {
@@ -360,6 +373,10 @@ const HOOK_CAPABILITIES: Record<string, HookCapabilities> = {
   glass_flash: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
   marker_swipe: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
   signal_scan: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
+  comment_reply: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
+  search_prompt: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
+  countdown_list: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
+  pov_stamp: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
 };
 
 function hookCapabilities(animation: string): HookCapabilities {
@@ -377,6 +394,10 @@ const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = 
   { id: "glass_flash_preset", name: "Glass Flash", style: { animation: "glass_flash", color: "#F8FAFC", bgColor: "#050816", bgOpacity: 0.52, boxColor: "#FFFFFF", boxOpacity: 0.12, fontSize: 48, fontFamily: "Montserrat", fontWeight: "800", lineColor: "#C084FC", glowEnabled: true, glowColor: "#C084FC", glowSize: 24, badgeEnabled: true, badgeText: "FOCUS", decorativeElements: true, motionIntensity: 0.8 } },
   { id: "marker_swipe_preset", name: "Marker Swipe", style: { animation: "marker_swipe", color: "#F8FAFC", bgColor: "#080A0F", bgOpacity: 0.48, boxColor: "#FDE047", boxOpacity: 0.86, fontSize: 52, fontFamily: "Bebas Neue", fontWeight: "900", uppercase: true, lineColor: "#FDE047", shadowEnabled: true, shadowBlur: 18, badgeEnabled: false, badgeText: "MARKED", decorativeElements: true, motionIntensity: 1.0 } },
   { id: "signal_scan_preset", name: "Signal Scan", style: { animation: "signal_scan", color: "#E0F2FE", bgColor: "#020617", bgOpacity: 0.62, boxColor: "#0EA5E9", boxOpacity: 0.16, fontSize: 46, fontFamily: "Titillium Web", fontWeight: "900", uppercase: true, lineColor: "#22D3EE", glowEnabled: true, glowColor: "#22D3EE", glowSize: 20, badgeEnabled: true, badgeText: "SIGNAL", decorativeElements: true, motionIntensity: 1.05 } },
+  { id: "comment_reply_preset", name: "Reply to Comment", style: { animation: "comment_reply", color: "#18181B", bgColor: "#000000", bgOpacity: 0.18, boxColor: "#FFFFFF", boxOpacity: 0.98, fontSize: 42, fontFamily: "Inter", fontWeight: "800", lineHeight: 1.14, uppercase: false, position: "top", positionY: 24, lineColor: "#18181B", badgeEnabled: true, badgeText: "replying to @viewer", decorativeElements: true, motionIntensity: 0.8 } },
+  { id: "search_prompt_preset", name: "Search Prompt", style: { animation: "search_prompt", color: "#F8FAFC", bgColor: "#020617", bgOpacity: 0.34, boxColor: "#0F172A", boxOpacity: 0.94, fontSize: 43, fontFamily: "Inter", fontWeight: "800", lineHeight: 1.12, position: "top", positionY: 20, lineColor: "#22D3EE", badgeEnabled: false, badgeText: "", decorativeElements: true, motionIntensity: 0.85 } },
+  { id: "countdown_list_preset", name: "Countdown List", style: { animation: "countdown_list", color: "#111827", bgColor: "#050505", bgOpacity: 0.38, boxColor: "#FACC15", boxOpacity: 0.98, fontSize: 48, fontFamily: "Archivo Black", fontWeight: "900", uppercase: true, position: "center", positionY: 50, lineColor: "#111827", badgeEnabled: true, badgeText: "03", decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "pov_stamp_preset", name: "POV Stamp", style: { animation: "pov_stamp", color: "#FFFFFF", bgColor: "#12070C", bgOpacity: 0.38, boxColor: "#FB7185", boxOpacity: 0.96, fontSize: 50, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, italic: true, position: "center", positionY: 48, lineColor: "#FFFFFF", badgeEnabled: true, badgeText: "POV", decorativeElements: true, motionIntensity: 0.9 } },
 ];
 
 const SUBTITLE_PRESETS: { id: string; name: string; style: Partial<SubtitleStyle> }[] = [
@@ -664,6 +685,121 @@ const SUBTITLE_PRESETS: { id: string; name: string; style: Partial<SubtitleStyle
       animationStyle: "fade",
       lineTransition: "line_reveal",
       maxWordsPerLine: 6,
+    },
+  },
+  {
+    id: "caption_strip",
+    name: "Full-Width Strip",
+    style: {
+      stylePreset: "caption_strip",
+      color: "#FFFFFF",
+      highlightColor: "#FACC15",
+      fontFamily: "Inter",
+      fontSize: 34,
+      fontWeight: "900",
+      bgColor: "#09090B",
+      bgOpacity: 0.9,
+      bgRadius: 0,
+      bgPadding: 18,
+      strokeEnabled: false,
+      position: "bottom",
+      positionY: 82,
+      uppercase: true,
+      animationStyle: "slide",
+      lineTransition: "word_pop",
+      maxWordsPerLine: 5,
+    },
+  },
+  {
+    id: "word_tiles",
+    name: "Word Tiles",
+    style: {
+      stylePreset: "word_tiles",
+      color: "#18181B",
+      highlightColor: "#FFFFFF",
+      fontFamily: "Montserrat",
+      fontSize: 31,
+      fontWeight: "900",
+      bgEnabled: false,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 16,
+      highlightStyle: "background",
+      animationStyle: "pop",
+      lineTransition: "word_pop",
+      maxWordsPerLine: 4,
+      wordSpacing: 8,
+    },
+  },
+  {
+    id: "gradient_glass",
+    name: "Gradient Glass",
+    style: {
+      stylePreset: "gradient_glass",
+      color: "#F8FAFC",
+      highlightColor: "#C4B5FD",
+      fontFamily: "Poppins",
+      fontSize: 33,
+      fontWeight: "800",
+      bgColor: "#312E81",
+      bgOpacity: 0.58,
+      bgRadius: 24,
+      bgPadding: 18,
+      highlightGlow: true,
+      highlightGlowColor: "#A78BFA",
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 18,
+      animationStyle: "fade",
+      lineTransition: "word_pop",
+      maxWordsPerLine: 4,
+    },
+  },
+  {
+    id: "comic_burst",
+    name: "Comic Burst",
+    style: {
+      stylePreset: "comic_burst",
+      color: "#FFFFFF",
+      highlightColor: "#FDE047",
+      fontFamily: "Bungee",
+      fontSize: 40,
+      fontWeight: "900",
+      uppercase: true,
+      bgEnabled: false,
+      strokeEnabled: true,
+      strokeColor: "#111827",
+      strokeWidth: 5,
+      shadowEnabled: true,
+      shadowBlur: 18,
+      animationStyle: "pop",
+      lineTransition: "word_pop",
+      maxWordsPerLine: 3,
+      wordSpacing: 7,
+    },
+  },
+  {
+    id: "terminal_type",
+    name: "Terminal Type",
+    style: {
+      stylePreset: "terminal_type",
+      color: "#BBF7D0",
+      highlightColor: "#4ADE80",
+      fontFamily: "monospace",
+      fontSize: 30,
+      fontWeight: "700",
+      letterSpacing: 1,
+      bgColor: "#052E16",
+      bgOpacity: 0.88,
+      bgRadius: 4,
+      bgPadding: 16,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowColor: "#16A34A",
+      shadowBlur: 10,
+      animationStyle: "slide",
+      lineTransition: "line_reveal",
+      maxWordsPerLine: 5,
     },
   },
 ];
@@ -1224,6 +1360,66 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
       );
     }
 
+    case "comment_reply": {
+      const accent = style.lineColor || "#18181B";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-8" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ position: "relative", borderRadius: 14, padding: "14px 16px", background: `${style.boxColor || "#FFFFFF"}${Math.round((style.boxOpacity || 0.98) * 255).toString(16).padStart(2, "0")}`, boxShadow: "0 16px 32px rgba(0,0,0,.32)" }}>
+              <span style={{ display: "block", marginBottom: 5, color: `${accent}99`, fontSize: 8, fontWeight: 700 }}>{style.badgeText || "replying to @viewer"}</span>
+              <p style={{ ...baseTextStyle, color: style.color || "#18181B", fontSize: Math.max(fontSize * 0.78, 13), textAlign: "left", textShadow: "none" }}>{text}</p>
+              <span style={{ position: "absolute", left: 20, bottom: -8, width: 18, height: 18, background: style.boxColor || "#FFFFFF", transform: "rotate(45deg)" }} />
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "search_prompt": {
+      const accent = style.lineColor || "#22D3EE";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "28px 1fr 26px", alignItems: "center", gap: 8, borderRadius: 999, padding: "10px 13px", background: `${style.boxColor || "#0F172A"}${Math.round((style.boxOpacity || 0.94) * 255).toString(16).padStart(2, "0")}`, border: `1px solid ${accent}66`, boxShadow: `0 0 22px ${accent}22` }}>
+              <span style={{ color: accent, fontSize: 17 }}>⌕</span>
+              <p style={{ ...baseTextStyle, color: style.color, fontSize: Math.max(fontSize * 0.72, 12), textAlign: "left", textShadow }}> {text}</p>
+              <span style={{ color: accent, fontSize: 14 }}>↗</span>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "countdown_list": {
+      const accent = style.boxColor || "#FACC15";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "70px 1fr", overflow: "hidden", borderRadius: 12, border: `3px solid ${style.lineColor || "#111827"}`, boxShadow: `7px 7px 0 ${style.lineColor || "#111827"}` }}>
+              <span style={{ display: "grid", placeItems: "center", background: accent, color: "#111827", fontSize: 28, fontWeight: 1000 }}>{style.badgeText || "03"}</span>
+              <p style={{ ...baseTextStyle, color: style.color || "#111827", background: "#F8FAFC", padding: "14px", fontSize: Math.max(fontSize * 0.74, 13), textAlign: "left", textShadow: "none" }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "pov_stamp": {
+      const accent = style.boxColor || "#FB7185";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute inset-x-5" style={{ top: posTop, transform: "translateY(-50%) rotate(-2deg)" }}>
+            <span style={{ display: "inline-block", marginBottom: 6, padding: "4px 10px", borderRadius: 6, background: accent, color: "#FFFFFF", fontSize: 11, fontWeight: 1000, letterSpacing: 1 }}>{style.badgeText || "POV"}</span>
+            <p style={{ ...baseTextStyle, color: style.color, padding: "12px 15px", border: `2px solid ${accent}`, borderRadius: 8, background: "rgba(18,7,12,.78)", textShadow, fontSize: Math.max(fontSize * 0.86, 14), textAlign: "left" }}>{text}</p>
+          </div>
+        </>
+      );
+    }
+
     case "glitch_rgb": {
       // 3 separate text layers matching FFmpeg: Red(-4+sin(t*15)*3), Cyan(+4-sin(t*15)*3), White(center)
       return (
@@ -1404,13 +1600,13 @@ function SubtitlePresetCard({ preset, active, onClick }: { preset: { id: string;
   const font = preset.style.fontFamily || "Poppins";
   const color = preset.style.highlightColor || meta.accent;
   const presetKey = preset.style.stylePreset || "classic";
-  const isLightCard = presetKey === "bubble_chat" || presetKey === "breaking_tape" || presetKey === "quote_box";
+  const isLightCard = presetKey === "bubble_chat" || presetKey === "breaking_tape" || presetKey === "quote_box" || presetKey === "word_tiles";
   const previewBg = preset.style.bgEnabled === false
     ? "transparent"
     : preset.style.bgColor
       ? `${preset.style.bgColor}${Math.round((preset.style.bgOpacity ?? 0.45) * 255).toString(16).padStart(2, "0")}`
       : "rgba(0,0,0,0.28)";
-  const previewRadius = presetKey === "breaking_tape" ? 2 : presetKey === "bubble_chat" ? 14 : preset.style.bgRadius ?? 6;
+  const previewRadius = presetKey === "caption_strip" ? 0 : presetKey === "breaking_tape" ? 2 : presetKey === "bubble_chat" || presetKey === "gradient_glass" ? 14 : preset.style.bgRadius ?? 6;
   const previewTransform = presetKey === "breaking_tape" ? "rotate(-1.5deg)" : undefined;
   return (
     <button type="button" onClick={onClick}
@@ -2184,6 +2380,10 @@ function getHookAnimationClass(animation: string): string {
     case "glass_flash": return "animate-[glassFlashPreview_2.8s_ease-in-out_infinite]";
     case "marker_swipe": return "animate-[markerSwipePreview_2.4s_ease-in-out_infinite]";
     case "signal_scan": return "animate-[signalScanPreview_2.5s_ease-in-out_infinite]";
+    case "comment_reply": return "animate-[slideUpPreview_2.4s_ease-in-out_infinite]";
+    case "search_prompt": return "animate-[fadeScalePreview_2.5s_ease-in-out_infinite]";
+    case "countdown_list": return "animate-[slidePunchPreview_2.4s_ease-out_infinite]";
+    case "pov_stamp": return "animate-[fadeScalePreview_2.5s_ease-in-out_infinite]";
     default: return "";
   }
 }
@@ -2200,6 +2400,10 @@ function getHookPreviewSample(animation: string): string {
     case "glass_flash": return "bagian kecil ini paling mahal";
     case "marker_swipe": return "kalimat ini wajib ditandai";
     case "signal_scan": return "sinyalnya kelihatan dari sini";
+    case "comment_reply": return "gimana caranya mulai dari nol?";
+    case "search_prompt": return "cara naik jabatan tanpa burnout";
+    case "countdown_list": return "3 kesalahan yang bikin kamu stuck";
+    case "pov_stamp": return "kamu akhirnya berani bilang tidak";
     case "cinematic_reveal": return "mereka gak cerita bagian ini";
     case "danger_bold": return "jangan skip bagian ini";
     case "shake_neon": return "ini yang bikin rame";

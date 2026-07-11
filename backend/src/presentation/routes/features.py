@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 # All features that premium unlocks (for frontend reference)
 ALL_PREMIUM_FEATURES = [
     "dual_subtitle",
-    "smart_camera",
-    "smart_subtitle_pos",
     "auto_grid",
     "threejs_effects",
     "ai_layer",

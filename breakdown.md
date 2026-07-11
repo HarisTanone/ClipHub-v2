@@ -276,8 +276,8 @@ Flow Diagram Lengkap
 └─────────────────────────────────────────────────────────────────────────┘
 Yang TIDAK Digunakan (Clarification)
 Tech	Status	Kenapa
-YOLO (ultralytics)	❌ Tidak dipakai di podcast engine	Hanya di SmartCameraEngine (non-podcast path). Podcast pakai MediaPipe karena lebih ringan dan accurate untuk face
-Grid split (50/50, 60/40)	❌ Disabled	Menyebabkan audio desync (FFmpeg concat). Diganti dengan dynamic panning
+YOLO (ultralytics)	❌ Tidak dipakai di podcast engine	Podcast memakai MediaPipe karena lebih ringan dan akurat untuk deteksi wajah
+Grid split 50/50	✅ Kondisional	Hanya aktif saat dua identitas berbeda terlihat bersamaan; selain itu memakai person-centered dynamic panning
 Pyannote Speaker Diarization	❌ Tidak dipakai	Unreliable, crash 2x, audio-only (tidak bisa map ke wajah). Diganti lip+head multimodal
 OpenPose / Skeleton	❌ Tidak ada	Overkill untuk podcast. Head motion dari nose tip sudah cukup
 Dynamic segment switching	❌ Reverted	FFmpeg trim+concat = audio desync. Single pass panning menggantikan ini
@@ -286,7 +286,6 @@ File	Fungsi
 podcast_reframe_engine.py	Orchestrator: pipeline, panning, render
 active_speaker_detector.py	Face Mesh lip + head motion + VAD scoring
 person_tracker.py	IoU-based persistent face ID tracking
-smart_subtitle_positioner.py	Subtitle Y position (grid-aware)
 gpu_encoder.py	Auto-detect NVENC / fallback libx264
 silero_vad.py	Voice Activity Detection untuk VAD gate
 Elapsed time: 1m 41s

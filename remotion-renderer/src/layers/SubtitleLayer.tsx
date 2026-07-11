@@ -95,7 +95,12 @@ type SubtitleVisualPreset =
   | "minimal_clean"
   | "breaking_tape"
   | "quote_box"
-  | "documentary";
+  | "documentary"
+  | "caption_strip"
+  | "word_tiles"
+  | "gradient_glass"
+  | "comic_burst"
+  | "terminal_type";
 
 const SUBTITLE_VISUAL_PRESETS = new Set<SubtitleVisualPreset>([
   "classic",
@@ -110,6 +115,11 @@ const SUBTITLE_VISUAL_PRESETS = new Set<SubtitleVisualPreset>([
   "breaking_tape",
   "quote_box",
   "documentary",
+  "caption_strip",
+  "word_tiles",
+  "gradient_glass",
+  "comic_burst",
+  "terminal_type",
 ]);
 
 const PRESET_ALIASES: Record<string, SubtitleVisualPreset> = {
@@ -151,6 +161,10 @@ const defaultMaxWidthForPreset = (preset: SubtitleVisualPreset): number => {
       return 92;
     case "breaking_tape":
       return 88;
+    case "caption_strip":
+      return 96;
+    case "terminal_type":
+      return 86;
     default:
       return 90;
   }
@@ -318,9 +332,9 @@ function SubtitlePage({
   const highlightScale = config.highlightScale || 1.2;
   const highlightStyleType = config.highlightStyle || "scale";
   const maxWidthPct = clamp(Number(config.maxWidthPct ?? config.maxWidth ?? defaultMaxWidthForPreset(visualPreset)), 45, 96);
-  const alignLeft = visualPreset === "lower_third" || visualPreset === "documentary";
-  const isImpactPreset = visualPreset === "meme_impact" || visualPreset === "breaking_tape";
-  const isLightPanel = visualPreset === "bubble_chat" || visualPreset === "breaking_tape" || visualPreset === "quote_box";
+  const alignLeft = visualPreset === "lower_third" || visualPreset === "documentary" || visualPreset === "terminal_type";
+  const isImpactPreset = visualPreset === "meme_impact" || visualPreset === "breaking_tape" || visualPreset === "comic_burst";
+  const isLightPanel = visualPreset === "bubble_chat" || visualPreset === "breaking_tape" || visualPreset === "quote_box" || visualPreset === "word_tiles";
   const presetTransform = visualPreset === "breaking_tape" ? "rotate(-1.1deg)" : undefined;
 
   const presetPanelStyle: React.CSSProperties = (() => {
@@ -368,6 +382,30 @@ function SubtitlePage({
         return {
           border: `1px solid ${hexToRgba(highlightColor, 0.34)}`,
           boxShadow: "0 12px 28px rgba(0,0,0,0.35)",
+        };
+      case "caption_strip":
+        return {
+          width: "100%",
+          borderTop: `4px solid ${highlightColor}`,
+          borderBottom: `4px solid ${hexToRgba(highlightColor, 0.45)}`,
+          boxShadow: "0 16px 32px rgba(0,0,0,0.45)",
+        };
+      case "gradient_glass":
+        return {
+          background: `linear-gradient(120deg, ${hexToRgba(config.bgColor || "#312E81", 0.76)}, ${hexToRgba(highlightColor, 0.28)})`,
+          border: `1px solid ${hexToRgba(highlightColor, 0.55)}`,
+          boxShadow: `0 18px 44px rgba(0,0,0,0.38), 0 0 26px ${hexToRgba(highlightColor, 0.2)}`,
+          backdropFilter: "blur(12px)",
+        };
+      case "comic_burst":
+        return {
+          filter: `drop-shadow(9px 10px 0 ${hexToRgba("#111827", 0.72)})`,
+        };
+      case "terminal_type":
+        return {
+          border: `2px solid ${hexToRgba(highlightColor, 0.55)}`,
+          borderTop: `16px solid ${hexToRgba(highlightColor, 0.35)}`,
+          boxShadow: `0 0 28px ${hexToRgba(highlightColor, 0.2)}, inset 0 0 24px rgba(0,0,0,0.48)`,
         };
       default:
         return {};
@@ -509,6 +547,12 @@ function SubtitlePage({
               zIndex: 0,
             }} />
           )}
+          {visualPreset === "gradient_glass" && (
+            <div style={{ position: "absolute", inset: 0, borderRadius: "inherit", background: "linear-gradient(115deg, rgba(255,255,255,.15), transparent 42%)", zIndex: 0 }} />
+          )}
+          {visualPreset === "terminal_type" && (
+            <span style={{ position: "relative", zIndex: 1, color: highlightColor, fontFamily: "monospace", fontSize, fontWeight: 900, marginRight: 4 }}>&gt;</span>
+          )}
           {lineTransition === "line_reveal" && (
             <div style={{
               width: "100%",
@@ -606,21 +650,26 @@ function SubtitlePage({
 
             const wordUppercase = useDual ? config.highlightUppercase : config.uppercase;
             const displayText = applyCase(wordText, wordUppercase, useDual ? false : config.capitalize);
-            const presetBackground = shouldHighlight && visualPreset === "bubble_chat"
+            const presetBackground = visualPreset === "word_tiles"
+              ? (shouldHighlight ? highlightColor : hexToRgba(color, 0.92))
+              : shouldHighlight && visualPreset === "bubble_chat"
               ? hexToRgba(highlightColor, 0.16)
               : shouldHighlight && visualPreset === "breaking_tape"
                 ? hexToRgba("#111111", 0.12)
                 : undefined;
-            const presetPadding = presetBackground ? "2px 8px" : undefined;
+            const presetPadding = visualPreset === "word_tiles" ? "8px 12px" : presetBackground ? "2px 8px" : undefined;
             const textStroke = (useDual ? config.highlightStrokeEnabled : config.strokeEnabled)
               ? `${(useDual ? (config.highlightStrokeWidth || 3) : (config.strokeWidth || 2))}px ${useDual ? (config.highlightStrokeColor || "#000") : (config.strokeColor || "#000")}`
               : visualPreset === "meme_impact"
                 ? `${shouldHighlight ? 4 : 3}px #000000`
+                : visualPreset === "comic_burst"
+                  ? `${shouldHighlight ? 5 : 4}px #111827`
                 : undefined;
             const transformParts = [
               wordScale !== 1 ? `scale(${wordScale})` : "",
               shouldHighlight && visualPreset === "meme_impact" ? "translateY(-4px)" : "",
               shouldHighlight && visualPreset === "breaking_tape" ? "skewX(-4deg)" : "",
+              shouldHighlight && visualPreset === "comic_burst" ? "rotate(-3deg) translateY(-5px)" : "",
             ].filter(Boolean);
 
             return (
@@ -630,7 +679,7 @@ function SubtitlePage({
                   position: "relative",
                   zIndex: 1,
                   display: "inline-block",
-                  color: wordColor,
+                  color: visualPreset === "word_tiles" ? (shouldHighlight ? "#18181B" : "#FFFFFF") : wordColor,
                   fontSize: wordFontSize,
                   fontWeight: wordWeight,
                   fontFamily: wordFontFamily,
@@ -640,7 +689,7 @@ function SubtitlePage({
                   paintOrder: textStroke ? "stroke" : undefined,
                   WebkitTextStroke: textStroke,
                   backgroundColor: presetBackground,
-                  borderRadius: presetBackground ? 8 : undefined,
+                  borderRadius: presetBackground ? (visualPreset === "word_tiles" ? 7 : 8) : undefined,
                   padding: presetPadding,
                   // Highlight style decorations (only if NOT dual)
                   ...(!useDual && shouldHighlight && highlightStyleType === "underline" ? { textDecoration: "underline", textDecorationColor: highlightColor, textUnderlineOffset: "4px", textDecorationThickness: "3px" } : {}),

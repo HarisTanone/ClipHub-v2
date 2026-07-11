@@ -175,7 +175,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const isGlitch = animation === "glitch";
   const glitchActive = isGlitch && frame % 8 < 2;
   const glitchX = Math.sin(frame * 0.7) * 4;
-  const customRenderAnimations = new Set(["bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse", "breaking_tape", "mic_drop", "split_panel", "kinetic_stack", "glass_flash", "marker_swipe", "signal_scan"]);
+  const customRenderAnimations = new Set(["bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse", "breaking_tape", "mic_drop", "split_panel", "kinetic_stack", "glass_flash", "marker_swipe", "signal_scan", "comment_reply", "search_prompt", "countdown_list", "pov_stamp"]);
 
   return (
     <AbsoluteFill style={{ opacity }}>
@@ -733,6 +733,70 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 textShadow: shadows.length ? shadows.join(", ") : `0 0 18px ${accent}`,
                 textTransform: config.uppercase ? "uppercase" : "none",
               }}>{renderedText}</div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* TikTok-native reply bubble */}
+      {animation === "comment_reply" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 16, stiffness: 150, mass: 0.75 } });
+        const y = interpolate(Math.min(1, entrance), [0, 1], [-80, 0]);
+        const panel = config.boxColor || "#FFFFFF";
+        const accent = config.lineColor || "#18181B";
+        return (
+          <AbsoluteFill>
+            <div style={{ position: "absolute", top: `${positionY}%`, left: "7%", right: "13%", transform: `translateY(calc(-50% + ${y}px))` }}>
+              <div style={{ position: "relative", borderRadius: 28, padding: "34px 38px", background: hexToRgba(panel, config.boxOpacity ?? 0.98), boxShadow: "0 30px 72px rgba(0,0,0,.38)" }}>
+                <div style={{ color: hexToRgba(accent, 0.58), fontFamily: "'Inter', sans-serif", fontSize: 22, fontWeight: 700, marginBottom: 14 }}>{badgeText || "replying to @viewer"}</div>
+                <div style={{ color: config.color || "#18181B", fontFamily, fontSize, fontWeight, lineHeight: config.lineHeight || 1.14, textAlign: "left" }}>{renderedText}</div>
+                {decorativeElements && <div style={{ position: "absolute", left: 54, bottom: -20, width: 42, height: 42, background: panel, transform: "rotate(45deg)", borderRadius: 4 }} />}
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* TikTok discovery/search prompt */}
+      {animation === "search_prompt" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 18, stiffness: 130, mass: 0.8 } });
+        const accent = config.lineColor || "#22D3EE";
+        return (
+          <AbsoluteFill>
+            <div style={{ position: "absolute", top: `${positionY}%`, left: "6%", right: "6%", transform: `translateY(-50%) scale(${0.94 + Math.min(1, entrance) * 0.06})`, display: "grid", gridTemplateColumns: "68px 1fr 58px", alignItems: "center", gap: 18, padding: "26px 32px", borderRadius: 999, background: hexToRgba(config.boxColor || "#0F172A", config.boxOpacity ?? 0.94), border: `2px solid ${accent}66`, boxShadow: `0 0 42px ${accent}22, 0 28px 64px rgba(0,0,0,.4)` }}>
+              <span style={{ color: accent, fontSize: 48, lineHeight: 1 }}>⌕</span>
+              <div style={{ color, fontFamily, fontSize, fontWeight, lineHeight: config.lineHeight || 1.12, textAlign: "left", textShadow: shadows.join(", ") || undefined }}>{renderedText}</div>
+              <span style={{ color: accent, fontSize: 38 }}>↗</span>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* Numbered listicle/countdown hook */}
+      {animation === "countdown_list" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 11, stiffness: 190, mass: 0.7 } });
+        const accent = config.boxColor || "#FACC15";
+        const ink = config.lineColor || "#111827";
+        return (
+          <AbsoluteFill>
+            <div style={{ position: "absolute", top: `${positionY}%`, left: "7%", right: "7%", transform: `translateY(-50%) scale(${Math.min(1, entrance)})`, display: "grid", gridTemplateColumns: "220px 1fr", overflow: "hidden", borderRadius: 26, border: `8px solid ${ink}`, boxShadow: `16px 16px 0 ${ink}` }}>
+              <div style={{ display: "grid", placeItems: "center", background: accent, color: ink, fontFamily: "'Archivo Black', sans-serif", fontSize: 104, fontWeight: 900 }}>{badgeText || "03"}</div>
+              <div style={{ color: config.color || ink, background: "#F8FAFC", padding: "48px 44px", fontFamily, fontSize, fontWeight, lineHeight: 1.04, textTransform: "uppercase", textAlign: "left" }}>{renderedText}</div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* Persistent creator point-of-view stamp */}
+      {animation === "pov_stamp" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 14, stiffness: 155, mass: 0.8 } });
+        const accent = config.boxColor || "#FB7185";
+        const rotate = interpolate(frame, [0, 16], [-8, -2], { extrapolateRight: "clamp" });
+        return (
+          <AbsoluteFill>
+            <div style={{ position: "absolute", top: `${positionY}%`, left: "8%", right: "8%", transform: `translateY(-50%) rotate(${rotate}deg) scale(${0.88 + Math.min(1, entrance) * 0.12})` }}>
+              <div style={{ display: "inline-block", marginBottom: 14, padding: "12px 24px", borderRadius: 12, background: accent, color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontSize: 30, fontWeight: 900, letterSpacing: 3 }}>{badgeText || "POV"}</div>
+              <div style={{ padding: "34px 40px", borderRadius: 18, border: `5px solid ${accent}`, background: "rgba(18,7,12,.8)", color, fontFamily, fontSize, fontWeight, fontStyle: config.italic ? "italic" : "normal", lineHeight: config.lineHeight || 1.08, textAlign: "left", textShadow: shadows.join(", ") || "0 6px 22px rgba(0,0,0,.5)" }}>{renderedText}</div>
             </div>
           </AbsoluteFill>
         );

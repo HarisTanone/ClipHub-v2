@@ -158,5 +158,7 @@ describe("SubtitleLayer - Page Grouping", () => {
     expect(resolveSubtitleVisualPreset({ lineTransition: "line_reveal" })).toBe("editorial_banner");
     expect(resolveSubtitleVisualPreset({ dualStyleEnabled: true })).toBe("dual_pop");
     expect(resolveSubtitleVisualPreset({ stylePreset: "bold_yellow" })).toBe("dual_pop");
+    expect(resolveSubtitleVisualPreset({ stylePreset: "word_tiles" })).toBe("word_tiles");
+    expect(resolveSubtitleVisualPreset({ stylePreset: "terminal_type" })).toBe("terminal_type");
   });
 });

@@ -195,9 +195,6 @@ export interface CreateJobPayload {
   // Full style configs from Custom Style Editor
   hook_style_config?: Record<string, any>;
   subtitle_style_config?: Record<string, any>;
-  // Smart features
-  smart_camera?: boolean;
-  smart_subtitle_position?: boolean;
 }
 
 export type UploadJobPayload = Omit<CreateJobPayload, "youtube_url">;
@@ -306,6 +303,9 @@ export interface ClipDetailResponse {
     reason: string | null;
     words: Array<{ word: string; start: number; end: number; highlight?: boolean }>;
     highlights: any[];
+    hook_style: string | null;
+    hook_style_config: Record<string, any>;
+    subtitle_style_config: Record<string, any>;
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };
     urls: { raw: string | null; final: string | null; thumbnail: string | null };
   };

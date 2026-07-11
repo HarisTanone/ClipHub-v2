@@ -45,15 +45,7 @@ from src.domain.interfaces import (
     IYoloReframeEngine,
 )
 from src.infrastructure.content_intelligence import ContentIntelligence
-from src.infrastructure.smart_subtitle_style import (
-    apply_smart_word_highlights,
-    build_smart_editorial_subtitle_style,
-    smart_editorial_enabled,
-)
-from src.infrastructure.subtitle_words import (
-    grid_subtitle_position_y as resolve_grid_subtitle_position_y,
-    sanitize_subtitle_words,
-)
+from src.infrastructure.subtitle_words import sanitize_subtitle_words
 
 if TYPE_CHECKING:
     from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
@@ -435,16 +427,6 @@ class V2PipelineService:
             )
             merged_clips_data = dict(job.clips_data or {})
             merged_clips_data["content_profile"] = content_profile.to_dict()
-            merged_clips_data["smart_features"] = {
-                "smart_camera": bool(merged_clips_data.get("smart_camera")),
-                "smart_subtitle_position": bool(merged_clips_data.get("smart_subtitle_position")),
-                "auto_grid": bool(job.autogrid_enabled),
-                "smart_subtitle_template": bool(
-                    merged_clips_data.get("smart_camera")
-                    and merged_clips_data.get("smart_subtitle_position")
-                ),
-                "render_engine": "remotion",
-            }
             job.clips_data = merged_clips_data
             await self._repo.update_clips_data(job_id, merged_clips_data)
             logger.info(
@@ -514,8 +496,6 @@ class V2PipelineService:
                             job.target_aspect_ratio,
                             flags.autogrid_enabled,
                             content_profile=(job.clips_data or {}).get("content_profile", {}),
-                            smart_camera=bool((job.clips_data or {}).get("smart_camera")),
-                            smart_subtitle_position=bool((job.clips_data or {}).get("smart_subtitle_position")),
                         )
                         reframe_data[clip.rank] = result
                     except Exception as e:
@@ -592,13 +572,6 @@ class V2PipelineService:
                 raw_words = words_per_clip.get(clip.rank, [])
                 clip_duration = round(clip.end - clip.start, 3)
                 valid_words = sanitize_subtitle_words(raw_words, clip_duration)
-                if smart_editorial_enabled(job.clips_data):
-                    valid_words = apply_smart_word_highlights(
-                        valid_words,
-                        hook_text=clip.hook,
-                        reason_text=clip.reason,
-                        content_profile=(job.clips_data or {}).get("content_profile", {}),
-                    )
                 clips_with_words[clip.rank] = valid_words
                 if valid_words:
                     logger.info(
@@ -649,18 +622,12 @@ class V2PipelineService:
                 for key in (
                     "hook_style_config",
                     "content_profile",
-                    "smart_features",
                     "source",
                     "source_type",
                 ):
                     if job.clips_data.get(key):
                         clips_data[key] = job.clips_data[key]
-                if smart_editorial_enabled(job.clips_data):
-                    clips_data["subtitle_style_config"] = build_smart_editorial_subtitle_style(
-                        job.clips_data.get("subtitle_style_config", {}),
-                        job.clips_data.get("content_profile", {}),
-                    )
-                elif job.clips_data.get("subtitle_style_config"):
+                if job.clips_data.get("subtitle_style_config"):
                     clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
             await self._repo.update_clips_data(job_id, clips_data)
 
@@ -755,11 +722,6 @@ class V2PipelineService:
         if job.clips_data:
             hook_style_config = job.clips_data.get("hook_style_config", {})
             subtitle_style_config = job.clips_data.get("subtitle_style_config", {})
-            if smart_editorial_enabled(job.clips_data):
-                subtitle_style_config = build_smart_editorial_subtitle_style(
-                    subtitle_style_config,
-                    job.clips_data.get("content_profile", {}),
-                )
 
         logger.info(
             f"[{job_id}] Render style: hook_anim={hook_style_config.get('animation', 'N/A')}, "
@@ -830,22 +792,7 @@ class V2PipelineService:
                 clip_duration = max(0.0, clip.end - clip.start)
                 clip_words = sanitize_subtitle_words(clip_words_raw, clip_duration)
 
-                # Check if this clip was reframed with grid (2-speaker split)
-                is_grid_mode = False
-                grid_subtitle_position_y = None
                 clip_reframe = reframe_data.get(clip.rank)
-                if clip_reframe and isinstance(clip_reframe, dict):
-                    method = clip_reframe.get("method", "")
-                    is_grid_mode = (
-                        "grid" in method
-                        or "double" in method
-                        or "emphasis" in method
-                        or "gameplay_facecam" in method
-                    )
-                    grid_subtitle_position_y = (
-                        clip_reframe.get("subtitle_position_y")
-                        or resolve_grid_subtitle_position_y(method)
-                    )
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")
@@ -853,23 +800,9 @@ class V2PipelineService:
                 cd_dict = asdict(creative_direction) if creative_direction else {}
                 cd_dict["hook_style_config"] = hook_style_config
                 cd_dict["subtitle_style_config"] = subtitle_style_config
-                cd_dict["is_grid_mode"] = is_grid_mode
                 cd_dict["content_profile"] = (job.clips_data or {}).get("content_profile", {})
-                cd_dict["smart_features"] = (job.clips_data or {}).get("smart_features", {})
                 if clip_reframe and isinstance(clip_reframe, dict):
                     cd_dict["reframe_method"] = clip_reframe.get("method", "")
-                    max_width = clip_reframe.get("subtitle_max_width_pct")
-                    if max_width is not None:
-                        cd_dict["grid_subtitle_max_width_pct"] = float(max_width)
-                    if (job.clips_data or {}).get("smart_subtitle_position"):
-                        sub_config = dict(cd_dict.get("subtitle_style_config") or {})
-                        if grid_subtitle_position_y is not None:
-                            sub_config["positionY"] = float(grid_subtitle_position_y)
-                        if max_width is not None:
-                            sub_config["maxWidthPct"] = float(max_width)
-                        cd_dict["subtitle_style_config"] = sub_config
-                if grid_subtitle_position_y is not None:
-                    cd_dict["grid_subtitle_position_y"] = float(grid_subtitle_position_y)
 
                 try:
                     result = await self._remotion_adapter.render_clip(

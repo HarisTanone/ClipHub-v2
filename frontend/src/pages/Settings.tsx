@@ -46,8 +46,6 @@ async function deleteUserApi(id: number): Promise<boolean> {
 
 const PREMIUM_FEATURES = [
   { code: "dual_subtitle", name: "Dual Font Style" },
-  { code: "smart_camera", name: "Smart Camera" },
-  { code: "smart_subtitle_pos", name: "Smart Subtitle Position" },
   { code: "auto_grid", name: "Auto Grid" },
   { code: "threejs_effects", name: "Three.js Effects" },
   { code: "ai_layer", name: "AI Layer" },
@@ -236,7 +234,7 @@ export function Settings() {
                         ? "border-blue-500 bg-blue-500/10 text-blue-400"
                         : "border-zinc-700 text-zinc-500 hover:border-zinc-600")}>
                     <span className="block text-[10px] opacity-70">Free</span>
-                    V2 — Groq
+                    V2 — 9router
                   </button>
                 </div>
               </Card>
@@ -326,7 +324,7 @@ function UserRow({ user: u, isSuperadmin, onDelete, toast }: { user: any; isSupe
     });
     if (res.ok) {
       setIsPremium(newValue);
-      toast.success(`${u.email} → ${newValue ? "Premium (V1 Gemini)" : "Free (V2 Groq)"}`);
+      toast.success(`${u.email} → ${newValue ? "Premium (V1 Gemini)" : "Free (V2 9router)"}`);
     } else {
       toast.error("Failed to update premium status");
     }
@@ -383,7 +381,7 @@ function UserRow({ user: u, isSuperadmin, onDelete, toast }: { user: any; isSupe
             )}
           >
             <span className={cn("w-2 h-2 rounded-full", isPremium ? "bg-amber-400" : "bg-zinc-600")} />
-            {isPremium ? "Premium (V1 Gemini)" : "Free (V2 Groq)"}
+            {isPremium ? "Premium (V1 Gemini)" : "Free (V2 9router)"}
           </button>
           {isPremium && (
             <span className="text-[10px] text-zinc-600">All features unlocked</span>

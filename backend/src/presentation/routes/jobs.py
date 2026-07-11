@@ -241,9 +241,6 @@ async def create_job(
         # Custom style configs
         hook_style_config=request.hook_style_config,
         subtitle_style_config=request.subtitle_style_config,
-        # Smart features
-        smart_camera=request.smart_camera,
-        smart_subtitle_position=request.smart_subtitle_position,
         # User ownership
         user_id=user.id,
         # V2 pipeline routing
@@ -358,8 +355,6 @@ async def create_job_from_upload(
             remotion_quality=options.remotion_quality,
             hook_style_config=options.hook_style_config,
             subtitle_style_config=options.subtitle_style_config,
-            smart_camera=options.smart_camera,
-            smart_subtitle_position=options.smart_subtitle_position,
             user_id=user.id,
             is_superadmin=user.is_superadmin,
             source_type="upload",
@@ -929,6 +924,17 @@ async def get_clip_detail(
             "reason": clip_data.get("reason"),
             "words": clip_data.get("words", []),
             "highlights": clip_data.get("highlights", []),
+            "hook_style": clip_data.get("hook_style_override"),
+            "hook_style_config": (
+                clip_data.get("hook_style_config_override")
+                or (job.clips_data or {}).get("hook_style_config")
+                or {}
+            ),
+            "subtitle_style_config": (
+                clip_data.get("subtitle_style_config_override")
+                or (job.clips_data or {}).get("subtitle_style_config")
+                or {}
+            ),
             "file_status": file_status,
             "urls": {
                 "raw": f"/api/jobs/{job_id}/clips/{clip_rank}/raw" if file_status["raw"] else None,
@@ -1138,7 +1144,7 @@ async def restyle_clip(
     2. B-Roll overlay (if broll_enabled and brolls exist)
     3. Subtitle burn (word-by-word if subtitle_enabled)
 
-    Source: uses reframed clip if available, else raw clip.
+    Source: always the requested rank's raw clip, then re-centered.
     Output: replaces final/clip_{rank}_final.mp4
     """
     import logging
@@ -1149,6 +1155,7 @@ async def restyle_clip(
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
 
     if not job.clips_data or "clips" not in job.clips_data:
         raise HTTPException(status_code=400, detail="Job has no clips data")
@@ -1163,13 +1170,16 @@ async def restyle_clip(
     if clip_data is None:
         raise HTTPException(status_code=404, detail=f"Clip #{clip_rank} not found")
 
-    # Find source video (reframed > raw)
+    # Always start from this rank's raw clip. Reusing an older reframed file
+    # would accumulate crops and can make preview/output drift after restyles.
     output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
-    reframed_path = f"{output_dir}/clip_{clip_rank:02d}_reframed.mp4"
-    raw_path = f"{output_dir}/raw/clip_{clip_rank}.mp4"
-    source_path = reframed_path if os.path.exists(reframed_path) else raw_path
-
-    if not os.path.exists(source_path):
+    raw_candidates = [
+        f"{output_dir}/raw/clip_{clip_rank:02d}.mp4",
+        f"{output_dir}/raw/clip_{clip_rank}.mp4",
+        f"{output_dir}/clip_{clip_rank:02d}.mp4",
+    ]
+    raw_path = next((path for path in raw_candidates if os.path.exists(path)), None)
+    if raw_path is None:
         raise HTTPException(status_code=400, detail="Raw clip not found. Run full pipeline first.")
 
     # Resolve parameters
@@ -1199,12 +1209,45 @@ async def restyle_clip(
 
     # Prepare paths
     os.makedirs(f"{output_dir}/final", exist_ok=True)
-    hooked_path = f"{output_dir}/clip_{clip_rank:02d}_hooked.mp4"
     brolled_path = f"{output_dir}/clip_{clip_rank:02d}_brolled.mp4"
+    restyle_reframed_path = f"{output_dir}/clip_{clip_rank:02d}_restyle_reframed.mp4"
+    canonical_reframed_path = f"{output_dir}/clip_{clip_rank:02d}_reframed.mp4"
     final_path = f"{output_dir}/final/clip_{clip_rank}_final.mp4"
+    staged_final_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.mp4"
 
     try:
-        current_path = source_path
+        current_path = raw_path
+        reframe_result = None
+
+        # Re-run centering/crop for the active clip only. Auto-grid is still
+        # conservative inside the reframe engine and requires unique people.
+        reframe_engine = getattr(service, "_yolo_reframe", None)
+        if reframe_engine:
+            try:
+                reframe_result = await reframe_engine.process(
+                    raw_path,
+                    restyle_reframed_path,
+                    job.target_aspect_ratio or "9:16",
+                    bool(job.autogrid_enabled),
+                    content_profile=(job.clips_data or {}).get("content_profile", {}),
+                )
+                candidate_path = (
+                    reframe_result.get("output_path")
+                    if isinstance(reframe_result, dict)
+                    else None
+                )
+                if candidate_path and os.path.exists(candidate_path):
+                    current_path = candidate_path
+                elif os.path.exists(restyle_reframed_path):
+                    current_path = restyle_reframed_path
+            except Exception as e:
+                logger.warning(f"[restyle] person centering failed clip {clip_rank}: {e}")
+
+        if (job.target_aspect_ratio or "9:16") == "9:16" and current_path == raw_path:
+            raise HTTPException(
+                status_code=503,
+                detail="Person centering is unavailable; the existing final clip was preserved.",
+            )
 
         # Step 1: B-Roll overlay (if enabled and brolls exist for this clip).
         # Remotion is applied after this so hook/subtitle remain on top.
@@ -1293,16 +1336,16 @@ async def restyle_clip(
                         },
                         creative_direction=creative_direction,
                         video_path=current_path,
-                        output_path=final_path,
+                        output_path=staged_final_path,
                         clip_rank=clip_rank,
                         config=render_config,
                         words=render_words,
                         hook_text=hook_text,
                         hook_style=hook_style,
                     )
-                    remotion_rendered = bool(result.success and os.path.exists(final_path))
+                    remotion_rendered = bool(result.success and os.path.exists(staged_final_path))
                     if remotion_rendered:
-                        current_path = final_path
+                        current_path = staged_final_path
                         logger.info(f"[restyle] remotion applied clip {clip_rank} style={hook_style}")
                     else:
                         logger.warning(
@@ -1321,9 +1364,35 @@ async def restyle_clip(
                 ),
             )
 
-        if not hook_text and not render_words and current_path != final_path:
-            shutil.copy2(current_path, final_path)
-            current_path = final_path
+        if not hook_text and not render_words and current_path != staged_final_path:
+            shutil.copy2(current_path, staged_final_path)
+            current_path = staged_final_path
+
+        if not os.path.exists(staged_final_path):
+            raise HTTPException(status_code=503, detail="Restyle did not produce a final video")
+
+        # Keep the old final playable until the replacement is complete.
+        os.replace(staged_final_path, final_path)
+        current_path = final_path
+        if os.path.exists(restyle_reframed_path):
+            os.replace(restyle_reframed_path, canonical_reframed_path)
+        # Keep legacy file layouts synchronized for thumbnails and older routes.
+        for compatibility_path in (
+            f"{output_dir}/clip_{clip_rank:02d}_final.mp4",
+            f"{output_dir}/final/clip_{clip_rank:02d}.mp4",
+        ):
+            try:
+                shutil.copy2(final_path, compatibility_path)
+            except Exception as e:
+                logger.warning(f"[restyle] compatibility copy failed: {compatibility_path}: {e}")
+        for thumbnail_path in (
+            f"{output_dir}/thumbnail/clip_{clip_rank:02d}.jpg",
+            f"{output_dir}/thumbnail/clip_{clip_rank}_thumb.jpg",
+            f"{output_dir}/thumbnail/clip_{clip_rank:02d}_thumb.jpg",
+            f"{output_dir}/clip_{clip_rank:02d}_thumb.jpg",
+        ):
+            if os.path.exists(thumbnail_path):
+                os.remove(thumbnail_path)
 
         # Update clip_data with applied style
         clip_data["hook_style_override"] = hook_style
@@ -1344,7 +1413,7 @@ async def restyle_clip(
             await session.commit()
 
         # Cleanup temp files
-        for tmp in [hooked_path, brolled_path]:
+        for tmp in [brolled_path, restyle_reframed_path, staged_final_path]:
             if tmp != final_path and os.path.exists(tmp):
                 os.remove(tmp)
 
@@ -1359,11 +1428,20 @@ async def restyle_clip(
                 "subtitle_style_config": subtitle_config,
                 "subtitle_applied": do_subtitle and bool(clip_data.get("words")),
                 "broll_applied": do_broll and bool(clip_data.get("broll_suggestions")),
+                "reframe_method": reframe_result.get("method") if isinstance(reframe_result, dict) else None,
                 "output_url": f"/api/jobs/{job_id}/clips/{clip_rank}/final",
             },
             "message": f"Clip #{clip_rank} restyled successfully",
         }
 
+    except HTTPException:
+        for tmp in [brolled_path, restyle_reframed_path, staged_final_path]:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        raise
     except Exception as e:
+        for tmp in [brolled_path, restyle_reframed_path, staged_final_path]:
+            if os.path.exists(tmp):
+                os.remove(tmp)
         logger.error(f"restyle_error: job={job_id}, clip={clip_rank}, error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Restyle failed: {str(e)}")
