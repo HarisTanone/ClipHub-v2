@@ -205,6 +205,7 @@ class JobService:
         source_filename: Optional[str] = None,
         source_duration: Optional[float] = None,
         source_size_bytes: Optional[int] = None,
+        processing_mode: str = "analyze",
     ) -> tuple[Job, bool]:
         """Create job and start pipeline in background."""
         is_upload_source = source_type == "upload"
@@ -252,6 +253,7 @@ class JobService:
                 "size_bytes": source_size_bytes,
             }
             initial_clips_data["source_type"] = "upload"
+            initial_clips_data["processing_mode"] = processing_mode
 
         job = Job(
             job_id=job_id,
@@ -262,7 +264,9 @@ class JobService:
             hook_engine=hook_engine,
             hook_style=hook_style or (hook_style_config.get("animation", "") if hook_style_config else ""),
             broll_enabled=broll_enabled,
-            autogrid_enabled=autogrid_enabled,
+            # Computer-vision framing features are portrait-only. Enforce this
+            # server-side as API clients must not be able to bypass the UI lock.
+            autogrid_enabled=autogrid_enabled and target_aspect_ratio == "9:16",
             # v3.0 Remotion fields - use settings default if not specified
             use_remotion=use_remotion if use_remotion is not None else settings.USE_REMOTION,
             ai_layer_enabled=ai_layer_enabled if ai_layer_enabled is not None else settings.REMOTION_ENABLE_AI_LAYER,

@@ -22,6 +22,7 @@ class JobOptionsBase(BaseModel):
     # Full style configs from Custom Style Editor
     hook_style_config: Optional[dict] = None
     subtitle_style_config: Optional[dict] = None
+    processing_mode: str = "analyze"  # analyze viral moments | direct full-video edit
     @field_validator("target_aspect_ratio")
     @classmethod
     def valid_aspect(cls, v: str) -> str:
@@ -41,6 +42,13 @@ class JobOptionsBase(BaseModel):
     def valid_quality(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and v not in ("low", "medium", "high"):
             raise ValueError("remotion_quality harus 'low', 'medium', atau 'high'")
+        return v
+
+    @field_validator("processing_mode")
+    @classmethod
+    def valid_processing_mode(cls, v: str) -> str:
+        if v not in ("analyze", "direct"):
+            raise ValueError("processing_mode harus 'analyze' atau 'direct'")
         return v
 
 

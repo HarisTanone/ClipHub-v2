@@ -616,15 +616,18 @@ function SubtitlePage({
             const wordText = (t.text || "").trim();
             if (!wordText) return null;
             const isKeyword = Boolean(t.highlight) || highlightWords.includes(wordText.toLowerCase());
+            // Karaoke color follows the active token, but size/font emphasis is
+            // reserved for the sparse important-keyword flags from the backend.
             const shouldHighlight = isActive || isKeyword;
+            const shouldEnlarge = isActive && isKeyword;
             const presetWantsDual = visualPreset === "dual_pop" || visualPreset === "neon_pulse" || visualPreset === "meme_impact";
-            const useDual = shouldHighlight && (config.dualStyleEnabled === true || (config.dualStyleEnabled === undefined && presetWantsDual));
+            const useDual = shouldEnlarge && (config.dualStyleEnabled === true || (config.dualStyleEnabled === undefined && presetWantsDual));
 
             const wordFontSize = useDual
               ? (config.highlightFontSize || responsiveFontSize * (isImpactPreset ? 1.22 : 1.12))
               : responsiveFontSize;
-            const presetScale = shouldHighlight && isImpactPreset ? 1.1 : shouldHighlight && visualPreset === "neon_pulse" ? 1.06 : 1;
-            const wordScale = shouldHighlight ? (useDual ? presetScale : highlightScale * presetScale) : 1;
+            const presetScale = shouldEnlarge && isImpactPreset ? 1.1 : shouldEnlarge && visualPreset === "neon_pulse" ? 1.06 : 1;
+            const wordScale = shouldEnlarge ? (useDual ? presetScale : highlightScale * presetScale) : 1;
             const wordColor = shouldHighlight ? highlightColor : color;
             const wordWeight = useDual
               ? Number(config.highlightFontWeight || 900)

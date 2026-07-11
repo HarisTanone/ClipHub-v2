@@ -26,15 +26,10 @@ class AspectRatioRouter(IAspectRatioRouter):
         Returns:
             PipelineFlags with appropriate settings
         """
-        if aspect_ratio == "16:9":
-            logger.info(f"aspect_ratio_router: 16:9 → YOLO OFF, native framing")
+        if aspect_ratio != "9:16":
+            logger.info(f"aspect_ratio_router: {aspect_ratio} → detection OFF, native framing")
             return PipelineFlags.for_landscape()
 
         elif aspect_ratio == "9:16":
             logger.info(f"aspect_ratio_router: 9:16 → YOLO ON, autocenter ON, autogrid={autogrid_enabled}")
-            return PipelineFlags.for_portrait(autogrid=autogrid_enabled)
-
-        else:
-            # 1:1 or unknown → fallback to 9:16 (conservative)
-            logger.info(f"aspect_ratio_router: {aspect_ratio} → fallback to 9:16 policy")
             return PipelineFlags.for_portrait(autogrid=autogrid_enabled)

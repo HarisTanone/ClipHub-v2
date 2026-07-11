@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { presets as presetsApi, type Preset } from "@/lib/api";
@@ -103,6 +103,8 @@ export interface HookStyle {
   duration: number;
   fadeIn: number;
   fadeOut: number;
+  transitionStyle?: "cut" | "fade" | "slide" | "zoom";
+  transitionDuration?: number;
 }
 
 export interface SubtitleStyle {
@@ -152,6 +154,7 @@ export interface SubtitleStyle {
   shadowColor: string;
   shadowBlur: number;
   maxWordsPerLine: number;
+  maxWidthPct?: number;
   wordSpacing: number;
   animationStyle: "pop" | "fade" | "slide" | "none";
   animationSpeed: number;
@@ -815,17 +818,20 @@ interface StyleEditorModalProps {
   onSubtitleChange: (style: SubtitleStyle) => void;
   aspectRatio?: string;
   inline?: boolean;
-  activeTab?: "presets" | "hook" | "subtitle";
+  activeTab?: "presets" | "hook" | "subtitle" | "transition";
   thumbnailUrl?: string;
   isSuperadmin?: boolean;
   isPremium?: boolean;
   userFeatures?: string[];
   activePresetId?: number | null;
   onPresetSelect?: (id: number) => void;
+  onProcess?: () => void;
+  processing?: boolean;
+  processProgress?: { stage: string; percentage: number };
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect }: StyleEditorModalProps) {
-  const [tab, setTab] = useState<"presets" | "hook" | "subtitle">(activeTab || "hook");
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress }: StyleEditorModalProps) {
+  const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
 
@@ -964,7 +970,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
       </div>
     );
   }
@@ -987,13 +993,45 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
               <button type="button" onClick={() => setTab("subtitle")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === "subtitle" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
                 <Sparkles className="h-3 w-3 inline mr-1.5" />Subtitle
               </button>
+              <button type="button" onClick={() => setTab("transition")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === "transition" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
+                <MoveRight className="h-3 w-3 inline mr-1.5" />Transition
+              </button>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"><X className="h-4 w-4" /></button>
+          <div className="flex items-center gap-2">
+            {processing && processProgress && <div className="w-36"><div className="flex justify-between text-[9px] text-zinc-400"><span className="capitalize">{processProgress.stage}</span><span>{processProgress.percentage}%</span></div><div className="mt-1 h-1 overflow-hidden rounded bg-zinc-800"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${processProgress.percentage}%` }} /></div></div>}
+            {onProcess && <Button type="button" size="sm" onClick={onProcess} loading={processing} icon={<Sparkles className="h-3.5 w-3.5" />}>{processing ? "Processing" : "Process Restyle"}</Button>}
+            <button type="button" onClick={onClose} disabled={processing} className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"><X className="h-4 w-4" /></button>
+          </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TransitionEditor({ style, onChange }: { style: HookStyle; onChange: (style: HookStyle) => void }) {
+  const active = style.transitionStyle || "cut";
+  const duration = style.transitionDuration || 0.35;
+  const durationInt = Math.round(duration * 100);
+  return (
+    <div className="h-full overflow-y-auto p-5">
+      <h3 className="text-sm font-semibold text-zinc-100">Speaker Transition</h3>
+      <p className="mt-1 text-xs text-zinc-500">Applied to preview and final Remotion render when the clip starts or speaker framing changes.</p>
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {(["cut", "fade", "slide", "zoom"] as const).map((value) => (
+          <button type="button" key={value} onClick={() => onChange({ ...style, transitionStyle: value })} className={cn("rounded-xl border p-4 text-left capitalize transition-all", active === value ? "border-emerald-500 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-950/50 text-zinc-400 hover:border-zinc-700")}>
+            <div className={cn("mb-3 h-16 overflow-hidden rounded-lg bg-zinc-800", value === "fade" && "animate-pulse")}>
+              <div className={cn("h-full w-full bg-gradient-to-br from-emerald-500/40 to-blue-500/30", value === "slide" && "translate-x-2", value === "zoom" && "scale-110")} />
+            </div>
+            {value}
+          </button>
+        ))}
+      </div>
+      <div className="mt-6">
+        <RangeInput label={`Duration: ${duration.toFixed(2)}s`} min={15} max={100} value={durationInt} onChange={(v) => onChange({ ...style, transitionDuration: v / 100 })} />
       </div>
     </div>
   );
@@ -2041,14 +2079,14 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
     { kind: "transition"; id: SubtitleStyle["lineTransition"]; meta: OptionMeta } |
     { kind: "animation"; id: SubtitleStyle["animationStyle"]; meta: OptionMeta }
   > = [
-    { kind: "transition", id: "word_pop", meta: SUBTITLE_TRANSITION_META.word_pop },
-    { kind: "transition", id: "emphasis", meta: SUBTITLE_TRANSITION_META.emphasis },
-    { kind: "transition", id: "line_reveal", meta: SUBTITLE_TRANSITION_META.line_reveal },
-    { kind: "animation", id: "pop", meta: SUBTITLE_ANIMATION_META.pop },
-    { kind: "animation", id: "fade", meta: SUBTITLE_ANIMATION_META.fade },
-    { kind: "animation", id: "slide", meta: SUBTITLE_ANIMATION_META.slide },
-    { kind: "animation", id: "none", meta: SUBTITLE_ANIMATION_META.none },
-  ];
+      { kind: "transition", id: "word_pop", meta: SUBTITLE_TRANSITION_META.word_pop },
+      { kind: "transition", id: "emphasis", meta: SUBTITLE_TRANSITION_META.emphasis },
+      { kind: "transition", id: "line_reveal", meta: SUBTITLE_TRANSITION_META.line_reveal },
+      { kind: "animation", id: "pop", meta: SUBTITLE_ANIMATION_META.pop },
+      { kind: "animation", id: "fade", meta: SUBTITLE_ANIMATION_META.fade },
+      { kind: "animation", id: "slide", meta: SUBTITLE_ANIMATION_META.slide },
+      { kind: "animation", id: "none", meta: SUBTITLE_ANIMATION_META.none },
+    ];
   const visibleSubtitlePresets = getPageItems(SUBTITLE_PRESETS, presetPage);
   const visibleSubtitleTiming = getPageItems(subtitleTimingOptions, timingPage);
   const activeTimingMeta = SUBTITLE_TRANSITION_META[style.lineTransition] || SUBTITLE_ANIMATION_META[style.animationStyle];

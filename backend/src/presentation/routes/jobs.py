@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -24,6 +25,30 @@ from src.presentation.schemas.jobs import (
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 ALLOWED_UPLOAD_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
+
+
+async def _set_clip_operation(job_id: str, clip_rank: int, operation_id: str, **values):
+    from src.infrastructure.database import async_session, JobModel
+    from sqlalchemy import select, update
+    async with async_session() as session:
+        result = await session.execute(select(JobModel.clips_data).where(JobModel.job_id == job_id))
+        data = dict(result.scalar_one_or_none() or {})
+        operations = dict(data.get("operations") or {})
+        operation = dict(operations.get(str(clip_rank)) or {})
+        operation.update({"operation_id": operation_id, "clip_rank": clip_rank, **values, "updated_at": datetime.now(timezone.utc).isoformat()})
+        operations[str(clip_rank)] = operation
+        data["operations"] = operations
+        await session.execute(update(JobModel).where(JobModel.job_id == job_id).values(clips_data=data))
+        await session.commit()
+
+
+@router.get("/{job_id}/clips/{clip_rank}/operation")
+async def get_clip_operation(job_id: str, clip_rank: int, service: JobService = Depends(get_job_service), user: CurrentUser = Depends(get_current_user)):
+    job = await service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
+    return {"success": True, "data": ((job.clips_data or {}).get("operations") or {}).get(str(clip_rank))}
 
 
 def _safe_upload_filename(filename: str | None) -> str:
@@ -162,7 +187,7 @@ def _ensure_preview_quality_variant(final_path: str, quality: str) -> str:
     """Create/cache a lower-resolution final preview video."""
     import subprocess
 
-    allowed = {"720", "480", "360"}
+    allowed = {"720", "480", "360", "320"}
     if quality not in allowed:
         raise ValueError(f"Invalid quality '{quality}'")
 
@@ -182,7 +207,7 @@ def _ensure_preview_quality_variant(final_path: str, quality: str) -> str:
 
     tmp_path = f"{variant_path}.tmp.{os.getpid()}"
     scale_expr = f"{target}:-2" if height >= width else f"-2:{target}"
-    crf = {"720": "24", "480": "27", "360": "30"}[quality]
+    crf = {"720": "24", "480": "27", "360": "30", "320": "31"}[quality]
 
     cmd = [
         "ffmpeg", "-y",
@@ -211,6 +236,21 @@ async def _check_job_ownership(job, user: CurrentUser):
         return
     if job.user_id and job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+
+
+async def _fetch_and_store_youtube_title(job_id: str, youtube_url: str, service: JobService):
+    """Best-effort: fetch YouTube video title via oEmbed and store it."""
+    import httpx
+    match = re.search(r"(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})", youtube_url)
+    if not match:
+        return
+    video_id = match.group(1)
+    async with httpx.AsyncClient(timeout=5) as client:
+        resp = await client.get(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json")
+        if resp.status_code == 200:
+            title = resp.json().get("title", "")
+            if title:
+                await service._repo.update_video_title(job_id, title)
 
 
 @router.post("", status_code=201, response_model=JobResponse)
@@ -246,6 +286,14 @@ async def create_job(
         # V2 pipeline routing
         is_superadmin=user.is_superadmin,
     )
+
+    # Quick YouTube title fetch via oEmbed (non-blocking, best-effort)
+    if not job.video_title and not is_cached:
+        try:
+            await _fetch_and_store_youtube_title(job.job_id, request.youtube_url, service)
+        except Exception:
+            pass
+
     return JobResponse(
         job_id=job.job_id,
         youtube_url=job.youtube_url,
@@ -362,6 +410,7 @@ async def create_job_from_upload(
             source_filename=safe_name,
             source_duration=duration,
             source_size_bytes=written,
+            processing_mode=options.processing_mode,
         )
         return JobResponse(
             job_id=job.job_id,
@@ -542,8 +591,8 @@ async def get_clip_final(
     if quality in {"auto", "source"}:
         quality = "original"
     if quality != "original":
-        if quality not in {"720", "480", "360"}:
-            raise HTTPException(status_code=400, detail="Quality harus original, 720, 480, atau 360")
+        if quality not in {"720", "480", "360", "320"}:
+            raise HTTPException(status_code=400, detail="Quality harus original, 720, 480, 360, atau 320")
         try:
             preview_path = _ensure_preview_quality_variant(final_path, quality)
             if preview_path == final_path:
@@ -623,6 +672,27 @@ async def get_clip_thumb(
         pass
 
     raise HTTPException(status_code=404, detail="Thumbnail generation failed")
+
+
+@router.get("/{job_id}/source-thumb")
+async def get_source_thumbnail(job_id: str, service: JobService = Depends(get_job_service), user: CurrentUser = Depends(get_current_user)):
+    """Return a cached thumbnail from the uploaded source before clips exist."""
+    job = await service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
+    source = (job.clips_data or {}).get("source", {}) if isinstance(job.clips_data, dict) else {}
+    source_path = source.get("path") if isinstance(source, dict) else None
+    if not source_path or not os.path.exists(source_path):
+        raise HTTPException(status_code=404, detail="Upload source not available")
+    thumb_dir = os.path.join(settings.OUTPUT_DIR, job_id, "thumbnail")
+    os.makedirs(thumb_dir, exist_ok=True)
+    thumb_path = os.path.join(thumb_dir, "source.jpg")
+    if not os.path.exists(thumb_path) or os.path.getmtime(thumb_path) < os.path.getmtime(source_path):
+        result = subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i", source_path, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", thumb_path], capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail="Could not generate source thumbnail")
+    return FileResponse(thumb_path, media_type="image/jpeg", filename="source.jpg")
 
 
 # ─── Additional Endpoints for Frontend Integration ────────────────────────────
@@ -818,6 +888,62 @@ async def cancel_job(
     }
 
 
+@router.post("/{job_id}/reprocess", status_code=201, response_model=JobResponse)
+async def reprocess_job(
+    job_id: str,
+    service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Create a fresh tracked job using the failed job's source and settings."""
+    old = await service.get_job(job_id)
+    if not old:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(old, user)
+    if old.status.value not in {"failed", "timeout"}:
+        raise HTTPException(status_code=409, detail="Only failed or timed-out jobs can be reprocessed")
+
+    source_type, source_label = _source_from_clips_data(old.clips_data, old.youtube_url)
+    source = (old.clips_data or {}).get("source", {}) if isinstance(old.clips_data, dict) else {}
+    source_path = source.get("path") if isinstance(source, dict) else None
+    if source_type == "upload" and (not source_path or not os.path.exists(source_path)):
+        raise HTTPException(status_code=410, detail="Original upload is no longer available. Upload the video again.")
+
+    fresh, _ = await service.create_job(
+        old.youtube_url,
+        force_reprocess=True,
+        style_preset=old.style_preset or "",
+        target_aspect_ratio=old.target_aspect_ratio or "9:16",
+        hook_engine=old.hook_engine,
+        hook_style=old.hook_style,
+        broll_enabled=bool(old.broll_enabled),
+        autogrid_enabled=bool(old.autogrid_enabled),
+        use_remotion=bool(old.use_remotion),
+        ai_layer_enabled=bool(old.ai_layer_enabled),
+        threejs_enabled=bool(old.threejs_enabled),
+        remotion_quality=old.remotion_quality,
+        hook_style_config=(old.clips_data or {}).get("hook_style_config"),
+        subtitle_style_config=(old.clips_data or {}).get("subtitle_style_config"),
+        user_id=user.id,
+        is_superadmin=user.is_superadmin,
+        source_type=source_type,
+        source_video_path=source_path,
+        source_filename=source_label,
+        source_duration=source.get("duration") if isinstance(source, dict) else None,
+        source_size_bytes=source.get("size_bytes") if isinstance(source, dict) else None,
+        processing_mode=(old.clips_data or {}).get("processing_mode", "analyze"),
+    )
+    return JobResponse(
+        job_id=fresh.job_id, youtube_url=fresh.youtube_url, source_type=source_type,
+        source_label=source_label, status=fresh.status.value, video_duration=fresh.video_duration,
+        clips_data=fresh.clips_data, clips_total=fresh.clips_total, clips_success=fresh.clips_success,
+        clips_failed=fresh.clips_failed, style_preset=fresh.style_preset,
+        target_aspect_ratio=fresh.target_aspect_ratio, use_remotion=fresh.use_remotion,
+        ai_layer_enabled=fresh.ai_layer_enabled, threejs_enabled=fresh.threejs_enabled,
+        remotion_quality=fresh.remotion_quality, pipeline_version=fresh.pipeline_version,
+        created_at=fresh.created_at, updated_at=fresh.updated_at,
+    )
+
+
 @router.delete("/{job_id}")
 async def delete_job(
     job_id: str,
@@ -935,6 +1061,7 @@ async def get_clip_detail(
                 or (job.clips_data or {}).get("subtitle_style_config")
                 or {}
             ),
+            "reframe_layout": clip_data.get("reframe_layout") or clip_data.get("layout") or "single",
             "file_status": file_status,
             "urls": {
                 "raw": f"/api/jobs/{job_id}/clips/{clip_rank}/raw" if file_status["raw"] else None,
@@ -1151,11 +1278,13 @@ async def restyle_clip(
     import shutil
 
     logger = logging.getLogger(__name__)
+    operation_id = f"restyle_{uuid.uuid4().hex[:12]}"
 
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     await _check_job_ownership(job, user)
+    await _set_clip_operation(job_id, clip_rank, operation_id, type="restyle", status="running", stage="prepare", percentage=5, started_at=datetime.now(timezone.utc).isoformat(), error=None)
 
     if not job.clips_data or "clips" not in job.clips_data:
         raise HTTPException(status_code=400, detail="Job has no clips data")
@@ -1216,6 +1345,7 @@ async def restyle_clip(
     staged_final_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.mp4"
 
     try:
+        await _set_clip_operation(job_id, clip_rank, operation_id, stage="reframe", percentage=20)
         current_path = raw_path
         reframe_result = None
 
@@ -1252,6 +1382,7 @@ async def restyle_clip(
         # Step 1: B-Roll overlay (if enabled and brolls exist for this clip).
         # Remotion is applied after this so hook/subtitle remain on top.
         if do_broll and service._broll_injector:
+            await _set_clip_operation(job_id, clip_rank, operation_id, stage="assets", percentage=40)
             from src.domain.entities import BRollSuggestion, Clip, VisualCategory
             broll_suggestions = []
             for bs in clip_data.get("broll_suggestions", []):
@@ -1310,6 +1441,7 @@ async def restyle_clip(
 
         remotion_adapter = getattr(service, "_remotion_adapter", None)
         if remotion_adapter and (hook_text or render_words):
+            await _set_clip_operation(job_id, clip_rank, operation_id, stage="render", percentage=55)
             try:
                 remotion_ready = await remotion_adapter.health_check()
                 if not remotion_ready and hasattr(remotion_adapter, "start_server"):
@@ -1373,6 +1505,7 @@ async def restyle_clip(
 
         # Keep the old final playable until the replacement is complete.
         os.replace(staged_final_path, final_path)
+        await _set_clip_operation(job_id, clip_rank, operation_id, stage="finalize", percentage=92)
         current_path = final_path
         if os.path.exists(restyle_reframed_path):
             os.replace(restyle_reframed_path, canonical_reframed_path)
@@ -1405,8 +1538,13 @@ async def restyle_clip(
 
         # Persist
         from src.infrastructure.database import async_session, JobModel
-        from sqlalchemy import update as sql_update
+        from sqlalchemy import select as sql_select, update as sql_update
         async with async_session() as session:
+            current_data = (await session.execute(sql_select(JobModel.clips_data).where(JobModel.job_id == job_id))).scalar_one_or_none() or {}
+            # Preserve operation tracking written during this request; job is an
+            # older snapshot loaded before those progress updates.
+            if current_data.get("operations"):
+                job.clips_data["operations"] = current_data["operations"]
             await session.execute(
                 sql_update(JobModel).where(JobModel.job_id == job_id).values(clips_data=job.clips_data)
             )
@@ -1417,6 +1555,7 @@ async def restyle_clip(
             if tmp != final_path and os.path.exists(tmp):
                 os.remove(tmp)
 
+        await _set_clip_operation(job_id, clip_rank, operation_id, status="completed", stage="done", percentage=100, completed_at=datetime.now(timezone.utc).isoformat())
         return {
             "success": True,
             "data": {
@@ -1434,12 +1573,14 @@ async def restyle_clip(
             "message": f"Clip #{clip_rank} restyled successfully",
         }
 
-    except HTTPException:
+    except HTTPException as e:
+        await _set_clip_operation(job_id, clip_rank, operation_id, status="failed", stage="failed", error=str(e.detail), completed_at=datetime.now(timezone.utc).isoformat())
         for tmp in [brolled_path, restyle_reframed_path, staged_final_path]:
             if os.path.exists(tmp):
                 os.remove(tmp)
         raise
     except Exception as e:
+        await _set_clip_operation(job_id, clip_rank, operation_id, status="failed", stage="failed", error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
         for tmp in [brolled_path, restyle_reframed_path, staged_final_path]:
             if os.path.exists(tmp):
                 os.remove(tmp)

@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.infrastructure.subtitle_words import sanitize_subtitle_words
+from src.infrastructure.subtitle_words import sanitize_subtitle_words, mark_important_keywords
 
 
 def test_sanitize_subtitle_words_sorts_clamps_and_dedupes():
@@ -27,6 +27,20 @@ def test_sanitize_subtitle_words_sorts_clamps_and_dedupes():
     assert all(w["end"] > w["start"] for w in words)
 
 
+def test_important_keywords_are_capped_by_video_duration():
+    words = [{"word": f"keyword{i}", "start": i * .2, "end": i * .2 + .15} for i in range(200)]
+    marked = mark_important_keywords(words, 60)
+    assert sum(bool(word["highlight"]) for word in marked) == 10
+
+
+def test_existing_ai_keywords_are_preserved_within_quota():
+    words = [{"word": "penting", "highlight": True}, {"word": "ordinary", "highlight": False}]
+    marked = mark_important_keywords(words, 6)
+    assert marked[0]["highlight"] is True
+
+
 if __name__ == "__main__":
     test_sanitize_subtitle_words_sorts_clamps_and_dedupes()
+    test_important_keywords_are_capped_by_video_duration()
+    test_existing_ai_keywords_are_preserved_within_quota()
     print("v2 subtitle word tests passed")

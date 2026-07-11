@@ -1525,8 +1525,11 @@ class PodcastReframeEngine(IReframeEngine):
           - Aspect ratio preserved ✓
         """
         # Each panel: 9:8 aspect ratio
-        crop_w = int(height * 9 / 8)
-        crop_h = height
+        # Tighten each panel by ~12% so background/other people do not leak into
+        # the selected speaker crop.
+        grid_zoom = 1.12
+        crop_w = int((height * 9 / 8) / grid_zoom)
+        crop_h = int(height / grid_zoom)
 
         if crop_w > width:
             # Source too narrow — adjust
@@ -1573,6 +1576,9 @@ class PodcastReframeEngine(IReframeEngine):
                 "output_path": output_path,
                 "person_count": pc,
                 "method": "podcast_double_grid",
+                "layout": "double",
+                "grid_zoom": grid_zoom,
+                "subtitle_position_y": 50,
                 "grid_panel_height": self.GRID_PANEL_HEIGHT,
                 "top_track_id": decision.get("top_track_id"),
                 "bottom_track_id": decision.get("bottom_track_id"),

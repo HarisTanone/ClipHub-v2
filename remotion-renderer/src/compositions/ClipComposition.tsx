@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Sequence, OffthreadVideo, useVideoConfig } from "remotion";
+import { AbsoluteFill, Sequence, OffthreadVideo, useCurrentFrame, useVideoConfig, interpolate } from "remotion";
 import type { ClipCompositionProps } from "../types";
 import { HookLayer } from "../layers/HookLayer";
 import { SubtitleLayer } from "../layers/SubtitleLayer";
@@ -63,10 +63,14 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   hookAnimation,
 }) => {
   const { fps } = useVideoConfig();
+  const frame = useCurrentFrame();
 
   // ─── Per-component config extraction ─────────────────────────────
   const hook = useHookConfig(creativeDirection, hookAnimation);
   const subtitle = useSubtitleConfig(creativeDirection);
+  const subtitleConfig = creativeDirection.reframe_layout === "double"
+    ? { ...subtitle.config, position: "center", positionY: creativeDirection.subtitle_position_y ?? 50 }
+    : subtitle.config;
 
   const hookDurationFrames = Math.floor(hook.duration * fps);
 
@@ -79,12 +83,16 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
 
   // ─── Zoom events from prosody analysis ───────────────────────────
   const zoomEvents = creativeDirection.zoom_events || [];
+  const transitionStyle = hook.config.transitionStyle || "cut";
+  const transitionFrames = Math.max(1, Math.round((hook.config.transitionDuration || 0.35) * fps));
+  const transitionProgress = interpolate(frame, [0, transitionFrames], [0, 1], { extrapolateRight: "clamp" });
+  const videoTransition = transitionStyle === "fade" ? { opacity: transitionProgress } : transitionStyle === "slide" ? { transform: `translateX(${(1 - transitionProgress) * 100}%)` } : transitionStyle === "zoom" ? { transform: `scale(${1.12 - transitionProgress * 0.12})`, opacity: transitionProgress } : {};
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {/* L1: Base Video + Auto Zoom */}
       {videoPath && (
-        <AbsoluteFill>
+        <AbsoluteFill style={videoTransition}>
           <ZoomLayer zoomEvents={zoomEvents} maxScale={1.15} defaultDuration={0.5}>
             <OffthreadVideo
               src={videoPath}
@@ -103,7 +111,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
                 .filter(w => w.end > hook.duration)
                 .map(w => ({ ...w, start: Math.max(w.start, hook.duration) }))
               : words}
-            config={subtitle.config}
+            config={subtitleConfig}
             fps={fps}
           />
         </AbsoluteFill>

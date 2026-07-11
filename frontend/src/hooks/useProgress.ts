@@ -10,6 +10,7 @@ interface ProgressState {
   isTerminal: boolean;
   error: string | null;
   clipsAvailable: number[];
+  eta: ProgressResponse["data"]["eta"];
 }
 
 export function useProgress(jobId: string | undefined, enabled = true) {
@@ -36,6 +37,7 @@ export function useProgress(jobId: string | undefined, enabled = true) {
           isTerminal: d.is_terminal,
           error: d.error,
           clipsAvailable: d.clips.available,
+          eta: d.eta,
         };
       });
 

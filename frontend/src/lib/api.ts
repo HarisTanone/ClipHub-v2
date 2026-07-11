@@ -195,6 +195,7 @@ export interface CreateJobPayload {
   // Full style configs from Custom Style Editor
   hook_style_config?: Record<string, any>;
   subtitle_style_config?: Record<string, any>;
+  processing_mode?: "analyze" | "direct";
 }
 
 export type UploadJobPayload = Omit<CreateJobPayload, "youtube_url">;
@@ -306,6 +307,7 @@ export interface ClipDetailResponse {
     hook_style: string | null;
     hook_style_config: Record<string, any>;
     subtitle_style_config: Record<string, any>;
+    reframe_layout?: "single" | "double";
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };
     urls: { raw: string | null; final: string | null; thumbnail: string | null };
   };
@@ -332,6 +334,7 @@ export interface ProgressResponse {
     };
     error: string | null;
     timestamps: { created_at: string | null; updated_at: string | null };
+    eta?: null | { remaining_seconds: number; estimated_total_seconds: number; elapsed_seconds: number; sample_count: number; basis: string };
   };
   pipeline_steps: Array<{ number: number; name: string; label: string }>;
 }
@@ -372,6 +375,10 @@ export const jobs = {
     return request(`/api/jobs/${jobId}/cancel`, { method: "POST" });
   },
 
+  async reprocess(jobId: string): Promise<JobResponse> {
+    return request<JobResponse>(`/api/jobs/${jobId}/reprocess`, { method: "POST" });
+  },
+
   async delete(jobId: string): Promise<{ success: boolean; message: string }> {
     return request(`/api/jobs/${jobId}`, { method: "DELETE" });
   },
@@ -392,13 +399,17 @@ export const jobs = {
     return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/raw`;
   },
 
-  getClipFinalUrl(jobId: string, rank: number, quality?: "original" | "720" | "480" | "360"): string {
+  getClipFinalUrl(jobId: string, rank: number, quality?: "original" | "720" | "480" | "360" | "320"): string {
     const base = `${API_BASE}/api/jobs/${jobId}/clips/${rank}/final`;
     return quality && quality !== "original" ? `${base}?quality=${quality}` : base;
   },
 
   getClipThumbUrl(jobId: string, rank: number): string {
     return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/thumb`;
+  },
+
+  getSourceThumbUrl(jobId: string): string {
+    return `${API_BASE}/api/jobs/${jobId}/source-thumb`;
   },
 
   async getClipDetail(jobId: string, rank: number): Promise<ClipDetailResponse> {
@@ -442,6 +453,10 @@ export const jobs = {
       method: "POST",
       body: JSON.stringify(options),
     });
+  },
+
+  async getClipOperation(jobId: string, rank: number): Promise<{ success: boolean; data: null | { status: string; stage: string; percentage: number; error?: string } }> {
+    return request(`/api/jobs/${jobId}/clips/${rank}/operation`);
   },
 };
 

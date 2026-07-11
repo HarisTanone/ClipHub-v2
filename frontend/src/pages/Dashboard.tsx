@@ -22,6 +22,7 @@ export function Dashboard() {
   // Filters
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "youtube" | "upload">("all");
   const [page, setPage] = useState(1);
 
   async function loadData() {
@@ -59,6 +60,7 @@ export function Dashboard() {
         list = list.filter((j) => j.status === statusFilter);
       }
     }
+    if (sourceFilter !== "all") list = list.filter((j) => (j.source_type || "youtube") === sourceFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((j) =>
@@ -69,7 +71,7 @@ export function Dashboard() {
       );
     }
     return list;
-  }, [jobList, statusFilter, search]);
+  }, [jobList, statusFilter, sourceFilter, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -78,7 +80,7 @@ export function Dashboard() {
   const activeJobs = jobList.filter((j) => j.status !== "completed" && j.status !== "failed" && j.status !== "timeout").slice(0, 3);
 
   // Reset page on filter change
-  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, sourceFilter]);
 
   // Extract video ID for thumbnail
   function getYouTubeThumb(url: string): string | null {
@@ -87,7 +89,11 @@ export function Dashboard() {
   }
 
   function getSourceLabel(job: JobSummary): string {
-    return job.video_title || job.source_label || truncateUrl(job.youtube_url, 60);
+    if (job.video_title) return job.video_title;
+    if (job.source_label && job.source_label !== job.youtube_url) return job.source_label;
+    // Fallback: show "YouTube · VIDEO_ID" instead of raw URL
+    const match = job.youtube_url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+    return match ? `YouTube · ${match[1]}` : truncateUrl(job.youtube_url, 40);
   }
 
   return (
@@ -155,45 +161,49 @@ export function Dashboard() {
 
       {/* Toolbar */}
       <Card className="p-3 shrink-0">
-      <div className="flex items-center gap-3 flex-wrap">
-        {/* Search */}
-        <div className="relative flex-1 min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search title, URL, or job ID..."
-            className="w-full bg-zinc-950/70 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
-          />
-        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[240px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search title, URL, or job ID..."
+              className="w-full bg-zinc-950/70 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
+            />
+          </div>
 
-        {/* Status filter */}
-        <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 p-1">
-          <SlidersHorizontal className="ml-1 h-3.5 w-3.5 text-zinc-600" />
-          {["all", "completed", "failed", "processing"].map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatusFilter(s === "processing" ? "processing" : s)}
-              className={cn(
-                "px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors capitalize",
-                statusFilter === s ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300"
-              )}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as "all" | "youtube" | "upload")} className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-[10px] text-zinc-300 outline-none">
+            <option value="all">All sources</option><option value="youtube">YouTube</option><option value="upload">Upload</option>
+          </select>
 
-        <div className="ml-auto text-[10px] text-zinc-500">
-          {filtered.length} visible / {jobList.length} total
+          {/* Status filter */}
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 p-1">
+            <SlidersHorizontal className="ml-1 h-3.5 w-3.5 text-zinc-600" />
+            {["all", "completed", "failed", "processing"].map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setStatusFilter(s === "processing" ? "processing" : s)}
+                className={cn(
+                  "px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors capitalize",
+                  statusFilter === s ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300"
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+
+          <div className="ml-auto text-[10px] text-zinc-500">
+            {filtered.length} visible / {jobList.length} total
+          </div>
         </div>
-      </div>
       </Card>
 
       {/* Job list */}
-      <Card className="flex-1 p-0 flex flex-col min-h-0 overflow-hidden">
+      <Card className="flex-1 p-0 flex flex-col">
         <div className="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-zinc-100">Jobs</h2>
@@ -219,18 +229,18 @@ export function Dashboard() {
               action={!search ? <Link to="/jobs/new"><Button size="sm" icon={<PlusCircle className="h-3.5 w-3.5" />}>Create first job</Button></Link> : undefined}
             />
           ) : (
-            <div className="divide-y divide-zinc-800/40">
+            <div className="grid grid-cols-2 gap-3 p-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {paginated.map((job) => {
                 const isUpload = job.source_type === "upload";
-                const thumb = isUpload ? null : getYouTubeThumb(job.youtube_url);
+                const thumb = isUpload ? jobs.getSourceThumbUrl(job.job_id) : getYouTubeThumb(job.youtube_url);
                 return (
                   <Link
                     key={job.job_id}
                     to={`/jobs/${job.job_id}`}
-                    className="group flex items-center gap-3 px-4 py-3 hover:bg-zinc-900/70 transition-colors"
+                    className="group relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/50 hover:border-emerald-500/30 hover:bg-zinc-900/70 transition-colors"
                   >
                     {/* Thumbnail */}
-                    <div className="relative shrink-0 w-20 h-12 rounded-lg overflow-hidden bg-zinc-800 border border-zinc-800">
+                    <div className="relative aspect-video w-full overflow-hidden bg-zinc-800">
                       {thumb ? (
                         <img src={thumb} alt="" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
                       ) : isUpload ? (
@@ -247,7 +257,7 @@ export function Dashboard() {
                     </div>
 
                     {/* Info */}
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-0 p-3">
                       <p className="text-sm font-medium text-zinc-200 truncate group-hover:text-zinc-100">{getSourceLabel(job)}</p>
                       <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-1 flex-wrap">
                         <span className={isUpload ? "text-emerald-400" : "text-red-400"}>{isUpload ? "UPLOAD" : "YOUTUBE"}</span>
@@ -260,11 +270,9 @@ export function Dashboard() {
                     </div>
 
                     {/* Status + Delete */}
-                    <div className="shrink-0 flex items-center gap-2">
+                    <div className="flex items-center gap-2 px-3 pb-3">
                       {/* Live progress for active jobs */}
-                      {job.status !== "completed" && job.status !== "failed" && job.status !== "timeout" && (
-                        <JobProgressIndicator jobId={job.job_id} />
-                      )}
+                      {job.status !== "completed" && job.status !== "failed" && job.status !== "timeout" && <JobProgressIndicator jobId={job.job_id} />}
                       <Badge variant="status" status={job.status} size="sm" dot>{job.status}</Badge>
                       {(job.status === "completed" || job.status === "failed" || job.status === "timeout") && (
                         <button

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X } from "lucide-react";
+import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -21,6 +21,7 @@ export function NewJob() {
   const [sourceMode, setSourceMode] = useState<"youtube" | "upload">("youtube");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState("");
+  const [uploadProcessingMode, setUploadProcessingMode] = useState<"analyze" | "direct">("analyze");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [templateMode] = useState<"custom">("custom");
   const [forceReprocess, setForceReprocess] = useState(false);
@@ -29,7 +30,7 @@ export function NewJob() {
   const [urlError, setUrlError] = useState("");
 
   // Style editor inline (not modal)
-  const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle">("hook");
+  const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "transition">("hook");
   const [hookStyleConfig, setHookStyleConfig] = useState<HookStyle>(() => {
     try { const s = localStorage.getItem("autocliper_hook_style"); return s ? { ...DEFAULT_HOOK_STYLE, ...JSON.parse(s) } : DEFAULT_HOOK_STYLE; } catch { return DEFAULT_HOOK_STYLE; }
   });
@@ -145,6 +146,7 @@ export function NewJob() {
       hook_style_config: { ...hookStyleConfig, template_mode: templateMode },
       subtitle_style_config: subtitleStyleConfig,
       autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
+      processing_mode: sourceMode === "upload" ? uploadProcessingMode : "analyze" as const,
     };
     try {
       let res;
@@ -266,6 +268,10 @@ export function NewJob() {
                   </div>
                 )}
                 {uploadError && <p className="text-[10px] text-red-400">{uploadError}</p>}
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setUploadProcessingMode("analyze")} className={cn("rounded-lg border p-2 text-left", uploadProcessingMode === "analyze" ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800")}><p className="text-[11px] font-medium text-zinc-200">Analyze first</p><p className="text-[9px] text-zinc-500">Find and cut viral moments</p></button>
+                  <button type="button" onClick={() => setUploadProcessingMode("direct")} className={cn("rounded-lg border p-2 text-left", uploadProcessingMode === "direct" ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800")}><p className="text-[11px] font-medium text-zinc-200">Direct edit</p><p className="text-[9px] text-zinc-500">Keep full video; apply hook, subtitle and style</p></button>
+                </div>
               </div>
             )}
           </Card>
@@ -313,7 +319,7 @@ export function NewJob() {
               <FeatureLock featureName="Auto Grid" featureCode="auto_grid" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
                 <Toggle
                   label="Auto-Grid"
-                  description="Grid 50:50 hanya saat dua orang berbeda terlihat bersamaan"
+                  description={aspectRatio === "9:16" ? "Auto-switch single/2-grid. Saat 2-grid, subtitle berpindah ke titik tengah perpotongan; saat kembali single, subtitle kembali ke posisi template." : "Hanya tersedia untuk 9:16. YOLO, face/sound detection, dan Auto-Grid dinonaktifkan pada rasio lain."}
                   checked={autogridEnabled}
                   onChange={setAutogridEnabled}
                   disabled={aspectRatio !== "9:16"}
@@ -409,6 +415,7 @@ export function NewJob() {
               className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", styleTab === "subtitle" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}>
               <Sparkles className="h-3 w-3 inline mr-1" />Subtitle
             </button>
+            <button type="button" onClick={() => setStyleTab("transition")} className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", styleTab === "transition" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}><MoveRight className="h-3 w-3 inline mr-1" />Transition</button>
           </div>
 
           {/* Style editor content */}

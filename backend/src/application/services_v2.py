@@ -357,8 +357,18 @@ class V2PipelineService:
                 self._emit(job_id, 3, "v2_transcript", "complete")
 
             # ═══ Step 4: TAHAP 2 — Groq LLM Chunked Highlight Analysis ═══
-            cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
-            if cached_analysis:
+            direct_mode = is_upload_source and (job.clips_data or {}).get("processing_mode") == "direct"
+            if direct_mode:
+                from src.domain.entities import HighlightCandidate, HighlightAnalysisResult
+                analysis_result = HighlightAnalysisResult(
+                    clips=[HighlightCandidate(rank=1, start=0.0, end=duration, score=100, hook="", reason="Direct full-video edit")],
+                    creative_direction={}, broll_suggestions={}, model_used="direct", chunks_processed=0,
+                )
+                self._emit(job_id, 4, "direct_edit", "complete")
+                logger.info(f"[{job_id}] Direct Edit: viral analysis skipped, full source selected")
+            else:
+                cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
+            if not direct_mode and cached_analysis:
                 from src.domain.entities import HighlightCandidate, HighlightAnalysisResult
                 analysis_result = HighlightAnalysisResult(
                     clips=[HighlightCandidate(**c) for c in cached_analysis["clips"]],
@@ -369,7 +379,7 @@ class V2PipelineService:
                 )
                 logger.info(f"[{job_id}] Analysis SKIPPED (cached: {len(analysis_result.clips)} clips)")
                 self._emit(job_id, 4, "v2_highlight_analysis", "complete")
-            else:
+            elif not direct_mode:
                 self._emit(job_id, 4, "v2_highlight_analysis", "start")
                 await self._repo.update_status(job_id, JobStatus.V2_ANALYZING)
                 max_clips = self._calc_max_clips(duration)
@@ -442,6 +452,9 @@ class V2PipelineService:
                 analysis_result.broll_suggestions,
                 duration,
             )
+            if direct_mode and clips:
+                clips[0].start = 0.0
+                clips[0].end = duration
             if self._overlap_detector and clips:
                 try:
                     clips = self._overlap_detector.resolve_overlaps(clips)
@@ -618,6 +631,13 @@ class V2PipelineService:
                 clips, clips_with_words, creative_direction, output_dir,
                 transcript_source=transcript_result.source,
             )
+            for clip_output in clips_data.get("clips", []):
+                layout = reframe_data.get(clip_output.get("rank"), {})
+                if isinstance(layout, dict):
+                    clip_output["reframe_layout"] = layout.get("layout", "single")
+                    clip_output["reframe_method"] = layout.get("method", "")
+                    if layout.get("subtitle_position_y") is not None:
+                        clip_output["subtitle_position_y"] = layout["subtitle_position_y"]
             if job.clips_data:
                 for key in (
                     "hook_style_config",
@@ -803,6 +823,8 @@ class V2PipelineService:
                 cd_dict["content_profile"] = (job.clips_data or {}).get("content_profile", {})
                 if clip_reframe and isinstance(clip_reframe, dict):
                     cd_dict["reframe_method"] = clip_reframe.get("method", "")
+                    cd_dict["reframe_layout"] = clip_reframe.get("layout", "single")
+                    cd_dict["subtitle_position_y"] = clip_reframe.get("subtitle_position_y")
 
                 try:
                     result = await self._remotion_adapter.render_clip(

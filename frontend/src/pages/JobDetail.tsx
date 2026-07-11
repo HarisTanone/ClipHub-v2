@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -8,7 +8,7 @@ import { ProgressBar, StepProgress } from "@/components/ui/Progress";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
-import { jobs, preview, type JobDetailResponse, type VideoPreview, type JobResponse, type ClipInfo, API_BASE } from "@/lib/api";
+import { jobs, preview, type JobDetailResponse, type VideoPreview, type ClipInfo, API_BASE } from "@/lib/api";
 import { useProgress } from "@/hooks/useProgress";
 import { formatDuration, formatDate, cn } from "@/lib/utils";
 
@@ -34,8 +34,9 @@ const PIPELINE_STEPS = [
 export function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
   const toast = useToast();
+  const navigate = useNavigate();
+  const [isReprocessing, setIsReprocessing] = useState(false);
   const [data, setData] = useState<JobDetailResponse["data"] | null>(null);
-  const [jobData, setJobData] = useState<JobResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [videoMeta, setVideoMeta] = useState<VideoPreview | null>(null);
@@ -43,24 +44,12 @@ export function JobDetail() {
   const isTerminal = data ? ["completed", "failed", "timeout"].includes(data.status) : false;
   const { progress } = useProgress(jobId, !isTerminal);
 
-  // Check if Remotion was used
-  const useRemotion = jobData?.use_remotion || false;
-  const remotionFeatures = {
-    aiLayer: jobData?.ai_layer_enabled || false,
-    threejs: jobData?.threejs_enabled || false,
-    quality: jobData?.remotion_quality || "medium",
-  };
-
   async function loadDetail() {
     if (!jobId) return;
     setIsLoading(true);
     try {
-      const [detailRes, jobRes] = await Promise.all([
-        jobs.getDetail(jobId),
-        jobs.get(jobId),
-      ]);
+      const detailRes = await jobs.getDetail(jobId);
       setData(detailRes.data);
-      setJobData(jobRes);
       setError(null);
       // Fetch YouTube metadata only for YouTube source URLs
       if (detailRes.data.source_type !== "upload" && detailRes.data.youtube_url && !videoMeta) {
@@ -84,6 +73,13 @@ export function JobDetail() {
     }
   }, [progress?.isTerminal]);
 
+  // Final clips are produced independently. Refresh as soon as another output
+  // becomes available instead of waiting for the whole job to finish.
+  useEffect(() => {
+    const renderedCount = data?.clips?.filter((clip) => clip.has_final).length || 0;
+    if (!isTerminal && progress && progress.clipsAvailable.length !== renderedCount) loadDetail();
+  }, [progress?.clipsAvailable.join(",")]);
+
   async function handleCancel() {
     if (!jobId) return;
     try {
@@ -93,6 +89,17 @@ export function JobDetail() {
     } catch (e: any) {
       toast.error(e.message);
     }
+  }
+
+  async function handleReprocess() {
+    if (!jobId) return;
+    setIsReprocessing(true);
+    try {
+      const next = await jobs.reprocess(jobId);
+      toast.success("Reprocess started and is now tracked");
+      navigate(`/jobs/${next.job_id}`);
+    } catch (e: any) { toast.error(e.message || "Could not reprocess job"); }
+    finally { setIsReprocessing(false); }
   }
 
   if (isLoading && !data) {
@@ -154,6 +161,7 @@ export function JobDetail() {
             {!isTerminal && (
               <Button variant="danger" size="sm" onClick={handleCancel}>Cancel</Button>
             )}
+            {(data.status === "failed" || data.status === "timeout") && <Button size="sm" onClick={handleReprocess} loading={isReprocessing} icon={<RefreshCw className="h-3.5 w-3.5" />}>Reprocess</Button>}
           </div>
         </div>
 
@@ -164,12 +172,6 @@ export function JobDetail() {
           <MetricTile icon={<Film className="h-4 w-4" />} label="Output" value={data.target_aspect_ratio || "9:16"} hint={data.style_preset || "Custom style"} tone="zinc" />
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-800/60 pt-3">
-          <FeaturePill icon={<Sparkles className="h-3.5 w-3.5" />} label="Remotion" value={useRemotion ? "On" : "Off"} active={useRemotion} />
-          <FeaturePill icon={<Sparkles className="h-3.5 w-3.5" />} label="AI Layer" value={remotionFeatures.aiLayer ? "On" : "Off"} active={remotionFeatures.aiLayer} />
-          <FeaturePill icon={<Layers className="h-3.5 w-3.5" />} label="3D Layer" value={remotionFeatures.threejs ? "On" : "Off"} active={remotionFeatures.threejs} />
-          <FeaturePill icon={<CheckCircle className="h-3.5 w-3.5" />} label="Quality" value={remotionFeatures.quality} active />
-        </div>
       </Card>
 
       {!isTerminal && (
@@ -188,6 +190,7 @@ export function JobDetail() {
           </div>
           <StepProgress steps={PIPELINE_STEPS} currentStep={currentStep} />
           <ProgressBar value={percentage} className="mt-3" label="Render progress" showValue />
+          {progress?.eta && <p className="mt-2 text-[10px] text-zinc-500">Estimated remaining {formatDuration(progress.eta.remaining_seconds)} · based on {progress.eta.sample_count} completed jobs and current measured progress</p>}
         </Card>
       )}
 

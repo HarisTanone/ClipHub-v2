@@ -14,7 +14,7 @@ import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, type Hook
 import { jobs, API_BASE, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
 
-type PreviewQuality = "original" | "720" | "480" | "360";
+type PreviewQuality = "original" | "720" | "480" | "360" | "320";
 
 export function ClipViewer() {
   const { jobId, rank } = useParams<{ jobId: string; rank: string }>();
@@ -49,6 +49,7 @@ export function ClipViewer() {
     try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? { ...DEFAULT_SUBTITLE_STYLE, ...JSON.parse(s) } : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
   });
   const [isRestyling, setIsRestyling] = useState(false);
+  const [restyleProgress, setRestyleProgress] = useState<{ stage: string; percentage: number } | null>(null);
   const [videoRevision, setVideoRevision] = useState(0);
 
   // Other clips from same job
@@ -84,6 +85,11 @@ export function ClipViewer() {
   }
 
   useEffect(() => { loadClip(); }, [jobId, rank]);
+  useEffect(() => {
+    if (!isRestyling || !jobId) return;
+    const poll = async () => { try { const res = await jobs.getClipOperation(jobId, clipRank); if (res.data) setRestyleProgress({ stage: res.data.stage, percentage: res.data.percentage }); } catch { } };
+    poll(); const timer = window.setInterval(poll, 1000); return () => clearInterval(timer);
+  }, [isRestyling, jobId, clipRank]);
 
   async function handleSaveHook() {
     if (!jobId || !hookText.trim()) return;
@@ -100,6 +106,7 @@ export function ClipViewer() {
   async function handleRestyle() {
     if (!jobId) return;
     setIsRestyling(true);
+    setRestyleProgress({ stage: "prepare", percentage: 1 });
     try {
       const res = await jobs.restyle(jobId, clipRank, {
         hook_text: hookText.trim() || undefined,
@@ -110,11 +117,12 @@ export function ClipViewer() {
       });
       setShowRaw(false);
       setPreviewMode(false);
+      setStyleModalOpen(false);
       setVideoRevision(Date.now());
       await loadClip();
       toast.success(res.message || `Clip #${clipRank} updated`);
     } catch (e: any) { toast.error(e.message || "Restyle failed"); }
-    finally { setIsRestyling(false); }
+    finally { setIsRestyling(false); setRestyleProgress(null); }
   }
 
   function handlePreviewQualityChange(quality: PreviewQuality) {
@@ -161,10 +169,7 @@ export function ClipViewer() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={() => setStyleModalOpen(true)} icon={<Palette className="h-3.5 w-3.5" />}>
-            Style Editor
-          </Button>
-          <Button variant="primary" size="sm" onClick={handleRestyle} loading={isRestyling} icon={<Wand2 className="h-3.5 w-3.5" />}>
+          <Button variant="primary" size="sm" onClick={() => setStyleModalOpen(true)} icon={<Wand2 className="h-3.5 w-3.5" />}>
             Restyle
           </Button>
         </div>
@@ -200,6 +205,7 @@ export function ClipViewer() {
                       hookStyle={hookStyleConfig.animation}
                       hookStyleConfig={hookStyleConfig}
                       subtitleStyleConfig={subtitleStyleConfig}
+                      autoGridLayout={clip.reframe_layout}
                       words={clip.words || []}
                       showHook={showHook}
                       showSubtitles={showSubtitles}
@@ -227,7 +233,7 @@ export function ClipViewer() {
             />
             <div className="ml-auto flex gap-1.5">
               {rawUrl && <a href={rawUrl} download><Button variant="outline" size="xs" icon={<Download className="h-3 w-3" />}>Raw</Button></a>}
-              {finalDownloadUrl && <a href={finalDownloadUrl} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final</Button></a>}
+              {finalDownloadUrl && <a href={jobs.getClipFinalUrl(jobId!, clipRank, previewQuality)} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final {previewQuality === "original" ? "" : `${previewQuality}p`}</Button></a>}
             </div>
           </div>
         </div>
@@ -318,6 +324,9 @@ export function ClipViewer() {
         aspectRatio="9:16"
         isSuperadmin={user?.is_superadmin}
         userFeatures={user?.features}
+        onProcess={handleRestyle}
+        processing={isRestyling}
+        processProgress={restyleProgress || undefined}
       />
     </div>
   );
@@ -358,6 +367,7 @@ function QualitySelect({
         <option value="720">720p</option>
         <option value="480">480p</option>
         <option value="360">360p</option>
+        <option value="320">320p</option>
       </select>
     </label>
   );

@@ -34,6 +34,8 @@ export interface CreativeDirection {
   // Auto zoom events from prosody analysis
   zoom_events?: Array<{ time: number; intensity?: number; duration?: number }>;
   reframe_method?: string;
+  reframe_layout?: "single" | "double";
+  subtitle_position_y?: number;
   content_profile?: Record<string, any>;
 }
 

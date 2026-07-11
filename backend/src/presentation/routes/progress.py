@@ -5,6 +5,7 @@ Endpoints:
 - GET /jobs/{job_id}/progress/poll  — Polling endpoint (REST, for fallback)
 """
 import os
+import statistics
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -174,6 +175,25 @@ async def poll_job_progress(
 
     is_terminal = job.status.value in ("completed", "failed", "timeout")
 
+    # Data-driven ETA from completed jobs on this actual server. Processing is
+    # server-side, so browser device specs are intentionally not fabricated.
+    eta = None
+    if not is_terminal and job.created_at and job.video_duration and progress_pct > 0:
+        try:
+            from sqlalchemy import select
+            from src.infrastructure.database import JobModel, async_session
+            async with async_session() as session:
+                rows = (await session.execute(select(JobModel).where(JobModel.status == "completed").where(JobModel.video_duration > 0).order_by(JobModel.updated_at.desc()).limit(30))).scalars().all()
+            ratios = [max(0.0, (row.updated_at - row.created_at).total_seconds()) / row.video_duration for row in rows if row.created_at and row.updated_at and row.video_duration]
+            if len(ratios) >= 2:
+                elapsed = max(0.0, (datetime.now(timezone.utc).replace(tzinfo=None) - job.created_at.replace(tzinfo=None)).total_seconds())
+                historical_total = statistics.median(ratios) * job.video_duration
+                progress_total = elapsed / max(progress_pct / 100.0, 0.01)
+                estimated_total = historical_total * 0.65 + progress_total * 0.35
+                eta = {"remaining_seconds": max(0, round(estimated_total - elapsed)), "estimated_total_seconds": round(estimated_total), "elapsed_seconds": round(elapsed), "sample_count": len(ratios), "basis": "median completed jobs + current measured progress"}
+        except Exception:
+            eta = None
+
     if is_terminal and job.status.value == "completed":
         progress_pct = 100
         current_step = total_steps
@@ -217,6 +237,7 @@ async def poll_job_progress(
                 "created_at": job.created_at.isoformat() if job.created_at else None,
                 "updated_at": job.updated_at.isoformat() if job.updated_at else None,
             },
+            "eta": eta,
         },
         "pipeline_steps": PIPELINE_STEPS,
     }
