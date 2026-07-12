@@ -676,7 +676,7 @@ async def get_clip_thumb(
 
 @router.get("/{job_id}/source-thumb")
 async def get_source_thumbnail(job_id: str, service: JobService = Depends(get_job_service), user: CurrentUser = Depends(get_current_user)):
-    """Return a cached thumbnail from the uploaded source before clips exist."""
+    """Return a smart thumbnail from uploaded source — picks best frame with face focus."""
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -688,10 +688,63 @@ async def get_source_thumbnail(job_id: str, service: JobService = Depends(get_jo
     thumb_dir = os.path.join(settings.OUTPUT_DIR, job_id, "thumbnail")
     os.makedirs(thumb_dir, exist_ok=True)
     thumb_path = os.path.join(thumb_dir, "source.jpg")
-    if not os.path.exists(thumb_path) or os.path.getmtime(thumb_path) < os.path.getmtime(source_path):
-        result = subprocess.run(["ffmpeg", "-y", "-ss", "1", "-i", source_path, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", thumb_path], capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail="Could not generate source thumbnail")
+    if os.path.exists(thumb_path) and os.path.getmtime(thumb_path) >= os.path.getmtime(source_path):
+        return FileResponse(thumb_path, media_type="image/jpeg", filename="source.jpg")
+
+    # Get video duration for smart timestamp selection
+    duration = (source.get("duration") or job.video_duration or 30)
+
+    # Strategy: use FFmpeg thumbnail filter which analyzes N frames and picks
+    # the most representative one (avoids black frames, transitions, blur).
+    # Then crop to upper-center (where faces typically are in talking-head videos).
+    try:
+        # First try: thumbnail filter (picks best frame from first 30s)
+        seek = min(1, duration * 0.1)
+        analyze_duration = min(30, duration * 0.5)
+        result = subprocess.run([
+            "ffmpeg", "-y",
+            "-ss", str(seek),
+            "-i", source_path,
+            "-t", str(analyze_duration),
+            "-vf", "thumbnail=300,crop=in_w:in_w*9/16:0:(in_h-in_w*9/16)/4,scale=480:852",
+            "-frames:v", "1",
+            "-q:v", "2",
+            thumb_path,
+        ], capture_output=True, text=True, timeout=60)
+
+        # If crop filter fails (e.g. landscape video), fallback to simple scale
+        if result.returncode != 0 or not os.path.exists(thumb_path):
+            result = subprocess.run([
+                "ffmpeg", "-y",
+                "-ss", str(min(3, duration * 0.15)),
+                "-i", source_path,
+                "-vf", "thumbnail=100,scale=640:-2",
+                "-frames:v", "1",
+                "-q:v", "2",
+                thumb_path,
+            ], capture_output=True, text=True, timeout=60)
+
+        # Final fallback: just grab a frame at 3s
+        if result.returncode != 0 or not os.path.exists(thumb_path):
+            subprocess.run([
+                "ffmpeg", "-y",
+                "-ss", str(min(3, duration * 0.1)),
+                "-i", source_path,
+                "-frames:v", "1",
+                "-vf", "scale=640:-2",
+                "-q:v", "3",
+                thumb_path,
+            ], capture_output=True, text=True, timeout=60)
+
+    except subprocess.TimeoutExpired:
+        # Ultra fallback
+        subprocess.run(
+            ["ffmpeg", "-y", "-ss", "1", "-i", source_path, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", thumb_path],
+            capture_output=True, text=True, timeout=30
+        )
+
+    if not os.path.exists(thumb_path):
+        raise HTTPException(status_code=500, detail="Could not generate source thumbnail")
     return FileResponse(thumb_path, media_type="image/jpeg", filename="source.jpg")
 
 
