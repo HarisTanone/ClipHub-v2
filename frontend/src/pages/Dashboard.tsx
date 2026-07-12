@@ -77,7 +77,7 @@ export function Dashboard() {
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const completionRate = stats.total ? Math.round((stats.completed / stats.total) * 100) : 0;
   const failedRate = stats.total ? Math.round((stats.failed / stats.total) * 100) : 0;
-  const activeJobs = jobList.filter((j) => j.status !== "completed" && j.status !== "failed" && j.status !== "timeout").slice(0, 3);
+  const activeJobs = jobList.filter((j) => (j.status !== "completed" && j.status !== "failed" && j.status !== "timeout") || (j.active_operations && j.active_operations > 0)).slice(0, 3);
 
   // Reset page on filter change
   useEffect(() => { setPage(1); }, [search, statusFilter, sourceFilter]);
@@ -85,7 +85,7 @@ export function Dashboard() {
   // Extract video ID for thumbnail
   function getYouTubeThumb(url: string): string | null {
     const match = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
-    return match ? `https://i.ytimg.com/vi/${match[1]}/default.jpg` : null;
+    return match ? `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg` : null;
   }
 
   function getSourceLabel(job: JobSummary): string {
@@ -270,9 +270,11 @@ export function Dashboard() {
                     </div>
 
                     {/* Status + Delete */}
-                    <div className="flex items-center gap-2 px-3 pb-3">
+                    <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3">
                       {/* Live progress for active jobs */}
                       {job.status !== "completed" && job.status !== "failed" && job.status !== "timeout" && <JobProgressIndicator jobId={job.job_id} />}
+                      {/* Restyle operation indicator */}
+                      {job.active_operations ? <span className="inline-flex items-center gap-1 rounded bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-medium text-violet-300"><span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />restyling</span> : null}
                       <Badge variant="status" status={job.status} size="sm" dot>{job.status}</Badge>
                       {(job.status === "completed" || job.status === "failed" || job.status === "timeout") && (
                         <button
@@ -424,14 +426,14 @@ function JobProgressIndicator({ jobId }: { jobId: string }) {
   if (!progress) return null;
 
   return (
-    <div className="flex items-center gap-2 mr-2">
-      <div className="w-20 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+    <div className="flex items-center gap-1.5">
+      <div className="w-16 h-1 rounded-full bg-zinc-800 overflow-hidden">
         <div
           className="h-full rounded-full bg-emerald-500 transition-all duration-500"
           style={{ width: `${progress.pct}%` }}
         />
       </div>
-      <span className="text-[9px] text-zinc-400 whitespace-nowrap">{progress.label} {progress.pct}%</span>
+      <span className="text-[9px] text-zinc-400 whitespace-nowrap truncate max-w-[80px]">{progress.label} {progress.pct}%</span>
     </div>
   );
 }

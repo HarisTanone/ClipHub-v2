@@ -746,6 +746,9 @@ async def list_jobs(
     jobs = []
     for model in models:
         source_type, source_label = _source_from_clips_data(model.clips_data, model.youtube_url)
+        # Check for active restyle/operations
+        operations = (model.clips_data or {}).get("operations", {}) if isinstance(model.clips_data, dict) else {}
+        active_ops = [op for op in operations.values() if isinstance(op, dict) and op.get("status") == "running"]
         jobs.append({
             "job_id": model.job_id,
             "youtube_url": model.youtube_url,
@@ -760,6 +763,7 @@ async def list_jobs(
             "style_preset": model.style_preset,
             "target_aspect_ratio": model.target_aspect_ratio,
             "pipeline_version": getattr(model, "pipeline_version", "v1"),
+            "active_operations": len(active_ops),
             "created_at": model.created_at.isoformat() if model.created_at else None,
             "updated_at": model.updated_at.isoformat() if model.updated_at else None,
         })

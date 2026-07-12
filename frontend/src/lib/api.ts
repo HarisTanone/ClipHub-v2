@@ -214,6 +214,7 @@ export interface JobSummary {
   style_preset: string | null;
   target_aspect_ratio: string | null;
   pipeline_version: string;
+  active_operations?: number;
   created_at: string | null;
   updated_at: string | null;
 }

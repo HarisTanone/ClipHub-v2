@@ -185,7 +185,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS — merge env origins with hardcoded defaults so production overrides
+# never accidentally drop development/tailscale origins.
 default_cors_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -205,9 +206,12 @@ env_cors_origins = [
     if origin.strip()
 ]
 
+# Merge both — env extends defaults, never replaces
+all_cors_origins = list(set(default_cors_origins + env_cors_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=env_cors_origins or default_cors_origins,
+    allow_origins=all_cors_origins if all_cors_origins else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
