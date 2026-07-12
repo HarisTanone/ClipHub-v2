@@ -229,6 +229,7 @@ class Job:
     remotion_quality: str = "medium"
     user_id: Optional[int] = None
     pipeline_version: str = "v1"  # "v1" (Gemini) or "v2" (Groq)
+    video_title: Optional[str] = None
 
 
 # ─── Aspect Ratio Routing ─────────────────────────────────────────────────────

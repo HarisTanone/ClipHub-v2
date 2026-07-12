@@ -288,7 +288,7 @@ async def create_job(
     )
 
     # Quick YouTube title fetch via oEmbed (non-blocking, best-effort)
-    if not job.video_title and not is_cached:
+    if not getattr(job, "video_title", None) and not is_cached:
         try:
             await _fetch_and_store_youtube_title(job.job_id, request.youtube_url, service)
         except Exception:
