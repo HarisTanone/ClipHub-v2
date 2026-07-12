@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from src.domain.events import ZoomEvent # Import the correct ZoomEvent
 
 from typing import Any, Optional
 

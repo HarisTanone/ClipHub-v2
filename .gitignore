@@ -91,6 +91,14 @@ backend/models/
 9router-data-*.tar.gz
 *.tar.gz
 
+# ─── Root-level runtime files ─────────────────────────────────────────────────
+data/
+
+# ─── Coverage / Testing ──────────────────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+
 # ─── Agent skills (local reference only) ─────────────────────────────────────
 .agents/
 skills-lock.json
