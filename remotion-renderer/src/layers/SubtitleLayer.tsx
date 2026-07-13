@@ -51,6 +51,8 @@ interface SubtitleConfig {
   bgPadding?: number;
   position?: string;
   positionY?: number;
+  layoutEvents?: Array<{ time: number; layout: "single" | "double" }>;
+  gridPositionY?: number;
   maxWidthPct?: number;
   maxWidth?: number;
   uppercase?: boolean;
@@ -179,6 +181,18 @@ export const resolveSubtitlePositionY = (config: SubtitleConfig): number => {
   return 85;
 };
 
+export const resolveLayoutAtTime = (
+  events: Array<{ time: number; layout: "single" | "double" }> | undefined,
+  timeSeconds: number,
+): "single" | "double" => {
+  let layout: "single" | "double" = "single";
+  for (const event of events || []) {
+    if (!Number.isFinite(event.time) || event.time > timeSeconds) break;
+    layout = event.layout === "double" ? "double" : "single";
+  }
+  return layout;
+};
+
 export const normaliseSubtitleWords = (words: Word[]): Word[] => {
   let lastEnd = 0;
   const seen = new Set<string>();
@@ -282,6 +296,10 @@ export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps
         const endFrame = Math.min(naturalEnd, nextStartFrame);
         const durationInFrames = endFrame - startFrame;
         if (durationInFrames <= 0) return null;
+        const pageLayout = resolveLayoutAtTime(config.layoutEvents, page.startMs / 1000);
+        const pagePositionY = pageLayout === "double"
+          ? clamp(config.gridPositionY ?? 50, 8, 94)
+          : positionY;
 
         return (
           <Sequence key={index} from={startFrame} durationInFrames={durationInFrames}>
@@ -292,7 +310,7 @@ export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps
               fontSize={fontSize}
               color={color}
               highlightColor={highlightColor}
-              positionY={positionY}
+              positionY={pagePositionY}
               visualPreset={visualPreset}
             />
           </Sequence>

@@ -233,6 +233,174 @@ def test_autogrid_rejects_people_who_never_share_a_frame():
     assert decision["layout"] == "single"
 
 
+def test_autogrid_rejects_pair_when_isolation_requires_overzoom():
+    engine = PodcastReframeEngine()
+    tracked_data = {
+        "person_count": 2,
+        "position_targets": {0: 760, 1: 1160},
+        "position_target_profiles": {
+            0: {"x": 760, "y": 320, "width": 140, "height": 170, "area": 23800},
+            1: {"x": 1160, "y": 320, "width": 140, "height": 170, "area": 23800},
+        },
+        "track_to_position": {10: 0, 20: 1},
+        "sample_timestamps": [frame / 3 for frame in range(8)],
+        "per_frame_tracked": [
+            [
+                TrackedDetection(10, BBox(690, 235, 830, 405), frame),
+                TrackedDetection(20, BBox(1090, 235, 1230, 405), frame),
+            ]
+            for frame in range(8)
+        ],
+    }
+
+    decision = engine._decide_autogrid_layout(
+        tracked_data, None, width=1920, height=1080
+    )
+
+    assert decision["layout"] == "single"
+
+
+def test_grid_geometry_uses_smallest_safe_zoom_and_caps_it():
+    engine = PodcastReframeEngine()
+    geometry = engine._calculate_grid_geometry(
+        first_id=0,
+        second_id=1,
+        position_targets={0: 480, 1: 1460},
+        position_profiles={
+            0: {"x": 480, "y": 340, "width": 120, "height": 150, "area": 18000},
+            1: {"x": 1460, "y": 360, "width": 120, "height": 150, "area": 18000},
+        },
+        width=1920,
+        height=1080,
+    )
+
+    assert geometry is not None
+    assert engine.GRID_BASE_ZOOM <= geometry["grid_zoom"] <= engine.GRID_MAX_ZOOM
+    assert geometry["first_crop_x"] + geometry["crop_w"] < 1400
+    assert geometry["second_crop_x"] > 540
+
+
+def test_layout_timeline_switches_only_after_stable_people_count():
+    engine = PodcastReframeEngine()
+    events = engine._build_layout_events(
+        raw_double=[False, False, True, True, True, False, False, False],
+        timestamps=[0.0, 0.33, 0.66, 1.0, 1.33, 1.66, 2.0, 2.33],
+    )
+
+    assert [event["layout"] for event in events] == ["single", "double", "single"]
+    assert events[1]["time"] == 1.0
+    assert events[2]["time"] == 2.33
+
+
+def test_layout_closes_immediately_if_one_face_enters_both_crops():
+    engine = PodcastReframeEngine()
+    events = engine._build_layout_events(
+        raw_double=[True, True, False, True, True],
+        timestamps=[0.0, 0.33, 0.66, 1.0, 1.33],
+        force_single=[False, False, True, False, False],
+    )
+
+    assert events[0]["layout"] == "double"
+    assert events[1] == {"time": 0.66, "layout": "single"}
+    assert events[2] == {"time": 1.33, "layout": "double"}
+
+
+def test_grid_frame_detects_same_face_inside_both_source_crops():
+    engine = PodcastReframeEngine()
+    geometry = {
+        "crop_w": 1000,
+        "crop_h": 900,
+        "top_crop_x": 100,
+        "bottom_crop_x": 820,
+        "top_crop_y": 0,
+        "bottom_crop_y": 0,
+    }
+    overlapping_face = TrackedDetection(9, BBox(900, 200, 1020, 360), 0)
+
+    assert engine._grid_frame_is_safe([overlapping_face], geometry) is False
+
+
+def test_autogrid_can_open_for_short_stable_multi_person_section():
+    engine = PodcastReframeEngine()
+    frames = []
+    for frame in range(12):
+        detections = [TrackedDetection(10, BBox(410, 100, 550, 260), frame)]
+        if 4 <= frame <= 6:
+            detections.append(TrackedDetection(20, BBox(1390, 100, 1530, 260), frame))
+        frames.append(detections)
+    tracked_data = {
+        "person_count": 2,
+        "position_targets": {0: 480, 1: 1460},
+        "track_to_position": {10: 0, 20: 1},
+        "sample_timestamps": [frame / 3 for frame in range(12)],
+        "per_frame_tracked": frames,
+    }
+
+    decision = engine._decide_autogrid_layout(
+        tracked_data, None, width=1920, height=1080
+    )
+
+    assert decision["layout"] == "double"
+    assert decision["coexist_ratio"] < engine.MIN_COEXIST_RATIO
+    assert any(event["layout"] == "double" for event in decision["layout_events"])
+
+
+def test_grid_crop_rejects_third_person_leaking_into_both_panels():
+    engine = PodcastReframeEngine()
+    geometry = engine._calculate_grid_geometry(
+        first_id=0,
+        second_id=2,
+        position_targets={0: 600, 1: 960, 2: 1320},
+        position_profiles={
+            0: {"x": 600, "y": 340, "width": 120, "height": 150, "area": 18000},
+            1: {"x": 960, "y": 340, "width": 120, "height": 150, "area": 18000},
+            2: {"x": 1320, "y": 340, "width": 120, "height": 150, "area": 18000},
+        },
+        width=1920,
+        height=1080,
+    )
+
+    assert geometry is None
+
+
+def test_layout_transition_graph_honors_selected_style():
+    engine = PodcastReframeEngine()
+    events = [
+        {"time": 0.0, "layout": "single"},
+        {"time": 2.0, "layout": "double"},
+        {"time": 5.0, "layout": "single"},
+    ]
+
+    slide_graph, slide_output = engine._build_layout_transition_graph(
+        events, duration=8.0, transition_style="slide", transition_duration=0.4
+    )
+    cut_graph, cut_output = engine._build_layout_transition_graph(
+        events, duration=8.0, transition_style="cut", transition_duration=0.4
+    )
+
+    assert "xfade=transition=slideup" in slide_graph
+    assert "xfade=transition=slidedown" in slide_graph
+    assert slide_output == "layout_out"
+    assert "xfade=" not in cut_graph
+    assert "concat=n=3" in cut_graph
+    assert cut_output == "layout_out"
+
+
+def test_speaker_panning_cut_snaps_and_slide_interpolates():
+    engine = PodcastReframeEngine()
+    keyframes = [(0.0, 100), (2.0, 700)]
+
+    cut_expression = engine._build_panning_expression(
+        keyframes, transition_sec=0.4, transition_style="cut"
+    )
+    slide_expression = engine._build_panning_expression(
+        keyframes, transition_sec=0.4, transition_style="slide"
+    )
+
+    assert "min(1" not in cut_expression
+    assert "min(1" in slide_expression
+
+
 def test_grid_renderer_uses_two_equal_960px_panels():
     engine = PodcastReframeEngine()
     captured = {}
@@ -400,6 +568,15 @@ if __name__ == "__main__":
     test_autogrid_rejects_duplicate_tracks_mapped_to_one_person()
     test_autogrid_requires_two_unique_people_visible_together()
     test_autogrid_rejects_people_who_never_share_a_frame()
+    test_autogrid_rejects_pair_when_isolation_requires_overzoom()
+    test_grid_geometry_uses_smallest_safe_zoom_and_caps_it()
+    test_layout_timeline_switches_only_after_stable_people_count()
+    test_layout_closes_immediately_if_one_face_enters_both_crops()
+    test_grid_frame_detects_same_face_inside_both_source_crops()
+    test_autogrid_can_open_for_short_stable_multi_person_section()
+    test_grid_crop_rejects_third_person_leaking_into_both_panels()
+    test_layout_transition_graph_honors_selected_style()
+    test_speaker_panning_cut_snaps_and_slide_interpolates()
     test_grid_renderer_uses_two_equal_960px_panels()
     test_panning_holds_active_speaker_seat_when_only_listener_is_visible()
     test_panning_holds_profile_when_visible_face_is_not_active_speaker()

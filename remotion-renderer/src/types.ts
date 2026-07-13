@@ -35,8 +35,22 @@ export interface CreativeDirection {
   zoom_events?: Array<{ time: number; intensity?: number; duration?: number }>;
   reframe_method?: string;
   reframe_layout?: "single" | "double";
+  layout_mode?: "static" | "dynamic";
+  layout_events?: Array<{ time: number; layout: "single" | "double" }>;
+  framing_events?: FramingEvent[];
+  transition_style?: TransitionStyle;
+  transition_duration?: number;
   subtitle_position_y?: number;
   content_profile?: Record<string, any>;
+}
+
+export type TransitionStyle = "cut" | "fade" | "slide" | "zoom";
+
+export interface FramingEvent {
+  time: number;
+  kind: "speaker" | "layout";
+  from?: number | string;
+  to?: number | string;
 }
 
 /** Word-level timestamps from Whisper */

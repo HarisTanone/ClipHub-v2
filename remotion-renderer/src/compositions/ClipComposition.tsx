@@ -1,9 +1,10 @@
 import React from "react";
-import { AbsoluteFill, Sequence, OffthreadVideo, useCurrentFrame, useVideoConfig, interpolate } from "remotion";
+import { AbsoluteFill, Sequence, OffthreadVideo, useVideoConfig } from "remotion";
 import type { ClipCompositionProps } from "../types";
 import { HookLayer } from "../layers/HookLayer";
 import { SubtitleLayer } from "../layers/SubtitleLayer";
 import { ZoomLayer } from "../layers/ZoomLayer";
+import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 
 // ─── Font Loader ─────────────────────────────────────────────────────────────
 
@@ -63,13 +64,18 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   hookAnimation,
 }) => {
   const { fps } = useVideoConfig();
-  const frame = useCurrentFrame();
 
   // ─── Per-component config extraction ─────────────────────────────
   const hook = useHookConfig(creativeDirection, hookAnimation);
   const subtitle = useSubtitleConfig(creativeDirection);
   const subtitleConfig = creativeDirection.reframe_layout === "double"
-    ? { ...subtitle.config, position: "center", positionY: creativeDirection.subtitle_position_y ?? 50 }
+    ? creativeDirection.layout_mode === "dynamic"
+      ? {
+        ...subtitle.config,
+        layoutEvents: creativeDirection.layout_events,
+        gridPositionY: creativeDirection.subtitle_position_y ?? 50,
+      }
+      : { ...subtitle.config, position: "center", positionY: creativeDirection.subtitle_position_y ?? 50 }
     : subtitle.config;
 
   const hookDurationFrames = Math.floor(hook.duration * fps);
@@ -83,34 +89,34 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
 
   // ─── Zoom events from prosody analysis ───────────────────────────
   const zoomEvents = creativeDirection.zoom_events || [];
-  const transitionStyle = hook.config.transitionStyle || "cut";
-  const transitionFrames = Math.max(1, Math.round((hook.config.transitionDuration || 0.35) * fps));
-  const transitionProgress = interpolate(frame, [0, transitionFrames], [0, 1], { extrapolateRight: "clamp" });
-  const videoTransition = transitionStyle === "fade" ? { opacity: transitionProgress } : transitionStyle === "slide" ? { transform: `translateX(${(1 - transitionProgress) * 100}%)` } : transitionStyle === "zoom" ? { transform: `scale(${1.12 - transitionProgress * 0.12})`, opacity: transitionProgress } : {};
+  const transitionStyle = hook.config.transitionStyle || creativeDirection.transition_style || "cut";
+  const transitionDuration = hook.config.transitionDuration || creativeDirection.transition_duration || 0.35;
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {/* L1: Base Video + Auto Zoom */}
       {videoPath && (
-        <AbsoluteFill style={videoTransition}>
-          <ZoomLayer zoomEvents={zoomEvents} maxScale={1.15} defaultDuration={0.5}>
-            <OffthreadVideo
-              src={videoPath}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-          </ZoomLayer>
+        <AbsoluteFill>
+          <FramingTransitionLayer
+            events={creativeDirection.framing_events}
+            style={transitionStyle}
+            duration={transitionDuration}
+          >
+            <ZoomLayer zoomEvents={zoomEvents} maxScale={1.15} defaultDuration={0.5}>
+              <OffthreadVideo
+                src={videoPath}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            </ZoomLayer>
+          </FramingTransitionLayer>
         </AbsoluteFill>
       )}
 
-      {/* L2: Subtitles — words overlapping hook get clamped, not discarded */}
+      {/* L2: Keep original word timing; hook is a visual layer above subtitles. */}
       {words.length > 0 && (
         <AbsoluteFill style={{ zIndex: 1, pointerEvents: "none" }}>
           <SubtitleLayer
-            words={hookText
-              ? words
-                .filter(w => w.end > hook.duration)
-                .map(w => ({ ...w, start: Math.max(w.start, hook.duration) }))
-              : words}
+            words={words}
             config={subtitleConfig}
             fps={fps}
           />

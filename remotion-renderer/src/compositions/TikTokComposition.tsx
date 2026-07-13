@@ -19,6 +19,7 @@ import {
 import { makeTransform, scale, translateY } from "@remotion/animation-utils";
 import { fitText } from "@remotion/layout-utils";
 import type { ClipCompositionProps, Word } from "../types";
+import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 
 const HIGHLIGHT_COLOR = "#39E508";
 
@@ -37,6 +38,7 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
 
   // Hook duration
   const hookDuration = creativeDirection?.hook_style_config?.duration || 3.0;
+  const hookConfig = creativeDirection?.hook_style_config || {};
   const hookEndFrame = Math.floor(hookDuration * fps);
 
   // Group words into pages — manual grouping for reliable token format
@@ -68,10 +70,16 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
       {/* Video layer — OffthreadVideo for stability */}
       {videoPath && (
         <AbsoluteFill>
-          <OffthreadVideo
-            src={videoPath}
-            style={{ objectFit: "cover", width: "100%", height: "100%" }}
-          />
+          <FramingTransitionLayer
+            events={creativeDirection.framing_events}
+            style={hookConfig.transitionStyle || creativeDirection.transition_style || "cut"}
+            duration={hookConfig.transitionDuration || creativeDirection.transition_duration || 0.35}
+          >
+            <OffthreadVideo
+              src={videoPath}
+              style={{ objectFit: "cover", width: "100%", height: "100%" }}
+            />
+          </FramingTransitionLayer>
         </AbsoluteFill>
       )}
 
@@ -79,6 +87,7 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
       {hookVisible && (
         <AbsoluteFill
           style={{
+            zIndex: 2,
             justifyContent: "center",
             alignItems: "center",
             backgroundColor: "rgba(0,0,0,0.6)",
@@ -166,6 +175,7 @@ function TikTokSubtitlePage({
   return (
     <AbsoluteFill
       style={{
+        zIndex: 1,
         justifyContent: "center",
         alignItems: "center",
         top: undefined,

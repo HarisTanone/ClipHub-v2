@@ -4,6 +4,7 @@ import {
   normaliseSubtitleWords,
   resolveSubtitleVisualPreset,
   resolveSubtitlePositionY,
+  resolveLayoutAtTime,
 } from "./SubtitleLayer";
 
 describe("SubtitleLayer - Page Grouping", () => {
@@ -160,5 +161,19 @@ describe("SubtitleLayer - Page Grouping", () => {
     expect(resolveSubtitleVisualPreset({ stylePreset: "bold_yellow" })).toBe("dual_pop");
     expect(resolveSubtitleVisualPreset({ stylePreset: "word_tiles" })).toBe("word_tiles");
     expect(resolveSubtitleVisualPreset({ stylePreset: "terminal_type" })).toBe("terminal_type");
+  });
+});
+
+describe("SubtitleLayer - Dynamic Grid Safe Zone", () => {
+  const events = [
+    { time: 0, layout: "single" as const },
+    { time: 2.5, layout: "double" as const },
+    { time: 5.5, layout: "single" as const },
+  ];
+
+  it("uses single positioning before and after a temporary grid", () => {
+    expect(resolveLayoutAtTime(events, 1.0)).toBe("single");
+    expect(resolveLayoutAtTime(events, 3.0)).toBe("double");
+    expect(resolveLayoutAtTime(events, 6.0)).toBe("single");
   });
 });

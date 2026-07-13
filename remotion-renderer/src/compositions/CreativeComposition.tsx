@@ -19,6 +19,7 @@ import {
 } from "remotion";
 import { makeTransform, scale, translateY } from "@remotion/animation-utils";
 import type { ClipCompositionProps, Word } from "../types";
+import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 
 // Available creative styles
 export type CreativeStyle =
@@ -67,13 +68,19 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
       {/* Video */}
       {videoPath && (
         <AbsoluteFill>
-          <OffthreadVideo src={videoPath} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
+          <FramingTransitionLayer
+            events={creativeDirection.framing_events}
+            style={hookConfig.transitionStyle || creativeDirection.transition_style || "cut"}
+            duration={hookConfig.transitionDuration || creativeDirection.transition_duration || 0.35}
+          >
+            <OffthreadVideo src={videoPath} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
+          </FramingTransitionLayer>
         </AbsoluteFill>
       )}
 
       {/* Hook with creative style */}
       {hookVisible && (
-        <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.6)", opacity: hookOpacity }}>
+        <AbsoluteFill style={{ zIndex: 2, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.6)", opacity: hookOpacity }}>
           <CreativeText text={hookText} style={creativeStyle} frame={frame} fontSize={48} />
         </AbsoluteFill>
       )}
@@ -89,7 +96,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
 
         return (
           <Sequence key={index} from={startFrame} durationInFrames={dur}>
-            <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "center", paddingBottom: 200 }}>
+            <AbsoluteFill style={{ zIndex: 1, justifyContent: "flex-end", alignItems: "center", paddingBottom: 200 }}>
               <CreativeText text={text.trim()} style={creativeStyle} frame={0} fontSize={36} />
             </AbsoluteFill>
           </Sequence>

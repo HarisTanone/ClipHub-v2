@@ -497,6 +497,7 @@ class V2PipelineService:
             await self._repo.update_status(job_id, JobStatus.SEGMENTING)
             reframe_data = {}
             if flags.yolo_enabled and self._yolo_reframe:
+                reframe_style = (job.clips_data or {}).get("hook_style_config", {})
                 for clip in clips:
                     if not trim_results.get(clip.rank):
                         continue
@@ -509,6 +510,8 @@ class V2PipelineService:
                             job.target_aspect_ratio,
                             flags.autogrid_enabled,
                             content_profile=(job.clips_data or {}).get("content_profile", {}),
+                            transition_style=reframe_style.get("transitionStyle", "cut"),
+                            transition_duration=reframe_style.get("transitionDuration", 0.35),
                         )
                         reframe_data[clip.rank] = result
                     except Exception as e:
@@ -638,6 +641,15 @@ class V2PipelineService:
                     clip_output["reframe_method"] = layout.get("method", "")
                     if layout.get("subtitle_position_y") is not None:
                         clip_output["subtitle_position_y"] = layout["subtitle_position_y"]
+                    for key in (
+                        "layout_mode",
+                        "layout_events",
+                        "framing_events",
+                        "transition_style",
+                        "transition_duration",
+                    ):
+                        if layout.get(key) is not None:
+                            clip_output[key] = layout[key]
             if job.clips_data:
                 for key in (
                     "hook_style_config",
@@ -825,6 +837,15 @@ class V2PipelineService:
                     cd_dict["reframe_method"] = clip_reframe.get("method", "")
                     cd_dict["reframe_layout"] = clip_reframe.get("layout", "single")
                     cd_dict["subtitle_position_y"] = clip_reframe.get("subtitle_position_y")
+                    for key in (
+                        "layout_mode",
+                        "layout_events",
+                        "framing_events",
+                        "transition_style",
+                        "transition_duration",
+                    ):
+                        if clip_reframe.get(key) is not None:
+                            cd_dict[key] = clip_reframe[key]
 
                 try:
                     result = await self._remotion_adapter.render_clip(

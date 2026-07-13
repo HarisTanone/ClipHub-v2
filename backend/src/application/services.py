@@ -498,6 +498,7 @@ class JobService:
             await self._repo.update_status(job_id, JobStatus.SEGMENTING)
             reframe_data = {}
             if flags.yolo_enabled and self._yolo_reframe:
+                reframe_style = (job.clips_data or {}).get("hook_style_config", {})
                 for clip in clips:
                     if not trim_results.get(clip.rank):
                         continue
@@ -510,6 +511,8 @@ class JobService:
                             job.target_aspect_ratio,
                             flags.autogrid_enabled,
                             content_profile=(job.clips_data or {}).get("content_profile", {}),
+                            transition_style=reframe_style.get("transitionStyle", "cut"),
+                            transition_duration=reframe_style.get("transitionDuration", 0.35),
                         )
                         reframe_data[clip.rank] = result
                     except Exception as e:
@@ -1077,6 +1080,20 @@ class JobService:
             if isinstance(clip_reframe, dict)
             else ""
         )
+        if not isinstance(clip_reframe, dict):
+            return
+        for key in (
+            "layout",
+            "layout_mode",
+            "layout_events",
+            "framing_events",
+            "subtitle_position_y",
+            "transition_style",
+            "transition_duration",
+        ):
+            if clip_reframe.get(key) is not None:
+                target_key = "reframe_layout" if key == "layout" else key
+                creative_direction[target_key] = clip_reframe[key]
 
     def _best_clip_path(self, output_dir: str, rank: int, reframe_data: dict) -> str:
         """Get best available clip path. Always verify file exists AND has content."""

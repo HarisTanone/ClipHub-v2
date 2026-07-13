@@ -60,6 +60,12 @@ class PodcastReframeEngine(IReframeEngine):
     # Every grid panel is exactly half of the 1080x1920 output.
     GRID_PANEL_HEIGHT = 960
     DOMINANCE_SINGLE_CROP = 0.75     # If dominant ≥75% → use single crop instead of grid
+    GRID_BASE_ZOOM = 1.08            # Gentle default crop; avoids excessive background.
+    GRID_MAX_ZOOM = 1.40             # Hard ceiling so faces never become uncomfortably large.
+    GRID_FACE_MARGIN = 0.35          # Minimum face-side breathing room inside a panel.
+    GRID_ENTER_SAMPLES = 2           # Confirm a second person before opening the grid.
+    GRID_EXIT_SAMPLES = 3            # Tolerate short detector misses before closing the grid.
+    VALID_TRANSITIONS = {"cut", "fade", "slide", "zoom"}
 
     def __init__(self, hf_token: Optional[str] = None):
         self._face_detector = None
@@ -149,6 +155,14 @@ class PodcastReframeEngine(IReframeEngine):
             return {"output_path": output_path if success else video_path, "person_count": 0, "method": "center_crop"}
 
         content_profile = kwargs.get("content_profile") or {}
+        transition_style = str(kwargs.get("transition_style") or "cut").lower()
+        if transition_style not in self.VALID_TRANSITIONS:
+            transition_style = "cut"
+        try:
+            transition_duration = float(kwargs.get("transition_duration", 0.35))
+        except (TypeError, ValueError):
+            transition_duration = 0.35
+        transition_duration = max(0.0, min(1.0, transition_duration))
 
         try:
             result = await asyncio.to_thread(
@@ -157,6 +171,8 @@ class PodcastReframeEngine(IReframeEngine):
                 output_path,
                 autogrid_enabled,
                 content_profile,
+                transition_style,
+                transition_duration,
             )
             if result:
                 return result
@@ -174,6 +190,8 @@ class PodcastReframeEngine(IReframeEngine):
         output_path: str,
         autogrid: bool,
         content_profile: Optional[dict] = None,
+        transition_style: str = "cut",
+        transition_duration: float = 0.35,
     ) -> Optional[dict]:
         import cv2
         cv2.setNumThreads(0)
@@ -257,9 +275,30 @@ class PodcastReframeEngine(IReframeEngine):
                 tracked_data=tracked_data,
                 speaker_result=speaker_result,
                 width=width,
+                height=height,
             )
             if grid_decision["layout"] == "double":
-                return self._render_double_grid(video_path, output_path, width, height, grid_decision)
+                grid_decision["transition_style"] = transition_style
+                grid_decision["transition_duration"] = transition_duration
+                layout_events = grid_decision.get("layout_events") or []
+                if len(layout_events) > 1:
+                    dynamic_grid = self._render_dynamic_auto_grid(
+                        video_path=video_path,
+                        output_path=output_path,
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        duration=(total_frames / fps if fps > 0 else 0.0),
+                        tracked_data=tracked_data,
+                        speaker_result=speaker_result,
+                        decision=grid_decision,
+                    )
+                    if dynamic_grid:
+                        return dynamic_grid
+                elif layout_events and layout_events[0].get("layout") == "double":
+                    return self._render_double_grid(
+                        video_path, output_path, width, height, grid_decision
+                    )
 
         # Step 4: Dynamic Panning — single FFmpeg pass with smooth crop tracking
         # Builds a time-based crop X expression that follows the active face.
@@ -267,6 +306,8 @@ class PodcastReframeEngine(IReframeEngine):
         result = self._render_dynamic_panning(
             video_path, output_path, width, height, fps,
             tracked_data, speaker_result,
+            transition_style=transition_style,
+            transition_duration=transition_duration,
         )
         if result:
             return result
@@ -830,13 +871,15 @@ class PodcastReframeEngine(IReframeEngine):
         tracked_data: dict,
         speaker_result: Optional[ActiveSpeakerResult],
         width: int,
+        height: int = 1080,
     ) -> dict:
-        """Choose a 50:50 grid only for two stable, distinct identities.
+        """Choose and schedule a 50:50 grid for two stable identities.
 
         Raw face counts are not sufficient: a detector can emit a duplicate
         box or recreate a track for the same person. We therefore count unique
-        stable position IDs that coexist in the *same sampled frames* and only
-        select a pair that passes the coexistence threshold.
+        stable position IDs that coexist in the *same sampled frames*. A pair
+        is accepted only when each crop can exclude the other face without
+        exceeding the safe zoom ceiling.
         """
         per_frame_tracked = tracked_data.get("per_frame_tracked") or []
         track_to_position = {
@@ -847,12 +890,17 @@ class PodcastReframeEngine(IReframeEngine):
             int(pos_id): float(x)
             for pos_id, x in (tracked_data.get("position_targets") or {}).items()
         }
+        position_profiles = self._normalise_position_profiles(
+            tracked_data.get("position_target_profiles") or {}
+        )
         person_count = int(tracked_data.get("person_count") or 0)
 
         if not per_frame_tracked or person_count < 2 or len(position_targets) < 2:
             return {"layout": "single", "person_count": person_count}
 
         pair_hits: Dict[Tuple[int, int], int] = defaultdict(int)
+        pair_geometry: Dict[Tuple[int, int], dict] = {}
+        per_frame_positions: List[set[int]] = []
         valid_frames = 0
         for frame_tracked in per_frame_tracked:
             visible_positions = sorted({
@@ -860,26 +908,48 @@ class PodcastReframeEngine(IReframeEngine):
                 for detection in frame_tracked
                 if int(detection.track_id) in track_to_position
             })
+            per_frame_positions.append(set(visible_positions))
             if not visible_positions:
                 continue
             valid_frames += 1
             for index, first_id in enumerate(visible_positions):
                 for second_id in visible_positions[index + 1:]:
                     separation = abs(position_targets.get(second_id, 0) - position_targets.get(first_id, 0))
-                    if separation >= width * self.MIN_SEPARATION_RATIO:
-                        pair_hits[(first_id, second_id)] += 1
+                    if separation < width * self.MIN_SEPARATION_RATIO:
+                        continue
+                    pair = (first_id, second_id)
+                    geometry = pair_geometry.get(pair)
+                    if geometry is None:
+                        geometry = self._calculate_grid_geometry(
+                            first_id=first_id,
+                            second_id=second_id,
+                            position_targets=position_targets,
+                            position_profiles=position_profiles,
+                            width=width,
+                            height=height,
+                        )
+                        if geometry:
+                            pair_geometry[pair] = geometry
+                    if geometry:
+                        pair_hits[pair] += 1
 
         if not pair_hits or valid_frames <= 0:
             logger.info("podcast_reframe: autogrid skipped (no distinct co-visible identity pair)")
             return {"layout": "single", "person_count": person_count}
 
-        best_pair, best_hits = max(pair_hits.items(), key=lambda item: item[1])
+        best_pair, best_hits = max(
+            pair_hits.items(),
+            key=lambda item: (
+                item[1],
+                abs(position_targets[item[0][1]] - position_targets[item[0][0]]),
+            ),
+        )
         coexist_ratio = best_hits / valid_frames
-        if coexist_ratio < self.MIN_COEXIST_RATIO:
+        if best_hits < self.GRID_ENTER_SAMPLES:
             logger.info(
                 "podcast_reframe: autogrid skipped "
                 f"(distinct_pair=P{best_pair[0]}/P{best_pair[1]}, "
-                f"coexist={coexist_ratio:.0%}, visible_people={person_count})"
+                f"co-visible-samples={best_hits}, visible_people={person_count})"
             )
             return {"layout": "single", "person_count": person_count}
 
@@ -897,10 +967,51 @@ class PodcastReframeEngine(IReframeEngine):
             top_id, bottom_id = first_id, second_id
         top_x = int(position_targets[top_id])
         bottom_x = int(position_targets[bottom_id])
+        geometry = dict(pair_geometry[best_pair])
+        if top_id != geometry["first_id"]:
+            geometry = {
+                **geometry,
+                "top_crop_x": geometry["second_crop_x"],
+                "bottom_crop_x": geometry["first_crop_x"],
+                "top_crop_y": geometry["second_crop_y"],
+                "bottom_crop_y": geometry["first_crop_y"],
+            }
+        else:
+            geometry = {
+                **geometry,
+                "top_crop_x": geometry["first_crop_x"],
+                "bottom_crop_x": geometry["second_crop_x"],
+                "top_crop_y": geometry["first_crop_y"],
+                "bottom_crop_y": geometry["second_crop_y"],
+            }
+
+        sample_timestamps = tracked_data.get("sample_timestamps") or [
+            index * self.SAMPLE_INTERVAL_SEC
+            for index in range(len(per_frame_positions))
+        ]
+        unsafe_frames = [
+            not self._grid_frame_is_safe(frame_tracked, geometry)
+            for frame_tracked in per_frame_tracked
+        ]
+        raw_double = [
+            first_id in positions and second_id in positions and not unsafe_frames[index]
+            for index, positions in enumerate(per_frame_positions)
+        ]
+        layout_events = self._build_layout_events(
+            raw_double, sample_timestamps, force_single=unsafe_frames
+        )
+        if not any(event["layout"] == "double" for event in layout_events):
+            logger.info(
+                "podcast_reframe: autogrid skipped after visibility hysteresis "
+                f"(pair=P{first_id}/P{second_id})"
+            )
+            return {"layout": "single", "person_count": person_count}
+
         logger.info(
             "podcast_reframe: AUTO 50/50 GRID "
             f"(top=P{top_id}@{top_x}, bottom=P{bottom_id}@{bottom_x}, "
-            f"coexist={coexist_ratio:.0%})"
+            f"coexist={coexist_ratio:.0%}, zoom={geometry['grid_zoom']:.2f}, "
+            f"layout_changes={max(0, len(layout_events) - 1)})"
         )
         return {
             "layout": "double",
@@ -910,7 +1021,221 @@ class PodcastReframeEngine(IReframeEngine):
             "bottom_track_id": bottom_id,
             "person_count": person_count,
             "coexist_ratio": coexist_ratio,
+            "layout_events": layout_events,
+            **geometry,
         }
+
+    def _build_layout_events(
+        self,
+        raw_double: List[bool],
+        timestamps: List[float],
+        force_single: Optional[List[bool]] = None,
+    ) -> List[dict]:
+        """Turn noisy per-sample people counts into a stable layout timeline."""
+        if not raw_double:
+            return [{"time": 0.0, "layout": "single"}]
+
+        state = bool(raw_double[0])
+        events = [{"time": 0.0, "layout": "double" if state else "single"}]
+        pending_state: Optional[bool] = None
+        pending_count = 0
+
+        for index in range(1, len(raw_double)):
+            candidate = bool(raw_double[index])
+            if force_single and index < len(force_single) and force_single[index]:
+                if state:
+                    event_time = (
+                        float(timestamps[index])
+                        if index < len(timestamps)
+                        else index * self.SAMPLE_INTERVAL_SEC
+                    )
+                    state = False
+                    events.append({"time": max(0.0, event_time), "layout": "single"})
+                pending_state = None
+                pending_count = 0
+                continue
+            if candidate == state:
+                pending_state = None
+                pending_count = 0
+                continue
+
+            if pending_state != candidate:
+                pending_state = candidate
+                pending_count = 1
+            else:
+                pending_count += 1
+
+            threshold = (
+                self.GRID_ENTER_SAMPLES if candidate else self.GRID_EXIT_SAMPLES
+            )
+            if pending_count < threshold:
+                continue
+
+            state = candidate
+            event_time = (
+                float(timestamps[index])
+                if index < len(timestamps)
+                else index * self.SAMPLE_INTERVAL_SEC
+            )
+            events.append({
+                "time": max(0.0, event_time),
+                "layout": "double" if state else "single",
+            })
+            pending_state = None
+            pending_count = 0
+
+        return events
+
+    @staticmethod
+    def _grid_frame_is_safe(
+        frame_tracked: List[TrackedDetection],
+        geometry: dict,
+    ) -> bool:
+        """Reject a grid frame if any detected face enters both source crops."""
+        crop_w = int(geometry.get("crop_w", 0))
+        crop_h = int(geometry.get("crop_h", 0))
+        if crop_w <= 0 or crop_h <= 0:
+            return False
+
+        first_rect = (
+            int(geometry.get("top_crop_x", geometry.get("first_crop_x", 0))),
+            int(geometry.get("top_crop_y", geometry.get("first_crop_y", 0))),
+        )
+        second_rect = (
+            int(geometry.get("bottom_crop_x", geometry.get("second_crop_x", 0))),
+            int(geometry.get("bottom_crop_y", geometry.get("second_crop_y", 0))),
+        )
+
+        def intersects(bbox: BBox, crop_x: int, crop_y: int) -> bool:
+            return not (
+                bbox.x2 <= crop_x
+                or bbox.x1 >= crop_x + crop_w
+                or bbox.y2 <= crop_y
+                or bbox.y1 >= crop_y + crop_h
+            )
+
+        return not any(
+            intersects(detection.bbox, *first_rect)
+            and intersects(detection.bbox, *second_rect)
+            for detection in frame_tracked
+        )
+
+    def _calculate_grid_geometry(
+        self,
+        first_id: int,
+        second_id: int,
+        position_targets: Dict[int, float],
+        position_profiles: Dict[int, Dict[str, float]],
+        width: int,
+        height: int,
+    ) -> Optional[dict]:
+        """Find the mildest crop that isolates each person from the other.
+
+        If isolation would require zooming past ``GRID_MAX_ZOOM``, the pair is
+        rejected and auto-grid falls back to the centered single-speaker view.
+        """
+        if first_id == second_id:
+            return None
+
+        all_profiles = {
+            position_id: {
+                "x": float(target_x),
+                "y": height * 0.38,
+                "width": width * 0.08,
+                "height": height * 0.16,
+                **position_profiles.get(position_id, {}),
+            }
+            for position_id, target_x in position_targets.items()
+        }
+        first_profile = all_profiles.get(first_id, {
+            "x": width / 3,
+            "y": height * 0.38,
+            "width": width * 0.08,
+            "height": height * 0.16,
+        })
+        second_profile = all_profiles.get(second_id, {
+            "x": width * 2 / 3,
+            "y": height * 0.38,
+            "width": width * 0.08,
+            "height": height * 0.16,
+        })
+        separation = abs(first_profile["x"] - second_profile["x"])
+        if separation < width * self.MIN_SEPARATION_RATIO:
+            return None
+
+        base_crop_w = min(float(width), float(height) * 9 / 8)
+        max_face_w = max(
+            [float(profile.get("width", 0.0)) for profile in all_profiles.values()]
+            + [first_profile["width"], second_profile["width"], 1.0]
+        )
+        face_gutter = max(width * 0.015, max_face_w * 0.18)
+
+        zoom = self.GRID_BASE_ZOOM
+        while zoom <= self.GRID_MAX_ZOOM + 1e-6:
+            crop_w = min(width, max(2, int(base_crop_w / zoom)))
+            crop_h = min(height, max(2, int(crop_w * 8 / 9)))
+
+            # Leave enough room around the selected face even at max zoom.
+            own_face_min_w = max_face_w * (1 + self.GRID_FACE_MARGIN * 2)
+            own_face_min_h = max(
+                first_profile["height"], second_profile["height"], 1.0
+            ) * (1 + self.GRID_FACE_MARGIN)
+            if crop_w < own_face_min_w or crop_h < own_face_min_h:
+                break
+
+            first_crop_x = self._clamp_x(first_profile["x"], crop_w, width)
+            second_crop_x = self._clamp_x(second_profile["x"], crop_w, width)
+            first_isolated = all(
+                first_crop_x + crop_w
+                <= profile["x"] - profile["width"] / 2 - face_gutter
+                or first_crop_x
+                >= profile["x"] + profile["width"] / 2 + face_gutter
+                for position_id, profile in all_profiles.items()
+                if position_id != first_id
+            )
+            second_isolated = all(
+                second_crop_x + crop_w
+                <= profile["x"] - profile["width"] / 2 - face_gutter
+                or second_crop_x
+                >= profile["x"] + profile["width"] / 2 + face_gutter
+                for position_id, profile in all_profiles.items()
+                if position_id != second_id
+            )
+            if first_isolated and second_isolated:
+                first_crop_y = self._clamp_grid_y(
+                    first_profile["y"], crop_h, height
+                )
+                second_crop_y = self._clamp_grid_y(
+                    second_profile["y"], crop_h, height
+                )
+                return {
+                    "first_id": first_id,
+                    "second_id": second_id,
+                    "crop_w": crop_w,
+                    "crop_h": crop_h,
+                    "first_crop_x": first_crop_x,
+                    "second_crop_x": second_crop_x,
+                    "first_crop_y": first_crop_y,
+                    "second_crop_y": second_crop_y,
+                    "grid_zoom": round(base_crop_w / crop_w, 3),
+                }
+
+            zoom += 0.02
+
+        logger.info(
+            "podcast_reframe: grid pair rejected; isolation needs overzoom "
+            f"(P{first_id}/P{second_id}, separation={separation:.0f}px, "
+            f"max_zoom={self.GRID_MAX_ZOOM:.2f})"
+        )
+        return None
+
+    @staticmethod
+    def _clamp_grid_y(face_y: float, crop_h: int, frame_h: int) -> int:
+        """Place eyes slightly above panel center while keeping the crop valid."""
+        if crop_h >= frame_h:
+            return 0
+        target_y = int(float(face_y) - crop_h * 0.38)
+        return max(0, min(target_y, frame_h - crop_h))
 
     def _decide_layout_v2(
         self,
@@ -1182,27 +1507,17 @@ class PodcastReframeEngine(IReframeEngine):
 
         return int(np.median(frame_faces)), None, None, "median_face"
 
-    def _render_dynamic_panning(
+    def _build_panning_plan(
         self,
-        video_path: str,
-        output_path: str,
         width: int,
         height: int,
         fps: float,
         tracked_data: dict,
         speaker_result: Optional[ActiveSpeakerResult],
+        transition_style: str,
+        transition_duration: float,
     ) -> Optional[dict]:
-        """Render with dynamic crop panning — smooth tracking of active face.
-
-        Single FFmpeg command, NO concat, audio stream-copied = zero desync.
-
-        Approach:
-          1. Build per-second target crop X from face detections
-          2. Generate FFmpeg crop expression with time-based interpolation
-          3. Crop smoothly pans from face to face as they appear
-
-        Result: camera "follows" the speaker, smooth panning transitions.
-        """
+        """Build a bbox-aware, speaker-centered crop expression."""
         per_frame_faces = tracked_data["per_frame_faces"]
         if not per_frame_faces or len(per_frame_faces) < 3:
             return None
@@ -1270,7 +1585,14 @@ class PodcastReframeEngine(IReframeEngine):
                 mismatch_threshold = width * self.SPEAKER_TARGET_MISMATCH_RATIO
                 if target_detection or abs(best_det.bbox.center_x - cx) <= mismatch_threshold:
                     face_w = best_det.bbox.width
-                    margin = face_w * 0.6  # 60% extra space around face
+                    try:
+                        from src.config import settings
+                        margin_ratio = getattr(
+                            settings, "CENTERING_FACE_MARGIN_RATIO", 0.6
+                        )
+                    except (ImportError, ModuleNotFoundError):
+                        margin_ratio = 0.6
+                    margin = face_w * max(0.0, float(margin_ratio))
 
                     desired_left = best_det.bbox.x1 - margin
                     desired_right = best_det.bbox.x2 + margin
@@ -1341,7 +1663,7 @@ class PodcastReframeEngine(IReframeEngine):
             f"(dead_zone={self.PAN_DEAD_ZONE_PX}px, hold={self.PAN_HOLD_MIN_SEC}s)"
         )
 
-        # 2. Build FFmpeg crop X expression
+        # Build FFmpeg crop X expression.
         if len(stabilized) <= 1 or all(s[1] == stabilized[0][1] for s in stabilized):
             crop_x_expr = str(stabilized[0][1])
             logger.info(
@@ -1353,13 +1675,50 @@ class PodcastReframeEngine(IReframeEngine):
         else:
             crop_x_expr = self._build_panning_expression(
                 [(t, x) for t, x, _, _ in stabilized],
-                0,
+                transition_duration,
+                transition_style,
             )
             for i, (t, x, speaker_id, source) in enumerate(stabilized):
                 logger.info(
                     f"  pan[{i}] t={t:.1f}s → x={x}, "
                     f"speaker={self._format_position_id(speaker_id)}, source={source}"
                 )
+
+        return {
+            "crop_w": crop_w,
+            "crop_x_expr": crop_x_expr,
+            "keyframes": stabilized,
+            "framing_events": self._speaker_change_events(stabilized),
+        }
+
+    def _render_dynamic_panning(
+        self,
+        video_path: str,
+        output_path: str,
+        width: int,
+        height: int,
+        fps: float,
+        tracked_data: dict,
+        speaker_result: Optional[ActiveSpeakerResult],
+        transition_style: str = "slide",
+        transition_duration: float = 0.4,
+    ) -> Optional[dict]:
+        """Render a single vertical crop that follows the active speaker."""
+        plan = self._build_panning_plan(
+            width=width,
+            height=height,
+            fps=fps,
+            tracked_data=tracked_data,
+            speaker_result=speaker_result,
+            transition_style=transition_style,
+            transition_duration=transition_duration,
+        )
+        if not plan:
+            return None
+
+        crop_w = plan["crop_w"]
+        crop_x_expr = plan["crop_x_expr"]
+        stabilized = plan["keyframes"]
 
         # 3. Render with single FFmpeg command
         vf = (
@@ -1391,14 +1750,269 @@ class PodcastReframeEngine(IReframeEngine):
                 "person_count": pc,
                 "method": "podcast_dynamic_panning",
                 "keyframes": len(stabilized),
+                "layout": "single",
+                "layout_events": [{"time": 0.0, "layout": "single"}],
+                "framing_events": plan["framing_events"],
+                "transition_style": transition_style,
+                "transition_duration": transition_duration,
             }
 
         if result.stderr:
             logger.warning(f"podcast_reframe: dynamic panning failed: {result.stderr[-300:]}")
         return None
 
+    def _render_dynamic_auto_grid(
+        self,
+        video_path: str,
+        output_path: str,
+        width: int,
+        height: int,
+        fps: float,
+        duration: float,
+        tracked_data: dict,
+        speaker_result: Optional[ActiveSpeakerResult],
+        decision: dict,
+    ) -> Optional[dict]:
+        """Auto-switch between centered single view and identity-safe grid."""
+        transition_style = str(decision.get("transition_style") or "cut")
+        transition_duration = float(decision.get("transition_duration") or 0.0)
+        plan = self._build_panning_plan(
+            width=width,
+            height=height,
+            fps=fps,
+            tracked_data=tracked_data,
+            speaker_result=speaker_result,
+            transition_style=transition_style,
+            transition_duration=transition_duration,
+        )
+        if not plan or duration <= 0:
+            return None
+
+        layout_events = decision.get("layout_events") or []
+        if len(layout_events) < 2:
+            return None
+
+        crop_w = int(decision["crop_w"])
+        crop_h = int(decision["crop_h"])
+        top_x = int(decision["top_crop_x"])
+        bottom_x = int(decision["bottom_crop_x"])
+        top_y = int(decision["top_crop_y"])
+        bottom_y = int(decision["bottom_crop_y"])
+        single_crop_w = int(plan["crop_w"])
+        single_x_expr = plan["crop_x_expr"]
+
+        transition_graph, output_label = self._build_layout_transition_graph(
+            layout_events=layout_events,
+            duration=duration,
+            transition_style=transition_style,
+            transition_duration=transition_duration,
+        )
+        if not transition_graph:
+            return None
+
+        fps_value = max(1.0, float(fps))
+        filters = [
+            "[0:v]split=3[single_src][top_src][bottom_src]",
+            (
+                f"[single_src]crop={single_crop_w}:{height}:{single_x_expr}:0,"
+                f"scale=1080:1920:flags=lanczos,format=yuv420p,"
+                f"fps={fps_value:.6f},settb=AVTB[single]"
+            ),
+            (
+                f"[top_src]crop={crop_w}:{crop_h}:{top_x}:{top_y},"
+                f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,"
+                "format=yuv420p[top]"
+            ),
+            (
+                f"[bottom_src]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},"
+                f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,"
+                "format=yuv420p[bottom]"
+            ),
+            (
+                f"[top][bottom]vstack=inputs=2,format=yuv420p,"
+                f"fps={fps_value:.6f},settb=AVTB[grid]"
+            ),
+            transition_graph,
+        ]
+        filter_complex = ";".join(filters)
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-filter_complex", filter_complex,
+            "-map", f"[{output_label}]", "-map", "0:a?",
+            *get_video_encoder_args("medium"),
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+        logger.info(
+            "podcast_reframe: DYNAMIC AUTO GRID "
+            f"(events={len(layout_events)}, transition={transition_style}/"
+            f"{transition_duration:.2f}s, zoom={decision.get('grid_zoom', 1.0):.2f})"
+        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 1000:
+            if result.stderr:
+                logger.warning(
+                    f"podcast_reframe: dynamic auto grid failed: {result.stderr[-500:]}"
+                )
+            return None
+
+        def layout_at(time_sec: float) -> str:
+            current = "single"
+            for event in layout_events:
+                if float(event.get("time", 0.0)) > time_sec:
+                    break
+                current = str(event.get("layout", "single"))
+            return current
+
+        framing_events = [
+            event
+            for event in plan["framing_events"]
+            if layout_at(float(event.get("time", 0.0))) == "single"
+        ]
+        framing_events.extend(
+            {
+                "time": float(event["time"]),
+                "kind": "layout",
+                "to": event["layout"],
+            }
+            for event in layout_events[1:]
+        )
+        framing_events.sort(key=lambda event: float(event.get("time", 0.0)))
+        logger.info("podcast_reframe: dynamic auto grid OK")
+        return {
+            "output_path": output_path,
+            "person_count": int(decision.get("person_count", 2)),
+            "method": "podcast_dynamic_auto_grid",
+            # Keep `double` for subtitle safe-zone compatibility; layout_mode
+            # carries the fact that the encoded video switches over time.
+            "layout": "double",
+            "layout_mode": "dynamic",
+            "layout_events": layout_events,
+            "framing_events": framing_events,
+            "transition_style": transition_style,
+            "transition_duration": transition_duration,
+            "grid_zoom": decision.get("grid_zoom"),
+            "grid_panel_height": self.GRID_PANEL_HEIGHT,
+            "subtitle_position_y": 50,
+            "top_track_id": decision.get("top_track_id"),
+            "bottom_track_id": decision.get("bottom_track_id"),
+        }
+
+    def _build_layout_transition_graph(
+        self,
+        layout_events: List[dict],
+        duration: float,
+        transition_style: str,
+        transition_duration: float,
+    ) -> Tuple[str, str]:
+        """Build trim/concat or xfade graph without changing video duration."""
+        cleaned: List[dict] = []
+        for event in sorted(layout_events, key=lambda item: float(item.get("time", 0.0))):
+            layout = "double" if event.get("layout") == "double" else "single"
+            event_time = max(0.0, min(float(duration), float(event.get("time", 0.0))))
+            if cleaned and layout == cleaned[-1]["layout"]:
+                continue
+            if cleaned and event_time <= cleaned[-1]["time"] + 1e-3:
+                cleaned[-1] = {"time": event_time, "layout": layout}
+            else:
+                cleaned.append({"time": event_time, "layout": layout})
+
+        if not cleaned:
+            return "", ""
+        if cleaned[0]["time"] > 0:
+            cleaned.insert(0, {"time": 0.0, "layout": cleaned[0]["layout"]})
+        else:
+            cleaned[0]["time"] = 0.0
+        cleaned = [event for event in cleaned if event["time"] < duration]
+        if len(cleaned) < 2:
+            return "", ""
+
+        use_xfade = transition_style in {"fade", "slide", "zoom"} and transition_duration > 0
+        transition_durations: List[float] = []
+        for index in range(1, len(cleaned)):
+            previous_gap = cleaned[index]["time"] - cleaned[index - 1]["time"]
+            next_time = cleaned[index + 1]["time"] if index + 1 < len(cleaned) else duration
+            next_gap = next_time - cleaned[index]["time"]
+            safe_duration = min(
+                max(0.0, transition_duration),
+                max(0.0, previous_gap * 0.8),
+                max(0.0, next_gap * 0.8),
+            )
+            transition_durations.append(safe_duration if safe_duration >= 0.04 else 0.0)
+        if not all(value > 0 for value in transition_durations):
+            use_xfade = False
+
+        layout_counts = {
+            "single": sum(1 for event in cleaned if event["layout"] == "single"),
+            "double": sum(1 for event in cleaned if event["layout"] == "double"),
+        }
+        parts: List[str] = []
+        source_labels: Dict[str, List[str]] = {"single": [], "double": []}
+        for layout, source in (("single", "single"), ("double", "grid")):
+            count = layout_counts[layout]
+            labels = [f"{layout}_copy_{index}" for index in range(count)]
+            source_labels[layout] = labels
+            if count == 1:
+                parts.append(f"[{source}]null[{labels[0]}]")
+            elif count > 1:
+                joined = "".join(f"[{label}]" for label in labels)
+                parts.append(f"[{source}]split={count}{joined}")
+
+        source_offsets = {"single": 0, "double": 0}
+        segment_durations: List[float] = []
+        for index, event in enumerate(cleaned):
+            left_overlap = transition_durations[index - 1] / 2 if use_xfade and index > 0 else 0.0
+            right_overlap = transition_durations[index] / 2 if use_xfade and index < len(cleaned) - 1 else 0.0
+            segment_start = max(0.0, event["time"] - left_overlap)
+            next_boundary = cleaned[index + 1]["time"] if index + 1 < len(cleaned) else duration
+            segment_end = min(duration, next_boundary + right_overlap)
+            layout = event["layout"]
+            source_index = source_offsets[layout]
+            source_offsets[layout] += 1
+            source_label = source_labels[layout][source_index]
+            parts.append(
+                f"[{source_label}]trim=start={segment_start:.6f}:end={segment_end:.6f},"
+                f"setpts=PTS-STARTPTS[layout_seg_{index}]"
+            )
+            segment_durations.append(max(0.0, segment_end - segment_start))
+
+        if not use_xfade:
+            inputs = "".join(f"[layout_seg_{index}]" for index in range(len(cleaned)))
+            parts.append(f"{inputs}concat=n={len(cleaned)}:v=1:a=0[layout_out]")
+            return ";".join(parts), "layout_out"
+
+        accumulated = segment_durations[0]
+        current_label = "layout_seg_0"
+        for index in range(1, len(cleaned)):
+            trans_duration = transition_durations[index - 1]
+            offset = max(0.0, accumulated - trans_duration)
+            if transition_style == "slide":
+                transition_name = (
+                    "slideup" if cleaned[index]["layout"] == "double" else "slidedown"
+                )
+            elif transition_style == "zoom":
+                transition_name = "zoomin"
+            else:
+                transition_name = "fade"
+            next_label = f"layout_mix_{index}"
+            parts.append(
+                f"[{current_label}][layout_seg_{index}]"
+                f"xfade=transition={transition_name}:duration={trans_duration:.6f}:"
+                f"offset={offset:.6f}[{next_label}]"
+            )
+            accumulated += segment_durations[index] - trans_duration
+            current_label = next_label
+
+        parts.append(f"[{current_label}]null[layout_out]")
+        return ";".join(parts), "layout_out"
+
     def _build_panning_expression(
-        self, keyframes: List[Tuple[float, int]], transition_sec: float = 0.0
+        self,
+        keyframes: List[Tuple[float, int]],
+        transition_sec: float = 0.0,
+        transition_style: str = "slide",
     ) -> str:
         """Build FFmpeg time-based crop X expression.
 
@@ -1412,9 +2026,20 @@ class PodcastReframeEngine(IReframeEngine):
         if len(keyframes) <= 1:
             return str(keyframes[0][1] if keyframes else 0)
 
-        # Use configured transition time
-        from src.config import settings
-        trans = getattr(settings, 'CENTERING_TRANSITION_SEC', 0.4)
+        # Respect the style selected in the editor. Cut snaps immediately;
+        # the other styles keep the crop motion smooth while Remotion applies
+        # the corresponding fade/slide/zoom accent at the same event time.
+        if transition_sec > 0:
+            trans = transition_sec
+        else:
+            try:
+                from src.config import settings
+                trans = getattr(settings, 'CENTERING_TRANSITION_SEC', 0.4)
+            except (ImportError, ModuleNotFoundError):
+                trans = 0.4
+        if transition_style == "cut":
+            trans = 0.0
+        trans = max(0.0, min(1.0, float(trans)))
 
         if trans <= 0:
             # Original behavior: instant snap
@@ -1449,6 +2074,30 @@ class PodcastReframeEngine(IReframeEngine):
                 expr = inner
 
         return f"'{expr}'"
+
+    @staticmethod
+    def _speaker_change_events(
+        keyframes: List[Tuple[float, int, Optional[int], str]],
+    ) -> List[dict]:
+        """Expose stable speaker changes to the final transition renderer."""
+        events: List[dict] = []
+        previous_speaker: Optional[int] = None
+        for time_sec, _, speaker_id, _ in keyframes:
+            if speaker_id is None:
+                continue
+            if previous_speaker is None:
+                previous_speaker = int(speaker_id)
+                continue
+            if int(speaker_id) == previous_speaker:
+                continue
+            events.append({
+                "time": max(0.0, float(time_sec)),
+                "kind": "speaker",
+                "from": previous_speaker,
+                "to": int(speaker_id),
+            })
+            previous_speaker = int(speaker_id)
+        return events
 
     # ─── Render: Single Crop ──────────────────────────────────────────────
 
@@ -1493,67 +2142,67 @@ class PodcastReframeEngine(IReframeEngine):
     ) -> Optional[dict]:
         """Equal grid: one unique person in each 1080x960 panel.
 
-        CORRECT MATH:
-          - Output: 1080x1920 (9:16)
-          - Each panel: 1080x960
-          - Per panel aspect = 1080/960 = 9/8
-          - From source: crop_w = height/2 * 9/8 (to maintain 9:8 ratio per panel)
-          - crop_h = height/2 (each person gets half the vertical source)
-          - NO SQUISH: scale maintains aspect because crop ratio = output ratio
-
-        Wait — podcast speakers sit side-by-side in a 16:9 frame.
-        We want to show each person FULL HEIGHT but cropped horizontally.
-        Correct approach: crop a 9:16 column per person, then stack them.
-
-        Per panel: crop (height*9/32) wide x (height/2) tall? No...
-
-        SIMPLEST CORRECT approach for side-by-side podcast framing:
-          - Each panel shows one person from full-height source
-          - crop_w per panel = some width centered on face
-          - crop_h per panel = full height
-          - Scale each crop to 1080x960
-          - This WILL cause slight vertical compression (height → 960)
-            but 1080/height ratio must equal 1080/960 ratio for no distortion
-          - For no distortion: crop must be (crop_w)x(crop_w * 960/1080) = crop_w x (crop_w * 8/9)
-
-        FINAL CORRECT: each panel crop = W x H where W:H = 9:8 (= 1080:960)
-          - crop_h = height (full height)
-          - crop_w = height * 9 / 8 (from full height)
-          - If crop_w > width, clamp to width and adjust crop_h = width * 8 / 9
-          - Scale to 1080x960
-          - Stack = 1080x1920 ✓
-          - Aspect ratio preserved ✓
+        Each source crop uses a 9:8 ratio, so scaling it to 1080x960
+        preserves aspect ratio. The two panels then stack to 1080x1920.
         """
-        # Each panel: 9:8 aspect ratio
-        # Tighten each panel by ~12% so background/other people do not leak into
-        # the selected speaker crop.
-        grid_zoom = 1.12
-        crop_w = int((height * 9 / 8) / grid_zoom)
-        crop_h = int(height / grid_zoom)
-
-        if crop_w > width:
-            # Source too narrow — adjust
-            crop_w = width
-            crop_h = int(width * 8 / 9)
-
         top_center_x = decision.get("top_x", decision.get("left_x", width // 3))
         bottom_center_x = decision.get("bottom_x", decision.get("right_x", width * 2 // 3))
-        if decision.get("top_track_id") == decision.get("bottom_track_id"):
+        top_track_id = decision.get("top_track_id")
+        bottom_track_id = decision.get("bottom_track_id")
+        if top_track_id is not None and top_track_id == bottom_track_id:
             logger.warning("podcast_reframe: rejected grid with duplicate identity")
             return None
         if abs(float(top_center_x) - float(bottom_center_x)) < width * self.MIN_SEPARATION_RATIO:
             logger.warning("podcast_reframe: rejected grid with visually overlapping people")
             return None
-        top_x = self._clamp_x(top_center_x, crop_w, width)
-        bottom_x = self._clamp_x(bottom_center_x, crop_w, width)
 
-        # Y offset for crop (center vertically if crop_h < height)
-        crop_y = max(0, (height - crop_h) // 2)
+        # Auto-grid decisions normally provide identity-safe geometry. Rebuild
+        # it for older callers so even the compatibility path has disjoint crops.
+        if decision.get("crop_w") is None and top_track_id is not None and bottom_track_id is not None:
+            fallback_geometry = self._calculate_grid_geometry(
+                first_id=int(top_track_id),
+                second_id=int(bottom_track_id),
+                position_targets={
+                    int(top_track_id): float(top_center_x),
+                    int(bottom_track_id): float(bottom_center_x),
+                },
+                position_profiles={},
+                width=width,
+                height=height,
+            )
+            if not fallback_geometry:
+                logger.warning("podcast_reframe: rejected grid without safe crop geometry")
+                return None
+            decision = {
+                **decision,
+                "crop_w": fallback_geometry["crop_w"],
+                "crop_h": fallback_geometry["crop_h"],
+                "grid_zoom": fallback_geometry["grid_zoom"],
+                "top_crop_x": fallback_geometry["first_crop_x"],
+                "bottom_crop_x": fallback_geometry["second_crop_x"],
+                "top_crop_y": fallback_geometry["first_crop_y"],
+                "bottom_crop_y": fallback_geometry["second_crop_y"],
+            }
+
+        grid_zoom = float(decision.get("grid_zoom", self.GRID_MAX_ZOOM))
+        crop_w = int(decision.get("crop_w", (height * 9 / 8) / grid_zoom))
+        crop_h = int(decision.get("crop_h", crop_w * 8 / 9))
+        if crop_w > width:
+            crop_w = width
+            crop_h = int(width * 8 / 9)
+
+        top_x = int(decision.get("top_crop_x", self._clamp_x(top_center_x, crop_w, width)))
+        bottom_x = int(decision.get("bottom_crop_x", self._clamp_x(bottom_center_x, crop_w, width)))
+
+        # Center each person independently; front/back rows can have different Y.
+        fallback_y = max(0, (height - crop_h) // 2)
+        top_y = int(decision.get("top_crop_y", fallback_y))
+        bottom_y = int(decision.get("bottom_crop_y", fallback_y))
 
         vf = (
             f"split=2[top][bot];"
-            f"[top]crop={crop_w}:{crop_h}:{top_x}:{crop_y},scale=1080:{self.GRID_PANEL_HEIGHT},format=yuv420p[t];"
-            f"[bot]crop={crop_w}:{crop_h}:{bottom_x}:{crop_y},scale=1080:{self.GRID_PANEL_HEIGHT},format=yuv420p[b];"
+            f"[top]crop={crop_w}:{crop_h}:{top_x}:{top_y},scale=1080:{self.GRID_PANEL_HEIGHT},format=yuv420p[t];"
+            f"[bot]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},scale=1080:{self.GRID_PANEL_HEIGHT},format=yuv420p[b];"
             f"[t][b]vstack=inputs=2,setsar=1[vout]"
         )
 
@@ -1571,7 +2220,11 @@ class PodcastReframeEngine(IReframeEngine):
 
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
             pc = decision.get("person_count", 2)
-            logger.info(f"podcast_reframe: 50/50 grid OK (top={top_x}, bottom={bottom_x}, crop={crop_w}x{crop_h})")
+            logger.info(
+                "podcast_reframe: 50/50 grid OK "
+                f"(top={top_x},{top_y}, bottom={bottom_x},{bottom_y}, "
+                f"crop={crop_w}x{crop_h}, zoom={grid_zoom:.2f})"
+            )
             return {
                 "output_path": output_path,
                 "person_count": pc,
@@ -1582,6 +2235,9 @@ class PodcastReframeEngine(IReframeEngine):
                 "grid_panel_height": self.GRID_PANEL_HEIGHT,
                 "top_track_id": decision.get("top_track_id"),
                 "bottom_track_id": decision.get("bottom_track_id"),
+                "layout_events": decision.get("layout_events", [{"time": 0.0, "layout": "double"}]),
+                "framing_events": [],
+                "transition_style": decision.get("transition_style", "cut"),
             }
 
         if result.stderr:
