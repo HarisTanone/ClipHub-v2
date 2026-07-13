@@ -120,7 +120,7 @@ if [ -d ".git" ]; then
         git stash 2>/dev/null || true
     fi
 
-    git pull origin feature/pyannote-speaker-diarization 2>/dev/null || git pull 2>/dev/null || true
+    git pull origin fix/autogrid-ghost-detection 2>/dev/null || git pull 2>/dev/null || true
     echo "  ✅ Code updated"
 else
     echo "  ⚠️  No .git found — skipping pull"
