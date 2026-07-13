@@ -45,6 +45,7 @@ from src.domain.interfaces import (
     IYoloReframeEngine,
 )
 from src.infrastructure.content_intelligence import ContentIntelligence
+from src.infrastructure.clip_outputs import initialize_clip_readiness, mark_clip_ready
 from src.infrastructure.subtitle_words import sanitize_subtitle_words
 
 if TYPE_CHECKING:
@@ -475,6 +476,21 @@ class V2PipelineService:
 
             clips_count = len(clips)
             await self._repo.update_clips_count(job_id, clips_count, 0, 0)
+
+            # Publish the AI-selected clip slots immediately. The detail page
+            # can now show every candidate as locked/processing while renders
+            # complete independently in the background.
+            pending_clips_data = self._assemble_clips_data(
+                clips,
+                {},
+                creative_direction,
+                output_dir,
+                transcript_source=transcript_result.source,
+            )
+            merged_clips_data = dict(job.clips_data or {})
+            merged_clips_data.update(pending_clips_data)
+            job.clips_data = merged_clips_data
+            await self._repo.update_clips_data(job_id, merged_clips_data)
             self._emit(job_id, 5, "prepare_clips", "complete")
 
             # ═══ Step 6: Aspect Ratio Router ═══
@@ -796,6 +812,7 @@ class V2PipelineService:
         """Render all clips via Remotion server (parallel, max 2 concurrent)."""
         self._emit(job_id, 13, "remotion_render", "start")
         await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
+        initialize_clip_readiness(output_dir)
 
         from src.domain.interfaces_remotion import RemotionRenderConfig
         render_config = RemotionRenderConfig(
@@ -860,6 +877,7 @@ class V2PipelineService:
                         hook_style=hook_style,
                     )
                     if result.success:
+                        mark_clip_ready(output_dir, clip.rank)
                         logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
                     else:
                         message = f"clip {clip.rank}: {result.error_message or 'unknown Remotion error'}"

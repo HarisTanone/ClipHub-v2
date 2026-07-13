@@ -294,6 +294,7 @@ export interface ClipInfo {
   word_count: number;
   has_final: boolean;
   has_thumbnail: boolean;
+  render_status: "ready" | "processing" | "unavailable";
 }
 
 export interface JobDetailResponse {

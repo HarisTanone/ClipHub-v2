@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from src.application.services import JobService
 from src.config import settings
+from src.infrastructure.clip_outputs import discover_ready_clip_ranks, find_final_clip
 from src.presentation.auth_deps import CurrentUser, get_current_user, get_optional_user
 from src.presentation.dependencies import get_job_service
 from src.presentation.schemas.jobs import (
@@ -581,10 +582,9 @@ async def get_clip_final(
     if not job:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
 
-    final_path = f"{settings.OUTPUT_DIR}/{job_id}/final/clip_{clip_rank}_final.mp4"
-    if not os.path.exists(final_path):
-        final_path = f"{settings.OUTPUT_DIR}/{job_id}/clip_{clip_rank:02d}_final.mp4"
-    if not os.path.exists(final_path):
+    output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
+    final_path = find_final_clip(output_dir, clip_rank)
+    if not final_path:
         raise HTTPException(status_code=404, detail="File final clip tidak ditemukan")
 
     quality = (quality or "original").lower().replace("p", "")
@@ -874,24 +874,44 @@ async def get_job_detail(
                 elif f.endswith("_thumb.jpg"):
                     files["thumbnails"].append(f)
 
-    # Extract clips info
+    ready_ranks = set(discover_ready_clip_ranks(output_dir))
+    is_terminal = job.status.value in ("completed", "failed", "timeout")
+
+    # Extract clips info. Candidate metadata is stored as soon as AI analysis
+    # finishes, while readiness is resolved independently for every final file.
     clips_info = []
-    if job.clips_data and "clips" in job.clips_data:
-        for clip in job.clips_data["clips"]:
-            rank = clip.get("rank", 0)
-            clips_info.append({
-                "rank": rank,
-                "score": clip.get("score"),
-                "start": clip.get("start"),
-                "end": clip.get("end"),
-                "duration": round(clip.get("end", 0) - clip.get("start", 0), 1),
-                "hook": clip.get("hook"),
-                "reason": clip.get("reason"),
-                "has_words": bool(clip.get("words")),
-                "word_count": len(clip.get("words", [])),
-                "has_final": any(f"clip_{rank}_final" in f or f"clip_{rank:02d}_final" in f for f in files["final"]),
-                "has_thumbnail": True,  # Auto-generated on demand from video
-            })
+    clip_candidates = (
+        job.clips_data.get("clips", [])
+        if isinstance(job.clips_data, dict)
+        else []
+    )
+    if not clip_candidates and job.clips_total > 0:
+        # Running jobs created by an older worker may only have the count. Keep
+        # the UI useful by exposing ranked placeholders until metadata arrives.
+        clip_candidates = [
+            {"rank": rank, "start": 0, "end": 0}
+            for rank in range(1, job.clips_total + 1)
+        ]
+
+    for clip in clip_candidates:
+        rank = clip.get("rank", 0)
+        start = float(clip.get("start") or 0)
+        end = float(clip.get("end") or 0)
+        has_final = rank in ready_ranks
+        clips_info.append({
+            "rank": rank,
+            "score": clip.get("score"),
+            "start": start,
+            "end": end,
+            "duration": round(max(0, end - start), 1),
+            "hook": clip.get("hook"),
+            "reason": clip.get("reason"),
+            "has_words": bool(clip.get("words")),
+            "word_count": len(clip.get("words", [])),
+            "has_final": has_final,
+            "has_thumbnail": True,  # Auto-generated on demand from video
+            "render_status": "ready" if has_final else ("unavailable" if is_terminal else "processing"),
+        })
 
     return {
         "success": True,

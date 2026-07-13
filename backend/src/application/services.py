@@ -45,6 +45,7 @@ from src.domain.interfaces import (
     IYoloReframeEngine,
 )
 from src.domain.interfaces_remotion import IRemotionRenderer
+from src.infrastructure.clip_outputs import initialize_clip_readiness, mark_clip_ready
 from src.infrastructure.content_intelligence import ContentIntelligence
 from src.infrastructure.step_timer import StepTimer
 
@@ -460,6 +461,16 @@ class JobService:
             except Exception as e:
                 logger.warning(f"[{job_id}] Hook optimizer failed (non-critical): {e}")
 
+            # Persist the AI recommendations before any rendering starts. This
+            # lets the job page show all clip slots immediately as processing.
+            pending_clips_data = self._assemble_clips_data(
+                job, clips, [], {}, creative_direction
+            )
+            merged_clips_data = dict(job.clips_data or {})
+            merged_clips_data.update(pending_clips_data)
+            job.clips_data = merged_clips_data
+            await self._repo.update_clips_data(job_id, merged_clips_data)
+
             # ═══ Step 5: Aspect Ratio Router ═══
             self._emit(job_id, 5, "aspect_router", "start")
             await self._repo.update_status(job_id, JobStatus.ROUTING)
@@ -659,6 +670,7 @@ class JobService:
             
             # ═══ Remotion is ALWAYS used for hook+subtitle rendering ═══
             # FFmpeg subtitle rendering is deprecated — Remotion produces correct karaoke + style
+            initialize_clip_readiness(output_dir)
             use_remotion = False
             if self._remotion_adapter:
                 # Emit status — Remotion render always attempted
@@ -745,6 +757,8 @@ class JobService:
                             if os.path.exists(in_path) and not os.path.exists(out_path):
                                 import shutil
                                 shutil.copy2(in_path, out_path)
+                        if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                            mark_clip_ready(output_dir, clip.rank)
                     
                     self._emit(job_id, 12, "remotion_render", "complete")
                 else:
@@ -813,6 +827,8 @@ class JobService:
                                 if os.path.exists(in_path) and not os.path.exists(out_path):
                                     import shutil
                                     shutil.copy2(in_path, out_path)
+                            if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                                mark_clip_ready(output_dir, clip.rank)
                         
                         self._emit(job_id, 12, "remotion_render", "complete")
                     else:
@@ -915,6 +931,8 @@ class JobService:
                         if os.path.exists(in_path) and not os.path.exists(out_path):
                             import shutil
                             shutil.copy2(in_path, out_path)
+                    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                        mark_clip_ready(output_dir, clip.rank)
                 self._emit(job_id, 12, "subtitle", "complete")
 
             # ═══ Step 13: Audio Post-Production (ducking + normalization) ═══

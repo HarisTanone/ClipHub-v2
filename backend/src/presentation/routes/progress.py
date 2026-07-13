@@ -4,7 +4,6 @@ Endpoints:
 - GET /jobs/{job_id}/progress       — SSE stream (real-time)
 - GET /jobs/{job_id}/progress/poll  — Polling endpoint (REST, for fallback)
 """
-import os
 import statistics
 from datetime import datetime, timezone
 
@@ -13,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from src.application.services import JobService
 from src.config import settings
+from src.infrastructure.clip_outputs import discover_ready_clip_ranks
 from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
 from src.presentation.dependencies import get_job_service
 
@@ -199,19 +199,10 @@ async def poll_job_progress(
         current_step = total_steps
         step_name, step_label = _step_info(current_step)
 
-    # Check available outputs
+    # Check outputs that have finished independently. New renders use explicit
+    # ready markers so a partially-written MP4 is never exposed to the player.
     output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
-    available_clips = []
-    if os.path.isdir(output_dir):
-        final_dir = os.path.join(output_dir, "final")
-        if os.path.isdir(final_dir):
-            for f in sorted(os.listdir(final_dir)):
-                if f.endswith("_final.mp4"):
-                    try:
-                        rank = int(f.split("_")[1])
-                        available_clips.append(rank)
-                    except (ValueError, IndexError):
-                        pass
+    available_clips = discover_ready_clip_ranks(output_dir)
 
     return {
         "success": True,

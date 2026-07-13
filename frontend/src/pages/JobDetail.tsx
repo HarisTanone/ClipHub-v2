@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo } from "lucide-react";
+import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo, Lock, LoaderCircle } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -8,7 +8,7 @@ import { ProgressBar, StepProgress } from "@/components/ui/Progress";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
-import { jobs, preview, type JobDetailResponse, type VideoPreview, type ClipInfo, API_BASE } from "@/lib/api";
+import { jobs, preview, type JobDetailResponse, type VideoPreview, type ClipInfo } from "@/lib/api";
 import { useProgress } from "@/hooks/useProgress";
 import { formatDuration, formatDate, cn } from "@/lib/utils";
 
@@ -73,12 +73,17 @@ export function JobDetail() {
     }
   }, [progress?.isTerminal]);
 
-  // Final clips are produced independently. Refresh as soon as another output
-  // becomes available instead of waiting for the whole job to finish.
+  // Candidate slots and final clips become available independently. Refresh
+  // both when AI publishes the total and whenever another final render unlocks.
   useEffect(() => {
     const renderedCount = data?.clips?.filter((clip) => clip.has_final).length || 0;
-    if (!isTerminal && progress && progress.clipsAvailable.length !== renderedCount) loadDetail();
-  }, [progress?.clipsAvailable.join(",")]);
+    const listedCount = data?.clips?.length || 0;
+    if (
+      !isTerminal
+      && progress
+      && (progress.clipsAvailable.length !== renderedCount || progress.clipsTotal !== listedCount)
+    ) loadDetail();
+  }, [progress?.clipsAvailable.join(","), progress?.clipsTotal]);
 
   async function handleCancel() {
     if (!jobId) return;
@@ -125,7 +130,9 @@ export function JobDetail() {
   const currentStep = progress?.currentStep ?? (isTerminal && data.status === "completed" ? PIPELINE_STEPS.length : 0);
   const percentage = progress?.percentage ?? (data.status === "completed" ? 100 : 0);
   const readyClips = data.clips?.filter((clip) => clip.has_final).length || 0;
-  const clipCompletionRate = data.clips_total ? Math.round((data.clips_success / data.clips_total) * 100) : 0;
+  const remainingClips = Math.max(0, data.clips_total - readyClips);
+  const remainingLabel = isTerminal ? "unavailable" : "processing";
+  const clipCompletionRate = data.clips_total ? Math.round((readyClips / data.clips_total) * 100) : 0;
   const jobShort = (jobId || data.job_id).replace("job_", "").slice(0, 12);
   const stageLabel = progress?.stepLabel || (data.status === "completed" ? "Completed" : isTerminal ? "Stopped" : "Preparing pipeline");
   const createdDate = data.created_at ? formatDate(data.created_at).split(",")[0] : "-";
@@ -167,7 +174,7 @@ export function JobDetail() {
 
         <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <MetricTile icon={<Activity className="h-4 w-4" />} label="Progress" value={`${percentage}%`} hint={stageLabel} tone="blue" />
-          <MetricTile icon={<Scissors className="h-4 w-4" />} label="Clips" value={`${data.clips_success}/${data.clips_total}`} hint={`${readyClips} ready, ${clipCompletionRate}% complete`} tone="emerald" />
+          <MetricTile icon={<Scissors className="h-4 w-4" />} label="Clips" value={`${readyClips}/${data.clips_total}`} hint={`${readyClips} ready, ${remainingClips} ${remainingLabel} · ${clipCompletionRate}%`} tone="emerald" />
           <MetricTile icon={<Clock className="h-4 w-4" />} label="Duration" value={data.video_duration ? formatDuration(data.video_duration) : "-"} hint="Source length" tone="amber" />
           <MetricTile icon={<Film className="h-4 w-4" />} label="Output" value={data.target_aspect_ratio || "9:16"} hint={data.style_preset || "Custom style"} tone="zinc" />
         </div>
@@ -292,7 +299,7 @@ export function JobDetail() {
           <div className="flex items-center justify-between gap-3 border-b border-zinc-800/60 px-4 py-3">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-zinc-100">Clips</h2>
-              <p className="text-[10px] text-zinc-500">{data.clips_success}/{data.clips_total} generated, {readyClips} final renders ready</p>
+              <p className="text-[10px] text-zinc-500">{data.clips_total} clips · {readyClips} ready · {remainingClips} {remainingLabel}</p>
             </div>
             <Badge variant="default" size="sm">{data.target_aspect_ratio || "9:16"}</Badge>
           </div>
@@ -363,16 +370,21 @@ function FeaturePill({ icon, label, value, active }: { icon: React.ReactNode; la
 function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo; aspectRatio: string }) {
   const finalUrl = clip.has_final ? jobs.getClipFinalUrl(jobId, clip.rank) : null;
   const thumbUrl = clip.has_thumbnail ? jobs.getClipThumbUrl(jobId, clip.rank) : null;
-  const rawUrl = `${API_BASE}/api/jobs/${jobId}/clips/${clip.rank}/raw`;
 
   const isPortrait = aspectRatio === "9:16";
   const hasScore = clip.score !== null && clip.score !== undefined;
   const score = hasScore ? (clip.score! <= 1 ? Math.round(clip.score! * 100) : Math.round(clip.score!)) : null;
   const timeline = `${formatDuration(clip.start)} - ${formatDuration(clip.end)}`;
+  const renderStatus = clip.has_final ? "ready" : (clip.render_status || "processing");
+  const isProcessing = renderStatus === "processing";
 
-  return (
-    <Link to={`/jobs/${jobId}/clips/${clip.rank}`} className="group block h-full">
-      <Card className="p-0 overflow-hidden h-full flex flex-col rounded-lg hover:border-emerald-500/30 hover:bg-zinc-900/80 transition-colors cursor-pointer">
+  const card = (
+    <Card className={cn(
+        "p-0 overflow-hidden h-full flex flex-col rounded-lg transition-colors",
+        clip.has_final
+          ? "hover:border-emerald-500/30 hover:bg-zinc-900/80 cursor-pointer"
+          : "border-zinc-800/70 bg-zinc-950/45 cursor-not-allowed"
+      )}>
         <div className={cn(
           "bg-zinc-950 relative overflow-hidden",
           isPortrait ? "aspect-[9/16]" : aspectRatio === "1:1" ? "aspect-square" : "aspect-video"
@@ -387,33 +399,35 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
               muted
             />
           ) : (
-            thumbUrl ? (
-              <img src={thumbUrl} alt={`Clip ${clip.rank}`} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
-            ) : (
-              <video
-                src={rawUrl}
-                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                playsInline
-                preload="metadata"
-                muted
-              />
-            )
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(63,63,70,0.28),_rgba(9,9,11,0.96)_68%)]" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/35" />
           <div className="absolute left-2 top-2 flex items-center gap-1.5">
             <span className="rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-bold text-white">#{clip.rank}</span>
             {score !== null && <span className="rounded bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold text-white">{score}</span>}
           </div>
-          {clip.has_final && (
-            <div className="absolute right-2 top-2">
-              <Badge variant="success" size="sm">Ready</Badge>
+          <div className="absolute right-2 top-2">
+            {clip.has_final
+              ? <Badge variant="success" size="sm">Ready</Badge>
+              : <span className="inline-flex items-center gap-1 rounded border border-amber-500/20 bg-black/75 px-1.5 py-0.5 text-[9px] font-medium text-amber-300"><Lock className="h-2.5 w-2.5" /> Locked</span>}
+          </div>
+          {clip.has_final ? (
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+              <span className="rounded-lg bg-black/65 p-2 text-white">
+                <Play className="h-4 w-4 fill-current" />
+              </span>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-zinc-700/70 bg-zinc-900/85 text-zinc-400 shadow-lg">
+                {isProcessing ? <LoaderCircle className="h-4 w-4 animate-spin text-amber-300" /> : <Lock className="h-4 w-4" />}
+              </span>
+              <div>
+                <p className="text-[11px] font-medium text-zinc-300">{isProcessing ? "Rendering clip" : "Render unavailable"}</p>
+                <p className="mt-0.5 text-[9px] text-zinc-600">{isProcessing ? "Opens automatically when ready" : "This clip did not finish"}</p>
+              </div>
             </div>
           )}
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-            <span className="rounded-lg bg-black/65 p-2 text-white">
-              <Play className="h-4 w-4 fill-current" />
-            </span>
-          </div>
           {clip.duration && (
             <div className="absolute bottom-2 right-2">
               <span className="rounded bg-black/80 px-1.5 py-0.5 font-mono text-[9px] text-white">{formatDuration(clip.duration)}</span>
@@ -426,12 +440,21 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
           </p>
           {clip.reason && <p className="text-[10px] text-zinc-600 line-clamp-2 leading-relaxed">{clip.reason}</p>}
           <div className="mt-auto flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
-            <span className="font-mono">{timeline}</span>
+            {clip.duration > 0 ? <span className="font-mono">{timeline}</span> : <span>Awaiting clip metadata</span>}
             {clip.has_words && <span>{clip.word_count} words</span>}
-            {!clip.has_final && <span className="text-amber-400">rendering</span>}
+            {!clip.has_final && <span className={isProcessing ? "text-amber-400" : "text-zinc-600"}>{isProcessing ? "processing" : "unavailable"}</span>}
           </div>
         </div>
       </Card>
+  );
+
+  return clip.has_final ? (
+    <Link to={`/jobs/${jobId}/clips/${clip.rank}`} className="group block h-full">
+      {card}
     </Link>
+  ) : (
+    <div className="block h-full" aria-disabled="true">
+      {card}
+    </div>
   );
 }
