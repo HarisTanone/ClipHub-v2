@@ -232,7 +232,7 @@ export function Dashboard() {
             <div className="grid grid-cols-2 gap-3 p-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {paginated.map((job) => {
                 const isUpload = job.source_type === "upload";
-                const thumb = isUpload ? jobs.getSourceThumbUrl(job.job_id) : getYouTubeThumb(job.youtube_url);
+                const thumb = isUpload ? null : getYouTubeThumb(job.youtube_url);
                 return (
                   <Link
                     key={job.job_id}
@@ -241,12 +241,10 @@ export function Dashboard() {
                   >
                     {/* Thumbnail */}
                     <div className="relative aspect-video w-full overflow-hidden bg-zinc-800">
-                      {thumb ? (
+                      {isUpload ? (
+                        <SourceThumbnail jobId={job.job_id} />
+                      ) : thumb ? (
                         <img src={thumb} alt="" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
-                      ) : isUpload ? (
-                        <div className="w-full h-full flex items-center justify-center bg-emerald-500/[0.04]">
-                          <FileVideo className="h-4 w-4 text-emerald-400" />
-                        </div>
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <Activity className="h-3 w-3 text-zinc-700" />
@@ -333,6 +331,51 @@ export function Dashboard() {
         )}
       </Card>
     </div>
+  );
+}
+
+function SourceThumbnail({ jobId }: { jobId: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setSrc(null);
+    setFailed(false);
+
+    jobs.getSourceThumbBlob(jobId)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [jobId]);
+
+  if (!src) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-emerald-500/[0.04]">
+        {failed
+          ? <FileVideo className="h-4 w-4 text-emerald-400" />
+          : <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt=""
+      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+    />
   );
 }
 

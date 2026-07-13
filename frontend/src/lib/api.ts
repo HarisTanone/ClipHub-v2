@@ -113,6 +113,32 @@ async function requestForm<T>(
   return res.json();
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const url = `${API_BASE}${path}`;
+  let token = getToken();
+  const headers: Record<string, string> = { Accept: "image/*" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res = await fetch(url, { headers });
+  if (res.status === 401 && token) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      headers.Authorization = `Bearer ${newToken}`;
+      res = await fetch(url, { headers });
+    } else {
+      clearTokens();
+      window.location.href = "/login";
+      throw new Error("Session expired");
+    }
+  }
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new ApiError(res.status, error.detail || "Failed to load image");
+  }
+  return res.blob();
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -409,8 +435,8 @@ export const jobs = {
     return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/thumb`;
   },
 
-  getSourceThumbUrl(jobId: string): string {
-    return `${API_BASE}/api/jobs/${jobId}/source-thumb`;
+  async getSourceThumbBlob(jobId: string): Promise<Blob> {
+    return requestBlob(`/api/jobs/${jobId}/source-thumb`);
   },
 
   async getClipDetail(jobId: string, rank: number): Promise<ClipDetailResponse> {
