@@ -52,7 +52,7 @@ class PodcastReframeEngine(IReframeEngine):
     SAMPLE_INTERVAL_SEC = 0.333  # 3fps sampling (3× more precise than 1fps)
     MAX_SAMPLES = 180  # 3fps × 60s = 180 samples per clip
     FACE_CONFIDENCE = 0.55
-    MIN_FACE_SIZE_RATIO = 0.05
+    MIN_FACE_SIZE_RATIO = 0.10
     MAX_FACE_SIZE_RATIO = 0.50
     MIN_SEPARATION_RATIO = 0.20  # 20% of frame width to consider "two people"
     MIN_COEXIST_RATIO = 0.40     # ≥40% of frames must have BOTH faces simultaneously
@@ -66,6 +66,15 @@ class PodcastReframeEngine(IReframeEngine):
     GRID_ENTER_SAMPLES = 2           # Confirm a second person before opening the grid.
     GRID_EXIT_SAMPLES = 3            # Tolerate short detector misses before closing the grid.
     VALID_TRANSITIONS = {"cut", "fade", "slide", "zoom"}
+
+    # Ghost detection constants
+    MIN_FACE_AREA_PX = 12_000           # Absolute floor (~110x110 px)
+    MIN_AREA_RATIO_TO_MAX = 0.40        # Track area must be ≥40% of largest track
+    MIN_FRAME_RATIO = 0.15              # Track must appear in ≥15% of sampled frames
+    GHOST_IOU_THRESHOLD = 0.25          # IoU overlap indicating same-person duplicate
+    GHOST_CENTER_DIST_RATIO = 0.08      # Normalized center distance for ghost proximity
+    GHOST_CENTER_DIST_BROAD = 0.20      # Broader center distance for ghost with area similarity
+    MIN_PAIR_SIZE_RATIO = 0.30          # Both faces in pair must be comparable size
 
     def __init__(self, hf_token: Optional[str] = None):
         self._face_detector = None
@@ -277,6 +286,20 @@ class PodcastReframeEngine(IReframeEngine):
                 width=width,
                 height=height,
             )
+
+            # Fix #4: Diarization fallback safety guard
+            if grid_decision["layout"] == "double":
+                valid_track_count = len([
+                    tid for tid in (tracked_data.get("track_to_position") or {}).keys()
+                    if int(tid) in (tracked_data.get("stable_positions") or {})
+                ])
+                if valid_track_count <= 1:
+                    logger.info(
+                        "podcast_reframe: ghost elimination reduced to 1 valid track; "
+                        "overriding to single layout"
+                    )
+                    grid_decision = {"layout": "single", "person_count": person_count}
+
             if grid_decision["layout"] == "double":
                 grid_decision["transition_style"] = transition_style
                 grid_decision["transition_duration"] = transition_duration
@@ -669,6 +692,10 @@ class PodcastReframeEngine(IReframeEngine):
                         bbox = det.location_data.relative_bounding_box
                         if bbox.width < self.MIN_FACE_SIZE_RATIO or bbox.width > self.MAX_FACE_SIZE_RATIO:
                             continue
+                        # Fix #1: Absolute area floor
+                        face_area_px = (bbox.width * width) * (bbox.height * height)
+                        if face_area_px < self.MIN_FACE_AREA_PX:
+                            continue
                         cx = (bbox.xmin + bbox.width / 2) * width
                         frame_faces.append(cx)
                         face_bbox = BBox.from_relative(
@@ -697,6 +724,10 @@ class PodcastReframeEngine(IReframeEngine):
                         y1 = bbox.origin_y * (height / proc_h)
                         w_px = bbox.width * scale_to_orig
                         h_px = bbox.height * (height / proc_h)
+                        # Fix #1: Absolute area floor
+                        face_area_px = w_px * h_px
+                        if face_area_px < self.MIN_FACE_AREA_PX:
+                            continue
                         cx = x1 + w_px / 2
                         frame_faces.append(cx)
                         face_bbox = BBox(x1, y1, x1 + w_px, y1 + h_px)
@@ -815,6 +846,71 @@ class PodcastReframeEngine(IReframeEngine):
             for track_id, profile in stable_position_profiles.items()
         }
 
+        # Ghost elimination pass (Fix #2)
+        if stable_position_profiles:
+            max_area = max(
+                p.get("area", p.get("width", 0) * p.get("height", 0))
+                for p in stable_position_profiles.values()
+            )
+            total_sampled = len(per_frame_tracked)
+
+            # Count frames each track appears in
+            track_frame_counts: Dict[int, int] = defaultdict(int)
+            for frame_tracked in per_frame_tracked:
+                for det in frame_tracked:
+                    track_frame_counts[det.track_id] += 1
+
+            ghost_track_ids: set = set()
+            sorted_by_area = sorted(
+                stable_position_profiles.items(),
+                key=lambda kv: kv[1].get("area", kv[1].get("width", 0) * kv[1].get("height", 0)),
+                reverse=True,
+            )
+
+            for track_id, profile in sorted_by_area:
+                if track_id in ghost_track_ids:
+                    continue
+
+                track_area = profile.get("area", profile.get("width", 0) * profile.get("height", 0))
+                frame_count = track_frame_counts.get(track_id, 0)
+
+                # Filter: area ratio too small compared to largest track
+                if max_area > 0 and track_area / max_area < self.MIN_AREA_RATIO_TO_MAX:
+                    ghost_track_ids.add(track_id)
+                    continue
+
+                # Filter: flicker track (too few frames)
+                if total_sampled > 0 and frame_count / total_sampled < self.MIN_FRAME_RATIO:
+                    ghost_track_ids.add(track_id)
+                    continue
+
+                # Filter: ghost pair with a larger track already validated
+                for valid_id, valid_profile in sorted_by_area:
+                    if valid_id == track_id or valid_id in ghost_track_ids:
+                        continue
+                    valid_area = valid_profile.get("area", valid_profile.get("width", 0) * valid_profile.get("height", 0))
+                    if valid_area <= track_area:
+                        continue  # Only compare against larger tracks
+                    if self._is_ghost_pair(profile, valid_profile, width, height):
+                        ghost_track_ids.add(track_id)
+                        break
+
+            # Remove ghost tracks
+            if ghost_track_ids:
+                logger.info(f"podcast_reframe: ghost elimination removed tracks: {ghost_track_ids}")
+                stable_position_profiles = {
+                    tid: prof for tid, prof in stable_position_profiles.items()
+                    if tid not in ghost_track_ids
+                }
+                stable_positions = {
+                    tid: profile["x"]
+                    for tid, profile in stable_position_profiles.items()
+                }
+                filtered = {
+                    tid: vals for tid, vals in filtered.items()
+                    if tid not in ghost_track_ids
+                }
+
         clusters: List[dict] = []
         cluster_threshold = 0.11
 
@@ -917,6 +1013,24 @@ class PodcastReframeEngine(IReframeEngine):
                     separation = abs(position_targets.get(second_id, 0) - position_targets.get(first_id, 0))
                     if separation < width * self.MIN_SEPARATION_RATIO:
                         continue
+
+                    # Fix #3: Ghost pair validation
+                    prof_first = position_profiles.get(first_id, {})
+                    prof_second = position_profiles.get(second_id, {})
+
+                    # 3a: Comparable size check
+                    area_first = prof_first.get("area", prof_first.get("width", 0) * prof_first.get("height", 0))
+                    area_second = prof_second.get("area", prof_second.get("width", 0) * prof_second.get("height", 0))
+                    if area_first > 0 and area_second > 0:
+                        pair_size_ratio = min(area_first, area_second) / max(area_first, area_second)
+                        if pair_size_ratio < self.MIN_PAIR_SIZE_RATIO:
+                            continue
+
+                    # 3b: Ghost pair check (IoU + center proximity)
+                    if prof_first and prof_second:
+                        if self._is_ghost_pair(prof_first, prof_second, width, height):
+                            continue
+
                     pair = (first_id, second_id)
                     geometry = pair_geometry.get(pair)
                     if geometry is None:
@@ -2283,6 +2397,63 @@ class PodcastReframeEngine(IReframeEngine):
                 selected.append(bbox)
 
         return sorted(selected, key=lambda b: (b.center_x, b.center_y))
+
+    @staticmethod
+    def _compute_iou(box_a: 'BBox', box_b: 'BBox') -> float:
+        """Compute IoU between two BBox instances."""
+        x1 = max(box_a.x1, box_b.x1)
+        y1 = max(box_a.y1, box_b.y1)
+        x2 = min(box_a.x2, box_b.x2)
+        y2 = min(box_a.y2, box_b.y2)
+        intersection = max(0, x2 - x1) * max(0, y2 - y1)
+        area_a = box_a.area
+        area_b = box_b.area
+        union = area_a + area_b - intersection
+        return intersection / union if union > 0 else 0.0
+
+    def _is_ghost_pair(
+        self,
+        prof_a: dict,
+        prof_b: dict,
+        width: int,
+        height: int,
+    ) -> bool:
+        """Check if two position profiles represent the same person (ghost pair).
+
+        Uses IoU overlap and center distance proximity to detect duplicates.
+        Profile values are in PIXELS (center_x, center_y, width, height).
+        """
+        ax, ay = prof_a.get("x", 0), prof_a.get("y", 0)
+        aw, ah = prof_a.get("width", 0), prof_a.get("height", 0)
+        bx, by = prof_b.get("x", 0), prof_b.get("y", 0)
+        bw, bh = prof_b.get("width", 0), prof_b.get("height", 0)
+
+        box_a = BBox(ax - aw / 2, ay - ah / 2, ax + aw / 2, ay + ah / 2)
+        box_b = BBox(bx - bw / 2, by - bh / 2, bx + bw / 2, by + bh / 2)
+
+        # IoU check
+        iou = self._compute_iou(box_a, box_b)
+        if iou > self.GHOST_IOU_THRESHOLD:
+            return True
+
+        # Center distance proximity check
+        frame_diag = (width**2 + height**2) ** 0.5
+        center_dist = ((ax - bx)**2 + (ay - by)**2) ** 0.5
+        if frame_diag > 0:
+            dist_ratio = center_dist / frame_diag
+            # Tight threshold: unconditional ghost
+            if dist_ratio < self.GHOST_CENTER_DIST_RATIO:
+                return True
+            # Broader threshold: ghost if areas are very similar (same person duplicate)
+            if dist_ratio < self.GHOST_CENTER_DIST_BROAD:
+                area_a = prof_a.get("area", aw * ah)
+                area_b = prof_b.get("area", bw * bh)
+                if area_a > 0 and area_b > 0:
+                    area_ratio = min(area_a, area_b) / max(area_a, area_b)
+                    if area_ratio > 0.65:
+                        return True
+
+        return False
 
     @staticmethod
     def _median_profile(values: Dict[str, List[float]]) -> Dict[str, float]:
