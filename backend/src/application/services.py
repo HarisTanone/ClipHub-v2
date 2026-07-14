@@ -207,6 +207,7 @@ class JobService:
         source_duration: Optional[float] = None,
         source_size_bytes: Optional[int] = None,
         processing_mode: str = "analyze",
+        custom_hook: Optional[str] = None,
     ) -> tuple[Job, bool]:
         """Create job and start pipeline in background."""
         is_upload_source = source_type == "upload"
@@ -255,6 +256,9 @@ class JobService:
             }
             initial_clips_data["source_type"] = "upload"
             initial_clips_data["processing_mode"] = processing_mode
+            normalized_custom_hook = str(custom_hook or "").strip()
+            if processing_mode == "direct" and normalized_custom_hook:
+                initial_clips_data["custom_hook"] = normalized_custom_hook
 
         job = Job(
             job_id=job_id,

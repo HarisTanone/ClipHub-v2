@@ -412,6 +412,7 @@ async def create_job_from_upload(
             source_duration=duration,
             source_size_bytes=written,
             processing_mode=options.processing_mode,
+            custom_hook=options.custom_hook,
         )
         return JobResponse(
             job_id=job.job_id,
@@ -1008,6 +1009,7 @@ async def reprocess_job(
         source_duration=source.get("duration") if isinstance(source, dict) else None,
         source_size_bytes=source.get("size_bytes") if isinstance(source, dict) else None,
         processing_mode=(old.clips_data or {}).get("processing_mode", "analyze"),
+        custom_hook=(old.clips_data or {}).get("custom_hook"),
     )
     return JobResponse(
         job_id=fresh.job_id, youtube_url=fresh.youtube_url, source_type=source_type,

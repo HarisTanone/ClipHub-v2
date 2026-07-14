@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 class FFmpegRenderer(IRenderer):
     async def trim_clip(
-        self, video_path: str, clip: Clip, output_path: str
+        self,
+        video_path: str,
+        clip: Clip,
+        output_path: str,
+        normalize_timestamps: bool = False,
     ) -> bool:
         """
         Trim video segment menggunakan FFmpeg dengan PRECISE seeking.
@@ -24,22 +28,46 @@ class FFmpegRenderer(IRenderer):
         duration = clip.end - clip.start
         encoder_args = get_video_encoder_args("medium")
 
-        cmd = [
-            "ffmpeg",
-            "-ss", str(clip.start),
-            "-i", video_path,
-            "-t", str(duration),
-            *encoder_args,
-            "-c:a", "copy",
-            "-avoid_negative_ts", "make_zero",
-            "-movflags", "+faststart",
-            "-y",
-            output_path,
-        ]
+        if normalize_timestamps:
+            # Uploaded containers (especially MOV/MKV and phone recordings) may
+            # have non-zero or discontinuous stream timestamps. Re-encoding only
+            # the video while copying audio can retain an audio offset after a
+            # non-zero seek. Reset both timelines and resample audio onto a clean
+            # zero-based clock before word-level transcription and Remotion.
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(clip.start),
+                "-i", video_path,
+                "-t", str(duration),
+                "-map", "0:v:0",
+                "-map", "0:a:0?",
+                "-vf", "setpts=PTS-STARTPTS",
+                *encoder_args,
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-af", "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS",
+                "-movflags", "+faststart",
+                output_path,
+            ]
+        else:
+            # Preserve the existing YouTube path exactly.
+            cmd = [
+                "ffmpeg",
+                "-ss", str(clip.start),
+                "-i", video_path,
+                "-t", str(duration),
+                *encoder_args,
+                "-c:a", "copy",
+                "-avoid_negative_ts", "make_zero",
+                "-movflags", "+faststart",
+                "-y",
+                output_path,
+            ]
 
         logger.info(
             f"Trimming clip #{clip.rank}: {clip.start:.1f}s → {clip.end:.1f}s "
-            f"({duration:.1f}s) → {output_path} [{get_encoder_name()}]"
+            f"({duration:.1f}s) → {output_path} [{get_encoder_name()}, "
+            f"timeline={'normalized' if normalize_timestamps else 'preserved'}]"
         )
 
         proc = await asyncio.create_subprocess_exec(

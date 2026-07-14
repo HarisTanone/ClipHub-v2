@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class JobOptionsBase(BaseModel):
@@ -65,6 +65,15 @@ class CreateJobRequest(JobOptionsBase):
 
 class UploadJobOptions(JobOptionsBase):
     force_reprocess: bool = True
+    custom_hook: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("custom_hook")
+    @classmethod
+    def normalize_custom_hook(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 class JobResponse(BaseModel):

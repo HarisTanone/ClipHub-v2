@@ -361,13 +361,15 @@ class V2PipelineService:
             # ═══ Step 4: TAHAP 2 — Groq LLM Chunked Highlight Analysis ═══
             direct_mode = is_upload_source and (job.clips_data or {}).get("processing_mode") == "direct"
             if direct_mode:
-                from src.domain.entities import HighlightCandidate, HighlightAnalysisResult
-                analysis_result = HighlightAnalysisResult(
-                    clips=[HighlightCandidate(rank=1, start=0.0, end=duration, score=100, hook="", reason="Direct full-video edit")],
-                    creative_direction={}, broll_suggestions={}, model_used="direct", chunks_processed=0,
+                analysis_result = self._build_direct_edit_analysis(
+                    duration,
+                    (job.clips_data or {}).get("custom_hook"),
                 )
                 self._emit(job_id, 4, "direct_edit", "complete")
-                logger.info(f"[{job_id}] Direct Edit: viral analysis skipped, full source selected")
+                logger.info(
+                    f"[{job_id}] Direct Edit: viral analysis skipped, full source selected, "
+                    f"custom_hook={bool(analysis_result.clips[0].hook)}"
+                )
             else:
                 cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
             if not direct_mode and cached_analysis:
@@ -449,14 +451,23 @@ class V2PipelineService:
             # ═══ Step 5: Prepare Clips ═══
             self._emit(job_id, 5, "prepare_clips", "start")
             await self._repo.update_status(job_id, JobStatus.PREPARING)
-            clips = self._prepare_clips_from_v2(
-                analysis_result.clips,
-                analysis_result.broll_suggestions,
-                duration,
-            )
-            if direct_mode and clips:
-                clips[0].start = 0.0
-                clips[0].end = duration
+            if direct_mode:
+                direct_highlight = analysis_result.clips[0]
+                clips = [Clip(
+                    rank=1,
+                    score=100,
+                    start=0.0,
+                    end=duration,
+                    hook=direct_highlight.hook,
+                    reason=direct_highlight.reason,
+                    broll_suggestions=[],
+                )]
+            else:
+                clips = self._prepare_clips_from_v2(
+                    analysis_result.clips,
+                    analysis_result.broll_suggestions,
+                    duration,
+                )
             if self._overlap_detector and clips:
                 try:
                     clips = self._overlap_detector.resolve_overlaps(clips)
@@ -506,7 +517,13 @@ class V2PipelineService:
             # ═══ Step 7: Trim Clips ═══
             self._emit(job_id, 7, "trim", "start")
             await self._repo.update_status(job_id, JobStatus.TRIMMING)
-            trim_results = await self._trim_all_clips(job_id, video_path, clips, output_dir)
+            trim_results = await self._trim_all_clips(
+                job_id,
+                video_path,
+                clips,
+                output_dir,
+                normalize_timestamps=is_upload_source,
+            )
             self._emit(job_id, 7, "trim", "complete")
 
             # ═══ Step 8: YOLO Seg + Reframe ═══
@@ -673,6 +690,8 @@ class V2PipelineService:
                     "content_profile",
                     "source",
                     "source_type",
+                    "processing_mode",
+                    "custom_hook",
                 ):
                     if job.clips_data.get(key):
                         clips_data[key] = job.clips_data[key]
@@ -696,6 +715,27 @@ class V2PipelineService:
             )
 
     # ─── V2-Specific Helpers ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_direct_edit_analysis(video_duration: float, custom_hook: object = None):
+        """Build the direct-edit result without invoking the AI analyzer."""
+        from src.domain.entities import HighlightAnalysisResult, HighlightCandidate
+
+        hook = str(custom_hook or "").strip()
+        return HighlightAnalysisResult(
+            clips=[HighlightCandidate(
+                rank=1,
+                start=0.0,
+                end=video_duration,
+                score=100,
+                hook=hook,
+                reason="Direct full-video edit",
+            )],
+            creative_direction={},
+            broll_suggestions={},
+            model_used="direct",
+            chunks_processed=0,
+        )
 
     def _prepare_clips_from_v2(
         self, highlights: list, broll_map: dict, video_duration: float
@@ -737,14 +777,24 @@ class V2PipelineService:
         return clips
 
     async def _trim_all_clips(
-        self, job_id: str, video_path: str, clips: list[Clip], output_dir: str
+        self,
+        job_id: str,
+        video_path: str,
+        clips: list[Clip],
+        output_dir: str,
+        normalize_timestamps: bool = False,
     ) -> dict[int, bool]:
         """Trim all clips using FFmpeg."""
         results = {}
         for clip in clips:
             out_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
             try:
-                success = await self._renderer.trim_clip(video_path, clip, out_path)
+                success = await self._renderer.trim_clip(
+                    video_path,
+                    clip,
+                    out_path,
+                    normalize_timestamps=normalize_timestamps,
+                )
                 results[clip.rank] = success
                 if not success:
                     logger.warning(f"[{job_id}] Trim failed for clip {clip.rank}")

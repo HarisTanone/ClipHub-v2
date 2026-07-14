@@ -22,6 +22,7 @@ export function NewJob() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [uploadProcessingMode, setUploadProcessingMode] = useState<"analyze" | "direct">("analyze");
+  const [directHook, setDirectHook] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [templateMode] = useState<"custom">("custom");
   const [forceReprocess, setForceReprocess] = useState(false);
@@ -147,6 +148,9 @@ export function NewJob() {
       subtitle_style_config: subtitleStyleConfig,
       autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
       processing_mode: sourceMode === "upload" ? uploadProcessingMode : "analyze" as const,
+      custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
+        ? directHook.trim() || undefined
+        : undefined,
     };
     try {
       let res;
@@ -270,8 +274,19 @@ export function NewJob() {
                 {uploadError && <p className="text-[10px] text-red-400">{uploadError}</p>}
                 <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => setUploadProcessingMode("analyze")} className={cn("rounded-lg border p-2 text-left", uploadProcessingMode === "analyze" ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800")}><p className="text-[11px] font-medium text-zinc-200">Analyze first</p><p className="text-[9px] text-zinc-500">Find and cut viral moments</p></button>
-                  <button type="button" onClick={() => setUploadProcessingMode("direct")} className={cn("rounded-lg border p-2 text-left", uploadProcessingMode === "direct" ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800")}><p className="text-[11px] font-medium text-zinc-200">Direct edit</p><p className="text-[9px] text-zinc-500">Keep full video; apply hook, subtitle and style</p></button>
+                  <button type="button" onClick={() => setUploadProcessingMode("direct")} className={cn("rounded-lg border p-2 text-left", uploadProcessingMode === "direct" ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800")}><p className="text-[11px] font-medium text-zinc-200">Direct edit</p><p className="text-[9px] text-zinc-500">Keep full video; subtitle + optional hook</p></button>
                 </div>
+                {uploadProcessingMode === "direct" && (
+                  <Input
+                    label="Custom Hook (optional)"
+                    value={directHook}
+                    onChange={(event) => setDirectHook(event.target.value)}
+                    maxLength={500}
+                    placeholder="Masukkan hook yang tampil di awal video"
+                    hint="Kosongkan jika hanya ingin menampilkan subtitle."
+                    className="text-xs"
+                  />
+                )}
               </div>
             )}
           </Card>

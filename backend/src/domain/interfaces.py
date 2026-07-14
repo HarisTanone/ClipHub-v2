@@ -65,7 +65,13 @@ class IWhisperLocal(ABC):
 
 class IRenderer(ABC):
     @abstractmethod
-    async def trim_clip(self, video_path: str, clip: Clip, output_path: str) -> bool: ...
+    async def trim_clip(
+        self,
+        video_path: str,
+        clip: Clip,
+        output_path: str,
+        normalize_timestamps: bool = False,
+    ) -> bool: ...
 
 
 class IValidator(ABC):

@@ -222,6 +222,7 @@ export interface CreateJobPayload {
   hook_style_config?: Record<string, any>;
   subtitle_style_config?: Record<string, any>;
   processing_mode?: "analyze" | "direct";
+  custom_hook?: string;
 }
 
 export type UploadJobPayload = Omit<CreateJobPayload, "youtube_url">;
