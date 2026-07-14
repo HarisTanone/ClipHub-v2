@@ -212,6 +212,7 @@ export interface CreateJobPayload {
   target_aspect_ratio?: string;
   hook_engine?: string;
   hook_style?: string;
+  broll_enabled?: boolean;
   autogrid_enabled?: boolean;
   // Remotion fields
   use_remotion?: boolean;

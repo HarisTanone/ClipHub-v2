@@ -15,7 +15,8 @@ Pipeline Steps (V2):
   8. YOLO Seg + Reframe    — Conditional
   9. Word-Level Transcription — 9router Groq → Faster-Whisper fallback
   10. Build Subtitle Data  — Validate & format words for rendering
-  11+ Hook + Subtitle Render — Remotion only, matching preview config
+  11. Auto B-roll        — Optional visual overlay; audio timeline unchanged
+  12+ Hook + Subtitle Render — Remotion only, matching preview config
 """
 import asyncio
 import json
@@ -365,10 +366,23 @@ class V2PipelineService:
                     duration,
                     (job.clips_data or {}).get("custom_hook"),
                 )
+                if job.broll_enabled:
+                    try:
+                        analyzer = self._get_analyzer()
+                        analysis_result.broll_suggestions = await analyzer.analyze_broll(
+                            transcript_result,
+                            duration,
+                        )
+                    except Exception as exc:
+                        # Auto B-roll is optional. A provider/asset failure must
+                        # never prevent Direct Edit from producing subtitles.
+                        logger.warning(f"[{job_id}] Direct Edit B-roll analysis skipped: {exc}")
                 self._emit(job_id, 4, "direct_edit", "complete")
                 logger.info(
                     f"[{job_id}] Direct Edit: viral analysis skipped, full source selected, "
-                    f"custom_hook={bool(analysis_result.clips[0].hook)}"
+                    f"custom_hook={bool(analysis_result.clips[0].hook)}, "
+                    f"broll_enabled={job.broll_enabled}, "
+                    f"broll_count={len(analysis_result.broll_suggestions.get('1', []))}"
                 )
             else:
                 cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
@@ -460,7 +474,11 @@ class V2PipelineService:
                     end=duration,
                     hook=direct_highlight.hook,
                     reason=direct_highlight.reason,
-                    broll_suggestions=[],
+                    broll_suggestions=self._parse_broll_suggestions(
+                        1,
+                        analysis_result.broll_suggestions,
+                        duration,
+                    ),
                 )]
             else:
                 clips = self._prepare_clips_from_v2(
@@ -499,6 +517,7 @@ class V2PipelineService:
                 output_dir,
                 transcript_source=transcript_result.source,
             )
+            pending_clips_data["broll_enabled"] = job.broll_enabled
             merged_clips_data = dict(job.clips_data or {})
             merged_clips_data.update(pending_clips_data)
             job.clips_data = merged_clips_data
@@ -631,7 +650,19 @@ class V2PipelineService:
                     )
             self._emit(job_id, 10, "highlights", "complete")
 
-            # ═══ Step 11+: Hook, Subtitle, Encode (REUSE) ═══
+            # ═══ Step 11: Optional Auto B-roll ═══
+            # The B-roll renderer overlays video frames and copies the original
+            # audio stream, so word timestamps and lip-sync remain unchanged.
+            await self._apply_brolls(
+                job=job,
+                job_id=job_id,
+                clips=clips,
+                creative_direction=creative_direction,
+                output_dir=output_dir,
+                trim_results=trim_results,
+            )
+
+            # ═══ Step 12+: Hook, Subtitle, Encode (REUSE) ═══
             await self._render_clips(
                 job=job,
                 job_id=job_id,
@@ -668,6 +699,7 @@ class V2PipelineService:
                 clips, clips_with_words, creative_direction, output_dir,
                 transcript_source=transcript_result.source,
             )
+            clips_data["broll_enabled"] = job.broll_enabled
             for clip_output in clips_data.get("clips", []):
                 layout = reframe_data.get(clip_output.get("rank"), {})
                 if isinstance(layout, dict):
@@ -748,22 +780,11 @@ class V2PipelineService:
             if end - start < settings.MIN_CLIP_DURATION:
                 continue
 
-            # Parse B-Roll suggestions for this clip
-            broll_suggestions = []
-            rank_key = str(h.rank)
-            if rank_key in broll_map:
-                for bs in broll_map[rank_key]:
-                    try:
-                        visual_cat = VisualCategory(bs.get("visual_category", "footage"))
-                    except (ValueError, KeyError):
-                        visual_cat = VisualCategory.FOOTAGE
-                    broll_suggestions.append(BRollSuggestion(
-                        at_time=float(bs.get("at_time", 0)),
-                        keyword=bs.get("keyword", ""),
-                        template=bs.get("template", "word_pop_typography"),
-                        duration=float(bs.get("duration", 2.0)),
-                        visual_category=visual_cat,
-                    ))
+            broll_suggestions = self._parse_broll_suggestions(
+                h.rank,
+                broll_map,
+                end - start,
+            )
 
             clips.append(Clip(
                 rank=h.rank,
@@ -775,6 +796,63 @@ class V2PipelineService:
                 broll_suggestions=broll_suggestions,
             ))
         return clips
+
+    @staticmethod
+    def _parse_broll_suggestions(
+        clip_rank: int,
+        broll_map: dict,
+        clip_duration: float,
+    ) -> list[BRollSuggestion]:
+        """Convert and constrain AI B-roll output to a clip-safe timeline."""
+        if not isinstance(broll_map, dict) or clip_duration <= 1.0:
+            return []
+
+        raw_suggestions = broll_map.get(str(clip_rank), [])
+        if not isinstance(raw_suggestions, list):
+            return []
+
+        allowed_templates = {
+            "word_pop_typography",
+            "line_reveal_typography",
+            "particle_text_burst",
+        }
+        parsed: list[BRollSuggestion] = []
+        for raw in raw_suggestions[:3]:
+            if not isinstance(raw, dict):
+                continue
+            keyword = " ".join(str(raw.get("keyword") or "").split())[:80]
+            if not keyword:
+                continue
+            try:
+                at_time = float(raw.get("at_time", 0))
+                duration = float(raw.get("duration", 2.0))
+            except (TypeError, ValueError):
+                continue
+
+            safe_start = 3.0 if clip_duration > 4.0 else 0.0
+            at_time = max(safe_start, at_time)
+            if at_time >= clip_duration - 1.0:
+                continue
+            duration = min(3.0, max(1.5, duration), clip_duration - at_time)
+            if duration < 1.0:
+                continue
+
+            try:
+                visual_cat = VisualCategory(raw.get("visual_category", "footage"))
+            except (ValueError, TypeError):
+                visual_cat = VisualCategory.FOOTAGE
+            template = str(raw.get("template") or "word_pop_typography")
+            if template not in allowed_templates:
+                template = "word_pop_typography"
+
+            parsed.append(BRollSuggestion(
+                at_time=round(at_time, 3),
+                keyword=keyword,
+                template=template,
+                duration=round(duration, 3),
+                visual_category=visual_cat,
+            ))
+        return parsed
 
     async def _trim_all_clips(
         self,
@@ -802,6 +880,72 @@ class V2PipelineService:
                 logger.warning(f"[{job_id}] Trim error clip {clip.rank}: {e}")
                 results[clip.rank] = False
         return results
+
+    async def _apply_brolls(
+        self,
+        job: Job,
+        job_id: str,
+        clips: list[Clip],
+        creative_direction: CreativeDirection,
+        output_dir: str,
+        trim_results: dict[int, bool],
+    ) -> None:
+        """Apply optional B-roll before Remotion renders hooks and subtitles."""
+        self._emit(job_id, 11, "broll", "start")
+        if not job.broll_enabled:
+            logger.info(f"[{job_id}] Auto B-roll disabled by user")
+            self._emit(job_id, 11, "broll", "complete")
+            return
+
+        suggestions = [
+            suggestion
+            for clip in clips
+            for suggestion in clip.broll_suggestions
+        ]
+        if not suggestions:
+            logger.info(f"[{job_id}] Auto B-roll enabled, but no relevant suggestions were found")
+            self._emit(job_id, 11, "broll", "complete")
+            return
+
+        if not self._broll_injector:
+            logger.warning(f"[{job_id}] Auto B-roll renderer unavailable; continuing without B-roll")
+            self._emit(job_id, 11, "broll", "complete")
+            return
+
+        await self._repo.update_status(job_id, JobStatus.BROLL)
+        if self._asset_fetcher:
+            try:
+                await self._asset_fetcher.fetch_assets(suggestions, creative_direction)
+            except Exception as exc:
+                # The injector can still render its typography fallback.
+                logger.warning(f"[{job_id}] B-roll asset search failed; using fallback: {exc}")
+
+        applied_count = 0
+        for clip in clips:
+            if not trim_results.get(clip.rank) or not clip.broll_suggestions:
+                continue
+
+            reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+            base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+            input_path = reframed_path if os.path.exists(reframed_path) else base_path
+            output_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+            try:
+                result_path = await self._broll_injector.inject(
+                    input_path,
+                    clip.broll_suggestions,
+                    output_path,
+                )
+                if result_path == output_path and os.path.exists(output_path):
+                    applied_count += 1
+            except Exception as exc:
+                # B-roll is optional. Keep the original/reframed source so the
+                # job can still finish with its hook and subtitles.
+                logger.warning(f"[{job_id}] B-roll failed clip {clip.rank}: {exc}")
+
+        logger.info(
+            f"[{job_id}] Auto B-roll complete: {applied_count}/{len(clips)} clips applied"
+        )
+        self._emit(job_id, 11, "broll", "complete")
 
     async def _render_clips(
         self,
@@ -882,9 +1026,14 @@ class V2PipelineService:
                 if not trim_results.get(clip.rank):
                     return
 
+                brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
                 reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
                 base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
-                in_path = reframed_path if os.path.exists(reframed_path) else base_path
+                in_path = (
+                    brolled_path if os.path.exists(brolled_path)
+                    else reframed_path if os.path.exists(reframed_path)
+                    else base_path
+                )
                 out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
 
                 clip_words_raw = clips_with_words.get(clip.rank, [])
@@ -992,6 +1141,7 @@ class V2PipelineService:
                         break
 
             words = words_per_clip.get(clip.rank, [])
+            broll_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
             clips_output.append({
                 "rank": clip.rank,
                 "score": clip.score,
@@ -1004,6 +1154,25 @@ class V2PipelineService:
                 "words": words,
                 "word_count": len(words),
                 "has_subtitles": len(words) > 0,
+                "broll_applied": os.path.exists(broll_path),
+                "broll_suggestions": [
+                    {
+                        "at_time": suggestion.at_time,
+                        "keyword": suggestion.keyword,
+                        "template": suggestion.template,
+                        "duration": suggestion.duration,
+                        "visual_category": (
+                            suggestion.visual_category.value
+                            if isinstance(suggestion.visual_category, VisualCategory)
+                            else str(suggestion.visual_category)
+                        ),
+                        "asset_source": (
+                            suggestion.asset_result.source_api
+                            if suggestion.asset_result else ""
+                        ),
+                    }
+                    for suggestion in clip.broll_suggestions
+                ],
             })
 
         return {

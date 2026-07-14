@@ -46,8 +46,12 @@ test.describe("New Job", () => {
   });
 
   test("toggle controls work", async ({ page }) => {
-    // B-Roll toggle should be visible and enabled by default
-    await expect(page.locator("text=B-Roll Typography")).toBeVisible();
+    // Auto B-roll is optional and disabled by default.
+    const brollOption = page.locator("label", { hasText: "Auto B-roll" });
+    await expect(brollOption).toBeVisible();
+    await expect(brollOption.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    await brollOption.getByRole("switch").click();
+    await expect(brollOption.getByRole("switch")).toHaveAttribute("aria-checked", "true");
     await expect(page.locator("text=Auto-Grid")).toBeVisible();
     await expect(page.locator("text=Force Reprocess")).toBeVisible();
   });

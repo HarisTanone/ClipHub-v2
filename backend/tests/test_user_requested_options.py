@@ -22,6 +22,11 @@ def test_upload_processing_modes_are_validated():
     assert UploadJobOptions(processing_mode="direct").processing_mode == "direct"
 
 
+def test_auto_broll_is_optional_and_disabled_by_default():
+    assert UploadJobOptions().broll_enabled is False
+    assert UploadJobOptions(broll_enabled=True).broll_enabled is True
+
+
 def test_direct_edit_custom_hook_is_optional_and_normalized():
     assert UploadJobOptions(processing_mode="direct").custom_hook is None
     assert UploadJobOptions(processing_mode="direct", custom_hook="   ").custom_hook is None
@@ -36,5 +41,6 @@ def test_direct_edit_custom_hook_is_optional_and_normalized():
 if __name__ == "__main__":
     test_detection_is_portrait_only()
     test_upload_processing_modes_are_validated()
+    test_auto_broll_is_optional_and_disabled_by_default()
     test_direct_edit_custom_hook_is_optional_and_normalized()
     print("user requested option tests passed")

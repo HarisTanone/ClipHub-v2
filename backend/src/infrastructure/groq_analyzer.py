@@ -145,6 +145,141 @@ class GroqAnalyzer(IGroqAnalyzer):
                 transcript, video_duration, max_clips
             )
 
+    async def analyze_broll(
+        self,
+        transcript: TranscriptResult,
+        video_duration: float,
+        max_suggestions: int = 3,
+    ) -> dict:
+        """Generate lightweight B-roll suggestions without selecting or cutting clips.
+
+        This is used by Direct Edit only when the user explicitly enables
+        Auto B-roll. Suggested timestamps are anchored back to real transcript
+        segment timestamps so an LLM cannot shift the audio/subtitle timeline.
+        """
+        eligible_segments = [
+            segment
+            for segment in transcript.segments
+            if segment.start >= 3.0 and segment.text.strip()
+        ]
+        if not eligible_segments or video_duration <= 4.0 or max_suggestions <= 0:
+            return {}
+
+        # Keep this a single, small router call even for long Direct Edit videos.
+        # Evenly sampled timestamped segments preserve coverage across the source.
+        sample_limit = 60
+        if len(eligible_segments) <= sample_limit:
+            sampled_segments = eligible_segments
+        else:
+            last_index = len(eligible_segments) - 1
+            sampled_indices = {
+                round(i * last_index / (sample_limit - 1))
+                for i in range(sample_limit)
+            }
+            sampled_segments = [eligible_segments[i] for i in sorted(sampled_indices)]
+
+        context_lines = []
+        context_chars = 0
+        for segment in sampled_segments:
+            line = f"[{segment.start:.2f}s] {segment.text.strip()[:220]}"
+            if context_chars + len(line) > 12000:
+                break
+            context_lines.append(line)
+            context_chars += len(line)
+        if not context_lines:
+            return {}
+
+        prompt = f"""Kamu adalah visual director video pendek. Pilih maksimal {min(max_suggestions, 3)} B-roll yang benar-benar relevan berdasarkan transkrip bertimestamp berikut.
+
+TRANSKRIP:
+{chr(10).join(context_lines)}
+
+ATURAN:
+- at_time WAJIB memakai salah satu timestamp yang tertulis di transkrip.
+- Jangan pilih bagian sebelum detik 3 agar tidak menimpa area hook.
+- B-roll hanya mengganti visual; jangan mengubah durasi atau urutan ucapan.
+- keyword berupa istilah pencarian stock footage yang konkret, maksimal 6 kata.
+- duration antara 1.5 sampai 3.0 detik.
+- visual_category: footage, icon, motion_graphic, atau reaction.
+- template: word_pop_typography, line_reveal_typography, atau particle_text_burst.
+
+OUTPUT RAW JSON:
+{{"items":[{{"at_time":12.5,"keyword":"aging population","duration":2.5,"visual_category":"footage","template":"word_pop_typography"}}]}}"""
+
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._call_groq_llm,
+                    prompt,
+                    self._model_pass1,
+                    1200,
+                ),
+                timeout=self._timeout,
+            )
+            parsed = self._parse_json_response(raw)
+        except Exception as exc:
+            logger.warning(f"v2_analyzer: direct B-roll analysis failed: {exc}")
+            return {}
+
+        raw_items = parsed.get("items", []) if isinstance(parsed, dict) else []
+        if not isinstance(raw_items, list):
+            return {}
+
+        allowed_times = [float(segment.start) for segment in sampled_segments]
+        allowed_templates = {
+            "word_pop_typography",
+            "line_reveal_typography",
+            "particle_text_burst",
+        }
+        allowed_categories = {"footage", "icon", "motion_graphic", "reaction"}
+        suggestions = []
+
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            keyword = " ".join(str(item.get("keyword") or "").split())[:80]
+            if not keyword:
+                continue
+            try:
+                requested_time = float(item.get("at_time"))
+            except (TypeError, ValueError):
+                continue
+
+            # Anchor every suggestion to a timestamp Whisper actually produced.
+            at_time = min(allowed_times, key=lambda timestamp: abs(timestamp - requested_time))
+            if at_time >= video_duration - 1.0:
+                continue
+            if any(abs(at_time - existing["at_time"]) < 4.0 for existing in suggestions):
+                continue
+
+            try:
+                requested_duration = float(item.get("duration", 2.0))
+            except (TypeError, ValueError):
+                requested_duration = 2.0
+            duration = min(3.0, max(1.5, requested_duration))
+            duration = min(duration, video_duration - at_time)
+            if duration < 1.0:
+                continue
+
+            template = str(item.get("template") or "word_pop_typography")
+            if template not in allowed_templates:
+                template = "word_pop_typography"
+            visual_category = str(item.get("visual_category") or "footage")
+            if visual_category not in allowed_categories:
+                visual_category = "footage"
+
+            suggestions.append({
+                "at_time": round(at_time, 3),
+                "keyword": keyword,
+                "template": template,
+                "duration": round(duration, 3),
+                "visual_category": visual_category,
+            })
+            if len(suggestions) >= min(max_suggestions, 3):
+                break
+
+        return {"1": suggestions} if suggestions else {}
+
     async def _analyze_highlights_impl(
         self, transcript: TranscriptResult, video_duration: float, max_clips: int
     ) -> HighlightAnalysisResult:

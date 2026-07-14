@@ -26,6 +26,7 @@ export function NewJob() {
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [templateMode] = useState<"custom">("custom");
   const [forceReprocess, setForceReprocess] = useState(false);
+  const [brollEnabled, setBrollEnabled] = useState(false);
   const [autogridEnabled, setAutogridEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [urlError, setUrlError] = useState("");
@@ -146,6 +147,7 @@ export function NewJob() {
       remotion_quality: "medium",
       hook_style_config: { ...hookStyleConfig, template_mode: templateMode },
       subtitle_style_config: subtitleStyleConfig,
+      broll_enabled: brollEnabled,
       autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
       processing_mode: sourceMode === "upload" ? uploadProcessingMode : "analyze" as const,
       custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
@@ -331,6 +333,14 @@ export function NewJob() {
           <Card className="p-3">
             <label className="block text-[10px] font-medium text-zinc-500 mb-2 uppercase tracking-wider">Smart Features</label>
             <div className="space-y-2">
+              <Toggle
+                label="Auto B-roll"
+                description={brollEnabled
+                  ? "AI menambahkan visual pendukung tanpa mengubah audio atau waktu subtitle."
+                  : "Opsional. Video tetap menggunakan visual asli jika dinonaktifkan."}
+                checked={brollEnabled}
+                onChange={setBrollEnabled}
+              />
               <FeatureLock featureName="Auto Grid" featureCode="auto_grid" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
                 <Toggle
                   label="Auto-Grid"
