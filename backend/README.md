@@ -9,7 +9,7 @@ Python FastAPI backend — pipeline orchestrator for YouTube to short-form video
 | Framework | FastAPI + Uvicorn (port 8000) |
 | Database | SQLite + aiosqlite (WAL mode) |
 | AI Analysis | 9router combo via OpenAI-compatible chat API |
-| Transcription | YouTube captions + local Whisper/faster-whisper |
+| Transcription | YouTube captions + Groq Whisper via 9router + local fallback |
 | Video | FFmpeg (trim, reframe, encode) |
 | Render Engine | Remotion (via Node.js server on port 3002) |
 | Auth | JWT (access + refresh tokens, bcrypt) |
@@ -43,7 +43,7 @@ src/
 
 ```
 URL → Validate → Download → Transcript → 9router Analysis → Prepare Clips →
-Aspect Router → Trim → Reframe → Local Word Transcription →
+Aspect Router → Trim → Reframe → 9router Groq Word Transcription (local fallback) →
 Scene Graph → Remotion Render → Thumbnail → Assemble JSON → Done
 ```
 
@@ -95,6 +95,9 @@ TRANSCRIPTION_PROVIDER=local
 NINE_ROUTER_BASE_URL=http://127.0.0.1:20128/v1
 NINE_ROUTER_API_KEY=your_9router_key_if_required
 NINE_ROUTER_MODEL=ngentot
+NINE_ROUTER_WHISPER_ENABLED=true
+NINE_ROUTER_WHISPER_MODEL=groq/whisper-large-v3-turbo
+NINE_ROUTER_WHISPER_MAX_RETRIES=1
 USE_REMOTION=true
 REMOTION_SERVER_PORT=3002
 SUPERADMIN_EMAIL=admin@autocliper.com

@@ -286,7 +286,7 @@ def test_full_transcribe_youtube_path():
 
 
 def test_full_transcribe_groq_fallback():
-    """Integration test: transcribe() falls back to Groq when YouTube fails."""
+    """Integration test: transcribe() falls back to 9router Groq when YouTube fails."""
     t = GroqTranscriber()
 
     mock_groq_result = TranscriptResult(
@@ -301,7 +301,7 @@ def test_full_transcribe_groq_fallback():
             t, "_fetch_youtube_transcript", side_effect=Exception("No captions")
         ):
             with patch.object(
-                t, "_transcribe_via_groq_whisper", return_value=mock_groq_result
+                t, "_transcribe_via_whisper_fallbacks", return_value=mock_groq_result
             ):
                 result = await t.transcribe("https://youtube.com/watch?v=nocaps", 300.0)
                 assert result.source == "groq_whisper"
@@ -320,7 +320,7 @@ def test_full_transcribe_both_fail():
             t, "_fetch_youtube_transcript", side_effect=Exception("YT fail")
         ):
             with patch.object(
-                t, "_transcribe_via_groq_whisper", side_effect=Exception("Groq fail")
+                t, "_transcribe_via_whisper_fallbacks", side_effect=TranscriptionError("Groq fail")
             ):
                 try:
                     await t.transcribe("https://youtube.com/watch?v=broken", 300.0)

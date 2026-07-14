@@ -1,18 +1,19 @@
 """V2PipelineService — Pipeline orchestrator for transcript-based clipping.
 
-Uses YouTube Transcript API/local Whisper + 9router-backed dynamic chunking
-+ local word-level transcription. NO Gemini dependency. NO MicroSlicer, NO Silero VAD.
+Uses YouTube Transcript API/9router Groq Whisper/local fallback + 9router-backed
+dynamic chunking and router-first word-level transcription. NO Gemini dependency.
+NO MicroSlicer, NO Silero VAD.
 
 Pipeline Steps (V2):
   1. Validate              — yt-dlp validate URL, extract duration
   2. Download              — Download full video
-  3. V2 Transcript         — YouTube API (primary) → local Whisper (fallback)
+  3. V2 Transcript         — YouTube API → 9router Groq → local Whisper
   4. V2 Highlight Analysis — Dynamic Chunking → 9router LLM
   5. Prepare Clips         — Time padding, overlap detection
   6. Aspect Ratio Router   — Set pipeline flags
   7. Trim Clips            — FFmpeg precise re-encode
   8. YOLO Seg + Reframe    — Conditional
-  9. Word-Level Transcription — Faster-Whisper on trimmed clip files
+  9. Word-Level Transcription — 9router Groq → Faster-Whisper fallback
   10. Build Subtitle Data  — Validate & format words for rendering
   11+ Hook + Subtitle Render — Remotion only, matching preview config
 """
@@ -60,8 +61,8 @@ logger = logging.getLogger(__name__)
 class V2PipelineService:
     """V2 Pipeline orchestrator for non-premium users.
 
-    Architecture: YouTube API/local Whisper → 9router LLM → Trim →
-    WordLevelTranscriber (local Faster-Whisper) → render pipeline.
+    Architecture: YouTube API/9router Groq/local fallback → 9router LLM → Trim →
+    router-first WordLevelTranscriber → render pipeline.
     NO Gemini. NO MicroSlicer. NO Silero VAD.
     """
 
@@ -128,7 +129,7 @@ class V2PipelineService:
         return self._analyzer
 
     def _get_word_level_transcriber(self):
-        """Lazy-init WordLevelTranscriber (local Faster-Whisper on trimmed clips)."""
+        """Lazy-init router-first word transcription with local fallback."""
         if self._word_level_transcriber is None:
             from src.infrastructure.word_level_transcriber import WordLevelTranscriber
             self._word_level_transcriber = WordLevelTranscriber()

@@ -1,13 +1,13 @@
 """GroqTranscriber — TAHAP 1: Ingestion & Text Extraction.
 
 Primary: YouTube Transcript API (free, instant).
-Fallback: local Whisper. Optional direct Groq Whisper can be enabled explicitly.
+Whisper fallback order: Groq through 9router, then local Whisper.
 
 Architecture:
 1. Try youtube-transcript-api → fetch captions (id → en → auto → any)
 2. If no captions → download audio only (yt-dlp)
-3. Transcribe audio locally with Whisper/faster-whisper
-4. Optional: direct Groq Whisper fallback only when explicitly allowed
+3. Transcribe audio with Groq Whisper through 9router
+4. Reuse the same download for local Whisper if 9router fails
 """
 import asyncio
 import logging
@@ -39,20 +39,31 @@ class GroqTranscriber(IGroqTranscriber):
 
     def __init__(self):
         self._groq_client = None
+        self._router_whisper = None
         self._model = settings.GROQ_WHISPER_MODEL
         self._max_chunk_mb = settings.V2_MAX_AUDIO_CHUNK_MB
         self._timeout = settings.GROQ_TIMEOUT
         self._max_retries = settings.GROQ_MAX_RETRIES
 
+    def _get_router_whisper(self):
+        """Lazy-init Groq Whisper through 9router."""
+        if self._router_whisper is None:
+            from src.infrastructure.groq_whisper import GroqWhisperTranscriber
+            self._router_whisper = GroqWhisperTranscriber()
+        return self._router_whisper
+
     def _get_groq_client(self):
         """Lazy-init Groq client."""
+        # Preserve injected test/legacy clients without enabling direct-provider
+        # credentials in normal production configuration.
+        if self._groq_client is not None:
+            return self._groq_client
         if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
             raise TranscriptionError("Direct Groq fallback disabled")
-        if self._groq_client is None:
-            from groq import Groq
-            if not settings.GROQ_API_KEY:
-                raise TranscriptionError("GROQ_API_KEY not configured")
-            self._groq_client = Groq(api_key=settings.GROQ_API_KEY)
+        from groq import Groq
+        if not settings.GROQ_API_KEY:
+            raise TranscriptionError("GROQ_API_KEY not configured")
+        self._groq_client = Groq(api_key=settings.GROQ_API_KEY)
         return self._groq_client
 
     # ─── Main Entry Point ─────────────────────────────────────────────────────
@@ -78,47 +89,113 @@ class GroqTranscriber(IGroqTranscriber):
         except Exception as e:
             logger.info(f"v2_transcriber: YouTube API failed — {e}")
 
-        errors = []
-        provider = settings.TRANSCRIPTION_PROVIDER.lower().strip()
+        # Download once, then try 9router Groq before the unchanged local
+        # backend. This avoids a second network/download delay on fallback.
+        return await self._transcribe_via_whisper_fallbacks(
+            youtube_url,
+            video_duration,
+            video_id,
+        )
 
-        # ─── Path 2: Local Whisper (default fallback) ─────────────────
-        if provider in {"local", "auto", "whisper", "faster_whisper"}:
-            logger.info(f"v2_transcriber: falling back to local Whisper for {video_id}")
+    async def _transcribe_via_whisper_fallbacks(
+        self,
+        youtube_url: str,
+        video_duration: float,
+        video_id: str,
+    ) -> TranscriptResult:
+        audio_dir = tempfile.mkdtemp(prefix="v2_whisper_audio_")
+        errors: list[str] = []
+        try:
+            audio_path = await self._download_audio(youtube_url, audio_dir)
+            if not audio_path or not os.path.exists(audio_path):
+                raise TranscriptionError("Audio download failed")
+
+            router = self._get_router_whisper()
+            if router.is_available:
+                logger.info(
+                    f"v2_transcriber: trying Groq Whisper through 9router for {video_id}"
+                )
+                try:
+                    raw_segments = await router.transcribe(audio_path, language="id")
+                    result = self._raw_segments_to_result(
+                        raw_segments,
+                        video_duration,
+                        source="groq_whisper",
+                    )
+                    if result.segments:
+                        logger.info(
+                            f"v2_transcriber: 9router Groq success — "
+                            f"{len(result.segments)} segments"
+                        )
+                        return result
+                    errors.append("9router Groq: empty transcript")
+                except Exception as exc:
+                    errors.append(f"9router Groq: {exc}")
+                    logger.warning(
+                        f"v2_transcriber: 9router Groq failed — {exc}; "
+                        "using local Whisper"
+                    )
+
+            logger.info(f"v2_transcriber: using local Whisper fallback for {video_id}")
             try:
-                result = await self._transcribe_via_local_whisper(youtube_url, video_duration)
-                if result and result.segments:
+                from src.infrastructure.whisper_local import WhisperLocal
+
+                raw_segments = await WhisperLocal().transcribe_clip(audio_path)
+                result = self._raw_segments_to_result(
+                    raw_segments,
+                    video_duration,
+                    source="local_whisper",
+                )
+                if result.segments:
                     logger.info(
                         f"v2_transcriber: local Whisper success — "
-                        f"{len(result.segments)} segments, lang={result.language}"
+                        f"{len(result.segments)} segments"
                     )
                     return result
-            except Exception as e:
-                errors.append(f"local Whisper: {e}")
-                logger.error(f"v2_transcriber: local Whisper failed — {e}")
+                errors.append("local Whisper: empty transcript")
+            except Exception as exc:
+                errors.append(f"local Whisper: {exc}")
+                logger.error(f"v2_transcriber: local Whisper failed — {exc}")
 
-        # ─── Path 3: Optional direct Groq Whisper ─────────────────────
-        if (
-            provider in {"groq", "auto"}
-            and settings.ALLOW_DIRECT_PROVIDER_FALLBACKS
-            and settings.GROQ_API_KEY
-        ):
-            logger.info(f"v2_transcriber: falling back to direct Groq Whisper for {video_id}")
-            try:
-                result = await self._transcribe_via_groq_whisper(youtube_url, video_duration)
-                if result and result.segments:
-                    logger.info(
-                        f"v2_transcriber: Groq Whisper success — "
-                        f"{len(result.segments)} segments, lang={result.language}"
-                    )
-                    return result
-            except Exception as e:
-                errors.append(f"Groq Whisper: {e}")
-                logger.error(f"v2_transcriber: Groq Whisper failed — {e}")
+            detail = "; ".join(errors) if errors else "no usable transcript"
+            raise TranscriptionError(
+                "Transcription gagal: YouTube API tidak tersedia dan fallback gagal. "
+                f"Detail: {detail}"
+            )
+        finally:
+            shutil.rmtree(audio_dir, ignore_errors=True)
 
-        detail = "; ".join(errors) if errors else "no fallback provider enabled"
-        raise TranscriptionError(
-            f"Transcription gagal: YouTube API tidak tersedia dan fallback gagal. "
-            f"Detail: {detail}"
+    @staticmethod
+    def _raw_segments_to_result(
+        raw_segments: list[dict],
+        video_duration: float,
+        source: str,
+    ) -> TranscriptResult:
+        """Normalize router/local segment dictionaries to the existing entity."""
+        segments: list[TranscriptSegment] = []
+        for item in raw_segments or []:
+            text = str(item.get("text", "")).strip()
+            if not text and item.get("words"):
+                text = " ".join(
+                    str(word.get("word", "")).strip()
+                    for word in item.get("words", [])
+                    if str(word.get("word", "")).strip()
+                )
+            if not text:
+                continue
+            segments.append(
+                TranscriptSegment(
+                    text=text,
+                    start=round(float(item.get("start", 0.0)), 2),
+                    end=round(float(item.get("end", 0.0)), 2),
+                )
+            )
+
+        return TranscriptResult(
+            segments=segments,
+            source=source,
+            language="id",
+            total_duration=video_duration,
         )
 
     async def _transcribe_via_local_whisper(

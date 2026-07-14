@@ -1,23 +1,23 @@
-"""GroqWhisperTranscriber — Optional cloud transcription via Groq Whisper API.
-
-This module is kept for explicit direct-provider fallback only. It is disabled
-unless ALLOW_DIRECT_PROVIDER_FALLBACKS=true.
+"""Groq Whisper transcription through 9router's OpenAI-compatible endpoint.
 
 Flow:
-1. Compress audio to FLAC 16kHz mono (minimizes file size)
-2. If file > 25MB: chunk into segments
-3. Send to Groq API with word-level timestamps
-4. Return unified word-level JSON
-
-Speed: ~216x real-time (1 hour audio ≈ 16-30 seconds)
-Cost: Free tier supports ~20 RPM, ~2000 RPD
+1. Send already prepared, small audio files without re-encoding
+2. Compress other media to FLAC 16kHz mono (minimizes file size)
+3. If file > 25MB: chunk into segments
+4. Send to 9router ``/v1/audio/transcriptions`` with word timestamps
+5. Return unified word-level JSON
 """
 import asyncio
 import json
 import logging
+import math
+import mimetypes
 import os
 import subprocess
+import time
 from typing import Optional
+
+import httpx
 
 from src.config import settings
 
@@ -26,32 +26,57 @@ logger = logging.getLogger(__name__)
 # Max file size for Groq free tier (bytes)
 GROQ_MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 CHUNK_DURATION_SECONDS = 600  # 10 minutes per chunk
+SUPPORTED_UPLOAD_EXTENSIONS = {
+    ".flac", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"
+}
+
+
+class NineRouterWhisperError(RuntimeError):
+    """Raised when 9router cannot provide a usable transcription response."""
 
 
 class GroqWhisperTranscriber:
-    """Transcribe audio using Groq's Whisper API with word-level timestamps."""
+    """Transcribe audio with Groq Whisper routed through local 9router.
 
-    def __init__(self):
-        self._api_key = settings.GROQ_API_KEY
-        self._model = settings.GROQ_WHISPER_MODEL or "whisper-large-v3-turbo"
-        self._max_retries = settings.GROQ_MAX_RETRIES or 3
-        self._client = None
+    The historical class name is retained so callers do not need to change
+    their output handling. No direct Groq credential is used here.
+    """
+
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: Optional[int] = None,
+        max_retries: Optional[int] = None,
+    ):
+        self._base_url = (base_url or settings.NINE_ROUTER_BASE_URL).rstrip("/")
+        self._api_key = (
+            settings.NINE_ROUTER_API_KEY if api_key is None else api_key
+        )
+        self._model = (
+            model or settings.NINE_ROUTER_WHISPER_MODEL
+            or "groq/whisper-large-v3-turbo"
+        )
+        self._timeout = timeout or settings.NINE_ROUTER_WHISPER_TIMEOUT
+        self._max_retries = max(
+            1,
+            max_retries or settings.NINE_ROUTER_WHISPER_MAX_RETRIES,
+        )
 
     @property
     def is_available(self) -> bool:
-        """Check if Groq Whisper is configured and available."""
-        return bool(settings.ALLOW_DIRECT_PROVIDER_FALLBACKS and self._api_key)
+        """Return whether the 9router Whisper route is enabled/configured."""
+        return bool(settings.NINE_ROUTER_WHISPER_ENABLED and self._base_url)
 
-    def _get_client(self):
-        """Lazy-init Groq client."""
-        if self._client is None:
-            if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
-                raise RuntimeError("Direct Groq fallback disabled")
-            if not self._api_key:
-                raise RuntimeError("GROQ_API_KEY not configured")
-            from groq import Groq
-            self._client = Groq(api_key=self._api_key)
-        return self._client
+    def _transcriptions_url(self) -> str:
+        """Resolve a base, chat, or full audio URL to the transcription route."""
+        base_url = self._base_url
+        if base_url.endswith("/audio/transcriptions"):
+            return base_url
+        if base_url.endswith("/chat/completions"):
+            base_url = base_url[: -len("/chat/completions")]
+        return f"{base_url}/audio/transcriptions"
 
     async def transcribe(self, video_path: str, language: str = "id") -> list[dict]:
         """Transcribe video/audio file via Groq Whisper API.
@@ -65,52 +90,67 @@ class GroqWhisperTranscriber:
             Empty list on failure.
         """
         if not self.is_available:
-            logger.warning("groq_whisper: API key not configured")
+            logger.info("nine_router_whisper: route is not configured; using local fallback")
             return []
 
-        # Step 1: Compress to FLAC 16kHz mono
+        if not os.path.exists(video_path) or os.path.getsize(video_path) <= 0:
+            logger.warning("nine_router_whisper: input file is missing or empty")
+            return []
+
+        # Already prepared audio (including the WAV generated for word-level
+        # subtitles) is uploaded directly, avoiding a second FFmpeg pass.
         base, _ = os.path.splitext(video_path)
         flac_path = base + "_groq.flac"
+        upload_path = video_path
+        cleanup_upload = False
         try:
-            await self._compress_to_flac(video_path, flac_path)
+            extension = os.path.splitext(video_path)[1].lower()
+            if extension not in SUPPORTED_UPLOAD_EXTENSIONS:
+                await self._compress_to_flac(video_path, flac_path)
+                if not os.path.exists(flac_path) or os.path.getsize(flac_path) <= 0:
+                    logger.error("nine_router_whisper: FLAC compression failed")
+                    return []
+                upload_path = flac_path
+                cleanup_upload = True
 
-            if not os.path.exists(flac_path):
-                logger.error("groq_whisper: FLAC compression failed")
-                return []
-
-            file_size = os.path.getsize(flac_path)
+            file_size = os.path.getsize(upload_path)
             file_size_mb = file_size / (1024 * 1024)
-            logger.info(f"groq_whisper: compressed to FLAC ({file_size_mb:.1f}MB)")
+            logger.info(
+                "nine_router_whisper: prepared %s (%.1fMB)",
+                os.path.basename(upload_path),
+                file_size_mb,
+            )
 
             # Step 2: Decide single or chunked transcription
             if file_size <= GROQ_MAX_FILE_SIZE:
-                # Single request — most common case
-                segments = await self._transcribe_single(flac_path, language)
+                segments = await self._transcribe_single(upload_path, language)
             else:
-                # File too large — chunk it
-                logger.info(f"groq_whisper: file {file_size_mb:.1f}MB > 25MB, chunking...")
+                logger.info(
+                    "nine_router_whisper: file %.1fMB > 25MB, chunking",
+                    file_size_mb,
+                )
                 segments = await self._transcribe_chunked(video_path, language)
 
             if segments:
                 total_words = sum(len(s.get("words", [])) for s in segments)
                 logger.info(
-                    f"groq_whisper: {len(segments)} segments, {total_words} words, "
+                    f"nine_router_whisper: {len(segments)} segments, {total_words} words, "
                     f"model={self._model}"
                 )
                 # Track usage
                 try:
                     from src.infrastructure.model_status import ModelStatusTracker
+                    # Preserve the existing status key consumed by the UI.
                     ModelStatusTracker().mark_success("groq_whisper")
                 except Exception:
                     pass
             return segments
 
         except Exception as e:
-            logger.error(f"groq_whisper: unexpected error: {e}")
+            logger.warning(f"nine_router_whisper: failed, using local fallback: {e}")
             return []
         finally:
-            # Cleanup FLAC
-            if os.path.exists(flac_path):
+            if cleanup_upload and os.path.exists(flac_path):
                 os.remove(flac_path)
 
     async def _compress_to_flac(self, input_path: str, output_path: str) -> None:
@@ -133,68 +173,89 @@ class GroqWhisperTranscriber:
             None, lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         )
         if result.returncode != 0:
-            logger.error(f"groq_whisper: ffmpeg flac failed: {result.stderr[:200]}")
+            logger.error(f"nine_router_whisper: ffmpeg flac failed: {result.stderr[:200]}")
 
     async def _transcribe_single(self, flac_path: str, language: str) -> list[dict]:
         """Send single file to Groq API and get word-level transcription."""
         loop = asyncio.get_running_loop()
-        # Dynamic timeout: 120s base + 1s per MB (large files take longer to upload)
+        # Dynamic timeout preserves the configured floor while allowing uploads
+        # a little extra time for larger payloads.
         file_size_mb = os.path.getsize(flac_path) / (1024 * 1024)
-        timeout = max(120, int(120 + file_size_mb * 2))
+        timeout = max(self._timeout, int(self._timeout + file_size_mb * 2))
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(None, self._call_groq_api, flac_path, language),
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
-            logger.error(f"groq_whisper: single transcription timeout ({timeout}s)")
+            logger.warning(f"nine_router_whisper: request timeout ({timeout}s)")
             return []
 
     def _call_groq_api(self, audio_path: str, language: str) -> list[dict]:
-        """Synchronous Groq API call with retry logic."""
-        import time as _time
-        from groq import RateLimitError, APIConnectionError, APIStatusError
-
+        """Post multipart audio to 9router and normalize its JSON response."""
+        last_error = "unknown error"
         for attempt in range(self._max_retries):
             try:
-                client = self._get_client()
-                start_time = _time.time()
+                start_time = time.monotonic()
+                headers = {}
+                if self._api_key:
+                    headers["Authorization"] = f"Bearer {self._api_key}"
 
                 with open(audio_path, "rb") as f:
-                    transcription = client.audio.transcriptions.create(
-                        file=f,
-                        model=self._model,
-                        response_format="verbose_json",
-                        timestamp_granularities=["word", "segment"],
-                        language=language,
-                        temperature=0.0,
+                    mime_type = mimetypes.guess_type(audio_path)[0] or "application/octet-stream"
+                    multipart = [
+                        ("file", (os.path.basename(audio_path), f, mime_type)),
+                        ("model", (None, self._model)),
+                        ("language", (None, language)),
+                        ("response_format", (None, "verbose_json")),
+                        ("temperature", (None, "0")),
+                        # Word timing keeps the existing subtitle output shape;
+                        # segment timing keeps transcript-analysis compatibility.
+                        ("timestamp_granularities[]", (None, "word")),
+                        ("timestamp_granularities[]", (None, "segment")),
+                    ]
+                    with httpx.Client(timeout=self._timeout) as client:
+                        response = client.post(
+                            self._transcriptions_url(),
+                            headers=headers,
+                            files=multipart,
+                        )
+
+                if response.status_code >= 400:
+                    try:
+                        detail = response.json()
+                    except ValueError:
+                        detail = response.text[:500]
+                    raise NineRouterWhisperError(
+                        f"HTTP {response.status_code}: {detail}"
                     )
 
-                elapsed = _time.time() - start_time
-                logger.info(f"groq_whisper: API response in {elapsed:.1f}s")
+                try:
+                    transcription = response.json()
+                except ValueError as exc:
+                    raise NineRouterWhisperError("response is not valid JSON") from exc
+                if not isinstance(transcription, dict):
+                    raise NineRouterWhisperError("response JSON is not an object")
 
-                # Parse response into our segment format
-                return self._parse_response(transcription)
+                elapsed = time.monotonic() - start_time
+                logger.info(f"nine_router_whisper: API response in {elapsed:.1f}s")
+                segments = self._parse_response(transcription)
+                if not segments:
+                    raise NineRouterWhisperError("response has no usable segments")
+                return segments
 
-            except RateLimitError as e:
-                wait = (attempt + 1) * 10
-                logger.warning(f"groq_whisper: rate limit hit, waiting {wait}s (attempt {attempt + 1})")
-                _time.sleep(wait)
-            except APIConnectionError as e:
-                wait = (attempt + 1) * 5
-                logger.warning(f"groq_whisper: connection error, retry in {wait}s (attempt {attempt + 1})")
-                _time.sleep(wait)
-            except APIStatusError as e:
-                logger.error(f"groq_whisper: API status error (attempt {attempt + 1}): {e.status_code} {e.message}")
-                if attempt == self._max_retries - 1:
-                    return []
-                _time.sleep(3)
             except Exception as e:
-                logger.error(f"groq_whisper: unexpected error (attempt {attempt + 1}): {type(e).__name__}: {e}")
-                if attempt == self._max_retries - 1:
-                    return []
-                _time.sleep(3)
+                last_error = f"{type(e).__name__}: {e}"
+                logger.warning(
+                    "nine_router_whisper: attempt %s/%s failed: %s",
+                    attempt + 1,
+                    self._max_retries,
+                    last_error,
+                )
+                if attempt < self._max_retries - 1:
+                    time.sleep(min(2 ** attempt, 5))
 
+        logger.warning(f"nine_router_whisper: exhausted attempts: {last_error}")
         return []
 
     def _parse_response(self, transcription) -> list[dict]:
@@ -212,8 +273,8 @@ class GroqWhisperTranscriber:
             raw_segments = transcription.segments or []
             raw_words = getattr(transcription, "words", None) or []
         elif isinstance(transcription, dict):
-            raw_segments = transcription.get("segments", [])
-            raw_words = transcription.get("words", [])
+            raw_segments = transcription.get("segments") or []
+            raw_words = transcription.get("words") or []
         else:
             # Pydantic v2: use model_dump() if available
             try:
@@ -224,30 +285,46 @@ class GroqWhisperTranscriber:
                 raw_segments = data.get("segments", [])
                 raw_words = data.get("words", [])
             except (json.JSONDecodeError, AttributeError, TypeError):
-                logger.error("groq_whisper: failed to parse response")
+                logger.error("nine_router_whisper: failed to parse response")
                 return []
 
-        # Build word list
+        # Some OpenAI-compatible gateways return words at the top level, while
+        # others nest them under each segment.
+        if not raw_words:
+            nested_words = []
+            for segment in raw_segments:
+                if isinstance(segment, dict):
+                    nested_words.extend(segment.get("words") or [])
+                else:
+                    nested_words.extend(getattr(segment, "words", None) or [])
+            raw_words = nested_words
+
         all_words = []
         for w in raw_words:
             word_data = self._extract_word(w)
             if word_data:
                 all_words.append(word_data)
+        all_words.sort(key=lambda item: (item["start"], item["end"]))
 
-        # Build segments with their words (half-open interval matching)
+        # Assign each word once using its midpoint. This avoids duplicated words
+        # where adjacent API segments share a boundary timestamp.
+        assigned_word_indexes: set[int] = set()
         for seg in raw_segments:
             seg_start = self._get_float(seg, "start", 0)
             seg_end = self._get_float(seg, "end", 0)
             seg_text = self._get_str(seg, "text", "").strip()
 
-            if not seg_text:
+            if not seg_text or seg_end < seg_start:
                 continue
 
-            # Find words belonging to this segment (word start within segment bounds)
-            seg_words = [
-                w for w in all_words
-                if w["start"] >= seg_start - 0.01 and w["start"] < seg_end + 0.01
-            ]
+            seg_words = []
+            for word_index, word in enumerate(all_words):
+                if word_index in assigned_word_indexes:
+                    continue
+                midpoint = (word["start"] + word["end"]) / 2
+                if seg_start - 0.02 <= midpoint <= seg_end + 0.02:
+                    seg_words.append(word)
+                    assigned_word_indexes.add(word_index)
 
             segments.append({
                 "start": round(seg_start, 3),
@@ -256,10 +333,32 @@ class GroqWhisperTranscriber:
                 "words": seg_words,
             })
 
+        # Do not silently lose valid word timestamps because of a small router
+        # boundary mismatch. Attach any unmatched word to the nearest segment.
+        if segments and len(assigned_word_indexes) < len(all_words):
+            for word_index, word in enumerate(all_words):
+                if word_index in assigned_word_indexes:
+                    continue
+                midpoint = (word["start"] + word["end"]) / 2
+
+                def distance(segment: dict) -> float:
+                    if segment["start"] <= midpoint <= segment["end"]:
+                        return 0.0
+                    return min(
+                        abs(midpoint - segment["start"]),
+                        abs(midpoint - segment["end"]),
+                    )
+
+                nearest = min(segments, key=distance)
+                nearest["words"].append(word)
+            for segment in segments:
+                segment["words"].sort(key=lambda item: (item["start"], item["end"]))
+
         # If no segments but we have words, create segments from word groups
         if not segments and all_words:
             segments = self._words_to_segments(all_words)
 
+        segments.sort(key=lambda item: (item["start"], item["end"]))
         return segments
 
     def _extract_word(self, w) -> Optional[dict]:
@@ -277,19 +376,37 @@ class GroqWhisperTranscriber:
 
         if not word:
             return None
-        return {"word": word, "start": round(float(start), 3), "end": round(float(end), 3)}
+        try:
+            start_value = float(start)
+            end_value = float(end)
+        except (TypeError, ValueError):
+            return None
+        if (
+            not math.isfinite(start_value)
+            or not math.isfinite(end_value)
+            or start_value < 0
+            or end_value < start_value
+        ):
+            return None
+        return {
+            "word": word,
+            "start": round(start_value, 3),
+            "end": round(end_value, 3),
+        }
 
     def _get_float(self, obj, key: str, default: float) -> float:
         """Get float from dict or object attribute."""
-        if isinstance(obj, dict):
-            return float(obj.get(key, default))
-        return float(getattr(obj, key, default))
+        try:
+            value = obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
+            number = float(value)
+            return number if math.isfinite(number) else default
+        except (TypeError, ValueError):
+            return default
 
     def _get_str(self, obj, key: str, default: str) -> str:
         """Get string from dict or object attribute."""
-        if isinstance(obj, dict):
-            return str(obj.get(key, default))
-        return str(getattr(obj, key, default))
+        value = obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
+        return default if value is None else str(value)
 
     def _words_to_segments(self, words: list[dict], max_per_segment: int = 30) -> list[dict]:
         """Group words into segments when API returns words without segments."""
@@ -317,9 +434,12 @@ class GroqWhisperTranscriber:
             return []
 
         # Calculate chunks
-        num_chunks = max(1, int(duration / CHUNK_DURATION_SECONDS) + 1)
+        num_chunks = max(1, math.ceil(duration / CHUNK_DURATION_SECONDS))
         chunk_duration = duration / num_chunks
-        logger.info(f"groq_whisper: chunking {duration:.0f}s into {num_chunks} parts ({chunk_duration:.0f}s each)")
+        logger.info(
+            f"nine_router_whisper: chunking {duration:.0f}s into "
+            f"{num_chunks} parts ({chunk_duration:.0f}s each)"
+        )
 
         all_segments = []
         for i in range(num_chunks):
@@ -350,11 +470,10 @@ class GroqWhisperTranscriber:
                         w["end"] = round(w["end"] + start_time, 3)
 
                 all_segments.extend(chunk_segments)
-                logger.info(f"groq_whisper: chunk {i + 1}/{num_chunks} done ({len(chunk_segments)} segments)")
-
-                # Small delay between chunks to respect rate limit (20 RPM = 3s gap)
-                if i < num_chunks - 1:
-                    await asyncio.sleep(3)
+                logger.info(
+                    f"nine_router_whisper: chunk {i + 1}/{num_chunks} done "
+                    f"({len(chunk_segments)} segments)"
+                )
 
             finally:
                 if os.path.exists(chunk_path):

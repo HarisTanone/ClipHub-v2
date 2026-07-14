@@ -1492,7 +1492,10 @@ class JobService:
         return results
 
     async def _whisper_all_clips(self, job_id: str, clips: list[Clip], output_dir: str, trim_results: dict) -> list[dict]:
-        """Run Whisper on all successfully trimmed clips."""
+        """Run 9router Groq Whisper first, then the existing local fallback."""
+        from src.infrastructure.groq_whisper import GroqWhisperTranscriber
+
+        router_whisper = GroqWhisperTranscriber()
         results = []
         for clip in clips:
             if not trim_results.get(clip.rank):
@@ -1500,8 +1503,27 @@ class JobService:
                 continue
             clip_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
             try:
-                words = await self._whisper.transcribe_clip(clip_path)
-                results.append({"rank": clip.rank, "words": words, "_success": True})
+                segments = []
+                if router_whisper.is_available:
+                    segments = await router_whisper.transcribe(clip_path, language="id")
+                    has_word_timestamps = any(
+                        segment.get("words") for segment in segments
+                    )
+                    if not has_word_timestamps:
+                        logger.warning(
+                            f"[{job_id}] 9router Whisper clip {clip.rank} returned "
+                            "no word timestamps; using local Whisper"
+                        )
+                        segments = []
+
+                if not segments:
+                    segments = await self._whisper.transcribe_clip(clip_path)
+
+                results.append({
+                    "rank": clip.rank,
+                    "words": segments,
+                    "_success": bool(segments),
+                })
             except Exception as e:
                 logger.warning(f"[{job_id}] Whisper clip {clip.rank} failed: {e}")
                 results.append({"rank": clip.rank, "words": [], "_success": False})

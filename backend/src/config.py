@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "nine_router"
     FORCE_V2_PIPELINE: bool = True
     ALLOW_DIRECT_PROVIDER_FALLBACKS: bool = False
-    TRANSCRIPTION_PROVIDER: str = "local"  # youtube_api first, then local whisper
+    # Legacy value retained for existing deployments. When 9router is
+    # configured, Whisper calls are router-first with an automatic local fallback.
+    TRANSCRIPTION_PROVIDER: str = "local"
 
     # Database (SQLite)
     DATABASE_URL: str = "sqlite+aiosqlite:///data/autoclip.db"
@@ -34,6 +36,14 @@ class Settings(BaseSettings):
     NINE_ROUTER_TIMEOUT: int = 120
     NINE_ROUTER_MAX_RETRIES: int = 3
     NINE_ROUTER_TEMPERATURE: float = 0.3
+    # Groq Whisper through 9router. This is independent from the LLM combo
+    # model because 9router expects the provider-qualified audio model name.
+    NINE_ROUTER_WHISPER_ENABLED: bool = True
+    NINE_ROUTER_WHISPER_MODEL: str = "groq/whisper-large-v3-turbo"
+    NINE_ROUTER_WHISPER_TIMEOUT: int = 120
+    # Fail over to local Whisper immediately by default; do not add retry waits
+    # to subtitle generation when the local 9router service is unavailable.
+    NINE_ROUTER_WHISPER_MAX_RETRIES: int = 1
 
     # Gemini — supports multiple keys: "key1,key2,key3"
     GEMINI_API_KEY: str = ""

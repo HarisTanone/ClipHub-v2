@@ -1,15 +1,15 @@
-"""WordLevelTranscriber — Word-level transcription on TRIMMED clips.
+"""Word-level transcription on trimmed clips.
 
-Runs Faster-Whisper locally on small trimmed clip files (45-180s each).
-Optional fallback: direct Groq Whisper, only when explicitly enabled.
+Uses Groq Whisper through 9router first and preserves Faster-Whisper as the
+local fallback for small trimmed clip files (45-180s each).
 
 Key insight: Whisper on a trimmed clip returns 0-based timestamps.
 No offset calculation or relativization needed.
 
 Architecture:
 1. For each trimmed clip_XX.mp4, extract audio as WAV (16kHz mono)
-2. Transcribe locally with Faster-Whisper word timestamps
-3. Optional direct Groq fallback only when explicitly allowed
+2. Transcribe through 9router with Groq word timestamps
+3. Fall back to local Faster-Whisper on any error or missing word timestamps
 4. Return words with 0-based timestamps (relative to clip start)
 5. Cleanup intermediate WAV files
 """
@@ -17,9 +17,7 @@ import asyncio
 import logging
 import os
 import subprocess
-import time
 from pathlib import Path
-from typing import Optional
 
 from src.config import settings
 
@@ -34,42 +32,31 @@ class WordLevelTranscriptionError(Exception):
 class WordLevelTranscriber:
     """Word-level transcription per trimmed clip.
 
-    Primary: Groq Whisper API (fast, cloud, word timestamps)
+    Primary: Groq Whisper through 9router (fast, word timestamps)
     Fallback: Faster-Whisper Medium (local, CPU/int8)
 
     Output format: [{word: str, start: float, end: float}]
     Timestamps are 0-based (relative to clip start) — no offset needed.
     """
 
-    GROQ_MODEL = "whisper-large-v3-turbo"
     GROQ_MAX_FILE_SIZE_MB = 25
     MAX_CONCURRENT = 3
-    MIN_DELAY_BETWEEN_CALLS = 1.5  # seconds (rate limit protection)
 
     def __init__(self):
-        self._groq_client = None
+        self._router_whisper = None
         self._faster_whisper_model = None
         self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENT)
-        self._last_groq_call_time = 0.0
-        self._rate_limit_lock = asyncio.Lock()
         # Initialize class-level model lock (safe to call multiple times)
         if WordLevelTranscriber._fw_model_lock is None:
             WordLevelTranscriber._fw_model_lock = asyncio.Lock()
 
     # ─── Properties (lazy init) ───────────────────────────────────────────────
 
-    @property
-    def groq_client(self):
-        if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
-            raise WordLevelTranscriptionError(
-                "Direct Groq fallback disabled. Local Faster-Whisper is the active provider."
-            )
-        if self._groq_client is None:
-            from groq import Groq
-            if not settings.GROQ_API_KEY:
-                raise WordLevelTranscriptionError("GROQ_API_KEY not configured")
-            self._groq_client = Groq(api_key=settings.GROQ_API_KEY)
-        return self._groq_client
+    def _get_router_whisper(self):
+        if self._router_whisper is None:
+            from src.infrastructure.groq_whisper import GroqWhisperTranscriber
+            self._router_whisper = GroqWhisperTranscriber()
+        return self._router_whisper
 
     # Class-level singleton: only ONE model instance across all WordLevelTranscriber instances
     _shared_fw_model = None
@@ -188,9 +175,9 @@ class WordLevelTranscriber:
     async def _transcribe_one(
         self, rank: int, clip_path: str, language: str
     ) -> dict:
-        """Transcribe a single clip: Faster-Whisper GPU (primary) → Groq API (fallback).
+        """Transcribe one clip: 9router Groq first, then local Faster-Whisper.
 
-        Returns: {words: [{word, start, end}], source: 'faster_whisper'|'groq'}
+        Returns: {words: [{word, start, end}], source: str}
         """
         async with self._semaphore:
             if not os.path.exists(clip_path):
@@ -199,33 +186,52 @@ class WordLevelTranscriber:
             # Extract audio WAV (16kHz mono)
             audio_path = await self._extract_audio(clip_path)
 
+            router = self._get_router_whisper()
+            if router.is_available:
+                try:
+                    segments = await router.transcribe(audio_path, language)
+                    words = self._flatten_router_words(segments)
+                    if words:
+                        # Keep the historical internal source label unchanged.
+                        return {"words": words, "source": "groq"}
+                    logger.warning(
+                        f"word_level: clip {rank} 9router returned no word timestamps; "
+                        "using local Whisper"
+                    )
+                except Exception as router_err:
+                    logger.warning(
+                        f"word_level: clip {rank} 9router failed ({router_err}); "
+                        "using local Whisper"
+                    )
+
             try:
-                # Primary: Faster-Whisper local GPU (no rate limit, no network)
                 words = await self._faster_whisper_transcribe(audio_path, language)
                 if words:
                     return {"words": words, "source": "faster_whisper"}
                 raise WordLevelTranscriptionError("Faster-Whisper returned 0 words")
-            except Exception as fw_err:
-                logger.warning(
-                    f"word_level: clip {rank} Faster-Whisper failed ({fw_err}), "
-                    f"trying Groq API fallback..."
-                )
-
-                if settings.ALLOW_DIRECT_PROVIDER_FALLBACKS and settings.GROQ_API_KEY:
-                    try:
-                        # Fallback: direct Groq Whisper API (cloud)
-                        words = await self._groq_transcribe(audio_path, language)
-                        if words:
-                            return {"words": words, "source": "groq"}
-                        raise WordLevelTranscriptionError("Groq returned 0 words")
-                    except Exception as groq_err:
-                        raise WordLevelTranscriptionError(
-                            f"Both failed. FW: {fw_err} | Groq: {groq_err}"
-                        )
-
+            except Exception as local_err:
                 raise WordLevelTranscriptionError(
-                    f"Faster-Whisper failed and direct provider fallbacks are disabled: {fw_err}"
-                )
+                    f"9router Groq and local Faster-Whisper both returned no usable words: {local_err}"
+                ) from local_err
+
+    @staticmethod
+    def _flatten_router_words(segments: list[dict]) -> list[dict]:
+        """Flatten standardized segments without altering word timestamps."""
+        words: list[dict] = []
+        last_start = -1.0
+        for segment in segments or []:
+            for word in segment.get("words", []) or []:
+                text = str(word.get("word", "")).strip()
+                try:
+                    start = round(float(word.get("start", 0)), 3)
+                    end = round(float(word.get("end", 0)), 3)
+                except (TypeError, ValueError):
+                    continue
+                if not text or start < 0 or end < start or start < last_start:
+                    continue
+                words.append({"word": text, "start": start, "end": end})
+                last_start = start
+        return words
 
     # ─── Audio Extraction ─────────────────────────────────────────────────────
 
@@ -260,74 +266,6 @@ class WordLevelTranscriber:
             )
 
         return audio_path
-
-    # ─── Groq Whisper API ─────────────────────────────────────────────────────
-
-    async def _groq_transcribe(
-        self, audio_path: str, language: str, max_retries: int = 2
-    ) -> list[dict]:
-        """Upload to Groq Whisper API with word-level granularity."""
-        # Rate limit: enforce minimum delay between calls
-        async with self._rate_limit_lock:
-            now = time.monotonic()
-            elapsed = now - self._last_groq_call_time
-            if elapsed < self.MIN_DELAY_BETWEEN_CALLS:
-                await asyncio.sleep(self.MIN_DELAY_BETWEEN_CALLS - elapsed)
-            self._last_groq_call_time = time.monotonic()
-
-        # Retry with backoff
-        for attempt in range(max_retries + 1):
-            try:
-                loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(
-                    None, self._groq_call_sync, audio_path, language
-                )
-            except Exception as e:
-                error_str = str(e).lower()
-                is_rate_limit = "429" in error_str or "rate" in error_str
-
-                if is_rate_limit and attempt < max_retries:
-                    wait = (2 ** attempt) * 5  # 5s, 10s
-                    logger.warning(
-                        f"word_level: Groq rate limited, wait {wait}s "
-                        f"(attempt {attempt + 1}/{max_retries + 1})"
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-                raise
-
-    def _groq_call_sync(self, audio_path: str, language: str) -> list[dict]:
-        """Blocking Groq Whisper API call (run in executor)."""
-        with open(audio_path, "rb") as f:
-            response = self.groq_client.audio.transcriptions.create(
-                model=self.GROQ_MODEL,
-                file=f,
-                response_format="verbose_json",
-                timestamp_granularities=["word"],
-                language=language,
-                temperature=0.0,
-            )
-
-        words = []
-        if hasattr(response, "words") and response.words:
-            for w in response.words:
-                # Groq may return words as dicts or objects — handle both
-                if isinstance(w, dict):
-                    word_text = (w.get("word", "") or "").strip()
-                    w_start = w.get("start", 0)
-                    w_end = w.get("end", 0)
-                else:
-                    word_text = (w.word or "").strip()
-                    w_start = w.start
-                    w_end = w.end
-                if word_text:
-                    words.append({
-                        "word": word_text,
-                        "start": round(float(w_start), 3),
-                        "end": round(float(w_end), 3),
-                    })
-
-        return words
 
     # ─── Faster-Whisper Local Fallback ────────────────────────────────────────
 
