@@ -687,9 +687,9 @@ async def get_source_thumbnail(job_id: str, service: JobService = Depends(get_jo
         raise HTTPException(status_code=404, detail="Upload source not available")
     thumb_dir = os.path.join(settings.OUTPUT_DIR, job_id, "thumbnail")
     os.makedirs(thumb_dir, exist_ok=True)
-    thumb_path = os.path.join(thumb_dir, "source.jpg")
+    thumb_path = os.path.join(thumb_dir, "source_card.jpg")
     if os.path.exists(thumb_path) and os.path.getmtime(thumb_path) >= os.path.getmtime(source_path):
-        return FileResponse(thumb_path, media_type="image/jpeg", filename="source.jpg")
+        return FileResponse(thumb_path, media_type="image/jpeg", filename="source_card.jpg")
 
     # Get video duration for smart timestamp selection
     duration = (source.get("duration") or job.video_duration or 30)
@@ -706,7 +706,7 @@ async def get_source_thumbnail(job_id: str, service: JobService = Depends(get_jo
             "-ss", str(seek),
             "-i", source_path,
             "-t", str(analyze_duration),
-            "-vf", "thumbnail=300,crop=in_w:in_w*9/16:0:(in_h-in_w*9/16)/4,scale=480:852",
+            "-vf", "thumbnail=300,scale=640:360:force_original_aspect_ratio=increase,crop=640:360",
             "-frames:v", "1",
             "-q:v", "2",
             thumb_path,
@@ -745,7 +745,7 @@ async def get_source_thumbnail(job_id: str, service: JobService = Depends(get_jo
 
     if not os.path.exists(thumb_path):
         raise HTTPException(status_code=500, detail="Could not generate source thumbnail")
-    return FileResponse(thumb_path, media_type="image/jpeg", filename="source.jpg")
+    return FileResponse(thumb_path, media_type="image/jpeg", filename="source_card.jpg")
 
 
 # ─── Additional Endpoints for Frontend Integration ────────────────────────────
