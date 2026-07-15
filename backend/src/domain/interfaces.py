@@ -351,3 +351,33 @@ class ISileroVAD(ABC):
             Tuple of (refined_start, refined_end) in seconds
         """
         ...
+
+
+# ─── ClipScout B-Roll Splice Interfaces ───────────────────────────────────────
+
+
+class IClipScoutClient(ABC):
+    """ClipScout API client for multi-source video search."""
+
+    @abstractmethod
+    async def search(self, segments: list[dict], orientation: str = "vertical") -> dict:
+        """Search ClipScout API with segments. Returns raw response dict.
+
+        Raises ClipScoutUnavailableError after max retries.
+        """
+        ...
+
+
+class IVideoSplicer(ABC):
+    """Video track splice engine — cut & replace with footage."""
+
+    @abstractmethod
+    async def splice(
+        self, clip_path: str, segments: list, output_path: str
+    ) -> str:
+        """Splice footage segments into video track.
+
+        Audio track preserved intact (stream copy).
+        Returns output_path on success, clip_path on failure (fallback).
+        """
+        ...

@@ -31,7 +31,7 @@ from typing import Optional, TYPE_CHECKING
 from src.config import settings
 from src.domain.entities import (
     BRollSuggestion, Clip, CreativeDirection, Job, JobStatus,
-    PipelineFlags, VisualCategory, Word,
+    PipelineFlags, SpliceSegment, VisualCategory, Word,
 )
 from src.domain.interfaces import (
     IAspectRatioRouter,
@@ -50,6 +50,7 @@ from src.infrastructure.content_intelligence import ContentIntelligence
 from src.infrastructure.clip_outputs import initialize_clip_readiness, mark_clip_ready
 from src.infrastructure.subtitle_words import sanitize_subtitle_words
 from src.infrastructure.text_emphasis import normalise_text_emphasis_style
+from src.infrastructure.video_splicer import VideoSplicer
 
 if TYPE_CHECKING:
     from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
@@ -105,6 +106,7 @@ class V2PipelineService:
         self._broll_injector = broll_injector
         self._subtitle_renderer = subtitle_renderer
         self._asset_fetcher = asset_fetcher
+        self._video_splicer = VideoSplicer()
 
         # Infrastructure
         self._sse = sse_emitter
@@ -947,13 +949,63 @@ class V2PipelineService:
                 # The injector can still render its typography fallback.
                 logger.warning(f"[{job_id}] B-roll asset search failed; using fallback: {exc}")
 
+        # ─── Step 10.6: Splice B-Roll Footage (video track replacement) ───────
+        if settings.BROLL_SPLICE_ENABLED:
+            splice_count = 0
+            for clip in clips:
+                if not trim_results.get(clip.rank) or not clip.broll_suggestions:
+                    continue
+
+                # Collect splice segments from suggestions
+                splice_segments = [
+                    s.splice_segment for s in clip.broll_suggestions
+                    if hasattr(s, 'splice_segment') and s.splice_segment
+                ]
+                if not splice_segments:
+                    continue
+
+                # Determine input path
+                reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                input_path = reframed_path if os.path.exists(reframed_path) else base_path
+                splice_output = f"{output_dir}/clip_{clip.rank:02d}_spliced.mp4"
+
+                self._emit(job_id, 11, "broll_splice", "start")
+                try:
+                    result_path = await self._video_splicer.splice(
+                        clip_path=input_path,
+                        segments=splice_segments,
+                        output_path=splice_output,
+                    )
+                    if result_path == splice_output and os.path.exists(splice_output):
+                        splice_count += 1
+                        # Rename spliced as the "brolled" output so downstream steps use it
+                        brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+                        os.rename(splice_output, brolled_path)
+                except Exception as exc:
+                    logger.warning(f"[{job_id}] B-roll splice failed clip {clip.rank}: {exc}")
+                finally:
+                    self._emit(job_id, 11, "broll_splice", "complete")
+
+            if splice_count > 0:
+                logger.info(f"[{job_id}] B-roll splice: {splice_count}/{len(clips)} clips spliced")
+                # Cleanup intermediate footage files
+                footage_dir = os.path.join(output_dir, "broll_footage")
+                if os.path.exists(footage_dir):
+                    import shutil
+                    shutil.rmtree(footage_dir, ignore_errors=True)
+
         applied_count = 0
         for clip in clips:
             if not trim_results.get(clip.rank) or not clip.broll_suggestions:
                 continue
 
+            brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
             reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
             base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+            # Skip overlay injection if splice already produced the brolled file
+            if os.path.exists(brolled_path):
+                continue
             input_path = reframed_path if os.path.exists(reframed_path) else base_path
             output_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
             try:

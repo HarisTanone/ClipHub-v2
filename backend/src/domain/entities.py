@@ -92,6 +92,7 @@ class BRollSuggestion:
     reason: str = ""
     visual_category: VisualCategory = VisualCategory.FOOTAGE
     asset_result: Optional[AssetResult] = None
+    splice_segment: object = None  # Optional[SpliceSegment] — forward ref, set by ClipScout flow
 
 
 @dataclass
@@ -528,3 +529,35 @@ class StylePreset:
     subtitle: SubtitleStyleConfig
     hook_render_path: str = "overlay"
     raw_hook_json: Optional[dict] = None
+
+
+# ─── ClipScout B-Roll Splice Entities ─────────────────────────────────────────
+
+
+@dataclass
+class VideoCandidate:
+    """A video result from ClipScout API, before AI selection."""
+    id: str
+    title: str
+    thumbnail_url: str
+    source_url: str
+    embed_url: str
+    platform: str           # "pexels", "pixabay", "youtube"
+    license: str            # "royalty-free", "standard"
+    duration_seconds: int
+    start_timestamp: int    # Relevant for YouTube (start point in source video)
+    relevance_score: float
+    transcript_snippet: str = ""
+    transcript_reason: str = ""
+    channel_or_author: str = ""
+
+
+@dataclass
+class SpliceSegment:
+    """A prepared footage segment ready for splicing into a clip."""
+    footage_path: str       # Path to processed footage file (1080x1920 H.264)
+    at_time: float          # When in the clip to start the splice (seconds)
+    duration: float         # Duration of the splice (seconds)
+    keyword: str            # B-roll keyword for logging/debugging
+    source_id: str          # VideoCandidate.id for traceability
+    platform: str           # Source platform for logging

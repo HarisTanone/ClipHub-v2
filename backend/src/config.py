@@ -176,6 +176,18 @@ class Settings(BaseSettings):
     # ─── Hook Engine ─────────────────────────────────────────────────────
     HOOK_ENABLE_JALUR_A: bool = False
 
+    # ─── ClipScout API ────────────────────────────────────────────────────
+    CLIPSCOUT_API_URL: str = "https://www.clipscout.app/api/search"
+    CLIPSCOUT_TIMEOUT: int = 15
+    CLIPSCOUT_MAX_RETRIES: int = 2
+    CLIPSCOUT_ENABLED_SOURCES: str = "pexels,pixabay,youtube_cc,youtube_protected"
+
+    # ─── B-Roll Splice ────────────────────────────────────────────────────
+    BROLL_SPLICE_ENABLED: bool = True
+    BROLL_SPLICE_MAX_PER_CLIP: int = 3
+    BROLL_SPLICE_CROSSFADE_SEC: float = 0.15
+    BROLL_MAX_FOOTAGE_SIZE_MB: int = 50
+
     # ─── Timeout Settings (seconds) ─────────────────────────────────────
     GEMINI_TIMEOUT: int = 30  # Fast fail — skip to Groq fallback quickly
     GROQ_LLM_TIMEOUT: int = 120  # Full transcript analysis needs more time

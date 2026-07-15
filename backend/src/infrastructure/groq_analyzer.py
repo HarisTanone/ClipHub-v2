@@ -39,6 +39,7 @@ from src.domain.interfaces import IGroqAnalyzer
 from src.infrastructure.text_emphasis import (
     anchor_text_emphasis_response,
     build_text_emphasis_context,
+    build_text_emphasis_context_full,
     normalise_text_emphasis_style,
 )
 
@@ -509,33 +510,38 @@ OUTPUT RAW JSON:
     ) -> dict[int, list[dict]]:
         """Choose sparse cinematic text moments through 9router.
 
+        Sends the FULL word-level transcript per clip to the AI (no sampling).
+        Enforces minimum 1 event per clip. Retries 9router up to 2 times;
+        on double failure falls back to the sampled-context approach.
+
         The model selects only Whisper word IDs. ``anchor_text_emphasis_response``
-        then reconstructs text/timing locally and enforces max-two, spacing,
-        hook, B-roll, and duration rules.
+        then reconstructs text/timing locally and enforces spacing, hook,
+        B-roll, and duration rules.
         """
         if max_events <= 0 or not any(clips_words.values()):
             return {}
 
-        context, _lookup = build_text_emphasis_context(clips_words)
+        # Build full context — all words per clip, no sampling
+        context, _lookup = build_text_emphasis_context_full(clips_words)
         if not context:
             return {}
+
         safe_style = normalise_text_emphasis_style(style)
         effect_instruction = (
             "Pilih effect paling cocok dari behind_person, spotlight, side_label."
             if safe_style["effectMode"] == "auto"
             else f'Semua pilihan WAJIB memakai effect "{safe_style["effectMode"]}".'
         )
-        prompt = f"""Kamu adalah senior motion editor video pendek. Pilih hanya frasa yang benar-benar layak ditonjolkan sebagai cinematic text.
+        prompt = f"""Kamu adalah senior motion editor video pendek. Pilih frasa yang layak ditonjolkan sebagai cinematic text.
 
-TRANSKRIP WORD-ID:
+TRANSKRIP WORD-ID (lengkap per clip):
 {context}
 
 ATURAN KETAT:
-- Maksimal {min(2, max_events)} event per clip; BOLEH 0 atau 1 jika tidak ada frasa yang sangat kuat.
+- WAJIB minimal 1 event per clip, maksimal {min(2, max_events)} event per clip. Tidak boleh 0.
 - Frasa 1-7 kata, harus memakai start_word dan end_word yang berurutan pada clip yang sama.
-- Jangan melewati penanda [... gap ...].
 - Prioritaskan angka mengejutkan, tesis utama, kontras tajam, istilah inti, atau punchline.
-- Hindari filler, salam, kalimat generik, dan jangan memilih dua frasa yang berdekatan.
+- Hindari filler, salam, kalimat generik, dan jangan memilih dua frasa yang berdekatan (min 6 detik jarak).
 - behind_person untuk pernyataan hero yang sangat kuat; spotlight untuk angka/punchline; side_label untuk istilah atau konteks singkat.
 - {effect_instruction}
 - position hanya left, center, atau right.
@@ -549,18 +555,66 @@ OUTPUT RAW JSON SAJA:
             if settings.use_nine_router
             else self._model_pass1
         )
-        try:
-            raw = await asyncio.wait_for(
-                asyncio.to_thread(self._call_groq_llm, prompt, model, 1800),
-                timeout=self._timeout,
+
+        # Retry 9router up to 2 attempts with full context
+        parsed = None
+        last_error = None
+        for attempt in range(2):
+            try:
+                raw = await asyncio.wait_for(
+                    asyncio.to_thread(self._call_groq_llm, prompt, model, 2400),
+                    timeout=self._timeout,
+                )
+                parsed = self._parse_json_response(raw)
+                if parsed:
+                    break
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    f"v2_analyzer: text emphasis attempt {attempt + 1}/2 failed: {exc}"
+                )
+                if attempt < 1:
+                    await asyncio.sleep(3)
+
+        # If both 9router attempts failed, fallback to sampled context approach
+        if parsed is None:
+            logger.warning(
+                f"v2_analyzer: text emphasis 9router failed 2x ({last_error}), "
+                f"using sampled fallback"
             )
-            parsed = self._parse_json_response(raw)
-        except Exception as exc:
-            logger.warning(f"v2_analyzer: text emphasis analysis skipped: {exc}")
-            return {}
+            try:
+                fallback_context, _ = build_text_emphasis_context(clips_words)
+                if fallback_context:
+                    fallback_prompt = f"""Kamu adalah senior motion editor video pendek. Pilih frasa yang layak ditonjolkan sebagai cinematic text.
+
+TRANSKRIP WORD-ID:
+{fallback_context}
+
+ATURAN KETAT:
+- WAJIB minimal 1 event per clip, maksimal {min(2, max_events)} event per clip. Tidak boleh 0.
+- Frasa 1-7 kata, harus memakai start_word dan end_word yang berurutan pada clip yang sama.
+- Jangan melewati penanda [... gap ...].
+- Prioritaskan angka mengejutkan, tesis utama, kontras tajam, istilah inti, atau punchline.
+- Hindari filler, salam, kalimat generik, dan jangan memilih dua frasa yang berdekatan.
+- behind_person untuk pernyataan hero yang sangat kuat; spotlight untuk angka/punchline; side_label untuk istilah atau konteks singkat.
+- {effect_instruction}
+- position hanya left, center, atau right.
+- Jangan membuat ulang teks dan jangan membuat timestamp.
+
+OUTPUT RAW JSON SAJA:
+{{"clips":{{"1":[{{"start_word":"W0012","end_word":"W0015","effect":"behind_person","position":"center","reason":"tesis utama"}}]}}}}
+"""
+                    raw = await asyncio.wait_for(
+                        asyncio.to_thread(self._call_groq_llm, fallback_prompt, model, 1800),
+                        timeout=self._timeout,
+                    )
+                    parsed = self._parse_json_response(raw)
+            except Exception as exc:
+                logger.warning(f"v2_analyzer: text emphasis sampled fallback also failed: {exc}")
+                parsed = {}
 
         return anchor_text_emphasis_response(
-            parsed,
+            parsed or {},
             clips_words,
             clip_durations,
             style=safe_style,

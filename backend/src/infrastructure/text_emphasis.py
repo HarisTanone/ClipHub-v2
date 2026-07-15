@@ -118,6 +118,40 @@ def build_text_emphasis_context(
     return "\n".join(sections), lookup
 
 
+def build_text_emphasis_context_full(
+    clips_words: dict[int, list[dict]],
+) -> tuple[str, dict[int, dict[int, dict]]]:
+    """Build a full word-ID transcript and lookup table without sampling.
+
+    Unlike `build_text_emphasis_context`, this includes ALL words per clip
+    without any contiguous-window sampling. IDs remain the original Whisper
+    word indexes for exact anchoring.
+    """
+    non_empty = {rank: words for rank, words in clips_words.items() if words}
+    if not non_empty:
+        return "", {}
+
+    lookup: dict[int, dict[int, dict]] = {}
+    sections: list[str] = []
+    for rank, words in sorted(non_empty.items()):
+        clean_words = [word for word in words if str(word.get("word") or "").strip()]
+        if not clean_words:
+            continue
+        lookup[rank] = {index: clean_words[index] for index in range(len(clean_words))}
+        sections.append(f"CLIP {rank}")
+        line: list[str] = []
+        for index, word in enumerate(clean_words):
+            token = str(word.get("word") or "").strip().replace("\n", " ")
+            start = _safe_float(word.get("start"), 0)
+            line.append(f"[W{index:04d}|{start:.2f}]{token}")
+            if len(line) >= 12:
+                sections.append(" ".join(line))
+                line = []
+        if line:
+            sections.append(" ".join(line))
+    return "\n".join(sections), lookup
+
+
 def anchor_text_emphasis_response(
     raw_response: object,
     clips_words: dict[int, list[dict]],
@@ -208,9 +242,81 @@ def anchor_text_emphasis_response(
             })
             if len(accepted) >= min(2, max_events):
                 break
+
+        # Fallback: guarantee minimum 1 event per clip when AI returned nothing.
+        if not accepted and max_events >= 1:
+            fallback = _find_fallback_phrase(
+                words, min_start, duration, blocked.get(rank, [])
+            )
+            if fallback is not None:
+                accepted.append(fallback)
+
         if accepted:
             output[rank] = sorted(accepted, key=lambda event: event["start"])
     return output
+
+
+def _find_fallback_phrase(
+    words: list[dict],
+    min_start: float,
+    duration: float,
+    blocked_ranges: list[tuple[float, float]],
+) -> dict | None:
+    """Find the best fallback phrase when AI returned 0 events for a clip.
+
+    Scans all contiguous windows of 2-5 words that start after min_start,
+    don't overlap blocked ranges, and picks the one with the longest combined
+    word length (most "substantial" text).
+    """
+    best: dict | None = None
+    best_length = 0
+
+    total = len(words)
+    for phrase_len in range(2, 6):  # 2 to 5 words
+        for start_idx in range(total - phrase_len + 1):
+            end_idx = start_idx + phrase_len - 1
+            phrase_words = words[start_idx:end_idx + 1]
+
+            # All words in the phrase must have non-empty text.
+            if any(not str(w.get("word") or "").strip() for w in phrase_words):
+                continue
+
+            start = max(0.0, _safe_float(phrase_words[0].get("start"), 0))
+            if start < min_start or start >= duration - 1.0:
+                continue
+
+            spoken_end = max(start, _safe_float(phrase_words[-1].get("end"), start))
+            end = min(duration, max(spoken_end + 0.55, start + 1.65))
+            end = min(end, start + 2.8)
+            if end - start < 1.0:
+                continue
+
+            if any(_ranges_overlap(start, end, a, b) for a, b in blocked_ranges):
+                continue
+
+            combined_length = sum(
+                len(str(w.get("word") or "").strip()) for w in phrase_words
+            )
+            if combined_length > best_length:
+                best_length = combined_length
+                text = " ".join(
+                    str(w.get("word") or "").strip() for w in phrase_words
+                )
+                text = re.sub(r"\s+([,.;:!?])", r"\1", text).strip()
+                if not text:
+                    continue
+                best = {
+                    "id": "emphasis_fallback",
+                    "start": round(start, 3),
+                    "end": round(end, 3),
+                    "text": text,
+                    "effect": "spotlight",
+                    "position": "center",
+                    "start_word": start_idx,
+                    "end_word": end_idx,
+                    "reason": "auto_fallback",
+                }
+    return best
 
 
 def _sample_contiguous_indices(total: int, limit: int) -> list[int]:
