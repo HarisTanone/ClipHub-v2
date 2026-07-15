@@ -9,7 +9,7 @@ Pipeline:
   4. Dynamic panning keeps the active speaker centered.
 
 Rules:
-  - Audio is ALWAYS stream-copied, never re-encoded through filter_complex
+  - Video and audio are normalized to the same zero-based timeline
   - Aspect ratio math: 9:16 output = 1080x1920
   - Hysteresis prevents rapid speaker switching (0.3s hold)
   - Person IDs are IoU-tracked, not X-sorted (no swap on movement)
@@ -33,6 +33,7 @@ from src.infrastructure.person_tracker import SimpleIoUTracker, BBox, TrackedDet
 from src.infrastructure.speaker_diarizer import SpeakerDiarizer, DiarizationResult
 from src.infrastructure.speaker_face_mapper import SpeakerFaceMapper, MappingResult
 from src.infrastructure.diarization_result_builder import DiarizationResultBuilder
+from src.infrastructure.media_timeline import timeline_is_safe
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,11 @@ class FaceDetection:
 class PodcastReframeEngine(IReframeEngine):
     """Speaker-aware face-based reframing with person tracking and lip analysis."""
 
-    SAMPLE_INTERVAL_SEC = 0.333  # 3fps sampling (3× more precise than 1fps)
-    MAX_SAMPLES = 180  # 3fps × 60s = 180 samples per clip
+    SAMPLE_INTERVAL_SEC = 0.333  # target 3fps sampling
+    # 720 samples covers a four-minute highlight at roughly 3fps. When a clip
+    # is longer, samples are spread across the entire timeline instead of only
+    # inspecting its first minute.
+    MAX_SAMPLES = 720
     FACE_CONFIDENCE = 0.55
     MIN_FACE_SIZE_RATIO = 0.10
     MAX_FACE_SIZE_RATIO = 0.50
@@ -63,8 +67,9 @@ class PodcastReframeEngine(IReframeEngine):
     GRID_BASE_ZOOM = 1.08            # Gentle default crop; avoids excessive background.
     GRID_MAX_ZOOM = 1.40             # Hard ceiling so faces never become uncomfortably large.
     GRID_FACE_MARGIN = 0.35          # Minimum face-side breathing room inside a panel.
-    GRID_ENTER_SAMPLES = 2           # Confirm a second person before opening the grid.
-    GRID_EXIT_SAMPLES = 3            # Tolerate short detector misses before closing the grid.
+    GRID_ENTER_SAMPLES = 4           # Confirm a second person for ~1.3s.
+    GRID_EXIT_SAMPLES = 2            # Close within ~0.7s when one person leaves.
+    MIN_GRID_SEGMENT_SECONDS = 1.20   # Never render a one-frame/flicker grid.
     VALID_TRANSITIONS = {"cut", "fade", "slide", "zoom"}
 
     # Ghost detection constants
@@ -75,6 +80,7 @@ class PodcastReframeEngine(IReframeEngine):
     GHOST_CENTER_DIST_RATIO = 0.08      # Normalized center distance for ghost proximity
     GHOST_CENTER_DIST_BROAD = 0.20      # Broader center distance for ghost with area similarity
     MIN_PAIR_SIZE_RATIO = 0.30          # Both faces in pair must be comparable size
+    AUDIO_FILTER = "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS"
 
     def __init__(self, hf_token: Optional[str] = None):
         self._face_detector = None
@@ -325,7 +331,7 @@ class PodcastReframeEngine(IReframeEngine):
 
         # Step 4: Dynamic Panning — single FFmpeg pass with smooth crop tracking
         # Builds a time-based crop X expression that follows the active face.
-        # No concat, no trim, no desync. Audio always stream-copied.
+        # No concat and no source-timeline discontinuity.
         result = self._render_dynamic_panning(
             video_path, output_path, width, height, fps,
             tracked_data, speaker_result,
@@ -658,8 +664,7 @@ class PodcastReframeEngine(IReframeEngine):
                 "track_to_position": {},
             }
 
-        sample_interval = max(1, int(fps * self.SAMPLE_INTERVAL_SEC))
-        sample_indices = list(range(0, total_frames, sample_interval))[:self.MAX_SAMPLES]
+        sample_indices = self._sample_frame_indices(total_frames, fps)
 
         per_frame_faces: List[List[float]] = []
         per_frame_tracked: List[List[TrackedDetection]] = []
@@ -763,6 +768,7 @@ class PodcastReframeEngine(IReframeEngine):
         logger.info(
             "podcast_reframe: face scan "
             f"samples={len(frame_face_counts)}, "
+            f"coverage=0.0-{(sample_timestamps[-1] if sample_timestamps else 0.0):.1f}s, "
             f"frames_with_faces={frames_with_faces}/{len(frame_face_counts)}, "
             f"faces_per_frame=min/median/max="
             f"{(min(frame_face_counts) if frame_face_counts else 0)}/"
@@ -791,6 +797,31 @@ class PodcastReframeEngine(IReframeEngine):
             "position_target_profiles": position_target_profiles,
             "track_to_position": track_to_position,
         }
+
+    def _sample_frame_indices(self, total_frames: int, fps: float) -> List[int]:
+        """Sample the complete clip while keeping face detection bounded."""
+        if total_frames <= 0:
+            return []
+        sample_interval = max(1, int(round(float(fps) * self.SAMPLE_INTERVAL_SEC)))
+        natural_indices = list(range(0, total_frames, sample_interval))
+        if len(natural_indices) <= self.MAX_SAMPLES:
+            if natural_indices and natural_indices[-1] != total_frames - 1:
+                if len(natural_indices) < self.MAX_SAMPLES:
+                    natural_indices.append(total_frames - 1)
+                else:
+                    natural_indices[-1] = total_frames - 1
+            return natural_indices
+
+        # A hard slice used to make every clip longer than 60 seconds blind
+        # after its first minute. Preserve the cap, but distribute it over the
+        # complete source timeline so later camera cuts are inspected.
+        distributed = np.linspace(
+            0,
+            max(0, total_frames - 1),
+            num=self.MAX_SAMPLES,
+            dtype=int,
+        ).tolist()
+        return list(dict.fromkeys(distributed))
 
     def _build_position_model(
         self,
@@ -1044,7 +1075,13 @@ class PodcastReframeEngine(IReframeEngine):
                         )
                         if geometry:
                             pair_geometry[pair] = geometry
-                    if geometry:
+                    if geometry and self._grid_frame_is_safe(
+                        frame_tracked,
+                        geometry,
+                        first_id=first_id,
+                        second_id=second_id,
+                        track_to_position=track_to_position,
+                    ):
                         pair_hits[pair] += 1
 
         if not pair_hits or valid_frames <= 0:
@@ -1103,13 +1140,30 @@ class PodcastReframeEngine(IReframeEngine):
             index * self.SAMPLE_INTERVAL_SEC
             for index in range(len(per_frame_positions))
         ]
-        unsafe_frames = [
-            not self._grid_frame_is_safe(frame_tracked, geometry)
+        pair_visible = [
+            first_id in positions and second_id in positions
+            for positions in per_frame_positions
+        ]
+        frame_is_safe = [
+            self._grid_frame_is_safe(
+                frame_tracked,
+                geometry,
+                first_id=first_id,
+                second_id=second_id,
+                track_to_position=track_to_position,
+            )
             for frame_tracked in per_frame_tracked
         ]
+        # A face entering both panels is unsafe and closes the grid immediately.
+        # An ordinary detector miss still uses exit hysteresis so one bad sample
+        # cannot make the layout flicker.
+        unsafe_frames = [
+            pair_visible[index] and not frame_is_safe[index]
+            for index in range(len(per_frame_positions))
+        ]
         raw_double = [
-            first_id in positions and second_id in positions and not unsafe_frames[index]
-            for index, positions in enumerate(per_frame_positions)
+            pair_visible[index] and frame_is_safe[index]
+            for index in range(len(per_frame_positions))
         ]
         layout_events = self._build_layout_events(
             raw_double, sample_timestamps, force_single=unsafe_frames
@@ -1149,22 +1203,38 @@ class PodcastReframeEngine(IReframeEngine):
         if not raw_double:
             return [{"time": 0.0, "layout": "single"}]
 
-        state = bool(raw_double[0])
-        events = [{"time": 0.0, "layout": "double" if state else "single"}]
+        # Always require confirmation, including at t=0. Once confirmed we
+        # backdate the event to the start of the stable run, so a valid opening
+        # two-shot does not have an artificial single-frame blind spot.
+        state = False
+        events = [{"time": 0.0, "layout": "single"}]
         pending_state: Optional[bool] = None
         pending_count = 0
+        pending_start = 0
 
-        for index in range(1, len(raw_double)):
+        def timestamp_at(index: int) -> float:
+            return (
+                float(timestamps[index])
+                if index < len(timestamps)
+                else index * self.SAMPLE_INTERVAL_SEC
+            )
+
+        def append_event(event_time: float, next_state: bool) -> None:
+            event = {
+                "time": max(0.0, float(event_time)),
+                "layout": "double" if next_state else "single",
+            }
+            if events and event["time"] <= float(events[-1]["time"]) + 1e-3:
+                events[-1] = event
+            elif not events or events[-1]["layout"] != event["layout"]:
+                events.append(event)
+
+        for index in range(len(raw_double)):
             candidate = bool(raw_double[index])
             if force_single and index < len(force_single) and force_single[index]:
                 if state:
-                    event_time = (
-                        float(timestamps[index])
-                        if index < len(timestamps)
-                        else index * self.SAMPLE_INTERVAL_SEC
-                    )
                     state = False
-                    events.append({"time": max(0.0, event_time), "layout": "single"})
+                    append_event(timestamp_at(index), False)
                 pending_state = None
                 pending_count = 0
                 continue
@@ -1176,6 +1246,7 @@ class PodcastReframeEngine(IReframeEngine):
             if pending_state != candidate:
                 pending_state = candidate
                 pending_count = 1
+                pending_start = index
             else:
                 pending_count += 1
 
@@ -1186,38 +1257,63 @@ class PodcastReframeEngine(IReframeEngine):
                 continue
 
             state = candidate
-            event_time = (
-                float(timestamps[index])
-                if index < len(timestamps)
-                else index * self.SAMPLE_INTERVAL_SEC
-            )
-            events.append({
-                "time": max(0.0, event_time),
-                "layout": "double" if state else "single",
-            })
+            append_event(timestamp_at(pending_start), state)
             pending_state = None
             pending_count = 0
 
+        # Remove confirmed-but-too-short grid bursts. These are normally caused
+        # by a cutaway, detector duplicate, or a person briefly crossing frame.
+        if len(events) > 1:
+            if len(timestamps) >= 2:
+                deltas = [
+                    float(timestamps[index]) - float(timestamps[index - 1])
+                    for index in range(1, len(timestamps))
+                    if float(timestamps[index]) > float(timestamps[index - 1])
+                ]
+                sample_step = float(np.median(deltas)) if deltas else self.SAMPLE_INTERVAL_SEC
+            else:
+                sample_step = self.SAMPLE_INTERVAL_SEC
+            timeline_end = timestamp_at(len(raw_double) - 1) + sample_step
+            filtered: List[dict] = []
+            for index, event in enumerate(events):
+                next_time = (
+                    float(events[index + 1]["time"])
+                    if index + 1 < len(events)
+                    else timeline_end
+                )
+                if (
+                    event["layout"] == "double"
+                    and next_time - float(event["time"]) < self.MIN_GRID_SEGMENT_SECONDS
+                ):
+                    continue
+                if filtered and filtered[-1]["layout"] == event["layout"]:
+                    continue
+                filtered.append(event)
+            events = filtered or [{"time": 0.0, "layout": "single"}]
+
         return events
 
-    @staticmethod
     def _grid_frame_is_safe(
+        self,
         frame_tracked: List[TrackedDetection],
         geometry: dict,
+        first_id: Optional[int] = None,
+        second_id: Optional[int] = None,
+        track_to_position: Optional[Dict[int, int]] = None,
     ) -> bool:
-        """Reject a grid frame if any detected face enters both source crops."""
+        """Require one exclusive, distinct face inside each source crop."""
         crop_w = int(geometry.get("crop_w", 0))
         crop_h = int(geometry.get("crop_h", 0))
         if crop_w <= 0 or crop_h <= 0:
             return False
 
         first_rect = (
-            int(geometry.get("top_crop_x", geometry.get("first_crop_x", 0))),
-            int(geometry.get("top_crop_y", geometry.get("first_crop_y", 0))),
+            int(geometry.get("first_crop_x", geometry.get("top_crop_x", 0))),
+            int(geometry.get("first_crop_y", geometry.get("top_crop_y", 0))),
         )
         second_rect = (
-            int(geometry.get("bottom_crop_x", geometry.get("second_crop_x", 0))),
-            int(geometry.get("bottom_crop_y", geometry.get("second_crop_y", 0))),
+            int(geometry.get("second_crop_x", geometry.get("bottom_crop_x", 0))),
+            int(geometry.get("second_crop_y", geometry.get("bottom_crop_y", 0))),
         )
 
         def intersects(bbox: BBox, crop_x: int, crop_y: int) -> bool:
@@ -1228,11 +1324,45 @@ class PodcastReframeEngine(IReframeEngine):
                 or bbox.y1 >= crop_y + crop_h
             )
 
-        return not any(
+        if any(
             intersects(detection.bbox, *first_rect)
             and intersects(detection.bbox, *second_rect)
             for detection in frame_tracked
+        ):
+            return False
+
+        if first_id is None or second_id is None or track_to_position is None:
+            return bool(frame_tracked)
+
+        first_detections = [
+            detection
+            for detection in frame_tracked
+            if track_to_position.get(int(detection.track_id)) == int(first_id)
+        ]
+        second_detections = [
+            detection
+            for detection in frame_tracked
+            if track_to_position.get(int(detection.track_id)) == int(second_id)
+        ]
+        if not first_detections or not second_detections:
+            return False
+
+        first_detection = max(first_detections, key=lambda item: item.bbox.area)
+        second_detection = max(second_detections, key=lambda item: item.bbox.area)
+        first_only = (
+            intersects(first_detection.bbox, *first_rect)
+            and not intersects(first_detection.bbox, *second_rect)
         )
+        second_only = (
+            intersects(second_detection.bbox, *second_rect)
+            and not intersects(second_detection.bbox, *first_rect)
+        )
+        if not first_only or not second_only:
+            return False
+
+        # A detector duplicate can survive tracking with a different ID. Never
+        # approve it as a second panel when the live boxes still overlap.
+        return self._compute_iou(first_detection.bbox, second_detection.bbox) < 0.10
 
     def _calculate_grid_geometry(
         self,
@@ -1835,16 +1965,20 @@ class PodcastReframeEngine(IReframeEngine):
         stabilized = plan["keyframes"]
 
         # 3. Render with single FFmpeg command
+        fps_value = max(1.0, float(fps))
         vf = (
-            f"crop={crop_w}:{height}:{crop_x_expr}:0,"
-            f"scale=1080:1920,format=yuv420p,setsar=1"
+            f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x_expr}:0,"
+            f"scale=1080:1920,format=yuv420p,setsar=1,"
+            f"fps={fps_value:.6f},settb=AVTB"
         )
 
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
             "-vf", vf,
+            "-af", self.AUDIO_FILTER,
             *get_video_encoder_args("medium"),
-            "-c:a", "copy",  # NEVER re-encode audio → zero desync
+            "-c:a", "aac", "-b:a", "192k",
+            "-fps_mode", "cfr",
             "-movflags", "+faststart",
             output_path,
         ]
@@ -1856,7 +1990,12 @@ class PodcastReframeEngine(IReframeEngine):
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
-        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+        if (
+            result.returncode == 0
+            and os.path.exists(output_path)
+            and os.path.getsize(output_path) > 1000
+            and timeline_is_safe(output_path)
+        ):
             logger.info(f"podcast_reframe: dynamic panning OK")
             pc = tracked_data["person_count"]
             return {
@@ -1926,7 +2065,7 @@ class PodcastReframeEngine(IReframeEngine):
 
         fps_value = max(1.0, float(fps))
         filters = [
-            "[0:v]split=3[single_src][top_src][bottom_src]",
+            "[0:v]setpts=PTS-STARTPTS,split=3[single_src][top_src][bottom_src]",
             (
                 f"[single_src]crop={single_crop_w}:{height}:{single_x_expr}:0,"
                 f"scale=1080:1920:flags=lanczos,format=yuv420p,"
@@ -1953,8 +2092,10 @@ class PodcastReframeEngine(IReframeEngine):
             "ffmpeg", "-y", "-i", video_path,
             "-filter_complex", filter_complex,
             "-map", f"[{output_label}]", "-map", "0:a?",
+            "-af", self.AUDIO_FILTER,
             *get_video_encoder_args("medium"),
-            "-c:a", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-fps_mode", "cfr",
             "-movflags", "+faststart",
             output_path,
         ]
@@ -1965,7 +2106,12 @@ class PodcastReframeEngine(IReframeEngine):
             f"{transition_duration:.2f}s, zoom={decision.get('grid_zoom', 1.0):.2f})"
         )
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if result.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 1000:
+        if (
+            result.returncode != 0
+            or not os.path.exists(output_path)
+            or os.path.getsize(output_path) <= 1000
+            or not timeline_is_safe(output_path, expected_duration=duration)
+        ):
             if result.stderr:
                 logger.warning(
                     f"podcast_reframe: dynamic auto grid failed: {result.stderr[-500:]}"
@@ -2218,24 +2364,33 @@ class PodcastReframeEngine(IReframeEngine):
     def _render_single_crop(
         self, video_path: str, output_path: str, width: int, height: int, decision: dict
     ) -> Optional[dict]:
-        """Simple 9:16 crop centered on detected face. Audio stream-copied."""
+        """Simple 9:16 crop centered on detected face with a clean A/V clock."""
         crop_w = min(int(height * 9 / 16), width)
         crop_x = self._clamp_x(decision["crop_x"], crop_w, width)
 
-        vf = f"crop={crop_w}:{height}:{crop_x}:0,scale=1080:1920,format=yuv420p,setsar=1"
+        vf = (
+            f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x}:0,"
+            "scale=1080:1920,format=yuv420p,setsar=1"
+        )
 
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
             "-vf", vf,
+            "-af", self.AUDIO_FILTER,
             *get_video_encoder_args("medium"),
-            "-c:a", "copy",  # NEVER re-encode audio
+            "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
-        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+        if (
+            result.returncode == 0
+            and os.path.exists(output_path)
+            and os.path.getsize(output_path) > 1000
+            and timeline_is_safe(output_path)
+        ):
             pc = decision.get("person_count", 1)
             method_detail = decision.get("method_detail", "podcast_single_crop")
             logger.info(f"podcast_reframe: single crop OK (x={crop_x}, w={crop_w}, method={method_detail})")
@@ -2314,7 +2469,7 @@ class PodcastReframeEngine(IReframeEngine):
         bottom_y = int(decision.get("bottom_crop_y", fallback_y))
 
         vf = (
-            f"split=2[top][bot];"
+            f"setpts=PTS-STARTPTS,split=2[top][bot];"
             f"[top]crop={crop_w}:{crop_h}:{top_x}:{top_y},scale=1080:{self.GRID_PANEL_HEIGHT},format=yuv420p[t];"
             f"[bot]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},scale=1080:{self.GRID_PANEL_HEIGHT},format=yuv420p[b];"
             f"[t][b]vstack=inputs=2,setsar=1[vout]"
@@ -2324,15 +2479,21 @@ class PodcastReframeEngine(IReframeEngine):
             "ffmpeg", "-y", "-i", video_path,
             "-filter_complex", vf,
             "-map", "[vout]", "-map", "0:a?",
+            "-af", self.AUDIO_FILTER,
             *get_video_encoder_args("medium"),
-            "-c:a", "copy",  # NEVER re-encode audio
+            "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
-        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+        if (
+            result.returncode == 0
+            and os.path.exists(output_path)
+            and os.path.getsize(output_path) > 1000
+            and timeline_is_safe(output_path)
+        ):
             pc = decision.get("person_count", 2)
             logger.info(
                 "podcast_reframe: 50/50 grid OK "
@@ -2610,19 +2771,25 @@ class PodcastReframeEngine(IReframeEngine):
         """Center crop to 9:16."""
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
-            "-vf", "crop=ih*9/16:ih,scale=1080:1920,format=yuv420p,setsar=1",
+            "-vf", "setpts=PTS-STARTPTS,crop=ih*9/16:ih,scale=1080:1920,format=yuv420p,setsar=1",
+            "-af", self.AUDIO_FILTER,
             *get_video_encoder_args("medium"),
-            "-c:a", "copy",
+            "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
         ]
         result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=120)
-        return result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000
+        return (
+            result.returncode == 0
+            and os.path.exists(output_path)
+            and os.path.getsize(output_path) > 1000
+            and timeline_is_safe(output_path)
+        )
 
     async def _simple_crop(self, video_path: str, output_path: str, target_aspect: str) -> bool:
         """Simple crop for non-9:16."""
         if target_aspect == "1:1":
-            vf = "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080"
+            vf = "setpts=PTS-STARTPTS,crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080"
         else:
             shutil.copy2(video_path, output_path)
             return True
@@ -2630,10 +2797,16 @@ class PodcastReframeEngine(IReframeEngine):
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
             "-vf", vf,
+            "-af", self.AUDIO_FILTER,
             *get_video_encoder_args("medium"),
-            "-c:a", "copy",
+            "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
         ]
         result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=120)
-        return result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000
+        return (
+            result.returncode == 0
+            and os.path.exists(output_path)
+            and os.path.getsize(output_path) > 1000
+            and timeline_is_safe(output_path)
+        )

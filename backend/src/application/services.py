@@ -188,6 +188,7 @@ class JobService:
         hook_style: str = "",
         broll_enabled: bool = False,
         autogrid_enabled: bool = False,
+        text_emphasis_enabled: bool = False,
         # v3.0 Remotion fields
         use_remotion: Optional[bool] = None,
         ai_layer_enabled: Optional[bool] = None,
@@ -196,6 +197,7 @@ class JobService:
         # Custom style configs from frontend editor
         hook_style_config: Optional[dict] = None,
         subtitle_style_config: Optional[dict] = None,
+        text_emphasis_style_config: Optional[dict] = None,
         # User ownership
         user_id: Optional[int] = None,
         # V2 pipeline routing
@@ -246,6 +248,11 @@ class JobService:
             initial_clips_data["hook_style_config"] = hook_style_config
         if subtitle_style_config:
             initial_clips_data["subtitle_style_config"] = subtitle_style_config
+        # Persist explicit false as well. This makes retries deterministic and
+        # preserves the opt-in contract even when defaults change later.
+        initial_clips_data["text_emphasis_enabled"] = bool(text_emphasis_enabled)
+        if text_emphasis_style_config:
+            initial_clips_data["text_emphasis_style_config"] = text_emphasis_style_config
         if is_upload_source:
             initial_clips_data["source"] = {
                 "type": "upload",

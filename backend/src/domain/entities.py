@@ -104,6 +104,9 @@ class Clip:
     reason: str
     subtitles: list[Subtitle] = field(default_factory=list)
     broll_suggestions: list[BRollSuggestion] = field(default_factory=list)
+    # Sparse AI-selected cinematic text events.  Kept separate from subtitles
+    # so hiding an ordinary caption never changes its Whisper timing.
+    text_emphasis_events: list[dict] = field(default_factory=list)
 
 
 # ─── Creative Direction (v2.0 — per-job visual identity) ─────────────────────

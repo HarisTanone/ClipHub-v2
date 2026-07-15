@@ -80,6 +80,10 @@ class IRemotionRenderer(ABC):
         output_path: str,
         clip_rank: int,
         config: Optional[RemotionRenderConfig] = None,
+        words: Optional[list] = None,
+        hook_text: Optional[str] = None,
+        hook_style: Optional[str] = None,
+        text_emphasis_events: Optional[list[dict]] = None,
     ) -> RemotionRenderResult:
         """Render full clip composition via Remotion.
         

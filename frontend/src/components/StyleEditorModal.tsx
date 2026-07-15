@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { presets as presetsApi, type Preset } from "@/lib/api";
@@ -161,6 +161,28 @@ export interface SubtitleStyle {
   lineTransition: "word_pop" | "emphasis" | "line_reveal";
 }
 
+export interface TextEmphasisStyle {
+  effectMode: "auto" | "behind_person" | "spotlight" | "side_label";
+  animation: "cinematic" | "slam" | "reveal";
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: string;
+  letterSpacing: number;
+  lineHeight: number;
+  color: string;
+  accentColor: string;
+  uppercase: boolean;
+  strokeEnabled: boolean;
+  strokeColor: string;
+  strokeWidth: number;
+  shadowEnabled: boolean;
+  shadowColor: string;
+  shadowBlur: number;
+  positionY: number;
+  maxWidthPct: number;
+  maskFeather: number;
+}
+
 export const DEFAULT_HOOK_STYLE: HookStyle = {
   animation: "podcast_lower_third",
   text: "",
@@ -262,6 +284,28 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   animationStyle: "pop",
   animationSpeed: 1.0,
   lineTransition: "word_pop",
+};
+
+export const DEFAULT_TEXT_EMPHASIS_STYLE: TextEmphasisStyle = {
+  effectMode: "auto",
+  animation: "cinematic",
+  fontFamily: "Anton",
+  fontSize: 92,
+  fontWeight: "900",
+  letterSpacing: 1,
+  lineHeight: 0.95,
+  color: "#FFFFFF",
+  accentColor: "#FFD400",
+  uppercase: true,
+  strokeEnabled: true,
+  strokeColor: "#09090B",
+  strokeWidth: 2,
+  shadowEnabled: true,
+  shadowColor: "#000000",
+  shadowBlur: 22,
+  positionY: 50,
+  maxWidthPct: 82,
+  maskFeather: 9,
 };
 
 // ─── Presets ─────────────────────────────────────────────────────────────────
@@ -814,11 +858,13 @@ interface StyleEditorModalProps {
   onClose: () => void;
   hookStyle: HookStyle;
   subtitleStyle: SubtitleStyle;
+  textEmphasisStyle?: TextEmphasisStyle;
   onHookChange: (style: HookStyle) => void;
   onSubtitleChange: (style: SubtitleStyle) => void;
+  onTextEmphasisChange?: (style: TextEmphasisStyle) => void;
   aspectRatio?: string;
   inline?: boolean;
-  activeTab?: "presets" | "hook" | "subtitle" | "transition";
+  activeTab?: "presets" | "hook" | "subtitle" | "transition" | "ai_text";
   thumbnailUrl?: string;
   isSuperadmin?: boolean;
   isPremium?: boolean;
@@ -830,8 +876,8 @@ interface StyleEditorModalProps {
   processProgress?: { stage: string; percentage: number };
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHookChange, onSubtitleChange, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress }: StyleEditorModalProps) {
-  const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition">(activeTab || "hook");
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => {}, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress }: StyleEditorModalProps) {
+  const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
 
@@ -970,7 +1016,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : tab === "ai_text" ? <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
       </div>
     );
   }
@@ -996,6 +1042,9 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
               <button type="button" onClick={() => setTab("transition")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === "transition" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
                 <MoveRight className="h-3 w-3 inline mr-1.5" />Transition
               </button>
+              <button type="button" onClick={() => setTab("ai_text")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === "ai_text" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
+                <Layers className="h-3 w-3 inline mr-1.5" />AI Text
+              </button>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1005,7 +1054,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, onHo
           </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : tab === "ai_text" ? <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
         </div>
       </div>
     </div>
@@ -1037,9 +1086,126 @@ function TransitionEditor({ style, onChange }: { style: HookStyle; onChange: (st
   );
 }
 
+function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmphasisStyle; onChange: (style: TextEmphasisStyle) => void; thumbnailUrl?: string }) {
+  useGoogleFont(style.fontFamily);
+  const update = <K extends keyof TextEmphasisStyle>(key: K, value: TextEmphasisStyle[K]) => onChange({ ...style, [key]: value });
+  const previewEffect = style.effectMode === "auto" ? "behind_person" : style.effectMode;
+  const textStyle = {
+    fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`,
+    fontSize: Math.max(16, style.fontSize * 0.28),
+    fontWeight: Number(style.fontWeight),
+    letterSpacing: style.letterSpacing * 0.35,
+    lineHeight: style.lineHeight,
+    color: style.color,
+    textTransform: style.uppercase ? "uppercase" as const : "none" as const,
+    WebkitTextStroke: style.strokeEnabled ? `${Math.max(0.5, style.strokeWidth * 0.35)}px ${style.strokeColor}` : undefined,
+    paintOrder: style.strokeEnabled ? "stroke" as const : undefined,
+    textShadow: style.shadowEnabled ? `0 3px ${Math.max(4, style.shadowBlur * 0.35)}px ${style.shadowColor}` : undefined,
+  };
+
+  return (
+    <div className="h-full overflow-y-auto p-5">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-100">AI Cinematic Text</h3>
+          <p className="mt-1 max-w-xl text-xs leading-5 text-zinc-500">AI memilih maksimal 2 frasa paling kuat per clip. Subtitle berhenti hanya selama frasa tampil, lalu kembali ke timing aslinya.</p>
+        </div>
+        <span className="shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">MAX 2 / CLIP</span>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.85fr)_minmax(360px,1.15fr)]">
+        <div>
+          <div className="sticky top-0 aspect-[9/16] max-h-[520px] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl">
+            {thumbnailUrl ? <img src={thumbnailUrl} alt="Video preview" className="absolute inset-0 h-full w-full object-cover opacity-70" /> : <div className="absolute inset-0 bg-gradient-to-b from-zinc-700 via-zinc-900 to-black" />}
+            {previewEffect === "spotlight" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.75)_100%)]" />}
+            <div className={cn("absolute inset-x-[7%] z-10 flex", previewEffect === "side_label" ? "justify-start text-left" : "justify-center text-center")} style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+              <div style={{ ...textStyle, maxWidth: `${style.maxWidthPct}%` }}>
+                {previewEffect === "side_label" && <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: style.accentColor }} />}
+                Ide Besar yang Perlu Diingat
+                {previewEffect === "spotlight" && <div className="mx-auto mt-2 h-1 w-16 rounded-full" style={{ backgroundColor: style.accentColor, boxShadow: `0 0 10px ${style.accentColor}` }} />}
+              </div>
+            </div>
+            {previewEffect === "behind_person" && (
+              <div className="absolute bottom-0 left-1/2 z-20 h-[72%] w-[58%] -translate-x-1/2">
+                <div className="absolute left-1/2 top-[2%] h-[22%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
+                <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-700 via-zinc-300 to-zinc-700 shadow-2xl" />
+              </div>
+            )}
+            <div className="absolute bottom-3 left-3 z-30 rounded-md bg-black/60 px-2 py-1 text-[9px] text-zinc-400">Preview style • AI menentukan teks final</div>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          <div>
+            <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Visual Mode</label>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ["auto", "AI Auto", "AI memilih jenis terbaik"],
+                ["behind_person", "Behind Person", "Teks di belakang subjek"],
+                ["spotlight", "Spotlight", "Hero text + vignette"],
+                ["side_label", "Side Label", "Label editorial di sisi"],
+              ] as const).map(([value, label, desc]) => (
+                <button key={value} type="button" onClick={() => update("effectMode", value)} className={cn("rounded-xl border p-3 text-left transition-all", style.effectMode === value ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700")}>
+                  <p className={cn("text-xs font-semibold", style.effectMode === value ? "text-emerald-300" : "text-zinc-300")}>{label}</p>
+                  <p className="mt-1 text-[10px] text-zinc-600">{desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Animation
+              <select value={style.animation} onChange={(e) => update("animation", e.target.value as TextEmphasisStyle["animation"])} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-2 text-xs font-normal normal-case text-zinc-200 outline-none focus:border-emerald-500/60">
+                <option value="cinematic">Cinematic</option><option value="slam">Slam</option><option value="reveal">Reveal</option>
+              </select>
+            </label>
+            <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Font
+              <select value={style.fontFamily} onChange={(e) => update("fontFamily", e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-2 text-xs font-normal normal-case text-zinc-200 outline-none focus:border-emerald-500/60">
+                {FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <SliderField label="Font Size" value={style.fontSize} min={32} max={160} suffix="px" onChange={(value) => update("fontSize", value)} />
+            <SliderField label="Position" value={style.positionY} min={12} max={88} suffix="%" onChange={(value) => update("positionY", value)} />
+            <SliderField label="Max Width" value={style.maxWidthPct} min={35} max={96} suffix="%" onChange={(value) => update("maxWidthPct", value)} />
+            <SliderField label="Mask Feather" value={style.maskFeather} min={1} max={31} suffix="px" step={2} onChange={(value) => update("maskFeather", value % 2 === 0 ? value + 1 : value)} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <ColorField label="Text" value={style.color} onChange={(value) => update("color", value)} />
+            <ColorField label="Accent" value={style.accentColor} onChange={(value) => update("accentColor", value)} />
+            <ColorField label="Stroke" value={style.strokeColor} onChange={(value) => update("strokeColor", value)} />
+            <ColorField label="Shadow" value={style.shadowColor} onChange={(value) => update("shadowColor", value)} />
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <MiniToggle label="Uppercase" checked={style.uppercase} onChange={(value) => update("uppercase", value)} />
+            <MiniToggle label="Stroke" checked={style.strokeEnabled} onChange={(value) => update("strokeEnabled", value)} />
+            <MiniToggle label="Shadow" checked={style.shadowEnabled} onChange={(value) => update("shadowEnabled", value)} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SliderField({ label, value, min, max, suffix, step = 1, onChange }: { label: string; value: number; min: number; max: number; suffix: string; step?: number; onChange: (value: number) => void }) {
+  return <label className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3"><span className="flex justify-between text-[10px] font-semibold uppercase tracking-wider text-zinc-500"><span>{label}</span><span className="text-emerald-400">{value}{suffix}</span></span><input type="range" value={value} min={min} max={max} step={step} onChange={(e) => onChange(Number(e.target.value))} className="mt-3 w-full accent-emerald-500" /></label>;
+}
+
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/40 p-2.5"><input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="h-7 w-9 cursor-pointer rounded border-0 bg-transparent" /><span><span className="block text-[9px] font-semibold uppercase tracking-wider text-zinc-500">{label}</span><span className="text-[10px] text-zinc-300">{value}</span></span></label>;
+}
+
+function MiniToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return <button type="button" onClick={() => onChange(!checked)} className={cn("rounded-lg border px-2 py-2 text-[10px] font-medium transition-colors", checked ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 text-zinc-500")}>{label}</button>;
+}
+
 // ─── Presets Tab ─────────────────────────────────────────────────────────────
 
-function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange, externalActiveId, onPresetSelect }: { hookStyle: HookStyle; subtitleStyle: SubtitleStyle; onHookChange: (s: HookStyle) => void; onSubtitleChange: (s: SubtitleStyle) => void; externalActiveId?: number | null; onPresetSelect?: (id: number) => void }) {
+function PresetsTab({ hookStyle, subtitleStyle, textEmphasisStyle, onHookChange, onSubtitleChange, onTextEmphasisChange, externalActiveId, onPresetSelect }: { hookStyle: HookStyle; subtitleStyle: SubtitleStyle; textEmphasisStyle: TextEmphasisStyle; onHookChange: (s: HookStyle) => void; onSubtitleChange: (s: SubtitleStyle) => void; onTextEmphasisChange: (s: TextEmphasisStyle) => void; externalActiveId?: number | null; onPresetSelect?: (id: number) => void }) {
   const [userPresets, setUserPresets] = useState<Preset[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveName, setSaveName] = useState("");
@@ -1057,6 +1223,7 @@ function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange, 
   function loadPreset(preset: Preset) {
     onHookChange({ ...DEFAULT_HOOK_STYLE, ...preset.hook_style } as HookStyle);
     onSubtitleChange({ ...DEFAULT_SUBTITLE_STYLE, ...preset.subtitle_style } as SubtitleStyle);
+    if (preset.text_emphasis_style) onTextEmphasisChange({ ...DEFAULT_TEXT_EMPHASIS_STYLE, ...preset.text_emphasis_style } as TextEmphasisStyle);
     setActivePresetId(preset.id);
     if (onPresetSelect) onPresetSelect(preset.id);
     setStatusMsg(`Loaded "${preset.name}"`);
@@ -1067,7 +1234,7 @@ function PresetsTab({ hookStyle, subtitleStyle, onHookChange, onSubtitleChange, 
     if (!saveName.trim()) return;
     setSaving(true);
     try {
-      await presetsApi.create(saveName.trim(), hookStyle, subtitleStyle);
+      await presetsApi.create(saveName.trim(), hookStyle, subtitleStyle, textEmphasisStyle);
       setSaveName("");
       setStatusMsg(`Saved "${saveName.trim()}"`);
       setTimeout(() => setStatusMsg(""), 2000);

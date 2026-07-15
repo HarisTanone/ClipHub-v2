@@ -214,6 +214,7 @@ export interface CreateJobPayload {
   hook_style?: string;
   broll_enabled?: boolean;
   autogrid_enabled?: boolean;
+  text_emphasis_enabled?: boolean;
   // Remotion fields
   use_remotion?: boolean;
   ai_layer_enabled?: boolean;
@@ -222,6 +223,7 @@ export interface CreateJobPayload {
   // Full style configs from Custom Style Editor
   hook_style_config?: Record<string, any>;
   subtitle_style_config?: Record<string, any>;
+  text_emphasis_style_config?: Record<string, any>;
   processing_mode?: "analyze" | "direct";
   custom_hook?: string;
 }
@@ -538,6 +540,7 @@ export interface Preset {
   name: string;
   hook_style: Record<string, any>;
   subtitle_style: Record<string, any>;
+  text_emphasis_style: Record<string, any>;
   created_at: string | null;
   owner_email?: string;
   owner_name?: string;
@@ -555,10 +558,10 @@ export const presets = {
     return res.data;
   },
 
-  async create(name: string, hook_style: Record<string, any>, subtitle_style: Record<string, any>): Promise<{ success: boolean; id: number; message: string }> {
+  async create(name: string, hook_style: Record<string, any>, subtitle_style: Record<string, any>, text_emphasis_style: Record<string, any> = {}): Promise<{ success: boolean; id: number; message: string }> {
     return request("/api/presets", {
       method: "POST",
-      body: JSON.stringify({ name, hook_style, subtitle_style }),
+      body: JSON.stringify({ name, hook_style, subtitle_style, text_emphasis_style }),
     });
   },
 

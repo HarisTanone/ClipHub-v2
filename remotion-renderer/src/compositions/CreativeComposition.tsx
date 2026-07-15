@@ -20,6 +20,7 @@ import {
 import { makeTransform, scale, translateY } from "@remotion/animation-utils";
 import type { ClipCompositionProps, Word } from "../types";
 import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
+import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 
 // Available creative styles
 export type CreativeStyle =
@@ -33,6 +34,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
   videoPath,
   words,
   hookText,
+  textEmphasisEvents = [],
 }) => {
   const { fps, width } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -78,6 +80,12 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
         </AbsoluteFill>
       )}
 
+      {textEmphasisEvents.length > 0 && (
+        <AbsoluteFill style={{ zIndex: 1 }}>
+          <AITextLayer events={textEmphasisEvents} style={creativeDirection.text_emphasis_style_config} />
+        </AbsoluteFill>
+      )}
+
       {/* Hook with creative style */}
       {hookVisible && (
         <AbsoluteFill style={{ zIndex: 2, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.6)", opacity: hookOpacity }}>
@@ -86,6 +94,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
       )}
 
       {/* Subtitles with creative animation */}
+      <HideDuringTextEmphasis events={textEmphasisEvents}>
       {pages.map((page, index) => {
         const startFrame = Math.round((page.startMs / 1000) * fps);
         const endFrame = Math.round((page.endMs / 1000) * fps) + 3;
@@ -102,6 +111,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
           </Sequence>
         );
       })}
+      </HideDuringTextEmphasis>
     </AbsoluteFill>
   );
 };

@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     YOLO_MODEL_VERSION: str = "v11"
     YOLO_MODEL_PATH: str = "models/yolo11n.pt"
     YOLO_SEG_MODEL: str = "models/yolo11n-seg.pt"
+    TEXT_EMPHASIS_MAX_EVENTS: int = 2
+    TEXT_EMPHASIS_SEG_CONFIDENCE: float = 0.35
+    TEXT_EMPHASIS_MASK_FEATHER: int = 9
 
     # === HuggingFace (Pyannote Speaker Diarization) ===
     HF_TOKEN: str = ""

@@ -49,6 +49,7 @@ from src.domain.interfaces import (
 from src.infrastructure.content_intelligence import ContentIntelligence
 from src.infrastructure.clip_outputs import initialize_clip_readiness, mark_clip_ready
 from src.infrastructure.subtitle_words import sanitize_subtitle_words
+from src.infrastructure.text_emphasis import normalise_text_emphasis_style
 
 if TYPE_CHECKING:
     from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
@@ -541,7 +542,10 @@ class V2PipelineService:
                 video_path,
                 clips,
                 output_dir,
-                normalize_timestamps=is_upload_source,
+                # Every downstream reframe/B-roll filter operates on a
+                # zero-based clock. Normalize YouTube and uploaded containers
+                # alike so audio never retains a source seek offset.
+                normalize_timestamps=True,
             )
             self._emit(job_id, 7, "trim", "complete")
 
@@ -651,13 +655,34 @@ class V2PipelineService:
             self._emit(job_id, 10, "highlights", "complete")
 
             # ═══ Step 11: Optional Auto B-roll ═══
-            # The B-roll renderer overlays video frames and copies the original
-            # audio stream, so word timestamps and lip-sync remain unchanged.
+            # Recover missing creative-direction suggestions from the exact
+            # word-level transcript. This keeps Analyze First working even when
+            # the separate creative JSON response is malformed or times out.
+            await self._ensure_broll_suggestions(
+                job=job,
+                job_id=job_id,
+                clips=clips,
+                clips_with_words=clips_with_words,
+            )
+            # The B-roll renderer keeps the same zero-based duration and audio
+            # clock, so word timestamps and lip-sync remain unchanged.
             await self._apply_brolls(
                 job=job,
                 job_id=job_id,
                 clips=clips,
                 creative_direction=creative_direction,
+                output_dir=output_dir,
+                trim_results=trim_results,
+            )
+
+            # ═══ Step 11.5: Optional sparse AI cinematic text ═══
+            # Selection is anchored to the word-level transcript. YOLO11-seg
+            # only creates foreground assets; it never rewrites the source.
+            await self._prepare_text_emphasis(
+                job=job,
+                job_id=job_id,
+                clips=clips,
+                clips_with_words=clips_with_words,
                 output_dir=output_dir,
                 trim_results=trim_results,
             )
@@ -724,6 +749,8 @@ class V2PipelineService:
                     "source_type",
                     "processing_mode",
                     "custom_hook",
+                    "text_emphasis_enabled",
+                    "text_emphasis_style_config",
                 ):
                     if job.clips_data.get(key):
                         clips_data[key] = job.clips_data[key]
@@ -947,6 +974,145 @@ class V2PipelineService:
         )
         self._emit(job_id, 11, "broll", "complete")
 
+    async def _ensure_broll_suggestions(
+        self,
+        job: Job,
+        job_id: str,
+        clips: list[Clip],
+        clips_with_words: dict[int, list[dict]],
+    ) -> None:
+        """Fill only missing B-roll plans without replacing valid AI output."""
+        if not job.broll_enabled:
+            return
+
+        missing = [clip for clip in clips if not clip.broll_suggestions]
+        if not missing:
+            return
+
+        missing_words = {
+            clip.rank: clips_with_words.get(clip.rank, [])
+            for clip in missing
+        }
+        durations = {
+            clip.rank: max(0.0, clip.end - clip.start)
+            for clip in missing
+        }
+        try:
+            analyzer = self._get_analyzer()
+            analyze = getattr(analyzer, "analyze_broll_for_clips", None)
+            if not analyze:
+                logger.warning(f"[{job_id}] B-roll recovery analyzer unavailable")
+                return
+            recovered = await analyze(
+                missing_words,
+                durations,
+                max_suggestions=2,
+            )
+        except Exception as exc:
+            logger.warning(f"[{job_id}] B-roll recovery skipped: {exc}")
+            return
+
+        recovered_count = 0
+        for clip in missing:
+            suggestions = self._parse_broll_suggestions(
+                clip.rank,
+                recovered,
+                durations[clip.rank],
+            )
+            if suggestions:
+                clip.broll_suggestions = suggestions
+                recovered_count += len(suggestions)
+
+        logger.info(
+            f"[{job_id}] Auto B-roll recovery: {recovered_count} suggestions "
+            f"for {sum(1 for clip in missing if clip.broll_suggestions)}/{len(missing)} clips"
+        )
+
+    async def _prepare_text_emphasis(
+        self,
+        job: Job,
+        job_id: str,
+        clips: list[Clip],
+        clips_with_words: dict[int, list[dict]],
+        output_dir: str,
+        trim_results: dict[int, bool],
+    ) -> None:
+        """Analyze at most two emphasis events and prepare person masks."""
+        job_data = job.clips_data or {}
+        if not bool(job_data.get("text_emphasis_enabled", False)):
+            logger.info(f"[{job_id}] AI cinematic text disabled by user")
+            return
+
+        style = normalise_text_emphasis_style(job_data.get("text_emphasis_style_config"))
+        durations = {clip.rank: max(0.0, clip.end - clip.start) for clip in clips}
+        min_starts = {}
+        blocked_ranges = {}
+        hook_duration = float((job_data.get("hook_style_config") or {}).get("duration", 3.0) or 3.0)
+        for clip in clips:
+            min_starts[clip.rank] = hook_duration + 0.35 if clip.hook else 1.0
+            blocked_ranges[clip.rank] = [
+                (suggestion.at_time, suggestion.at_time + suggestion.duration)
+                for suggestion in clip.broll_suggestions
+                if job.broll_enabled
+            ]
+
+        try:
+            analyzer = self._get_analyzer()
+            analyze = getattr(analyzer, "analyze_text_emphasis", None)
+            if not analyze:
+                logger.warning(f"[{job_id}] Text emphasis analyzer unavailable")
+                return
+            event_map = await analyze(
+                clips_with_words,
+                durations,
+                style=style,
+                min_start_by_clip=min_starts,
+                blocked_ranges_by_clip=blocked_ranges,
+                max_events=min(2, int(settings.TEXT_EMPHASIS_MAX_EVENTS)),
+            )
+        except Exception as exc:
+            # This feature is opt-in decoration. A router failure must not make
+            # an otherwise valid subtitle render fail.
+            logger.warning(f"[{job_id}] AI cinematic text analysis skipped: {exc}")
+            return
+
+        from src.infrastructure.person_foreground_generator import PersonForegroundGenerator
+        generator = PersonForegroundGenerator()
+        total_events = 0
+        for clip in clips:
+            events = list(event_map.get(clip.rank, []))[:2]
+            if not events or not trim_results.get(clip.rank):
+                clip.text_emphasis_events = []
+                continue
+
+            if any(event.get("effect") == "behind_person" for event in events):
+                brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+                reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                video_path = (
+                    brolled_path if os.path.exists(brolled_path)
+                    else reframed_path if os.path.exists(reframed_path)
+                    else base_path
+                )
+                try:
+                    events = await generator.generate_for_events(
+                        video_path,
+                        events,
+                        os.path.join(output_dir, "text_emphasis", f"clip_{clip.rank:02d}"),
+                        fps=30,
+                        feather=int(style.get("maskFeather", settings.TEXT_EMPHASIS_MASK_FEATHER)),
+                    )
+                except Exception as exc:
+                    logger.warning(f"[{job_id}] Person mask failed clip {clip.rank}: {exc}")
+                    events = generator._downgrade_behind_events(events, "segmentation_error")
+            clip.text_emphasis_events = events[:2]
+            total_events += len(clip.text_emphasis_events)
+
+        logger.info(
+            f"[{job_id}] AI cinematic text prepared: {total_events} events "
+            f"across {len(clips)} clips (max 2/clip)"
+        )
+
     async def _render_clips(
         self,
         job: Job,
@@ -965,6 +1131,9 @@ class V2PipelineService:
         if job.clips_data:
             hook_style_config = job.clips_data.get("hook_style_config", {})
             subtitle_style_config = job.clips_data.get("subtitle_style_config", {})
+        text_emphasis_style_config = normalise_text_emphasis_style(
+            (job.clips_data or {}).get("text_emphasis_style_config")
+        )
 
         logger.info(
             f"[{job_id}] Render style: hook_anim={hook_style_config.get('animation', 'N/A')}, "
@@ -997,12 +1166,13 @@ class V2PipelineService:
             job, job_id, clips, clips_with_words, creative_direction,
             output_dir, trim_results, reframe_data,
             hook_style_config, subtitle_style_config,
+            text_emphasis_style_config,
         )
 
     async def _render_via_remotion(
         self, job, job_id, clips, clips_with_words, creative_direction,
         output_dir, trim_results, reframe_data,
-        hook_style_config, subtitle_style_config,
+        hook_style_config, subtitle_style_config, text_emphasis_style_config=None,
     ) -> None:
         """Render all clips via Remotion server (parallel, max 2 concurrent)."""
         self._emit(job_id, 13, "remotion_render", "start")
@@ -1049,6 +1219,9 @@ class V2PipelineService:
                 cd_dict = asdict(creative_direction) if creative_direction else {}
                 cd_dict["hook_style_config"] = hook_style_config
                 cd_dict["subtitle_style_config"] = subtitle_style_config
+                cd_dict["text_emphasis_style_config"] = (
+                    text_emphasis_style_config or normalise_text_emphasis_style(None)
+                )
                 cd_dict["content_profile"] = (job.clips_data or {}).get("content_profile", {})
                 if clip_reframe and isinstance(clip_reframe, dict):
                     cd_dict["reframe_method"] = clip_reframe.get("method", "")
@@ -1075,6 +1248,7 @@ class V2PipelineService:
                         words=clip_words,
                         hook_text=clip_hook,
                         hook_style=hook_style,
+                        text_emphasis_events=clip.text_emphasis_events,
                     )
                     if result.success:
                         mark_clip_ready(output_dir, clip.rank)
@@ -1172,6 +1346,14 @@ class V2PipelineService:
                         ),
                     }
                     for suggestion in clip.broll_suggestions
+                ],
+                "text_emphasis_events": [
+                    {
+                        key: value
+                        for key, value in event.items()
+                        if key != "foreground_frames"
+                    }
+                    for event in clip.text_emphasis_events[:2]
                 ],
             })
 

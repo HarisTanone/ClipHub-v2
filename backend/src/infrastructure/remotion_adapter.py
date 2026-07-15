@@ -59,6 +59,7 @@ class RemotionAdapter(IRemotionRenderer):
         words: Optional[list] = None,
         hook_text: Optional[str] = None,
         hook_style: Optional[str] = None,
+        text_emphasis_events: Optional[list[dict]] = None,
     ) -> RemotionRenderResult:
         """Render clip via Remotion server.
         
@@ -72,6 +73,7 @@ class RemotionAdapter(IRemotionRenderer):
             words: Word-level timestamps from Whisper [{word, start, end}]
             hook_text: Hook text to display in first 3 seconds
             hook_style: Hook animation style (fade_scale, slide_up, glitch, typewriter, etc.)
+            text_emphasis_events: At most two AI-selected cinematic text events
         """
         import time
 
@@ -170,6 +172,7 @@ class RemotionAdapter(IRemotionRenderer):
                 "words": render_words,
                 "hookText": render_hook_text,
                 "hookAnimation": render_hook_animation,
+                "textEmphasisEvents": (text_emphasis_events or [])[:2],
                 "enableThreeJS": config.enable_threejs,
                 "enableAI": config.enable_ai_layer,
             },
@@ -182,7 +185,11 @@ class RemotionAdapter(IRemotionRenderer):
             "concurrency": config.concurrency,
         }
         
-        logger.info(f"[Remotion] Render clip {clip_rank}: hook='{render_hook_text[:30]}...', words={len(render_words)}, threejs={config.enable_threejs}")
+        logger.info(
+            f"[Remotion] Render clip {clip_rank}: hook='{render_hook_text[:30]}...', "
+            f"words={len(render_words)}, emphasis={len((text_emphasis_events or [])[:2])}, "
+            f"threejs={config.enable_threejs}"
+        )
         
         start_time = time.time()
         

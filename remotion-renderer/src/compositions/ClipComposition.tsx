@@ -5,6 +5,7 @@ import { HookLayer } from "../layers/HookLayer";
 import { SubtitleLayer } from "../layers/SubtitleLayer";
 import { ZoomLayer } from "../layers/ZoomLayer";
 import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
+import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 
 // ─── Font Loader ─────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   words,
   hookText,
   hookAnimation,
+  textEmphasisEvents = [],
 }) => {
   const { fps } = useVideoConfig();
 
@@ -86,6 +88,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   if (subtitle.highlightFontFamily) {
     useRemotionFont(subtitle.highlightFontFamily);
   }
+  useRemotionFont(creativeDirection.text_emphasis_style_config?.fontFamily);
 
   // ─── Zoom events from prosody analysis ───────────────────────────
   const zoomEvents = creativeDirection.zoom_events || [];
@@ -112,21 +115,33 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         </AbsoluteFill>
       )}
 
-      {/* L2: Keep original word timing; hook is a visual layer above subtitles. */}
-      {words.length > 0 && (
+      {/* L2: Sparse AI cinematic text. Person foreground is composited above it. */}
+      {textEmphasisEvents.length > 0 && (
         <AbsoluteFill style={{ zIndex: 1, pointerEvents: "none" }}>
-          <SubtitleLayer
-            words={words}
-            config={subtitleConfig}
-            fps={fps}
+          <AITextLayer
+            events={textEmphasisEvents}
+            style={creativeDirection.text_emphasis_style_config}
           />
         </AbsoluteFill>
       )}
 
-      {/* L3: Hook overlay — renders with fade-out buffer for smooth transition */}
+      {/* L3: Keep original word timing; only hide visually during emphasis. */}
+      {words.length > 0 && (
+        <AbsoluteFill style={{ zIndex: 2, pointerEvents: "none" }}>
+          <HideDuringTextEmphasis events={textEmphasisEvents}>
+            <SubtitleLayer
+              words={words}
+              config={subtitleConfig}
+              fps={fps}
+            />
+          </HideDuringTextEmphasis>
+        </AbsoluteFill>
+      )}
+
+      {/* L4: Hook overlay — highest z-index */}
       {hookText && (
         <Sequence from={0} durationInFrames={hookDurationFrames + Math.floor(fps * 0.5)}>
-          <AbsoluteFill style={{ zIndex: 2 }}>
+          <AbsoluteFill style={{ zIndex: 3 }}>
             <HookLayer text={hookText} config={hook.config} />
           </AbsoluteFill>
         </Sequence>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight } from "lucide-react";
+import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight, Layers } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { Toggle } from "@/components/ui/Toggle";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
-import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, type HookStyle, type SubtitleStyle } from "@/components/StyleEditorModal";
+import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { jobs, preview, presets as presetsApi, type VideoPreview, type Preset, API_BASE } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
@@ -28,20 +28,25 @@ export function NewJob() {
   const [forceReprocess, setForceReprocess] = useState(false);
   const [brollEnabled, setBrollEnabled] = useState(false);
   const [autogridEnabled, setAutogridEnabled] = useState(false);
+  const [textEmphasisEnabled, setTextEmphasisEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [urlError, setUrlError] = useState("");
 
   // Style editor inline (not modal)
-  const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "transition">("hook");
+  const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text">("hook");
   const [hookStyleConfig, setHookStyleConfig] = useState<HookStyle>(() => {
     try { const s = localStorage.getItem("autocliper_hook_style"); return s ? { ...DEFAULT_HOOK_STYLE, ...JSON.parse(s) } : DEFAULT_HOOK_STYLE; } catch { return DEFAULT_HOOK_STYLE; }
   });
   const [subtitleStyleConfig, setSubtitleStyleConfig] = useState<SubtitleStyle>(() => {
     try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? { ...DEFAULT_SUBTITLE_STYLE, ...JSON.parse(s) } : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
   });
+  const [textEmphasisStyleConfig, setTextEmphasisStyleConfig] = useState<TextEmphasisStyle>(() => {
+    try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? { ...DEFAULT_TEXT_EMPHASIS_STYLE, ...JSON.parse(s) } : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
+  });
 
   useEffect(() => { localStorage.setItem("autocliper_hook_style", JSON.stringify(hookStyleConfig)); }, [hookStyleConfig]);
   useEffect(() => { localStorage.setItem("autocliper_subtitle_style", JSON.stringify(subtitleStyleConfig)); }, [subtitleStyleConfig]);
+  useEffect(() => { localStorage.setItem("autocliper_text_emphasis_style", JSON.stringify(textEmphasisStyleConfig)); }, [textEmphasisStyleConfig]);
 
   // YouTube preview
   const [videoMeta, setVideoMeta] = useState<VideoPreview | null>(null);
@@ -64,6 +69,7 @@ export function NewJob() {
   function loadPreset(preset: Preset) {
     setHookStyleConfig({ ...DEFAULT_HOOK_STYLE, ...preset.hook_style } as HookStyle);
     setSubtitleStyleConfig({ ...DEFAULT_SUBTITLE_STYLE, ...preset.subtitle_style } as SubtitleStyle);
+    if (preset.text_emphasis_style) setTextEmphasisStyleConfig({ ...DEFAULT_TEXT_EMPHASIS_STYLE, ...preset.text_emphasis_style } as TextEmphasisStyle);
     setActivePresetId(preset.id);
     toast.success(`Loaded: ${preset.name}`);
   }
@@ -72,7 +78,7 @@ export function NewJob() {
     if (!presetName.trim()) { toast.error("Name required"); return; }
     setSavingPreset(true);
     try {
-      await presetsApi.create(presetName.trim(), hookStyleConfig, subtitleStyleConfig);
+      await presetsApi.create(presetName.trim(), hookStyleConfig, subtitleStyleConfig, textEmphasisStyleConfig);
       toast.success(`Preset "${presetName}" saved`);
       setPresetName("");
       setShowSavePreset(false);
@@ -149,6 +155,8 @@ export function NewJob() {
       subtitle_style_config: subtitleStyleConfig,
       broll_enabled: brollEnabled,
       autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
+      text_emphasis_enabled: textEmphasisEnabled,
+      text_emphasis_style_config: textEmphasisStyleConfig,
       processing_mode: sourceMode === "upload" ? uploadProcessingMode : "analyze" as const,
       custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
         ? directHook.trim() || undefined
@@ -350,6 +358,14 @@ export function NewJob() {
                   disabled={aspectRatio !== "9:16"}
                 />
               </FeatureLock>
+              <Toggle
+                label="AI Cinematic Text"
+                description={textEmphasisEnabled
+                  ? "Aktif: AI memilih maksimal 2 frasa kuat. Behind Person, Spotlight, atau Side Label; subtitle berhenti sementara."
+                  : "Opsional. Jika mati, hasil subtitle tetap sama seperti sekarang."}
+                checked={textEmphasisEnabled}
+                onChange={(enabled) => { setTextEmphasisEnabled(enabled); if (enabled) setStyleTab("ai_text"); }}
+              />
             </div>
           </Card>
 
@@ -420,6 +436,7 @@ export function NewJob() {
               <Row label="Font" value={hookStyleConfig.fontFamily} />
               <Row label="Sub Highlight" value={subtitleStyleConfig.highlightColor} color={subtitleStyleConfig.highlightColor} />
               <Row label="Sub Position" value={`${subtitleStyleConfig.position} ${subtitleStyleConfig.positionY}%`} />
+              <Row label="AI Text" value={textEmphasisEnabled ? textEmphasisStyleConfig.effectMode.replace(/_/g, " ") : "off"} />
             </div>
           </Card>
         </div>
@@ -441,6 +458,7 @@ export function NewJob() {
               <Sparkles className="h-3 w-3 inline mr-1" />Subtitle
             </button>
             <button type="button" onClick={() => setStyleTab("transition")} className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", styleTab === "transition" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}><MoveRight className="h-3 w-3 inline mr-1" />Transition</button>
+            <button type="button" onClick={() => setStyleTab("ai_text")} className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", styleTab === "ai_text" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}><Layers className="h-3 w-3 inline mr-1" />AI Text</button>
           </div>
 
           {/* Style editor content */}
@@ -450,8 +468,10 @@ export function NewJob() {
               onClose={() => { }}
               hookStyle={hookStyleConfig}
               subtitleStyle={subtitleStyleConfig}
+              textEmphasisStyle={textEmphasisStyleConfig}
               onHookChange={setHookStyleConfig}
               onSubtitleChange={setSubtitleStyleConfig}
+              onTextEmphasisChange={setTextEmphasisStyleConfig}
               aspectRatio={aspectRatio}
               inline
               activeTab={styleTab}

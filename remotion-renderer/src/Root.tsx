@@ -17,6 +17,7 @@ export const RemotionRoot: React.FC = () => {
     words: [],
     hookText: "",
     hookAnimation: "podcast_lower_third",
+    textEmphasisEvents: [],
     enableThreeJS: false,
     enableAI: false,
   };

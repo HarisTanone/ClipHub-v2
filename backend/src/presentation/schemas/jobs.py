@@ -13,6 +13,8 @@ class JobOptionsBase(BaseModel):
     hook_style: str = ""  # e.g. "slide_punch_framer"
     broll_enabled: bool = False  # B-Roll disabled by default
     autogrid_enabled: bool = False  # Enable multi-speaker grid (9:16 only)
+    text_emphasis_enabled: bool = False  # Optional sparse AI cinematic text
+    text_emphasis_style_config: Optional[dict] = None
     custom_style: Optional[dict] = None
     # v3.0 Remotion fields
     use_remotion: Optional[bool] = None  # Override USE_REMOTION setting
@@ -50,6 +52,17 @@ class JobOptionsBase(BaseModel):
         if v not in ("analyze", "direct"):
             raise ValueError("processing_mode harus 'analyze' atau 'direct'")
         return v
+
+    @field_validator("text_emphasis_style_config")
+    @classmethod
+    def valid_text_emphasis_style(cls, value: Optional[dict]) -> Optional[dict]:
+        if value is None:
+            return None
+        allowed_effects = {"auto", "behind_person", "spotlight", "side_label"}
+        effect = str(value.get("effectMode", "auto"))
+        if effect not in allowed_effects:
+            raise ValueError("effectMode harus auto, behind_person, spotlight, atau side_label")
+        return value
 
 
 class CreateJobRequest(JobOptionsBase):

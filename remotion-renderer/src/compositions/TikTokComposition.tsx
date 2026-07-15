@@ -20,6 +20,7 @@ import { makeTransform, scale, translateY } from "@remotion/animation-utils";
 import { fitText } from "@remotion/layout-utils";
 import type { ClipCompositionProps, Word } from "../types";
 import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
+import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 
 const HIGHLIGHT_COLOR = "#39E508";
 
@@ -28,6 +29,7 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
   videoPath,
   words,
   hookText,
+  textEmphasisEvents = [],
 }) => {
   const { fps, width } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -83,6 +85,12 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
         </AbsoluteFill>
       )}
 
+      {textEmphasisEvents.length > 0 && (
+        <AbsoluteFill style={{ zIndex: 1 }}>
+          <AITextLayer events={textEmphasisEvents} style={creativeDirection.text_emphasis_style_config} />
+        </AbsoluteFill>
+      )}
+
       {/* Hook layer */}
       {hookVisible && (
         <AbsoluteFill
@@ -113,6 +121,7 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
       )}
 
       {/* TikTok-style captions */}
+      <HideDuringTextEmphasis events={textEmphasisEvents}>
       {pages.map((page, index) => {
         const nextPage = pages[index + 1] ?? null;
         const subtitleStartFrame = Math.round((page.startMs / 1000) * fps);
@@ -132,6 +141,7 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
           </Sequence>
         );
       })}
+      </HideDuringTextEmphasis>
     </AbsoluteFill>
   );
 };

@@ -142,6 +142,7 @@ const RenderRequestSchema = z.object({
       "marker_swipe",
       "signal_scan",
     ]).default("podcast_lower_third"),
+    textEmphasisEvents: z.array(z.any()).max(2).default([]),
     enableThreeJS: z.boolean().default(false),
     enableAI: z.boolean().default(false),
   }),
@@ -191,6 +192,15 @@ app.post("/render", async (req, res) => {
     if (propsWithUrl.videoPath && propsWithUrl.videoPath.startsWith("/")) {
       propsWithUrl.videoPath = `http://localhost:${PORT}/media${propsWithUrl.videoPath}`;
     }
+    propsWithUrl.textEmphasisEvents = (propsWithUrl.textEmphasisEvents || []).slice(0, 2).map((event: any) => ({
+      ...event,
+      foreground_frames: (event.foreground_frames || []).map((item: any) => ({
+        ...item,
+        path: typeof item.path === "string" && item.path.startsWith("/")
+          ? `http://localhost:${PORT}/media${item.path}`
+          : item.path,
+      })),
+    }));
 
     console.log(`[remotion-server] Rendering: ${path.basename(request.outputPath)}`);
     console.log(`[remotion-server]   Video URL: ${propsWithUrl.videoPath}`);

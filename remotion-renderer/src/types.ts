@@ -31,6 +31,7 @@ export interface CreativeDirection {
   // Custom style configs from editor
   hook_style_config?: Record<string, any>;
   subtitle_style_config?: Record<string, any>;
+  text_emphasis_style_config?: TextEmphasisStyleConfig;
   // Auto zoom events from prosody analysis
   zoom_events?: Array<{ time: number; intensity?: number; duration?: number }>;
   reframe_method?: string;
@@ -61,6 +62,51 @@ export interface Word {
   highlight?: boolean;
 }
 
+export type TextEmphasisEffect = "behind_person" | "spotlight" | "side_label";
+
+export interface PersonForegroundFrame {
+  frame: number;
+  path: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface TextEmphasisEvent {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  effect: TextEmphasisEffect;
+  position?: "left" | "center" | "right";
+  source_width?: number;
+  source_height?: number;
+  foreground_frames?: PersonForegroundFrame[];
+  fallback_reason?: string;
+}
+
+export interface TextEmphasisStyleConfig {
+  effectMode?: "auto" | TextEmphasisEffect;
+  animation?: "cinematic" | "slam" | "reveal";
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: string;
+  letterSpacing?: number;
+  lineHeight?: number;
+  color?: string;
+  accentColor?: string;
+  uppercase?: boolean;
+  strokeEnabled?: boolean;
+  strokeColor?: string;
+  strokeWidth?: number;
+  shadowEnabled?: boolean;
+  shadowColor?: string;
+  shadowBlur?: number;
+  positionY?: number;
+  maxWidthPct?: number;
+}
+
 /** Props for the main ClipComposition */
 export interface ClipCompositionProps {
   sceneGraph: SceneGraph;
@@ -69,6 +115,7 @@ export interface ClipCompositionProps {
   words: Word[];
   hookText: string;
   hookAnimation: string;
+  textEmphasisEvents?: TextEmphasisEvent[];
   enableThreeJS: boolean;
   enableAI: boolean;
 }

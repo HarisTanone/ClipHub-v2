@@ -6,6 +6,7 @@ import os
 from src.domain.entities import Clip
 from src.domain.interfaces import IRenderer
 from src.infrastructure.gpu_encoder import get_video_encoder_args, get_encoder_name
+from src.infrastructure.media_timeline import timeline_is_safe
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,14 @@ class FFmpegRenderer(IRenderer):
             logger.error(f"FFmpeg trim gagal untuk clip #{clip.rank}: {err[:300]}")
             raise RuntimeError(
                 f"FFmpeg trim gagal: {err[:300]}"
+            )
+
+        if os.path.exists(output_path) and not timeline_is_safe(
+            output_path,
+            expected_duration=duration,
+        ):
+            raise RuntimeError(
+                f"FFmpeg trim menghasilkan timeline audio/video tidak sinkron untuk clip #{clip.rank}"
             )
 
         logger.info(f"Clip #{clip.rank} berhasil di-trim → {output_path}")

@@ -36,6 +36,11 @@ from src.domain.entities import (
     TranscriptSegment,
 )
 from src.domain.interfaces import IGroqAnalyzer
+from src.infrastructure.text_emphasis import (
+    anchor_text_emphasis_response,
+    build_text_emphasis_context,
+    normalise_text_emphasis_style,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +284,290 @@ OUTPUT RAW JSON:
                 break
 
         return {"1": suggestions} if suggestions else {}
+
+    async def analyze_broll_for_clips(
+        self,
+        clips_words: dict[int, list[dict]],
+        clip_durations: dict[int, float],
+        max_suggestions: int = 2,
+    ) -> dict:
+        """Recover B-roll suggestions from the final word-level transcript.
+
+        Creative-direction generation is intentionally separate from highlight
+        ranking and can fail independently. This method gives Analyze First a
+        second, smaller router call and anchors every result to a real Whisper
+        word timestamp. A conservative local fallback still produces one useful
+        suggestion when the router returns malformed or empty JSON.
+        """
+        max_suggestions = max(0, min(int(max_suggestions), 2))
+        eligible: dict[int, list[dict]] = {}
+        context_lines: list[str] = []
+
+        for raw_rank, words in sorted(clips_words.items()):
+            rank = int(raw_rank)
+            duration = float(clip_durations.get(rank, 0.0) or 0.0)
+            clean_words = [
+                word
+                for word in words
+                if 3.0 <= float(word.get("start", -1.0)) < duration - 1.0
+                and str(word.get("word") or "").strip()
+            ]
+            if not clean_words or duration <= 4.0:
+                continue
+            eligible[rank] = clean_words
+
+            # Give every clip coverage without letting a long transcript crowd
+            # all other clips out of the prompt.
+            window_size = 8
+            windows = [
+                clean_words[index:index + window_size]
+                for index in range(0, len(clean_words), window_size)
+            ]
+            if len(windows) > 18:
+                last_index = len(windows) - 1
+                selected_indices = sorted({
+                    round(index * last_index / 17)
+                    for index in range(18)
+                })
+                windows = [windows[index] for index in selected_indices]
+            for window in windows:
+                text = " ".join(
+                    str(word.get("word") or "").strip()
+                    for word in window
+                ).strip()
+                if text:
+                    context_lines.append(
+                        f"Clip {rank} [{float(window[0]['start']):.2f}s] {text[:260]}"
+                    )
+
+        if not eligible or max_suggestions <= 0:
+            return {}
+
+        context = "\n".join(context_lines)
+        if len(context) > 14000:
+            context = context[:14000]
+        prompt = f"""Kamu adalah visual director short video. Pilih maksimal {max_suggestions} momen B-roll yang benar-benar membantu pemahaman untuk setiap clip berikut.
+
+TRANSKRIP CLIP BERTIMESTAMP:
+{context}
+
+ATURAN:
+- at_time harus menyalin salah satu timestamp yang tersedia pada clip yang sama.
+- Jangan pilih sebelum detik 3 dan jangan mengubah durasi/audio.
+- keyword harus berupa query stock footage konkret dalam bahasa Inggris, 2-6 kata; hindari kata abstrak/generik.
+- Utamakan footage. Pakai icon/motion_graphic/reaction hanya bila lebih tepat.
+- duration 1.5-3.0 detik dan beri jarak minimal 6 detik antar-B-roll.
+- Boleh kosong jika tidak ada visual yang relevan.
+
+OUTPUT RAW JSON:
+{{"clips":{{"1":[{{"at_time":12.5,"keyword":"elderly people city","duration":2.5,"visual_category":"footage","template":"word_pop_typography"}}]}}}}
+"""
+
+        parsed: dict = {}
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._call_groq_llm,
+                    prompt,
+                    self._model_pass1,
+                    1800,
+                ),
+                timeout=self._timeout,
+            )
+            parsed = self._parse_json_response(raw)
+        except Exception as exc:
+            logger.warning("v2_analyzer: clip B-roll recovery failed: %s", exc)
+
+        raw_map = parsed.get("clips", {}) if isinstance(parsed, dict) else {}
+        if not isinstance(raw_map, dict):
+            raw_map = {}
+
+        allowed_templates = {
+            "word_pop_typography",
+            "line_reveal_typography",
+            "particle_text_burst",
+        }
+        allowed_categories = {"footage", "icon", "motion_graphic", "reaction"}
+        result: dict[str, list[dict]] = {}
+
+        for rank, words in eligible.items():
+            duration = float(clip_durations.get(rank, 0.0) or 0.0)
+            allowed_times = [float(word["start"]) for word in words]
+            raw_items = raw_map.get(str(rank), raw_map.get(rank, []))
+            if not isinstance(raw_items, list):
+                raw_items = []
+            items: list[dict] = []
+
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                keyword = " ".join(str(item.get("keyword") or "").split())[:80]
+                if not keyword:
+                    continue
+                try:
+                    requested_time = float(item.get("at_time"))
+                except (TypeError, ValueError):
+                    continue
+                at_time = min(allowed_times, key=lambda value: abs(value - requested_time))
+                if at_time < 3.0 or at_time >= duration - 1.0:
+                    continue
+                if any(abs(at_time - existing["at_time"]) < 6.0 for existing in items):
+                    continue
+                try:
+                    item_duration = float(item.get("duration", 2.25))
+                except (TypeError, ValueError):
+                    item_duration = 2.25
+                item_duration = min(3.0, max(1.5, item_duration), duration - at_time)
+                if item_duration < 1.0:
+                    continue
+                template = str(item.get("template") or "word_pop_typography")
+                category = str(item.get("visual_category") or "footage")
+                items.append({
+                    "at_time": round(at_time, 3),
+                    "keyword": keyword,
+                    "duration": round(item_duration, 3),
+                    "visual_category": category if category in allowed_categories else "footage",
+                    "template": template if template in allowed_templates else "word_pop_typography",
+                })
+                if len(items) >= max_suggestions:
+                    break
+
+            if not items:
+                items = self._fallback_broll_from_words(words, duration, limit=1)
+            if items:
+                result[str(rank)] = items
+
+        return result
+
+    @staticmethod
+    def _fallback_broll_from_words(
+        words: list[dict],
+        duration: float,
+        limit: int = 1,
+    ) -> list[dict]:
+        """Pick a sparse concrete phrase when the optional AI call is down."""
+        stopwords = {
+            "yang", "dan", "atau", "dari", "untuk", "dengan", "adalah", "itu",
+            "ini", "ada", "akan", "bisa", "jadi", "juga", "karena", "kalau",
+            "kita", "mereka", "saya", "aku", "kamu", "dia", "nya", "kan",
+            "lagi", "sudah", "belum", "lebih", "paling", "satu", "sebuah",
+            "the", "and", "that", "this", "with", "from", "have", "has",
+            "was", "were", "are", "you", "your", "they", "their", "about",
+            "basically", "gitu", "lah", "nih", "sih", "aja", "kayak",
+        }
+        content_words: list[tuple[int, str, float]] = []
+        for index, word in enumerate(words):
+            raw = str(word.get("word") or "").strip()
+            token = re.sub(r"[^0-9A-Za-zÀ-ÿ]+", "", raw).lower()
+            try:
+                start = float(word.get("start", -1.0))
+            except (TypeError, ValueError):
+                continue
+            if start < 3.0 or start >= duration - 1.0:
+                continue
+            if len(token) < 4 or token in stopwords:
+                continue
+            content_words.append((index, raw, start))
+
+        candidates: list[tuple[float, float, str]] = []
+        for position, (word_index, raw, start) in enumerate(content_words):
+            phrase = [raw]
+            for next_index, next_raw, next_start in content_words[position + 1:position + 3]:
+                if next_index - word_index > 5 or next_start - start > 2.5:
+                    break
+                phrase.append(next_raw)
+            keyword = " ".join(phrase[:3]).strip()
+            unique_tokens = len({part.lower() for part in phrase})
+            score = sum(len(part) for part in phrase) + unique_tokens * 3
+            if any(char.isdigit() for char in keyword):
+                score += 8
+            candidates.append((float(score), start, keyword))
+
+        selected: list[dict] = []
+        for _score, start, keyword in sorted(candidates, reverse=True):
+            if any(abs(start - item["at_time"]) < 8.0 for item in selected):
+                continue
+            selected.append({
+                "at_time": round(start, 3),
+                "keyword": keyword[:80],
+                "duration": round(min(2.25, duration - start), 3),
+                "visual_category": "footage",
+                "template": "word_pop_typography",
+            })
+            if len(selected) >= max(0, int(limit)):
+                break
+        return sorted(selected, key=lambda item: item["at_time"])
+
+    async def analyze_text_emphasis(
+        self,
+        clips_words: dict[int, list[dict]],
+        clip_durations: dict[int, float],
+        style: Optional[dict] = None,
+        min_start_by_clip: Optional[dict[int, float]] = None,
+        blocked_ranges_by_clip: Optional[dict[int, list[tuple[float, float]]]] = None,
+        max_events: int = 2,
+    ) -> dict[int, list[dict]]:
+        """Choose sparse cinematic text moments through 9router.
+
+        The model selects only Whisper word IDs. ``anchor_text_emphasis_response``
+        then reconstructs text/timing locally and enforces max-two, spacing,
+        hook, B-roll, and duration rules.
+        """
+        if max_events <= 0 or not any(clips_words.values()):
+            return {}
+
+        context, _lookup = build_text_emphasis_context(clips_words)
+        if not context:
+            return {}
+        safe_style = normalise_text_emphasis_style(style)
+        effect_instruction = (
+            "Pilih effect paling cocok dari behind_person, spotlight, side_label."
+            if safe_style["effectMode"] == "auto"
+            else f'Semua pilihan WAJIB memakai effect "{safe_style["effectMode"]}".'
+        )
+        prompt = f"""Kamu adalah senior motion editor video pendek. Pilih hanya frasa yang benar-benar layak ditonjolkan sebagai cinematic text.
+
+TRANSKRIP WORD-ID:
+{context}
+
+ATURAN KETAT:
+- Maksimal {min(2, max_events)} event per clip; BOLEH 0 atau 1 jika tidak ada frasa yang sangat kuat.
+- Frasa 1-7 kata, harus memakai start_word dan end_word yang berurutan pada clip yang sama.
+- Jangan melewati penanda [... gap ...].
+- Prioritaskan angka mengejutkan, tesis utama, kontras tajam, istilah inti, atau punchline.
+- Hindari filler, salam, kalimat generik, dan jangan memilih dua frasa yang berdekatan.
+- behind_person untuk pernyataan hero yang sangat kuat; spotlight untuk angka/punchline; side_label untuk istilah atau konteks singkat.
+- {effect_instruction}
+- position hanya left, center, atau right.
+- Jangan membuat ulang teks dan jangan membuat timestamp.
+
+OUTPUT RAW JSON SAJA:
+{{"clips":{{"1":[{{"start_word":"W0012","end_word":"W0015","effect":"behind_person","position":"center","reason":"tesis utama"}}]}}}}
+"""
+        model = (
+            settings.NINE_ROUTER_AI_LAYER_MODEL
+            if settings.use_nine_router
+            else self._model_pass1
+        )
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(self._call_groq_llm, prompt, model, 1800),
+                timeout=self._timeout,
+            )
+            parsed = self._parse_json_response(raw)
+        except Exception as exc:
+            logger.warning(f"v2_analyzer: text emphasis analysis skipped: {exc}")
+            return {}
+
+        return anchor_text_emphasis_response(
+            parsed,
+            clips_words,
+            clip_durations,
+            style=safe_style,
+            min_start_by_clip=min_start_by_clip,
+            blocked_ranges_by_clip=blocked_ranges_by_clip,
+            max_events=min(2, max_events),
+        )
 
     async def _analyze_highlights_impl(
         self, transcript: TranscriptResult, video_duration: float, max_clips: int

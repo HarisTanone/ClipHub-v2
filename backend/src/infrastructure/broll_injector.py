@@ -21,6 +21,7 @@ from typing import Optional
 
 from src.domain.entities import AssetResult, BRollSuggestion
 from src.domain.interfaces import IBRollInjector, IBrowserRenderEngine
+from src.infrastructure.media_timeline import probe_media_timeline, timeline_is_safe
 
 logger = logging.getLogger(__name__)
 
@@ -157,14 +158,15 @@ class BRollInjector(IBRollInjector):
         if not filter_parts:
             return clip_path
 
-        filter_chain = ",".join(filter_parts)
+        filter_chain = "setpts=PTS-STARTPTS," + ",".join(filter_parts)
 
         cmd = [
             "ffmpeg", "-y",
             "-i", clip_path,
             "-vf", filter_chain,
+            "-af", "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS",
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-c:a", "copy",
+            "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
         ]
@@ -173,7 +175,13 @@ class BRollInjector(IBRollInjector):
             result = await asyncio.to_thread(
                 subprocess.run, cmd, capture_output=True, text=True, timeout=120
             )
-            if result.returncode == 0 and os.path.exists(output_path):
+            source_timeline = probe_media_timeline(clip_path)
+            expected_duration = source_timeline.video_duration if source_timeline else None
+            if (
+                result.returncode == 0
+                and os.path.exists(output_path)
+                and timeline_is_safe(output_path, expected_duration=expected_duration)
+            ):
                 logger.info(f"broll_injector: text burned → {os.path.basename(output_path)}")
                 return output_path
 
@@ -215,6 +223,10 @@ class BRollInjector(IBRollInjector):
         # Build FFmpeg command with multiple inputs
         inputs = ["-i", clip_path]
         for s in valid_assets:
+            # Animated assets must start at the requested overlay timestamp,
+            # not run invisibly from t=0 and freeze on their final frame.
+            if s.asset_result.asset_format in {"video", "gif"}:
+                inputs.extend(["-stream_loop", "-1"])
             inputs.extend(["-i", s.asset_result.local_path])
 
         # Build filter_complex
@@ -226,8 +238,9 @@ class BRollInjector(IBRollInjector):
             "-filter_complex", filter_complex,
             "-map", "[vout]",
             "-map", "0:a?",
+            "-af", "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS",
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-c:a", "copy",
+            "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
         ]
@@ -236,7 +249,13 @@ class BRollInjector(IBRollInjector):
             result = await asyncio.to_thread(
                 subprocess.run, cmd, capture_output=True, text=True, timeout=180
             )
-            if result.returncode == 0 and os.path.exists(output_path):
+            source_timeline = probe_media_timeline(clip_path)
+            expected_duration = source_timeline.video_duration if source_timeline else None
+            if (
+                result.returncode == 0
+                and os.path.exists(output_path)
+                and timeline_is_safe(output_path, expected_duration=expected_duration)
+            ):
                 logger.info(f"broll_injector: mixed overlay → {os.path.basename(output_path)}")
                 return output_path
 
@@ -262,8 +281,8 @@ class BRollInjector(IBRollInjector):
 
         Chain: overlay each asset sequentially, then apply drawtext filters.
         """
-        filters = []
-        current_label = "0:v"
+        filters = ["[0:v]setpts=PTS-STARTPTS[base0]"]
+        current_label = "base0"
         font_path = self._resolve_font()
 
         for i, suggestion in enumerate(asset_suggestions):
@@ -291,9 +310,7 @@ class BRollInjector(IBRollInjector):
 
             if overlay_filter:
                 filters.append(overlay_filter)
-                current_label = f"[{out_label}]"
-            else:
-                current_label = f"[{current_label}]" if not current_label.startswith("[") else current_label
+                current_label = out_label
 
         # Apply drawtext filters for fallback suggestions
         drawtext_parts = []
@@ -319,19 +336,9 @@ class BRollInjector(IBRollInjector):
             # Current label needs to feed into drawtext
             drawtext_chain = ",".join(drawtext_parts)
             # Strip brackets for filter graph label
-            clean_label = current_label.strip("[]")
-            filters.append(f"{current_label}{drawtext_chain}[vout]")
+            filters.append(f"[{current_label}]{drawtext_chain}[vout]")
         else:
-            # No drawtext, final overlay output is [vout]
-            # Rename last overlay output to [vout]
-            if filters:
-                # Replace the last out_label with vout
-                last_filter = filters[-1]
-                last_out = f"[ov{len(asset_suggestions) - 1}]"
-                filters[-1] = last_filter.replace(last_out, "[vout]")
-            else:
-                # No filters at all (shouldn't happen)
-                filters.append(f"[0:v]null[vout]")
+            filters.append(f"[{current_label}]null[vout]")
 
         return ";".join(filters)
 
@@ -359,11 +366,14 @@ class BRollInjector(IBRollInjector):
         scaled_label = f"s{input_idx}"
 
         filter_str = (
-            f"[{input_idx}:v]scale=648:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
+            f"[{input_idx}:v]trim=duration={duration:.3f},"
+            f"setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
+            f"scale=648:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
             f"fade=t=in:st={at_time:.3f}:d={fade_dur}:alpha=1,"
             f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur}:alpha=1"
             f"[{scaled_label}];"
             f"[{base}][{scaled_label}]overlay=(W-w)/2:(H-h)/2"
+            f":eof_action=pass:repeatlast=0"
             f":enable='between(t,{at_time:.3f},{end_time:.3f})'"
             f"[{out_label}]"
         )
@@ -389,11 +399,14 @@ class BRollInjector(IBRollInjector):
         scaled_label = f"img{input_idx}"
 
         filter_str = (
-            f"[{input_idx}:v]scale=432:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
+            f"[{input_idx}:v]loop=loop=-1:size=1:start=0,"
+            f"trim=duration={duration:.3f},setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
+            f"scale=432:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
             f"fade=t=in:st={at_time:.3f}:d={fade_dur}:alpha=1,"
             f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur}:alpha=1"
             f"[{scaled_label}];"
             f"[{base}][{scaled_label}]overlay=(W-w)/2:(H-h)/2"
+            f":eof_action=pass:repeatlast=0"
             f":enable='between(t,{at_time:.3f},{end_time:.3f})'"
             f"[{out_label}]"
         )
@@ -419,12 +432,14 @@ class BRollInjector(IBRollInjector):
         scaled_label = f"gif{input_idx}"
 
         filter_str = (
-            f"[{input_idx}:v]scale=432:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
+            f"[{input_idx}:v]trim=duration={duration:.3f},"
+            f"setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
+            f"scale=432:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
             f"fade=t=in:st={at_time:.3f}:d={fade_dur}:alpha=1,"
             f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur}:alpha=1"
             f"[{scaled_label}];"
             f"[{base}][{scaled_label}]overlay=(W-w)/2:(H-h)/2"
-            f":shortest=1"
+            f":eof_action=pass:repeatlast=0"
             f":enable='between(t,{at_time:.3f},{end_time:.3f})'"
             f"[{out_label}]"
         )
@@ -475,10 +490,14 @@ class BRollInjector(IBRollInjector):
         # Layer 1: Compact background pill (top 20% of frame, not blocking speaker)
         box_color = style.get("box_color", "black@0.6")
         pill_h = font_size + 24
+        # drawbox does not expose drawtext's text_w variable. The old expression
+        # made the entire fallback render fail whenever stock footage was not
+        # available. Estimate a bounded pill width from the known text/font size.
+        pill_w = min(960, max(220, int(len(text) * font_size * 0.62) + 48))
         parts.append(
             f"drawbox="
-            f"x=(iw-text_w-40)/2:y=ih*0.15-{pill_h // 2}"
-            f":w=text_w+40:h={pill_h}"
+            f"x=(iw-{pill_w})/2:y=ih*0.15-{pill_h // 2}"
+            f":w={pill_w}:h={pill_h}"
             f":color={box_color}:t=fill"
             f":enable='between(t,{start:.3f},{end:.3f})'"
         )

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from typing import Optional
 
 from src.config import settings
@@ -68,6 +69,12 @@ class AssetFetcher(IAssetFetcher):
         if not suggestions:
             return suggestions
 
+        if not settings.ASSET_FETCH_ENABLED:
+            for suggestion in suggestions:
+                suggestion.asset_result = AssetResult.fallback()
+            logger.info("[AssetFetcher] Disabled by ASSET_FETCH_ENABLED=false")
+            return suggestions
+
         tasks = [
             self._resolve_single(s, creative_direction)
             for s in suggestions
@@ -104,41 +111,43 @@ class AssetFetcher(IAssetFetcher):
 
             # 1. Check cache first
             cached = self._cache.get(keyword, category_str)
-            if cached:
+            if cached and os.path.exists(cached.local_path) and os.path.getsize(cached.local_path) > 0:
                 suggestion.asset_result = cached
                 logger.debug(f"[AssetFetcher] Cache hit: {keyword} ({category_str})")
                 return
 
             # 2. Get client chain for this category
             chain = self._client_chains.get(cat_enum, self._client_chains[VisualCategory.FOOTAGE])
-            query = self._build_query(keyword, creative_direction, category_str)
+            queries = self._build_queries(keyword, creative_direction, category_str)
 
             # 3. Try each client in chain
             for client in chain:
-                try:
-                    result = await asyncio.wait_for(
-                        client.search(query),
-                        timeout=self._timeout,
-                    )
-                    if result and not result.is_fallback:
-                        # Cache the result
-                        self._cache.put(keyword, category_str, result)
-                        suggestion.asset_result = result
-                        logger.info(
-                            f"[AssetFetcher] Resolved: {keyword} -> "
-                            f"{result.source_api} ({result.asset_format})"
+                for query in queries:
+                    try:
+                        result = await asyncio.wait_for(
+                            client.search(query),
+                            timeout=self._timeout,
                         )
-                        return
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        f"[AssetFetcher] Timeout: {client.__class__.__name__} for '{keyword}'"
-                    )
-                    continue
-                except Exception as e:
-                    logger.warning(
-                        f"[AssetFetcher] Error: {client.__class__.__name__} for '{keyword}': {e}"
-                    )
-                    continue
+                        if result and not result.is_fallback:
+                            # Cache using the original semantic keyword so later
+                            # jobs reuse the same licensed asset.
+                            self._cache.put(keyword, category_str, result)
+                            suggestion.asset_result = result
+                            logger.info(
+                                f"[AssetFetcher] Resolved: {keyword} -> "
+                                f"{result.source_api} ({result.asset_format}, query='{query}')"
+                            )
+                            return
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            f"[AssetFetcher] Timeout: {client.__class__.__name__} for '{query}'"
+                        )
+                        break
+                    except Exception as e:
+                        logger.warning(
+                            f"[AssetFetcher] Error: {client.__class__.__name__} for '{query}': {e}"
+                        )
+                        break
 
             # 4. All clients failed — fallback mode
             suggestion.asset_result = AssetResult.fallback()
@@ -154,3 +163,14 @@ class AssetFetcher(IAssetFetcher):
             if mood and mood != "high":  # "high" is too generic to help
                 return f"{keyword} {mood}"
         return keyword
+
+    def _build_queries(
+        self,
+        keyword: str,
+        creative_direction: Optional[CreativeDirection],
+        category_str: str,
+    ) -> list[str]:
+        """Try the precise query first, then one optional mood variant."""
+        base = " ".join(str(keyword).split())
+        augmented = self._build_query(base, creative_direction, category_str)
+        return list(dict.fromkeys(query for query in (base, augmented) if query))
