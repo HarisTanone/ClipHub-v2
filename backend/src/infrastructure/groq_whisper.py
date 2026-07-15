@@ -299,6 +299,12 @@ class GroqWhisperTranscriber:
                     nested_words.extend(getattr(segment, "words", None) or [])
             raw_words = nested_words
 
+        # If still no words, synthesize word-level timing from segment text.
+        # This provides approximate word timestamps when the API only returns
+        # segment-level timing (common with 9router/Groq free tier).
+        if not raw_words and raw_segments:
+            raw_words = self._synthesize_words_from_segments(raw_segments)
+
         all_words = []
         for w in raw_words:
             word_data = self._extract_word(w)
@@ -407,6 +413,36 @@ class GroqWhisperTranscriber:
         """Get string from dict or object attribute."""
         value = obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
         return default if value is None else str(value)
+
+    def _synthesize_words_from_segments(self, raw_segments: list) -> list[dict]:
+        """Synthesize word-level timing from segment text when API omits words.
+
+        Distributes words evenly across each segment's time span. This is an
+        approximation but sufficient for subtitle display (local Whisper fallback
+        provides precise timing if this path is taken for word-level transcription).
+        """
+        synthesized = []
+        for seg in raw_segments:
+            seg_start = self._get_float(seg, "start", 0)
+            seg_end = self._get_float(seg, "end", 0)
+            seg_text = self._get_str(seg, "text", "").strip()
+
+            if not seg_text or seg_end <= seg_start:
+                continue
+
+            words = seg_text.split()
+            if not words:
+                continue
+
+            duration = seg_end - seg_start
+            word_duration = duration / len(words)
+
+            for i, word in enumerate(words):
+                w_start = round(seg_start + i * word_duration, 3)
+                w_end = round(seg_start + (i + 1) * word_duration, 3)
+                synthesized.append({"word": word, "start": w_start, "end": w_end})
+
+        return synthesized
 
     def _words_to_segments(self, words: list[dict], max_per_segment: int = 30) -> list[dict]:
         """Group words into segments when API returns words without segments."""

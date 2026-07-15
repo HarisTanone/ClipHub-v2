@@ -29,10 +29,10 @@ class Settings(BaseSettings):
     # 9router / OpenAI-compatible chat completions API
     NINE_ROUTER_BASE_URL: str = ""
     NINE_ROUTER_API_KEY: str = ""
-    NINE_ROUTER_MODEL: str = "ngentot"
-    NINE_ROUTER_PASS1_MODEL: str = "ngentot"
-    NINE_ROUTER_PASS2_MODEL: str = "ngentot"
-    NINE_ROUTER_AI_LAYER_MODEL: str = "ngentot"
+    NINE_ROUTER_MODEL: str = "CliperHub"
+    NINE_ROUTER_PASS1_MODEL: str = "CliperHub"
+    NINE_ROUTER_PASS2_MODEL: str = "CliperHub"
+    NINE_ROUTER_AI_LAYER_MODEL: str = "CliperHub"
     NINE_ROUTER_TIMEOUT: int = 120
     NINE_ROUTER_MAX_RETRIES: int = 3
     NINE_ROUTER_TEMPERATURE: float = 0.3
@@ -237,7 +237,7 @@ class Settings(BaseSettings):
 
     @property
     def nine_router_model(self) -> str:
-        return self.NINE_ROUTER_MODEL or "ngentot"
+        return self.NINE_ROUTER_MODEL or "CliperHub"
 
     @property
     def is_local(self) -> bool:

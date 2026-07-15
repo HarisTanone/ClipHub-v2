@@ -242,10 +242,10 @@ if [ -f ".env" ]; then
     append_env_if_missing ".env" "TRANSCRIPTION_PROVIDER" "local"
     append_env_if_missing ".env" "NINE_ROUTER_BASE_URL" "$NINE_ROUTER_DEFAULT_BASE_URL"
     append_env_if_missing ".env" "NINE_ROUTER_API_KEY" ""
-    append_env_if_missing ".env" "NINE_ROUTER_MODEL" "ngentot"
-    append_env_if_missing ".env" "NINE_ROUTER_PASS1_MODEL" "ngentot"
-    append_env_if_missing ".env" "NINE_ROUTER_PASS2_MODEL" "ngentot"
-    append_env_if_missing ".env" "NINE_ROUTER_AI_LAYER_MODEL" "ngentot"
+    append_env_if_missing ".env" "NINE_ROUTER_MODEL" "CliperHub"
+    append_env_if_missing ".env" "NINE_ROUTER_PASS1_MODEL" "CliperHub"
+    append_env_if_missing ".env" "NINE_ROUTER_PASS2_MODEL" "CliperHub"
+    append_env_if_missing ".env" "NINE_ROUTER_AI_LAYER_MODEL" "CliperHub"
     append_env_if_missing ".env" "NINE_ROUTER_TIMEOUT" "120"
     append_env_if_missing ".env" "NINE_ROUTER_MAX_RETRIES" "3"
     set_env_value ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000"
@@ -262,7 +262,7 @@ if [ -f ".env" ]; then
         if [ -z "$NINE_ROUTER_API_KEY_VAL" ]; then
             echo "  ⚠️  NINE_ROUTER_API_KEY is empty. Continuing because some local 9router installs do not require auth."
         fi
-        echo "  ✅ 9router configured (model=$(env_value ".env" "NINE_ROUTER_MODEL" "ngentot"), url=$NINE_ROUTER_BASE_URL_VAL)"
+        echo "  ✅ 9router configured (model=$(env_value ".env" "NINE_ROUTER_MODEL" "CliperHub"), url=$NINE_ROUTER_BASE_URL_VAL)"
     fi
 fi
 

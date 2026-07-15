@@ -818,7 +818,22 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
 {{"clips": [{{"start_id": "S0001", "end_id": "S0010", "score": 85, "summary": "ringkasan singkat", "content_type": "storytelling", "speaker_energy": "high"}}]}}"""
 
         raw = self._call_groq_llm(prompt, model=self._model_pass1, max_tokens=1500)
-        return self._parse_pass1_response(raw, segment_map, chunk_start, chunk_end)
+        candidates = self._parse_pass1_response(raw, segment_map, chunk_start, chunk_end)
+
+        # Retry once with stricter prompt if JSON parse returned 0 candidates
+        if not candidates and raw and raw.strip():
+            logger.info(f"v2_analyzer: Pass 1 chunk {chunk_num} retry (0 candidates from first attempt)")
+            retry_prompt = (
+                "PENTING: Jawab HANYA dengan JSON valid. Jangan gunakan markdown, "
+                "jangan tambahkan penjelasan. Format:\n"
+                '{"clips": [{"start_id": "SXXXX", "end_id": "SXXXX", "score": 80, '
+                '"summary": "...", "content_type": "storytelling", "speaker_energy": "high"}]}\n\n'
+                + prompt
+            )
+            raw_retry = self._call_groq_llm(retry_prompt, model=self._model_pass1, max_tokens=1500)
+            candidates = self._parse_pass1_response(raw_retry, segment_map, chunk_start, chunk_end)
+
+        return candidates
 
     def _parse_pass1_response(
         self, raw_text: str, segment_map: dict, chunk_start: float, chunk_end: float
@@ -1232,7 +1247,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         return json_str
 
     def _parse_json_response(self, raw_text: str) -> dict:
-        """Parse JSON with tolerance for markdown fences and trailing commas."""
+        """Parse JSON with tolerance for markdown fences, trailing commas, and truncation."""
         text = raw_text.strip()
         if text.startswith("```"):
             lines = text.split("\n")
@@ -1254,11 +1269,57 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             json_str = self._clean_json_string(match.group(0))
             try:
                 return json.loads(json_str)
-            except json.JSONDecodeError as e:
-                logger.warning(f"v2_analyzer: JSON parse failed after cleanup: {e}\nRaw: {json_str[:200]}")
+            except json.JSONDecodeError:
+                pass
 
-        logger.warning(f"v2_analyzer: failed to parse JSON: {text[:200]}")
+            # Third attempt: repair truncated JSON (LLM cut off mid-response)
+            repaired = self._repair_truncated_json(json_str)
+            if repaired:
+                try:
+                    return json.loads(repaired)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"v2_analyzer: JSON parse failed after repair: {e}\nRaw: {json_str[:200]}")
+            else:
+                logger.warning(f"v2_analyzer: JSON parse failed after cleanup: truncated\nRaw: {json_str[:200]}")
+        else:
+            logger.warning(f"v2_analyzer: failed to parse JSON (no JSON object found): {text[:200]}")
+
         return {}
+
+    def _repair_truncated_json(self, json_str: str) -> Optional[str]:
+        """Attempt to repair truncated JSON from LLM max_tokens cutoff.
+
+        Common patterns:
+        - {"clips": [{"start_id": "S0275", ...}, {"start_id": "S0300", ...   (cut off)
+        - Missing closing brackets/braces
+
+        Strategy: find last complete object in array, close the structure.
+        """
+        # Count open vs close braces/brackets
+        open_braces = json_str.count('{') - json_str.count('}')
+        open_brackets = json_str.count('[') - json_str.count(']')
+
+        if open_braces == 0 and open_brackets == 0:
+            return None  # Not a truncation issue
+
+        # Find the last complete object boundary ("},")
+        # Truncate to last complete item and close the structure
+        last_complete = json_str.rfind('},')
+        if last_complete == -1:
+            last_complete = json_str.rfind('}')
+
+        if last_complete == -1:
+            return None  # No complete object found
+
+        # Keep up to and including the last complete "}"
+        repaired = json_str[:last_complete + 1]
+
+        # Close any remaining open brackets/braces
+        open_braces = repaired.count('{') - repaired.count('}')
+        open_brackets = repaired.count('[') - repaired.count(']')
+        repaired += ']' * open_brackets + '}' * open_braces
+
+        return repaired
 
     # ─── Utility ──────────────────────────────────────────────────────────────
 

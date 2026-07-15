@@ -24,6 +24,10 @@ class AutoScaleAdvisor:
         self._scale_up_threshold = self._parse_int_env("SCALE_UP_THRESHOLD", 15)
         self._scale_down_threshold = self._parse_int_env("SCALE_DOWN_THRESHOLD", 3)
         self._consecutive_low_cycles = 0
+        self._last_recommendation: str = ""
+        self._stable_cycles_since_log: int = 0
+        # Only log every N stable cycles to reduce noise (4 workers × 60s = a lot of logs)
+        self._stable_log_interval: int = 10  # Log stable state every 10 minutes
 
         logger.info("auto_scale_init", extra={
             "scale_up_threshold": self._scale_up_threshold,
@@ -63,12 +67,28 @@ class AutoScaleAdvisor:
             recommendation=recommendation,
         )
 
-        logger.info("scale_evaluation", extra={
-            "queue_depth": queue_depth,
-            "recommended_workers": recommended,
-            "recommendation": recommendation,
-            "consecutive_low": self._consecutive_low_cycles,
-        })
+        # Only log when state changes or periodically for stable state
+        state_changed = recommendation != self._last_recommendation
+        self._last_recommendation = recommendation
+
+        if state_changed or recommendation != "stable":
+            self._stable_cycles_since_log = 0
+            logger.info("scale_evaluation", extra={
+                "queue_depth": queue_depth,
+                "recommended_workers": recommended,
+                "recommendation": recommendation,
+                "consecutive_low": self._consecutive_low_cycles,
+            })
+        else:
+            self._stable_cycles_since_log += 1
+            if self._stable_cycles_since_log >= self._stable_log_interval:
+                self._stable_cycles_since_log = 0
+                logger.debug("scale_evaluation", extra={
+                    "queue_depth": queue_depth,
+                    "recommended_workers": recommended,
+                    "recommendation": recommendation,
+                    "consecutive_low": self._consecutive_low_cycles,
+                })
 
         return result
 

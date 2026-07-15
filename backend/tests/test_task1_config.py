@@ -29,7 +29,7 @@ def test_config_nine_router_settings():
     assert settings.NINE_ROUTER_WHISPER_ENABLED is True
     assert settings.NINE_ROUTER_WHISPER_MODEL == "groq/whisper-large-v3-turbo"
     assert settings.NINE_ROUTER_WHISPER_MAX_RETRIES == 1
-    assert settings.nine_router_model == "ngentot"
+    assert settings.nine_router_model == "CliperHub"
     print("  [PASS] 9router settings loaded correctly")
 
 
