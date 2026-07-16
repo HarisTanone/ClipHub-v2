@@ -131,6 +131,16 @@ class Settings(BaseSettings):
     TEXT_EMPHASIS_SEG_CONFIDENCE: float = 0.35
     TEXT_EMPHASIS_MASK_FEATHER: int = 9
 
+    # === Person-First Reframe Migration ===
+    PERSON_DETECTOR: str = "rfdetr-large"       # rfdetr-medium | rfdetr-large | rfdetr-2xlarge
+    PERSON_CONF_THRESHOLD: float = 0.50
+    PERSON_TRACKER: str = "botsort"             # botsort | bytetrack
+    TRACKER_MAX_LOST_FRAMES: int = 8
+    FACE_DETECTOR: str = "retinaface"           # retinaface | scrfd
+    FACE_REGION_HEAD_RATIO: float = 0.35
+    FACE_CONFIDENCE: float = 0.55
+    REFRAME_PIPELINE_MODE: str = "legacy"       # legacy | shadow | person_first
+
     # === HuggingFace (Pyannote Speaker Diarization) ===
     HF_TOKEN: str = ""
 
@@ -147,6 +157,8 @@ class Settings(BaseSettings):
     CENTERING_FACE_MARGIN_RATIO: float = 0.6    # Extra margin around face bbox (0.6 = 60% of face width)
     MAPPING_MARGIN_THRESHOLD: float = 0.3       # Min margin between top1 and top2 for reliable mapping
     CENTERING_MAX_FACES: int = 12               # Detector capacity only; actual people count is auto-detected
+
+
 
     # === Hook Rendering ===
     HOOK_DEFAULT_STYLE: str = "zoom_punch"  # animation preset name

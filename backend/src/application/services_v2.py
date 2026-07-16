@@ -51,6 +51,7 @@ from src.infrastructure.clip_outputs import initialize_clip_readiness, mark_clip
 from src.infrastructure.subtitle_words import sanitize_subtitle_words
 from src.infrastructure.text_emphasis import normalise_text_emphasis_style
 from src.infrastructure.video_splicer import VideoSplicer
+from src.infrastructure.person_first_reframe_engine import PersonFirstReframeEngine
 
 if TYPE_CHECKING:
     from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
@@ -576,6 +577,84 @@ class V2PipelineService:
                     except Exception as e:
                         logger.warning(f"[{job_id}] YOLO reframe failed clip {clip.rank}: {e}")
             self._emit(job_id, 8, "yolo_reframe", "complete")
+
+            # ═══ Step 8.1: Person-First Shadow Mode (parallel comparison) ═══
+            if (
+                settings.REFRAME_PIPELINE_MODE == "shadow"
+                and flags.yolo_enabled
+                and reframe_data
+            ):
+                try:
+                    shadow_engine = PersonFirstReframeEngine(
+                        hf_token=getattr(settings, "HF_TOKEN", ""),
+                    )
+                    shadow_results = {}
+                    for clip in clips:
+                        if not trim_results.get(clip.rank):
+                            continue
+                        in_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                        shadow_out = f"{output_dir}/clip_{clip.rank:02d}_shadow.mp4"
+                        try:
+                            shadow_result = await shadow_engine.process(
+                                in_path,
+                                shadow_out,
+                                job.target_aspect_ratio,
+                                flags.autogrid_enabled,
+                                content_profile=(job.clips_data or {}).get("content_profile", {}),
+                                transition_style=reframe_style.get("transitionStyle", "cut"),
+                                transition_duration=reframe_style.get("transitionDuration", 0.35),
+                            )
+                            shadow_results[clip.rank] = shadow_result
+                        except Exception as e:
+                            logger.debug(f"[{job_id}] shadow reframe clip {clip.rank}: {e}")
+
+                    # Log comparison metrics
+                    for rank in reframe_data:
+                        legacy = reframe_data[rank]
+                        shadow = shadow_results.get(rank, {})
+                        logger.info(
+                            f"[{job_id}] SHADOW COMPARE clip {rank}: "
+                            f"legacy_method={legacy.get('method', 'unknown')}, "
+                            f"legacy_persons={legacy.get('person_count', 0)}, "
+                            f"shadow_method={shadow.get('method', 'unknown')}, "
+                            f"shadow_persons={shadow.get('person_count', 0)}"
+                        )
+
+                    # Cleanup shadow outputs (not used for final render)
+                    for clip in clips:
+                        shadow_out = f"{output_dir}/clip_{clip.rank:02d}_shadow.mp4"
+                        if os.path.exists(shadow_out):
+                            os.remove(shadow_out)
+
+                except Exception as e:
+                    logger.warning(f"[{job_id}] shadow mode error (non-fatal): {e}")
+
+            # ═══ Step 8.2: Person-First Active Mode ═══
+            elif settings.REFRAME_PIPELINE_MODE == "person_first" and flags.yolo_enabled:
+                # Replace legacy results with person-first pipeline
+                person_first_engine = PersonFirstReframeEngine(
+                    hf_token=getattr(settings, "HF_TOKEN", ""),
+                )
+                reframe_data = {}
+                reframe_style = (job.clips_data or {}).get("hook_style_config", {})
+                for clip in clips:
+                    if not trim_results.get(clip.rank):
+                        continue
+                    in_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                    out_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                    try:
+                        result = await person_first_engine.process(
+                            in_path,
+                            out_path,
+                            job.target_aspect_ratio,
+                            flags.autogrid_enabled,
+                            content_profile=(job.clips_data or {}).get("content_profile", {}),
+                            transition_style=reframe_style.get("transitionStyle", "cut"),
+                            transition_duration=reframe_style.get("transitionDuration", 0.35),
+                        )
+                        reframe_data[clip.rank] = result
+                    except Exception as e:
+                        logger.warning(f"[{job_id}] person_first reframe failed clip {clip.rank}: {e}")
 
             # Center-crop fallback for 9:16 — ONLY if YOLO model wasn't loaded
             # If YOLO ran but returned None (e.g. union_crop decided to skip because
