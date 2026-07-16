@@ -267,9 +267,79 @@ if [ -f ".env" ]; then
 fi
 
 # Create directories
-mkdir -p data data/asset_cache tmp/output tmp/downloads
+mkdir -p data data/asset_cache tmp/output tmp/downloads models
 
 echo "  ✅ Backend ready"
+
+# ─── Step 3.2: Person-First Pipeline Models ──────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Step 3.2: Person-First Pipeline Models"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# RF-DETR Large — pre-download so first inference doesn't block
+echo "  Checking RF-DETR Large model..."
+./venv/bin/python3 -c "
+try:
+    from rfdetr import RFDETRLarge
+    model = RFDETRLarge()
+    print('  RF-DETR Large: already cached')
+except Exception as e:
+    print(f'  RF-DETR Large: download needed ({e})')
+    try:
+        from rfdetr import RFDETRLarge
+        RFDETRLarge()
+        print('  RF-DETR Large: downloaded OK')
+    except Exception as e2:
+        print(f'  ⚠️  RF-DETR download failed: {e2}')
+        print('  Will fallback to Ultralytics YOLO at runtime')
+" 2>&1 || echo "  ⚠️  RF-DETR pre-download skipped (non-fatal)"
+
+# RetinaFace — pre-download model weights
+echo "  Checking RetinaFace model..."
+./venv/bin/python3 -c "
+try:
+    from retinaface.pre_trained_models import get_model
+    model = get_model('resnet50_2020-07-20', max_size=640)
+    print('  RetinaFace resnet50: ready')
+except ImportError:
+    print('  RetinaFace: package not available, will use MediaPipe fallback')
+except Exception as e:
+    print(f'  RetinaFace: {e}')
+" 2>&1 || echo "  ⚠️  RetinaFace pre-download skipped (non-fatal)"
+
+# Ultralytics YOLO — pre-download for tracker fallback + person detection fallback
+echo "  Checking YOLO11n model (tracker fallback)..."
+if [ ! -f "models/yolo11n.pt" ]; then
+    ./venv/bin/python3 -c "
+from ultralytics import YOLO
+import shutil, os
+model = YOLO('yolo11n.pt')
+# Move to models/ dir if downloaded to cwd
+if os.path.exists('yolo11n.pt') and not os.path.exists('models/yolo11n.pt'):
+    shutil.move('yolo11n.pt', 'models/yolo11n.pt')
+print('  YOLO11n: ready')
+" 2>&1 || echo "  ⚠️  YOLO11n download skipped"
+else
+    echo "  YOLO11n: already present"
+fi
+
+# YOLO11n-seg — for text-behind-person effect (existing feature)
+echo "  Checking YOLO11n-seg model..."
+if [ ! -f "models/yolo11n-seg.pt" ]; then
+    ./venv/bin/python3 -c "
+from ultralytics import YOLO
+import shutil, os
+model = YOLO('yolo11n-seg.pt')
+if os.path.exists('yolo11n-seg.pt') and not os.path.exists('models/yolo11n-seg.pt'):
+    shutil.move('yolo11n-seg.pt', 'models/yolo11n-seg.pt')
+print('  YOLO11n-seg: ready')
+" 2>&1 || echo "  ⚠️  YOLO11n-seg download skipped"
+else
+    echo "  YOLO11n-seg: already present"
+fi
+
+echo "  ✅ Models provisioned"
 
 # ─── Step 3.5: Optional cache clear ──────────────────────────────────────────
 echo ""
