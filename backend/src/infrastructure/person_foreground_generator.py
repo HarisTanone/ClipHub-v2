@@ -43,20 +43,9 @@ class PersonForegroundGenerator:
     def _load_model(self):
         if self._model is not None:
             return self._model
-        from ultralytics import YOLO
-
-        configured = Path(self.model_path)
-        backend_root = Path(__file__).resolve().parents[2]
-        candidates = [
-            configured,
-            backend_root / configured,
-            backend_root / configured.name,
-        ]
-        existing = next((path for path in candidates if path.exists()), None)
-        # Passing the official basename lets Ultralytics download it once when
-        # a deployment has not pre-provisioned the segmentation weight yet.
-        resolved = str(existing or configured.name or "yolo11n-seg.pt")
-        self._model = YOLO(resolved)
+        
+        import rfdetr
+        self._model = rfdetr.RFDETRSegLarge()
         return self._model
 
     def _generate_sync(
@@ -89,7 +78,7 @@ class PersonForegroundGenerator:
             model = self._load_model()
         except Exception as exc:
             cap.release()
-            logger.warning("text_emphasis: YOLO11-seg unavailable, using spotlight fallback: %s", exc)
+            logger.warning("text_emphasis: RF-DETR-Seg unavailable, using spotlight fallback: %s", exc)
             return self._downgrade_behind_events(safe_events, "segmentation_unavailable")
 
         os.makedirs(output_dir, exist_ok=True)
@@ -111,22 +100,21 @@ class PersonForegroundGenerator:
                     if not ok:
                         continue
                     try:
-                        results = model.predict(
-                            source=frame,
-                            classes=[0],
-                            conf=float(settings.TEXT_EMPHASIS_SEG_CONFIDENCE),
-                            imgsz=640,
-                            retina_masks=True,
-                            verbose=False,
-                        )
+                        preds = model.predict(frame, threshold=float(settings.TEXT_EMPHASIS_SEG_CONFIDENCE))
+                        person_masks = []
+                        for idx in range(len(preds)):
+                            cname = preds.data.get('class_name')[idx] if 'class_name' in preds.data else ""
+                            cid = preds.class_id[idx]
+                            if cname == "person" or cid == 1:
+                                person_masks.append(preds.mask[idx])
                     except Exception as exc:
-                        logger.warning("text_emphasis: YOLO inference failed at frame %s: %s", composition_frame, exc)
+                        logger.warning("text_emphasis: RF-DETR inference failed at frame %s: %s", composition_frame, exc)
                         continue
-                    if not results or results[0].masks is None:
+                    
+                    if not person_masks:
                         continue
-                    masks = results[0].masks.data.cpu().numpy()
-                    if masks.size == 0:
-                        continue
+                    
+                    masks = np.array(person_masks)
                     union = np.max(masks, axis=0)
                     if union.shape[:2] != (height, width):
                         union = cv2.resize(union, (width, height), interpolation=cv2.INTER_LINEAR)

@@ -84,6 +84,8 @@ class TrackedDetection:
     bbox: BBox
     frame_idx: int
     is_new: bool = False           # True if this is a newly created track
+    person_bbox: Optional[BBox] = None # Full person bounding box (for person-first reframe)
+    face_bbox: Optional[BBox] = None  # Optional face bbox (for person-first mode)
 
 
 class SimpleIoUTracker:

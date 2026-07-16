@@ -282,18 +282,24 @@ def test_grid_geometry_uses_smallest_safe_zoom_and_caps_it():
 
 def test_layout_timeline_switches_only_after_stable_people_count():
     engine = PodcastReframeEngine()
+    engine.GRID_ENTER_SAMPLES = 3
+    engine.GRID_EXIT_SAMPLES = 2
+    engine.MIN_GRID_SEGMENT_SECONDS = 0.5
     events = engine._build_layout_events(
         raw_double=[False, False, True, True, True, False, False, False],
         timestamps=[0.0, 0.33, 0.66, 1.0, 1.33, 1.66, 2.0, 2.33],
     )
 
     assert [event["layout"] for event in events] == ["single", "double", "single"]
-    assert events[1]["time"] == 1.0
-    assert events[2]["time"] == 2.33
+    assert events[1]["time"] == 0.66
+    assert events[2]["time"] == 1.66
 
 
 def test_layout_closes_immediately_if_one_face_enters_both_crops():
     engine = PodcastReframeEngine()
+    engine.GRID_ENTER_SAMPLES = 2
+    engine.GRID_EXIT_SAMPLES = 1
+    engine.MIN_GRID_SEGMENT_SECONDS = 0.5
     events = engine._build_layout_events(
         raw_double=[True, True, False, True, True],
         timestamps=[0.0, 0.33, 0.66, 1.0, 1.33],
@@ -302,7 +308,7 @@ def test_layout_closes_immediately_if_one_face_enters_both_crops():
 
     assert events[0]["layout"] == "double"
     assert events[1] == {"time": 0.66, "layout": "single"}
-    assert events[2] == {"time": 1.33, "layout": "double"}
+    assert events[2] == {"time": 1.0, "layout": "double"}
 
 
 def test_grid_frame_detects_same_face_inside_both_source_crops():
@@ -322,6 +328,8 @@ def test_grid_frame_detects_same_face_inside_both_source_crops():
 
 def test_autogrid_can_open_for_short_stable_multi_person_section():
     engine = PodcastReframeEngine()
+    engine.GRID_ENTER_SAMPLES = 3
+    engine.MIN_GRID_SEGMENT_SECONDS = 0.5
     frames = []
     for frame in range(12):
         detections = [TrackedDetection(10, BBox(410, 100, 550, 260), frame)]
@@ -406,11 +414,12 @@ def test_grid_renderer_uses_two_equal_960px_panels():
     captured = {}
 
     def fake_run(command, **kwargs):
-        captured["command"] = command
+        if len(command) > 0 and "ffmpeg" in command[0]:
+            captured["command"] = command
         output_path = command[-1]
         with open(output_path, "wb") as output:
             output.write(b"0" * 1200)
-        return SimpleNamespace(returncode=0, stderr="")
+        return SimpleNamespace(returncode=0, stdout='{"streams": [{"codec_type": "video", "start_time": "0.0", "duration": "1.0"}]}', stderr="")
 
     with tempfile.TemporaryDirectory() as temp_dir:
         output_path = os.path.join(temp_dir, "grid.mp4")

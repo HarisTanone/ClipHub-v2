@@ -148,6 +148,122 @@ class PodcastReframeEngine(IReframeEngine):
 
         return model_path
 
+    def _load_person_detector(self) -> bool:
+        """Lazy-load RF-DETR person detector."""
+        if hasattr(self, "_person_detector") and self._person_detector is not None:
+            return True
+        try:
+            from src.config import settings
+            detector_name = settings.PERSON_DETECTOR
+            if "large" in detector_name:
+                from rfdetr import RFDETRLarge
+                self._person_detector = RFDETRLarge()
+            elif "medium" in detector_name:
+                from rfdetr import RFDETRMedium
+                self._person_detector = RFDETRMedium()
+            else:
+                from rfdetr import RFDETRMedium
+                self._person_detector = RFDETRMedium()
+            logger.info(f"podcast_reframe: RF-DETR person detector loaded ({detector_name})")
+            return True
+        except Exception as e:
+            logger.warning(f"podcast_reframe: RF-DETR load failed, trying YOLO fallback: {e}")
+            try:
+                from ultralytics import YOLO
+                self._person_detector = YOLO("yolo11n.pt")
+                logger.info("podcast_reframe: YOLO fallback person detector loaded")
+                return True
+            except Exception as e2:
+                logger.error(f"podcast_reframe: all person detector loaders failed: {e2}")
+                return False
+
+    def _load_crop_face_detector(self) -> bool:
+        """Lazy-load RetinaFace / SCRFD face detector for person crop."""
+        if hasattr(self, "_crop_face_detector") and self._crop_face_detector is not None:
+            return True
+        try:
+            from src.config import settings
+            detector_type = settings.FACE_DETECTOR
+            if detector_type == "retinaface":
+                try:
+                    from retinaface.pre_trained_models import get_model
+                    import torch
+                    device = "cuda" if torch.cuda.is_available() else "cpu"
+                    self._crop_face_detector = get_model("resnet50_2020-07-20", max_size=2048, device=device)
+                    self._crop_face_detector.eval()
+                    self._crop_face_detector_type = "retinaface"
+                    logger.info("podcast_reframe: RetinaFace face detector loaded (PyTorch)")
+                    return True
+                except Exception as e_retina:
+                    logger.warning(f"podcast_reframe: RetinaFace load failed: {e_retina}, trying SCRFD fallback")
+                    detector_type = "scrfd"
+            
+            if detector_type == "scrfd":
+                try:
+                    from scrfd import SCRFD
+                    onnx_path = self._find_scrfd_model()
+                    self._crop_face_detector = SCRFD.from_path(onnx_path)
+                    self._crop_face_detector_type = "scrfd"
+                    logger.info("podcast_reframe: SCRFD face detector loaded")
+                    return True
+                except Exception as e_scrfd:
+                    logger.warning(f"podcast_reframe: SCRFD load failed: {e_scrfd}, falling back to MediaPipe")
+                    self._load_face_detector()
+                    self._crop_face_detector = self._face_detector
+                    self._crop_face_detector_type = "mediapipe"
+                    logger.info("podcast_reframe: MediaPipe face detector loaded as crop face detector fallback")
+                    return True
+            else:
+                self._load_face_detector()
+                self._crop_face_detector = self._face_detector
+                self._crop_face_detector_type = "mediapipe"
+                logger.info("podcast_reframe: MediaPipe face detector loaded as crop face detector fallback")
+                return True
+        except Exception as e:
+            logger.error(f"podcast_reframe: failed to load crop face detector: {e}")
+            return False
+
+    def _find_scrfd_model(self) -> str:
+        """Find or download the SCRFD ONNX face detection model."""
+        model_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'models')
+        os.makedirs(model_dir, exist_ok=True)
+        model_path = os.path.join(model_dir, 'scrfd_500m_bnkps.onnx')
+
+        if not os.path.exists(model_path):
+            import urllib.request
+            url = "https://huggingface.co/ykk648/face_lib/resolve/main/scrfd_500m_bnkps.onnx"
+            logger.info("podcast_reframe: downloading SCRFD ONNX model...")
+            urllib.request.urlretrieve(url, model_path)
+            logger.info(f"podcast_reframe: SCRFD model saved to {model_path}")
+
+        return model_path
+
+    def _init_person_tracker(self, fps: float) -> bool:
+        """Initialize the person tracker (supervision.ByteTrack or SimpleIoUTracker)."""
+        from src.config import settings
+        tracker_type = settings.PERSON_TRACKER
+        max_lost_frames = settings.TRACKER_MAX_LOST_FRAMES
+
+        try:
+            import supervision as sv
+            self._person_tracker = sv.ByteTrack(
+                lost_track_buffer=max_lost_frames,
+                frame_rate=int(max(1.0, fps))
+            )
+            self._person_tracker_type = "bytetrack"
+            logger.info(f"podcast_reframe: supervision ByteTrack initialized (max_lost_frames={max_lost_frames})")
+            return True
+        except Exception as e:
+            logger.warning(f"podcast_reframe: supervision ByteTrack initialization failed: {e}. Falling back to SimpleIoUTracker.")
+            self._person_tracker = SimpleIoUTracker(
+                frame_width=self._tracker._frame_width if self._tracker else 1920,
+                frame_height=self._tracker._frame_height if self._tracker else 1080
+            )
+            self._person_tracker.MAX_LOST_FRAMES = max_lost_frames
+            self._person_tracker_type = "simple_iou"
+            logger.info("podcast_reframe: SimpleIoUTracker initialized for person tracking")
+            return True
+
     # ─── Public API ───────────────────────────────────────────────────────
 
     async def process(
@@ -227,10 +343,40 @@ class PodcastReframeEngine(IReframeEngine):
         # Initialize person tracker
         self._tracker = SimpleIoUTracker(frame_width=width, frame_height=height)
 
-        # Step 1: Detect faces with bounding boxes + tracking (per-frame)
-        tracked_data = self._detect_and_track_faces(video_path, width, height, fps, total_frames)
+        from src.config import settings
+        pipeline_mode = settings.REFRAME_PIPELINE_MODE
 
-        if not tracked_data["per_frame_faces"]:
+        if pipeline_mode == "legacy":
+            tracked_data = self._detect_and_track_faces(video_path, width, height, fps, total_frames)
+        elif pipeline_mode == "shadow":
+            logger.info("podcast_reframe: running in SHADOW mode (legacy + person_first)")
+            import time
+            t0 = time.perf_counter()
+            tracked_data = self._detect_and_track_faces(video_path, width, height, fps, total_frames)
+            t1 = time.perf_counter()
+            legacy_time = t1 - t0
+
+            try:
+                t2 = time.perf_counter()
+                shadow_data = self._detect_and_track_persons_first(video_path, width, height, fps, total_frames)
+                t3 = time.perf_counter()
+                person_first_time = t3 - t2
+                
+                logger.info(
+                    f"podcast_reframe [SHADOW METRICS]: "
+                    f"legacy_time={legacy_time:.2f}s, person_first_time={person_first_time:.2f}s | "
+                    f"legacy_tracks={len(tracked_data.get('stable_positions', {}))}, "
+                    f"person_first_tracks={len(shadow_data.get('stable_positions', {}))} | "
+                    f"legacy_person_count={tracked_data.get('person_count')}, "
+                    f"person_first_person_count={shadow_data.get('person_count')}"
+                )
+            except Exception as shadow_err:
+                logger.warning(f"podcast_reframe [SHADOW ERROR]: person_first pipeline failed: {shadow_err}")
+        else: # person_first
+            logger.info("podcast_reframe: running in PERSON_FIRST mode")
+            tracked_data = self._detect_and_track_persons_first(video_path, width, height, fps, total_frames)
+
+        if not tracked_data or not tracked_data["per_frame_faces"]:
             logger.info("podcast_reframe: no faces → center crop")
             return None
 
@@ -375,8 +521,9 @@ class PodcastReframeEngine(IReframeEngine):
             min_speakers=None,
             max_speakers=None,
         )
+        map_thresh = settings.MAPPING_MARGIN_THRESHOLD if settings.REFRAME_PIPELINE_MODE != "legacy" else settings.DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD
         self._face_mapper = SpeakerFaceMapper(
-            confidence_threshold=settings.DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD,
+            confidence_threshold=map_thresh,
         )
         return self._diarizer
 
@@ -1682,6 +1829,13 @@ class PodcastReframeEngine(IReframeEngine):
                 if target_x_hint is None and target_profile:
                     target_x_hint = target_profile.get("x")
 
+        def get_det_cx(d: TrackedDetection) -> float:
+            return d.face_bbox.center_x if getattr(d, 'face_bbox', None) is not None else d.bbox.center_x
+
+        def get_det_profile_distance(d: TrackedDetection, prof: dict) -> float:
+            box = d.face_bbox if getattr(d, 'face_bbox', None) is not None else d.bbox
+            return self._bbox_profile_distance(box, prof, frame_width, frame_height)
+
         if active_speaker is not None:
             matching_detections = [
                 detection for detection in frame_tracked
@@ -1691,24 +1845,20 @@ class PodcastReframeEngine(IReframeEngine):
                 target_detection = min(
                     matching_detections,
                     key=lambda d: abs(
-                        d.bbox.center_x
-                        - (target_x_hint if target_x_hint is not None else d.bbox.center_x)
+                        get_det_cx(d)
+                        - (target_x_hint if target_x_hint is not None else get_det_cx(d))
                     ),
                 )
-                return int(target_detection.bbox.center_x), target_detection, active_speaker, "track"
+                return int(get_det_cx(target_detection)), target_detection, active_speaker, "track"
 
             if target_profile and frame_tracked:
                 target_detection = min(
                     frame_tracked,
-                    key=lambda d: self._bbox_profile_distance(
-                        d.bbox, target_profile, frame_width, frame_height
-                    ),
+                    key=lambda d: get_det_profile_distance(d, target_profile),
                 )
-                profile_distance = self._bbox_profile_distance(
-                    target_detection.bbox, target_profile, frame_width, frame_height
-                )
+                profile_distance = get_det_profile_distance(target_detection, target_profile)
                 if profile_distance <= self.SPEAKER_TARGET_PROFILE_MISMATCH:
-                    return int(target_detection.bbox.center_x), target_detection, active_speaker, "profile"
+                    return int(get_det_cx(target_detection)), target_detection, active_speaker, "profile"
 
                 if target_x_hint is not None:
                     logger.debug(
@@ -1818,17 +1968,30 @@ class PodcastReframeEngine(IReframeEngine):
                 continue
 
             # BBOX-AWARE CENTERING: ensure face + margin fits in crop window
-            # Use face width from stable detection data to prevent head cutoff
             face_margin_applied = False
             if frame_tracked:
                 # Find the tracked detection closest to our target cx
                 best_det = target_detection or min(
                     frame_tracked,
-                    key=lambda d: abs(d.bbox.center_x - cx),
+                    key=lambda d: abs((d.face_bbox.center_x if getattr(d, 'face_bbox', None) is not None else d.bbox.center_x) - cx),
                 )
                 mismatch_threshold = width * self.SPEAKER_TARGET_MISMATCH_RATIO
-                if target_detection or abs(best_det.bbox.center_x - cx) <= mismatch_threshold:
-                    face_w = best_det.bbox.width
+                best_det_cx = best_det.face_bbox.center_x if getattr(best_det, 'face_bbox', None) is not None else best_det.bbox.center_x
+                if target_detection or abs(best_det_cx - cx) <= mismatch_threshold:
+                    box_to_use = best_det.face_bbox if getattr(best_det, 'face_bbox', None) is not None else best_det.bbox
+                    # Fallback headroom estimation from person box if face is not found
+                    if getattr(best_det, 'face_bbox', None) is None:
+                        # Estimate head bbox from person bbox: top 35% of person height
+                        p_h = box_to_use.height
+                        head_y = box_to_use.y1 + 0.175 * p_h
+                        head_w = 0.25 * box_to_use.width
+                        box_to_use = BBox(
+                            box_to_use.center_x - head_w/2,
+                            head_y - head_w/2,
+                            box_to_use.center_x + head_w/2,
+                            head_y + head_w/2
+                        )
+                    face_w = box_to_use.width
                     try:
                         from src.config import settings
                         margin_ratio = getattr(
@@ -1838,8 +2001,8 @@ class PodcastReframeEngine(IReframeEngine):
                         margin_ratio = 0.6
                     margin = face_w * max(0.0, float(margin_ratio))
 
-                    desired_left = best_det.bbox.x1 - margin
-                    desired_right = best_det.bbox.x2 + margin
+                    desired_left = box_to_use.x1 - margin
+                    desired_right = box_to_use.x2 + margin
 
                     if (desired_right - desired_left) <= crop_w:
                         # Face + margin fits in crop → center it properly
@@ -2810,3 +2973,363 @@ class PodcastReframeEngine(IReframeEngine):
             and os.path.getsize(output_path) > 1000
             and timeline_is_safe(output_path)
         )
+
+    def _detect_and_track_persons_first(
+        self, video_path: str, width: int, height: int, fps: float, total_frames: int
+    ) -> dict:
+        """Detect persons using RF-DETR and track them with ByteTrack/SimpleIoU.
+        Detect faces only inside the person crops using RetinaFace/SCRFD/MediaPipe.
+        """
+        import cv2
+        cv2.setNumThreads(0)
+        
+        analytics_crops_processed = 0
+        analytics_faces_found = 0
+        analytics_id_switch_sets = set()
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return {
+                "per_frame_faces": [],
+                "per_frame_tracked": [],
+                "frame_face_counts": [],
+                "sample_frame_indices": [],
+                "sample_timestamps": [],
+                "person_count": 0,
+                "stable_positions": {},
+                "stable_position_profiles": {},
+                "position_targets": {},
+                "position_target_profiles": {},
+                "track_to_position": {},
+            }
+
+        sample_indices = self._sample_frame_indices(total_frames, fps)
+        from src.config import settings
+        person_conf_thresh = settings.PERSON_CONF_THRESHOLD
+        face_conf_thresh = settings.FACE_CONFIDENCE
+        head_ratio = settings.FACE_REGION_HEAD_RATIO
+
+        self._load_person_detector()
+        self._load_crop_face_detector()
+        self._init_person_tracker(fps)
+
+        per_frame_faces: List[List[float]] = []
+        per_frame_tracked: List[List[TrackedDetection]] = []
+        frame_face_counts: List[int] = []
+        sample_frame_indices: List[int] = []
+        sample_timestamps: List[float] = []
+
+        for frame_idx in sample_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h_frame, w_frame = frame_rgb.shape[:2]
+
+            # 1. Person Detection
+            person_bboxes: List[Tuple[float, float, float, float, float]] = [] # [x1, y1, x2, y2, conf]
+            
+            if hasattr(self, "_person_detector") and self._person_detector is not None:
+                if hasattr(self._person_detector, "predict"):
+                    preds = self._person_detector.predict(frame_rgb, threshold=person_conf_thresh)
+                    for idx in range(len(preds)):
+                        cname = preds.data.get('class_name')[idx] if 'class_name' in preds.data else ""
+                        cid = preds.class_id[idx]
+                        if cname == "person" or cid == 1:
+                            x1, y1, x2, y2 = preds.xyxy[idx]
+                            conf = preds.confidence[idx]
+                            person_bboxes.append((float(x1), float(y1), float(x2), float(y2), float(conf)))
+                else:
+                    results = self._person_detector(frame_rgb, verbose=False)
+                    if results and len(results) > 0:
+                        for box in results[0].boxes:
+                            if int(box.cls[0]) == 0 and float(box.conf[0]) >= person_conf_thresh:
+                                xyxy = box.xyxy[0].tolist()
+                                person_bboxes.append((xyxy[0], xyxy[1], xyxy[2], xyxy[3], float(box.conf[0])))
+
+            if not person_bboxes:
+                self._load_face_detector()
+                if self._use_legacy_api:
+                    results = self._face_detector.process(frame_rgb)
+                    if results.detections:
+                        for det in results.detections:
+                            bbox = det.location_data.relative_bounding_box
+                            x1 = bbox.xmin * w_frame
+                            y1 = bbox.ymin * h_frame
+                            x2 = (bbox.xmin + bbox.width) * w_frame
+                            y2 = (bbox.ymin + bbox.height) * h_frame
+                            person_bboxes.append((x1, y1, x2, y2, 0.99))
+                else:
+                    import mediapipe as mp
+                    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+                    result = self._face_detector.detect(mp_image)
+                    if result.detections:
+                        for det in result.detections:
+                            bbox = det.bounding_box
+                            person_bboxes.append((bbox.origin_x, bbox.origin_y, bbox.origin_x + bbox.width, bbox.origin_y + bbox.height, 0.99))
+
+            # 2. Update Person Tracker
+            tracked_detections: List[TrackedDetection] = []
+            if self._person_tracker_type == "bytetrack":
+                import supervision as sv
+                if person_bboxes:
+                    xyxy = np.array([[b[0], b[1], b[2], b[3]] for b in person_bboxes], dtype=np.float32)
+                    confidence = np.array([b[4] for b in person_bboxes], dtype=np.float32)
+                    class_id = np.array([0] * len(person_bboxes), dtype=np.int32)
+                    detections = sv.Detections(xyxy=xyxy, confidence=confidence, class_id=class_id)
+                    tracked = self._person_tracker.update_with_detections(detections)
+                    
+                    for idx in range(len(tracked)):
+                        track_id = int(tracked.tracker_id[idx])
+                        box = tracked.xyxy[idx].tolist()
+                        bbox_obj = BBox(box[0], box[1], box[2], box[3])
+                        tracked_detections.append(TrackedDetection(
+                            track_id=track_id,
+                            bbox=bbox_obj,
+                            frame_idx=frame_idx,
+                            is_new=False
+                        ))
+            else:
+                bboxes = [BBox(b[0], b[1], b[2], b[3]) for b in person_bboxes]
+                tracked_detections = self._person_tracker.update(bboxes, frame_idx)
+
+            # 3. Face Detection inside head region of person crops
+            frame_faces: List[float] = []
+            frame_track_detections: List[TrackedDetection] = []
+            for det in tracked_detections:
+                p_x1, p_y1, p_x2, p_y2 = det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2
+                p_h = p_y2 - p_y1
+                p_w = p_x2 - p_x1
+
+                head_x1 = max(0, int(p_x1))
+                head_y1 = max(0, int(p_y1))
+                head_x2 = min(w_frame, int(p_x2))
+                head_y2 = min(h_frame, int(p_y1 + head_ratio * p_h))
+
+                analytics_crops_processed += 1
+
+                crop = frame_rgb[head_y1:head_y2, head_x1:head_x2]
+                if crop.size == 0:
+                    frame_track_detections.append(det)
+                    continue
+
+                face_found = None
+                
+                if self._crop_face_detector_type == "retinaface":
+                    faces = self._crop_face_detector.predict_jsons(crop)
+                    if faces:
+                        best_face = max(faces, key=lambda f: f.get('score', 0.0) if f.get('score') is not None else 1.0)
+                        if best_face.get('bbox') and len(best_face['bbox']) == 4:
+                            f_box = best_face['bbox']
+                            face_found = BBox(
+                                f_box[0] + head_x1,
+                                f_box[1] + head_y1,
+                                f_box[2] + head_x1,
+                                f_box[3] + head_y1
+                            )
+                elif self._crop_face_detector_type == "scrfd":
+                    from scrfd import Threshold
+                    faces = self._crop_face_detector.detect(crop, threshold=Threshold(probability=face_conf_thresh))
+                    if faces:
+                        best_face = max(faces, key=lambda f: f.probability)
+                        f_box = best_face.bbox
+                        face_found = BBox(
+                            f_box[0] + head_x1,
+                            f_box[1] + head_y1,
+                            f_box[2] + head_x1,
+                            f_box[3] + head_y1
+                        )
+                elif self._crop_face_detector_type == "mediapipe":
+                    if self._use_legacy_api:
+                        results = self._face_detector.process(crop)
+                        if results.detections:
+                            best_det = max(results.detections, key=lambda d: d.score[0] if d.score else 0.0)
+                            bbox = best_det.location_data.relative_bounding_box
+                            crop_h, crop_w = crop.shape[:2]
+                            fx1 = bbox.xmin * crop_w + head_x1
+                            fy1 = bbox.ymin * crop_h + head_y1
+                            fx2 = (bbox.xmin + bbox.width) * crop_w + head_x1
+                            fy2 = (bbox.ymin + bbox.height) * crop_h + head_y1
+                            face_found = BBox(fx1, fy1, fx2, fy2)
+                    else:
+                        import mediapipe as mp
+                        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=crop)
+                        result = self._face_detector.detect(mp_image)
+                        if result.detections:
+                            best_det = max(result.detections, key=lambda d: d.categories[0].score if d.categories else 0.0)
+                            bbox = best_det.bounding_box
+                            fx1 = bbox.origin_x + head_x1
+                            fy1 = bbox.origin_y + head_y1
+                            fx2 = bbox.origin_x + bbox.width + head_x1
+                            fy2 = bbox.origin_y + bbox.height + head_y1
+                            face_found = BBox(fx1, fy1, fx2, fy2)
+
+                if face_found:
+                    analytics_faces_found += 1
+                    det.face_bbox = face_found
+                    frame_faces.append(face_found.center_x)
+                else:
+                    fallback_face_x = det.bbox.center_x
+                    fallback_face_y = p_y1 + 0.15 * p_h
+                    fallback_face_w = 0.20 * p_w
+                    fallback_face_h = 0.20 * p_h
+                    det.face_bbox = BBox(
+                        fallback_face_x - fallback_face_w/2,
+                        fallback_face_y - fallback_face_h/2,
+                        fallback_face_x + fallback_face_w/2,
+                        fallback_face_y + fallback_face_h/2
+                    )
+                    frame_faces.append(det.face_bbox.center_x)
+
+            per_frame_faces.append(frame_faces)
+            per_frame_tracked.append(tracked_detections)
+            frame_face_counts.append(len(frame_faces))
+            sample_frame_indices.append(frame_idx)
+            sample_timestamps.append(frame_idx / fps)
+
+        cap.release()
+
+        # Collect analytics
+        for frame_detections in per_frame_tracked:
+            for det in frame_detections:
+                analytics_id_switch_sets.add(det.track_id)
+        
+        logger.info(f"podcast_reframe: [ANALYTICS] Face recall on crop: {analytics_faces_found}/{max(1, analytics_crops_processed)} ({(analytics_faces_found / max(1, analytics_crops_processed))*100:.1f}%)")
+        logger.info(f"podcast_reframe: [ANALYTICS] Unique person track IDs: {len(analytics_id_switch_sets)}")
+
+        position_model = self._build_position_model_person_first(per_frame_tracked, width, height)
+        person_count = position_model["person_count"]
+        stable_positions = position_model["stable_positions"]
+        stable_position_profiles = position_model["stable_position_profiles"]
+        position_targets = position_model["position_targets"]
+        position_target_profiles = position_model["position_target_profiles"]
+        track_to_position = position_model["track_to_position"]
+        max_faces_in_frame = max(frame_face_counts) if frame_face_counts else 0
+        median_faces_in_frame = float(np.median(frame_face_counts)) if frame_face_counts else 0.0
+        frames_with_faces = sum(1 for count in frame_face_counts if count > 0)
+
+        logger.info(
+            "podcast_reframe (person-first): scan completed. "
+            f"samples={len(frame_face_counts)}, "
+            f"coverage=0.0-{(sample_timestamps[-1] if sample_timestamps else 0.0):.1f}s, "
+            f"frames_with_faces={frames_with_faces}/{len(frame_face_counts)}, "
+            f"faces_per_frame=min/median/max="
+            f"{(min(frame_face_counts) if frame_face_counts else 0)}/"
+            f"{median_faces_in_frame:.1f}/{max_faces_in_frame}"
+        )
+
+        return {
+            "per_frame_faces": per_frame_faces,
+            "per_frame_tracked": per_frame_tracked,
+            "frame_face_counts": frame_face_counts,
+            "max_faces_in_frame": max_faces_in_frame,
+            "median_faces_in_frame": median_faces_in_frame,
+            "sample_frame_indices": sample_frame_indices,
+            "sample_timestamps": sample_timestamps,
+            "person_count": person_count,
+            "stable_positions": stable_positions,
+            "stable_position_profiles": stable_position_profiles,
+            "position_targets": position_targets,
+            "position_target_profiles": position_target_profiles,
+            "track_to_position": track_to_position,
+        }
+
+    def _build_position_model_person_first(
+        self,
+        per_frame_tracked: List[List[TrackedDetection]],
+        width: int,
+        height: int,
+    ) -> dict:
+        """Build stable person positions using face_bbox inside the tracked person detections."""
+        track_profiles: Dict[int, Dict[str, List[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+
+        for frame_tracked in per_frame_tracked:
+            for detection in frame_tracked:
+                box_to_use = detection.face_bbox if detection.face_bbox is not None else detection.bbox
+                profile = track_profiles[detection.track_id]
+                profile["x"].append(box_to_use.center_x)
+                profile["y"].append(box_to_use.center_y)
+                profile["width"].append(box_to_use.width)
+                profile["height"].append(box_to_use.height)
+                profile["area"].append(box_to_use.area)
+
+        if not track_profiles:
+            return {
+                "person_count": 0,
+                "stable_positions": {},
+                "stable_position_profiles": {},
+                "position_targets": {},
+                "position_target_profiles": {},
+                "track_to_position": {},
+            }
+
+        min_hits = 2 if len(per_frame_tracked) >= 6 else 1
+        filtered = {
+            track_id: values
+            for track_id, values in track_profiles.items()
+            if len(values.get("x", [])) >= min_hits
+        }
+        if not filtered:
+            filtered = dict(track_profiles)
+
+        stable_position_profiles = {
+            track_id: self._median_profile(values)
+            for track_id, values in filtered.items()
+        }
+        stable_positions = {
+            track_id: profile["x"]
+            for track_id, profile in stable_position_profiles.items()
+        }
+
+        clusters: List[dict] = []
+        cluster_threshold = 0.11
+
+        for track_id, profile in sorted(
+            stable_position_profiles.items(),
+            key=lambda kv: (kv[1]["x"], kv[1]["y"]),
+        ):
+            best_cluster_idx: Optional[int] = None
+            best_distance = float("inf")
+            for idx, cluster in enumerate(clusters):
+                distance = self._profile_distance(
+                    profile, cluster["profile"], width, height
+                )
+                if distance < best_distance:
+                    best_distance = distance
+                    best_cluster_idx = idx
+
+            if best_cluster_idx is not None and best_distance <= cluster_threshold:
+                cluster = clusters[best_cluster_idx]
+                cluster["track_ids"].append(track_id)
+                cluster["profiles"].append(profile)
+                cluster["profile"] = self._merge_profiles(cluster["profiles"])
+            else:
+                clusters.append({
+                    "track_ids": [track_id],
+                    "profiles": [profile],
+                    "profile": dict(profile),
+                })
+
+        position_targets: Dict[int, float] = {}
+        position_target_profiles: Dict[int, Dict[str, float]] = {}
+        track_to_position: Dict[int, int] = {}
+        for position_id, cluster in enumerate(
+            sorted(clusters, key=lambda cluster: (cluster["profile"]["x"], cluster["profile"]["y"]))
+        ):
+            position_target_profiles[position_id] = cluster["profile"]
+            position_targets[position_id] = cluster["profile"]["x"]
+            for track_id in cluster["track_ids"]:
+                track_to_position[track_id] = position_id
+
+        return {
+            "person_count": len(position_targets),
+            "stable_positions": stable_positions,
+            "stable_position_profiles": stable_position_profiles,
+            "position_targets": position_targets,
+            "position_target_profiles": position_target_profiles,
+            "track_to_position": track_to_position,
+        }
