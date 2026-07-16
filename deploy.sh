@@ -226,7 +226,9 @@ fi
 
 # Install/update dependencies
 echo "  Syncing Python dependencies..."
-./venv/bin/pip install --upgrade pip -q 2>/dev/null
+./venv/bin/pip install --upgrade pip setuptools wheel -q 2>/dev/null
+# Pre-install numpy binary wheel (avoids source build failures on Python 3.12)
+./venv/bin/pip install "numpy>=1.26.0,<2.0" -q 2>/dev/null || true
 ./venv/bin/pip install -r requirements.txt -q 2>/dev/null || \
     ./venv/bin/pip install -r requirements.txt
 
