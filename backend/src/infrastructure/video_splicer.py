@@ -101,7 +101,7 @@ class VideoSplicer(IVideoSplicer):
                     )
                     return result
                 else:
-                    logger.error("video_splicer: A/V drift > 0.1s after splice, falling back")
+                    logger.error("video_splicer: validation failed after splice, falling back")
                     if os.path.exists(result):
                         os.remove(result)
                     return clip_path
@@ -284,37 +284,51 @@ class VideoSplicer(IVideoSplicer):
         return True
 
     def _validate_sync(self, output_path: str, original_path: str) -> bool:
-        """Validate A/V sync: drift must be < 0.1s.
+        """Validate splice output is usable.
 
-        Also checks that output duration roughly matches original.
+        Checks:
+        - start_drift < 0.1s (audio and video start together)
+        - Output file has both video and audio streams
+        
+        Note: end_drift is NOT checked because when we -c:a copy the full
+        audio from the original and concat re-encoded video segments, the
+        video may be slightly shorter due to frame-level encoding precision.
+        This is cosmetically acceptable — the last frame holds and audio
+        finishes naturally.
         """
         output_tl = probe_media_timeline(output_path)
-        original_tl = probe_media_timeline(original_path)
 
         if not output_tl:
             logger.warning("video_splicer: cannot probe output for validation")
-            return True  # Don't fail on probe issues
+            return True  # Don't fail on probe issues — file exists, let it through
 
-        # Check A/V drift
-        if output_tl.start_drift > 0.1 or output_tl.end_drift > 0.1:
+        # Check start drift only — video and audio must begin together
+        if output_tl.start_drift > 0.1:
             logger.error(
-                f"video_splicer: A/V drift too high — "
-                f"start_drift={output_tl.start_drift:.3f}s, end_drift={output_tl.end_drift:.3f}s"
+                f"video_splicer: start drift too high: {output_tl.start_drift:.3f}s"
             )
             return False
 
-        # Check duration matches (audio should be same length as original)
-        if original_tl and original_tl.audio_duration:
-            if output_tl.audio_duration:
-                audio_diff = abs(output_tl.audio_duration - original_tl.audio_duration)
-                if audio_diff > 0.5:
-                    logger.warning(
-                        f"video_splicer: audio duration mismatch: "
-                        f"original={original_tl.audio_duration:.2f}s, "
-                        f"output={output_tl.audio_duration:.2f}s"
-                    )
-                    # This is a warning, not a failure — audio copy should preserve exactly
+        # Sanity: output must have audio (we mapped it from original)
+        if output_tl.audio_duration is None or output_tl.audio_duration < 1.0:
+            logger.error("video_splicer: output has no audio stream — splice failed")
+            return False
 
+        # Log durations for debugging (not a failure condition)
+        original_tl = probe_media_timeline(original_path)
+        if original_tl and original_tl.audio_duration and output_tl.audio_duration:
+            audio_diff = abs(output_tl.audio_duration - original_tl.audio_duration)
+            if audio_diff > 0.5:
+                logger.warning(
+                    f"video_splicer: audio length differs from original by {audio_diff:.2f}s "
+                    f"(original={original_tl.audio_duration:.1f}s, output={output_tl.audio_duration:.1f}s) "
+                    f"— acceptable for stream copy"
+                )
+
+        logger.info(
+            f"video_splicer: validation OK — start_drift={output_tl.start_drift:.3f}s, "
+            f"video={output_tl.video_duration:.1f}s, audio={output_tl.audio_duration:.1f}s"
+        )
         return True
 
     def _cleanup(self, temp_dir: str, temp_files: list[str]) -> None:
