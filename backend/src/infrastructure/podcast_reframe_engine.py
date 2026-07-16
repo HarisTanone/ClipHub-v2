@@ -65,7 +65,7 @@ class PodcastReframeEngine(IReframeEngine):
     GRID_PANEL_HEIGHT = 960
     DOMINANCE_SINGLE_CROP = 0.75     # If dominant ≥75% → use single crop instead of grid
     GRID_BASE_ZOOM = 1.08            # Gentle default crop; avoids excessive background.
-    GRID_MAX_ZOOM = 1.40             # Hard ceiling so faces never become uncomfortably large.
+    GRID_MAX_ZOOM = 1.85             # [FIX] Naikkan dari 1.40 -> agar 2 orang berdekatan bisa terpisah
     GRID_FACE_MARGIN = 0.35          # Minimum face-side breathing room inside a panel.
     GRID_ENTER_SAMPLES = 4           # Confirm a second person for ~1.3s.
     GRID_EXIT_SAMPLES = 2            # Close within ~0.7s when one person leaves.
@@ -73,13 +73,13 @@ class PodcastReframeEngine(IReframeEngine):
     VALID_TRANSITIONS = {"cut", "fade", "slide", "zoom"}
 
     # Ghost detection constants
-    MIN_FACE_AREA_PX = 12_000           # Absolute floor (~110x110 px)
-    MIN_AREA_RATIO_TO_MAX = 0.40        # Track area must be ≥40% of largest track
+    MIN_FACE_AREA_PX = 4_000            # [FIX] Turunkan dari 12_000 -> Wajah jauh di studio radio tetap kebaca
+    MIN_AREA_RATIO_TO_MAX = 0.25        # [FIX] Turunkan dari 0.40 -> Orang di belakang tidak dianggap ghost
     MIN_FRAME_RATIO = 0.15              # Track must appear in ≥15% of sampled frames
     GHOST_IOU_THRESHOLD = 0.25          # IoU overlap indicating same-person duplicate
     GHOST_CENTER_DIST_RATIO = 0.08      # Normalized center distance for ghost proximity
     GHOST_CENTER_DIST_BROAD = 0.20      # Broader center distance for ghost with area similarity
-    MIN_PAIR_SIZE_RATIO = 0.30          # Both faces in pair must be comparable size
+    MIN_PAIR_SIZE_RATIO = 0.18          # [FIX] Turunkan dari 0.30 -> Bisa pasangkan wajah besar & wajah kecil
     AUDIO_FILTER = "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS"
 
     def __init__(self, hf_token: Optional[str] = None):
