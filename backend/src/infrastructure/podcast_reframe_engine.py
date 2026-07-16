@@ -99,38 +99,41 @@ class PodcastReframeEngine(IReframeEngine):
             return True
         try:
             import mediapipe as mp
-            # Try legacy API first (mediapipe ≤0.10.21)
+
+            # Coba Task API baru (mediapipe ≥0.10.14)
+            try:
+                # FIX: Path import diubah dari mediapipe.tasks.vision -> mediapipe.tasks.python.vision
+                from mediapipe.tasks.python import vision
+                from mediapipe.tasks.python import BaseOptions
+                model_path = self._find_face_detection_model()
+                base_options = BaseOptions(model_asset_path=model_path)
+                options = vision.FaceDetectorOptions(
+                    base_options=base_options,
+                    running_mode=vision.RunningMode.IMAGE,
+                    min_detection_confidence=self.FACE_CONFIDENCE,
+                )
+                self._face_detector = vision.FaceDetector.create_from_options(options)
+                self._use_legacy_api = False
+                logger.info("podcast_reframe: MediaPipe FaceDetector loaded (Task API)")
+                return True
+            except (ImportError, ModuleNotFoundError, AttributeError) as e:
+                logger.debug(f"podcast_reframe: Task API not available: {e}. Trying legacy API...")
+
+            # Fallback ke Legacy API (mediapipe ≤0.10.21)
             if hasattr(mp, 'solutions') and hasattr(mp.solutions, 'face_detection'):
                 self._face_detector = mp.solutions.face_detection.FaceDetection(
                     min_detection_confidence=self.FACE_CONFIDENCE,
                     model_selection=1,
                 )
                 self._use_legacy_api = True
-                logger.info("podcast_reframe: MediaPipe loaded (legacy API)")
+                logger.info("podcast_reframe: MediaPipe loaded (Legacy API)")
                 return True
-            else:
-                # Task API (mediapipe ≥0.10.30)
-                try:
-                    from mediapipe.tasks.vision import FaceDetector, FaceDetectorOptions
-                    from mediapipe.tasks.vision.core.vision_task_running_mode import VisionTaskRunningMode
-                    from mediapipe.tasks import BaseOptions
 
-                    model_path = self._find_face_detection_model()
-                    base_options = BaseOptions(model_asset_path=model_path)
-                    options = FaceDetectorOptions(
-                        base_options=base_options,
-                        running_mode=VisionTaskRunningMode.IMAGE,
-                        min_detection_confidence=self.FACE_CONFIDENCE,
-                    )
-                    self._face_detector = FaceDetector.create_from_options(options)
-                    self._use_legacy_api = False
-                    logger.info("podcast_reframe: MediaPipe FaceDetector loaded (task API)")
-                    return True
-                except (ImportError, ModuleNotFoundError) as e:
-                    logger.warning(f"podcast_reframe: Task API not available: {e}")
-                    return False
+            logger.error("podcast_reframe: No valid MediaPipe Face Detector API found.")
+            return False
+
         except Exception as e:
-            logger.warning(f"podcast_reframe: MediaPipe failed: {e}")
+            logger.warning(f"podcast_reframe: MediaPipe failed to load: {e}")
             return False
 
     def _find_face_detection_model(self) -> str:
