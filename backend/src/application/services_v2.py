@@ -995,6 +995,71 @@ class V2PipelineService:
                     import shutil
                     shutil.rmtree(footage_dir, ignore_errors=True)
 
+        # ─── Step 10.6b: Splice legacy video assets (Pexels/Pixabay direct) ──
+        # If ClipScout didn't provide splice_segments but legacy fetcher got video
+        # assets, also splice them full-frame (not overlay).
+        if settings.BROLL_SPLICE_ENABLED:
+            from src.infrastructure.footage_processor import FootageProcessor
+            legacy_processor = FootageProcessor()
+
+            for clip in clips:
+                if not trim_results.get(clip.rank) or not clip.broll_suggestions:
+                    continue
+                brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+                if os.path.exists(brolled_path):
+                    continue  # Already spliced by ClipScout path
+
+                # Collect video assets that have asset_result but no splice_segment
+                video_suggestions = [
+                    s for s in clip.broll_suggestions
+                    if (s.asset_result
+                        and not s.asset_result.is_fallback
+                        and s.asset_result.asset_format == "video"
+                        and not s.splice_segment
+                        and os.path.exists(s.asset_result.local_path))
+                ]
+                if not video_suggestions:
+                    continue
+
+                # Process each legacy video asset to 1080x1920 and create SpliceSegment
+                legacy_segments = []
+                for idx, s in enumerate(video_suggestions):
+                    processed = await legacy_processor.process(
+                        raw_path=s.asset_result.local_path,
+                        target_duration=s.duration,
+                        clip_rank=clip.rank,
+                        index=idx,
+                        output_dir=os.path.join(output_dir, "broll_footage"),
+                    )
+                    if processed:
+                        legacy_segments.append(SpliceSegment(
+                            footage_path=processed,
+                            at_time=s.at_time,
+                            duration=s.duration,
+                            keyword=s.keyword,
+                            source_id=s.asset_result.source_api or "legacy",
+                            platform=s.asset_result.source_api or "legacy",
+                        ))
+
+                if legacy_segments:
+                    reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                    base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                    input_path = reframed_path if os.path.exists(reframed_path) else base_path
+                    splice_output = f"{output_dir}/clip_{clip.rank:02d}_spliced.mp4"
+
+                    try:
+                        result_path = await self._video_splicer.splice(
+                            clip_path=input_path,
+                            segments=legacy_segments,
+                            output_path=splice_output,
+                        )
+                        if result_path == splice_output and os.path.exists(splice_output):
+                            os.rename(splice_output, brolled_path)
+                            logger.info(f"[{job_id}] Legacy video spliced clip {clip.rank}")
+                    except Exception as exc:
+                        logger.warning(f"[{job_id}] Legacy video splice failed clip {clip.rank}: {exc}")
+
+        # ─── Overlay fallback: only for non-video assets (images, gif, drawtext) ─
         applied_count = 0
         for clip in clips:
             if not trim_results.get(clip.rank) or not clip.broll_suggestions:
@@ -1005,21 +1070,32 @@ class V2PipelineService:
             base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
             # Skip overlay injection if splice already produced the brolled file
             if os.path.exists(brolled_path):
+                applied_count += 1
                 continue
             input_path = reframed_path if os.path.exists(reframed_path) else base_path
             output_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+
+            # Filter out video suggestions (already handled by splice above)
+            # Only pass non-video suggestions to overlay injector
+            non_video_suggestions = [
+                s for s in clip.broll_suggestions
+                if not (s.asset_result
+                        and not s.asset_result.is_fallback
+                        and s.asset_result.asset_format == "video")
+            ]
+            if not non_video_suggestions:
+                continue
+
             try:
                 result_path = await self._broll_injector.inject(
                     input_path,
-                    clip.broll_suggestions,
+                    non_video_suggestions,
                     output_path,
                 )
                 if result_path == output_path and os.path.exists(output_path):
                     applied_count += 1
             except Exception as exc:
-                # B-roll is optional. Keep the original/reframed source so the
-                # job can still finish with its hook and subtitles.
-                logger.warning(f"[{job_id}] B-roll failed clip {clip.rank}: {exc}")
+                logger.warning(f"[{job_id}] B-roll overlay failed clip {clip.rank}: {exc}")
 
         logger.info(
             f"[{job_id}] Auto B-roll complete: {applied_count}/{len(clips)} clips applied"
