@@ -29,7 +29,8 @@ pyyaml>=6.0.2
 Cython==3.2.8
 ctranslate2==4.5.0
 faster-whisper==1.1.0
-tokenizers>=0.20,<0.21
+# FIX: transformers 4.57.x butuh tokenizers 0.22.x
+tokenizers>=0.22,<0.23
 mediapipe>=0.10.14,<0.11
 ultralytics>=8.3.0,<9.0
 
@@ -45,8 +46,11 @@ insightface>=0.7.3
 onnxruntime>=1.16.0
 supervision>=0.18.0
 google-generativeai>=0.8.0
-torchaudio>=2.0.0
 soundfile>=0.12.0
+
+# NOTE: torch, torchvision, dan torchaudio diinstall manual via script
+# menggunakan --index-url https://download.pytorch.org/whl/cu121
+# agar dapat versi CUDA 12.1 (torch==2.5.1, torchvision==0.20.1, torchaudio==2.5.1)
 
 # Audio-Visual Reframe (Speaker Diarization)
 pyannote.audio==3.4.0
