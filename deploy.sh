@@ -163,6 +163,12 @@ else
     # Build tools for native modules
     sudo apt-get install -y build-essential cmake 2>/dev/null || true
 
+    # FFmpeg development libraries (required by PyAV / faster-whisper)
+    sudo apt-get install -y \
+        libavformat-dev libavcodec-dev libavdevice-dev \
+        libavutil-dev libavfilter-dev libswscale-dev \
+        libswresample-dev pkg-config 2>/dev/null || true
+
     # Chromium deps for Remotion headless rendering
     sudo apt-get install -y --no-install-recommends \
         libnss3 libatk-bridge2.0-0t64 libdrm2 libxcomposite1 \
@@ -170,6 +176,19 @@ else
         libasound2t64 libxshmfence1 2>/dev/null || true
 
     echo "  ✅ System packages installed"
+fi
+
+# Always ensure FFmpeg dev libs + build tools are present (needed by PyAV/faster-whisper)
+# This runs even if ffmpeg binary already exists, because dev headers may be missing
+if ! pkg-config --exists libavformat 2>/dev/null; then
+    echo "  Installing FFmpeg dev libraries (required for PyAV build)..."
+    sudo apt-get update -qq 2>/dev/null || true
+    sudo apt-get install -y \
+        build-essential cmake pkg-config \
+        libavformat-dev libavcodec-dev libavdevice-dev \
+        libavutil-dev libavfilter-dev libswscale-dev \
+        libswresample-dev 2>/dev/null || true
+    echo "  ✅ FFmpeg dev libraries installed"
 fi
 
 echo "  Python: $($PYTHON_BIN --version 2>/dev/null)"
