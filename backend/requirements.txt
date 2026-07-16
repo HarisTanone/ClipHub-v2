@@ -16,15 +16,17 @@ structlog>=24.4.0
 python-jose>=3.5.0
 bcrypt>=4.0.0
 
-# Pipeline
+# Pipeline — pinned tight to avoid resolution-too-deep
 psutil>=6.0.0
 httpx>=0.27.0
 aiobotocore>=2.13.0
-numpy>=1.26.0,<2.0
-pyyaml>=6.0.1
+numpy>=1.26.4,<2.0
+pyyaml>=6.0.2
 Cython>=3.0
-faster-whisper>=1.0.0
-mediapipe>=0.10.0
+faster-whisper==1.1.0
+ctranslate2>=4.5.0,<4.9
+tokenizers>=0.19.0
+mediapipe>=0.10.14,<0.11
 ultralytics>=8.3.0,<9.0
 rfdetr>=1.8.3
 retinaface-pytorch>=0.0.7
@@ -36,7 +38,6 @@ torchaudio>=2.0.0
 soundfile>=0.12.0
 
 # Audio-Visual Reframe (Speaker Diarization)
-# PINNED: pyannote 3.x + torch 2.5 + hf_hub <1.0 required for NVIDIA driver 535 compatibility
 pyannote.audio>=3.3.0,<4.0
 torch>=2.5.0,<2.6.0
 huggingface_hub>=0.20.0,<1.0
