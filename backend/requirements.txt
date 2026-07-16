@@ -10,28 +10,30 @@ python-multipart>=0.0.12
 aiofiles>=24.1.0
 youtube-transcript-api>=1.2.0
 google-genai>=1.0.0
-structlog>=24.4.0
+websockets==16.1
+structlog==26.1.0
 
 # Auth
-python-jose>=3.5.0
+python-jose==3.5.0
 rsa==4.9.1
-bcrypt>=4.0.0
+bcrypt==5.0.0
 
 # Pipeline — pinned tight to avoid resolution-too-deep
-psutil>=6.0.0
+psutil==7.2.2
 httpx>=0.27.0
 aiobotocore==3.7.0
 wrapt>=1.14.1
 multidict>=6.7.1
 numpy>=1.26.4,<2.0
 pyyaml>=6.0.2
-Cython>=3.0
+Cython==3.2.8
 ctranslate2==4.5.0
 faster-whisper==1.1.0
-tokenizers>=0.19.0
+tokenizers==0.23.1
 mediapipe>=0.10.14,<0.11
 ultralytics>=8.3.0,<9.0
 rfdetr>=1.8.3
+transformers==5.14.0
 retinaface-pytorch>=0.0.7
 insightface>=0.7.3
 onnxruntime>=1.16.0
@@ -41,7 +43,7 @@ torchaudio>=2.0.0
 soundfile>=0.12.0
 
 # Audio-Visual Reframe (Speaker Diarization)
-pyannote.audio>=3.3.0,<4.0
+pyannote.audio==3.4.0
 torch>=2.5.0,<2.6.0
 huggingface_hub>=0.20.0,<1.0
 protobuf>=4.25.0,<5.0
