@@ -47,11 +47,11 @@ function ReframePreviewRenderer({
       "transform 0.3s ease, object-position 0.3s ease, opacity 0.3s ease";
 
     if (isSingleCrop) {
-      // Single crop: one zoomed view centered on face area (~35% from top)
+      // Single crop: one zoomed view centered on face area
       return {
         single: {
           transform: `scale(${effectiveZoom})`,
-          transformOrigin: "center 35%",
+          transformOrigin: "center center",
           width: "100%" as const,
           height: "100%" as const,
           objectFit: "cover" as const,
@@ -59,19 +59,19 @@ function ReframePreviewRenderer({
         },
       };
     } else {
-      // Grid mode: two panels, top speaker (~25% from top), bottom speaker (~75% from top)
+      // Grid mode: two panels, left speaker and right speaker (side by side in typical podcast)
       return {
         top: {
-          transform: `scale(${effectiveZoom})`,
-          transformOrigin: "center 25%",
+          transform: `scale(${effectiveZoom * 1.2})`,
+          transformOrigin: "30% center",
           width: "100%" as const,
           height: "100%" as const,
           objectFit: "cover" as const,
           transition,
         },
         bottom: {
-          transform: `scale(${effectiveZoom})`,
-          transformOrigin: "center 75%",
+          transform: `scale(${effectiveZoom * 1.2})`,
+          transformOrigin: "70% center",
           width: "100%" as const,
           height: "100%" as const,
           objectFit: "cover" as const,
