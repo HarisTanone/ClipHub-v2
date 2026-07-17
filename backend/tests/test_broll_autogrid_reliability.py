@@ -15,7 +15,7 @@ from src.infrastructure.podcast_reframe_engine import PodcastReframeEngine
 
 
 def make_engine() -> PodcastReframeEngine:
-    return PodcastReframeEngine.__new__(PodcastReframeEngine)
+    return PodcastReframeEngine()
 
 
 def test_long_clip_sampling_covers_the_complete_timeline():

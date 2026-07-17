@@ -318,5 +318,41 @@ CREATE TABLE IF NOT EXISTS user_features (
     FOREIGN KEY (granted_by) REFERENCES users(id)
 );
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- v4.0 Reframe Tuning Configs (dynamic, no hardcoded constants)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS reframe_tuning_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER DEFAULT NULL,          -- NULL = global default, user_id = per-user override
+    -- Sampling & Detection
+    sample_interval_sec REAL NOT NULL DEFAULT 0.333,
+    max_samples INTEGER NOT NULL DEFAULT 720,
+    face_confidence REAL NOT NULL DEFAULT 0.55,
+    min_face_size_ratio REAL NOT NULL DEFAULT 0.10,
+    max_face_size_ratio REAL NOT NULL DEFAULT 0.50,
+    min_separation_ratio REAL NOT NULL DEFAULT 0.20,
+    min_coexist_ratio REAL NOT NULL DEFAULT 0.40,
+    -- Auto Grid
+    dominance_single_crop REAL NOT NULL DEFAULT 0.75,
+    grid_base_zoom REAL NOT NULL DEFAULT 1.08,
+    grid_max_zoom REAL NOT NULL DEFAULT 1.85,
+    grid_face_margin REAL NOT NULL DEFAULT 0.35,
+    grid_enter_samples INTEGER NOT NULL DEFAULT 4,
+    grid_exit_samples INTEGER NOT NULL DEFAULT 2,
+    min_grid_segment_seconds REAL NOT NULL DEFAULT 1.20,
+    -- Ghost Detection
+    min_face_area_px INTEGER NOT NULL DEFAULT 4000,
+    min_area_ratio_to_max REAL NOT NULL DEFAULT 0.25,
+    min_frame_ratio REAL NOT NULL DEFAULT 0.15,
+    ghost_iou_threshold REAL NOT NULL DEFAULT 0.25,
+    ghost_center_dist_ratio REAL NOT NULL DEFAULT 0.08,
+    ghost_center_dist_broad REAL NOT NULL DEFAULT 0.20,
+    min_pair_size_ratio REAL NOT NULL DEFAULT 0.18,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_user_features_user ON user_features(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_features_code ON user_features(feature_code);

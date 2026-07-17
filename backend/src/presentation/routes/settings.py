@@ -120,6 +120,118 @@ def _ensure_pipeline_override_column():
 _ensure_pipeline_override_column()
 
 
+# ─── Reframe Tuning Config ──────────────────────────────────────────────────────
+
+REFRAME_TUNING_COLUMNS = [
+    "sample_interval_sec", "max_samples", "face_confidence",
+    "min_face_size_ratio", "max_face_size_ratio",
+    "min_separation_ratio", "min_coexist_ratio",
+    "dominance_single_crop", "grid_base_zoom", "grid_max_zoom",
+    "grid_face_margin", "grid_enter_samples", "grid_exit_samples",
+    "min_grid_segment_seconds",
+    "min_face_area_px", "min_area_ratio_to_max", "min_frame_ratio",
+    "ghost_iou_threshold", "ghost_center_dist_ratio",
+    "ghost_center_dist_broad", "min_pair_size_ratio",
+]
+
+REFRAME_TUNING_DEFAULTS = {
+    "sample_interval_sec": 0.333, "max_samples": 720, "face_confidence": 0.55,
+    "min_face_size_ratio": 0.10, "max_face_size_ratio": 0.50,
+    "min_separation_ratio": 0.20, "min_coexist_ratio": 0.40,
+    "dominance_single_crop": 0.75, "grid_base_zoom": 1.08, "grid_max_zoom": 1.85,
+    "grid_face_margin": 0.35, "grid_enter_samples": 4, "grid_exit_samples": 2,
+    "min_grid_segment_seconds": 1.20,
+    "min_face_area_px": 4000, "min_area_ratio_to_max": 0.25, "min_frame_ratio": 0.15,
+    "ghost_iou_threshold": 0.25, "ghost_center_dist_ratio": 0.08,
+    "ghost_center_dist_broad": 0.20, "min_pair_size_ratio": 0.18,
+}
+
+
+class ReframeTuningConfig(BaseModel):
+    sample_interval_sec: float = 0.333
+    max_samples: int = 720
+    face_confidence: float = 0.55
+    min_face_size_ratio: float = 0.10
+    max_face_size_ratio: float = 0.50
+    min_separation_ratio: float = 0.20
+    min_coexist_ratio: float = 0.40
+    dominance_single_crop: float = 0.75
+    grid_base_zoom: float = 1.08
+    grid_max_zoom: float = 1.85
+    grid_face_margin: float = 0.35
+    grid_enter_samples: int = 4
+    grid_exit_samples: int = 2
+    min_grid_segment_seconds: float = 1.20
+    min_face_area_px: int = 4000
+    min_area_ratio_to_max: float = 0.25
+    min_frame_ratio: float = 0.15
+    ghost_iou_threshold: float = 0.25
+    ghost_center_dist_ratio: float = 0.08
+    ghost_center_dist_broad: float = 0.20
+    min_pair_size_ratio: float = 0.18
+
+
+def _ensure_reframe_tuning_table():
+    """Ensure reframe_tuning_configs table exists."""
+    conn = get_dict_connection()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reframe_tuning_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER DEFAULT NULL,
+                sample_interval_sec REAL NOT NULL DEFAULT 0.333,
+                max_samples INTEGER NOT NULL DEFAULT 720,
+                face_confidence REAL NOT NULL DEFAULT 0.55,
+                min_face_size_ratio REAL NOT NULL DEFAULT 0.10,
+                max_face_size_ratio REAL NOT NULL DEFAULT 0.50,
+                min_separation_ratio REAL NOT NULL DEFAULT 0.20,
+                min_coexist_ratio REAL NOT NULL DEFAULT 0.40,
+                dominance_single_crop REAL NOT NULL DEFAULT 0.75,
+                grid_base_zoom REAL NOT NULL DEFAULT 1.08,
+                grid_max_zoom REAL NOT NULL DEFAULT 1.85,
+                grid_face_margin REAL NOT NULL DEFAULT 0.35,
+                grid_enter_samples INTEGER NOT NULL DEFAULT 4,
+                grid_exit_samples INTEGER NOT NULL DEFAULT 2,
+                min_grid_segment_seconds REAL NOT NULL DEFAULT 1.20,
+                min_face_area_px INTEGER NOT NULL DEFAULT 4000,
+                min_area_ratio_to_max REAL NOT NULL DEFAULT 0.25,
+                min_frame_ratio REAL NOT NULL DEFAULT 0.15,
+                ghost_iou_threshold REAL NOT NULL DEFAULT 0.25,
+                ghost_center_dist_ratio REAL NOT NULL DEFAULT 0.08,
+                ghost_center_dist_broad REAL NOT NULL DEFAULT 0.20,
+                min_pair_size_ratio REAL NOT NULL DEFAULT 0.18,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(user_id)
+            )
+        """)
+        conn.execute("INSERT OR IGNORE INTO reframe_tuning_configs (user_id) VALUES (NULL)")
+        conn.commit()
+    finally:
+        conn.close()
+
+_ensure_reframe_tuning_table()
+
+
+def get_reframe_tuning(user_id: int | None = None) -> dict:
+    """Load reframe tuning config from DB. Lookup: user-specific → global → defaults."""
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        if user_id is not None:
+            cur.execute("SELECT * FROM reframe_tuning_configs WHERE user_id = ?", (user_id,))
+            row = cur.fetchone()
+            if row:
+                return {k: row[k] for k in REFRAME_TUNING_COLUMNS}
+        cur.execute("SELECT * FROM reframe_tuning_configs WHERE user_id IS NULL")
+        row = cur.fetchone()
+        if row:
+            return {k: row[k] for k in REFRAME_TUNING_COLUMNS}
+        return dict(REFRAME_TUNING_DEFAULTS)
+    finally:
+        conn.close()
+
+
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -232,6 +344,64 @@ async def get_system_info(user: CurrentUser = Depends(get_current_user)):
             asset_fetch_enabled=settings.ASSET_FETCH_ENABLED,
         ).model_dump(),
     }
+
+
+@router.get("/reframe-tuning")
+async def get_reframe_tuning_endpoint(user: CurrentUser = Depends(get_current_user)):
+    """Get reframe tuning config. Superadmin sees global; regular users see their override or global."""
+    target_user_id = None if user.is_superadmin else user.id
+    config = get_reframe_tuning(target_user_id)
+    return {"success": True, "data": config, "is_global": target_user_id is None}
+
+
+@router.put("/reframe-tuning")
+async def update_reframe_tuning_endpoint(body: ReframeTuningConfig, user: CurrentUser = Depends(get_current_user)):
+    """Update reframe tuning config. Superadmin updates global; regular users update their own override."""
+    if not user.is_superadmin and not getattr(user, "is_premium", False):
+        raise HTTPException(status_code=403, detail="Premium required to tune reframe settings")
+
+    target_user_id = None if user.is_superadmin else user.id
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        cols = ", ".join(REFRAME_TUNING_COLUMNS)
+        placeholders = ", ".join(["?"] * len(REFRAME_TUNING_COLUMNS))
+        update_set = ", ".join([f"{c} = excluded.{c}" for c in REFRAME_TUNING_COLUMNS])
+        values = [getattr(body, c) for c in REFRAME_TUNING_COLUMNS]
+        cur.execute(
+            f"""INSERT INTO reframe_tuning_configs (user_id, {cols})
+            VALUES (?, {placeholders})
+            ON CONFLICT(user_id) DO UPDATE SET {update_set}, updated_at = datetime('now')""",
+            [target_user_id] + values,
+        )
+        conn.commit()
+        return {"success": True, "message": "Reframe tuning saved"}
+    finally:
+        conn.close()
+
+
+@router.post("/reframe-tuning/reset")
+async def reset_reframe_tuning_endpoint(user: CurrentUser = Depends(get_current_user)):
+    """Reset reframe tuning to defaults. Superadmin resets global; users reset their override."""
+    if not user.is_superadmin and not getattr(user, "is_premium", False):
+        raise HTTPException(status_code=403, detail="Premium required to reset reframe settings")
+
+    target_user_id = None if user.is_superadmin else user.id
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM reframe_tuning_configs WHERE user_id IS ?", (target_user_id,))
+        cols = ", ".join(REFRAME_TUNING_COLUMNS)
+        placeholders = ", ".join(["?"] * len(REFRAME_TUNING_COLUMNS))
+        values = [REFRAME_TUNING_DEFAULTS[c] for c in REFRAME_TUNING_COLUMNS]
+        cur.execute(
+            f"INSERT INTO reframe_tuning_configs (user_id, {cols}) VALUES (?, {placeholders})",
+            [target_user_id] + values,
+        )
+        conn.commit()
+        return {"success": True, "message": "Reframe tuning reset to defaults", "data": dict(REFRAME_TUNING_DEFAULTS)}
+    finally:
+        conn.close()
 
 
 # ─── Model Status Endpoint ────────────────────────────────────────────────────

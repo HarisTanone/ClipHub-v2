@@ -213,7 +213,7 @@ def test_parse_chunk_response_clamps_timestamps():
         ]
     })
     # In two-pass, timestamps from raw start/end without IDs — -10 to 120 = 130s > 120s max → filtered
- candidates = a._parse_pass1_response(raw, {}, 50.0, 300.0)
+    candidates = a._parse_pass1_response(raw, {}, 50.0, 300.0)
     assert len(candidates) >= 0 # May be filtered due to duration > 120s
     assert candidates[0].start == 50.0  # Clamped from -10
     print("  [PASS] Timestamps clamped to chunk bounds")

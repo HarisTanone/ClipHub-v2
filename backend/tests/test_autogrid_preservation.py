@@ -95,16 +95,9 @@ def build_per_frame_tracked(
 
 def create_engine() -> PodcastReframeEngine:
     """Create PodcastReframeEngine instance without loading face detector."""
-    with patch.object(PodcastReframeEngine, '_load_face_detector', return_value=False):
-        engine = PodcastReframeEngine.__new__(PodcastReframeEngine)
-        engine._face_detector = None
-        engine._use_legacy_api = False
-        engine._speaker_detector = None
-        engine._tracker = None
-        engine._hf_token = None
-        engine._diarizer = None
-        engine._face_mapper = None
-        engine._result_builder = None
+    engine = PodcastReframeEngine()
+    engine._face_detector = None
+    engine._use_legacy_api = False
     return engine
 
 

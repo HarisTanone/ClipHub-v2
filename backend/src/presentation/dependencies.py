@@ -22,6 +22,16 @@ def _safe_import(factory, name: str):
         return None
 
 
+def _load_reframe_tuning_global() -> dict | None:
+    """Load global reframe tuning config from DB. Returns None on failure (engine uses class defaults)."""
+    try:
+        from src.presentation.routes.settings import get_reframe_tuning
+        return get_reframe_tuning(user_id=None)
+    except Exception as e:
+        logger.debug(f"[DI] reframe tuning load failed, using class defaults: {e}")
+        return None
+
+
 @lru_cache()
 def get_job_service() -> JobService:
     """Singleton JobService with all v0.4 dependencies."""
@@ -55,7 +65,7 @@ def get_job_service() -> JobService:
     aspect_router = _safe_import(AspectRatioRouter, "AspectRatioRouter")
     browser_render = _safe_import(BrowserRenderEngine, "BrowserRenderEngine")
     subtitle_renderer = _safe_import(SubtitleRenderer, "SubtitleRenderer")
-    yolo_reframe = _safe_import(lambda: PodcastReframeEngine(hf_token=settings.HF_TOKEN), "PodcastReframeEngine")
+    yolo_reframe = _safe_import(lambda: PodcastReframeEngine(hf_token=settings.HF_TOKEN, tuning_override=_load_reframe_tuning_global()), "PodcastReframeEngine")
 
     # BRollInjector needs BrowserRenderEngine
     broll_injector = None
@@ -131,7 +141,7 @@ def get_v2_pipeline_service():
     aspect_router = _safe_import(AspectRatioRouter, "V2-AspectRatioRouter")
     browser_render = _safe_import(BrowserRenderEngine, "V2-BrowserRenderEngine")
     subtitle_renderer = _safe_import(SubtitleRenderer, "V2-SubtitleRenderer")
-    yolo_reframe = _safe_import(lambda: PodcastReframeEngine(hf_token=_settings.HF_TOKEN), "V2-PodcastReframeEngine")
+    yolo_reframe = _safe_import(lambda: PodcastReframeEngine(hf_token=_settings.HF_TOKEN, tuning_override=_load_reframe_tuning_global()), "V2-PodcastReframeEngine")
     broll_injector = None
     if browser_render:
         broll_injector = _safe_import(lambda: BRollInjector(browser_render), "V2-BRollInjector")

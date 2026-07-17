@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
+import { RangeSlider } from "@/components/ui/RangeSlider";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { system, storage, API_BASE, getToken } from "@/lib/api";
@@ -71,13 +72,73 @@ async function revokeFeatureApi(userId: number, featureCode: string): Promise<bo
   return res.ok;
 }
 
+// ─── Reframe Tuning API ───────────────────────────────────────────────────────
+
+interface ReframeTuning {
+  sample_interval_sec: number;
+  max_samples: number;
+  face_confidence: number;
+  min_face_size_ratio: number;
+  max_face_size_ratio: number;
+  min_separation_ratio: number;
+  min_coexist_ratio: number;
+  dominance_single_crop: number;
+  grid_base_zoom: number;
+  grid_max_zoom: number;
+  grid_face_margin: number;
+  grid_enter_samples: number;
+  grid_exit_samples: number;
+  min_grid_segment_seconds: number;
+  min_face_area_px: number;
+  min_area_ratio_to_max: number;
+  min_frame_ratio: number;
+  ghost_iou_threshold: number;
+  ghost_center_dist_ratio: number;
+  ghost_center_dist_broad: number;
+  min_pair_size_ratio: number;
+}
+
+const REFRAME_TUNING_DEFAULTS: ReframeTuning = {
+  sample_interval_sec: 0.333, max_samples: 720, face_confidence: 0.55,
+  min_face_size_ratio: 0.10, max_face_size_ratio: 0.50,
+  min_separation_ratio: 0.20, min_coexist_ratio: 0.40,
+  dominance_single_crop: 0.75, grid_base_zoom: 1.08, grid_max_zoom: 1.85,
+  grid_face_margin: 0.35, grid_enter_samples: 4, grid_exit_samples: 2,
+  min_grid_segment_seconds: 1.20,
+  min_face_area_px: 4000, min_area_ratio_to_max: 0.25, min_frame_ratio: 0.15,
+  ghost_iou_threshold: 0.25, ghost_center_dist_ratio: 0.08,
+  ghost_center_dist_broad: 0.20, min_pair_size_ratio: 0.18,
+};
+
+async function fetchReframeTuning(): Promise<ReframeTuning | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/reframe-tuning`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.data || null;
+}
+
+async function saveReframeTuning(payload: ReframeTuning): Promise<boolean> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/reframe-tuning`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) });
+  return res.ok;
+}
+
+async function resetReframeTuning(): Promise<ReframeTuning | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/reframe-tuning/reset`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.data || null;
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -99,10 +160,15 @@ export function Settings() {
   // Clear storage
   const [isClearing, setIsClearing] = useState(false);
 
+  // Reframe tuning
+  const [reframeTuning, setReframeTuning] = useState<ReframeTuning>(REFRAME_TUNING_DEFAULTS);
+  const [isSavingReframe, setIsSavingReframe] = useState(false);
+
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
     fetchSettings().then((d) => { if (d) setSettings((p) => ({ ...p, ...d })); });
     fetchUsers().then(setUsers);
+    fetchReframeTuning().then((d) => { if (d) setReframeTuning(d); });
   }, []);
 
   function handleChange(key: string, value: any) { setSettings((p) => ({ ...p, [key]: value })); }
@@ -141,8 +207,31 @@ export function Settings() {
     }
   }
 
+  function handleReframeChange(key: keyof ReframeTuning, value: number) {
+    setReframeTuning((p) => ({ ...p, [key]: value }));
+  }
+
+  async function handleSaveReframe() {
+    setIsSavingReframe(true);
+    const ok = await saveReframeTuning(reframeTuning);
+    toast[ok ? "success" : "error"](ok ? "Reframe tuning saved" : "Failed to save");
+    setIsSavingReframe(false);
+  }
+
+  async function handleResetReframe() {
+    if (!confirm("Reset all reframe tuning to defaults?")) return;
+    const data = await resetReframeTuning();
+    if (data) {
+      setReframeTuning(data);
+      toast.success("Reframe tuning reset to defaults");
+    } else {
+      toast.error("Failed to reset");
+    }
+  }
+
   const tabs = [
     { id: "general" as const, label: "General" },
+    { id: "reframe" as const, label: "Reframe Tuning" },
     ...(isSuperadmin ? [{ id: "render" as const, label: "Render Engine" }] : []),
     ...(isSuperadmin ? [{ id: "users" as const, label: "Users" }] : []),
   ];
@@ -162,7 +251,12 @@ export function Settings() {
             ))}
           </div>
         </div>
-        {tab !== "users" && (
+        {tab === "users" ? null : tab === "reframe" ? (
+          <div className="flex items-center gap-2">
+            <Button onClick={handleResetReframe} size="sm" variant="outline">Reset</Button>
+            <Button onClick={handleSaveReframe} loading={isSavingReframe} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+          </div>
+        ) : (
           <Button onClick={handleSave} loading={isSaving} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
         )}
       </div>
@@ -271,6 +365,56 @@ export function Settings() {
                 )}
               </div>
             </Card>
+          </div>
+        )}
+
+        {tab === "reframe" && (
+          <div className="max-w-3xl space-y-4">
+            {/* Sampling & Detection */}
+            <Card className="p-4">
+              <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-zinc-500" />Sampling &amp; Detection</h3>
+              <div className="space-y-3">
+                <RangeSlider label="Sample Interval (sec)" value={reframeTuning.sample_interval_sec} min={0.1} max={1.0} step={0.01} onChange={(v) => handleReframeChange("sample_interval_sec", v)} />
+                <RangeSlider label="Max Samples" value={reframeTuning.max_samples} min={60} max={1440} step={10} onChange={(v) => handleReframeChange("max_samples", v)} />
+                <RangeSlider label="Face Confidence" value={reframeTuning.face_confidence} min={0.1} max={0.9} step={0.01} onChange={(v) => handleReframeChange("face_confidence", v)} />
+                <RangeSlider label="Min Face Size Ratio" value={reframeTuning.min_face_size_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("min_face_size_ratio", v)} />
+                <RangeSlider label="Max Face Size Ratio" value={reframeTuning.max_face_size_ratio} min={0.20} max={0.80} step={0.01} onChange={(v) => handleReframeChange("max_face_size_ratio", v)} />
+                <RangeSlider label="Min Separation Ratio (two-person threshold)" value={reframeTuning.min_separation_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_separation_ratio", v)} />
+                <RangeSlider label="Min Coexist Ratio (both faces simultaneous)" value={reframeTuning.min_coexist_ratio} min={0.10} max={0.80} step={0.01} onChange={(v) => handleReframeChange("min_coexist_ratio", v)} />
+              </div>
+            </Card>
+
+            {/* Auto Grid */}
+            <Card className="p-4">
+              <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Film className="h-3.5 w-3.5 text-zinc-500" />Auto Grid</h3>
+              <div className="space-y-3">
+                <RangeSlider label="Dominance Single Crop (switch to single above this)" value={reframeTuning.dominance_single_crop} min={0.50} max={0.95} step={0.01} onChange={(v) => handleReframeChange("dominance_single_crop", v)} />
+                <RangeSlider label="Grid Base Zoom" value={reframeTuning.grid_base_zoom} min={1.0} max={1.5} step={0.01} onChange={(v) => handleReframeChange("grid_base_zoom", v)} />
+                <RangeSlider label="Grid Max Zoom (2-person separation)" value={reframeTuning.grid_max_zoom} min={1.2} max={3.0} step={0.01} onChange={(v) => handleReframeChange("grid_max_zoom", v)} />
+                <RangeSlider label="Grid Face Margin (breathing room)" value={reframeTuning.grid_face_margin} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("grid_face_margin", v)} />
+                <RangeSlider label="Grid Enter Samples (confirm 2nd person)" value={reframeTuning.grid_enter_samples} min={1} max={10} step={1} onChange={(v) => handleReframeChange("grid_enter_samples", v)} />
+                <RangeSlider label="Grid Exit Samples (close when 1 leaves)" value={reframeTuning.grid_exit_samples} min={1} max={6} step={1} onChange={(v) => handleReframeChange("grid_exit_samples", v)} />
+                <RangeSlider label="Min Grid Segment (sec, anti-flicker)" value={reframeTuning.min_grid_segment_seconds} min={0.5} max={3.0} step={0.1} onChange={(v) => handleReframeChange("min_grid_segment_seconds", v)} />
+              </div>
+            </Card>
+
+            {/* Ghost Detection */}
+            <Card className="p-4">
+              <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-zinc-500" />Ghost Detection</h3>
+              <div className="space-y-3">
+                <RangeSlider label="Min Face Area (px)" value={reframeTuning.min_face_area_px} min={500} max={15000} step={100} onChange={(v) => handleReframeChange("min_face_area_px", v)} />
+                <RangeSlider label="Min Area Ratio to Max" value={reframeTuning.min_area_ratio_to_max} min={0.05} max={0.60} step={0.01} onChange={(v) => handleReframeChange("min_area_ratio_to_max", v)} />
+                <RangeSlider label="Min Frame Ratio (track persistence)" value={reframeTuning.min_frame_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_frame_ratio", v)} />
+                <RangeSlider label="Ghost IoU Threshold (duplicate overlap)" value={reframeTuning.ghost_iou_threshold} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("ghost_iou_threshold", v)} />
+                <RangeSlider label="Ghost Center Dist Ratio" value={reframeTuning.ghost_center_dist_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_ratio", v)} />
+                <RangeSlider label="Ghost Center Dist Broad" value={reframeTuning.ghost_center_dist_broad} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_broad", v)} />
+                <RangeSlider label="Min Pair Size Ratio (big+small face pairing)" value={reframeTuning.min_pair_size_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_pair_size_ratio", v)} />
+              </div>
+            </Card>
+
+            <p className="text-[10px] text-zinc-600 px-1">
+              Higher grid_max_zoom separates close faces better but crops tighter. Lower min_face_area_px detects distant faces but may catch false positives. Adjust min_coexist_ratio to control when auto-grid activates (higher = stricter).
+            </p>
           </div>
         )}
 

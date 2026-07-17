@@ -82,7 +82,7 @@ class PodcastReframeEngine(IReframeEngine):
     MIN_PAIR_SIZE_RATIO = 0.18          # [FIX] Turunkan dari 0.30 -> Bisa pasangkan wajah besar & wajah kecil
     AUDIO_FILTER = "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS"
 
-    def __init__(self, hf_token: Optional[str] = None):
+    def __init__(self, hf_token: Optional[str] = None, tuning_override: Optional[dict] = None):
         self._face_detector = None
         self._use_legacy_api = False
         self._speaker_detector = ActiveSpeakerDetector()
@@ -93,6 +93,45 @@ class PodcastReframeEngine(IReframeEngine):
         self._diarizer: Optional[SpeakerDiarizer] = None
         self._face_mapper: Optional[SpeakerFaceMapper] = None
         self._result_builder = DiarizationResultBuilder()
+
+        # Dynamic tuning overrides — replace hardcoded class constants at instance level
+        self._apply_tuning(tuning_override)
+
+    def _apply_tuning(self, tuning_override: Optional[dict]) -> None:
+        """Override class-level tuning constants with values from DB or caller.
+
+        Ponytail: keeps class constants as defaults for backward compat; instance attrs override.
+        Upgrade path: remove class constants entirely once all callers pass tuning_override.
+        """
+        if not tuning_override:
+            return
+        # Mapping: DB column -> class constant attr name
+        _ATTR_MAP = {
+            "sample_interval_sec": "SAMPLE_INTERVAL_SEC",
+            "max_samples": "MAX_SAMPLES",
+            "face_confidence": "FACE_CONFIDENCE",
+            "min_face_size_ratio": "MIN_FACE_SIZE_RATIO",
+            "max_face_size_ratio": "MAX_FACE_SIZE_RATIO",
+            "min_separation_ratio": "MIN_SEPARATION_RATIO",
+            "min_coexist_ratio": "MIN_COEXIST_RATIO",
+            "dominance_single_crop": "DOMINANCE_SINGLE_CROP",
+            "grid_base_zoom": "GRID_BASE_ZOOM",
+            "grid_max_zoom": "GRID_MAX_ZOOM",
+            "grid_face_margin": "GRID_FACE_MARGIN",
+            "grid_enter_samples": "GRID_ENTER_SAMPLES",
+            "grid_exit_samples": "GRID_EXIT_SAMPLES",
+            "min_grid_segment_seconds": "MIN_GRID_SEGMENT_SECONDS",
+            "min_face_area_px": "MIN_FACE_AREA_PX",
+            "min_area_ratio_to_max": "MIN_AREA_RATIO_TO_MAX",
+            "min_frame_ratio": "MIN_FRAME_RATIO",
+            "ghost_iou_threshold": "GHOST_IOU_THRESHOLD",
+            "ghost_center_dist_ratio": "GHOST_CENTER_DIST_RATIO",
+            "ghost_center_dist_broad": "GHOST_CENTER_DIST_BROAD",
+            "min_pair_size_ratio": "MIN_PAIR_SIZE_RATIO",
+        }
+        for db_key, attr_name in _ATTR_MAP.items():
+            if db_key in tuning_override and tuning_override[db_key] is not None:
+                setattr(self, attr_name, tuning_override[db_key])
 
     def _load_face_detector(self) -> bool:
         if self._face_detector is not None:
