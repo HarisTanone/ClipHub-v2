@@ -86,12 +86,11 @@ export function ImageUploadZone({ onUpload }: ImageUploadZoneProps) {
       onDrop={handleDrop}
       className={`
         flex flex-col items-center justify-center gap-2
-        w-full min-h-[200px] rounded-lg cursor-pointer
+        w-full min-h-[300px] rounded-lg cursor-pointer
         border-2 border-dashed transition-colors
-        ${
-          isDragOver
-            ? "border-emerald-500 bg-emerald-500/5"
-            : "border-zinc-700 bg-zinc-900/50 hover:border-zinc-600"
+        ${isDragOver
+          ? "border-emerald-500 bg-emerald-500/5"
+          : "border-zinc-700 bg-zinc-900/50 hover:border-zinc-600"
         }
       `}
     >
