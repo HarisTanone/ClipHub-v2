@@ -10,9 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { system, storage, API_BASE, getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SectionDescription } from "@/components/reframe/SectionDescription";
-import { SamplingDetectionPreview } from "@/components/reframe/SamplingDetectionPreview";
-import { AutoGridPreview } from "@/components/reframe/AutoGridPreview";
-import { GhostDetectionPreview } from "@/components/reframe/GhostDetectionPreview";
+import { ImagePreviewPanel } from "@/components/reframe/ImagePreviewPanel";
 import { REFRAME_SLIDER_META, REFRAME_SECTION_DESCRIPTIONS } from "@/components/reframe/ReframeSliderMeta";
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
@@ -168,6 +166,7 @@ export function Settings() {
   // Reframe tuning
   const [reframeTuning, setReframeTuning] = useState<ReframeTuning>(REFRAME_TUNING_DEFAULTS);
   const [isSavingReframe, setIsSavingReframe] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("9:16");
 
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
@@ -374,86 +373,68 @@ export function Settings() {
         )}
 
         {tab === "reframe" && (
-          <div className="max-w-3xl space-y-4">
-            {/* Sampling & Detection */}
-            <Card className="p-4">
-              <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-zinc-500" />Sampling &amp; Detection</h3>
-              <SectionDescription
-                pipelineStage={REFRAME_SECTION_DESCRIPTIONS.samplingDetection.pipelineStage}
-                description={REFRAME_SECTION_DESCRIPTIONS.samplingDetection.description}
-              />
-              <SamplingDetectionPreview
-                faceConfidence={reframeTuning.face_confidence}
-                minFaceSizeRatio={reframeTuning.min_face_size_ratio}
-                maxFaceSizeRatio={reframeTuning.max_face_size_ratio}
-                sampleIntervalSec={reframeTuning.sample_interval_sec}
-                maxSamples={reframeTuning.max_samples}
-              />
-              <div className="space-y-3 mt-3">
-                <RangeSlider label="Sample Interval (sec)" value={reframeTuning.sample_interval_sec} min={0.1} max={1.0} step={0.01} onChange={(v) => handleReframeChange("sample_interval_sec", v)} description={REFRAME_SLIDER_META.sample_interval_sec.description} tooltip={REFRAME_SLIDER_META.sample_interval_sec.tooltip} />
-                <RangeSlider label="Max Samples" value={reframeTuning.max_samples} min={60} max={1440} step={10} onChange={(v) => handleReframeChange("max_samples", v)} description={REFRAME_SLIDER_META.max_samples.description} tooltip={REFRAME_SLIDER_META.max_samples.tooltip} />
-                <RangeSlider label="Face Confidence" value={reframeTuning.face_confidence} min={0.1} max={0.9} step={0.01} onChange={(v) => handleReframeChange("face_confidence", v)} description={REFRAME_SLIDER_META.face_confidence.description} tooltip={REFRAME_SLIDER_META.face_confidence.tooltip} />
-                <RangeSlider label="Min Face Size Ratio" value={reframeTuning.min_face_size_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("min_face_size_ratio", v)} description={REFRAME_SLIDER_META.min_face_size_ratio.description} tooltip={REFRAME_SLIDER_META.min_face_size_ratio.tooltip} />
-                <RangeSlider label="Max Face Size Ratio" value={reframeTuning.max_face_size_ratio} min={0.20} max={0.80} step={0.01} onChange={(v) => handleReframeChange("max_face_size_ratio", v)} description={REFRAME_SLIDER_META.max_face_size_ratio.description} tooltip={REFRAME_SLIDER_META.max_face_size_ratio.tooltip} />
-                <RangeSlider label="Min Separation Ratio (two-person threshold)" value={reframeTuning.min_separation_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_separation_ratio", v)} description={REFRAME_SLIDER_META.min_separation_ratio.description} tooltip={REFRAME_SLIDER_META.min_separation_ratio.tooltip} />
-                <RangeSlider label="Min Coexist Ratio (both faces simultaneous)" value={reframeTuning.min_coexist_ratio} min={0.10} max={0.80} step={0.01} onChange={(v) => handleReframeChange("min_coexist_ratio", v)} description={REFRAME_SLIDER_META.min_coexist_ratio.description} tooltip={REFRAME_SLIDER_META.min_coexist_ratio.tooltip} />
-              </div>
-            </Card>
+          <div className="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-6">
+            <ImagePreviewPanel
+              reframeTuning={reframeTuning}
+              aspectRatio={aspectRatio}
+              onAspectRatioChange={setAspectRatio}
+            />
+            <div className="space-y-4">
+              {/* Sampling & Detection */}
+              <Card className="p-4">
+                <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-zinc-500" />Sampling &amp; Detection</h3>
+                <SectionDescription
+                  pipelineStage={REFRAME_SECTION_DESCRIPTIONS.samplingDetection.pipelineStage}
+                  description={REFRAME_SECTION_DESCRIPTIONS.samplingDetection.description}
+                />
+                <div className="space-y-3 mt-3">
+                  <RangeSlider label="Sample Interval (sec)" value={reframeTuning.sample_interval_sec} min={0.1} max={1.0} step={0.01} onChange={(v) => handleReframeChange("sample_interval_sec", v)} description={REFRAME_SLIDER_META.sample_interval_sec.description} tooltip={REFRAME_SLIDER_META.sample_interval_sec.tooltip} />
+                  <RangeSlider label="Max Samples" value={reframeTuning.max_samples} min={60} max={1440} step={10} onChange={(v) => handleReframeChange("max_samples", v)} description={REFRAME_SLIDER_META.max_samples.description} tooltip={REFRAME_SLIDER_META.max_samples.tooltip} />
+                  <RangeSlider label="Face Confidence" value={reframeTuning.face_confidence} min={0.1} max={0.9} step={0.01} onChange={(v) => handleReframeChange("face_confidence", v)} description={REFRAME_SLIDER_META.face_confidence.description} tooltip={REFRAME_SLIDER_META.face_confidence.tooltip} />
+                  <RangeSlider label="Min Face Size Ratio" value={reframeTuning.min_face_size_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("min_face_size_ratio", v)} description={REFRAME_SLIDER_META.min_face_size_ratio.description} tooltip={REFRAME_SLIDER_META.min_face_size_ratio.tooltip} />
+                  <RangeSlider label="Max Face Size Ratio" value={reframeTuning.max_face_size_ratio} min={0.20} max={0.80} step={0.01} onChange={(v) => handleReframeChange("max_face_size_ratio", v)} description={REFRAME_SLIDER_META.max_face_size_ratio.description} tooltip={REFRAME_SLIDER_META.max_face_size_ratio.tooltip} />
+                  <RangeSlider label="Min Separation Ratio (two-person threshold)" value={reframeTuning.min_separation_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_separation_ratio", v)} description={REFRAME_SLIDER_META.min_separation_ratio.description} tooltip={REFRAME_SLIDER_META.min_separation_ratio.tooltip} />
+                  <RangeSlider label="Min Coexist Ratio (both faces simultaneous)" value={reframeTuning.min_coexist_ratio} min={0.10} max={0.80} step={0.01} onChange={(v) => handleReframeChange("min_coexist_ratio", v)} description={REFRAME_SLIDER_META.min_coexist_ratio.description} tooltip={REFRAME_SLIDER_META.min_coexist_ratio.tooltip} />
+                </div>
+              </Card>
 
-            {/* Auto Grid */}
-            <Card className="p-4">
-              <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Film className="h-3.5 w-3.5 text-zinc-500" />Auto Grid</h3>
-              <SectionDescription
-                pipelineStage={REFRAME_SECTION_DESCRIPTIONS.autoGrid.pipelineStage}
-                description={REFRAME_SECTION_DESCRIPTIONS.autoGrid.description}
-              />
-              <AutoGridPreview
-                dominanceSingleCrop={reframeTuning.dominance_single_crop}
-                gridBaseZoom={reframeTuning.grid_base_zoom}
-                gridMaxZoom={reframeTuning.grid_max_zoom}
-                gridFaceMargin={reframeTuning.grid_face_margin}
-                gridEnterSamples={reframeTuning.grid_enter_samples}
-                gridExitSamples={reframeTuning.grid_exit_samples}
-                minGridSegmentSeconds={reframeTuning.min_grid_segment_seconds}
-              />
-              <div className="space-y-3 mt-3">
-                <RangeSlider label="Dominance Single Crop (switch to single above this)" value={reframeTuning.dominance_single_crop} min={0.50} max={0.95} step={0.01} onChange={(v) => handleReframeChange("dominance_single_crop", v)} description={REFRAME_SLIDER_META.dominance_single_crop.description} tooltip={REFRAME_SLIDER_META.dominance_single_crop.tooltip} />
-                <RangeSlider label="Grid Base Zoom" value={reframeTuning.grid_base_zoom} min={1.0} max={1.5} step={0.01} onChange={(v) => handleReframeChange("grid_base_zoom", v)} description={REFRAME_SLIDER_META.grid_base_zoom.description} tooltip={REFRAME_SLIDER_META.grid_base_zoom.tooltip} />
-                <RangeSlider label="Grid Max Zoom (2-person separation)" value={reframeTuning.grid_max_zoom} min={1.2} max={3.0} step={0.01} onChange={(v) => handleReframeChange("grid_max_zoom", v)} description={REFRAME_SLIDER_META.grid_max_zoom.description} tooltip={REFRAME_SLIDER_META.grid_max_zoom.tooltip} />
-                <RangeSlider label="Grid Face Margin (breathing room)" value={reframeTuning.grid_face_margin} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("grid_face_margin", v)} description={REFRAME_SLIDER_META.grid_face_margin.description} tooltip={REFRAME_SLIDER_META.grid_face_margin.tooltip} />
-                <RangeSlider label="Grid Enter Samples (confirm 2nd person)" value={reframeTuning.grid_enter_samples} min={1} max={10} step={1} onChange={(v) => handleReframeChange("grid_enter_samples", v)} description={REFRAME_SLIDER_META.grid_enter_samples.description} tooltip={REFRAME_SLIDER_META.grid_enter_samples.tooltip} />
-                <RangeSlider label="Grid Exit Samples (close when 1 leaves)" value={reframeTuning.grid_exit_samples} min={1} max={6} step={1} onChange={(v) => handleReframeChange("grid_exit_samples", v)} description={REFRAME_SLIDER_META.grid_exit_samples.description} tooltip={REFRAME_SLIDER_META.grid_exit_samples.tooltip} />
-                <RangeSlider label="Min Grid Segment (sec, anti-flicker)" value={reframeTuning.min_grid_segment_seconds} min={0.5} max={3.0} step={0.1} onChange={(v) => handleReframeChange("min_grid_segment_seconds", v)} description={REFRAME_SLIDER_META.min_grid_segment_seconds.description} tooltip={REFRAME_SLIDER_META.min_grid_segment_seconds.tooltip} />
-              </div>
-            </Card>
+              {/* Auto Grid */}
+              <Card className="p-4">
+                <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Film className="h-3.5 w-3.5 text-zinc-500" />Auto Grid</h3>
+                <SectionDescription
+                  pipelineStage={REFRAME_SECTION_DESCRIPTIONS.autoGrid.pipelineStage}
+                  description={REFRAME_SECTION_DESCRIPTIONS.autoGrid.description}
+                />
+                <div className="space-y-3 mt-3">
+                  <RangeSlider label="Dominance Single Crop (switch to single above this)" value={reframeTuning.dominance_single_crop} min={0.50} max={0.95} step={0.01} onChange={(v) => handleReframeChange("dominance_single_crop", v)} description={REFRAME_SLIDER_META.dominance_single_crop.description} tooltip={REFRAME_SLIDER_META.dominance_single_crop.tooltip} />
+                  <RangeSlider label="Grid Base Zoom" value={reframeTuning.grid_base_zoom} min={1.0} max={1.5} step={0.01} onChange={(v) => handleReframeChange("grid_base_zoom", v)} description={REFRAME_SLIDER_META.grid_base_zoom.description} tooltip={REFRAME_SLIDER_META.grid_base_zoom.tooltip} />
+                  <RangeSlider label="Grid Max Zoom (2-person separation)" value={reframeTuning.grid_max_zoom} min={1.2} max={3.0} step={0.01} onChange={(v) => handleReframeChange("grid_max_zoom", v)} description={REFRAME_SLIDER_META.grid_max_zoom.description} tooltip={REFRAME_SLIDER_META.grid_max_zoom.tooltip} />
+                  <RangeSlider label="Grid Face Margin (breathing room)" value={reframeTuning.grid_face_margin} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("grid_face_margin", v)} description={REFRAME_SLIDER_META.grid_face_margin.description} tooltip={REFRAME_SLIDER_META.grid_face_margin.tooltip} />
+                  <RangeSlider label="Grid Enter Samples (confirm 2nd person)" value={reframeTuning.grid_enter_samples} min={1} max={10} step={1} onChange={(v) => handleReframeChange("grid_enter_samples", v)} description={REFRAME_SLIDER_META.grid_enter_samples.description} tooltip={REFRAME_SLIDER_META.grid_enter_samples.tooltip} />
+                  <RangeSlider label="Grid Exit Samples (close when 1 leaves)" value={reframeTuning.grid_exit_samples} min={1} max={6} step={1} onChange={(v) => handleReframeChange("grid_exit_samples", v)} description={REFRAME_SLIDER_META.grid_exit_samples.description} tooltip={REFRAME_SLIDER_META.grid_exit_samples.tooltip} />
+                  <RangeSlider label="Min Grid Segment (sec, anti-flicker)" value={reframeTuning.min_grid_segment_seconds} min={0.5} max={3.0} step={0.1} onChange={(v) => handleReframeChange("min_grid_segment_seconds", v)} description={REFRAME_SLIDER_META.min_grid_segment_seconds.description} tooltip={REFRAME_SLIDER_META.min_grid_segment_seconds.tooltip} />
+                </div>
+              </Card>
 
-            {/* Ghost Detection */}
-            <Card className="p-4">
-              <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-zinc-500" />Ghost Detection</h3>
-              <SectionDescription
-                pipelineStage={REFRAME_SECTION_DESCRIPTIONS.ghostDetection.pipelineStage}
-                description={REFRAME_SECTION_DESCRIPTIONS.ghostDetection.description}
-              />
-              <GhostDetectionPreview
-                minFaceAreaPx={reframeTuning.min_face_area_px}
-                minAreaRatioToMax={reframeTuning.min_area_ratio_to_max}
-                minFrameRatio={reframeTuning.min_frame_ratio}
-                ghostIouThreshold={reframeTuning.ghost_iou_threshold}
-                ghostCenterDistRatio={reframeTuning.ghost_center_dist_ratio}
-                ghostCenterDistBroad={reframeTuning.ghost_center_dist_broad}
-                minPairSizeRatio={reframeTuning.min_pair_size_ratio}
-              />
-              <div className="space-y-3 mt-3">
-                <RangeSlider label="Min Face Area (px)" value={reframeTuning.min_face_area_px} min={500} max={15000} step={100} onChange={(v) => handleReframeChange("min_face_area_px", v)} description={REFRAME_SLIDER_META.min_face_area_px.description} tooltip={REFRAME_SLIDER_META.min_face_area_px.tooltip} />
-                <RangeSlider label="Min Area Ratio to Max" value={reframeTuning.min_area_ratio_to_max} min={0.05} max={0.60} step={0.01} onChange={(v) => handleReframeChange("min_area_ratio_to_max", v)} description={REFRAME_SLIDER_META.min_area_ratio_to_max.description} tooltip={REFRAME_SLIDER_META.min_area_ratio_to_max.tooltip} />
-                <RangeSlider label="Min Frame Ratio (track persistence)" value={reframeTuning.min_frame_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_frame_ratio", v)} description={REFRAME_SLIDER_META.min_frame_ratio.description} tooltip={REFRAME_SLIDER_META.min_frame_ratio.tooltip} />
-                <RangeSlider label="Ghost IoU Threshold (duplicate overlap)" value={reframeTuning.ghost_iou_threshold} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("ghost_iou_threshold", v)} description={REFRAME_SLIDER_META.ghost_iou_threshold.description} tooltip={REFRAME_SLIDER_META.ghost_iou_threshold.tooltip} />
-                <RangeSlider label="Ghost Center Dist Ratio" value={reframeTuning.ghost_center_dist_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_ratio", v)} description={REFRAME_SLIDER_META.ghost_center_dist_ratio.description} tooltip={REFRAME_SLIDER_META.ghost_center_dist_ratio.tooltip} />
-                <RangeSlider label="Ghost Center Dist Broad" value={reframeTuning.ghost_center_dist_broad} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_broad", v)} description={REFRAME_SLIDER_META.ghost_center_dist_broad.description} tooltip={REFRAME_SLIDER_META.ghost_center_dist_broad.tooltip} />
-                <RangeSlider label="Min Pair Size Ratio (big+small face pairing)" value={reframeTuning.min_pair_size_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_pair_size_ratio", v)} description={REFRAME_SLIDER_META.min_pair_size_ratio.description} tooltip={REFRAME_SLIDER_META.min_pair_size_ratio.tooltip} />
-              </div>
-            </Card>
+              {/* Ghost Detection */}
+              <Card className="p-4">
+                <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-zinc-500" />Ghost Detection</h3>
+                <SectionDescription
+                  pipelineStage={REFRAME_SECTION_DESCRIPTIONS.ghostDetection.pipelineStage}
+                  description={REFRAME_SECTION_DESCRIPTIONS.ghostDetection.description}
+                />
+                <div className="space-y-3 mt-3">
+                  <RangeSlider label="Min Face Area (px)" value={reframeTuning.min_face_area_px} min={500} max={15000} step={100} onChange={(v) => handleReframeChange("min_face_area_px", v)} description={REFRAME_SLIDER_META.min_face_area_px.description} tooltip={REFRAME_SLIDER_META.min_face_area_px.tooltip} />
+                  <RangeSlider label="Min Area Ratio to Max" value={reframeTuning.min_area_ratio_to_max} min={0.05} max={0.60} step={0.01} onChange={(v) => handleReframeChange("min_area_ratio_to_max", v)} description={REFRAME_SLIDER_META.min_area_ratio_to_max.description} tooltip={REFRAME_SLIDER_META.min_area_ratio_to_max.tooltip} />
+                  <RangeSlider label="Min Frame Ratio (track persistence)" value={reframeTuning.min_frame_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_frame_ratio", v)} description={REFRAME_SLIDER_META.min_frame_ratio.description} tooltip={REFRAME_SLIDER_META.min_frame_ratio.tooltip} />
+                  <RangeSlider label="Ghost IoU Threshold (duplicate overlap)" value={reframeTuning.ghost_iou_threshold} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("ghost_iou_threshold", v)} description={REFRAME_SLIDER_META.ghost_iou_threshold.description} tooltip={REFRAME_SLIDER_META.ghost_iou_threshold.tooltip} />
+                  <RangeSlider label="Ghost Center Dist Ratio" value={reframeTuning.ghost_center_dist_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_ratio", v)} description={REFRAME_SLIDER_META.ghost_center_dist_ratio.description} tooltip={REFRAME_SLIDER_META.ghost_center_dist_ratio.tooltip} />
+                  <RangeSlider label="Ghost Center Dist Broad" value={reframeTuning.ghost_center_dist_broad} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_broad", v)} description={REFRAME_SLIDER_META.ghost_center_dist_broad.description} tooltip={REFRAME_SLIDER_META.ghost_center_dist_broad.tooltip} />
+                  <RangeSlider label="Min Pair Size Ratio (big+small face pairing)" value={reframeTuning.min_pair_size_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_pair_size_ratio", v)} description={REFRAME_SLIDER_META.min_pair_size_ratio.description} tooltip={REFRAME_SLIDER_META.min_pair_size_ratio.tooltip} />
+                </div>
+              </Card>
 
+            </div>
           </div>
         )}
 

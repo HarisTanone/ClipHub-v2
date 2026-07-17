@@ -196,9 +196,12 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
     });
   });
 
-  describe('Property 2: SVG Previews Absent', () => {
-    it('should have NO SVG preview for Sampling & Detection section', async () => {
-      // Validates: Requirement 1.2
+  describe('Property 2: SVG Previews Replaced by Image Preview Panel', () => {
+    // Phase 2 replaced the old SVG schematics with a real image preview panel.
+    // These tests now verify the old SVGs are removed and the new panel exists.
+
+    it('should have NO old SVG preview for Sampling & Detection section (replaced by image preview)', async () => {
+      // Validates: Requirement 1.2 — old SVGs intentionally removed in Phase 2
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
@@ -207,13 +210,12 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
 
       const preview = container.querySelector('[data-testid="sampling-detection-preview"]');
 
-      // BUG CONDITION: We EXPECT this preview SVG to exist
-      // On UNFIXED code, this FAILS — no preview exists
-      expect(preview).not.toBeNull();
+      // After Phase 2 fix: SVG previews are removed, replaced by ImagePreviewPanel
+      expect(preview).toBeNull();
     });
 
-    it('should have NO SVG preview for Auto Grid section', async () => {
-      // Validates: Requirement 1.3
+    it('should have NO old SVG preview for Auto Grid section (replaced by image preview)', async () => {
+      // Validates: Requirement 1.3 — old SVGs intentionally removed in Phase 2
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
@@ -222,13 +224,12 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
 
       const preview = container.querySelector('[data-testid="auto-grid-preview"]');
 
-      // BUG CONDITION: We EXPECT this preview SVG to exist
-      // On UNFIXED code, this FAILS
-      expect(preview).not.toBeNull();
+      // After Phase 2 fix: SVG previews are removed, replaced by ImagePreviewPanel
+      expect(preview).toBeNull();
     });
 
-    it('should have NO SVG preview for Ghost Detection section', async () => {
-      // Validates: Requirement 1.4
+    it('should have NO old SVG preview for Ghost Detection section (replaced by image preview)', async () => {
+      // Validates: Requirement 1.4 — old SVGs intentionally removed in Phase 2
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
@@ -237,9 +238,8 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
 
       const preview = container.querySelector('[data-testid="ghost-detection-preview"]');
 
-      // BUG CONDITION: We EXPECT this preview SVG to exist
-      // On UNFIXED code, this FAILS
-      expect(preview).not.toBeNull();
+      // After Phase 2 fix: SVG previews are removed, replaced by ImagePreviewPanel
+      expect(preview).toBeNull();
     });
   });
 });

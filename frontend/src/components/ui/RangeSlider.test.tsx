@@ -110,6 +110,9 @@ describe('Property 4: RangeSlider Backward Compatibility (Preservation)', () => 
             initialValue: fc.double({ min, max, noNaN: true, noDefaultInfinity: true }),
             newValue: fc.double({ min, max, noNaN: true, noDefaultInfinity: true }),
           });
+        }).filter(({ initialValue, newValue }) => {
+          // Ensure newValue differs from initialValue (otherwise onChange won't fire)
+          return String(newValue) !== String(initialValue);
         }),
         ({ min, max, step, initialValue, newValue }) => {
           const onChange = vi.fn();
