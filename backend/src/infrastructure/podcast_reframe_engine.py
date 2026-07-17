@@ -133,6 +133,21 @@ class PodcastReframeEngine(IReframeEngine):
             if db_key in tuning_override and tuning_override[db_key] is not None:
                 setattr(self, attr_name, tuning_override[db_key])
 
+    def _reload_tuning_from_db(self) -> None:
+        """Reload tuning config from DB before each process() call.
+
+        This ensures settings saved via the UI take effect immediately
+        without requiring a service restart.
+        """
+        try:
+            from src.presentation.routes.settings import get_reframe_tuning
+            tuning = get_reframe_tuning(user_id=None)
+            if tuning:
+                self._apply_tuning(tuning)
+        except Exception as e:
+            # Non-fatal: if DB read fails, keep current values
+            logger.debug(f"podcast_reframe: tuning reload failed (using current): {e}")
+
     def _load_face_detector(self) -> bool:
         if self._face_detector is not None:
             return True
@@ -318,6 +333,9 @@ class PodcastReframeEngine(IReframeEngine):
     ) -> dict:
         if not os.path.exists(video_path):
             return {"output_path": video_path, "person_count": 0, "method": "error"}
+
+        # Reload tuning from DB (picks up UI changes without restart)
+        self._reload_tuning_from_db()
 
         if target_aspect != "9:16":
             success = await self._simple_crop(video_path, output_path, target_aspect)
