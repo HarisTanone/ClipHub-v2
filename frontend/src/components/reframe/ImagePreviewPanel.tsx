@@ -20,6 +20,10 @@ const ASPECT_RATIO_CSS: Record<"9:16" | "16:9" | "1:1", string> = {
 };
 
 // ─── Reframe Preview Renderer ────────────────────────────────────────────────
+// Simulates the ACTUAL reframe engine output:
+// - Black background (like real 1080x1920 output)
+// - objectFit: cover + objectPosition for real crop behavior
+// - Grid mode splits into two panels (top/bottom), each cropped to a speaker
 
 interface ReframePreviewRendererProps {
   uploadedImage: string;
@@ -33,82 +37,31 @@ function ReframePreviewRenderer({
   reframeTuning,
 }: ReframePreviewRendererProps) {
   const isSingleCrop = reframeTuning.dominance_single_crop > 0.75;
-
-  // Calculate effective zoom considering face margin
-  const effectiveZoom = useMemo(() => {
-    const baseZoom = reframeTuning.grid_base_zoom;
-    // Face margin reduces effective zoom slightly (more breathing room = less zoom)
-    const marginFactor = 1 - reframeTuning.grid_face_margin * 0.3;
-    return baseZoom * marginFactor;
-  }, [reframeTuning.grid_base_zoom, reframeTuning.grid_face_margin]);
-
-  const panelStyles = useMemo(() => {
-    const transition =
-      "transform 0.3s ease, object-position 0.3s ease, opacity 0.3s ease";
-
-    if (isSingleCrop) {
-      // Single crop: one zoomed view centered on face area
-      return {
-        single: {
-          transform: `scale(${effectiveZoom})`,
-          transformOrigin: "center center",
-          width: "100%" as const,
-          height: "100%" as const,
-          objectFit: "cover" as const,
-          transition,
-        },
-      };
-    } else {
-      // Grid mode: two panels, left speaker and right speaker (side by side in typical podcast)
-      return {
-        top: {
-          transform: `scale(${effectiveZoom * 1.2})`,
-          transformOrigin: "30% center",
-          width: "100%" as const,
-          height: "100%" as const,
-          objectFit: "cover" as const,
-          transition,
-        },
-        bottom: {
-          transform: `scale(${effectiveZoom * 1.2})`,
-          transformOrigin: "70% center",
-          width: "100%" as const,
-          height: "100%" as const,
-          objectFit: "cover" as const,
-          transition,
-        },
-      };
-    }
-  }, [isSingleCrop, effectiveZoom]);
-
   const aspectRatioCSS = ASPECT_RATIO_CSS[aspectRatio];
 
+  const zoomFactor = reframeTuning.grid_base_zoom;
+  const margin = reframeTuning.grid_face_margin;
+
   if (isSingleCrop) {
-    // Single crop mode: one panel with zoomed image
+    // Single crop mode: one panel showing cropped center of image
     return (
       <div
-        className="relative w-full mx-auto border border-emerald-500/40 rounded-md"
+        className="bg-black rounded-lg overflow-hidden mx-auto"
         style={{ aspectRatio: aspectRatioCSS, maxHeight: "500px" }}
       >
-        <div className="absolute inset-0 overflow-hidden rounded-md">
+        <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
           <img
             src={uploadedImage}
             alt="Reframe preview — single crop"
-            style={panelStyles.single}
             draggable={false}
-          />
-        </div>
-        {/* Max zoom indicator overlay */}
-        <div
-          className="absolute inset-0 flex items-center justify-center pointer-events-none"
-          style={{ opacity: 0.4 }}
-        >
-          <div
-            className="border border-dashed border-blue-400 rounded-sm"
             style={{
-              width: `${(1 / reframeTuning.grid_max_zoom) * 100}%`,
-              height: `${(1 / reframeTuning.grid_max_zoom) * 100}%`,
-              transition: "width 0.3s ease, height 0.3s ease",
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center center",
+              transform: `scale(${zoomFactor})`,
+              transformOrigin: "center center",
+              transition: "transform 0.3s ease, object-position 0.3s ease",
             }}
           />
         </div>
@@ -116,66 +69,56 @@ function ReframePreviewRenderer({
     );
   }
 
-  // Grid mode: two panels stacked vertically
+  // Grid mode: two stacked panels, each cropped to a different speaker
+  // Top panel → left speaker (~25% horizontal position)
+  // Bottom panel → right speaker (~75% horizontal position)
+  const leftSpeakerPos = Math.max(0, Math.min(100, 25 - margin * 10));
+  const rightSpeakerPos = Math.max(0, Math.min(100, 75 + margin * 10));
+
   return (
     <div
-      className="relative w-full mx-auto border border-emerald-500/40 rounded-md"
+      className="bg-black rounded-lg overflow-hidden mx-auto flex flex-col"
       style={{ aspectRatio: aspectRatioCSS, maxHeight: "500px" }}
     >
+      {/* Top panel — LEFT speaker */}
+      <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+        <img
+          src={uploadedImage}
+          alt="Reframe preview — top speaker"
+          draggable={false}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: `${leftSpeakerPos}% center`,
+            transform: `scale(${zoomFactor * 1.1})`,
+            transformOrigin: "25% center",
+            transition: "all 0.3s ease",
+          }}
+        />
+      </div>
+
+      {/* Divider */}
       <div
-        className="absolute inset-0 flex flex-col rounded-md"
-        style={{ gap: "2px" }}
-      >
-        {/* Top panel — speaker 1 */}
-        <div className="flex-1 overflow-hidden rounded-t-md relative">
-          <img
-            src={uploadedImage}
-            alt="Reframe preview — top speaker"
-            style={(panelStyles as { top: React.CSSProperties; bottom: React.CSSProperties }).top}
-            draggable={false}
-          />
-          {/* Max zoom indicator */}
-          <div
-            className="absolute inset-0 flex items-center justify-center pointer-events-none"
-            style={{ opacity: 0.3 }}
-          >
-            <div
-              className="border border-dashed border-blue-400 rounded-sm"
-              style={{
-                width: `${(1 / reframeTuning.grid_max_zoom) * 100}%`,
-                height: `${(1 / reframeTuning.grid_max_zoom) * 100}%`,
-                transition: "width 0.3s ease, height 0.3s ease",
-              }}
-            />
-          </div>
-        </div>
+        style={{ height: "2px", background: "#1a1a1a", flexShrink: 0 }}
+      />
 
-        {/* Divider line */}
-        <div className="h-[2px] bg-blue-500/60 flex-shrink-0" />
-
-        {/* Bottom panel — speaker 2 */}
-        <div className="flex-1 overflow-hidden rounded-b-md relative">
-          <img
-            src={uploadedImage}
-            alt="Reframe preview — bottom speaker"
-            style={(panelStyles as { top: React.CSSProperties; bottom: React.CSSProperties }).bottom}
-            draggable={false}
-          />
-          {/* Max zoom indicator */}
-          <div
-            className="absolute inset-0 flex items-center justify-center pointer-events-none"
-            style={{ opacity: 0.3 }}
-          >
-            <div
-              className="border border-dashed border-blue-400 rounded-sm"
-              style={{
-                width: `${(1 / reframeTuning.grid_max_zoom) * 100}%`,
-                height: `${(1 / reframeTuning.grid_max_zoom) * 100}%`,
-                transition: "width 0.3s ease, height 0.3s ease",
-              }}
-            />
-          </div>
-        </div>
+      {/* Bottom panel — RIGHT speaker */}
+      <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+        <img
+          src={uploadedImage}
+          alt="Reframe preview — bottom speaker"
+          draggable={false}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: `${rightSpeakerPos}% center`,
+            transform: `scale(${zoomFactor * 1.1})`,
+            transformOrigin: "75% center",
+            transition: "all 0.3s ease",
+          }}
+        />
       </div>
     </div>
   );
@@ -207,7 +150,7 @@ export function ImagePreviewPanel({
     if (reframeTuning.dominance_single_crop > 0.75) {
       return "Single Crop";
     }
-    return "Grid Mode (2 speakers)";
+    return "Grid Mode";
   }, [reframeTuning.dominance_single_crop]);
 
   return (
@@ -215,7 +158,7 @@ export function ImagePreviewPanel({
       {/* Aspect Ratio Selector */}
       <AspectRatioSelector value={aspectRatio} onChange={onAspectRatioChange} />
 
-      {/* Image Container */}
+      {/* Preview Container */}
       <div className="relative rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800">
         {uploadedImage ? (
           <div className="p-2">
