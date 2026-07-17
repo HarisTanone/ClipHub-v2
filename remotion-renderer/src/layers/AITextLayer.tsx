@@ -53,11 +53,17 @@ export const AITextLayer: React.FC<{
     extrapolateRight: "clamp",
   });
   const animation = style.animation || "cinematic";
+  const glitchOffset = animation === "glitch" ? interpolate(enter, [0, 0.3, 0.6, 1], [-6, 4, -3, 0]) : 0;
+  const neonGlow = animation === "neon" ? interpolate(enter, [0, 1], [4, 28]) : 0;
   const transform = animation === "slam"
     ? `scale(${interpolate(enter, [0, 1], [1.4, 1])}) rotate(${interpolate(enter, [0, 1], [-3, 0])}deg)`
     : animation === "reveal"
       ? `translateY(${interpolate(enter, [0, 1], [42, 0])}px)`
-      : `scale(${interpolate(enter, [0, 1], [0.88, 1])}) translateY(${interpolate(enter, [0, 1], [18, 0])}px)`;
+      : animation === "glitch"
+        ? `translateX(${glitchOffset}px) translateY(${interpolate(enter, [0, 1], [10, 0])}px)`
+        : animation === "neon"
+          ? `scale(${interpolate(enter, [0, 1], [0.92, 1])})`
+          : `scale(${interpolate(enter, [0, 1], [0.88, 1])}) translateY(${interpolate(enter, [0, 1], [18, 0])}px)`;
 
   const effect = active.effect || "spotlight";
   const position = active.position || (effect === "side_label" ? "left" : "center");
@@ -103,9 +109,11 @@ export const AITextLayer: React.FC<{
           WebkitTextStroke: style.strokeEnabled === false
             ? undefined
             : `${Number(style.strokeWidth ?? 2)}px ${style.strokeColor || "#09090B"}`,
-          textShadow: style.shadowEnabled === false
-            ? undefined
-            : `0 8px ${Number(style.shadowBlur ?? 22)}px ${style.shadowColor || "#000000"}`,
+          textShadow: animation === "neon"
+            ? `0 0 ${neonGlow}px ${accent}, 0 0 ${neonGlow * 2}px ${accent}, 0 4px ${Number(style.shadowBlur ?? 22)}px ${style.shadowColor || "#000000"}`
+            : style.shadowEnabled === false
+              ? undefined
+              : `0 8px ${Number(style.shadowBlur ?? 22)}px ${style.shadowColor || "#000000"}`,
         }}>
           {effect === "side_label" && (
             <div style={{ width: 80, height: 7, borderRadius: 999, background: accent, marginBottom: 18, marginLeft: position === "right" ? "auto" : 0 }} />

@@ -45,7 +45,7 @@ def normalise_text_emphasis_style(style: object) -> dict:
     effect_mode = str(result.get("effectMode", "auto"))
     result["effectMode"] = effect_mode if effect_mode in ALLOWED_EFFECTS | {"auto"} else "auto"
     animation = str(result.get("animation", "cinematic"))
-    result["animation"] = animation if animation in {"cinematic", "slam", "reveal"} else "cinematic"
+    result["animation"] = animation if animation in {"cinematic", "slam", "reveal", "glitch", "neon"} else "cinematic"
     result["fontFamily"] = str(result.get("fontFamily") or "Anton")[:80]
     result["fontWeight"] = str(result.get("fontWeight") or "900")[:8]
     result["fontSize"] = _clamp_number(result.get("fontSize"), 32, 160, 92)

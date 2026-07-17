@@ -88,7 +88,7 @@ export interface TextEmphasisEvent {
 
 export interface TextEmphasisStyleConfig {
   effectMode?: "auto" | TextEmphasisEffect;
-  animation?: "cinematic" | "slam" | "reveal";
+  animation?: "cinematic" | "slam" | "reveal" | "glitch" | "neon";
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: string;

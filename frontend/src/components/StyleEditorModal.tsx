@@ -163,7 +163,7 @@ export interface SubtitleStyle {
 
 export interface TextEmphasisStyle {
   effectMode: "auto" | "behind_person" | "spotlight" | "side_label";
-  animation: "cinematic" | "slam" | "reveal";
+  animation: "cinematic" | "slam" | "reveal" | "glitch" | "neon";
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
@@ -864,7 +864,7 @@ interface StyleEditorModalProps {
   onTextEmphasisChange?: (style: TextEmphasisStyle) => void;
   aspectRatio?: string;
   inline?: boolean;
-  activeTab?: "presets" | "hook" | "subtitle" | "transition" | "ai_text";
+  activeTab?: "presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other";
   thumbnailUrl?: string;
   isSuperadmin?: boolean;
   isPremium?: boolean;
@@ -877,7 +877,7 @@ interface StyleEditorModalProps {
 }
 
 export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => {}, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress }: StyleEditorModalProps) {
-  const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text">(activeTab || "hook");
+  const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
 
@@ -1016,7 +1016,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : tab === "ai_text" ? <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
       </div>
     );
   }
@@ -1039,11 +1039,8 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
               <button type="button" onClick={() => setTab("subtitle")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === "subtitle" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
                 <Sparkles className="h-3 w-3 inline mr-1.5" />Subtitle
               </button>
-              <button type="button" onClick={() => setTab("transition")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === "transition" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
-                <MoveRight className="h-3 w-3 inline mr-1.5" />Transition
-              </button>
-              <button type="button" onClick={() => setTab("ai_text")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === "ai_text" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
-                <Layers className="h-3 w-3 inline mr-1.5" />AI Text
+              <button type="button" onClick={() => setTab("other")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === "other" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
+                <Layers className="h-3 w-3 inline mr-1.5" />Other
               </button>
             </div>
           </div>
@@ -1054,8 +1051,35 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
           </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : tab === "ai_text" ? <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Other Tab (Transition + AI Text combined) ────────────────────────────────
+
+function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisChange, thumbnailUrl }: {
+  hookStyle: HookStyle;
+  textEmphasisStyle: TextEmphasisStyle;
+  onHookChange: (s: HookStyle) => void;
+  onTextEmphasisChange: (s: TextEmphasisStyle) => void;
+  thumbnailUrl?: string;
+}) {
+  const [subTab, setSubTab] = useState<"transition" | "ai_text">("transition");
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex items-center gap-1 px-5 pt-3 shrink-0">
+        <button type="button" onClick={() => setSubTab("transition")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "transition" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}>
+          <MoveRight className="h-3 w-3 inline mr-1" />Transition
+        </button>
+        <button type="button" onClick={() => setSubTab("ai_text")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "ai_text" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}>
+          <Layers className="h-3 w-3 inline mr-1" />AI Text
+        </button>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        {subTab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} />}
       </div>
     </div>
   );
@@ -1065,10 +1089,30 @@ function TransitionEditor({ style, onChange }: { style: HookStyle; onChange: (st
   const active = style.transitionStyle || "cut";
   const duration = style.transitionDuration || 0.35;
   const durationInt = Math.round(duration * 100);
+  const previewDur = Math.max(0.8, duration * 2);
   return (
     <div className="h-full overflow-y-auto p-5">
+      <style>{`
+        @keyframes transCut { 0%,49% { opacity:1; } 50%,99% { opacity:0; } 100% { opacity:1; } }
+        @keyframes transFade { 0%,100% { opacity:1; } 50% { opacity:0; } }
+        @keyframes transSlide { 0% { transform:translateX(0); } 49% { transform:translateX(-100%); } 50% { transform:translateX(100%); } 100% { transform:translateX(0); } }
+        @keyframes transZoom { 0%,100% { transform:scale(1); opacity:1; } 50% { transform:scale(1.5); opacity:0; } }
+      `}</style>
       <h3 className="text-sm font-semibold text-zinc-100">Speaker Transition</h3>
       <p className="mt-1 text-xs text-zinc-500">Applied to preview and final Remotion render when the clip starts or speaker framing changes.</p>
+
+      {/* Live preview */}
+      <div className="mt-4 flex justify-center">
+        <div className="relative aspect-[9/16] w-32 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
+          <div className="absolute inset-0 flex items-center justify-center" style={{ animation: `${active === "cut" ? "transCut" : active === "fade" ? "transFade" : active === "slide" ? "transSlide" : "transZoom"} ${previewDur}s ease-in-out infinite` }}>
+            <div className="h-full w-full bg-gradient-to-br from-emerald-500/50 to-blue-500/40" />
+          </div>
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <span className="rounded-full bg-black/50 px-2 py-0.5 text-[9px] font-medium text-white">{active} · {duration.toFixed(2)}s</span>
+          </div>
+        </div>
+      </div>
+
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {(["cut", "fade", "slide", "zoom"] as const).map((value) => (
           <button type="button" key={value} onClick={() => onChange({ ...style, transitionStyle: value })} className={cn("rounded-xl border p-4 text-left capitalize transition-all", active === value ? "border-emerald-500 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-950/50 text-zinc-400 hover:border-zinc-700")}>
@@ -1156,7 +1200,7 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Animation
               <select value={style.animation} onChange={(e) => update("animation", e.target.value as TextEmphasisStyle["animation"])} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-2 text-xs font-normal normal-case text-zinc-200 outline-none focus:border-emerald-500/60">
-                <option value="cinematic">Cinematic</option><option value="slam">Slam</option><option value="reveal">Reveal</option>
+                <option value="cinematic">Cinematic</option><option value="slam">Slam</option><option value="reveal">Reveal</option><option value="glitch">Glitch</option><option value="neon">Neon Glow</option>
               </select>
             </label>
             <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Font

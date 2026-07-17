@@ -33,7 +33,7 @@ export function NewJob() {
   const [urlError, setUrlError] = useState("");
 
   // Style editor inline (not modal)
-  const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text">("hook");
+  const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "other">("hook");
   const [hookStyleConfig, setHookStyleConfig] = useState<HookStyle>(() => {
     try { const s = localStorage.getItem("autocliper_hook_style"); return s ? { ...DEFAULT_HOOK_STYLE, ...JSON.parse(s) } : DEFAULT_HOOK_STYLE; } catch { return DEFAULT_HOOK_STYLE; }
   });
@@ -364,7 +364,7 @@ export function NewJob() {
                   ? "Aktif: AI memilih maksimal 2 frasa kuat. Behind Person, Spotlight, atau Side Label; subtitle berhenti sementara."
                   : "Opsional. Jika mati, hasil subtitle tetap sama seperti sekarang."}
                 checked={textEmphasisEnabled}
-                onChange={(enabled) => { setTextEmphasisEnabled(enabled); if (enabled) setStyleTab("ai_text"); }}
+                onChange={(enabled) => { setTextEmphasisEnabled(enabled); if (enabled) setStyleTab("other"); }}
               />
             </div>
           </Card>
@@ -457,8 +457,7 @@ export function NewJob() {
               className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", styleTab === "subtitle" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}>
               <Sparkles className="h-3 w-3 inline mr-1" />Subtitle
             </button>
-            <button type="button" onClick={() => setStyleTab("transition")} className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", styleTab === "transition" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}><MoveRight className="h-3 w-3 inline mr-1" />Transition</button>
-            <button type="button" onClick={() => setStyleTab("ai_text")} className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", styleTab === "ai_text" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}><Layers className="h-3 w-3 inline mr-1" />AI Text</button>
+            <button type="button" onClick={() => setStyleTab("other")} className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", styleTab === "other" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}><Layers className="h-3 w-3 inline mr-1" />Other</button>
           </div>
 
           {/* Style editor content */}
