@@ -630,8 +630,10 @@ class V2PipelineService:
                     logger.warning(f"[{job_id}] shadow mode error (non-fatal): {e}")
 
             # ═══ Step 8.2: Person-First Active Mode ═══
-            elif settings.REFRAME_PIPELINE_MODE == "person_first" and flags.yolo_enabled:
-                # Replace legacy results with person-first pipeline
+            elif settings.REFRAME_PIPELINE_MODE == "person_first" and flags.yolo_enabled and not reframe_data:
+                # Only run if Step 8 (PodcastReframeEngine) did NOT produce results.
+                # PodcastReframeEngine already handles person-first mode internally
+                # when REFRAME_PIPELINE_MODE == "person_first".
                 person_first_engine = PersonFirstReframeEngine(
                     hf_token=getattr(settings, "HF_TOKEN", ""),
                 )
