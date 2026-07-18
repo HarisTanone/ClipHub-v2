@@ -298,6 +298,38 @@ mkdir -p data data/asset_cache tmp/output tmp/downloads models
 
 echo "  ✅ Backend ready"
 
+# ─── Step 3.1: Database Migrations ──────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Step 3.1: Database Migrations"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+cd "$BACKEND_DIR"
+
+# Run all migrations in order (each is idempotent — safe to run multiple times)
+MIGRATION_DIR="$BACKEND_DIR/database/migrations"
+if [ -d "$MIGRATION_DIR" ]; then
+    MIGRATION_COUNT=0
+    for migration in $(ls "$MIGRATION_DIR"/v*.py 2>/dev/null | sort -V); do
+        migration_name="$(basename "$migration" .py)"
+        echo "  Running $migration_name..."
+        ./venv/bin/python -c "
+import sys
+sys.path.insert(0, '$BACKEND_DIR')
+from database.migrations.${migration_name} import migrate
+migrate()
+" 2>&1 | sed 's/^/    /'
+        MIGRATION_COUNT=$((MIGRATION_COUNT + 1))
+    done
+    if [ $MIGRATION_COUNT -eq 0 ]; then
+        echo "  No migrations found"
+    else
+        echo "  ✅ $MIGRATION_COUNT migration(s) executed"
+    fi
+else
+    echo "  ⚠️  No migrations directory found"
+fi
+
 # ─── Step 3.2: Person-First Pipeline Models ──────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
