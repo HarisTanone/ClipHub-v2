@@ -1302,57 +1302,45 @@ class PodcastReframeEngine(IReframeEngine):
                     "bottom_crop_y": geometry["second_crop_y"],
                 }
 
-            # Dynamic grid: only active when 2+ persons are visible in frame
+            # Person-first mode: force grid for entire duration.
+            # ByteTrack fragments IDs across time (T1→T4→T7 = same person re-tracked),
+            # so per-frame co-visibility is unreliable. Position model has already
+            # confirmed distinct speakers via ghost elimination + stable positions.
+            # For static-camera podcasts, both speakers are always in frame.
             sample_timestamps = tracked_data.get("sample_timestamps") or [
                 i * self.SAMPLE_INTERVAL_SEC
                 for i in range(len(per_frame_tracked))
             ]
+            total_duration = sample_timestamps[-1] + self.SAMPLE_INTERVAL_SEC if sample_timestamps else 0.0
+            layout_events = [{"layout": "double", "start_time": 0.0, "end_time": total_duration}]
+            coexist_ratio = 1.0
 
-            # Build per-frame visibility for the selected pair
-            raw_double = []
-            for frame_tracked in per_frame_tracked:
-                frame_positions = {
-                    track_to_position.get(int(d.track_id))
-                    for d in frame_tracked
-                    if int(d.track_id) in track_to_position
-                }
-                # Grid if both pair members OR at least 2 positions visible
-                both_visible = first_id in frame_positions and second_id in frame_positions
-                # Also count as grid if any 2 of the position targets are visible
-                multi_visible = len(frame_positions - {None}) >= 2
-                raw_double.append(both_visible or multi_visible)
-
-            # Build layout events with hysteresis
-            layout_events = self._build_layout_events(
-                raw_double, sample_timestamps, force_single=None
+            logger.info(
+                f"podcast_reframe: PERSON-FIRST AUTO 50/50 GRID "
+                f"(top=P{top_id}@{top_x}, bottom=P{bottom_id}@{bottom_x}, "
+                f"separation={best_separation:.0f}px, zoom={geometry['grid_zoom']:.2f}, "
+                f"crop_w={geometry['crop_w']}, crop_h={geometry['crop_h']}, "
+                f"duration={total_duration:.1f}s, mode=forced_full)"
             )
-
-            if not any(event["layout"] == "double" for event in layout_events):
-                # No grid segments at all — fall through to panning
-                logger.info("podcast_reframe: person-first grid skipped (never 2 persons co-visible)")
-                # Don't return here — let it fall through to normal pair loop and then panning
-                pass
-            else:
-                coexist_ratio = sum(raw_double) / max(len(raw_double), 1)
-
-                logger.info(
-                    f"podcast_reframe: PERSON-FIRST AUTO 50/50 GRID "
-                    f"(top=P{top_id}@{top_x}, bottom=P{bottom_id}@{bottom_x}, "
-                    f"separation={best_separation:.0f}px, zoom={geometry['grid_zoom']:.2f}, "
-                    f"crop_w={geometry['crop_w']}, coexist={coexist_ratio:.0%}, "
-                    f"layout_changes={max(0, len(layout_events) - 1)})"
-                )
-                return {
-                    "layout": "double",
-                    "top_x": top_x,
-                    "bottom_x": bottom_x,
-                    "top_track_id": top_id,
-                    "bottom_track_id": bottom_id,
-                    "person_count": person_count,
-                    "coexist_ratio": coexist_ratio,
-                    "layout_events": layout_events,
-                    **geometry,
-                }
+            logger.info(
+                f"podcast_reframe: grid crop detail — "
+                f"TOP: crop_x={geometry.get('top_crop_x', geometry.get('first_crop_x'))}, "
+                f"crop_y={geometry.get('top_crop_y', geometry.get('first_crop_y'))}, "
+                f"BOTTOM: crop_x={geometry.get('bottom_crop_x', geometry.get('second_crop_x'))}, "
+                f"crop_y={geometry.get('bottom_crop_y', geometry.get('second_crop_y'))}, "
+                f"source={width}x{height}"
+            )
+            return {
+                "layout": "double",
+                "top_x": top_x,
+                "bottom_x": bottom_x,
+                "top_track_id": top_id,
+                "bottom_track_id": bottom_id,
+                "person_count": person_count,
+                "coexist_ratio": coexist_ratio,
+                "layout_events": layout_events,
+                **geometry,
+            }
         # ─── End person-first fast path ───
 
         pair_hits: Dict[Tuple[int, int], int] = defaultdict(int)
