@@ -61,7 +61,7 @@ class PersonFirstReframeEngine(IReframeEngine):
     DOMINANCE_SINGLE_CROP = 0.75
     GRID_PANEL_HEIGHT = 960
     GRID_BASE_ZOOM = 1.08
-    GRID_MAX_ZOOM = 3.50  # [FIX] Naikkan dari 1.40 → isolate orang berdekatan
+    GRID_MAX_ZOOM = 2.20  # Head+shoulders framing for face-to-face podcast grid
     GRID_FACE_MARGIN = 0.35
     GRID_ENTER_SAMPLES = 4
     GRID_EXIT_SAMPLES = 2

@@ -138,7 +138,7 @@ REFRAME_TUNING_DEFAULTS = {
     "sample_interval_sec": 0.333, "max_samples": 720, "face_confidence": 0.55,
     "min_face_size_ratio": 0.10, "max_face_size_ratio": 0.50,
     "min_separation_ratio": 0.05, "min_coexist_ratio": 0.40,
-    "dominance_single_crop": 0.75, "grid_base_zoom": 1.08, "grid_max_zoom": 3.50,
+    "dominance_single_crop": 0.75, "grid_base_zoom": 1.08, "grid_max_zoom": 2.20,
     "grid_face_margin": 0.35, "grid_enter_samples": 4, "grid_exit_samples": 2,
     "min_grid_segment_seconds": 1.20,
     "min_face_area_px": 4000, "min_area_ratio_to_max": 0.25, "min_frame_ratio": 0.15,
@@ -157,7 +157,7 @@ class ReframeTuningConfig(BaseModel):
     min_coexist_ratio: float = 0.40
     dominance_single_crop: float = 0.75
     grid_base_zoom: float = 1.08
-    grid_max_zoom: float = 3.50
+    grid_max_zoom: float = 2.20
     grid_face_margin: float = 0.35
     grid_enter_samples: int = 4
     grid_exit_samples: int = 2
@@ -188,7 +188,7 @@ def _ensure_reframe_tuning_table():
                 min_coexist_ratio REAL NOT NULL DEFAULT 0.40,
                 dominance_single_crop REAL NOT NULL DEFAULT 0.75,
                 grid_base_zoom REAL NOT NULL DEFAULT 1.08,
-                grid_max_zoom REAL NOT NULL DEFAULT 3.50,
+                grid_max_zoom REAL NOT NULL DEFAULT 2.20,
                 grid_face_margin REAL NOT NULL DEFAULT 0.35,
                 grid_enter_samples INTEGER NOT NULL DEFAULT 4,
                 grid_exit_samples INTEGER NOT NULL DEFAULT 2,
@@ -230,15 +230,15 @@ def _ensure_reframe_tuning_table():
             conn.commit()
             print(f"  [FIX] Updated {cur.rowcount} row(s): min_separation_ratio → 0.05")
 
-        # Fix: Update stale DEFAULT 1.85 → 3.50 for grid_max_zoom
+        # Fix: Update stale grid_max_zoom → 2.20
         cur.execute("""
             UPDATE reframe_tuning_configs
-            SET grid_max_zoom = 3.50, updated_at = datetime('now')
-            WHERE grid_max_zoom < 3.50
+            SET grid_max_zoom = 2.20, updated_at = datetime('now')
+            WHERE grid_max_zoom != 2.20
         """)
         if cur.rowcount > 0:
             conn.commit()
-            print(f"  [FIX] Updated {cur.rowcount} row(s): grid_max_zoom → 3.50")
+            print(f"  [FIX] Updated {cur.rowcount} row(s): grid_max_zoom → 2.20")
 
         conn.commit()
     finally:

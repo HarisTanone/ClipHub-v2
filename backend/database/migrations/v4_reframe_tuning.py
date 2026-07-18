@@ -49,7 +49,7 @@ def migrate():
             min_coexist_ratio REAL NOT NULL DEFAULT 0.40,
             dominance_single_crop REAL NOT NULL DEFAULT 0.75,
             grid_base_zoom REAL NOT NULL DEFAULT 1.08,
-            grid_max_zoom REAL NOT NULL DEFAULT 3.50,
+            grid_max_zoom REAL NOT NULL DEFAULT 2.20,
             grid_face_margin REAL NOT NULL DEFAULT 0.35,
             grid_enter_samples INTEGER NOT NULL DEFAULT 4,
             grid_exit_samples INTEGER NOT NULL DEFAULT 2,
