@@ -1240,6 +1240,27 @@ class PodcastReframeEngine(IReframeEngine):
         pair_geometry: Dict[Tuple[int, int], dict] = {}
         per_frame_positions: List[set[int]] = []
         valid_frames = 0
+
+        # DIAGNOSTIC: Check what track_ids exist in per_frame_tracked
+        if skip_ghost_pair_check and per_frame_tracked:
+            all_track_ids_in_frames = set()
+            frames_with_multiple_positions = 0
+            for _diag_frame in per_frame_tracked[:50]:  # sample first 50 frames
+                _diag_tids = {int(d.track_id) for d in _diag_frame}
+                all_track_ids_in_frames.update(_diag_tids)
+                _diag_positions = {
+                    track_to_position[tid] for tid in _diag_tids if tid in track_to_position
+                }
+                if len(_diag_positions) >= 2:
+                    frames_with_multiple_positions += 1
+            logger.info(
+                f"podcast_reframe: [DIAG] per_frame_tracked analysis: "
+                f"total_frames={len(per_frame_tracked)}, "
+                f"all_track_ids_in_first_50={sorted(all_track_ids_in_frames)}, "
+                f"track_to_position_keys={sorted(track_to_position.keys())}, "
+                f"frames_with_2+_positions (of 50)={frames_with_multiple_positions}"
+            )
+
         for frame_tracked in per_frame_tracked:
             visible_positions = sorted({
                 track_to_position[int(detection.track_id)]
