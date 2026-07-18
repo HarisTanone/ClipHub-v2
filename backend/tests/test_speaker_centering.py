@@ -353,7 +353,9 @@ def test_autogrid_can_open_for_short_stable_multi_person_section():
     assert any(event["layout"] == "double" for event in decision["layout_events"])
 
 
-def test_grid_crop_rejects_third_person_leaking_into_both_panels():
+def test_grid_crop_accepts_fallback_when_isolation_impossible():
+    """When isolation is impossible (e.g. third person between two targets),
+    the fallback returns best-effort geometry instead of None."""
     engine = PodcastReframeEngine()
     geometry = engine._calculate_grid_geometry(
         first_id=0,
@@ -368,7 +370,12 @@ def test_grid_crop_rejects_third_person_leaking_into_both_panels():
         height=1080,
     )
 
-    assert geometry is None
+    # Fallback now returns geometry instead of None
+    assert geometry is not None
+    assert geometry["first_id"] == 0
+    assert geometry["second_id"] == 2
+    assert geometry["crop_w"] > 0
+    assert geometry["crop_h"] > 0
 
 
 def test_layout_transition_graph_honors_selected_style():

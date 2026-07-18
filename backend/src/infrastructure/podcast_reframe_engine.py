@@ -1673,12 +1673,34 @@ class PodcastReframeEngine(IReframeEngine):
 
             zoom += 0.02
 
+        # Fallback for face-to-face setups: if both persons are confirmed distinct
+        # by body tracking but isolation is impossible (they overlap in X-space),
+        # accept grid with best-effort crop centered on each person's body.
+        # This happens when speakers sit face-to-face with camera from the side/center.
+        crop_w_fallback = min(width, max(2, int(base_crop_w / self.GRID_MAX_ZOOM)))
+        crop_h_fallback = min(height, max(2, int(crop_w_fallback * 8 / 9)))
+
+        first_crop_x_fb = self._clamp_x(first_profile["x"], crop_w_fallback, width)
+        second_crop_x_fb = self._clamp_x(second_profile["x"], crop_w_fallback, width)
+        first_crop_y_fb = self._clamp_grid_y(first_profile["y"], crop_h_fallback, height)
+        second_crop_y_fb = self._clamp_grid_y(second_profile["y"], crop_h_fallback, height)
+
         logger.info(
-            "podcast_reframe: grid pair rejected; isolation needs overzoom "
+            f"podcast_reframe: grid pair accepted (face-to-face fallback, no isolation) "
             f"(P{first_id}/P{second_id}, separation={separation:.0f}px, "
-            f"max_zoom={self.GRID_MAX_ZOOM:.2f})"
+            f"zoom={self.GRID_MAX_ZOOM:.2f}, crop_w={crop_w_fallback})"
         )
-        return None
+        return {
+            "first_id": first_id,
+            "second_id": second_id,
+            "crop_w": crop_w_fallback,
+            "crop_h": crop_h_fallback,
+            "first_crop_x": first_crop_x_fb,
+            "second_crop_x": second_crop_x_fb,
+            "first_crop_y": first_crop_y_fb,
+            "second_crop_y": second_crop_y_fb,
+            "grid_zoom": round(base_crop_w / crop_w_fallback, 3),
+        }
 
     @staticmethod
     def _clamp_grid_y(face_y: float, crop_h: int, frame_h: int) -> int:
