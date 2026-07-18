@@ -206,6 +206,18 @@ def _ensure_reframe_tuning_table():
             )
         """)
         conn.execute("INSERT OR IGNORE INTO reframe_tuning_configs (user_id) VALUES (NULL)")
+
+        # Fix: Clean up duplicate NULL rows (caused by SQLite NULL conflict bug)
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM reframe_tuning_configs 
+            WHERE user_id IS NULL 
+            AND id NOT IN (SELECT MAX(id) FROM reframe_tuning_configs WHERE user_id IS NULL)
+        """)
+        if cur.rowcount > 0:
+            conn.commit()
+            print(f"  [CLEANUP] Removed {cur.rowcount} duplicate global config rows")
+
         conn.commit()
     finally:
         conn.close()
@@ -219,11 +231,11 @@ def get_reframe_tuning(user_id: int | None = None) -> dict:
     try:
         cur = conn.cursor()
         if user_id is not None:
-            cur.execute("SELECT * FROM reframe_tuning_configs WHERE user_id = ?", (user_id,))
+            cur.execute("SELECT * FROM reframe_tuning_configs WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,))
             row = cur.fetchone()
             if row:
                 return {k: row[k] for k in REFRAME_TUNING_COLUMNS}
-        cur.execute("SELECT * FROM reframe_tuning_configs WHERE user_id IS NULL")
+        cur.execute("SELECT * FROM reframe_tuning_configs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1")
         row = cur.fetchone()
         if row:
             return {k: row[k] for k in REFRAME_TUNING_COLUMNS}
@@ -364,16 +376,39 @@ async def update_reframe_tuning_endpoint(body: ReframeTuningConfig, user: Curren
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
-        cols = ", ".join(REFRAME_TUNING_COLUMNS)
-        placeholders = ", ".join(["?"] * len(REFRAME_TUNING_COLUMNS))
-        update_set = ", ".join([f"{c} = excluded.{c}" for c in REFRAME_TUNING_COLUMNS])
         values = [getattr(body, c) for c in REFRAME_TUNING_COLUMNS]
-        cur.execute(
-            f"""INSERT INTO reframe_tuning_configs (user_id, {cols})
-            VALUES (?, {placeholders})
-            ON CONFLICT(user_id) DO UPDATE SET {update_set}, updated_at = datetime('now')""",
-            [target_user_id] + values,
-        )
+
+        # SQLite: NULL != NULL so ON CONFLICT(user_id) doesn't work for global config.
+        # Use explicit check-then-update/insert instead.
+        if target_user_id is None:
+            cur.execute("SELECT id FROM reframe_tuning_configs WHERE user_id IS NULL LIMIT 1")
+        else:
+            cur.execute("SELECT id FROM reframe_tuning_configs WHERE user_id = ? LIMIT 1", (target_user_id,))
+
+        existing = cur.fetchone()
+
+        if existing:
+            # UPDATE existing row
+            update_set = ", ".join([f"{c} = ?" for c in REFRAME_TUNING_COLUMNS])
+            if target_user_id is None:
+                cur.execute(
+                    f"UPDATE reframe_tuning_configs SET {update_set}, updated_at = datetime('now') WHERE user_id IS NULL",
+                    values,
+                )
+            else:
+                cur.execute(
+                    f"UPDATE reframe_tuning_configs SET {update_set}, updated_at = datetime('now') WHERE user_id = ?",
+                    values + [target_user_id],
+                )
+        else:
+            # INSERT new row
+            cols = ", ".join(REFRAME_TUNING_COLUMNS)
+            placeholders = ", ".join(["?"] * len(REFRAME_TUNING_COLUMNS))
+            cur.execute(
+                f"INSERT INTO reframe_tuning_configs (user_id, {cols}) VALUES (?, {placeholders})",
+                [target_user_id] + values,
+            )
+
         conn.commit()
         return {"success": True, "message": "Reframe tuning saved"}
     finally:
