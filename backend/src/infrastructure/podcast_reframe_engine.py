@@ -2865,9 +2865,17 @@ class PodcastReframeEngine(IReframeEngine):
         ):
             pc = decision.get("person_count", 2)
             logger.info(
-                "podcast_reframe: 50/50 grid OK "
+                f"podcast_reframe: 50/50 grid OK "
                 f"(top={top_x},{top_y}, bottom={bottom_x},{bottom_y}, "
                 f"crop={crop_w}x{crop_h}, zoom={grid_zoom:.2f})"
+            )
+            logger.info(
+                f"podcast_reframe: grid regions — "
+                f"TOP panel: source[x={top_x}..{top_x + crop_w}, y={top_y}..{top_y + crop_h}] "
+                f"(person P{decision.get('top_track_id','?')} center@{top_center_x}), "
+                f"BOTTOM panel: source[x={bottom_x}..{bottom_x + crop_w}, y={bottom_y}..{bottom_y + crop_h}] "
+                f"(person P{decision.get('bottom_track_id','?')} center@{bottom_center_x}), "
+                f"source_frame={width}x{height}, output=1080x1920 (2×960px panels)"
             )
             return {
                 "output_path": output_path,
