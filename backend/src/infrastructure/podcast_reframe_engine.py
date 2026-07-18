@@ -3280,6 +3280,21 @@ class PodcastReframeEngine(IReframeEngine):
             f"{median_faces_in_frame:.1f}/{max_faces_in_frame}"
         )
 
+        tracks_str = ", ".join(
+            f"T{tid}:({int(p['x'])},{int(p['y'])},{int(p['width'])}x{int(p['height'])})"
+            for tid, p in stable_position_profiles.items()
+        )
+        positions_str = ", ".join(
+            f"P{pid}:({int(position_target_profiles[pid]['x'])},{int(position_target_profiles[pid]['y'])},{int(position_target_profiles[pid]['width'])}x{int(position_target_profiles[pid]['height'])})"
+            for pid in position_target_profiles
+        )
+        logger.info(
+            f"podcast_reframe: tracked {len(stable_position_profiles)} unique tracks, "
+            f"person_count={person_count}, "
+            f"tracks={{{tracks_str}}}, "
+            f"positions={{{positions_str}}}"
+        )
+
         return {
             "per_frame_faces": per_frame_faces,
             "per_frame_tracked": per_frame_tracked,
@@ -3345,34 +3360,19 @@ class PodcastReframeEngine(IReframeEngine):
             for track_id, profile in stable_position_profiles.items()
         }
 
+        # Person-first mode: ByteTrack/BoT-SORT with ReID already ensures
+        # unique track IDs = unique persons. No need to re-cluster them,
+        # which can merge two people sitting face-to-face from a center camera.
         clusters: List[dict] = []
-        cluster_threshold = 0.11
-
         for track_id, profile in sorted(
             stable_position_profiles.items(),
             key=lambda kv: (kv[1]["x"], kv[1]["y"]),
         ):
-            best_cluster_idx: Optional[int] = None
-            best_distance = float("inf")
-            for idx, cluster in enumerate(clusters):
-                distance = self._profile_distance(
-                    profile, cluster["profile"], width, height
-                )
-                if distance < best_distance:
-                    best_distance = distance
-                    best_cluster_idx = idx
-
-            if best_cluster_idx is not None and best_distance <= cluster_threshold:
-                cluster = clusters[best_cluster_idx]
-                cluster["track_ids"].append(track_id)
-                cluster["profiles"].append(profile)
-                cluster["profile"] = self._merge_profiles(cluster["profiles"])
-            else:
-                clusters.append({
-                    "track_ids": [track_id],
-                    "profiles": [profile],
-                    "profile": dict(profile),
-                })
+            clusters.append({
+                "track_ids": [track_id],
+                "profiles": [profile],
+                "profile": dict(profile),
+            })
 
         position_targets: Dict[int, float] = {}
         position_target_profiles: Dict[int, Dict[str, float]] = {}
