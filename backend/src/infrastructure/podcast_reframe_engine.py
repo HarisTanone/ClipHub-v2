@@ -3382,6 +3382,39 @@ class PodcastReframeEngine(IReframeEngine):
             for track_id, profile in stable_position_profiles.items()
         }
 
+        # Ghost elimination for person-first mode:
+        # Only filter by SIZE (remove noise/small detections).
+        # Do NOT filter by proximity/IoU — close speakers are legitimate in face-to-face setups.
+        if len(stable_position_profiles) > 2:
+            max_area = max(
+                p.get("area", p.get("width", 0) * p.get("height", 0))
+                for p in stable_position_profiles.values()
+            )
+
+            ghost_track_ids: set = set()
+            for track_id, profile in stable_position_profiles.items():
+                track_area = profile.get("area", profile.get("width", 0) * profile.get("height", 0))
+
+                # Filter: area ratio too small compared to largest track
+                # Use a fair threshold: must be at least 25% the size of the largest person
+                if max_area > 0 and track_area / max_area < 0.25:
+                    ghost_track_ids.add(track_id)
+
+            if ghost_track_ids:
+                logger.info(f"podcast_reframe: ghost elimination removed tracks: {ghost_track_ids}")
+                stable_position_profiles = {
+                    tid: prof for tid, prof in stable_position_profiles.items()
+                    if tid not in ghost_track_ids
+                }
+                stable_positions = {
+                    tid: profile["x"]
+                    for tid, profile in stable_position_profiles.items()
+                }
+                filtered = {
+                    tid: vals for tid, vals in filtered.items()
+                    if tid not in ghost_track_ids
+                }
+
         # Person-first mode: ByteTrack/BoT-SORT with ReID already ensures
         # unique track IDs = unique persons. No need to re-cluster them,
         # which can merge two people sitting face-to-face from a center camera.
