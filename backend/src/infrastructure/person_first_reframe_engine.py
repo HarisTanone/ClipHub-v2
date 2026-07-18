@@ -56,12 +56,12 @@ class PersonFirstReframeEngine(IReframeEngine):
 
     SAMPLE_INTERVAL_SEC = 0.333
     MAX_SAMPLES = 720
-    MIN_SEPARATION_RATIO = 0.20
+    MIN_SEPARATION_RATIO = 0.05  # [FIX] Turunkan dari 0.20 → face-to-face podcast support
     MIN_COEXIST_RATIO = 0.40
     DOMINANCE_SINGLE_CROP = 0.75
     GRID_PANEL_HEIGHT = 960
     GRID_BASE_ZOOM = 1.08
-    GRID_MAX_ZOOM = 1.40
+    GRID_MAX_ZOOM = 3.50  # [FIX] Naikkan dari 1.40 → isolate orang berdekatan
     GRID_FACE_MARGIN = 0.35
     GRID_ENTER_SAMPLES = 4
     GRID_EXIT_SAMPLES = 2

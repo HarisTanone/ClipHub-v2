@@ -104,8 +104,8 @@ interface ReframeTuning {
 const REFRAME_TUNING_DEFAULTS: ReframeTuning = {
   sample_interval_sec: 0.333, max_samples: 720, face_confidence: 0.55,
   min_face_size_ratio: 0.10, max_face_size_ratio: 0.50,
-  min_separation_ratio: 0.20, min_coexist_ratio: 0.40,
-  dominance_single_crop: 0.75, grid_base_zoom: 1.08, grid_max_zoom: 1.85,
+  min_separation_ratio: 0.05, min_coexist_ratio: 0.40,
+  dominance_single_crop: 0.75, grid_base_zoom: 1.08, grid_max_zoom: 3.50,
   grid_face_margin: 0.35, grid_enter_samples: 4, grid_exit_samples: 2,
   min_grid_segment_seconds: 1.20,
   min_face_area_px: 4000, min_area_ratio_to_max: 0.25, min_frame_ratio: 0.15,

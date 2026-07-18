@@ -58,14 +58,14 @@ class PodcastReframeEngine(IReframeEngine):
     FACE_CONFIDENCE = 0.55
     MIN_FACE_SIZE_RATIO = 0.10
     MAX_FACE_SIZE_RATIO = 0.50
-    MIN_SEPARATION_RATIO = 0.20  # 20% of frame width to consider "two people"
+    MIN_SEPARATION_RATIO = 0.05  # [FIX] Turunkan dari 0.20 → face-to-face setup orang sangat dekat horizontal
     MIN_COEXIST_RATIO = 0.40     # ≥40% of frames must have BOTH faces simultaneously
 
     # Every grid panel is exactly half of the 1080x1920 output.
     GRID_PANEL_HEIGHT = 960
     DOMINANCE_SINGLE_CROP = 0.75     # If dominant ≥75% → use single crop instead of grid
     GRID_BASE_ZOOM = 1.08            # Gentle default crop; avoids excessive background.
-    GRID_MAX_ZOOM = 1.85             # [FIX] Naikkan dari 1.40 -> agar 2 orang berdekatan bisa terpisah
+    GRID_MAX_ZOOM = 3.50             # [FIX] Naikkan dari 1.85 → agar bisa isolate orang yang berdekatan
     GRID_FACE_MARGIN = 0.35          # Minimum face-side breathing room inside a panel.
     GRID_ENTER_SAMPLES = 4           # Confirm a second person for ~1.3s.
     GRID_EXIT_SAMPLES = 2            # Close within ~0.7s when one person leaves.
