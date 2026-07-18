@@ -113,6 +113,36 @@ const REFRAME_TUNING_DEFAULTS: ReframeTuning = {
   ghost_center_dist_broad: 0.20, min_pair_size_ratio: 0.18,
 };
 
+// Integer-valued reframe fields (must not be persisted as floats).
+const REFRAME_INT_KEYS: (keyof ReframeTuning)[] = [
+  "max_samples", "grid_enter_samples", "grid_exit_samples", "min_face_area_px",
+];
+
+// Normalize a raw config object coming from the API into a fully-typed
+// ReframeTuning, coercing numeric types and filling any missing keys from
+// defaults. This guarantees the local state matches what is persisted so
+// save → refresh round-trips are stable and equality checks are reliable.
+function normalizeReframeTuning(raw: Partial<ReframeTuning> | null | undefined): ReframeTuning {
+  const out = { ...REFRAME_TUNING_DEFAULTS } as ReframeTuning;
+  if (!raw) return out;
+  (Object.keys(REFRAME_TUNING_DEFAULTS) as (keyof ReframeTuning)[]).forEach((key) => {
+    const val = raw[key];
+    if (val === undefined || val === null) return;
+    const num = typeof val === "number" ? val : parseFloat(String(val));
+    if (Number.isNaN(num)) return;
+    out[key] = REFRAME_INT_KEYS.includes(key) ? Math.round(num) : num;
+  });
+  return out;
+}
+
+// Deep-ish equality for two reframe configs (numeric comparison with epsilon
+// to avoid float noise from DB round-trips).
+function reframeTuningEquals(a: ReframeTuning, b: ReframeTuning): boolean {
+  return (Object.keys(REFRAME_TUNING_DEFAULTS) as (keyof ReframeTuning)[]).every((key) => {
+    return Math.abs((a[key] as number) - (b[key] as number)) < 1e-6;
+  });
+}
+
 async function fetchReframeTuning(): Promise<ReframeTuning | null> {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/settings/reframe-tuning`, { headers: { Authorization: `Bearer ${token}` } });
@@ -120,6 +150,7 @@ async function fetchReframeTuning(): Promise<ReframeTuning | null> {
   const data = await res.json();
   return data.data || null;
 }
+
 
 async function saveReframeTuning(payload: ReframeTuning): Promise<boolean> {
   const token = getToken();
@@ -165,15 +196,29 @@ export function Settings() {
 
   // Reframe tuning
   const [reframeTuning, setReframeTuning] = useState<ReframeTuning>(REFRAME_TUNING_DEFAULTS);
+  // Snapshot of the last PERSISTED value (loaded from server or last successful save).
+  // Used by Reset to revert unsaved edits back to what is actually stored.
+  const [reframeBaseline, setReframeBaseline] = useState<ReframeTuning>(REFRAME_TUNING_DEFAULTS);
   const [isSavingReframe, setIsSavingReframe] = useState(false);
+  const [isResettingReframe, setIsResettingReframe] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("9:16");
 
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
     fetchSettings().then((d) => { if (d) setSettings((p) => ({ ...p, ...d })); });
     fetchUsers().then(setUsers);
-    fetchReframeTuning().then((d) => { if (d) setReframeTuning(d); });
+    fetchReframeTuning().then((d) => {
+      if (d) {
+        const normalized = normalizeReframeTuning(d);
+        setReframeTuning(normalized);
+        setReframeBaseline(normalized);
+      }
+    });
   }, []);
+
+  // Whether there are unsaved changes relative to the last persisted snapshot.
+  const reframeDirty = !reframeTuningEquals(reframeTuning, reframeBaseline);
+
 
   function handleChange(key: string, value: any) { setSettings((p) => ({ ...p, [key]: value })); }
 
@@ -217,21 +262,45 @@ export function Settings() {
 
   async function handleSaveReframe() {
     setIsSavingReframe(true);
-    const ok = await saveReframeTuning(reframeTuning);
-    toast[ok ? "success" : "error"](ok ? "Reframe tuning saved" : "Failed to save");
+    // Normalize before persisting so what we save == what we snapshot as baseline.
+    const payload = normalizeReframeTuning(reframeTuning);
+    const ok = await saveReframeTuning(payload);
+    if (ok) {
+      // Persisted successfully: this normalized payload is now the new baseline.
+      setReframeTuning(payload);
+      setReframeBaseline(payload);
+      toast.success("Reframe tuning saved");
+    } else {
+      toast.error("Failed to save");
+    }
     setIsSavingReframe(false);
   }
 
-  async function handleResetReframe() {
-    if (!confirm("Reset all reframe tuning to defaults?")) return;
+  // "Reset" reverts any unsaved edits back to the last persisted snapshot
+  // (i.e. the state as it was before the current round of editing / before save).
+  function handleResetReframe() {
+    if (!reframeDirty) return;
+    setReframeTuning(reframeBaseline);
+    toast.success("Reverted unsaved changes");
+  }
+
+  // "Restore defaults" pulls the factory defaults from the backend and applies
+  // them locally (still requires an explicit Save to persist).
+  async function handleRestoreReframeDefaults() {
+    if (!confirm("Restore all reframe tuning to factory defaults? This will be applied after you Save.")) return;
+    setIsResettingReframe(true);
     const data = await resetReframeTuning();
     if (data) {
-      setReframeTuning(data);
-      toast.success("Reframe tuning reset to defaults");
+      const normalized = normalizeReframeTuning(data);
+      setReframeTuning(normalized);
+      setReframeBaseline(normalized);
+      toast.success("Reframe tuning restored to defaults");
     } else {
-      toast.error("Failed to reset");
+      toast.error("Failed to restore defaults");
     }
+    setIsResettingReframe(false);
   }
+
 
   const tabs = [
     { id: "general" as const, label: "General" },
@@ -257,10 +326,13 @@ export function Settings() {
         </div>
         {tab === "users" ? null : tab === "reframe" ? (
           <div className="flex items-center gap-2">
-            <Button onClick={handleResetReframe} size="sm" variant="outline">Reset</Button>
-            <Button onClick={handleSaveReframe} loading={isSavingReframe} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+            {reframeDirty && <span className="text-[10px] text-amber-400 font-medium mr-1">Unsaved changes</span>}
+            <Button onClick={handleRestoreReframeDefaults} loading={isResettingReframe} size="sm" variant="outline">Restore Defaults</Button>
+            <Button onClick={handleResetReframe} disabled={!reframeDirty} size="sm" variant="outline">Reset</Button>
+            <Button onClick={handleSaveReframe} disabled={!reframeDirty} loading={isSavingReframe} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
           </div>
         ) : (
+
           <Button onClick={handleSave} loading={isSaving} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
         )}
       </div>

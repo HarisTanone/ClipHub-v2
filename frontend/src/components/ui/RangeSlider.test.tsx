@@ -370,9 +370,29 @@ describe('Property 3: ReframeTuning Save Payload Matches Interface (Preservation
       expect(screen.getByText('Sample Interval (sec)')).toBeInTheDocument();
     });
 
-    // Click save
-    const saveButton = screen.getByText('Save');
+    // The Save button is only enabled when there are unsaved changes (dirty
+    // state) relative to the last-persisted baseline. On fresh load the form
+    // equals the baseline, so we must first modify a slider to make it dirty.
+    const sliders = screen.getAllByRole('slider') as HTMLInputElement[];
+    expect(sliders.length).toBeGreaterThan(0);
+    const firstSlider = sliders[0];
+    const currentValue = Number(firstSlider.value);
+    const step = Number(firstSlider.step) || 1;
+    const max = Number(firstSlider.max);
+    const min = Number(firstSlider.min);
+    // Nudge the value by one step, staying within [min, max].
+    const nextValue =
+      currentValue + step <= max ? currentValue + step : currentValue - step;
+    expect(nextValue).toBeGreaterThanOrEqual(min);
+    fireEvent.change(firstSlider, { target: { value: String(nextValue) } });
+
+    // Now the form is dirty and Save should be enabled.
+    const saveButton = screen.getByText('Save').closest('button') as HTMLButtonElement;
+    await waitFor(() => {
+      expect(saveButton).not.toBeDisabled();
+    });
     fireEvent.click(saveButton);
+
 
     await waitFor(() => {
       expect(capturedPayload).not.toBeNull();

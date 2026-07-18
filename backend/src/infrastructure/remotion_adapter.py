@@ -248,6 +248,110 @@ class RemotionAdapter(IRemotionRenderer):
                 error_message=f"Unexpected error: {e}",
             )
     
+    async def render_still(
+        self,
+        scene_graph: dict,
+        creative_direction: dict,
+        video_path: str,
+        output_path: str,
+        frame: int = 60,
+        config: Optional[RemotionRenderConfig] = None,
+        words: Optional[list] = None,
+        hook_text: Optional[str] = None,
+        hook_style: Optional[str] = None,
+        text_emphasis_events: Optional[list[dict]] = None,
+    ) -> dict:
+        """Render a single frame as JPEG via Remotion /render-still.
+        Returns {"success": True, "image": "data:image/jpeg;base64,..."} or {"success": False, "error": "..."}.
+        """
+        import time
+
+        if config is None:
+            config = RemotionRenderConfig(
+                concurrency=settings.REMOTION_CONCURRENCY,
+                quality=settings.REMOTION_QUALITY,
+                enable_threejs=settings.REMOTION_ENABLE_THREEJS,
+                enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
+            )
+
+        # Build words from scene_graph if not provided
+        render_words = words or []
+        if not render_words:
+            for layer in scene_graph.get("layers", []):
+                if layer.get("layer_id") == "L5_subtitle":
+                    for event in layer.get("events", []):
+                        content = event.get("content")
+                        if isinstance(content, list):
+                            render_words = content
+                        break
+
+        render_hook_text = hook_text or ""
+        render_hook_animation = hook_style or "podcast_lower_third"
+        if not render_hook_text:
+            for layer in scene_graph.get("layers", []):
+                if layer.get("layer_id") == "L3_hook":
+                    events = layer.get("events", [])
+                    if events:
+                        render_hook_text = events[0].get("content", "")
+                        render_hook_animation = events[0].get("event_type", "podcast_lower_third")
+                    break
+
+        hook_cfg = creative_direction.get("hook_style_config", {})
+        valid_animations = (
+            "fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb",
+            "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer",
+            "bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse",
+            "breaking_tape", "mic_drop", "split_panel", "kinetic_stack",
+            "glass_flash", "marker_swipe", "signal_scan",
+        )
+        if render_hook_animation not in valid_animations:
+            cfg_anim = hook_cfg.get("animation")
+            render_hook_animation = cfg_anim if cfg_anim in valid_animations else "podcast_lower_third"
+
+        template_mode = hook_cfg.get("template_mode", "custom")
+        composition_id = "ClipComposition"
+        if template_mode == "tiktok":
+            composition_id = "TikTokComposition"
+        elif template_mode == "creative":
+            composition_id = "CreativeComposition"
+
+        payload = {
+            "compositionId": composition_id,
+            "outputPath": os.path.abspath(output_path),
+            "props": {
+                "sceneGraph": scene_graph,
+                "creativeDirection": creative_direction,
+                "videoPath": os.path.abspath(video_path) if video_path else "",
+                "words": render_words,
+                "hookText": render_hook_text,
+                "hookAnimation": render_hook_animation,
+                "textEmphasisEvents": (text_emphasis_events or [])[:2],
+                "enableThreeJS": config.enable_threejs,
+                "enableAI": config.enable_ai_layer,
+            },
+            "frame": frame,
+            "fps": config.framerate,
+            "width": config.resolution[0],
+            "height": config.resolution[1],
+        }
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/render-still",
+                json=payload,
+                timeout=ClientTimeout(total=60),
+            ) as resp:
+                result = await resp.json()
+                if resp.status == 200 and result.get("success"):
+                    return {"success": True, "image": result["image"]}
+                return {"success": False, "error": result.get("error", f"HTTP {resp.status}")}
+        except asyncio.TimeoutError:
+            return {"success": False, "error": "Still render timeout"}
+        except Exception as e:
+            logger.exception(f"[Remotion] Still render failed: {e}")
+            return {"success": False, "error": str(e)}
+
     async def _poll_render_progress(
         self,
         job_id: str,

@@ -14,7 +14,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { bundle } from "@remotion/bundler";
-import { renderMedia, selectComposition } from "@remotion/renderer";
+import { renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 import { z } from "zod";
 import type { RenderResponse } from "../types";
 
@@ -281,6 +281,119 @@ app.get("/status/:renderId", (req, res) => {
     return res.json({ status: "not_found" });
   }
   return res.json(render);
+});
+
+// ─── Still frame preview ─────────────────────────────────────────────────────
+// Renders a single frame PNG so the frontend can preview style changes
+// without committing to a full video render.
+
+const StillRequestSchema = z.object({
+  compositionId: z.string().default("ClipComposition"),
+  outputPath: z.string(),
+  props: z.object({
+    sceneGraph: z.any(),
+    creativeDirection: z.any(),
+    videoPath: z.string(),
+    words: z.array(z.any()).default([]),
+    hookText: z.string().default(""),
+    hookAnimation: z.enum([
+      "fade_scale",
+      "slide_up",
+      "glitch",
+      "typewriter",
+      "glitch_rgb",
+      "shake_neon",
+      "cinematic_reveal",
+      "danger_bold",
+      "slide_punch_framer",
+      "bold_slam",
+      "podcast_lower_third",
+      "quote_card",
+      "waveform_pulse",
+      "breaking_tape",
+      "mic_drop",
+      "split_panel",
+      "kinetic_stack",
+      "glass_flash",
+      "marker_swipe",
+      "signal_scan",
+    ]).default("podcast_lower_third"),
+    textEmphasisEvents: z.array(z.any()).max(2).default([]),
+    enableThreeJS: z.boolean().default(false),
+    enableAI: z.boolean().default(false),
+  }),
+  frame: z.number().int().min(0).default(60),
+  fps: z.number().default(30),
+  width: z.number().default(1080),
+  height: z.number().default(1920),
+});
+
+app.post("/render-still", async (req, res) => {
+  if (!bundleReady || !bundled) {
+    return res.status(503).json({ success: false, error: "Server not ready - bundle still compiling" });
+  }
+
+  const parsed = StillRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: `Invalid request: ${parsed.error.message}` });
+  }
+
+  const request = parsed.data;
+
+  try {
+    const propsWithUrl = { ...request.props };
+    if (propsWithUrl.videoPath && propsWithUrl.videoPath.startsWith("/")) {
+      propsWithUrl.videoPath = `http://localhost:${PORT}/media${propsWithUrl.videoPath}`;
+    }
+    propsWithUrl.textEmphasisEvents = (propsWithUrl.textEmphasisEvents || []).slice(0, 2).map((event: any) => ({
+      ...event,
+      foreground_frames: (event.foreground_frames || []).map((item: any) => ({
+        ...item,
+        path: typeof item.path === "string" && item.path.startsWith("/")
+          ? `http://localhost:${PORT}/media${item.path}`
+          : item.path,
+      })),
+    }));
+
+    const composition = await selectComposition({
+      serveUrl: bundled,
+      id: request.compositionId,
+      inputProps: propsWithUrl,
+      chromiumOptions: { gl: "angle" },
+    });
+
+    const finalComposition = {
+      ...composition,
+      durationInFrames: Math.max(request.frame + 1, 2),
+      fps: request.fps,
+      width: request.width,
+      height: request.height,
+    };
+
+    const outputDir = path.dirname(request.outputPath);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    await renderStill({
+      composition: finalComposition,
+      serveUrl: bundled,
+      frame: request.frame,
+      output: request.outputPath,
+      imageFormat: "jpeg",
+      quality: 80,
+      inputProps: propsWithUrl,
+      chromiumOptions: { gl: "angle" },
+    });
+
+    const imageData = fs.readFileSync(request.outputPath, { encoding: "base64" });
+    const dataUrl = `data:image/jpeg;base64,${imageData}`;
+
+    return res.json({ success: true, image: dataUrl });
+  } catch (err: any) {
+    console.error("[remotion-server] Still render failed:", err.message);
+    return res.status(500).json({ success: false, error: err.message || "Still render failed" });
+  }
 });
 
 // ─── Start server ────────────────────────────────────────────────────────────
