@@ -492,11 +492,14 @@ class PodcastReframeEngine(IReframeEngine):
         # concurrently visible tracked identities. Content classification alone
         # (for example a false "gaming" label) must never duplicate one person.
         if autogrid:
+            from src.config import settings
+            is_person_first = settings.REFRAME_PIPELINE_MODE == "person_first"
             grid_decision = self._decide_autogrid_layout(
                 tracked_data=tracked_data,
                 speaker_result=speaker_result,
                 width=width,
                 height=height,
+                skip_ghost_pair_check=is_person_first,
             )
 
             # Fix #4: Diarization fallback safety guard
@@ -1206,6 +1209,7 @@ class PodcastReframeEngine(IReframeEngine):
         speaker_result: Optional[ActiveSpeakerResult],
         width: int,
         height: int = 1080,
+        skip_ghost_pair_check: bool = False,
     ) -> dict:
         """Choose and schedule a 50:50 grid for two stable identities.
 
@@ -1248,26 +1252,27 @@ class PodcastReframeEngine(IReframeEngine):
             valid_frames += 1
             for index, first_id in enumerate(visible_positions):
                 for second_id in visible_positions[index + 1:]:
-                    separation = abs(position_targets.get(second_id, 0) - position_targets.get(first_id, 0))
-                    if separation < width * self.MIN_SEPARATION_RATIO:
-                        continue
-
-                    # Fix #3: Ghost pair validation
-                    prof_first = position_profiles.get(first_id, {})
-                    prof_second = position_profiles.get(second_id, {})
-
-                    # 3a: Comparable size check
-                    area_first = prof_first.get("area", prof_first.get("width", 0) * prof_first.get("height", 0))
-                    area_second = prof_second.get("area", prof_second.get("width", 0) * prof_second.get("height", 0))
-                    if area_first > 0 and area_second > 0:
-                        pair_size_ratio = min(area_first, area_second) / max(area_first, area_second)
-                        if pair_size_ratio < self.MIN_PAIR_SIZE_RATIO:
+                    if not skip_ghost_pair_check:
+                        separation = abs(position_targets.get(second_id, 0) - position_targets.get(first_id, 0))
+                        if separation < width * self.MIN_SEPARATION_RATIO:
                             continue
 
-                    # 3b: Ghost pair check (IoU + center proximity)
-                    if prof_first and prof_second:
-                        if self._is_ghost_pair(prof_first, prof_second, width, height):
-                            continue
+                        # Fix #3: Ghost pair validation
+                        prof_first = position_profiles.get(first_id, {})
+                        prof_second = position_profiles.get(second_id, {})
+
+                        # 3a: Comparable size check
+                        area_first = prof_first.get("area", prof_first.get("width", 0) * prof_first.get("height", 0))
+                        area_second = prof_second.get("area", prof_second.get("width", 0) * prof_second.get("height", 0))
+                        if area_first > 0 and area_second > 0:
+                            pair_size_ratio = min(area_first, area_second) / max(area_first, area_second)
+                            if pair_size_ratio < self.MIN_PAIR_SIZE_RATIO:
+                                continue
+
+                        # 3b: Ghost pair check (IoU + center proximity)
+                        if prof_first and prof_second:
+                            if self._is_ghost_pair(prof_first, prof_second, width, height):
+                                continue
 
                     pair = (first_id, second_id)
                     geometry = pair_geometry.get(pair)
@@ -1279,6 +1284,7 @@ class PodcastReframeEngine(IReframeEngine):
                             position_profiles=position_profiles,
                             width=width,
                             height=height,
+                            skip_separation_check=skip_ghost_pair_check,
                         )
                         if geometry:
                             pair_geometry[pair] = geometry
@@ -1579,6 +1585,7 @@ class PodcastReframeEngine(IReframeEngine):
         position_profiles: Dict[int, Dict[str, float]],
         width: int,
         height: int,
+        skip_separation_check: bool = False,
     ) -> Optional[dict]:
         """Find the mildest crop that isolates each person from the other.
 
@@ -1611,7 +1618,7 @@ class PodcastReframeEngine(IReframeEngine):
             "height": height * 0.16,
         })
         separation = abs(first_profile["x"] - second_profile["x"])
-        if separation < width * self.MIN_SEPARATION_RATIO:
+        if not skip_separation_check and separation < width * self.MIN_SEPARATION_RATIO:
             return None
 
         base_crop_w = min(float(width), float(height) * 9 / 8)
