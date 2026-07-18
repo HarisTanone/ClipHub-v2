@@ -1286,6 +1286,11 @@ class PodcastReframeEngine(IReframeEngine):
                             height=height,
                             skip_separation_check=skip_ghost_pair_check,
                         )
+                        if skip_ghost_pair_check:
+                            logger.info(
+                                f"podcast_reframe: [DIAG] geometry for pair ({first_id},{second_id}): "
+                                f"{'OK crop_w=' + str(geometry.get('crop_w')) if geometry else 'None'}"
+                            )
                         if geometry:
                             pair_geometry[pair] = geometry
                     if geometry:
@@ -1309,6 +1314,15 @@ class PodcastReframeEngine(IReframeEngine):
                             track_to_position=track_to_position,
                         ):
                             pair_hits[pair] += 1
+
+        if skip_ghost_pair_check:
+            logger.info(
+                f"podcast_reframe: [DIAG] person-first grid check: "
+                f"valid_frames={valid_frames}, pair_hits={dict(pair_hits)}, "
+                f"pair_geometry_keys={list(pair_geometry.keys())}, "
+                f"position_targets={position_targets}, "
+                f"track_to_position={track_to_position}"
+            )
 
         if not pair_hits or valid_frames <= 0:
             logger.info("podcast_reframe: autogrid skipped (no distinct co-visible identity pair)")
@@ -1656,6 +1670,10 @@ class PodcastReframeEngine(IReframeEngine):
                 first_profile["height"], second_profile["height"], 1.0
             ) * (1 + self.GRID_FACE_MARGIN)
             if crop_w < own_face_min_w or crop_h < own_face_min_h:
+                logger.debug(
+                    f"podcast_reframe: [DIAG] zoom loop break at zoom={zoom:.2f}, "
+                    f"crop_w={crop_w} < own_face_min_w={own_face_min_w:.0f}"
+                )
                 break
 
             first_crop_x = self._clamp_x(first_profile["x"], crop_w, width)
