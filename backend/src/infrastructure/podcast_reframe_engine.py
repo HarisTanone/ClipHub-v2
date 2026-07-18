@@ -3521,20 +3521,23 @@ class PodcastReframeEngine(IReframeEngine):
         width: int,
         height: int,
     ) -> dict:
-        """Build stable person positions using face_bbox inside the tracked person detections."""
+        """Build stable person positions using BODY bbox for grid geometry separation."""
         track_profiles: Dict[int, Dict[str, List[float]]] = defaultdict(
             lambda: defaultdict(list)
         )
 
         for frame_tracked in per_frame_tracked:
             for detection in frame_tracked:
-                box_to_use = detection.face_bbox if detection.face_bbox is not None else detection.bbox
+                # Use BODY bbox for position model (determines grid crop separation).
+                # Face bbox is too centered (both speakers face toward middle),
+                # body bbox reflects actual left/right position in frame.
+                body_box = detection.bbox
                 profile = track_profiles[detection.track_id]
-                profile["x"].append(box_to_use.center_x)
-                profile["y"].append(box_to_use.center_y)
-                profile["width"].append(box_to_use.width)
-                profile["height"].append(box_to_use.height)
-                profile["area"].append(box_to_use.area)
+                profile["x"].append(body_box.center_x)
+                profile["y"].append(body_box.center_y)
+                profile["width"].append(body_box.width)
+                profile["height"].append(body_box.height)
+                profile["area"].append(body_box.area)
 
         if not track_profiles:
             return {
