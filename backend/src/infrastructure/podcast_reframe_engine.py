@@ -3262,17 +3262,45 @@ class PodcastReframeEngine(IReframeEngine):
                     for idx in range(len(preds)):
                         cname = preds.data.get('class_name')[idx] if 'class_name' in preds.data else ""
                         cid = preds.class_id[idx]
-                        if cname == "person" or cid == 1:
-                            x1, y1, x2, y2 = preds.xyxy[idx]
-                            conf = preds.confidence[idx]
+                        x1, y1, x2, y2 = preds.xyxy[idx]
+                        conf = preds.confidence[idx]
+                        w_det = float(x2 - x1)
+                        h_det = float(y2 - y1)
+                        area_det = w_det * h_det
+
+                        # Accept as person if:
+                        # 1. Explicitly labeled as person (class_id 0 or 1, or class_name "person")
+                        is_person_class = (cname == "person" or cid in (0, 1))
+                        # 2. Large confident detection with human-like proportions (fallback for mislabeled persons)
+                        #    Min area 100k px (~300x333), confidence >= 0.7, height >= width * 0.8
+                        is_large_human_shape = (
+                            conf >= 0.70
+                            and area_det >= 100_000
+                            and h_det >= w_det * 0.8
+                        )
+
+                        if is_person_class or is_large_human_shape:
                             person_bboxes.append((float(x1), float(y1), float(x2), float(y2), float(conf)))
                 else:
                     results = self._person_detector(frame_rgb, verbose=False)
                     if results and len(results) > 0:
                         for box in results[0].boxes:
-                            if int(box.cls[0]) == 0 and float(box.conf[0]) >= person_conf_thresh:
-                                xyxy = box.xyxy[0].tolist()
-                                person_bboxes.append((xyxy[0], xyxy[1], xyxy[2], xyxy[3], float(box.conf[0])))
+                            cls_id = int(box.cls[0])
+                            conf_val = float(box.conf[0])
+                            if conf_val < person_conf_thresh:
+                                continue
+                            xyxy = box.xyxy[0].tolist()
+                            w_det = xyxy[2] - xyxy[0]
+                            h_det = xyxy[3] - xyxy[1]
+                            area_det = w_det * h_det
+                            is_person_class = cls_id in (0, 1)
+                            is_large_human_shape = (
+                                conf_val >= 0.70
+                                and area_det >= 100_000
+                                and h_det >= w_det * 0.8
+                            )
+                            if is_person_class or is_large_human_shape:
+                                person_bboxes.append((xyxy[0], xyxy[1], xyxy[2], xyxy[3], conf_val))
 
             if not person_bboxes:
                 self._load_face_detector()
@@ -3294,6 +3322,17 @@ class PodcastReframeEngine(IReframeEngine):
                         for det in result.detections:
                             bbox = det.bounding_box
                             person_bboxes.append((bbox.origin_x, bbox.origin_y, bbox.origin_x + bbox.width, bbox.origin_y + bbox.height, 0.99))
+
+            # Log first frame detection details for debugging
+            if len(sample_frame_indices) == 0 and person_bboxes:
+                logger.info(
+                    f"podcast_reframe: person detection frame[0] — "
+                    f"{len(person_bboxes)} persons found: "
+                    + ", ".join(
+                        f"({b[0]:.0f},{b[1]:.0f},{b[2]:.0f},{b[3]:.0f} conf={b[4]:.2f} cx={((b[0]+b[2])/2):.0f})"
+                        for b in person_bboxes
+                    )
+                )
 
             # 2. Update Person Tracker
             tracked_detections: List[TrackedDetection] = []
