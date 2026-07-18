@@ -1288,14 +1288,27 @@ class PodcastReframeEngine(IReframeEngine):
                         )
                         if geometry:
                             pair_geometry[pair] = geometry
-                    if geometry and self._grid_frame_is_safe(
-                        frame_tracked,
-                        geometry,
-                        first_id=first_id,
-                        second_id=second_id,
-                        track_to_position=track_to_position,
-                    ):
-                        pair_hits[pair] += 1
+                    if geometry:
+                        if skip_ghost_pair_check:
+                            # Person-first mode: trust ByteTrack IDs, just check both are visible
+                            first_visible = any(
+                                track_to_position.get(int(d.track_id)) == first_id
+                                for d in frame_tracked
+                            )
+                            second_visible = any(
+                                track_to_position.get(int(d.track_id)) == second_id
+                                for d in frame_tracked
+                            )
+                            if first_visible and second_visible:
+                                pair_hits[pair] += 1
+                        elif self._grid_frame_is_safe(
+                            frame_tracked,
+                            geometry,
+                            first_id=first_id,
+                            second_id=second_id,
+                            track_to_position=track_to_position,
+                        ):
+                            pair_hits[pair] += 1
 
         if not pair_hits or valid_frames <= 0:
             logger.info("podcast_reframe: autogrid skipped (no distinct co-visible identity pair)")
@@ -1357,16 +1370,20 @@ class PodcastReframeEngine(IReframeEngine):
             first_id in positions and second_id in positions
             for positions in per_frame_positions
         ]
-        frame_is_safe = [
-            self._grid_frame_is_safe(
-                frame_tracked,
-                geometry,
-                first_id=first_id,
-                second_id=second_id,
-                track_to_position=track_to_position,
-            )
-            for frame_tracked in per_frame_tracked
-        ]
+        if skip_ghost_pair_check:
+            # Person-first mode: all frames where both are visible are safe
+            frame_is_safe = list(pair_visible)
+        else:
+            frame_is_safe = [
+                self._grid_frame_is_safe(
+                    frame_tracked,
+                    geometry,
+                    first_id=first_id,
+                    second_id=second_id,
+                    track_to_position=track_to_position,
+                )
+                for frame_tracked in per_frame_tracked
+            ]
         # A face entering both panels is unsafe and closes the grid immediately.
         # An ordinary detector miss still uses exit hysteresis so one bad sample
         # cannot make the layout flicker.
