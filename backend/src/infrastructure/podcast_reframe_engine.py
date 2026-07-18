@@ -2788,8 +2788,11 @@ class PodcastReframeEngine(IReframeEngine):
             logger.warning("podcast_reframe: rejected grid with duplicate identity")
             return None
         if abs(float(top_center_x) - float(bottom_center_x)) < width * self.MIN_SEPARATION_RATIO:
-            logger.warning("podcast_reframe: rejected grid with visually overlapping people")
-            return None
+            logger.info(
+                f"podcast_reframe: grid speakers close together "
+                f"(separation={abs(float(top_center_x) - float(bottom_center_x)):.0f}px, "
+                f"threshold={width * self.MIN_SEPARATION_RATIO:.0f}px) — proceeding anyway"
+            )
 
         # Auto-grid decisions normally provide identity-safe geometry. Rebuild
         # it for older callers so even the compatibility path has disjoint crops.

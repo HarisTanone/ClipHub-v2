@@ -184,11 +184,11 @@ def _ensure_reframe_tuning_table():
                 face_confidence REAL NOT NULL DEFAULT 0.55,
                 min_face_size_ratio REAL NOT NULL DEFAULT 0.10,
                 max_face_size_ratio REAL NOT NULL DEFAULT 0.50,
-                min_separation_ratio REAL NOT NULL DEFAULT 0.20,
+                min_separation_ratio REAL NOT NULL DEFAULT 0.05,
                 min_coexist_ratio REAL NOT NULL DEFAULT 0.40,
                 dominance_single_crop REAL NOT NULL DEFAULT 0.75,
                 grid_base_zoom REAL NOT NULL DEFAULT 1.08,
-                grid_max_zoom REAL NOT NULL DEFAULT 1.85,
+                grid_max_zoom REAL NOT NULL DEFAULT 3.50,
                 grid_face_margin REAL NOT NULL DEFAULT 0.35,
                 grid_enter_samples INTEGER NOT NULL DEFAULT 4,
                 grid_exit_samples INTEGER NOT NULL DEFAULT 2,
@@ -217,6 +217,28 @@ def _ensure_reframe_tuning_table():
         if cur.rowcount > 0:
             conn.commit()
             print(f"  [CLEANUP] Removed {cur.rowcount} duplicate global config rows")
+
+        # Fix: Update stale DEFAULT 0.20 → 0.05 for min_separation_ratio
+        # The original migration/schema used DEFAULT 0.20 which is too strict for
+        # face-to-face podcast setups. Fix ANY value higher than 0.05.
+        cur.execute("""
+            UPDATE reframe_tuning_configs
+            SET min_separation_ratio = 0.05, updated_at = datetime('now')
+            WHERE min_separation_ratio > 0.05
+        """)
+        if cur.rowcount > 0:
+            conn.commit()
+            print(f"  [FIX] Updated {cur.rowcount} row(s): min_separation_ratio → 0.05")
+
+        # Fix: Update stale DEFAULT 1.85 → 3.50 for grid_max_zoom
+        cur.execute("""
+            UPDATE reframe_tuning_configs
+            SET grid_max_zoom = 3.50, updated_at = datetime('now')
+            WHERE grid_max_zoom < 3.50
+        """)
+        if cur.rowcount > 0:
+            conn.commit()
+            print(f"  [FIX] Updated {cur.rowcount} row(s): grid_max_zoom → 3.50")
 
         conn.commit()
     finally:
