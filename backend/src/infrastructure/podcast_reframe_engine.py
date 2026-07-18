@@ -1236,30 +1236,106 @@ class PodcastReframeEngine(IReframeEngine):
         if not per_frame_tracked or person_count < 2 or len(position_targets) < 2:
             return {"layout": "single", "person_count": person_count}
 
+        # ─── Person-first fast path: skip co-visibility, use position targets directly ───
+        if skip_ghost_pair_check and len(position_targets) >= 2:
+            # Pick the pair with largest X-separation (most distinct positions)
+            best_pair = None
+            best_separation = 0.0
+            position_ids = sorted(position_targets.keys())
+            for i, pid_a in enumerate(position_ids):
+                for pid_b in position_ids[i + 1:]:
+                    sep = abs(position_targets[pid_a] - position_targets[pid_b])
+                    if sep > best_separation:
+                        best_separation = sep
+                        best_pair = (pid_a, pid_b)
+
+            if best_pair is None:
+                return {"layout": "single", "person_count": person_count}
+
+            first_id, second_id = best_pair
+            geometry = self._calculate_grid_geometry(
+                first_id=first_id,
+                second_id=second_id,
+                position_targets=position_targets,
+                position_profiles=position_profiles,
+                width=width,
+                height=height,
+                skip_separation_check=True,
+            )
+            if not geometry:
+                logger.info(
+                    f"podcast_reframe: person-first grid failed geometry "
+                    f"(pair=P{first_id}/P{second_id}, sep={best_separation:.0f}px)"
+                )
+                return {"layout": "single", "person_count": person_count}
+
+            # Determine top/bottom placement based on speaker detection
+            latest_speaker_id: Optional[int] = None
+            if speaker_result and speaker_result.per_frame_speaker:
+                latest_frame = max(speaker_result.per_frame_speaker)
+                latest_speaker_id = int(speaker_result.per_frame_speaker[latest_frame])
+            elif speaker_result and speaker_result.dominant_speaker_id is not None:
+                latest_speaker_id = int(speaker_result.dominant_speaker_id)
+
+            if latest_speaker_id == second_id:
+                top_id, bottom_id = second_id, first_id
+            else:
+                top_id, bottom_id = first_id, second_id
+
+            top_x = int(position_targets[top_id])
+            bottom_x = int(position_targets[bottom_id])
+
+            if top_id != geometry["first_id"]:
+                geometry = {
+                    **geometry,
+                    "top_crop_x": geometry["second_crop_x"],
+                    "bottom_crop_x": geometry["first_crop_x"],
+                    "top_crop_y": geometry["second_crop_y"],
+                    "bottom_crop_y": geometry["first_crop_y"],
+                }
+            else:
+                geometry = {
+                    **geometry,
+                    "top_crop_x": geometry["first_crop_x"],
+                    "bottom_crop_x": geometry["second_crop_x"],
+                    "top_crop_y": geometry["first_crop_y"],
+                    "bottom_crop_y": geometry["second_crop_y"],
+                }
+
+            # Force grid for entire duration (100% double layout)
+            sample_timestamps = tracked_data.get("sample_timestamps") or [
+                i * self.SAMPLE_INTERVAL_SEC
+                for i in range(len(per_frame_tracked))
+            ]
+            layout_events = [{"layout": "double", "start_time": 0.0}]
+            if sample_timestamps:
+                layout_events[0]["end_time"] = sample_timestamps[-1] + self.SAMPLE_INTERVAL_SEC
+
+            coexist_ratio = 1.0  # forced grid
+
+            logger.info(
+                f"podcast_reframe: PERSON-FIRST AUTO 50/50 GRID "
+                f"(top=P{top_id}@{top_x}, bottom=P{bottom_id}@{bottom_x}, "
+                f"separation={best_separation:.0f}px, zoom={geometry['grid_zoom']:.2f}, "
+                f"crop_w={geometry['crop_w']})"
+            )
+            return {
+                "layout": "double",
+                "top_x": top_x,
+                "bottom_x": bottom_x,
+                "top_track_id": top_id,
+                "bottom_track_id": bottom_id,
+                "person_count": person_count,
+                "coexist_ratio": coexist_ratio,
+                "layout_events": layout_events,
+                **geometry,
+            }
+        # ─── End person-first fast path ───
+
         pair_hits: Dict[Tuple[int, int], int] = defaultdict(int)
         pair_geometry: Dict[Tuple[int, int], dict] = {}
         per_frame_positions: List[set[int]] = []
         valid_frames = 0
-
-        # DIAGNOSTIC: Check what track_ids exist in per_frame_tracked
-        if skip_ghost_pair_check and per_frame_tracked:
-            all_track_ids_in_frames = set()
-            frames_with_multiple_positions = 0
-            for _diag_frame in per_frame_tracked[:50]:  # sample first 50 frames
-                _diag_tids = {int(d.track_id) for d in _diag_frame}
-                all_track_ids_in_frames.update(_diag_tids)
-                _diag_positions = {
-                    track_to_position[tid] for tid in _diag_tids if tid in track_to_position
-                }
-                if len(_diag_positions) >= 2:
-                    frames_with_multiple_positions += 1
-            logger.info(
-                f"podcast_reframe: [DIAG] per_frame_tracked analysis: "
-                f"total_frames={len(per_frame_tracked)}, "
-                f"all_track_ids_in_first_50={sorted(all_track_ids_in_frames)}, "
-                f"track_to_position_keys={sorted(track_to_position.keys())}, "
-                f"frames_with_2+_positions (of 50)={frames_with_multiple_positions}"
-            )
 
         for frame_tracked in per_frame_tracked:
             visible_positions = sorted({
@@ -1307,11 +1383,6 @@ class PodcastReframeEngine(IReframeEngine):
                             height=height,
                             skip_separation_check=skip_ghost_pair_check,
                         )
-                        if skip_ghost_pair_check:
-                            logger.info(
-                                f"podcast_reframe: [DIAG] geometry for pair ({first_id},{second_id}): "
-                                f"{'OK crop_w=' + str(geometry.get('crop_w')) if geometry else 'None'}"
-                            )
                         if geometry:
                             pair_geometry[pair] = geometry
                     if geometry:
@@ -1335,15 +1406,6 @@ class PodcastReframeEngine(IReframeEngine):
                             track_to_position=track_to_position,
                         ):
                             pair_hits[pair] += 1
-
-        if skip_ghost_pair_check:
-            logger.info(
-                f"podcast_reframe: [DIAG] person-first grid check: "
-                f"valid_frames={valid_frames}, pair_hits={dict(pair_hits)}, "
-                f"pair_geometry_keys={list(pair_geometry.keys())}, "
-                f"position_targets={position_targets}, "
-                f"track_to_position={track_to_position}"
-            )
 
         if not pair_hits or valid_frames <= 0:
             logger.info("podcast_reframe: autogrid skipped (no distinct co-visible identity pair)")
@@ -1691,10 +1753,6 @@ class PodcastReframeEngine(IReframeEngine):
                 first_profile["height"], second_profile["height"], 1.0
             ) * (1 + self.GRID_FACE_MARGIN)
             if crop_w < own_face_min_w or crop_h < own_face_min_h:
-                logger.debug(
-                    f"podcast_reframe: [DIAG] zoom loop break at zoom={zoom:.2f}, "
-                    f"crop_w={crop_w} < own_face_min_w={own_face_min_w:.0f}"
-                )
                 break
 
             first_crop_x = self._clamp_x(first_profile["x"], crop_w, width)
