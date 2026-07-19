@@ -43,6 +43,8 @@ export interface CreativeDirection {
   transition_duration?: number;
   subtitle_position_y?: number;
   content_profile?: Record<string, any>;
+  // v3.1 B-roll motion graphic global style config (rendered in Remotion)
+  broll_style_config?: BrollStyleConfig;
 }
 
 export type TransitionStyle = "cut" | "fade" | "slide" | "zoom";
@@ -127,6 +129,51 @@ export interface TextEmphasisStyleConfig {
   kineticStagger?: number; // For kinetic_type: word stagger delay (frames)
 }
 
+// ─── B-Roll Motion Graphic Events (rendered in Remotion) ─────────────────────
+// When broll_enabled, each BRollSuggestion with a motion_graphic style is
+// rendered as a Remotion layer (consistent with preview).  This replaces
+// the legacy FFmpeg drawtext/overlay path for motion-graphic styles so that
+// what the user sees in preview matches the final render exactly.
+
+export type BrollMotionStyle =
+  | "ken_burns" // Slow zoom + pan (documentary style)
+  | "parallax_zoom" // Depth-based zoom with parallax layers
+  | "light_sweep" // Light sweep across image + text reveal
+  | "particle_float" // Floating particles + text
+  | "depth_parallax" // Foreground/background parallax
+  | "glitch_reveal" // Glitch + reveal
+  | "typewriter" // Typewriter text
+  | "stroke_draw" // SVG stroke draw text
+  | "word_pop" // Legacy compatibility: scale/pop text
+  | "line_reveal" // Legacy compatibility: mask wipe
+  | "particle_burst"; // Legacy compatibility: particle burst
+
+export interface BrollEvent {
+  id: string;
+  start: number; // seconds (relative to clip)
+  end: number; // seconds (relative to clip)
+  keyword: string; // Text to display
+  motionStyle: BrollMotionStyle;
+  // Optional static image asset (local path or URL). If absent, renders as
+  // motion typography on a dark gradient background.
+  imagePath?: string;
+  // Optional styling overrides
+  textColor?: string;
+  accentColor?: string;
+  fontFamily?: string;
+}
+
+export interface BrollStyleConfig {
+  // Global defaults applied to all B-roll events unless overridden per-event.
+  defaultMotionStyle?: BrollMotionStyle;
+  fontFamily?: string;
+  textColor?: string;
+  accentColor?: string;
+  // 0..1 — how much the B-roll darkens/blurs the underlying video while active.
+  backdropDim?: number;
+  backdropBlur?: number; // px
+}
+
 /** Props for the main ClipComposition */
 export interface ClipCompositionProps {
   sceneGraph: SceneGraph;
@@ -136,6 +183,7 @@ export interface ClipCompositionProps {
   hookText: string;
   hookAnimation: string;
   textEmphasisEvents?: TextEmphasisEvent[];
+  brollEvents?: BrollEvent[];
   enableThreeJS: boolean;
   enableAI: boolean;
 }

@@ -188,6 +188,7 @@ class JobService:
         hook_style: str = "",
         broll_enabled: bool = False,
         autogrid_enabled: bool = False,
+        broll_motion_style: Optional[str] = None,
         text_emphasis_enabled: bool = False,
         # v3.0 Remotion fields
         use_remotion: Optional[bool] = None,
@@ -279,6 +280,7 @@ class JobService:
             # Computer-vision framing features are portrait-only. Enforce this
             # server-side as API clients must not be able to bypass the UI lock.
             autogrid_enabled=autogrid_enabled and target_aspect_ratio == "9:16",
+            broll_motion_style=broll_motion_style or None,
             # v3.0 Remotion fields - use settings default if not specified
             use_remotion=use_remotion if use_remotion is not None else settings.USE_REMOTION,
             ai_layer_enabled=ai_layer_enabled if ai_layer_enabled is not None else settings.REMOTION_ENABLE_AI_LAYER,

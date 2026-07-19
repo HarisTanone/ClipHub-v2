@@ -27,6 +27,7 @@ export function NewJob() {
   const [templateMode] = useState<"custom">("custom");
   const [forceReprocess, setForceReprocess] = useState(false);
   const [brollEnabled, setBrollEnabled] = useState(false);
+  const [brollMotionStyle, setBrollMotionStyle] = useState<string>(""); // "" = AI picks
   const [autogridEnabled, setAutogridEnabled] = useState(false);
   const [textEmphasisEnabled, setTextEmphasisEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -154,6 +155,7 @@ export function NewJob() {
       hook_style_config: { ...hookStyleConfig, template_mode: templateMode },
       subtitle_style_config: subtitleStyleConfig,
       broll_enabled: brollEnabled,
+      broll_motion_style: brollEnabled && brollMotionStyle ? brollMotionStyle : undefined,
       autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
       text_emphasis_enabled: textEmphasisEnabled,
       text_emphasis_style_config: textEmphasisStyleConfig,
@@ -349,6 +351,32 @@ export function NewJob() {
                 checked={brollEnabled}
                 onChange={setBrollEnabled}
               />
+              {brollEnabled && (
+                <div className="pl-1 pt-1">
+                  <label className="block text-[10px] font-medium text-zinc-500 mb-1 uppercase tracking-wider">
+                    B-roll Motion Style
+                  </label>
+                  <select
+                    value={brollMotionStyle}
+                    onChange={(e) => setBrollMotionStyle(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600"
+                  >
+                    <option value="">Auto (AI pilih per momen)</option>
+                    <option value="ken_burns">Ken Burns — dokumenter, narasi tenang</option>
+                    <option value="parallax_zoom">Parallax Zoom — inovasi/teknologi</option>
+                    <option value="light_sweep">Light Sweep — showcase/produk elegan</option>
+                    <option value="particle_float">Particle Float — inspiratif/abstrak</option>
+                    <option value="depth_parallax">Depth Parallax — cinematic fg/bg</option>
+                    <option value="glitch_reveal">Glitch Reveal — energetik/breaking</option>
+                    <option value="typewriter">Typewriter — tutorial/edukasi</option>
+                    <option value="stroke_draw">Stroke Draw — kutipan/motivasi</option>
+                    <option value="word_pop">Word Pop — punchy keyword</option>
+                    <option value="line_reveal">Line Reveal — reveal baris</option>
+                    <option value="particle_burst">Particle Burst — burst energetik</option>
+                  </select>
+                  <p className="text-[10px] text-zinc-600 mt-1">Dirender di Remotion → preview = final export.</p>
+                </div>
+              )}
               <FeatureLock featureName="Auto Grid" featureCode="auto_grid" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
                 <Toggle
                   label="Auto-Grid"

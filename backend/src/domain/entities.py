@@ -56,6 +56,39 @@ class BRollTemplate(str, Enum):
     PARTICLE_BURST = "particle_text_burst"
 
 
+class BrollMotionStyle(str, Enum):
+    """Motion-graphic style rendered in Remotion (preview == final).
+
+    These styles supersede the legacy FFmpeg drawtext-only path. When a
+    BRollSuggestion carries a ``motion_style``, the backend skips the FFmpeg
+    overlay injection and instead emits a ``BrollEvent`` to the Remotion
+    render props, guaranteeing the on-screen preview matches the exported clip.
+    """
+    # Image-based motion graphics
+    KEN_BURNS = "ken_burns"               # slow zoom + pan (documentary)
+    PARALLAX_ZOOM = "parallax_zoom"       # depth-based zoom
+    LIGHT_SWEEP = "light_sweep"           # light sweep across image
+    PARTICLE_FLOAT = "particle_float"     # floating particles + image
+    DEPTH_PARALLAX = "depth_parallax"     # foreground/background parallax
+    GLITCH_REVEAL = "glitch_reveal"       # glitch + reveal
+    # Typography-only motion graphics
+    TYPEWRITER = "typewriter"
+    STROKE_DRAW = "stroke_draw"
+    # Legacy compatibility (rendered as Remotion motion graphic, not FFmpeg)
+    WORD_POP = "word_pop"
+    LINE_REVEAL = "line_reveal"
+    PARTICLE_BURST = "particle_burst"
+
+
+# Map legacy BRollTemplate ids to the new BrollMotionStyle so old data still
+# renders via the Remotion path with the closest matching animation.
+LEGACY_TEMPLATE_TO_MOTION = {
+    "word_pop_typography": BrollMotionStyle.WORD_POP,
+    "line_reveal_typography": BrollMotionStyle.LINE_REVEAL,
+    "particle_text_burst": BrollMotionStyle.PARTICLE_BURST,
+}
+
+
 class VisualCategory(str, Enum):
     """Visual category for B-Roll asset resolution."""
     FOOTAGE = "footage"
@@ -87,12 +120,16 @@ class BRollSuggestion:
     """B-Roll suggestion from Gemini analysis."""
     at_time: float
     keyword: str
-    template: str  # BRollTemplate value
+    template: str  # BRollTemplate value (legacy id, kept for DB compat)
     duration: float = 2.0
     reason: str = ""
     visual_category: VisualCategory = VisualCategory.FOOTAGE
     asset_result: Optional[AssetResult] = None
     splice_segment: object = None  # Optional[SpliceSegment] — forward ref, set by ClipScout flow
+    # v3.1: Remotion motion-graphic style. When set, the suggestion is rendered
+    # as a Remotion BrollLayer event (preview == final) instead of via the
+    # legacy FFmpeg drawtext/overlay path.
+    motion_style: Optional[BrollMotionStyle] = None
 
 
 @dataclass
@@ -225,6 +262,10 @@ class Job:
     custom_style: Optional[dict] = None
     broll_enabled: bool = True
     autogrid_enabled: bool = True
+    # ─── v3.1 B-roll motion graphic default ────────────────────────────────
+    # Per-job default motion style for B-roll events. Individual suggestions
+    # may override. None = "ken_burns" (chosen at render time).
+    broll_motion_style: Optional[str] = None
     # ─── v3.0 Remotion fields ─────────────────────────────────────────────
     use_remotion: bool = False
     ai_layer_enabled: bool = False

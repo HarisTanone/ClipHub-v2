@@ -171,9 +171,19 @@ def seed_database() -> None:
 
         # 6. Seed B-Roll templates
         templates = [
+            # Legacy (FFmpeg overlay compatible)
             ("word_pop_typography", "Word Pop", "WordPopBroll", "Kata kunci muncul dengan scale/pop", 2000),
             ("line_reveal_typography", "Line Reveal", "LineRevealBroll", "Baris teks reveal dengan mask wipe", 2500),
             ("particle_text_burst", "Particle Burst", "ParticleBurstBroll", "Teks terbentuk dari partikel", 3000),
+            # v3.1 Remotion motion-graphic styles (preview == final)
+            ("ken_burns", "Ken Burns", "KenBurnsBroll", "Zoom + pan lambat gaya dokumenter (Remotion)", 2500),
+            ("parallax_zoom", "Parallax Zoom", "ParallaxZoomBroll", "Zoom berbasis kedalaman (Remotion)", 2500),
+            ("light_sweep", "Light Sweep", "LightSweepBroll", "Sapuan cahaya + reveal teks (Remotion)", 2500),
+            ("particle_float", "Particle Float", "ParticleFloatBroll", "Partikel melayang + teks (Remotion)", 2500),
+            ("depth_parallax", "Depth Parallax", "DepthParallaxBroll", "Parallax fg/bg cinematic (Remotion)", 2500),
+            ("glitch_reveal", "Glitch Reveal", "GlitchRevealBroll", "Glitch + reveal energetik (Remotion)", 2000),
+            ("typewriter", "Typewriter", "TypewriterBroll", "Ketik huruf per huruf (Remotion)", 2500),
+            ("stroke_draw", "Stroke Draw", "StrokeDrawBroll", "Teks tergambar dari outline (Remotion)", 2500),
         ]
         for tid, name, component, desc, duration in templates:
             cur.execute(

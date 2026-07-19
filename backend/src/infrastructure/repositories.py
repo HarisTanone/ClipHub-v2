@@ -24,6 +24,7 @@ class JobRepository(IJobRepository):
                 hook_style=job.hook_style,
                 broll_enabled=int(job.broll_enabled),
                 autogrid_enabled=int(job.autogrid_enabled),
+                broll_motion_style=getattr(job, "broll_motion_style", None),
                 # v3.0 Remotion fields
                 use_remotion=int(job.use_remotion),
                 ai_layer_enabled=int(job.ai_layer_enabled),
@@ -143,6 +144,7 @@ class JobRepository(IJobRepository):
             hook_style=model.hook_style or "",
             broll_enabled=bool(model.broll_enabled),
             autogrid_enabled=bool(model.autogrid_enabled),
+            broll_motion_style=getattr(model, "broll_motion_style", None),
             use_remotion=bool(model.use_remotion),
             ai_layer_enabled=bool(model.ai_layer_enabled),
             threejs_enabled=bool(model.threejs_enabled),

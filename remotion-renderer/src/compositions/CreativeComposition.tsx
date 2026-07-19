@@ -21,6 +21,7 @@ import { makeTransform, scale, translateY } from "@remotion/animation-utils";
 import type { ClipCompositionProps, Word } from "../types";
 import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
+import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 
 // Available creative styles
 export type CreativeStyle =
@@ -35,6 +36,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
   words,
   hookText,
   textEmphasisEvents = [],
+  brollEvents = [],
 }) => {
   const { fps, width } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -86,6 +88,13 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
         </AbsoluteFill>
       )}
 
+      {/* B-Roll motion graphic layer */}
+      {brollEvents.length > 0 && (
+        <AbsoluteFill style={{ zIndex: 2, pointerEvents: "none" }}>
+          <BrollLayer events={brollEvents} style={creativeDirection.broll_style_config} />
+        </AbsoluteFill>
+      )}
+
       {/* Hook with creative style */}
       {hookVisible && (
         <AbsoluteFill style={{ zIndex: 2, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.6)", opacity: hookOpacity }}>
@@ -95,6 +104,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
 
       {/* Subtitles with creative animation */}
       <HideDuringTextEmphasis events={textEmphasisEvents}>
+      <HideDuringBroll events={brollEvents}>
       {pages.map((page, index) => {
         const startFrame = Math.round((page.startMs / 1000) * fps);
         const endFrame = Math.round((page.endMs / 1000) * fps) + 3;
@@ -111,6 +121,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
           </Sequence>
         );
       })}
+      </HideDuringBroll>
       </HideDuringTextEmphasis>
     </AbsoluteFill>
   );

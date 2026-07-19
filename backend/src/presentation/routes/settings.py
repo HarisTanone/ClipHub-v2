@@ -93,6 +93,10 @@ def _ensure_settings_table():
             conn.execute("ALTER TABLE user_settings ADD COLUMN remotion_quality TEXT NOT NULL DEFAULT 'medium'")
         except:
             pass
+        try:
+            conn.execute("ALTER TABLE user_settings ADD COLUMN broll_motion_style TEXT")
+        except:
+            pass
         conn.commit()
     finally:
         conn.close()

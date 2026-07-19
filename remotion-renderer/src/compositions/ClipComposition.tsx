@@ -6,6 +6,7 @@ import { SubtitleLayer } from "../layers/SubtitleLayer";
 import { ZoomLayer } from "../layers/ZoomLayer";
 import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
+import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 
 // ─── Font Loader ─────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   hookText,
   hookAnimation,
   textEmphasisEvents = [],
+  brollEvents = [],
 }) => {
   const { fps } = useVideoConfig();
 
@@ -125,15 +127,32 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         </AbsoluteFill>
       )}
 
-      {/* L3: Keep original word timing; only hide visually during emphasis. */}
-      {words.length > 0 && (
-        <AbsoluteFill style={{ zIndex: 2, pointerEvents: "none" }}>
-          <HideDuringTextEmphasis events={textEmphasisEvents}>
-            <SubtitleLayer
-              words={words}
-              config={subtitleConfig}
-              fps={fps}
+      {/* L2.5: B-Roll motion graphic events (when broll_enabled).
+          Rendered in Remotion so preview == final render. Subtitles are
+          hidden while a B-roll event is active to keep the focus on the
+          motion graphic moment. */}
+      {brollEvents.length > 0 && (
+        <>
+          <AbsoluteFill style={{ zIndex: 2, pointerEvents: "none" }}>
+            <BrollLayer
+              events={brollEvents}
+              style={creativeDirection.broll_style_config}
             />
+          </AbsoluteFill>
+        </>
+      )}
+
+      {/* L3: Keep original word timing; only hide visually during emphasis or B-roll. */}
+      {words.length > 0 && (
+        <AbsoluteFill style={{ zIndex: 3, pointerEvents: "none" }}>
+          <HideDuringTextEmphasis events={textEmphasisEvents}>
+            <HideDuringBroll events={brollEvents}>
+              <SubtitleLayer
+                words={words}
+                config={subtitleConfig}
+                fps={fps}
+              />
+            </HideDuringBroll>
           </HideDuringTextEmphasis>
         </AbsoluteFill>
       )}

@@ -206,6 +206,16 @@ Untuk SETIAP clip, tentukan 1-2 momen di mana motion typography harus muncul:
 - "template": "word_pop_typography" / "line_reveal_typography" / "particle_text_burst"
 - "duration": 1.5 - 3.0 detik
 - "visual_category": "footage" / "icon" / "motion_graphic" / "reaction"
+- "motion_style": PILIH SALAH SATU berdasarkan mood (dirender di Remotion):
+  * "ken_burns" — dokumenter, narasi tenang (zoom+pan lambat)
+  * "parallax_zoom" — inovasi/teknologi
+  * "light_sweep" — showcase/produk elegan
+  * "particle_float" — inspiratif/abstrak
+  * "depth_parallax" — cinematic fg/bg
+  * "glitch_reveal" — energetik/breaking
+  * "typewriter" — tutorial/edukasi/code
+  * "stroke_draw" — kutipan/motivasi
+  * "word_pop" / "line_reveal" / "particle_burst" — punchy keyword (legacy)
 
 PANDUAN VISUAL_CATEGORY:
 - "footage": Tempat, aktivitas, objek fisik → video footage nyata

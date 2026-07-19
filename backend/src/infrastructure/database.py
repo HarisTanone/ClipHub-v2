@@ -60,6 +60,8 @@ class JobModel(Base):
     hook_style: Mapped[str] = mapped_column(String(50), default="", nullable=False, server_default="")
     broll_enabled: Mapped[int] = mapped_column(Integer, default=1, nullable=False, server_default="1")
     autogrid_enabled: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    # v3.1 B-roll motion graphic default (NULL = ken_burns at render time)
+    broll_motion_style: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # v3.0 Remotion fields
     use_remotion: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
     ai_layer_enabled: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")

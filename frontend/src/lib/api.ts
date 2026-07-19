@@ -214,6 +214,9 @@ export interface CreateJobPayload {
   hook_style?: string;
   broll_enabled?: boolean;
   autogrid_enabled?: boolean;
+  // v3.1: Default motion-graphic style for B-roll events (rendered in Remotion).
+  // Empty/undefined = AI picks per-suggestion.
+  broll_motion_style?: string;
   text_emphasis_enabled?: boolean;
   // Remotion fields
   use_remotion?: boolean;

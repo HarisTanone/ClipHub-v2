@@ -274,6 +274,7 @@ async def create_job(
         hook_style=request.hook_style,
         broll_enabled=request.broll_enabled,
         autogrid_enabled=request.autogrid_enabled,
+        broll_motion_style=request.broll_motion_style,
         text_emphasis_enabled=request.text_emphasis_enabled,
         # v3.0 Remotion fields
         use_remotion=request.use_remotion,

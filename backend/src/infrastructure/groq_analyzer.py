@@ -208,9 +208,21 @@ ATURAN:
 - duration antara 1.5 sampai 3.0 detik.
 - visual_category: footage, icon, motion_graphic, atau reaction.
 - template: word_pop_typography, line_reveal_typography, atau particle_text_burst.
+- motion_style (PILIH SALAH SATU berdasarkan mood konten):
+  * ken_burns — dokumenter, narasi tenang (zoom+pan lambat)
+  * parallax_zoom — inovasi/teknologi, kedalaman
+  * light_sweep — showcase/produk, elegan
+  * particle_float — inspiratif, abstrak
+  * depth_parallax — cinematic, kontras fg/bg
+  * glitch_reveal — energetik, breaking news
+  * typewriter — tutorial, edukasi, code
+  * stroke_draw — kutipan, motivasi
+  * word_pop — punchy keyword (legacy)
+  * line_reveal — reveal baris (legacy)
+  * particle_burst — burst energetik (legacy)
 
 OUTPUT RAW JSON:
-{{"items":[{{"at_time":12.5,"keyword":"aging population","duration":2.5,"visual_category":"footage","template":"word_pop_typography"}}]}}"""
+{{"items":[{{"at_time":12.5,"keyword":"aging population","duration":2.5,"visual_category":"footage","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
 
         try:
             raw = await asyncio.wait_for(

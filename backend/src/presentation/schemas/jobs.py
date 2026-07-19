@@ -13,6 +13,9 @@ class JobOptionsBase(BaseModel):
     hook_style: str = ""  # e.g. "slide_punch_framer"
     broll_enabled: bool = False  # B-Roll disabled by default
     autogrid_enabled: bool = False  # Enable multi-speaker grid (9:16 only)
+    # v3.1: Default motion-graphic style for B-roll events rendered in Remotion.
+    # None/empty = let the AI pick per-suggestion (recommended).
+    broll_motion_style: Optional[str] = None
     text_emphasis_enabled: bool = False  # Optional sparse AI cinematic text
     text_emphasis_style_config: Optional[dict] = None
     custom_style: Optional[dict] = None

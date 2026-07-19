@@ -84,6 +84,7 @@ class IRemotionRenderer(ABC):
         hook_text: Optional[str] = None,
         hook_style: Optional[str] = None,
         text_emphasis_events: Optional[list[dict]] = None,
+        broll_events: Optional[list[dict]] = None,
     ) -> RemotionRenderResult:
         """Render full clip composition via Remotion.
         
@@ -94,6 +95,7 @@ class IRemotionRenderer(ABC):
             output_path: Path for output rendered video
             clip_rank: Clip number (for logging/tracking)
             config: Optional render configuration
+            broll_events: Remotion BrollEvent dicts (motion-graphic B-roll)
             
         Returns:
             RemotionRenderResult with success status and output path

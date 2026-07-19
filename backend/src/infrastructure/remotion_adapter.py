@@ -60,6 +60,7 @@ class RemotionAdapter(IRemotionRenderer):
         hook_text: Optional[str] = None,
         hook_style: Optional[str] = None,
         text_emphasis_events: Optional[list[dict]] = None,
+        broll_events: Optional[list[dict]] = None,
     ) -> RemotionRenderResult:
         """Render clip via Remotion server.
         
@@ -74,6 +75,8 @@ class RemotionAdapter(IRemotionRenderer):
             hook_text: Hook text to display in first 3 seconds
             hook_style: Hook animation style (fade_scale, slide_up, glitch, typewriter, etc.)
             text_emphasis_events: At most two AI-selected cinematic text events
+            broll_events: Remotion BrollEvent dicts (motion-graphic B-roll,
+                rendered in Remotion so preview == final). See BrollLayer.tsx.
         """
         import time
 
@@ -173,6 +176,7 @@ class RemotionAdapter(IRemotionRenderer):
                 "hookText": render_hook_text,
                 "hookAnimation": render_hook_animation,
                 "textEmphasisEvents": (text_emphasis_events or [])[:2],
+                "brollEvents": (broll_events or [])[:3],
                 "enableThreeJS": config.enable_threejs,
                 "enableAI": config.enable_ai_layer,
             },
@@ -260,6 +264,7 @@ class RemotionAdapter(IRemotionRenderer):
         hook_text: Optional[str] = None,
         hook_style: Optional[str] = None,
         text_emphasis_events: Optional[list[dict]] = None,
+        broll_events: Optional[list[dict]] = None,
     ) -> dict:
         """Render a single frame as JPEG via Remotion /render-still.
         Returns {"success": True, "image": "data:image/jpeg;base64,..."} or {"success": False, "error": "..."}.
@@ -326,6 +331,7 @@ class RemotionAdapter(IRemotionRenderer):
                 "hookText": render_hook_text,
                 "hookAnimation": render_hook_animation,
                 "textEmphasisEvents": (text_emphasis_events or [])[:2],
+                "brollEvents": (broll_events or [])[:3],
                 "enableThreeJS": config.enable_threejs,
                 "enableAI": config.enable_ai_layer,
             },

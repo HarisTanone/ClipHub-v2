@@ -32,6 +32,7 @@ from src.config import settings
 from src.domain.entities import (
     BRollSuggestion, Clip, CreativeDirection, Job, JobStatus,
     PipelineFlags, SpliceSegment, VisualCategory, Word,
+    BrollMotionStyle, LEGACY_TEMPLATE_TO_MOTION,
 )
 from src.domain.interfaces import (
     IAspectRatioRouter,
@@ -955,12 +956,26 @@ class V2PipelineService:
             if template not in allowed_templates:
                 template = "word_pop_typography"
 
+            # v3.1: resolve Remotion motion style. Accept either an explicit
+            # "motion_style" field (new) or fall back to the legacy template id
+            # mapping. This keeps older analysis outputs rendering correctly.
+            motion_style: Optional[BrollMotionStyle] = None
+            raw_motion = raw.get("motion_style")
+            if raw_motion:
+                try:
+                    motion_style = BrollMotionStyle(raw_motion)
+                except (ValueError, TypeError):
+                    motion_style = None
+            if motion_style is None:
+                motion_style = LEGACY_TEMPLATE_TO_MOTION.get(template)
+
             parsed.append(BRollSuggestion(
                 at_time=round(at_time, 3),
                 keyword=keyword,
                 template=template,
                 duration=round(duration, 3),
                 visual_category=visual_cat,
+                motion_style=motion_style,
             ))
         return parsed
 
@@ -1156,13 +1171,16 @@ class V2PipelineService:
             input_path = reframed_path if os.path.exists(reframed_path) else base_path
             output_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
 
-            # Filter out video suggestions (already handled by splice above)
-            # Only pass non-video suggestions to overlay injector
+            # Filter out video suggestions (already handled by splice above).
+            # Also filter out suggestions that carry a Remotion motion_style —
+            # those are rendered as a BrollLayer in Remotion (preview == final)
+            # so the FFmpeg overlay path must NOT touch them.
             non_video_suggestions = [
                 s for s in clip.broll_suggestions
                 if not (s.asset_result
                         and not s.asset_result.is_fallback
                         and s.asset_result.asset_format == "video")
+                and s.motion_style is None
             ]
             if not non_video_suggestions:
                 continue
@@ -1178,8 +1196,12 @@ class V2PipelineService:
             except Exception as exc:
                 logger.warning(f"[{job_id}] B-roll overlay failed clip {clip.rank}: {exc}")
 
+        remotion_count = sum(
+            1 for clip in clips for s in clip.broll_suggestions if s.motion_style is not None
+        )
         logger.info(
-            f"[{job_id}] Auto B-roll complete: {applied_count}/{len(clips)} clips applied"
+            f"[{job_id}] Auto B-roll complete: {applied_count}/{len(clips)} clips FFmpeg-overlaid, "
+            f"{remotion_count} Remotion motion-graphic events queued"
         )
         self._emit(job_id, 11, "broll", "complete")
 
@@ -1324,6 +1346,58 @@ class V2PipelineService:
             f"across {len(clips)} clips (max 2/clip)"
         )
 
+    @staticmethod
+    def _build_broll_events(
+        clip: Clip,
+        job_motion_style: Optional[str] = None,
+    ) -> list[dict]:
+        """Convert a clip's BRollSuggestion list into Remotion BrollEvent dicts.
+
+        Only suggestions carrying a ``motion_style`` (or inheriting the job
+        default) are emitted — these render as a Remotion BrollLayer so the
+        on-screen preview matches the final export exactly. Suggestions
+        without a motion style stay on the legacy FFmpeg overlay path and are
+        intentionally excluded here.
+
+        Args:
+            clip: Clip whose broll_suggestions to convert.
+            job_motion_style: Optional per-job default motion style id.
+
+        Returns:
+            List of BrollEvent dicts ready for the Remotion render payload.
+        """
+        events: list[dict] = []
+        for idx, s in enumerate(clip.broll_suggestions):
+            style = s.motion_style
+            if style is None and job_motion_style:
+                try:
+                    style = BrollMotionStyle(job_motion_style)
+                except (ValueError, TypeError):
+                    style = None
+            if style is None:
+                # No motion style → handled by FFmpeg overlay, skip Remotion.
+                continue
+            # Resolve an image asset path if a non-video asset was fetched.
+            image_path: Optional[str] = None
+            if (
+                s.asset_result
+                and not s.asset_result.is_fallback
+                and s.asset_result.asset_format in {"png", "svg", "gif"}
+                and s.asset_result.local_path
+                and os.path.exists(s.asset_result.local_path)
+            ):
+                image_path = os.path.abspath(s.asset_result.local_path)
+
+            events.append({
+                "id": f"broll-{clip.rank}-{idx}",
+                "start": round(float(s.at_time), 3),
+                "end": round(float(s.at_time) + float(s.duration), 3),
+                "keyword": s.keyword.upper(),
+                "motionStyle": style.value,
+                "imagePath": image_path,
+            })
+        return events
+
     async def _render_clips(
         self,
         job: Job,
@@ -1460,6 +1534,7 @@ class V2PipelineService:
                         hook_text=clip_hook,
                         hook_style=hook_style,
                         text_emphasis_events=clip.text_emphasis_events,
+                        broll_events=self._build_broll_events(clip, job.broll_motion_style),
                     )
                     if result.success:
                         mark_clip_ready(output_dir, clip.rank)
