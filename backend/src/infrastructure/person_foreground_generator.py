@@ -99,8 +99,11 @@ class PersonForegroundGenerator:
                 end_frame = max(start_frame + 1, round(float(event["end"]) * fps))
                 generated: dict[int, dict] = {}
                 needs_png = event.get("effect") == "behind_person"
+                # Subsample tracking effects (every 3rd frame) for performance.
+                # PNG effects need every frame for smooth mask animation.
+                frame_step = 1 if needs_png else 3
 
-                for composition_frame in range(start_frame, end_frame + 1):
+                for composition_frame in range(start_frame, end_frame + 1, frame_step):
                     cap.set(cv2.CAP_PROP_POS_MSEC, composition_frame * 1000.0 / fps)
                     ok, frame = cap.read()
                     if not ok:
@@ -183,8 +186,9 @@ class PersonForegroundGenerator:
 
                 expected = end_frame - start_frame + 1
                 coverage = len(generated) / max(1, expected)
-                # Tracking effects use a lower threshold (no PNG needed, just bbox metadata)
-                min_coverage = 0.90 if needs_png else 0.60
+                # Tracking effects use a lower threshold (no PNG needed, just bbox metadata).
+                # With 3x subsampling, expected generated frames = expected/3, so adjust threshold.
+                min_coverage = 0.90 if needs_png else 0.20
                 if coverage < min_coverage:
                     event["effect"] = "spotlight"
                     event["fallback_reason"] = "insufficient_person_mask"

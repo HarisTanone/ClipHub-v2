@@ -1187,6 +1187,18 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
             {previewEffect === "around_head" && (
               <div className="absolute left-1/2 top-[20%] z-20 h-12 w-12 -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
             )}
+            {(previewEffect === "floating_text" || previewEffect === "auto_avoid") && (
+              <div className="absolute bottom-[12%] left-1/2 z-5 h-[55%] w-[42%] -translate-x-1/2 opacity-60">
+                <div className="absolute left-1/2 top-[8%] h-[20%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-xl" />
+                <div className="absolute bottom-0 left-1/2 h-[78%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-800 via-zinc-500 to-zinc-800 shadow-2xl" />
+              </div>
+            )}
+            {previewEffect === "depth_text" && (
+              <div className="absolute bottom-[15%] left-1/2 z-5 h-[60%] w-[46%] -translate-x-1/2 opacity-70" style={{ filter: "blur(0.5px)" }}>
+                <div className="absolute left-1/2 top-[6%] h-[18%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-xl" />
+                <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-800 via-zinc-500 to-zinc-800 shadow-2xl" />
+              </div>
+            )}
             <div className={cn("absolute inset-x-[7%] z-10 flex", previewAlign)} style={{ top: previewTop, transform: "translateY(-50%)" }}>
               <div style={{ ...textStyle, maxWidth: `${style.maxWidthPct}%` }}>
                 {previewEffect === "side_label" && <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: style.accentColor }} />}
