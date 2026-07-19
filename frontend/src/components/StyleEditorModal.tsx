@@ -1082,13 +1082,14 @@ function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisCh
   const [subTab, setSubTab] = useState<"transition" | "ai_text">("transition");
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex items-center gap-1 px-5 pt-3 shrink-0">
-        <button type="button" onClick={() => setSubTab("transition")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "transition" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}>
-          <MoveRight className="h-3 w-3 inline mr-1" />Transition
+      <div className="flex items-center gap-1 px-4 pt-3 pb-2 shrink-0 border-b border-zinc-800/60">
+        <button type="button" onClick={() => setSubTab("transition")} className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "transition" ? "bg-emerald-600 text-white" : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800")}>
+          <MoveRight className="h-3 w-3" />Transition
         </button>
-        <button type="button" onClick={() => setSubTab("ai_text")} className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "ai_text" ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200")}>
-          <Layers className="h-3 w-3 inline mr-1" />AI Text
+        <button type="button" onClick={() => setSubTab("ai_text")} className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "ai_text" ? "bg-emerald-600 text-white" : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800")}>
+          <Layers className="h-3 w-3" />AI Text
         </button>
+        <span className="ml-auto text-[9px] text-zinc-600">Applied to preview &amp; final render</span>
       </div>
       <div className="flex-1 overflow-hidden">
         {subTab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} />}
@@ -1097,46 +1098,80 @@ function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisCh
   );
 }
 
+const TRANSITION_META: Record<string, { label: string; desc: string; icon: string }> = {
+  cut: { label: "Cut", desc: "Hard cut antar framing. Cepat & energik.", icon: "⫛" },
+  fade: { label: "Fade", desc: "Cross-fade halus. Cinematic & natural.", icon: "◐" },
+  slide: { label: "Slide", desc: "Geser horizontal. Dinamis & modern.", icon: "→" },
+  zoom: { label: "Zoom", desc: "Zoom in/out transisi. Dramatis.", icon: "⊙" },
+};
+
 function TransitionEditor({ style, onChange }: { style: HookStyle; onChange: (style: HookStyle) => void }) {
   const active = style.transitionStyle || "cut";
-  const duration = style.transitionDuration || 0.35;
+  const duration = style.transitionDuration ?? 0.35;
   const durationInt = Math.round(duration * 100);
   const previewDur = Math.max(0.8, duration * 2);
+  const update = (patch: Partial<HookStyle>) => onChange({ ...style, ...patch });
+
   return (
-    <div className="h-full overflow-y-auto p-5">
-      <style>{`
-        @keyframes transCut { 0%,49% { opacity:1; } 50%,99% { opacity:0; } 100% { opacity:1; } }
-        @keyframes transFade { 0%,100% { opacity:1; } 50% { opacity:0; } }
-        @keyframes transSlide { 0% { transform:translateX(0); } 49% { transform:translateX(-100%); } 50% { transform:translateX(100%); } 100% { transform:translateX(0); } }
-        @keyframes transZoom { 0%,100% { transform:scale(1); opacity:1; } 50% { transform:scale(1.5); opacity:0; } }
-      `}</style>
-      <h3 className="text-sm font-semibold text-zinc-100">Speaker Transition</h3>
-      <p className="mt-1 text-xs text-zinc-500">Applied to preview and final Remotion render when the clip starts or speaker framing changes.</p>
-
-      {/* Live preview */}
-      <div className="mt-4 flex justify-center">
-        <div className="relative aspect-[9/16] w-32 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
-          <div className="absolute inset-0 flex items-center justify-center" style={{ animation: `${active === "cut" ? "transCut" : active === "fade" ? "transFade" : active === "slide" ? "transSlide" : "transZoom"} ${previewDur}s ease-in-out infinite` }}>
-            <div className="h-full w-full bg-gradient-to-br from-emerald-500/50 to-blue-500/40" />
-          </div>
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="rounded-full bg-black/50 px-2 py-0.5 text-[9px] font-medium text-white">{active} · {duration.toFixed(2)}s</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {(["cut", "fade", "slide", "zoom"] as const).map((value) => (
-          <button type="button" key={value} onClick={() => onChange({ ...style, transitionStyle: value })} className={cn("rounded-xl border p-4 text-left capitalize transition-all", active === value ? "border-emerald-500 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-950/50 text-zinc-400 hover:border-zinc-700")}>
-            <div className={cn("mb-3 h-16 overflow-hidden rounded-lg bg-zinc-800", value === "fade" && "animate-pulse")}>
-              <div className={cn("h-full w-full bg-gradient-to-br from-emerald-500/40 to-blue-500/30", value === "slide" && "translate-x-2", value === "zoom" && "scale-110")} />
+    <div className="grid grid-cols-1 xl:grid-cols-12 h-full">
+      {/* Left: Live preview (sticky) */}
+      <div className="xl:col-span-5 p-4 overflow-y-auto space-y-4 border-r border-zinc-800">
+        <Section title="Live Preview">
+          <div className="flex justify-center">
+            <div className="relative aspect-[9/16] w-full max-w-[200px] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
+              <div className="absolute inset-0 flex items-center justify-center" style={{ animation: `${active === "cut" ? "transCut" : active === "fade" ? "transFade" : active === "slide" ? "transSlide" : "transZoom"} ${previewDur}s ease-in-out infinite` }}>
+                <div className="h-full w-full bg-gradient-to-br from-emerald-500/50 to-blue-500/40" />
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="rounded-full bg-black/60 px-2.5 py-0.5 text-[9px] font-medium text-white backdrop-blur-sm">{active} · {duration.toFixed(2)}s</span>
+              </div>
+              <div className="absolute bottom-2 left-2 z-30 rounded-md bg-black/60 px-2 py-0.5 text-[8px] text-zinc-400">Preview transition</div>
             </div>
-            {value}
-          </button>
-        ))}
+          </div>
+        </Section>
+
+        <Section title="Info">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+            <p className="text-[10px] leading-relaxed text-zinc-400">
+              Transisi diterapkan saat clip dimulai atau saat framing speaker berubah (single → grid, atau panning antar speaker). Pilihan ini mempengaruhi <span className="text-emerald-400">preview</span> dan <span className="text-emerald-400">final Remotion render</span>.
+            </p>
+          </div>
+        </Section>
       </div>
-      <div className="mt-6">
-        <RangeInput label={`Duration: ${duration.toFixed(2)}s`} min={15} max={100} value={durationInt} onChange={(v) => onChange({ ...style, transitionDuration: v / 100 })} />
+
+      {/* Right: Controls */}
+      <div className="xl:col-span-7 p-4 overflow-y-auto space-y-4">
+        <style>{`
+          @keyframes transCut { 0%,49% { opacity:1; } 50%,99% { opacity:0; } 100% { opacity:1; } }
+          @keyframes transFade { 0%,100% { opacity:1; } 50% { opacity:0; } }
+          @keyframes transSlide { 0% { transform:translateX(0); } 49% { transform:translateX(-100%); } 50% { transform:translateX(100%); } 100% { transform:translateX(0); } }
+          @keyframes transZoom { 0%,100% { transform:scale(1); opacity:1; } 50% { transform:scale(1.5); opacity:0; } }
+        `}</style>
+
+        <Section title="Transition Style">
+          <div className="grid grid-cols-2 gap-2">
+            {(["cut", "fade", "slide", "zoom"] as const).map((value) => {
+              const meta = TRANSITION_META[value];
+              return (
+                <button type="button" key={value} onClick={() => update({ transitionStyle: value })} className={cn("rounded-xl border p-3 text-left transition-all", active === value ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700")}>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-lg leading-none">{meta.icon}</span>
+                    {active === value && <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-400">Active</span>}
+                  </div>
+                  <p className={cn("text-xs font-semibold", active === value ? "text-emerald-300" : "text-zinc-300")}>{meta.label}</p>
+                  <p className="mt-0.5 text-[9px] leading-tight text-zinc-600">{meta.desc}</p>
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+
+        <Section title="Timing">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+            <RangeInput label={`Duration: ${duration.toFixed(2)}s`} min={15} max={100} value={durationInt} onChange={(v) => update({ transitionDuration: v / 100 })} />
+            <p className="mt-2 text-[9px] text-zinc-600">Rentang 0.15s – 1.00s. Cut cepat untuk energi tinggi, fade lambat untuk vibe cinematic.</p>
+          </div>
+        </Section>
       </div>
     </div>
   );
@@ -1225,9 +1260,8 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
           </div>
         </div>
 
-        <div className="space-y-5">
-          <div>
-            <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Visual Mode</label>
+        <div className="space-y-4">
+          <Section title="Visual Mode">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {([
                 ["auto", "AI Auto", "AI memilih jenis terbaik"],
@@ -1246,71 +1280,84 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
                 </button>
               ))}
             </div>
-          </div>
+          </Section>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Animation
-              <select value={style.animation} onChange={(e) => update("animation", e.target.value as TextEmphasisStyle["animation"])} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-2 text-xs font-normal normal-case text-zinc-200 outline-none focus:border-emerald-500/60">
-                <option value="cinematic">Cinematic</option><option value="slam">Slam</option><option value="reveal">Reveal</option><option value="glitch">Glitch</option><option value="neon">Neon Glow</option>
-              </select>
-            </label>
-            <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Font
-              <select value={style.fontFamily} onChange={(e) => update("fontFamily", e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-2 text-xs font-normal normal-case text-zinc-200 outline-none focus:border-emerald-500/60">
-                {FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}
-              </select>
-            </label>
-          </div>
+          <Section title="Animation &amp; Font">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Animation
+                <select value={style.animation} onChange={(e) => update("animation", e.target.value as TextEmphasisStyle["animation"])} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-2 text-xs font-normal normal-case text-zinc-200 outline-none focus:border-emerald-500/60">
+                  <option value="cinematic">Cinematic</option><option value="slam">Slam</option><option value="reveal">Reveal</option><option value="glitch">Glitch</option><option value="neon">Neon Glow</option>
+                </select>
+              </label>
+              <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Font
+                <select value={style.fontFamily} onChange={(e) => update("fontFamily", e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-2 text-xs font-normal normal-case text-zinc-200 outline-none focus:border-emerald-500/60">
+                  {FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}
+                </select>
+              </label>
+            </div>
+          </Section>
 
-          <div className="grid grid-cols-2 gap-3">
-            <SliderField label="Font Size" value={style.fontSize} min={32} max={160} suffix="px" onChange={(value) => update("fontSize", value)} />
-            <SliderField label="Position" value={style.positionY} min={12} max={88} suffix="%" onChange={(value) => update("positionY", value)} />
-            <SliderField label="Max Width" value={style.maxWidthPct} min={35} max={96} suffix="%" onChange={(value) => update("maxWidthPct", value)} />
-            <SliderField label="Mask Feather" value={style.maskFeather} min={1} max={31} suffix="px" step={2} onChange={(value) => update("maskFeather", value % 2 === 0 ? value + 1 : value)} />
-          </div>
+          <Section title="Layout &amp; Sizing">
+            <div className="grid grid-cols-2 gap-3">
+              <SliderField label="Font Size" value={style.fontSize} min={32} max={160} suffix="px" onChange={(value) => update("fontSize", value)} />
+              <SliderField label="Position" value={style.positionY} min={12} max={88} suffix="%" onChange={(value) => update("positionY", value)} />
+              <SliderField label="Max Width" value={style.maxWidthPct} min={35} max={96} suffix="%" onChange={(value) => update("maxWidthPct", value)} />
+              <SliderField label="Mask Feather" value={style.maskFeather} min={1} max={31} suffix="px" step={2} onChange={(value) => update("maskFeather", value % 2 === 0 ? value + 1 : value)} />
+            </div>
+          </Section>
 
-          <div className="grid grid-cols-2 gap-3">
-            <ColorField label="Text" value={style.color} onChange={(value) => update("color", value)} />
-            <ColorField label="Accent" value={style.accentColor} onChange={(value) => update("accentColor", value)} />
-            <ColorField label="Stroke" value={style.strokeColor} onChange={(value) => update("strokeColor", value)} />
-            <ColorField label="Shadow" value={style.shadowColor} onChange={(value) => update("shadowColor", value)} />
-          </div>
+          <Section title="Colors">
+            <div className="grid grid-cols-2 gap-3">
+              <ColorField label="Text" value={style.color} onChange={(value) => update("color", value)} />
+              <ColorField label="Accent" value={style.accentColor} onChange={(value) => update("accentColor", value)} />
+              <ColorField label="Stroke" value={style.strokeColor} onChange={(value) => update("strokeColor", value)} />
+              <ColorField label="Shadow" value={style.shadowColor} onChange={(value) => update("shadowColor", value)} />
+            </div>
+          </Section>
 
-          <div className="grid grid-cols-3 gap-2">
-            <MiniToggle label="Uppercase" checked={style.uppercase} onChange={(value) => update("uppercase", value)} />
-            <MiniToggle label="Stroke" checked={style.strokeEnabled} onChange={(value) => update("strokeEnabled", value)} />
-            <MiniToggle label="Shadow" checked={style.shadowEnabled} onChange={(value) => update("shadowEnabled", value)} />
-          </div>
+          <Section title="Effects">
+            <div className="grid grid-cols-3 gap-2">
+              <MiniToggle label="Uppercase" checked={style.uppercase} onChange={(value) => update("uppercase", value)} />
+              <MiniToggle label="Stroke" checked={style.strokeEnabled} onChange={(value) => update("strokeEnabled", value)} />
+              <MiniToggle label="Shadow" checked={style.shadowEnabled} onChange={(value) => update("shadowEnabled", value)} />
+            </div>
+          </Section>
 
           {/* Effect-specific tuning sliders (conditional) */}
           {previewEffect === "floating_text" && (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Floating Text Tuning</p>
-              <SliderField label="Bob Speed" value={style.floatSpeed ?? 1.2} min={0.5} max={3.0} step={0.1} suffix="x" onChange={(value) => update("floatSpeed", value)} />
-            </div>
+            <Section title="Floating Text Tuning">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+                <SliderField label="Bob Speed" value={style.floatSpeed ?? 1.2} min={0.5} max={3.0} step={0.1} suffix="x" onChange={(value) => update("floatSpeed", value)} />
+              </div>
+            </Section>
           )}
           {previewEffect === "auto_avoid" && (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Auto Avoid Tuning</p>
-              <SliderField label="Avoid Padding" value={style.avoidPadding ?? 40} min={10} max={120} suffix="px" onChange={(value) => update("avoidPadding", value)} />
-            </div>
+            <Section title="Auto Avoid Tuning">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+                <SliderField label="Avoid Padding" value={style.avoidPadding ?? 40} min={10} max={120} suffix="px" onChange={(value) => update("avoidPadding", value)} />
+              </div>
+            </Section>
           )}
           {previewEffect === "around_head" && (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Around Head Tuning</p>
-              <SliderField label="Orbit Radius" value={style.aroundHeadRadius ?? 60} min={30} max={120} suffix="%" onChange={(value) => update("aroundHeadRadius", value)} />
-            </div>
+            <Section title="Around Head Tuning">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+                <SliderField label="Orbit Radius" value={style.aroundHeadRadius ?? 60} min={30} max={120} suffix="%" onChange={(value) => update("aroundHeadRadius", value)} />
+              </div>
+            </Section>
           )}
           {previewEffect === "depth_text" && (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Depth Text Tuning</p>
-              <SliderField label="Depth Intensity" value={style.depthIntensity ?? 0.5} min={0.1} max={1.0} step={0.05} suffix="" onChange={(value) => update("depthIntensity", value)} />
-            </div>
+            <Section title="Depth Text Tuning">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+                <SliderField label="Depth Intensity" value={style.depthIntensity ?? 0.5} min={0.1} max={1.0} step={0.05} suffix="" onChange={(value) => update("depthIntensity", value)} />
+              </div>
+            </Section>
           )}
           {previewEffect === "kinetic_type" && (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Kinetic Type Tuning</p>
-              <SliderField label="Word Stagger" value={style.kineticStagger ?? 6} min={1} max={18} suffix="f" onChange={(value) => update("kineticStagger", value)} />
-            </div>
+            <Section title="Kinetic Type Tuning">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+                <SliderField label="Word Stagger" value={style.kineticStagger ?? 6} min={1} max={18} suffix="f" onChange={(value) => update("kineticStagger", value)} />
+              </div>
+            </Section>
           )}
         </div>
       </div>
