@@ -62,7 +62,15 @@ export interface Word {
   highlight?: boolean;
 }
 
-export type TextEmphasisEffect = "behind_person" | "spotlight" | "side_label";
+export type TextEmphasisEffect =
+  | "behind_person"
+  | "spotlight"
+  | "side_label"
+  | "floating_text"
+  | "auto_avoid"
+  | "around_head"
+  | "depth_text"
+  | "kinetic_type";
 
 export interface PersonForegroundFrame {
   frame: number;
@@ -71,6 +79,12 @@ export interface PersonForegroundFrame {
   y: number;
   width: number;
   height: number;
+  // Optional person tracking metadata for advanced effects
+  head_x?: number;
+  head_y?: number;
+  head_width?: number;
+  head_height?: number;
+  depth_z?: number; // Estimated depth (0 = far, 1 = near) for depth_text effect
 }
 
 export interface TextEmphasisEvent {
@@ -105,6 +119,12 @@ export interface TextEmphasisStyleConfig {
   shadowBlur?: number;
   positionY?: number;
   maxWidthPct?: number;
+  // New: effect-specific tuning
+  floatSpeed?: number; // For floating_text: vertical oscillation speed (0.5-3.0)
+  avoidPadding?: number; // For auto_avoid: padding around person bbox (px)
+  aroundHeadRadius?: number; // For around_head: radius from head center (%)
+  depthIntensity?: number; // For depth_text: parallax intensity (0.1-1.0)
+  kineticStagger?: number; // For kinetic_type: word stagger delay (frames)
 }
 
 /** Props for the main ClipComposition */

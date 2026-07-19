@@ -11,7 +11,16 @@ import re
 from typing import Iterable
 
 
-ALLOWED_EFFECTS = {"behind_person", "spotlight", "side_label"}
+ALLOWED_EFFECTS = {
+    "behind_person",
+    "spotlight",
+    "side_label",
+    "floating_text",
+    "auto_avoid",
+    "around_head",
+    "depth_text",
+    "kinetic_type",
+}
 ALLOWED_POSITIONS = {"left", "center", "right"}
 
 DEFAULT_TEXT_EMPHASIS_STYLE = {
@@ -34,6 +43,12 @@ DEFAULT_TEXT_EMPHASIS_STYLE = {
     "positionY": 50,
     "maxWidthPct": 82,
     "maskFeather": 9,
+    # Effect-specific tuning
+    "floatSpeed": 1.2,
+    "avoidPadding": 40,
+    "aroundHeadRadius": 60,
+    "depthIntensity": 0.5,
+    "kineticStagger": 6,
 }
 
 
@@ -58,6 +73,12 @@ def normalise_text_emphasis_style(style: object) -> dict:
     result["maskFeather"] = int(_clamp_number(result.get("maskFeather"), 1, 31, 9))
     if result["maskFeather"] % 2 == 0:
         result["maskFeather"] += 1
+    # Effect-specific tuning (new)
+    result["floatSpeed"] = _clamp_number(result.get("floatSpeed"), 0.5, 3.0, 1.2)
+    result["avoidPadding"] = _clamp_number(result.get("avoidPadding"), 10, 120, 40)
+    result["aroundHeadRadius"] = _clamp_number(result.get("aroundHeadRadius"), 30, 120, 60)
+    result["depthIntensity"] = _clamp_number(result.get("depthIntensity"), 0.1, 1.0, 0.5)
+    result["kineticStagger"] = _clamp_number(result.get("kineticStagger"), 1, 18, 6)
 
     for key, fallback in (
         ("color", "#FFFFFF"),

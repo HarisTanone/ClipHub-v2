@@ -528,7 +528,8 @@ OUTPUT RAW JSON:
 
         safe_style = normalise_text_emphasis_style(style)
         effect_instruction = (
-            "Pilih effect paling cocok dari behind_person, spotlight, side_label."
+            "Pilih effect paling cocok dari behind_person, spotlight, side_label, "
+            "floating_text, auto_avoid, around_head, depth_text, kinetic_type."
             if safe_style["effectMode"] == "auto"
             else f'Semua pilihan WAJIB memakai effect "{safe_style["effectMode"]}".'
         )
@@ -542,7 +543,14 @@ ATURAN KETAT:
 - Frasa 1-7 kata, harus memakai start_word dan end_word yang berurutan pada clip yang sama.
 - Prioritaskan angka mengejutkan, tesis utama, kontras tajam, istilah inti, atau punchline.
 - Hindari filler, salam, kalimat generik, dan jangan memilih dua frasa yang berdekatan (min 6 detik jarak).
-- behind_person untuk pernyataan hero yang sangat kuat; spotlight untuk angka/punchline; side_label untuk istilah atau konteks singkat.
+- behind_person: pernyataan hero sangat kuat (teks di belakang subjek, butuh segmentasi orang).
+- spotlight: angka/punchline (hero text + vignette).
+- side_label: istilah atau konteks singkat (label editorial di sisi).
+- floating_text: teks melayang mengikuti gerakan orang (gentle bob).
+- auto_avoid: teks otomatis menghindari orang (ke area kosong terbesar).
+- around_head: teks mengorbit di sekitar kepala orang.
+- depth_text: teks dengan parallax kedalaman (dekat/jauh mengikuti posisi orang).
+- kinetic_type: tipografi kinetik kata-per-kata (cocok untuk frasa pendek dan ritmis).
 - {effect_instruction}
 - position hanya left, center, atau right.
 - Jangan membuat ulang teks dan jangan membuat timestamp.
@@ -596,7 +604,14 @@ ATURAN KETAT:
 - Jangan melewati penanda [... gap ...].
 - Prioritaskan angka mengejutkan, tesis utama, kontras tajam, istilah inti, atau punchline.
 - Hindari filler, salam, kalimat generik, dan jangan memilih dua frasa yang berdekatan.
-- behind_person untuk pernyataan hero yang sangat kuat; spotlight untuk angka/punchline; side_label untuk istilah atau konteks singkat.
+- behind_person: pernyataan hero sangat kuat (teks di belakang subjek).
+- spotlight: angka/punchline (hero text + vignette).
+- side_label: istilah atau konteks singkat (label editorial di sisi).
+- floating_text: teks melayang mengikuti gerakan orang.
+- auto_avoid: teks otomatis menghindari orang.
+- around_head: teks mengorbit di sekitar kepala orang.
+- depth_text: teks dengan parallax kedalaman.
+- kinetic_type: tipografi kinetik kata-per-kata.
 - {effect_instruction}
 - position hanya left, center, atau right.
 - Jangan membuat ulang teks dan jangan membuat timestamp.

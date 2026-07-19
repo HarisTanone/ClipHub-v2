@@ -1294,7 +1294,9 @@ class V2PipelineService:
                 clip.text_emphasis_events = []
                 continue
 
-            if any(event.get("effect") == "behind_person" for event in events):
+            # Effects that need person detection (segmentation PNG or bbox metadata)
+            tracking_effects = {"behind_person", "floating_text", "auto_avoid", "around_head", "depth_text"}
+            if any(event.get("effect") in tracking_effects for event in events):
                 brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
                 reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
                 base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"

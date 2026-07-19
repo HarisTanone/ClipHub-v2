@@ -104,3 +104,80 @@ def test_disabled_feature_does_not_call_ai_or_segmentation(tmp_path):
         trim_results={1: True},
     ))
     assert clip.text_emphasis_events == []
+
+
+def test_new_effects_are_accepted_and_normalised():
+    """The five new YOLOv11-based effects must be valid effectMode values."""
+    new_effects = [
+        "floating_text",
+        "auto_avoid",
+        "around_head",
+        "depth_text",
+        "kinetic_type",
+    ]
+    for effect in new_effects:
+        options = UploadJobOptions(
+            text_emphasis_enabled=True,
+            text_emphasis_style_config={"effectMode": effect},
+        )
+        assert options.text_emphasis_style_config["effectMode"] == effect
+
+        style = normalise_text_emphasis_style({"effectMode": effect})
+        assert style["effectMode"] == effect
+        # New tuning fields must be present with sane defaults
+        assert "floatSpeed" in style
+        assert "avoidPadding" in style
+        assert "aroundHeadRadius" in style
+        assert "depthIntensity" in style
+        assert "kineticStagger" in style
+
+
+def test_new_effect_tuning_is_clamped():
+    """Effect-specific tuning sliders must clamp out-of-range values."""
+    style = normalise_text_emphasis_style({
+        "effectMode": "floating_text",
+        "floatSpeed": 99.0,
+        "avoidPadding": -5,
+        "aroundHeadRadius": 500,
+        "depthIntensity": 3.0,
+        "kineticStagger": 0,
+    })
+    assert style["floatSpeed"] == 3.0
+    assert style["avoidPadding"] == 10
+    assert style["aroundHeadRadius"] == 120
+    assert style["depthIntensity"] == 1.0
+    assert style["kineticStagger"] == 1
+
+
+def test_anchor_preserves_new_effect_choice():
+    """anchor_text_emphasis_response must keep the new effect when user forces it."""
+    words = _words()
+    result = anchor_text_emphasis_response(
+        {"clips": {"1": [
+            {"start_word": "W0008", "end_word": "W0010", "effect": "kinetic_type"},
+        ]}},
+        {1: words},
+        {1: 25.0},
+        style={"effectMode": "depth_text"},
+        min_start_by_clip={1: 3.2},
+    )
+    # When user forces effectMode != auto, that effect overrides AI's choice
+    assert result[1][0]["effect"] == "depth_text"
+
+
+def test_anchor_accepts_new_effect_from_ai():
+    """When effectMode is auto, AI-selected new effects must be preserved."""
+    words = _words()
+    result = anchor_text_emphasis_response(
+        {"clips": {"1": [
+            {"start_word": "W0008", "end_word": "W0010", "effect": "around_head"},
+            {"start_word": "W0022", "end_word": "W0024", "effect": "floating_text"},
+        ]}},
+        {1: words},
+        {1: 25.0},
+        style={"effectMode": "auto"},
+        min_start_by_clip={1: 3.2},
+    )
+    effects = [event["effect"] for event in result[1]]
+    assert "around_head" in effects
+    assert "floating_text" in effects

@@ -60,8 +60,12 @@ class PersonForegroundGenerator:
         import numpy as np
 
         safe_events = [dict(event) for event in events[:2]]
+        # Effects that need person segmentation (foreground PNG)
         behind_events = [event for event in safe_events if event.get("effect") == "behind_person"]
-        if not behind_events:
+        # Effects that need person bbox/head/depth metadata (no PNG needed)
+        tracking_effects = {"floating_text", "auto_avoid", "around_head", "depth_text"}
+        tracking_events = [event for event in safe_events if event.get("effect") in tracking_effects]
+        if not behind_events and not tracking_events:
             return safe_events
 
         cap = cv2.VideoCapture(video_path)
@@ -87,12 +91,14 @@ class PersonForegroundGenerator:
             kernel += 1
 
         try:
-            for event in behind_events:
+            all_track_events = behind_events + tracking_events
+            for event in all_track_events:
                 event_dir = os.path.join(output_dir, str(event.get("id") or "event"))
                 os.makedirs(event_dir, exist_ok=True)
                 start_frame = max(0, round(float(event["start"]) * fps))
                 end_frame = max(start_frame + 1, round(float(event["end"]) * fps))
                 generated: dict[int, dict] = {}
+                needs_png = event.get("effect") == "behind_person"
 
                 for composition_frame in range(start_frame, end_frame + 1):
                     cap.set(cv2.CAP_PROP_POS_MSEC, composition_frame * 1000.0 / fps)
@@ -102,26 +108,28 @@ class PersonForegroundGenerator:
                     try:
                         preds = model.predict(frame, threshold=float(settings.TEXT_EMPHASIS_SEG_CONFIDENCE))
                         person_masks = []
+                        person_bboxes = []
                         for idx in range(len(preds)):
                             cname = preds.data.get('class_name')[idx] if 'class_name' in preds.data else ""
                             cid = preds.class_id[idx]
                             if cname == "person" or cid == 1:
                                 person_masks.append(preds.mask[idx])
+                                if hasattr(preds, 'xyxy') and idx < len(preds.xyxy):
+                                    person_bboxes.append(preds.xyxy[idx])
                     except Exception as exc:
                         logger.warning("text_emphasis: RF-DETR inference failed at frame %s: %s", composition_frame, exc)
                         continue
-                    
+
                     if not person_masks:
                         continue
-                    
+
                     masks = np.array(person_masks)
                     union = np.max(masks, axis=0)
                     if union.shape[:2] != (height, width):
                         union = cv2.resize(union, (width, height), interpolation=cv2.INTER_LINEAR)
-                    alpha = np.clip(union * 255, 0, 255).astype(np.uint8)
-                    alpha = cv2.GaussianBlur(alpha, (kernel, kernel), 0)
 
-                    ys, xs = np.where(alpha > 8)
+                    # Compute person bbox from mask union (always, for tracking effects)
+                    ys, xs = np.where(union > 0.5)
                     if xs.size == 0 or ys.size == 0:
                         continue
                     pad = max(8, round(min(width, height) * 0.012))
@@ -129,24 +137,55 @@ class PersonForegroundGenerator:
                     y1 = max(0, int(ys.min()) - pad)
                     x2 = min(width, int(xs.max()) + pad + 1)
                     y2 = min(height, int(ys.max()) + pad + 1)
-                    crop = frame[y1:y2, x1:x2]
-                    crop_alpha = alpha[y1:y2, x1:x2]
-                    bgra = cv2.cvtColor(crop, cv2.COLOR_BGR2BGRA)
-                    bgra[:, :, 3] = crop_alpha
-                    frame_path = os.path.abspath(os.path.join(event_dir, f"frame_{composition_frame:06d}.png"))
-                    if cv2.imwrite(frame_path, bgra):
+
+                    # Estimate head bbox (top ~22% of person bbox)
+                    person_h = y2 - y1
+                    person_w = x2 - x1
+                    head_y1 = y1
+                    head_y2 = min(y2, y1 + max(20, int(person_h * 0.22)))
+                    head_x1 = max(0, x1 + int(person_w * 0.18))
+                    head_x2 = min(width, x2 - int(person_w * 0.18))
+
+                    # Estimate depth_z: normalized person area (larger = nearer)
+                    person_area = person_w * person_h
+                    frame_area = max(1, width * height)
+                    depth_z = round(min(1.0, person_area / (frame_area * 0.35)), 3)
+
+                    if needs_png:
+                        alpha = np.clip(union * 255, 0, 255).astype(np.uint8)
+                        alpha = cv2.GaussianBlur(alpha, (kernel, kernel), 0)
+                        crop = frame[y1:y2, x1:x2]
+                        crop_alpha = alpha[y1:y2, x1:x2]
+                        bgra = cv2.cvtColor(crop, cv2.COLOR_BGR2BGRA)
+                        bgra[:, :, 3] = crop_alpha
+                        frame_path = os.path.abspath(os.path.join(event_dir, f"frame_{composition_frame:06d}.png"))
+                        if cv2.imwrite(frame_path, bgra):
+                            generated[composition_frame] = {
+                                "frame": composition_frame,
+                                "path": frame_path,
+                                "x": x1, "y": y1,
+                                "width": x2 - x1, "height": y2 - y1,
+                                "head_x": head_x1, "head_y": head_y1,
+                                "head_width": head_x2 - head_x1, "head_height": head_y2 - head_y1,
+                                "depth_z": depth_z,
+                            }
+                    else:
+                        # Tracking effects: no PNG, just metadata
                         generated[composition_frame] = {
                             "frame": composition_frame,
-                            "path": frame_path,
-                            "x": x1,
-                            "y": y1,
-                            "width": x2 - x1,
-                            "height": y2 - y1,
+                            "path": "",
+                            "x": x1, "y": y1,
+                            "width": x2 - x1, "height": y2 - y1,
+                            "head_x": head_x1, "head_y": head_y1,
+                            "head_width": head_x2 - head_x1, "head_height": head_y2 - head_y1,
+                            "depth_z": depth_z,
                         }
 
                 expected = end_frame - start_frame + 1
                 coverage = len(generated) / max(1, expected)
-                if coverage < 0.90:
+                # Tracking effects use a lower threshold (no PNG needed, just bbox metadata)
+                min_coverage = 0.90 if needs_png else 0.60
+                if coverage < min_coverage:
                     event["effect"] = "spotlight"
                     event["fallback_reason"] = "insufficient_person_mask"
                     event["foreground_frames"] = []
@@ -171,15 +210,16 @@ class PersonForegroundGenerator:
         finally:
             cap.release()
 
-        by_id = {event.get("id"): event for event in behind_events}
+        by_id = {event.get("id"): event for event in all_track_events}
         return [by_id.get(event.get("id"), event) for event in safe_events]
 
     @staticmethod
     def _downgrade_behind_events(events: list[dict], reason: str) -> list[dict]:
         output = []
+        tracking_effects = {"behind_person", "floating_text", "auto_avoid", "around_head", "depth_text"}
         for event in events:
             updated = dict(event)
-            if updated.get("effect") == "behind_person":
+            if updated.get("effect") in tracking_effects:
                 updated["effect"] = "spotlight"
                 updated["fallback_reason"] = reason
                 updated["foreground_frames"] = []

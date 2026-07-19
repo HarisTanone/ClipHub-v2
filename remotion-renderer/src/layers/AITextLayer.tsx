@@ -70,7 +70,8 @@ export const AITextLayer: React.FC<{
   const positionY = clamp(Number(style.positionY ?? 50), 12, 88);
   const textAlign = position === "left" ? "left" : position === "right" ? "right" : "center";
   const alignItems = position === "left" ? "flex-start" : position === "right" ? "flex-end" : "center";
-  const foreground = effect === "behind_person"
+  const needsForeground = effect === "behind_person" || effect === "depth_text" || effect === "around_head" || effect === "auto_avoid" || effect === "floating_text";
+  const foreground = needsForeground
     ? active.foreground_frames?.find((item) => item.frame === frame)
     : undefined;
 
@@ -81,6 +82,64 @@ export const AITextLayer: React.FC<{
   const coverOffsetY = (compositionHeight - sourceHeight * coverScale) / 2;
   const accent = style.accentColor || "#FFD400";
 
+  // ─── Effect-specific transforms ──────────────────────────────────────
+  // Floating Text Following Person: gentle vertical bob
+  const floatSpeed = clamp(Number(style.floatSpeed ?? 1.2), 0.5, 3.0);
+  const floatOffset = effect === "floating_text" && foreground
+    ? Math.sin(localFrame / fps * floatSpeed * Math.PI * 2) * 12 : 0;
+
+  // Auto Avoid Person: move text to largest empty space
+  let avoidPositionY = positionY;
+  let avoidAlign: "flex-start" | "center" | "flex-end" = alignItems;
+  if (effect === "auto_avoid" && foreground) {
+    const personCenterY = (foreground.y + foreground.height / 2) * coverScale + coverOffsetY;
+    const personCenterX = (foreground.x + foreground.width / 2) * coverScale + coverOffsetX;
+    if (personCenterY < compositionHeight * 0.5) { avoidPositionY = 75; } else { avoidPositionY = 25; }
+    if (personCenterX < compositionWidth * 0.5) { avoidAlign = "flex-end"; } else { avoidAlign = "flex-start"; }
+  }
+
+  // Around Head: text orbits the person's head
+  const headRadius = clamp(Number(style.aroundHeadRadius ?? 60), 30, 120) / 100;
+  let aroundTop = `${positionY}%`;
+  let aroundLeft = "50%";
+  let aroundTransform = `translateY(-50%) ${transform}`;
+  if (effect === "around_head" && foreground && foreground.head_x !== undefined && foreground.head_y !== undefined) {
+    const headCx = (foreground.head_x + (foreground.head_width || 0) / 2) * coverScale + coverOffsetX;
+    const headCy = (foreground.head_y + (foreground.head_height || 0) / 2) * coverScale + coverOffsetY;
+    const angle = (localFrame / fps) * 0.8;
+    const orbitRadius = (foreground.head_width || 100) * coverScale * headRadius;
+    aroundLeft = `${headCx + Math.cos(angle) * orbitRadius}px`;
+    aroundTop = `${headCy + Math.sin(angle) * orbitRadius * 0.6}px`;
+    aroundTransform = `translate(-50%, -50%) ${transform}`;
+  }
+
+  // Dynamic Depth Text: scale based on estimated person depth
+  const depthIntensity = clamp(Number(style.depthIntensity ?? 0.5), 0.1, 1.0);
+  let depthScale = 1;
+  if (effect === "depth_text" && foreground && foreground.depth_z !== undefined) {
+    depthScale = 0.7 + foreground.depth_z * depthIntensity;
+  }
+
+  // Smart Kinetic Typography: words animate in sequence
+  const kineticStagger = Math.max(1, Math.round(Number(style.kineticStagger ?? 6)));
+  const kineticWords = effect === "kinetic_type" ? (active.text || "").split(" ") : [];
+  const kineticProgress = (idx: number) => {
+    if (localFrame < idx * kineticStagger) return 0;
+    if (localFrame > idx * kineticStagger + 12) return 1;
+    return (localFrame - idx * kineticStagger) / 12;
+  };
+
+  const effectivePositionY = effect === "auto_avoid" ? avoidPositionY : positionY;
+  const effectiveAlignItems = effect === "auto_avoid" ? avoidAlign : alignItems;
+  const effectiveTop = effect === "around_head" ? aroundTop : `${effectivePositionY}%`;
+  const effectiveTransform = effect === "around_head"
+    ? aroundTransform
+    : effect === "depth_text"
+      ? `${transform} scale(${depthScale})`
+      : effect === "floating_text"
+        ? `${transform} translateY(${floatOffset}px)`
+        : transform;
+
   return (
     <AbsoluteFill style={{ pointerEvents: "none", opacity: exitOpacity }}>
       {effect === "spotlight" && (
@@ -89,12 +148,19 @@ export const AITextLayer: React.FC<{
           opacity: interpolate(enter, [0, 1], [0, 1]),
         }} />
       )}
+      {effect === "depth_text" && (
+        <AbsoluteFill style={{
+          background: "radial-gradient(circle at 50% 40%, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.45) 100%)",
+          opacity: interpolate(enter, [0, 1], [0, depthIntensity]),
+        }} />
+      )}
 
-      <AbsoluteFill style={{ zIndex: 1, justifyContent: "flex-start", alignItems, padding: "0 7%" }}>
+      <AbsoluteFill style={{ zIndex: 1, justifyContent: "flex-start", alignItems: effectiveAlignItems, padding: "0 7%" }}>
         <div style={{
           position: "absolute",
-          top: `${positionY}%`,
-          transform: `translateY(-50%) ${transform}`,
+          top: effectiveTop,
+          left: effect === "around_head" ? aroundLeft : undefined,
+          transform: effectiveTransform,
           maxWidth: `${clamp(Number(style.maxWidthPct ?? 82), 35, 96)}%`,
           textAlign,
           color: style.color || "#FFFFFF",
@@ -118,14 +184,35 @@ export const AITextLayer: React.FC<{
           {effect === "side_label" && (
             <div style={{ width: 80, height: 7, borderRadius: 999, background: accent, marginBottom: 18, marginLeft: position === "right" ? "auto" : 0 }} />
           )}
-          {active.text}
+          {effect === "kinetic_type" ? (
+            <span>
+              {kineticWords.map((word, idx) => {
+                const p = kineticProgress(idx);
+                return (
+                  <span key={idx} style={{
+                    display: "inline-block",
+                    opacity: p,
+                    transform: `translateY(${(1 - p) * 24}px) scale(${0.8 + p * 0.2})`,
+                    marginRight: "0.25em",
+                  }}>
+                    {word}
+                  </span>
+                );
+              })}
+            </span>
+          ) : (
+            active.text
+          )}
           {effect === "spotlight" && (
             <div style={{ height: 6, borderRadius: 999, margin: "18px auto 0", width: "42%", background: accent, boxShadow: `0 0 24px ${accent}` }} />
+          )}
+          {effect === "floating_text" && foreground && (
+            <div style={{ height: 4, borderRadius: 999, margin: "12px auto 0", width: "30%", background: accent, opacity: 0.7 }} />
           )}
         </div>
       </AbsoluteFill>
 
-      {foreground && (
+      {foreground && foreground.path && effect === "behind_person" && (
         <Img
           src={foreground.path}
           style={{

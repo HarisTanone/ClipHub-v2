@@ -58,10 +58,23 @@ class JobOptionsBase(BaseModel):
     def valid_text_emphasis_style(cls, value: Optional[dict]) -> Optional[dict]:
         if value is None:
             return None
-        allowed_effects = {"auto", "behind_person", "spotlight", "side_label"}
+        allowed_effects = {
+            "auto",
+            "behind_person",
+            "spotlight",
+            "side_label",
+            "floating_text",
+            "auto_avoid",
+            "around_head",
+            "depth_text",
+            "kinetic_type",
+        }
         effect = str(value.get("effectMode", "auto"))
         if effect not in allowed_effects:
-            raise ValueError("effectMode harus auto, behind_person, spotlight, atau side_label")
+            raise ValueError(
+                "effectMode harus auto, behind_person, spotlight, side_label, "
+                "floating_text, auto_avoid, around_head, depth_text, atau kinetic_type"
+            )
         return value
 
 

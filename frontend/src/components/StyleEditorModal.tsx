@@ -162,7 +162,7 @@ export interface SubtitleStyle {
 }
 
 export interface TextEmphasisStyle {
-  effectMode: "auto" | "behind_person" | "spotlight" | "side_label";
+  effectMode: "auto" | "behind_person" | "spotlight" | "side_label" | "floating_text" | "auto_avoid" | "around_head" | "depth_text" | "kinetic_type";
   animation: "cinematic" | "slam" | "reveal" | "glitch" | "neon";
   fontFamily: string;
   fontSize: number;
@@ -181,6 +181,12 @@ export interface TextEmphasisStyle {
   positionY: number;
   maxWidthPct: number;
   maskFeather: number;
+  // Effect-specific tuning (new)
+  floatSpeed?: number;
+  avoidPadding?: number;
+  aroundHeadRadius?: number;
+  depthIntensity?: number;
+  kineticStagger?: number;
 }
 
 export const DEFAULT_HOOK_STYLE: HookStyle = {
@@ -306,6 +312,12 @@ export const DEFAULT_TEXT_EMPHASIS_STYLE: TextEmphasisStyle = {
   positionY: 50,
   maxWidthPct: 82,
   maskFeather: 9,
+  // Effect-specific tuning (new)
+  floatSpeed: 1.2,
+  avoidPadding: 40,
+  aroundHeadRadius: 60,
+  depthIntensity: 0.5,
+  kineticStagger: 6,
 };
 
 // ─── Presets ─────────────────────────────────────────────────────────────────
@@ -1134,6 +1146,11 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
   useGoogleFont(style.fontFamily);
   const update = <K extends keyof TextEmphasisStyle>(key: K, value: TextEmphasisStyle[K]) => onChange({ ...style, [key]: value });
   const previewEffect = style.effectMode === "auto" ? "behind_person" : style.effectMode;
+  // For auto_avoid, preview shows text at top (person assumed in bottom)
+  const previewTop = previewEffect === "auto_avoid" ? "22%" : `${style.positionY}%`;
+  const previewAlign = previewEffect === "auto_avoid" ? "justify-end text-right"
+    : previewEffect === "side_label" ? "justify-start text-left"
+    : "justify-center text-center";
   const textStyle = {
     fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`,
     fontSize: Math.max(16, style.fontSize * 0.28),
@@ -1146,6 +1163,10 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
     paintOrder: style.strokeEnabled ? "stroke" as const : undefined,
     textShadow: style.shadowEnabled ? `0 3px ${Math.max(4, style.shadowBlur * 0.35)}px ${style.shadowColor}` : undefined,
   };
+
+  // Kinetic typography preview: split words
+  const kineticPreviewWords = previewEffect === "kinetic_type"
+    ? "Ide Besar yang Perlu Diingat".split(" ") : [];
 
   return (
     <div className="h-full overflow-y-auto p-5">
@@ -1162,11 +1183,24 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
           <div className="sticky top-0 aspect-[9/16] max-h-[520px] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl">
             {thumbnailUrl ? <img src={thumbnailUrl} alt="Video preview" className="absolute inset-0 h-full w-full object-cover opacity-70" /> : <div className="absolute inset-0 bg-gradient-to-b from-zinc-700 via-zinc-900 to-black" />}
             {previewEffect === "spotlight" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.75)_100%)]" />}
-            <div className={cn("absolute inset-x-[7%] z-10 flex", previewEffect === "side_label" ? "justify-start text-left" : "justify-center text-center")} style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+            {previewEffect === "depth_text" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,transparent_0%,rgba(0,0,0,.5)_100%)]" />}
+            {previewEffect === "around_head" && (
+              <div className="absolute left-1/2 top-[20%] z-20 h-12 w-12 -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
+            )}
+            <div className={cn("absolute inset-x-[7%] z-10 flex", previewAlign)} style={{ top: previewTop, transform: "translateY(-50%)" }}>
               <div style={{ ...textStyle, maxWidth: `${style.maxWidthPct}%` }}>
                 {previewEffect === "side_label" && <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: style.accentColor }} />}
-                Ide Besar yang Perlu Diingat
+                {previewEffect === "kinetic_type" ? (
+                  <span>
+                    {kineticPreviewWords.map((word, idx) => (
+                      <span key={idx} style={{ display: "inline-block", marginRight: "0.25em", opacity: 0.6 + (idx % 3) * 0.2, transform: `translateY(${(2 - (idx % 3)) * 4}px)` }}>{word}</span>
+                    ))}
+                  </span>
+                ) : (
+                  "Ide Besar yang Perlu Diingat"
+                )}
                 {previewEffect === "spotlight" && <div className="mx-auto mt-2 h-1 w-16 rounded-full" style={{ backgroundColor: style.accentColor, boxShadow: `0 0 10px ${style.accentColor}` }} />}
+                {previewEffect === "floating_text" && <div className="mx-auto mt-2 h-1 w-12 rounded-full opacity-70" style={{ backgroundColor: style.accentColor }} />}
               </div>
             </div>
             {previewEffect === "behind_person" && (
@@ -1182,12 +1216,17 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
         <div className="space-y-5">
           <div>
             <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Visual Mode</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {([
                 ["auto", "AI Auto", "AI memilih jenis terbaik"],
                 ["behind_person", "Behind Person", "Teks di belakang subjek"],
                 ["spotlight", "Spotlight", "Hero text + vignette"],
                 ["side_label", "Side Label", "Label editorial di sisi"],
+                ["floating_text", "Floating Text", "Teks melayang mengikuti orang"],
+                ["auto_avoid", "Auto Avoid", "Teks otomatis menghindari orang"],
+                ["around_head", "Around Head", "Teks mengorbit di sekitar kepala"],
+                ["depth_text", "Depth Text", "Parallax kedalaman mengikuti orang"],
+                ["kinetic_type", "Kinetic Type", "Tipografi kinetik kata-per-kata"],
               ] as const).map(([value, label, desc]) => (
                 <button key={value} type="button" onClick={() => update("effectMode", value)} className={cn("rounded-xl border p-3 text-left transition-all", style.effectMode === value ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700")}>
                   <p className={cn("text-xs font-semibold", style.effectMode === value ? "text-emerald-300" : "text-zinc-300")}>{label}</p>
@@ -1229,6 +1268,38 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
             <MiniToggle label="Stroke" checked={style.strokeEnabled} onChange={(value) => update("strokeEnabled", value)} />
             <MiniToggle label="Shadow" checked={style.shadowEnabled} onChange={(value) => update("shadowEnabled", value)} />
           </div>
+
+          {/* Effect-specific tuning sliders (conditional) */}
+          {previewEffect === "floating_text" && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Floating Text Tuning</p>
+              <SliderField label="Bob Speed" value={style.floatSpeed ?? 1.2} min={0.5} max={3.0} step={0.1} suffix="x" onChange={(value) => update("floatSpeed", value)} />
+            </div>
+          )}
+          {previewEffect === "auto_avoid" && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Auto Avoid Tuning</p>
+              <SliderField label="Avoid Padding" value={style.avoidPadding ?? 40} min={10} max={120} suffix="px" onChange={(value) => update("avoidPadding", value)} />
+            </div>
+          )}
+          {previewEffect === "around_head" && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Around Head Tuning</p>
+              <SliderField label="Orbit Radius" value={style.aroundHeadRadius ?? 60} min={30} max={120} suffix="%" onChange={(value) => update("aroundHeadRadius", value)} />
+            </div>
+          )}
+          {previewEffect === "depth_text" && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Depth Text Tuning</p>
+              <SliderField label="Depth Intensity" value={style.depthIntensity ?? 0.5} min={0.1} max={1.0} step={0.05} suffix="" onChange={(value) => update("depthIntensity", value)} />
+            </div>
+          )}
+          {previewEffect === "kinetic_type" && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">Kinetic Type Tuning</p>
+              <SliderField label="Word Stagger" value={style.kineticStagger ?? 6} min={1} max={18} suffix="f" onChange={(value) => update("kineticStagger", value)} />
+            </div>
+          )}
         </div>
       </div>
     </div>
