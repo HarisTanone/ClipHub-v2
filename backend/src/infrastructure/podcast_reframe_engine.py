@@ -518,25 +518,45 @@ class PodcastReframeEngine(IReframeEngine):
             if grid_decision["layout"] == "double":
                 grid_decision["transition_style"] = transition_style
                 grid_decision["transition_duration"] = transition_duration
-                layout_events = grid_decision.get("layout_events") or []
-                if len(layout_events) > 1:
-                    dynamic_grid = self._render_dynamic_auto_grid(
-                        video_path=video_path,
-                        output_path=output_path,
-                        width=width,
-                        height=height,
-                        fps=fps,
-                        duration=(total_frames / fps if fps > 0 else 0.0),
-                        tracked_data=tracked_data,
-                        speaker_result=speaker_result,
-                        decision=grid_decision,
+                layout_events = self._normalise_layout_events(
+                    grid_decision.get("layout_events") or []
+                )
+                grid_decision["layout_events"] = layout_events
+
+                # Reject same-person panels before any render path.
+                top_tid = grid_decision.get("top_track_id")
+                bottom_tid = grid_decision.get("bottom_track_id")
+                if top_tid is not None and bottom_tid is not None and int(top_tid) == int(bottom_tid):
+                    logger.info(
+                        "podcast_reframe: autogrid rejected duplicate panel identity "
+                        f"(P{top_tid})"
                     )
-                    if dynamic_grid:
-                        return dynamic_grid
-                elif layout_events and layout_events[0].get("layout") == "double":
-                    return self._render_double_grid(
-                        video_path, output_path, width, height, grid_decision
+                    grid_decision = {"layout": "single", "person_count": person_count}
+                else:
+                    layouts = {str(e.get("layout")) for e in layout_events}
+                    needs_dynamic = (
+                        len(layout_events) > 1
+                        or (layouts == {"double"} and layout_events and float(layout_events[0].get("time", 0.0)) > 0)
+                        or layouts == {"single", "double"}
                     )
+                    if needs_dynamic:
+                        dynamic_grid = self._render_dynamic_auto_grid(
+                            video_path=video_path,
+                            output_path=output_path,
+                            width=width,
+                            height=height,
+                            fps=fps,
+                            duration=(total_frames / fps if fps > 0 else 0.0),
+                            tracked_data=tracked_data,
+                            speaker_result=speaker_result,
+                            decision=grid_decision,
+                        )
+                        if dynamic_grid:
+                            return dynamic_grid
+                    if layout_events and layout_events[0].get("layout") == "double" and layouts == {"double"}:
+                        return self._render_double_grid(
+                            video_path, output_path, width, height, grid_decision
+                        )
 
         # Step 4: Dynamic Panning — single FFmpeg pass with smooth crop tracking
         # Builds a time-based crop X expression that follows the active face.
@@ -1236,23 +1256,35 @@ class PodcastReframeEngine(IReframeEngine):
         if not per_frame_tracked or person_count < 2 or len(position_targets) < 2:
             return {"layout": "single", "person_count": person_count}
 
-        # ─── Person-first fast path: skip co-visibility, use position targets directly ───
+        # ─── Person-first path: detect first, then switch single ↔ 2-grid ───
+        # Never force grid from t=0. Use stable seat positions (not raw track
+        # IDs) so ByteTrack re-IDs of the same person still count as one seat.
         if skip_ghost_pair_check and len(position_targets) >= 2:
-            # Pick the pair with largest X-separation (most distinct positions)
             best_pair = None
             best_separation = 0.0
             position_ids = sorted(position_targets.keys())
             for i, pid_a in enumerate(position_ids):
                 for pid_b in position_ids[i + 1:]:
+                    if pid_a == pid_b:
+                        continue
                     sep = abs(position_targets[pid_a] - position_targets[pid_b])
                     if sep > best_separation:
                         best_separation = sep
                         best_pair = (pid_a, pid_b)
 
-            if best_pair is None:
+            if best_pair is None or best_pair[0] == best_pair[1]:
                 return {"layout": "single", "person_count": person_count}
 
             first_id, second_id = best_pair
+            # Require a real spatial gap so both panels never show the same person.
+            if best_separation < width * self.MIN_SEPARATION_RATIO:
+                logger.info(
+                    f"podcast_reframe: person-first grid skipped "
+                    f"(pair=P{first_id}/P{second_id}, sep={best_separation:.0f}px "
+                    f"< min={width * self.MIN_SEPARATION_RATIO:.0f}px)"
+                )
+                return {"layout": "single", "person_count": person_count}
+
             geometry = self._calculate_grid_geometry(
                 first_id=first_id,
                 second_id=second_id,
@@ -1269,7 +1301,18 @@ class PodcastReframeEngine(IReframeEngine):
                 )
                 return {"layout": "single", "person_count": person_count}
 
-            # Determine top/bottom placement based on speaker detection
+            # Reject identical crop windows (would duplicate one person into both panels).
+            same_crop = (
+                int(geometry.get("first_crop_x", -1)) == int(geometry.get("second_crop_x", -2))
+                and int(geometry.get("first_crop_y", -1)) == int(geometry.get("second_crop_y", -2))
+            )
+            if same_crop:
+                logger.info(
+                    f"podcast_reframe: person-first grid rejected identical crops "
+                    f"(pair=P{first_id}/P{second_id})"
+                )
+                return {"layout": "single", "person_count": person_count}
+
             latest_speaker_id: Optional[int] = None
             if speaker_result and speaker_result.per_frame_speaker:
                 latest_frame = max(speaker_result.per_frame_speaker)
@@ -1281,6 +1324,9 @@ class PodcastReframeEngine(IReframeEngine):
                 top_id, bottom_id = second_id, first_id
             else:
                 top_id, bottom_id = first_id, second_id
+
+            if top_id == bottom_id:
+                return {"layout": "single", "person_count": person_count}
 
             top_x = int(position_targets[top_id])
             bottom_x = int(position_targets[bottom_id])
@@ -1302,25 +1348,78 @@ class PodcastReframeEngine(IReframeEngine):
                     "bottom_crop_y": geometry["second_crop_y"],
                 }
 
-            # Person-first mode: force grid for entire duration.
-            # ByteTrack fragments IDs across time (T1→T4→T7 = same person re-tracked),
-            # so per-frame co-visibility is unreliable. Position model has already
-            # confirmed distinct speakers via ghost elimination + stable positions.
-            # For static-camera podcasts, both speakers are always in frame.
             sample_timestamps = tracked_data.get("sample_timestamps") or [
                 i * self.SAMPLE_INTERVAL_SEC
                 for i in range(len(per_frame_tracked))
             ]
-            total_duration = sample_timestamps[-1] + self.SAMPLE_INTERVAL_SEC if sample_timestamps else 0.0
-            layout_events = [{"layout": "double", "start_time": 0.0, "end_time": total_duration}]
-            coexist_ratio = 1.0
+
+            # Seat-based co-visibility: map live detections to nearest stable
+            # seat so ByteTrack ID fragmentation does not hide a real second person.
+            seat_match_radius = max(
+                width * 0.12,
+                abs(position_targets[first_id] - position_targets[second_id]) * 0.45,
+            )
+            raw_double: List[bool] = []
+            pair_hit_count = 0
+            valid_frame_count = 0
+            for frame_tracked in per_frame_tracked:
+                seats_hit: set[int] = set()
+                for detection in frame_tracked:
+                    mapped = track_to_position.get(int(detection.track_id))
+                    if mapped in (first_id, second_id):
+                        seats_hit.add(int(mapped))
+                        continue
+                    cx = float(detection.bbox.center_x)
+                    best_seat = None
+                    best_dist = seat_match_radius
+                    for seat_id in (first_id, second_id):
+                        dist = abs(cx - float(position_targets[seat_id]))
+                        if dist <= best_dist:
+                            best_dist = dist
+                            best_seat = seat_id
+                    if best_seat is not None:
+                        seats_hit.add(int(best_seat))
+
+                if seats_hit:
+                    valid_frame_count += 1
+                both = first_id in seats_hit and second_id in seats_hit
+                raw_double.append(both)
+                if both:
+                    pair_hit_count += 1
+
+            if valid_frame_count <= 0 or pair_hit_count < self.GRID_ENTER_SAMPLES:
+                logger.info(
+                    f"podcast_reframe: person-first grid skipped "
+                    f"(pair=P{first_id}/P{second_id}, co-visible-samples={pair_hit_count}, "
+                    f"need>={self.GRID_ENTER_SAMPLES}, visible_people={person_count})"
+                )
+                return {"layout": "single", "person_count": person_count}
+
+            coexist_ratio = pair_hit_count / max(valid_frame_count, 1)
+            layout_events = self._build_layout_events(raw_double, sample_timestamps)
+            if not any(event.get("layout") == "double" for event in layout_events):
+                logger.info(
+                    f"podcast_reframe: person-first grid skipped after hysteresis "
+                    f"(pair=P{first_id}/P{second_id})"
+                )
+                return {"layout": "single", "person_count": person_count}
+
+            # Normalize to {time, layout} only (renderer expects this format).
+            layout_events = [
+                {
+                    "time": float(event.get("time", 0.0)),
+                    "layout": "double" if event.get("layout") == "double" else "single",
+                }
+                for event in layout_events
+            ]
 
             logger.info(
                 f"podcast_reframe: PERSON-FIRST AUTO 50/50 GRID "
                 f"(top=P{top_id}@{top_x}, bottom=P{bottom_id}@{bottom_x}, "
                 f"separation={best_separation:.0f}px, zoom={geometry['grid_zoom']:.2f}, "
                 f"crop_w={geometry['crop_w']}, crop_h={geometry['crop_h']}, "
-                f"duration={total_duration:.1f}s, mode=forced_full)"
+                f"coexist={coexist_ratio:.0%}, layout_changes={max(0, len(layout_events) - 1)}, "
+                f"mode=detect_then_switch)"
             )
             logger.info(
                 f"podcast_reframe: grid crop detail — "
@@ -1341,7 +1440,7 @@ class PodcastReframeEngine(IReframeEngine):
                 "layout_events": layout_events,
                 **geometry,
             }
-        # ─── End person-first fast path ───
+        # ─── End person-first path ───
 
         pair_hits: Dict[Tuple[int, int], int] = defaultdict(int)
         pair_geometry: Dict[Tuple[int, int], dict] = {}
@@ -1530,6 +1629,33 @@ class PodcastReframeEngine(IReframeEngine):
             "layout_events": layout_events,
             **geometry,
         }
+
+
+    def _normalise_layout_events(self, layout_events: List[dict]) -> List[dict]:
+        """Normalize layout event payloads to {time, layout}."""
+        cleaned: List[dict] = []
+        for event in layout_events or []:
+            layout = "double" if str(event.get("layout", "single")) == "double" else "single"
+            if "time" in event:
+                t = float(event.get("time", 0.0))
+            elif "start_time" in event:
+                t = float(event.get("start_time", 0.0))
+            else:
+                t = 0.0
+            item = {"time": max(0.0, t), "layout": layout}
+            if cleaned and abs(cleaned[-1]["time"] - item["time"]) <= 1e-3:
+                cleaned[-1] = item
+            elif not cleaned or cleaned[-1]["layout"] != item["layout"]:
+                cleaned.append(item)
+        if not cleaned:
+            return [{"time": 0.0, "layout": "single"}]
+        if cleaned[0]["time"] > 0.0:
+            # Preserve leading single if first switch is later.
+            if cleaned[0]["layout"] == "double":
+                cleaned.insert(0, {"time": 0.0, "layout": "single"})
+            else:
+                cleaned[0]["time"] = 0.0
+        return cleaned
 
     def _build_layout_events(
         self,

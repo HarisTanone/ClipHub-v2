@@ -540,88 +540,88 @@ class PersonFirstReframeEngine(IReframeEngine):
         transition_style: str,
         transition_duration: float,
     ) -> Optional[dict]:
-        """Attempt auto grid layout for 2+ persons.
+        """Attempt auto grid only after detecting 2+ distinct people in-frame.
 
-        Uses same geometry calculation as legacy but with more stable input.
-        Delegates to PodcastReframeEngine._decide_autogrid_layout logic.
+        Delegates layout scheduling to PodcastReframeEngine so single → 2-grid
+        switching, distinct panel identities, and user transition style stay
+        consistent with the main reframe path.
         """
-        position_targets = {
-            int(k): float(v)
-            for k, v in (tracked_data.get("position_targets") or {}).items()
-        }
-        if len(position_targets) < 2:
-            return None
+        from src.infrastructure.podcast_reframe_engine import PodcastReframeEngine
 
-        # Check separation
-        positions_sorted = sorted(position_targets.values())
-        max_separation = positions_sorted[-1] - positions_sorted[0]
-        if max_separation < width * self.MIN_SEPARATION_RATIO:
-            logger.info("person_first_reframe: persons too close for grid")
-            return None
+        engine = PodcastReframeEngine()
+        # Keep person-first thresholds aligned for geometry/zoom.
+        engine.MIN_SEPARATION_RATIO = self.MIN_SEPARATION_RATIO
+        engine.MIN_COEXIST_RATIO = self.MIN_COEXIST_RATIO
+        engine.DOMINANCE_SINGLE_CROP = self.DOMINANCE_SINGLE_CROP
+        engine.GRID_BASE_ZOOM = self.GRID_BASE_ZOOM
+        engine.GRID_MAX_ZOOM = self.GRID_MAX_ZOOM
+        engine.GRID_FACE_MARGIN = self.GRID_FACE_MARGIN
+        engine.GRID_ENTER_SAMPLES = self.GRID_ENTER_SAMPLES
+        engine.GRID_EXIT_SAMPLES = self.GRID_EXIT_SAMPLES
+        engine.MIN_GRID_SEGMENT_SECONDS = self.MIN_GRID_SEGMENT_SECONDS
 
-        # Check co-visibility
-        per_frame_tracked = tracked_data.get("per_frame_tracked") or []
-        track_to_position = {
-            int(k): int(v)
-            for k, v in (tracked_data.get("track_to_position") or {}).items()
-        }
-        covisible_frames = 0
-        valid_frames = 0
-        for frame_tracked in per_frame_tracked:
-            visible_positions = {
-                track_to_position.get(int(det.track_id))
-                for det in frame_tracked
-                if int(det.track_id) in track_to_position
-            }
-            visible_positions.discard(None)
-            if visible_positions:
-                valid_frames += 1
-                if len(visible_positions) >= 2:
-                    covisible_frames += 1
-
-        coexist_ratio = covisible_frames / max(valid_frames, 1)
-        if coexist_ratio < self.MIN_COEXIST_RATIO:
-            logger.info(
-                f"person_first_reframe: coexist_ratio={coexist_ratio:.0%} < "
-                f"{self.MIN_COEXIST_RATIO:.0%}, skipping grid"
-            )
-            return None
-
-        # Dominance check: if one speaker dominates, single crop is better
-        if speaker_result and speaker_result.dominant_ratio >= self.DOMINANCE_SINGLE_CROP:
-            logger.info(
-                f"person_first_reframe: dominant speaker "
-                f"({speaker_result.dominant_ratio:.0%}) → single crop preferred"
-            )
-            return None
-
-        # Pick top 2 most-visible positions for grid
-        position_ids = sorted(position_targets.keys())
-        if len(position_ids) < 2:
-            return None
-
-        # Use speaker info to decide top/bottom
-        top_id, bottom_id = position_ids[0], position_ids[1]
-        if speaker_result and speaker_result.dominant_speaker_id is not None:
-            if speaker_result.dominant_speaker_id == bottom_id:
-                top_id, bottom_id = bottom_id, top_id
-
-        top_x = int(position_targets[top_id])
-        bottom_x = int(position_targets[bottom_id])
-
-        # Grid geometry
-        crop_w = min(width, int(height * 9 / 8 / self.GRID_BASE_ZOOM))
-        crop_h = min(height, int(crop_w * 8 / 9))
-        top_crop_x = max(0, min(top_x - crop_w // 2, width - crop_w))
-        bottom_crop_x = max(0, min(bottom_x - crop_w // 2, width - crop_w))
-
-        # Render double grid
-        return self._render_double_grid(
-            video_path, output_path, width, height,
-            crop_w, crop_h, top_crop_x, bottom_crop_x,
-            tracked_data.get("person_count", 2),
-            top_id, bottom_id,
+        decision = engine._decide_autogrid_layout(
+            tracked_data=tracked_data,
+            speaker_result=speaker_result,
+            width=width,
+            height=height,
+            skip_ghost_pair_check=True,
         )
+        if decision.get("layout") != "double":
+            return None
+
+        top_id = decision.get("top_track_id")
+        bottom_id = decision.get("bottom_track_id")
+        if top_id is None or bottom_id is None or int(top_id) == int(bottom_id):
+            logger.info("person_first_reframe: grid rejected (non-distinct panel identities)")
+            return None
+
+        decision["transition_style"] = transition_style
+        decision["transition_duration"] = transition_duration
+        layout_events = engine._normalise_layout_events(decision.get("layout_events") or [])
+        decision["layout_events"] = layout_events
+
+        duration = total_frames / fps if fps > 0 else 0.0
+        layouts = {str(e.get("layout")) for e in layout_events}
+        needs_dynamic = (
+            len(layout_events) > 1
+            or layouts == {"single", "double"}
+            or (layouts == {"double"} and layout_events and float(layout_events[0].get("time", 0.0)) > 0)
+        )
+
+        if needs_dynamic:
+            dynamic = engine._render_dynamic_auto_grid(
+                video_path=video_path,
+                output_path=output_path,
+                width=width,
+                height=height,
+                fps=fps,
+                duration=duration,
+                tracked_data=tracked_data,
+                speaker_result=speaker_result,
+                decision=decision,
+            )
+            if dynamic:
+                dynamic["method"] = "person_first_dynamic_auto_grid"
+                return dynamic
+
+        # Full-duration grid only when both people are present for the whole clip.
+        if layout_events and layout_events[0].get("layout") == "double" and layouts == {"double"}:
+            crop_w = int(decision.get("crop_w") or min(width, int(height * 9 / 8 / self.GRID_BASE_ZOOM)))
+            crop_h = int(decision.get("crop_h") or min(height, int(crop_w * 8 / 9)))
+            top_crop_x = int(decision.get("top_crop_x", max(0, min(int(decision.get("top_x", 0)) - crop_w // 2, width - crop_w))))
+            bottom_crop_x = int(decision.get("bottom_crop_x", max(0, min(int(decision.get("bottom_x", 0)) - crop_w // 2, width - crop_w))))
+            if top_crop_x == bottom_crop_x and int(decision.get("top_crop_y", 0)) == int(decision.get("bottom_crop_y", 0)):
+                logger.info("person_first_reframe: grid rejected identical crops")
+                return None
+            return self._render_double_grid(
+                video_path, output_path, width, height,
+                crop_w, crop_h, top_crop_x, bottom_crop_x,
+                tracked_data.get("person_count", 2),
+                int(top_id), int(bottom_id),
+            )
+
+        return None
 
     def _render_double_grid(
         self,

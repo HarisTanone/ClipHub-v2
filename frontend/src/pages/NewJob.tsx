@@ -352,7 +352,7 @@ export function NewJob() {
               <FeatureLock featureName="Auto Grid" featureCode="auto_grid" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>
                 <Toggle
                   label="Auto-Grid"
-                  description={aspectRatio === "9:16" ? "Auto-switch single/2-grid. Saat 2-grid, subtitle berpindah ke titik tengah perpotongan; saat kembali single, subtitle kembali ke posisi template." : "Hanya tersedia untuk 9:16. YOLO, face/sound detection, dan Auto-Grid dinonaktifkan pada rasio lain."}
+                  description={aspectRatio === "9:16" ? "Deteksi dulu: 1 orang = single, ≥2 orang berbeda = auto switch 2-grid (panel tidak boleh orang sama). Transisi single→grid memakai style yang dipilih user." : "Hanya tersedia untuk 9:16. YOLO, face/sound detection, dan Auto-Grid dinonaktifkan pada rasio lain."}
                   checked={autogridEnabled}
                   onChange={setAutogridEnabled}
                   disabled={aspectRatio !== "9:16"}
