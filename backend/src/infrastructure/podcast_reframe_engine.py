@@ -1853,32 +1853,52 @@ class PodcastReframeEngine(IReframeEngine):
         if first_id == second_id:
             return None
 
-        all_profiles = {
-            position_id: {
-                "x": float(target_x),
-                "width": width * 0.08,
-                "height": height * 0.16,
-                **position_profiles.get(position_id, {}),
+        # Convert body profiles to face profiles for proper grid geometry
+        # Body bbox is much larger than face, so we need to estimate face dimensions
+        def body_to_face_profile(body_profile: dict) -> dict:
+            """Convert body bbox profile to estimated face profile."""
+            body_height = float(body_profile.get("height", height * 0.8))
+            body_width = float(body_profile.get("width", width * 0.3))
+            body_y = float(body_profile.get("y", height * 0.5))
+            body_x = float(body_profile.get("x", width * 0.5))
+            
+            # Face is typically 10-12% of body height, 8-10% of body width
+            face_height = body_height * 0.12
+            face_width = body_width * 0.10
+            
+            # Face center Y is at ~12% from top of body
+            body_top = body_y - body_height / 2
+            face_y = body_top + (body_height * 0.12)
+            
+            return {
+                "x": body_x,
+                "y": face_y,
+                "width": face_width,
+                "height": face_height,
+                "area": face_width * face_height,
             }
+
+        all_profiles = {
+            position_id: body_to_face_profile({
+                "x": float(target_x),
+                "width": width * 0.3,
+                "height": height * 0.8,
+                **position_profiles.get(position_id, {}),
+            })
             for position_id, target_x in position_targets.items()
         }
-        first_profile = all_profiles.get(first_id, {
+        first_profile = all_profiles.get(first_id, body_to_face_profile({
             "x": width / 3,
-            "y": height * 0.38,
-            "width": width * 0.08,
-            "height": height * 0.16,
-        })
-        second_profile = all_profiles.get(second_id, {
+            "y": height * 0.5,
+            "width": width * 0.3,
+            "height": height * 0.8,
+        }))
+        second_profile = all_profiles.get(second_id, body_to_face_profile({
             "x": width * 2 / 3,
-            "y": height * 0.38,
-            "width": width * 0.08,
-            "height": height * 0.16,
-        })
-        # Ensure y is set
-        if "y" not in first_profile:
-            first_profile["y"] = height * 0.38
-        if "y" not in second_profile:
-            second_profile["y"] = height * 0.38
+            "y": height * 0.5,
+            "width": width * 0.3,
+            "height": height * 0.8,
+        }))
         separation = abs(first_profile["x"] - second_profile["x"])
         if not skip_separation_check and separation < width * self.MIN_SEPARATION_RATIO:
             return None
@@ -1922,18 +1942,12 @@ class PodcastReframeEngine(IReframeEngine):
                 if position_id != second_id
             )
             if first_isolated and second_isolated:
-                # Estimate face position from body bbox for proper vertical centering
-                first_face_y, first_face_h = self._estimate_face_from_body(
-                    first_profile["y"], first_profile["height"]
-                )
-                second_face_y, second_face_h = self._estimate_face_from_body(
-                    second_profile["y"], second_profile["height"]
-                )
+                # Profile already contains face position (converted from body bbox above)
                 first_crop_y = self._clamp_grid_y(
-                    first_face_y, first_face_h, crop_h, height
+                    first_profile["y"], first_profile["height"], crop_h, height
                 )
                 second_crop_y = self._clamp_grid_y(
-                    second_face_y, second_face_h, crop_h, height
+                    second_profile["y"], second_profile["height"], crop_h, height
                 )
                 return {
                     "first_id": first_id,
@@ -1973,15 +1987,9 @@ class PodcastReframeEngine(IReframeEngine):
 
         first_crop_x_fb = self._clamp_x(first_profile["x"], crop_w_fallback, width)
         second_crop_x_fb = self._clamp_x(second_profile["x"], crop_w_fallback, width)
-        # Estimate face position from body bbox for proper vertical centering
-        first_face_y_fb, first_face_h_fb = self._estimate_face_from_body(
-            first_profile["y"], first_profile["height"]
-        )
-        second_face_y_fb, second_face_h_fb = self._estimate_face_from_body(
-            second_profile["y"], second_profile["height"]
-        )
-        first_crop_y_fb = self._clamp_grid_y(first_face_y_fb, first_face_h_fb, crop_h_fallback, height)
-        second_crop_y_fb = self._clamp_grid_y(second_face_y_fb, second_face_h_fb, crop_h_fallback, height)
+        # Profile already contains face position (converted from body bbox above)
+        first_crop_y_fb = self._clamp_grid_y(first_profile["y"], first_profile["height"], crop_h_fallback, height)
+        second_crop_y_fb = self._clamp_grid_y(second_profile["y"], second_profile["height"], crop_h_fallback, height)
 
         final_zoom = base_crop_w / max(1, crop_w_fallback)
         logger.info(
@@ -2002,22 +2010,6 @@ class PodcastReframeEngine(IReframeEngine):
         }
 
     @staticmethod
-    def _estimate_face_from_body(body_y: float, body_height: float) -> Tuple[float, float]:
-        """Estimate face center Y and face height from body bbox.
-        
-        Body bbox center Y is at torso center, not face. We estimate:
-        - Face center Y: ~12% from top of body (head position)
-        - Face height: ~10% of body height (typical face-to-body ratio)
-        
-        Returns: (face_center_y, face_height)
-        """
-        body_top = body_y - body_height / 2
-        # Face is typically at 8-15% from top of body
-        face_center_y = body_top + (body_height * 0.12)
-        # Face height is typically 8-12% of body height
-        face_height = body_height * 0.10
-        return face_center_y, face_height
-
     @staticmethod
     def _clamp_grid_y(face_y: float, face_height: float, crop_h: int, frame_h: int) -> int:
         """Place face centered in crop with proper headroom.
