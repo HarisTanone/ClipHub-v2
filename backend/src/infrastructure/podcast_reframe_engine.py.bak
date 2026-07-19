@@ -1231,19 +1231,13 @@ class PodcastReframeEngine(IReframeEngine):
         height: int = 1080,
         skip_ghost_pair_check: bool = False,
     ) -> dict:
-        """Detect-then-switch auto grid (v2 — robust distinct & no head crop).
+        """Choose and schedule a 50:50 grid for two stable identities.
 
-        Rules:
-          1. 1 person visible  -> single layout (no grid forced)
-          2. >=2 distinct people co-visible in same frame -> double layout after hysteresis
-          3. Grid panels MUST have different identities (position_id AND track_id)
-          4. Layout timeline always starts single at t=0, then switches to double when
-             second person enters and is confirmed via GRID_ENTER_SAMPLES. Transisi
-             single -> grid menggunakan style yang dipilih user (handled in renderer).
-          5. Face crop Y uses headroom-aware _clamp_grid_y to avoid top clipping.
-
-        Raw face counts not sufficient: duplicate detections / ByteTrack re-IDs
-        must still count as one seat via stable position clustering.
+        Raw face counts are not sufficient: a detector can emit a duplicate
+        box or recreate a track for the same person. We therefore count unique
+        stable position IDs that coexist in the *same sampled frames*. A pair
+        is accepted only when each crop can exclude the other face without
+        exceeding the safe zoom ceiling.
         """
         per_frame_tracked = tracked_data.get("per_frame_tracked") or []
         track_to_position = {
@@ -1262,10 +1256,9 @@ class PodcastReframeEngine(IReframeEngine):
         if not per_frame_tracked or person_count < 2 or len(position_targets) < 2:
             return {"layout": "single", "person_count": person_count}
 
-        # ─── Person-first / detect-then-switch path ───────────────────────
-        # Never force grid from t=0. Use stable seat positions so ByteTrack
-        # re-IDs of the same person still count as one seat. Require co-visible
-        # samples before switching, so timeline always starts single.
+        # ─── Person-first path: detect first, then switch single ↔ 2-grid ───
+        # Never force grid from t=0. Use stable seat positions (not raw track
+        # IDs) so ByteTrack re-IDs of the same person still count as one seat.
         if skip_ghost_pair_check and len(position_targets) >= 2:
             best_pair = None
             best_separation = 0.0
@@ -1320,15 +1313,6 @@ class PodcastReframeEngine(IReframeEngine):
                 )
                 return {"layout": "single", "person_count": person_count}
 
-            # Enforce distinct seats (no ghost duplicate)
-            if first_id == second_id:
-                return {"layout": "single", "person_count": person_count}
-            pf = position_profiles.get(first_id, {})
-            ps = position_profiles.get(second_id, {})
-            if pf and ps and self._is_ghost_pair(pf, ps, width, height):
-                logger.info(f"podcast_reframe: person-first ghost pair rejected P{first_id}/P{second_id}")
-                return {"layout": "single", "person_count": person_count}
-
             latest_speaker_id: Optional[int] = None
             if speaker_result and speaker_result.per_frame_speaker:
                 latest_frame = max(speaker_result.per_frame_speaker)
@@ -1369,7 +1353,8 @@ class PodcastReframeEngine(IReframeEngine):
                 for i in range(len(per_frame_tracked))
             ]
 
-            # Detect-then-switch co-visibility with distinct track validation
+            # Seat-based co-visibility: map live detections to nearest stable
+            # seat so ByteTrack ID fragmentation does not hide a real second person.
             seat_match_radius = max(
                 width * 0.12,
                 abs(position_targets[first_id] - position_targets[second_id]) * 0.45,
@@ -1377,14 +1362,12 @@ class PodcastReframeEngine(IReframeEngine):
             raw_double: List[bool] = []
             pair_hit_count = 0
             valid_frame_count = 0
-            tids_per_seat: Dict[int, set[int]] = {first_id: set(), second_id: set()}
             for frame_tracked in per_frame_tracked:
                 seats_hit: set[int] = set()
                 for detection in frame_tracked:
                     mapped = track_to_position.get(int(detection.track_id))
                     if mapped in (first_id, second_id):
                         seats_hit.add(int(mapped))
-                        tids_per_seat[int(mapped)].add(int(detection.track_id))
                         continue
                     cx = float(detection.bbox.center_x)
                     best_seat = None
@@ -1396,7 +1379,6 @@ class PodcastReframeEngine(IReframeEngine):
                             best_seat = seat_id
                     if best_seat is not None:
                         seats_hit.add(int(best_seat))
-                        tids_per_seat[int(best_seat)].add(int(detection.track_id))
 
                 if seats_hit:
                     valid_frame_count += 1
@@ -1405,36 +1387,47 @@ class PodcastReframeEngine(IReframeEngine):
                 if both:
                     pair_hit_count += 1
 
-            shared = tids_per_seat[first_id] & tids_per_seat[second_id]
-            if shared:
-                logger.info(f"podcast_reframe: person-first shared track IDs {shared} -> reject as same person")
-                return {"layout": "single", "person_count": person_count}
-
             if valid_frame_count <= 0 or pair_hit_count < self.GRID_ENTER_SAMPLES:
                 logger.info(
                     f"podcast_reframe: person-first grid skipped "
-                    f"(pair=P{first_id}/P{second_id}, co-visible={pair_hit_count}, need>={self.GRID_ENTER_SAMPLES})"
+                    f"(pair=P{first_id}/P{second_id}, co-visible-samples={pair_hit_count}, "
+                    f"need>={self.GRID_ENTER_SAMPLES}, visible_people={person_count})"
                 )
                 return {"layout": "single", "person_count": person_count}
 
             coexist_ratio = pair_hit_count / max(valid_frame_count, 1)
-            raw_ev = self._build_layout_events(raw_double, sample_timestamps)
-            # Enforce detect-then-switch: always start single at t=0
-            layout_events = self._normalise_layout_events([
-                {"time": float(e.get("time", 0.0)), "layout": "double" if e.get("layout") == "double" else "single"}
-                for e in raw_ev
-            ])
-            if layout_events and layout_events[0]["layout"] == "double":
-                layout_events = [{"time": 0.0, "layout": "single"}] + layout_events
-
-            if not any(e.get("layout") == "double" for e in layout_events):
+            layout_events = self._build_layout_events(raw_double, sample_timestamps)
+            if not any(event.get("layout") == "double" for event in layout_events):
+                logger.info(
+                    f"podcast_reframe: person-first grid skipped after hysteresis "
+                    f"(pair=P{first_id}/P{second_id})"
+                )
                 return {"layout": "single", "person_count": person_count}
 
+            # Normalize to {time, layout} only (renderer expects this format).
+            layout_events = [
+                {
+                    "time": float(event.get("time", 0.0)),
+                    "layout": "double" if event.get("layout") == "double" else "single",
+                }
+                for event in layout_events
+            ]
+
             logger.info(
-                f"podcast_reframe: PERSON-FIRST GRID detect_then_switch "
+                f"podcast_reframe: PERSON-FIRST AUTO 50/50 GRID "
                 f"(top=P{top_id}@{top_x}, bottom=P{bottom_id}@{bottom_x}, "
-                f"sep={best_separation:.0f}px, zoom={geometry['grid_zoom']:.2f}, "
-                f"coexist={coexist_ratio:.0%}, changes={max(0, len(layout_events) - 1)})"
+                f"separation={best_separation:.0f}px, zoom={geometry['grid_zoom']:.2f}, "
+                f"crop_w={geometry['crop_w']}, crop_h={geometry['crop_h']}, "
+                f"coexist={coexist_ratio:.0%}, layout_changes={max(0, len(layout_events) - 1)}, "
+                f"mode=detect_then_switch)"
+            )
+            logger.info(
+                f"podcast_reframe: grid crop detail — "
+                f"TOP: crop_x={geometry.get('top_crop_x', geometry.get('first_crop_x'))}, "
+                f"crop_y={geometry.get('top_crop_y', geometry.get('first_crop_y'))}, "
+                f"BOTTOM: crop_x={geometry.get('bottom_crop_x', geometry.get('second_crop_x'))}, "
+                f"crop_y={geometry.get('bottom_crop_y', geometry.get('second_crop_y'))}, "
+                f"source={width}x{height}"
             )
             return {
                 "layout": "double",
@@ -1922,18 +1915,11 @@ class PodcastReframeEngine(IReframeEngine):
                 if position_id != second_id
             )
             if first_isolated and second_isolated:
-                # Estimate face position from body bbox for proper vertical centering
-                first_face_y, first_face_h = self._estimate_face_from_body(
-                    first_profile["y"], first_profile["height"]
-                )
-                second_face_y, second_face_h = self._estimate_face_from_body(
-                    second_profile["y"], second_profile["height"]
-                )
                 first_crop_y = self._clamp_grid_y(
-                    first_face_y, first_face_h, crop_h, height
+                    first_profile["y"], crop_h, height
                 )
                 second_crop_y = self._clamp_grid_y(
-                    second_face_y, second_face_h, crop_h, height
+                    second_profile["y"], crop_h, height
                 )
                 return {
                     "first_id": first_id,
@@ -1949,45 +1935,22 @@ class PodcastReframeEngine(IReframeEngine):
 
             zoom += 0.02
 
-        # Fallback for face-to-face: isolation impossible — avoid over-zoom.
-        # Use mildest possible crop that still keeps full head (no kejauhan zoom).
-        # Pilih zoom minimal yang masih izolasi parsial, bukan langsung MAX.
-        best_zoom = self.GRID_BASE_ZOOM
-        target_crop_w = min(width, max(2, int(base_crop_w / best_zoom)))
-        target_crop_h = min(height, max(2, int(target_crop_w * 8 / 9)))
-        # Clamp agar face full height tetap muat dengan headroom
-        needed_h = max(
-            first_profile["height"], second_profile["height"], 1.0
-        ) * (1 + self.GRID_FACE_MARGIN + 0.25)  # + headroom extra
-        if target_crop_h < needed_h:
-            target_crop_h = int(needed_h)
-            target_crop_w = int(target_crop_h * 9 / 8)
-            target_crop_w = min(width, target_crop_w)
-
-        crop_w_fallback = min(width, target_crop_w)
+        # Fallback for face-to-face setups: if both persons are confirmed distinct
+        # by body tracking but isolation is impossible (they overlap in X-space),
+        # accept grid with best-effort crop centered on each person's body.
+        # This happens when speakers sit face-to-face with camera from the side/center.
+        crop_w_fallback = min(width, max(2, int(base_crop_w / self.GRID_MAX_ZOOM)))
         crop_h_fallback = min(height, max(2, int(crop_w_fallback * 8 / 9)))
-        # Jika masih ketinggian kurang, sesuaikan
-        if crop_h_fallback < needed_h and needed_h <= height:
-            crop_h_fallback = int(min(height, needed_h))
-            crop_w_fallback = min(width, int(crop_h_fallback * 9 / 8))
 
         first_crop_x_fb = self._clamp_x(first_profile["x"], crop_w_fallback, width)
         second_crop_x_fb = self._clamp_x(second_profile["x"], crop_w_fallback, width)
-        # Estimate face position from body bbox for proper vertical centering
-        first_face_y_fb, first_face_h_fb = self._estimate_face_from_body(
-            first_profile["y"], first_profile["height"]
-        )
-        second_face_y_fb, second_face_h_fb = self._estimate_face_from_body(
-            second_profile["y"], second_profile["height"]
-        )
-        first_crop_y_fb = self._clamp_grid_y(first_face_y_fb, first_face_h_fb, crop_h_fallback, height)
-        second_crop_y_fb = self._clamp_grid_y(second_face_y_fb, second_face_h_fb, crop_h_fallback, height)
+        first_crop_y_fb = self._clamp_grid_y(first_profile["y"], crop_h_fallback, height)
+        second_crop_y_fb = self._clamp_grid_y(second_profile["y"], crop_h_fallback, height)
 
-        final_zoom = base_crop_w / max(1, crop_w_fallback)
         logger.info(
-            f"podcast_reframe: grid pair accepted (fallback no-overzoom, headroom fix) "
+            f"podcast_reframe: grid pair accepted (face-to-face fallback, no isolation) "
             f"(P{first_id}/P{second_id}, separation={separation:.0f}px, "
-            f"zoom={final_zoom:.2f} (was {self.GRID_MAX_ZOOM}), crop={crop_w_fallback}x{crop_h_fallback})"
+            f"zoom={self.GRID_MAX_ZOOM:.2f}, crop_w={crop_w_fallback})"
         )
         return {
             "first_id": first_id,
@@ -1998,65 +1961,32 @@ class PodcastReframeEngine(IReframeEngine):
             "second_crop_x": second_crop_x_fb,
             "first_crop_y": first_crop_y_fb,
             "second_crop_y": second_crop_y_fb,
-            "grid_zoom": round(final_zoom, 3),
+            "grid_zoom": round(base_crop_w / crop_w_fallback, 3),
         }
 
     @staticmethod
-    def _estimate_face_from_body(body_y: float, body_height: float) -> Tuple[float, float]:
-        """Estimate face center Y and face height from body bbox.
-        
-        Body bbox center Y is at torso center, not face. We estimate:
-        - Face center Y: ~12% from top of body (head position)
-        - Face height: ~10% of body height (typical face-to-body ratio)
-        
-        Returns: (face_center_y, face_height)
-        """
-        body_top = body_y - body_height / 2
-        # Face is typically at 8-15% from top of body
-        face_center_y = body_top + (body_height * 0.12)
-        # Face height is typically 8-12% of body height
-        face_height = body_height * 0.10
-        return face_center_y, face_height
-
-    @staticmethod
     def _clamp_grid_y(face_y: float, face_height: float, crop_h: int, frame_h: int) -> int:
-        """Place face centered in crop with proper headroom.
+        """Place eyes slightly above panel center while keeping the crop valid.
         
         Args:
-            face_y: Face center Y (estimated from body if using body bbox)
-            face_height: Face height (estimated from body if using body bbox)
-            crop_h: Crop height
-            frame_h: Frame height
+            face_y: Y coordinate of face center (from bbox)
+            face_height: Height of face bbox
+            crop_h: Height of crop region
+            frame_h: Height of frame
         
         Returns:
-            Crop top Y coordinate
+            Y coordinate where crop should start
         """
         if crop_h >= frame_h:
             return 0
-
-        face_top = face_y - face_height / 2
-        face_bottom = face_y + face_height / 2
         
-        # Reserve headroom above face top (forehead + hair)
-        headroom = max(int(face_height * 0.5), int(crop_h * 0.08))
-        desired_top = int(face_top - headroom)
+        # Eyes are typically 20% above face center
+        eye_y = face_y - (face_height * 0.20)
         
-        # Reserve chin margin below face bottom
-        chin_margin = max(int(face_height * 0.6), int(crop_h * 0.10))
-        desired_bottom = int(face_bottom + chin_margin)
+        # Place eyes at 35% from top of crop (slightly above center)
+        target_y = int(eye_y - crop_h * 0.35)
         
-        # Ideal crop position: center face vertically with margins
-        ideal_crop_h = (desired_bottom - desired_top)
-        if ideal_crop_h <= crop_h:
-            # Face + margins fit in crop, center it
-            target_y = int(face_y - crop_h * 0.45)  # Slightly above center (eyes at 45% from top)
-        else:
-            # Face too large, prioritize keeping top of head
-            target_y = desired_top
-        
-        # Clamp to valid range
-        max_y = frame_h - crop_h
-        return max(0, min(target_y, max_y))
+        return max(0, min(target_y, frame_h - crop_h))
 
     def _decide_layout_v2(
         self,

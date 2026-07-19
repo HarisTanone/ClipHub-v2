@@ -549,7 +549,7 @@ class PersonFirstReframeEngine(IReframeEngine):
         from src.infrastructure.podcast_reframe_engine import PodcastReframeEngine
 
         engine = PodcastReframeEngine()
-        # Keep person-first thresholds aligned for geometry/zoom.
+        # Keep person-first thresholds aligned for geometry/zoom + headroom fix.
         engine.MIN_SEPARATION_RATIO = self.MIN_SEPARATION_RATIO
         engine.MIN_COEXIST_RATIO = self.MIN_COEXIST_RATIO
         engine.DOMINANCE_SINGLE_CROP = self.DOMINANCE_SINGLE_CROP
@@ -576,9 +576,19 @@ class PersonFirstReframeEngine(IReframeEngine):
             logger.info("person_first_reframe: grid rejected (non-distinct panel identities)")
             return None
 
+        # Must be 2 distinct persons in same frame at some timestamp — detect then switch spec
+        per_frame_positions_raw = []
+        t2p = decision.get("track_to_position") or tracked_data.get("track_to_position") or {}
+        # validation is already done inside _decide_autogrid_layout, extra safety:
+        if isinstance(t2p, dict) and len({int(top_id), int(bottom_id)}) < 2:
+            return None
+
         decision["transition_style"] = transition_style
         decision["transition_duration"] = transition_duration
+        # Preserve detect-then-switch semantics: force start single if backend somehow missed it
         layout_events = engine._normalise_layout_events(decision.get("layout_events") or [])
+        if layout_events and layout_events[0].get("layout") == "double":
+            layout_events = [{"time": 0.0, "layout": "single"}] + layout_events
         decision["layout_events"] = layout_events
 
         duration = total_frames / fps if fps > 0 else 0.0
