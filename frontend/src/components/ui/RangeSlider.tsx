@@ -9,10 +9,11 @@ interface RangeSliderProps {
   step: number;
   onChange: (value: number) => void;
   description?: string;
+  suffix?: string;
   tooltip?: { what: string; increase: string; decrease: string };
 }
 
-export function RangeSlider({ label, value, min, max, step, onChange, description, tooltip }: RangeSliderProps) {
+export function RangeSlider({ label, value, min, max, step, onChange, description, suffix, tooltip }: RangeSliderProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const pct = ((value - min) / (max - min)) * 100;
 
@@ -26,7 +27,7 @@ export function RangeSlider({ label, value, min, max, step, onChange, descriptio
         onBlur={() => tooltip && setShowTooltip(false)}
       >
         <label className="text-[11px] text-zinc-400">{label}</label>
-        <span className="text-[11px] font-mono text-zinc-300">{Number.isInteger(value) ? value : value.toFixed(2)}</span>
+        <span className="text-[11px] font-mono text-zinc-300">{Number.isInteger(value) ? value : value.toFixed(2)}{suffix ?? ""}</span>
 
         {tooltip && showTooltip && (
           <div

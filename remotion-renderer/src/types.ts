@@ -126,6 +126,8 @@ export interface TextEmphasisStyleConfig {
   avoidPadding?: number; // For auto_avoid: padding around person bbox (px)
   aroundHeadRadius?: number; // For around_head: radius from head center (%)
   depthIntensity?: number; // For depth_text: parallax intensity (0.1-1.0)
+  depthParallax?: number; // For depth_text: foreground/background separation scale (0.05-1.0)
+  depthFade?: number; // For depth_text: enter/exit fade duration in seconds (0.1-1.5)
   kineticStagger?: number; // For kinetic_type: word stagger delay (frames)
 }
 

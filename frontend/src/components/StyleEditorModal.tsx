@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { presets as presetsApi, type Preset } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { RangeSlider } from "@/components/ui/RangeSlider";
 
 type OptionMeta = {
   label: string;
@@ -186,6 +187,8 @@ export interface TextEmphasisStyle {
   avoidPadding?: number;
   aroundHeadRadius?: number;
   depthIntensity?: number;
+  depthParallax?: number;
+  depthFade?: number;
   kineticStagger?: number;
 }
 
@@ -317,6 +320,8 @@ export const DEFAULT_TEXT_EMPHASIS_STYLE: TextEmphasisStyle = {
   avoidPadding: 40,
   aroundHeadRadius: 60,
   depthIntensity: 0.5,
+  depthParallax: 0.35,
+  depthFade: 0.45,
   kineticStagger: 6,
 };
 
@@ -1326,35 +1331,38 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
           {/* Effect-specific tuning sliders (conditional) */}
           {previewEffect === "floating_text" && (
             <Section title="Floating Text Tuning">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Bob Speed" value={style.floatSpeed ?? 1.2} min={0.5} max={3.0} step={0.1} suffix="x" onChange={(value) => update("floatSpeed", value)} />
               </div>
             </Section>
           )}
           {previewEffect === "auto_avoid" && (
             <Section title="Auto Avoid Tuning">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Avoid Padding" value={style.avoidPadding ?? 40} min={10} max={120} suffix="px" onChange={(value) => update("avoidPadding", value)} />
               </div>
             </Section>
           )}
           {previewEffect === "around_head" && (
             <Section title="Around Head Tuning">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Orbit Radius" value={style.aroundHeadRadius ?? 60} min={30} max={120} suffix="%" onChange={(value) => update("aroundHeadRadius", value)} />
               </div>
             </Section>
           )}
           {previewEffect === "depth_text" && (
             <Section title="Depth Text Tuning">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Depth Intensity" value={style.depthIntensity ?? 0.5} min={0.1} max={1.0} step={0.05} suffix="" onChange={(value) => update("depthIntensity", value)} />
+                <SliderField label="Parallax Scale" value={style.depthParallax ?? 0.35} min={0.05} max={1.0} step={0.05} suffix="" onChange={(value) => update("depthParallax", value)} />
+                <SliderField label="Fade Duration" value={style.depthFade ?? 0.45} min={0.1} max={1.5} step={0.05} suffix="s" onChange={(value) => update("depthFade", value)} />
               </div>
+              <p className="mt-2 text-[11px] text-zinc-500">Depth Intensity mengatur kekuatan parallax; Parallax Scale mengatur jarak fg/bg; Fade Duration mengatur transisi masuk/keluar teks.</p>
             </Section>
           )}
           {previewEffect === "kinetic_type" && (
             <Section title="Kinetic Type Tuning">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Word Stagger" value={style.kineticStagger ?? 6} min={1} max={18} suffix="f" onChange={(value) => update("kineticStagger", value)} />
               </div>
             </Section>
@@ -1365,8 +1373,12 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
   );
 }
 
-function SliderField({ label, value, min, max, suffix, step = 1, onChange }: { label: string; value: number; min: number; max: number; suffix: string; step?: number; onChange: (value: number) => void }) {
-  return <label className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3"><span className="flex justify-between text-[10px] font-semibold uppercase tracking-wider text-zinc-500"><span>{label}</span><span className="text-emerald-400">{value}{suffix}</span></span><input type="range" value={value} min={min} max={max} step={step} onChange={(e) => onChange(Number(e.target.value))} className="mt-3 w-full accent-emerald-500" /></label>;
+function SliderField({ label, value, min, max, suffix = "", step = 1, onChange }: { label: string; value: number; min: number; max: number; suffix?: string; step?: number; onChange: (value: number) => void }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+      <RangeSlider label={label} value={value} min={min} max={max} step={step} suffix={suffix} onChange={onChange} />
+    </div>
+  );
 }
 
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

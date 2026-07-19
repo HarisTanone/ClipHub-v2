@@ -48,6 +48,8 @@ DEFAULT_TEXT_EMPHASIS_STYLE = {
     "avoidPadding": 40,
     "aroundHeadRadius": 60,
     "depthIntensity": 0.5,
+    "depthParallax": 0.35,
+    "depthFade": 0.45,
     "kineticStagger": 6,
 }
 
@@ -78,6 +80,8 @@ def normalise_text_emphasis_style(style: object) -> dict:
     result["avoidPadding"] = _clamp_number(result.get("avoidPadding"), 10, 120, 40)
     result["aroundHeadRadius"] = _clamp_number(result.get("aroundHeadRadius"), 30, 120, 60)
     result["depthIntensity"] = _clamp_number(result.get("depthIntensity"), 0.1, 1.0, 0.5)
+    result["depthParallax"] = _clamp_number(result.get("depthParallax"), 0.05, 1.0, 0.35)
+    result["depthFade"] = _clamp_number(result.get("depthFade"), 0.1, 1.5, 0.45)
     result["kineticStagger"] = _clamp_number(result.get("kineticStagger"), 1, 18, 6)
 
     for key, fallback in (

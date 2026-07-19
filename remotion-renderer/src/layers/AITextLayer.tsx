@@ -115,10 +115,22 @@ export const AITextLayer: React.FC<{
 
   // Dynamic Depth Text: scale based on estimated person depth
   const depthIntensity = clamp(Number(style.depthIntensity ?? 0.5), 0.1, 1.0);
+  const depthParallax = clamp(Number(style.depthParallax ?? 0.35), 0.05, 1.0);
+  const depthFadeSec = clamp(Number(style.depthFade ?? 0.45), 0.1, 1.5);
+  const depthFadeFrames = Math.max(1, Math.round(depthFadeSec * fps));
   let depthScale = 1;
   if (effect === "depth_text" && foreground && foreground.depth_z !== undefined) {
-    depthScale = 0.7 + foreground.depth_z * depthIntensity;
+    depthScale = 0.7 + foreground.depth_z * depthIntensity * (1 + depthParallax);
   }
+  const depthEnter = effect === "depth_text"
+    ? interpolate(localFrame, [0, depthFadeFrames], [0, 1], { extrapolateRight: "clamp" })
+    : enter;
+  const depthExitOpacity = effect === "depth_text"
+    ? interpolate(localFrame, [Math.max(0, eventDuration - depthFadeFrames), eventDuration], [1, 0], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      })
+    : exitOpacity;
 
   // Smart Kinetic Typography: words animate in sequence
   const kineticStagger = Math.max(1, Math.round(Number(style.kineticStagger ?? 6)));
@@ -141,7 +153,7 @@ export const AITextLayer: React.FC<{
         : transform;
 
   return (
-    <AbsoluteFill style={{ pointerEvents: "none", opacity: exitOpacity }}>
+    <AbsoluteFill style={{ pointerEvents: "none", opacity: effect === "depth_text" ? depthExitOpacity : exitOpacity }}>
       {effect === "spotlight" && (
         <AbsoluteFill style={{
           background: "radial-gradient(circle at center, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.68) 100%)",
@@ -151,7 +163,7 @@ export const AITextLayer: React.FC<{
       {effect === "depth_text" && (
         <AbsoluteFill style={{
           background: "radial-gradient(circle at 50% 40%, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.45) 100%)",
-          opacity: interpolate(enter, [0, 1], [0, depthIntensity]),
+          opacity: interpolate(depthEnter, [0, 1], [0, depthIntensity]),
         }} />
       )}
 
