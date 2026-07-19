@@ -1173,7 +1173,15 @@ class PodcastReframeEngine(IReframeEngine):
                 }
 
         clusters: List[dict] = []
-        cluster_threshold = 0.11
+        # Clustering threshold to merge similar positions
+        # Use 0.15 to properly merge tracks from the same person who moves slightly
+        # Higher threshold = more aggressive merging (reduces false "multiple people" detection)
+        cluster_threshold = 0.15
+
+        logger.info(
+            f"podcast_reframe: clustering {len(stable_position_profiles)} position profiles "
+            f"with threshold={cluster_threshold}"
+        )
 
         for track_id, profile in sorted(
             stable_position_profiles.items(),
@@ -1267,186 +1275,216 @@ class PodcastReframeEngine(IReframeEngine):
         # re-IDs of the same person still count as one seat. Require co-visible
         # samples before switching, so timeline always starts single.
         if skip_ghost_pair_check and len(position_targets) >= 2:
-            best_pair = None
-            best_separation = 0.0
+            # Generate all candidate pairs with co-visibility check
+            candidate_pairs = []
             position_ids = sorted(position_targets.keys())
+            
+            # Build track-to-seat mapping for co-visibility check
+            seat_match_radius = width * 0.12
+            tids_per_seat: Dict[int, set[int]] = {pid: set() for pid in position_ids}
+            
+            for frame_tracked in per_frame_tracked:
+                for detection in frame_tracked:
+                    cx = float(detection.bbox.center_x)
+                    for seat_id in position_ids:
+                        dist = abs(cx - float(position_targets[seat_id]))
+                        if dist <= seat_match_radius:
+                            tids_per_seat[seat_id].add(int(detection.track_id))
+            
+            # Generate pairs sorted by separation (descending)
             for i, pid_a in enumerate(position_ids):
                 for pid_b in position_ids[i + 1:]:
                     if pid_a == pid_b:
                         continue
                     sep = abs(position_targets[pid_a] - position_targets[pid_b])
-                    if sep > best_separation:
-                        best_separation = sep
-                        best_pair = (pid_a, pid_b)
-
-            if best_pair is None or best_pair[0] == best_pair[1]:
-                return {"layout": "single", "person_count": person_count}
-
-            first_id, second_id = best_pair
-            # Require a real spatial gap so both panels never show the same person.
-            if best_separation < width * self.MIN_SEPARATION_RATIO:
+                    if sep >= width * self.MIN_SEPARATION_RATIO:
+                        # Check if this pair has shared track IDs (tracking error)
+                        shared = tids_per_seat[pid_a] & tids_per_seat[pid_b]
+                        if shared:
+                            logger.debug(
+                                f"podcast_reframe: skipping pair P{pid_a}/P{pid_b} "
+                                f"(shared track IDs {shared})"
+                            )
+                            continue
+                        candidate_pairs.append((pid_a, pid_b, sep))
+            
+            # Sort by separation descending
+            candidate_pairs.sort(key=lambda x: x[2], reverse=True)
+            
+            if not candidate_pairs:
                 logger.info(
-                    f"podcast_reframe: person-first grid skipped "
-                    f"(pair=P{first_id}/P{second_id}, sep={best_separation:.0f}px "
-                    f"< min={width * self.MIN_SEPARATION_RATIO:.0f}px)"
+                    f"podcast_reframe: person-first grid skipped (no valid pairs without shared track IDs)"
                 )
                 return {"layout": "single", "person_count": person_count}
-
-            geometry = self._calculate_grid_geometry(
-                first_id=first_id,
-                second_id=second_id,
-                position_targets=position_targets,
-                position_profiles=position_profiles,
-                width=width,
-                height=height,
-                skip_separation_check=True,
-            )
-            if not geometry:
+            
+            # Try each candidate pair until one succeeds
+            for first_id, second_id, best_separation in candidate_pairs:
                 logger.info(
-                    f"podcast_reframe: person-first grid failed geometry "
-                    f"(pair=P{first_id}/P{second_id}, sep={best_separation:.0f}px)"
+                    f"podcast_reframe: trying grid pair P{first_id}/P{second_id} (sep={best_separation:.0f}px)"
                 )
-                return {"layout": "single", "person_count": person_count}
 
-            # Reject identical crop windows (would duplicate one person into both panels).
-            same_crop = (
-                int(geometry.get("first_crop_x", -1)) == int(geometry.get("second_crop_x", -2))
-                and int(geometry.get("first_crop_y", -1)) == int(geometry.get("second_crop_y", -2))
-            )
-            if same_crop:
+                geometry = self._calculate_grid_geometry(
+                    first_id=first_id,
+                    second_id=second_id,
+                    position_targets=position_targets,
+                    position_profiles=position_profiles,
+                    width=width,
+                    height=height,
+                    skip_separation_check=True,
+                )
+                if not geometry:
+                    logger.info(
+                        f"podcast_reframe: person-first grid failed geometry "
+                        f"(pair=P{first_id}/P{second_id}, sep={best_separation:.0f}px)"
+                    )
+                    continue  # Try next pair
+
+                # Reject identical crop windows (would duplicate one person into both panels).
+                same_crop = (
+                    int(geometry.get("first_crop_x", -1)) == int(geometry.get("second_crop_x", -2))
+                    and int(geometry.get("first_crop_y", -1)) == int(geometry.get("second_crop_y", -2))
+                )
+                if same_crop:
+                    logger.info(
+                        f"podcast_reframe: person-first grid rejected identical crops "
+                        f"(pair=P{first_id}/P{second_id})"
+                    )
+                    continue  # Try next pair
+
+                # Enforce distinct seats (no ghost duplicate)
+                if first_id == second_id:
+                    continue  # Try next pair
+                pf = position_profiles.get(first_id, {})
+                ps = position_profiles.get(second_id, {})
+                if pf and ps and self._is_ghost_pair(pf, ps, width, height):
+                    logger.info(f"podcast_reframe: person-first ghost pair rejected P{first_id}/P{second_id}")
+                    continue  # Try next pair
+
+                latest_speaker_id: Optional[int] = None
+                if speaker_result and speaker_result.per_frame_speaker:
+                    latest_frame = max(speaker_result.per_frame_speaker)
+                    latest_speaker_id = int(speaker_result.per_frame_speaker[latest_frame])
+                elif speaker_result and speaker_result.dominant_speaker_id is not None:
+                    latest_speaker_id = int(speaker_result.dominant_speaker_id)
+
+                if latest_speaker_id == second_id:
+                    top_id, bottom_id = second_id, first_id
+                else:
+                    top_id, bottom_id = first_id, second_id
+
+                if top_id == bottom_id:
+                    continue  # Try next pair
+
+                top_x = int(position_targets[top_id])
+                bottom_x = int(position_targets[bottom_id])
+
+                if top_id != geometry["first_id"]:
+                    geometry = {
+                        **geometry,
+                        "top_crop_x": geometry["second_crop_x"],
+                        "bottom_crop_x": geometry["first_crop_x"],
+                        "top_crop_y": geometry["second_crop_y"],
+                        "bottom_crop_y": geometry["first_crop_y"],
+                    }
+                else:
+                    geometry = {
+                        **geometry,
+                        "top_crop_x": geometry["first_crop_x"],
+                        "bottom_crop_x": geometry["second_crop_x"],
+                        "top_crop_y": geometry["first_crop_y"],
+                        "bottom_crop_y": geometry["second_crop_y"],
+                    }
+
+                sample_timestamps = tracked_data.get("sample_timestamps") or [
+                    i * self.SAMPLE_INTERVAL_SEC
+                    for i in range(len(per_frame_tracked))
+                ]
+
+                # Detect-then-switch co-visibility with distinct track validation
+                seat_match_radius = max(
+                    width * 0.12,
+                    abs(position_targets[first_id] - position_targets[second_id]) * 0.45,
+                )
+                raw_double: List[bool] = []
+                pair_hit_count = 0
+                valid_frame_count = 0
+                tids_per_seat: Dict[int, set[int]] = {first_id: set(), second_id: set()}
+                for frame_tracked in per_frame_tracked:
+                    seats_hit: set[int] = set()
+                    for detection in frame_tracked:
+                        mapped = track_to_position.get(int(detection.track_id))
+                        if mapped in (first_id, second_id):
+                            seats_hit.add(int(mapped))
+                            tids_per_seat[int(mapped)].add(int(detection.track_id))
+                            continue
+                        cx = float(detection.bbox.center_x)
+                        best_seat = None
+                        best_dist = seat_match_radius
+                        for seat_id in (first_id, second_id):
+                            dist = abs(cx - float(position_targets[seat_id]))
+                            if dist <= best_dist:
+                                best_dist = dist
+                                best_seat = seat_id
+                        if best_seat is not None:
+                            seats_hit.add(int(best_seat))
+                            tids_per_seat[int(best_seat)].add(int(detection.track_id))
+
+                    if seats_hit:
+                        valid_frame_count += 1
+                    both = first_id in seats_hit and second_id in seats_hit
+                    raw_double.append(both)
+                    if both:
+                        pair_hit_count += 1
+
+                shared = tids_per_seat[first_id] & tids_per_seat[second_id]
+                if shared:
+                    logger.info(f"podcast_reframe: person-first shared track IDs {shared} -> reject as same person")
+                    continue  # Try next pair
+
+                if valid_frame_count <= 0 or pair_hit_count < self.GRID_ENTER_SAMPLES:
+                    logger.info(
+                        f"podcast_reframe: person-first grid skipped "
+                        f"(pair=P{first_id}/P{second_id}, co-visible={pair_hit_count}, need>={self.GRID_ENTER_SAMPLES})"
+                    )
+                    continue  # Try next pair
+
+                coexist_ratio = pair_hit_count / max(valid_frame_count, 1)
+                raw_ev = self._build_layout_events(raw_double, sample_timestamps)
+                # Enforce detect-then-switch: always start single at t=0
+                layout_events = self._normalise_layout_events([
+                    {"time": float(e.get("time", 0.0)), "layout": "double" if e.get("layout") == "double" else "single"}
+                    for e in raw_ev
+                ])
+                if layout_events and layout_events[0]["layout"] == "double":
+                    layout_events = [{"time": 0.0, "layout": "single"}] + layout_events
+
+                if not any(e.get("layout") == "double" for e in layout_events):
+                    continue  # Try next pair
+
+                # SUCCESS! This pair passed all validations
                 logger.info(
-                    f"podcast_reframe: person-first grid rejected identical crops "
-                    f"(pair=P{first_id}/P{second_id})"
+                    f"podcast_reframe: PERSON-FIRST GRID detect_then_switch "
+                    f"(top=P{top_id}@{top_x}, bottom=P{bottom_id}@{bottom_x}, "
+                    f"sep={best_separation:.0f}px, zoom={geometry['grid_zoom']:.2f}, "
+                    f"coexist={coexist_ratio:.0%}, changes={max(0, len(layout_events) - 1)})"
                 )
-                return {"layout": "single", "person_count": person_count}
-
-            # Enforce distinct seats (no ghost duplicate)
-            if first_id == second_id:
-                return {"layout": "single", "person_count": person_count}
-            pf = position_profiles.get(first_id, {})
-            ps = position_profiles.get(second_id, {})
-            if pf and ps and self._is_ghost_pair(pf, ps, width, height):
-                logger.info(f"podcast_reframe: person-first ghost pair rejected P{first_id}/P{second_id}")
-                return {"layout": "single", "person_count": person_count}
-
-            latest_speaker_id: Optional[int] = None
-            if speaker_result and speaker_result.per_frame_speaker:
-                latest_frame = max(speaker_result.per_frame_speaker)
-                latest_speaker_id = int(speaker_result.per_frame_speaker[latest_frame])
-            elif speaker_result and speaker_result.dominant_speaker_id is not None:
-                latest_speaker_id = int(speaker_result.dominant_speaker_id)
-
-            if latest_speaker_id == second_id:
-                top_id, bottom_id = second_id, first_id
-            else:
-                top_id, bottom_id = first_id, second_id
-
-            if top_id == bottom_id:
-                return {"layout": "single", "person_count": person_count}
-
-            top_x = int(position_targets[top_id])
-            bottom_x = int(position_targets[bottom_id])
-
-            if top_id != geometry["first_id"]:
-                geometry = {
+                return {
+                    "layout": "double",
+                    "top_x": top_x,
+                    "bottom_x": bottom_x,
+                    "top_track_id": top_id,
+                    "bottom_track_id": bottom_id,
+                    "person_count": person_count,
+                    "coexist_ratio": coexist_ratio,
+                    "layout_events": layout_events,
                     **geometry,
-                    "top_crop_x": geometry["second_crop_x"],
-                    "bottom_crop_x": geometry["first_crop_x"],
-                    "top_crop_y": geometry["second_crop_y"],
-                    "bottom_crop_y": geometry["first_crop_y"],
                 }
-            else:
-                geometry = {
-                    **geometry,
-                    "top_crop_x": geometry["first_crop_x"],
-                    "bottom_crop_x": geometry["second_crop_x"],
-                    "top_crop_y": geometry["first_crop_y"],
-                    "bottom_crop_y": geometry["second_crop_y"],
-                }
-
-            sample_timestamps = tracked_data.get("sample_timestamps") or [
-                i * self.SAMPLE_INTERVAL_SEC
-                for i in range(len(per_frame_tracked))
-            ]
-
-            # Detect-then-switch co-visibility with distinct track validation
-            seat_match_radius = max(
-                width * 0.12,
-                abs(position_targets[first_id] - position_targets[second_id]) * 0.45,
-            )
-            raw_double: List[bool] = []
-            pair_hit_count = 0
-            valid_frame_count = 0
-            tids_per_seat: Dict[int, set[int]] = {first_id: set(), second_id: set()}
-            for frame_tracked in per_frame_tracked:
-                seats_hit: set[int] = set()
-                for detection in frame_tracked:
-                    mapped = track_to_position.get(int(detection.track_id))
-                    if mapped in (first_id, second_id):
-                        seats_hit.add(int(mapped))
-                        tids_per_seat[int(mapped)].add(int(detection.track_id))
-                        continue
-                    cx = float(detection.bbox.center_x)
-                    best_seat = None
-                    best_dist = seat_match_radius
-                    for seat_id in (first_id, second_id):
-                        dist = abs(cx - float(position_targets[seat_id]))
-                        if dist <= best_dist:
-                            best_dist = dist
-                            best_seat = seat_id
-                    if best_seat is not None:
-                        seats_hit.add(int(best_seat))
-                        tids_per_seat[int(best_seat)].add(int(detection.track_id))
-
-                if seats_hit:
-                    valid_frame_count += 1
-                both = first_id in seats_hit and second_id in seats_hit
-                raw_double.append(both)
-                if both:
-                    pair_hit_count += 1
-
-            shared = tids_per_seat[first_id] & tids_per_seat[second_id]
-            if shared:
-                logger.info(f"podcast_reframe: person-first shared track IDs {shared} -> reject as same person")
-                return {"layout": "single", "person_count": person_count}
-
-            if valid_frame_count <= 0 or pair_hit_count < self.GRID_ENTER_SAMPLES:
-                logger.info(
-                    f"podcast_reframe: person-first grid skipped "
-                    f"(pair=P{first_id}/P{second_id}, co-visible={pair_hit_count}, need>={self.GRID_ENTER_SAMPLES})"
-                )
-                return {"layout": "single", "person_count": person_count}
-
-            coexist_ratio = pair_hit_count / max(valid_frame_count, 1)
-            raw_ev = self._build_layout_events(raw_double, sample_timestamps)
-            # Enforce detect-then-switch: always start single at t=0
-            layout_events = self._normalise_layout_events([
-                {"time": float(e.get("time", 0.0)), "layout": "double" if e.get("layout") == "double" else "single"}
-                for e in raw_ev
-            ])
-            if layout_events and layout_events[0]["layout"] == "double":
-                layout_events = [{"time": 0.0, "layout": "single"}] + layout_events
-
-            if not any(e.get("layout") == "double" for e in layout_events):
-                return {"layout": "single", "person_count": person_count}
-
+            
+            # All candidate pairs failed
             logger.info(
-                f"podcast_reframe: PERSON-FIRST GRID detect_then_switch "
-                f"(top=P{top_id}@{top_x}, bottom=P{bottom_id}@{bottom_x}, "
-                f"sep={best_separation:.0f}px, zoom={geometry['grid_zoom']:.2f}, "
-                f"coexist={coexist_ratio:.0%}, changes={max(0, len(layout_events) - 1)})"
+                f"podcast_reframe: person-first grid skipped (all {len(candidate_pairs)} candidate pairs failed)"
             )
-            return {
-                "layout": "double",
-                "top_x": top_x,
-                "bottom_x": bottom_x,
-                "top_track_id": top_id,
-                "bottom_track_id": bottom_id,
-                "person_count": person_count,
-                "coexist_ratio": coexist_ratio,
-                "layout_events": layout_events,
-                **geometry,
-            }
+            return {"layout": "single", "person_count": person_count}
         # ─── End person-first path ───
 
         pair_hits: Dict[Tuple[int, int], int] = defaultdict(int)
@@ -2010,7 +2048,6 @@ class PodcastReframeEngine(IReframeEngine):
         }
 
     @staticmethod
-    @staticmethod
     def _clamp_grid_y(face_y: float, face_height: float, crop_h: int, frame_h: int) -> int:
         """Place face centered in crop with proper headroom.
         
@@ -2030,7 +2067,8 @@ class PodcastReframeEngine(IReframeEngine):
         face_bottom = face_y + face_height / 2
         
         # Reserve headroom above face top (forehead + hair)
-        headroom = max(int(face_height * 0.5), int(crop_h * 0.08))
+        # Increased from 0.5 to 0.8 for better head visibility
+        headroom = max(int(face_height * 0.8), int(crop_h * 0.12))
         desired_top = int(face_top - headroom)
         
         # Reserve chin margin below face bottom
@@ -2040,8 +2078,9 @@ class PodcastReframeEngine(IReframeEngine):
         # Ideal crop position: center face vertically with margins
         ideal_crop_h = (desired_bottom - desired_top)
         if ideal_crop_h <= crop_h:
-            # Face + margins fit in crop, center it
-            target_y = int(face_y - crop_h * 0.45)  # Slightly above center (eyes at 45% from top)
+            # Face + margins fit in crop, center it with eyes at 40% from top
+            # (eyes should be slightly above center for natural framing)
+            target_y = int(face_y - crop_h * 0.40)
         else:
             # Face too large, prioritize keeping top of head
             target_y = desired_top
