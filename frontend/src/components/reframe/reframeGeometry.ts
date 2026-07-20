@@ -140,9 +140,12 @@ export function computeGridCropRects(
   const clampX = (centerX: number) =>
     Math.max(0, Math.min(centerX - cropW / 2, sourceW - cropW));
 
-  // Vertical placement: eyes ~38% down the panel (production uses face_y - 0.38*crop_h,
-  // with faces typically ~38% from the top of frame).
-  const faceY = sourceH * 0.38;
+  // Vertical placement: eyes ~38% down the panel. This mirrors the production
+  // `_clamp_grid_y`: eyes_y = face_y - face_h*0.10, target_y = eyes_y - crop_h*0.38.
+  // In preview we have no per-person face box, so we use the body→face fallback
+  // (head sits at the top of a person bbox) and assume the face center is near
+  // the top third of the frame — the typical seated-podcast head position.
+  const faceY = sourceH * 0.30;
   const cropY = Math.max(0, Math.min(faceY - cropH * 0.38, sourceH - cropH));
 
   const toFrac = (px: number, py: number): CropRect => ({

@@ -114,6 +114,21 @@ async def lifespan(app: FastAPI):
         if "video_title" not in job_cols:
             cur.execute("ALTER TABLE jobs ADD COLUMN video_title TEXT DEFAULT NULL")
             logger.info("migration: added video_title to jobs table")
+        # v3.0/v3.1 Remotion + B-roll motion-graphic columns (idempotent)
+        jobs_additions = {
+            "broll_enabled": "INTEGER NOT NULL DEFAULT 1",
+            "autogrid_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "broll_motion_style": "TEXT DEFAULT NULL",
+            "use_remotion": "INTEGER NOT NULL DEFAULT 0",
+            "ai_layer_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "threejs_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "scene_graphs": "TEXT DEFAULT NULL",
+            "remotion_quality": "TEXT NOT NULL DEFAULT 'medium'",
+        }
+        for col_name, col_def in jobs_additions.items():
+            if col_name not in job_cols:
+                cur.execute(f"ALTER TABLE jobs ADD COLUMN {col_name} {col_def}")
+                logger.info(f"migration: added {col_name} to jobs table")
 
         cur.execute("PRAGMA table_info(users)")
         user_cols = [row["name"] for row in cur.fetchall()]

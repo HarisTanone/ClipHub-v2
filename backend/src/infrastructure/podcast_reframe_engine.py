@@ -1078,6 +1078,14 @@ class PodcastReframeEngine(IReframeEngine):
                 profile["width"].append(detection.bbox.width)
                 profile["height"].append(detection.bbox.height)
                 profile["area"].append(detection.bbox.area)
+                # Capture real face bbox when the tracker provides one
+                # (person-first mode) so grid-Y framing can use the actual face
+                # instead of a body→face estimate.
+                if detection.face_bbox is not None:
+                    profile["face_x"].append(detection.face_bbox.center_x)
+                    profile["face_y"].append(detection.face_bbox.center_y)
+                    profile["face_width"].append(detection.face_bbox.width)
+                    profile["face_height"].append(detection.face_bbox.height)
 
         if not track_profiles:
             return {
@@ -1891,23 +1899,59 @@ class PodcastReframeEngine(IReframeEngine):
         if first_id == second_id:
             return None
 
-        # Convert body profiles to face profiles for proper grid geometry
-        # Body bbox is much larger than face, so we need to estimate face dimensions
+        # Convert body profiles to face profiles for proper grid geometry.
+        # Prefer real face_* fields when present (person-first detector).
+        # Body bbox is used for horizontal seat separation; face for Y framing.
         def body_to_face_profile(body_profile: dict) -> dict:
-            """Convert body bbox profile to estimated face profile."""
+            """Estimate face from body, or pass through real face measurements."""
             body_height = float(body_profile.get("height", height * 0.8))
             body_width = float(body_profile.get("width", width * 0.3))
             body_y = float(body_profile.get("y", height * 0.5))
             body_x = float(body_profile.get("x", width * 0.5))
-            
-            # Face is typically 10-12% of body height, 8-10% of body width
-            face_height = body_height * 0.12
-            face_width = body_width * 0.10
-            
-            # Face center Y is at ~12% from top of body
+
+            # Real face from person-first crop detector (preferred).
+            if body_profile.get("face_y") is not None:
+                face_y = float(body_profile["face_y"])
+                face_h = float(body_profile.get("face_height") or max(body_height * 0.18, 40.0))
+                face_w = float(body_profile.get("face_width") or max(body_width * 0.22, 40.0))
+                face_x = float(body_profile.get("face_x") or body_x)
+                return {
+                    "x": body_x,  # keep body X for left/right isolation
+                    "y": face_y,
+                    "width": face_w,
+                    "height": face_h,
+                    "area": face_w * face_h,
+                    "face_x": face_x,
+                }
+
+            # Already face-sized profile (legacy face-tracker path) — do not re-shrink.
+            looks_like_face = (
+                body_height > 0
+                and body_height <= height * 0.35
+                and body_width <= width * 0.28
+                and body_height <= body_width * 1.6
+            )
+            if looks_like_face:
+                return {
+                    "x": body_x,
+                    "y": body_y,
+                    "width": body_width,
+                    "height": body_height,
+                    "area": body_width * body_height,
+                }
+
+            # Estimate face at the TOP of the body. The head sits at the top
+            # of a person bbox, so the face center is face_height/2 below the
+            # body top — NOT 10% into the body (that lands near the neck and
+            # causes the "nose-only" grid crop). Keep the size generous so the
+            # headroom clamp in _clamp_grid_y keeps the forehead in frame even
+            # when the detector box starts at the shoulders.
+            face_height = max(body_height * 0.18, body_width * 0.28, 48.0)
+            face_width = max(body_width * 0.22, face_height * 0.75, 40.0)
             body_top = body_y - body_height / 2
-            face_y = body_top + (body_height * 0.12)
-            
+            # Face center = top of body + half face height (head fully inside body).
+            face_y = body_top + face_height / 2
+
             return {
                 "x": body_x,
                 "y": face_y,
@@ -2049,45 +2093,52 @@ class PodcastReframeEngine(IReframeEngine):
 
     @staticmethod
     def _clamp_grid_y(face_y: float, face_height: float, crop_h: int, frame_h: int) -> int:
-        """Place face centered in crop with proper headroom.
-        
-        Args:
-            face_y: Face center Y (estimated from body if using body bbox)
-            face_height: Face height (estimated from body if using body bbox)
-            crop_h: Crop height
-            frame_h: Frame height
-        
-        Returns:
-            Crop top Y coordinate
+        """Place face in panel with forehead + eyes visible (not nose-only).
+
+        Talking-head framing: eyes sit ~38% down the panel. Two hard guarantees:
+
+          * floor  (keep head in):  crop_top <= face_top - headroom
+            → forehead / hair never clipped, even when grid zoom tightens.
+          * ceiling (keep eyes in): crop_top <= face_top + face_h * 0.30
+            → eyes are NEVER above the crop top (prevents the "nose-only" cut
+              that happens when a body-estimated face_y lands too low).
+
+        When both cannot hold simultaneously (crop too short for the head),
+        the floor wins — keeping the full head inside is more important than
+        hitting the exact 38% line.
         """
         if crop_h >= frame_h:
             return 0
 
-        face_top = face_y - face_height / 2
-        face_bottom = face_y + face_height / 2
-        
-        # Reserve headroom above face top (forehead + hair)
-        # Increased from 0.5 to 0.8 for better head visibility
-        headroom = max(int(face_height * 0.8), int(crop_h * 0.12))
-        desired_top = int(face_top - headroom)
-        
-        # Reserve chin margin below face bottom
-        chin_margin = max(int(face_height * 0.6), int(crop_h * 0.10))
-        desired_bottom = int(face_bottom + chin_margin)
-        
-        # Ideal crop position: center face vertically with margins
-        ideal_crop_h = (desired_bottom - desired_top)
-        if ideal_crop_h <= crop_h:
-            # Face + margins fit in crop, center it with eyes at 40% from top
-            # (eyes should be slightly above center for natural framing)
-            target_y = int(face_y - crop_h * 0.40)
-        else:
-            # Face too large, prioritize keeping top of head
-            target_y = desired_top
-        
-        # Clamp to valid range
-        max_y = frame_h - crop_h
-        return max(0, min(target_y, max_y))
+        face_h = max(float(face_height), 1.0)
+        face_top = float(face_y) - face_h / 2
+        face_bottom = float(face_y) + face_h / 2
+
+        # Headroom: forehead + hair. Prefer face-relative, floor by panel fraction.
+        headroom = max(face_h * 1.05, crop_h * 0.18)
+        chin_margin = max(face_h * 0.55, crop_h * 0.10)
+
+        # Ideal: eyes ~38% down the panel (natural talking-head framing).
+        eyes_y = float(face_y) - face_h * 0.10
+        target_y = int(eyes_y - crop_h * 0.38)
+
+        # Hard floor: face_top - headroom must stay inside crop.
+        floor_y = int(face_top - headroom)
+        # Hard ceiling: eyes must stay inside crop (crop_top <= face_top + 30% face).
+        ceiling_y = int(face_top + face_h * 0.30)
+
+        # Apply ceiling first — this is the guarantee that fixes "nose-only" cuts.
+        target_y = min(target_y, ceiling_y)
+        # Then apply floor (keep head in). Floor wins on conflict.
+        target_y = min(target_y, floor_y)
+
+        # If room remains, also try to keep the chin inside.
+        min_y_for_chin = int(face_bottom + chin_margin - crop_h)
+        if min_y_for_chin <= floor_y:
+            target_y = max(target_y, min_y_for_chin)
+
+        max_y = max(0, frame_h - crop_h)
+        return max(0, min(int(target_y), max_y))
 
     def _decide_layout_v2(
         self,
@@ -3253,7 +3304,13 @@ class PodcastReframeEngine(IReframeEngine):
 
     @staticmethod
     def _median_profile(values: Dict[str, List[float]]) -> Dict[str, float]:
-        """Return a median face profile for one tracker ID."""
+        """Return a median face profile for one tracker ID.
+
+        Always carries the body bbox (x/y/width/height/area). When the tracker
+        provided real face boxes (person-first mode), also carries face_x /
+        face_y / face_width / face_height so grid-Y framing can use the actual
+        face instead of a body→face estimate.
+        """
         result = {
             "x": float(np.median(values.get("x") or [0.0])),
             "y": float(np.median(values.get("y") or [0.0])),
@@ -3261,6 +3318,13 @@ class PodcastReframeEngine(IReframeEngine):
             "height": float(np.median(values.get("height") or [0.0])),
             "area": float(np.median(values.get("area") or [0.0])),
         }
+        face_x = values.get("face_x") or []
+        face_y = values.get("face_y") or []
+        if face_x and face_y:
+            result["face_x"] = float(np.median(face_x))
+            result["face_y"] = float(np.median(face_y))
+            result["face_width"] = float(np.median(values.get("face_width") or [0.0]))
+            result["face_height"] = float(np.median(values.get("face_height") or [0.0]))
         return result
 
     @staticmethod
@@ -3787,6 +3851,13 @@ class PodcastReframeEngine(IReframeEngine):
                 profile["width"].append(body_box.width)
                 profile["height"].append(body_box.height)
                 profile["area"].append(body_box.area)
+                # Capture the real face bbox (person-first detector provides it)
+                # so grid-Y framing centers the actual face, not a body estimate.
+                if detection.face_bbox is not None:
+                    profile["face_x"].append(detection.face_bbox.center_x)
+                    profile["face_y"].append(detection.face_bbox.center_y)
+                    profile["face_width"].append(detection.face_bbox.width)
+                    profile["face_height"].append(detection.face_bbox.height)
 
         if not track_profiles:
             return {
