@@ -22,7 +22,7 @@ def test_model_loaders():
     # 1. Person detector loader (RF-DETR or YOLO fallback)
     success_person = engine._load_person_detector()
     assert success_person is True
-    assert hasattr(engine, "_person_detector")
+    assert hasattr(engine, "_person_detector_instance")
     
     # 2. Crop face detector loader
     success_face = engine._load_crop_face_detector()

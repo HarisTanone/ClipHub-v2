@@ -206,33 +206,32 @@ class PodcastReframeEngine(IReframeEngine):
         return model_path
 
     def _load_person_detector(self) -> bool:
-        """Lazy-load RF-DETR person detector."""
-        if hasattr(self, "_person_detector") and self._person_detector is not None:
+        """Lazy-load PersonDetector (RF-DETR with YOLO fallback).
+
+        Uses the canonical PersonDetector class so detection logic (class
+        filtering, duplicate suppression) lives in one place.
+        """
+        if hasattr(self, "_person_detector_instance") and self._person_detector_instance is not None:
             return True
         try:
             from src.config import settings
-            detector_name = settings.PERSON_DETECTOR
-            if "large" in detector_name:
-                from rfdetr import RFDETRLarge
-                self._person_detector = RFDETRLarge()
-            elif "medium" in detector_name:
-                from rfdetr import RFDETRMedium
-                self._person_detector = RFDETRMedium()
-            else:
-                from rfdetr import RFDETRMedium
-                self._person_detector = RFDETRMedium()
-            logger.info(f"podcast_reframe: RF-DETR person detector loaded ({detector_name})")
-            return True
-        except Exception as e:
-            logger.warning(f"podcast_reframe: RF-DETR load failed, trying YOLO fallback: {e}")
-            try:
-                from ultralytics import YOLO
-                self._person_detector = YOLO("yolo11n.pt")
-                logger.info("podcast_reframe: YOLO fallback person detector loaded")
+            from src.infrastructure.person_detector import PersonDetector
+
+            self._person_detector_instance = PersonDetector(
+                model_variant=settings.PERSON_DETECTOR,
+                confidence_threshold=settings.PERSON_CONF_THRESHOLD,
+            )
+            if self._person_detector_instance.is_available or not self._person_detector_instance._load_attempted:
+                logger.info(f"podcast_reframe: PersonDetector ready ({settings.PERSON_DETECTOR})")
                 return True
-            except Exception as e2:
-                logger.error(f"podcast_reframe: all person detector loaders failed: {e2}")
+            else:
+                logger.error("podcast_reframe: PersonDetector unavailable after load attempt")
+                self._person_detector_instance = None
                 return False
+        except Exception as e:
+            logger.error(f"podcast_reframe: PersonDetector init failed: {e}")
+            self._person_detector_instance = None
+            return False
 
     def _load_crop_face_detector(self) -> bool:
         """Lazy-load RetinaFace / SCRFD face detector for person crop."""
@@ -1565,13 +1564,13 @@ class PodcastReframeEngine(IReframeEngine):
 
                 coexist_ratio = pair_hit_count / max(valid_frame_count, 1)
                 raw_ev = self._build_layout_events(raw_double, sample_timestamps)
-                # Enforce detect-then-switch: always start single at t=0
+                # _build_layout_events already backdates to t=0 when double is
+                # valid from the start. Do not force-prepend a single event —
+                # that adds an artificial delay before grid activates.
                 layout_events = self._normalise_layout_events([
                     {"time": float(e.get("time", 0.0)), "layout": "double" if e.get("layout") == "double" else "single"}
                     for e in raw_ev
                 ])
-                if layout_events and layout_events[0]["layout"] == "double":
-                    layout_events = [{"time": 0.0, "layout": "single"}] + layout_events
 
                 if not any(e.get("layout") == "double" for e in layout_events):
                     continue  # Try next pair
@@ -2429,6 +2428,7 @@ class PodcastReframeEngine(IReframeEngine):
         frame_width: int,
         frame_height: int,
         last_center: Optional[float] = None,
+        recent_live_positions: Optional[Dict[int, List[float]]] = None,
     ) -> Tuple[Optional[int], Optional[TrackedDetection], Optional[int], str]:
         """Pick the crop center, preferring the active speaker's stable seat."""
         active_speaker: Optional[int] = None
@@ -2443,7 +2443,17 @@ class PodcastReframeEngine(IReframeEngine):
             )
             if closest_frame is not None:
                 active_speaker = speaker_result.per_frame_speaker[closest_frame]
-                target_x_hint = position_targets.get(active_speaker)
+                # Prefer recent live position average over the static whole-clip
+                # median. This eliminates snap-back jitter when the hold fallback
+                # disagrees with where the person actually is now.
+                if (
+                    recent_live_positions
+                    and active_speaker in recent_live_positions
+                    and recent_live_positions[active_speaker]
+                ):
+                    target_x_hint = float(np.mean(recent_live_positions[active_speaker]))
+                else:
+                    target_x_hint = position_targets.get(active_speaker)
                 target_profile = position_target_profiles.get(active_speaker)
                 if target_x_hint is None and target_profile:
                     target_x_hint = target_profile.get("x")
@@ -2572,6 +2582,12 @@ class PodcastReframeEngine(IReframeEngine):
             for k, v in (tracked_data.get("track_to_position") or {}).items()
         }
 
+        # Recent live position buffer: tracks the last N live observations per
+        # position_id so that hold/fallback uses recent truth, not the static
+        # whole-clip median which causes snap-back jitter.
+        RECENT_LIVE_WINDOW = 8  # ~2.6s at 3fps sampling
+        recent_live_positions: Dict[int, List[float]] = defaultdict(list)
+
         for i, frame_faces in enumerate(per_frame_faces):
             t = sample_timestamps[i] if i < len(sample_timestamps) else i * self.SAMPLE_INTERVAL_SEC
             frame_idx_approx = (
@@ -2581,6 +2597,16 @@ class PodcastReframeEngine(IReframeEngine):
             )
             frame_tracked = per_frame_tracked[i] if i < len(per_frame_tracked) else []
             last_center = keyframes[-1][1] + crop_w / 2 if keyframes else None
+
+            # Update recent live positions from current frame's tracked detections
+            for det in frame_tracked:
+                pos_id = track_to_position.get(int(det.track_id))
+                if pos_id is not None:
+                    det_cx = det.face_bbox.center_x if getattr(det, 'face_bbox', None) is not None else det.bbox.center_x
+                    buf = recent_live_positions[pos_id]
+                    buf.append(float(det_cx))
+                    if len(buf) > RECENT_LIVE_WINDOW:
+                        buf.pop(0)
 
             cx, target_detection, active_position_id, target_source = self._choose_panning_target_x(
                 frame_faces=frame_faces,
@@ -2593,6 +2619,7 @@ class PodcastReframeEngine(IReframeEngine):
                 frame_width=width,
                 frame_height=height,
                 last_center=last_center,
+                recent_live_positions=dict(recent_live_positions),
             )
 
             if cx is None:
@@ -2653,6 +2680,22 @@ class PodcastReframeEngine(IReframeEngine):
         if not keyframes:
             return None
 
+        # ─── Pre-stabilization: rolling median smoothing ─────────────────
+        # Noise from per-frame detection jitter creates spurious keyframe
+        # candidates. A small rolling median (window=5) absorbs single-frame
+        # outliers before the dead-zone filter sees them.
+        SMOOTH_WINDOW = 5
+        if len(keyframes) >= SMOOTH_WINDOW:
+            smoothed_keyframes: List[Tuple[float, int, Optional[int], str]] = []
+            half_w = SMOOTH_WINDOW // 2
+            xs = [kf[1] for kf in keyframes]
+            for i, (t, _x, spk, src) in enumerate(keyframes):
+                window_start = max(0, i - half_w)
+                window_end = min(len(xs), i + half_w + 1)
+                median_x = int(np.median(xs[window_start:window_end]))
+                smoothed_keyframes.append((t, median_x, spk, src))
+            keyframes = smoothed_keyframes
+
         # Stabilize with cluster lock + dead zone + hold minimum
         # 1. Cluster lock: if all positions within PAN_CLUSTER_THRESHOLD → lock camera
         all_kf_x = [x for _, x, _, _ in keyframes]
@@ -2668,21 +2711,43 @@ class PodcastReframeEngine(IReframeEngine):
             first_speaker = keyframes[0][2] if keyframes else None
             stabilized = [(0.0, home_x, first_speaker, "cluster_lock")]
         else:
-            # 2. Dead zone + hold minimum
+            # 2. Dead zone + hold minimum + consecutive speaker-change guard
+            SPEAKER_CHANGE_CONFIRM_SAMPLES = 3  # require 3 consecutive samples confirming new speaker
             stabilized: List[Tuple[float, int, Optional[int], str]] = [keyframes[0]]
+            # Track consecutive samples with same new speaker to confirm a real change
+            pending_speaker_change: Optional[int] = None
+            pending_speaker_count: int = 0
+
             for t, x, speaker_id, source in keyframes[1:]:
                 last_t, last_x, last_speaker_id, _ = stabilized[-1]
                 movement = abs(x - last_x)
                 time_since_last = t - last_t
 
-                speaker_changed = (
+                # Speaker change requires consecutive confirmation to avoid
+                # single-sample diarization noise causing immediate pan.
+                speaker_confirmed = False
+                if (
                     speaker_id is not None
                     and last_speaker_id is not None
                     and speaker_id != last_speaker_id
-                )
+                ):
+                    if pending_speaker_change == speaker_id:
+                        pending_speaker_count += 1
+                    else:
+                        pending_speaker_change = speaker_id
+                        pending_speaker_count = 1
+                    if pending_speaker_count >= SPEAKER_CHANGE_CONFIRM_SAMPLES:
+                        speaker_confirmed = True
+                        pending_speaker_change = None
+                        pending_speaker_count = 0
+                else:
+                    # Same speaker or unknown — reset pending
+                    pending_speaker_change = None
+                    pending_speaker_count = 0
+
                 if (
                     movement >= self.PAN_DEAD_ZONE_PX
-                    and (time_since_last >= self.PAN_HOLD_MIN_SEC or speaker_changed)
+                    and (time_since_last >= self.PAN_HOLD_MIN_SEC or speaker_confirmed)
                 ):
                     stabilized.append((t, x, speaker_id, source))
 
@@ -3744,54 +3809,15 @@ class PodcastReframeEngine(IReframeEngine):
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h_frame, w_frame = frame_rgb.shape[:2]
 
-            # 1. Person Detection
-            person_bboxes: List[Tuple[float, float, float, float, float]] = [] # [x1, y1, x2, y2, conf]
-            
-            if hasattr(self, "_person_detector") and self._person_detector is not None:
-                if hasattr(self._person_detector, "predict"):
-                    preds = self._person_detector.predict(frame_rgb, threshold=person_conf_thresh)
-                    for idx in range(len(preds)):
-                        cname = preds.data.get('class_name')[idx] if 'class_name' in preds.data else ""
-                        cid = preds.class_id[idx]
-                        x1, y1, x2, y2 = preds.xyxy[idx]
-                        conf = preds.confidence[idx]
-                        w_det = float(x2 - x1)
-                        h_det = float(y2 - y1)
-                        area_det = w_det * h_det
+            # 1. Person Detection — delegate to PersonDetector which handles
+            # class filtering (PERSON_CLASS_ID=0 only) and duplicate suppression.
+            person_bboxes: List[Tuple[float, float, float, float, float]] = []
 
-                        # Accept as person if:
-                        # 1. Explicitly labeled as person (class_id 0 or 1, or class_name "person")
-                        is_person_class = (cname == "person" or cid in (0, 1))
-                        # 2. Large confident detection with human-like proportions (fallback for mislabeled persons)
-                        #    Min area 100k px (~300x333), confidence >= 0.7, height >= width * 0.8
-                        is_large_human_shape = (
-                            conf >= 0.70
-                            and area_det >= 100_000
-                            and h_det >= w_det * 0.8
-                        )
-
-                        if is_person_class or is_large_human_shape:
-                            person_bboxes.append((float(x1), float(y1), float(x2), float(y2), float(conf)))
-                else:
-                    results = self._person_detector(frame_rgb, verbose=False)
-                    if results and len(results) > 0:
-                        for box in results[0].boxes:
-                            cls_id = int(box.cls[0])
-                            conf_val = float(box.conf[0])
-                            if conf_val < person_conf_thresh:
-                                continue
-                            xyxy = box.xyxy[0].tolist()
-                            w_det = xyxy[2] - xyxy[0]
-                            h_det = xyxy[3] - xyxy[1]
-                            area_det = w_det * h_det
-                            is_person_class = cls_id in (0, 1)
-                            is_large_human_shape = (
-                                conf_val >= 0.70
-                                and area_det >= 100_000
-                                and h_det >= w_det * 0.8
-                            )
-                            if is_person_class or is_large_human_shape:
-                                person_bboxes.append((xyxy[0], xyxy[1], xyxy[2], xyxy[3], conf_val))
+            if hasattr(self, "_person_detector_instance") and self._person_detector_instance is not None:
+                detections = self._person_detector_instance.detect(
+                    frame_rgb, confidence_override=person_conf_thresh
+                )
+                person_bboxes = [det.to_box_tuple() for det in detections]
 
             if not person_bboxes:
                 self._load_face_detector()
@@ -3814,9 +3840,11 @@ class PodcastReframeEngine(IReframeEngine):
                             bbox = det.bounding_box
                             person_bboxes.append((bbox.origin_x, bbox.origin_y, bbox.origin_x + bbox.width, bbox.origin_y + bbox.height, 0.99))
 
-            # RF-DETR/YOLO may emit nested tight/loose boxes for one subject.
-            # Suppress those before ByteTrack assigns persistent IDs.
-            person_bboxes = self._filter_duplicate_person_detections(person_bboxes)
+            # Duplicate suppression for MediaPipe face fallback path only.
+            # PersonDetector.detect() already handles this internally, but
+            # the MediaPipe fallback adds raw boxes that still need filtering.
+            if not (hasattr(self, "_person_detector_instance") and self._person_detector_instance is not None):
+                person_bboxes = self._filter_duplicate_person_detections(person_bboxes)
 
             # Log first frame detection details for debugging
             if len(sample_frame_indices) == 0 and person_bboxes:

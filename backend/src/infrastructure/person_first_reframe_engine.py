@@ -601,10 +601,9 @@ class PersonFirstReframeEngine(IReframeEngine):
 
         decision["transition_style"] = transition_style
         decision["transition_duration"] = transition_duration
-        # Preserve detect-then-switch semantics: force start single if backend somehow missed it
+        # _decide_autogrid_layout already produces correct t=0 layout.
+        # Do not force-prepend single — that adds artificial grid delay.
         layout_events = engine._normalise_layout_events(decision.get("layout_events") or [])
-        if layout_events and layout_events[0].get("layout") == "double":
-            layout_events = [{"time": 0.0, "layout": "single"}] + layout_events
         decision["layout_events"] = layout_events
 
         duration = total_frames / fps if fps > 0 else 0.0
