@@ -1384,22 +1384,13 @@ class PodcastReframeEngine(IReframeEngine):
         # re-IDs of the same person still count as one seat. Require co-visible
         # samples before switching, so timeline always starts single.
         if skip_ghost_pair_check and len(position_targets) >= 2:
-            # Generate all candidate pairs with co-visibility check
+            # Generate candidate seat pairs. Do not reject a pair merely because
+            # one tracker ID appeared near both seats at different timestamps:
+            # re-identification and cross-seat movement make that historical
+            # signal unreliable. The frame-level validation below is the hard
+            # gate and requires two distinct physical detections concurrently.
             candidate_pairs = []
             position_ids = sorted(position_targets.keys())
-            
-            # Build track-to-seat mapping for co-visibility check
-            seat_match_radius = width * 0.12
-            tids_per_seat: Dict[int, set[int]] = {pid: set() for pid in position_ids}
-            
-            for frame_tracked in per_frame_tracked:
-                for detection in frame_tracked:
-                    cx = float(detection.bbox.center_x)
-                    for seat_id in position_ids:
-                        dist = abs(cx - float(position_targets[seat_id]))
-                        if dist <= seat_match_radius:
-                            tids_per_seat[seat_id].add(int(detection.track_id))
-            
             # Generate pairs sorted by separation (descending)
             for i, pid_a in enumerate(position_ids):
                 for pid_b in position_ids[i + 1:]:
@@ -1407,14 +1398,6 @@ class PodcastReframeEngine(IReframeEngine):
                         continue
                     sep = abs(position_targets[pid_a] - position_targets[pid_b])
                     if sep >= width * self.MIN_SEPARATION_RATIO:
-                        # Check if this pair has shared track IDs (tracking error)
-                        shared = tids_per_seat[pid_a] & tids_per_seat[pid_b]
-                        if shared:
-                            logger.debug(
-                                f"podcast_reframe: skipping pair P{pid_a}/P{pid_b} "
-                                f"(shared track IDs {shared})"
-                            )
-                            continue
                         candidate_pairs.append((pid_a, pid_b, sep))
             
             # Sort by separation descending
@@ -1422,7 +1405,7 @@ class PodcastReframeEngine(IReframeEngine):
             
             if not candidate_pairs:
                 logger.info(
-                    f"podcast_reframe: person-first grid skipped (no valid pairs without shared track IDs)"
+                    "podcast_reframe: person-first grid skipped (no sufficiently separated seat pairs)"
                 )
                 return {"layout": "single", "person_count": person_count}
             
@@ -1509,15 +1492,19 @@ class PodcastReframeEngine(IReframeEngine):
                     for i in range(len(per_frame_tracked))
                 ]
 
-                # Detect-then-switch co-visibility with distinct track validation
+                # Detect-then-switch co-visibility with strict frame-level
+                # physical-person validation. Historical track IDs are not a
+                # valid identity veto because ByteTrack can re-identify a person
+                # after motion or occlusion.
                 seat_match_radius = max(
                     width * 0.12,
                     abs(position_targets[first_id] - position_targets[second_id]) * 0.45,
                 )
                 raw_double: List[bool] = []
                 pair_hit_count = 0
+                consecutive_pair_hits = 0
+                max_consecutive_pair_hits = 0
                 valid_frame_count = 0
-                tids_per_seat: Dict[int, set[int]] = {first_id: set(), second_id: set()}
                 for frame_tracked in per_frame_tracked:
                     seats_hit: set[int] = set()
                     detections_per_seat: Dict[int, List[TrackedDetection]] = {
@@ -1528,7 +1515,6 @@ class PodcastReframeEngine(IReframeEngine):
                         mapped = track_to_position.get(int(detection.track_id))
                         if mapped in (first_id, second_id):
                             seats_hit.add(int(mapped))
-                            tids_per_seat[int(mapped)].add(int(detection.track_id))
                             detections_per_seat[int(mapped)].append(detection)
                             continue
                         cx = float(detection.bbox.center_x)
@@ -1541,7 +1527,6 @@ class PodcastReframeEngine(IReframeEngine):
                                 best_seat = seat_id
                         if best_seat is not None:
                             seats_hit.add(int(best_seat))
-                            tids_per_seat[int(best_seat)].add(int(detection.track_id))
                             detections_per_seat[int(best_seat)].append(detection)
 
                     if seats_hit:
@@ -1559,16 +1544,22 @@ class PodcastReframeEngine(IReframeEngine):
                     raw_double.append(both)
                     if both:
                         pair_hit_count += 1
+                        consecutive_pair_hits += 1
+                        max_consecutive_pair_hits = max(
+                            max_consecutive_pair_hits,
+                            consecutive_pair_hits,
+                        )
+                    else:
+                        consecutive_pair_hits = 0
 
-                shared = tids_per_seat[first_id] & tids_per_seat[second_id]
-                if shared:
-                    logger.info(f"podcast_reframe: person-first shared track IDs {shared} -> reject as same person")
-                    continue  # Try next pair
-
-                if valid_frame_count <= 0 or pair_hit_count < self.GRID_ENTER_SAMPLES:
+                if (
+                    valid_frame_count <= 0
+                    or max_consecutive_pair_hits < self.GRID_ENTER_SAMPLES
+                ):
                     logger.info(
                         f"podcast_reframe: person-first grid skipped "
-                        f"(pair=P{first_id}/P{second_id}, co-visible={pair_hit_count}, need>={self.GRID_ENTER_SAMPLES})"
+                        f"(pair=P{first_id}/P{second_id}, co-visible={pair_hit_count}, "
+                        f"consecutive={max_consecutive_pair_hits}, need>={self.GRID_ENTER_SAMPLES})"
                     )
                     continue  # Try next pair
 

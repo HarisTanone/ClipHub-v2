@@ -86,6 +86,61 @@ class TestDetectThenSwitch:
         events = decision.get("layout_events") or []
         assert any(e.get("layout") == "double" for e in events)
 
+    def test_person_first_grid_accepts_valid_pair_despite_historical_track_overlap(self):
+        # A tracker can reuse/re-identify one ID after a person moves between
+        # seats. Each frame still contains two physically distinct people, so
+        # the frame-level evidence must activate grid instead of rejecting the
+        # pair based on a historical shared ID.
+        frames = []
+        for i in range(8):
+            if i < 4:
+                frames.append([
+                    make_det(10, 450, 400, 250, 290, i),
+                    make_det(20, 1450, 410, 240, 280, i),
+                ])
+            else:
+                frames.append([
+                    make_det(30, 450, 400, 250, 290, i),
+                    make_det(10, 1450, 410, 240, 280, i),
+                ])
+
+        tracked = {
+            "person_count": 2,
+            "position_targets": {0: 450, 1: 1450},
+            "position_target_profiles": {
+                0: {"x": 450, "y": 400, "width": 250, "height": 290, "area": 72500},
+                1: {"x": 1450, "y": 410, "width": 240, "height": 280, "area": 67200},
+            },
+            # Force seat matching from current-frame geometry so ID 10 is seen
+            # at both seats across the full timeline.
+            "track_to_position": {},
+            "per_frame_tracked": frames,
+            "sample_timestamps": [i * self.engine.SAMPLE_INTERVAL_SEC for i in range(len(frames))],
+        }
+
+        decision = self.engine._decide_autogrid_layout(
+            tracked_data=tracked,
+            speaker_result=None,
+            width=FRAME_WIDTH,
+            height=FRAME_HEIGHT,
+            skip_ghost_pair_check=True,
+        )
+
+        assert decision["layout"] == "double"
+
+    def test_person_first_grid_requires_consecutive_valid_frames(self):
+        # Alternating two-person and one-person samples must not activate grid.
+        frames = []
+        for i in range(12):
+            detections = [make_det(1, 450, 400, 250, 290, i)]
+            if i % 2 == 0:
+                detections.append(make_det(2, 1450, 410, 240, 280, i))
+            frames.append(detections)
+
+        _, decision = decide(self.engine, frames, skip_ghost_pair_check=True)
+
+        assert decision["layout"] == "single"
+
     def test_second_person_enters_later_starts_single_then_double(self):
         frames = []
         for i in range(TOTAL_FRAMES):
