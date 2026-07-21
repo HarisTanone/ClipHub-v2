@@ -24,7 +24,7 @@ from typing import Optional
 from src.config import settings
 from src.domain.entities import SpliceSegment
 from src.domain.interfaces import IVideoSplicer
-from src.infrastructure.media_timeline import probe_media_timeline
+from src.infrastructure.media_timeline import probe_media_timeline, timeline_is_safe
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ class VideoSplicer(IVideoSplicer):
     - Validate A/V drift < 0.1s after splice
     - Multiple splices: process in reverse order (last timestamp first)
     """
+
+    MAX_SYNC_DRIFT = 0.1
 
     def __init__(self):
         self._crossfade_sec = settings.BROLL_SPLICE_CROSSFADE_SEC
@@ -151,6 +153,13 @@ class VideoSplicer(IVideoSplicer):
                 if await self._extract_video_segment(clip_path, prev_end, at_time, before_path):
                     concat_parts.append(before_path)
                     temp_files.append(before_path)
+                else:
+                    logger.error(
+                        "video_splicer: required source part failed [%.1fs-%.1fs]",
+                        prev_end,
+                        at_time,
+                    )
+                    return None
 
             # The footage itself (already processed to 1080x1920 H.264 30fps)
             concat_parts.append(segment.footage_path)
@@ -163,6 +172,15 @@ class VideoSplicer(IVideoSplicer):
             if await self._extract_video_segment(clip_path, prev_end, clip_duration, after_path):
                 concat_parts.append(after_path)
                 temp_files.append(after_path)
+            else:
+                # Never accept a concat with its tail missing. Long tails used to
+                # exceed the fixed extraction timeout and were silently omitted.
+                logger.error(
+                    "video_splicer: required final source part failed [%.1fs-%.1fs]",
+                    prev_end,
+                    clip_duration,
+                )
+                return None
 
         if len(concat_parts) < 2:
             logger.warning("video_splicer: not enough parts to concat")
@@ -257,15 +275,30 @@ class VideoSplicer(IVideoSplicer):
             output_path,
         ]
 
+        proc: Optional[asyncio.subprocess.Process] = None
+        timeout = max(60.0, duration * 5.0 + 30.0)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await asyncio.wait_for(proc.communicate(), timeout=60)
+            # Encoding time scales with source duration and available CPU. Give
+            # long parts proportional headroom instead of truncating at 60s.
+            await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return proc.returncode == 0 and os.path.exists(output_path)
-        except (asyncio.TimeoutError, Exception) as exc:
+        except asyncio.TimeoutError:
+            if proc is not None:
+                proc.kill()
+                await proc.communicate()
+            logger.warning(
+                "video_splicer: segment extract timed out after %.1fs [%.1f-%.1f]",
+                timeout,
+                start,
+                end,
+            )
+            return False
+        except Exception as exc:
             logger.warning(f"video_splicer: segment extract failed [{start:.1f}-{end:.1f}]: {exc}")
             return False
 
@@ -284,50 +317,31 @@ class VideoSplicer(IVideoSplicer):
         return True
 
     def _validate_sync(self, output_path: str, original_path: str) -> bool:
-        """Validate splice output is usable.
-
-        Checks:
-        - start_drift < 0.1s (audio and video start together)
-        - Output file has both video and audio streams
-        
-        Note: end_drift is NOT checked because when we -c:a copy the full
-        audio from the original and concat re-encoded video segments, the
-        video may be slightly shorter due to frame-level encoding precision.
-        This is cosmetically acceptable — the last frame holds and audio
-        finishes naturally.
-        """
-        output_tl = probe_media_timeline(output_path)
-
-        if not output_tl:
-            logger.warning("video_splicer: cannot probe output for validation")
-            return True  # Don't fail on probe issues — file exists, let it through
-
-        # Check start drift only — video and audio must begin together
-        if output_tl.start_drift > 0.1:
-            logger.error(
-                f"video_splicer: start drift too high: {output_tl.start_drift:.3f}s"
-            )
-            return False
-
-        # Sanity: output must have audio (we mapped it from original)
-        if output_tl.audio_duration is None or output_tl.audio_duration < 1.0:
-            logger.error("video_splicer: output has no audio stream — splice failed")
-            return False
-
-        # Log durations for debugging (not a failure condition)
+        """Reject truncated, unprobeable, silent, or desynchronised outputs."""
         original_tl = probe_media_timeline(original_path)
-        if original_tl and original_tl.audio_duration and output_tl.audio_duration:
-            audio_diff = abs(output_tl.audio_duration - original_tl.audio_duration)
-            if audio_diff > 0.5:
-                logger.warning(
-                    f"video_splicer: audio length differs from original by {audio_diff:.2f}s "
-                    f"(original={original_tl.audio_duration:.1f}s, output={output_tl.audio_duration:.1f}s) "
-                    f"— acceptable for stream copy"
-                )
+        output_tl = probe_media_timeline(output_path)
+        if original_tl is None or output_tl is None:
+            logger.warning("video_splicer: cannot probe source/output for validation")
+            return False
+
+        if original_tl.audio_start is not None and output_tl.audio_start is None:
+            logger.error("video_splicer: output lost the original audio stream")
+            return False
+
+        if not timeline_is_safe(
+            output_path,
+            expected_duration=original_tl.video_duration,
+            max_start_drift=self.MAX_SYNC_DRIFT,
+            max_end_drift=0.25,
+            max_duration_error=0.25,
+        ):
+            return False
 
         logger.info(
             f"video_splicer: validation OK — start_drift={output_tl.start_drift:.3f}s, "
-            f"video={output_tl.video_duration:.1f}s, audio={output_tl.audio_duration:.1f}s"
+            f"end_drift={output_tl.end_drift:.3f}s, "
+            f"video={output_tl.video_duration:.1f}s, "
+            f"audio={output_tl.audio_duration or 0:.1f}s"
         )
         return True
 

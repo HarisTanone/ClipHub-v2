@@ -1241,6 +1241,56 @@ class PodcastReframeEngine(IReframeEngine):
 
     # ─── Layout Decision (Speaker-Aware) ─────────────────────────────────
 
+    def _frame_has_distinct_people(
+        self,
+        first_detections: List[TrackedDetection],
+        second_detections: List[TrackedDetection],
+        width: int,
+        height: int,
+    ) -> bool:
+        """Return true only with frame-level evidence of two physical people.
+
+        Track/seat IDs alone are insufficient because one person can receive two
+        detector IDs. A valid pair must have low overlap and meaningful 2-D
+        separation relative to the detections' own size. The 2-D check still
+        permits front/back podcast seating where X coordinates are similar.
+        """
+        frame_diagonal = max(1.0, float(np.hypot(width, height)))
+        for first in first_detections:
+            first_box = first.person_bbox or first.bbox
+            for second in second_detections:
+                if int(first.track_id) == int(second.track_id):
+                    continue
+                second_box = second.person_bbox or second.bbox
+                intersection_w = max(
+                    0.0,
+                    min(first_box.x2, second_box.x2) - max(first_box.x1, second_box.x1),
+                )
+                intersection_h = max(
+                    0.0,
+                    min(first_box.y2, second_box.y2) - max(first_box.y1, second_box.y1),
+                )
+                intersection = intersection_w * intersection_h
+                union = max(1.0, first_box.area + second_box.area - intersection)
+                iou = intersection / union
+                distance = float(np.hypot(
+                    first_box.center_x - second_box.center_x,
+                    first_box.center_y - second_box.center_y,
+                ))
+                own_scale = max(
+                    1.0,
+                    min(
+                        max(first_box.width, first_box.height),
+                        max(second_box.width, second_box.height),
+                    ),
+                )
+                if iou < self.GHOST_IOU_THRESHOLD and (
+                    distance >= own_scale * 0.45
+                    or distance / frame_diagonal >= self.MIN_SEPARATION_RATIO
+                ):
+                    return True
+        return False
+
     def _decide_autogrid_layout(
         self,
         tracked_data: dict,
@@ -1425,11 +1475,16 @@ class PodcastReframeEngine(IReframeEngine):
                 tids_per_seat: Dict[int, set[int]] = {first_id: set(), second_id: set()}
                 for frame_tracked in per_frame_tracked:
                     seats_hit: set[int] = set()
+                    detections_per_seat: Dict[int, List[TrackedDetection]] = {
+                        first_id: [],
+                        second_id: [],
+                    }
                     for detection in frame_tracked:
                         mapped = track_to_position.get(int(detection.track_id))
                         if mapped in (first_id, second_id):
                             seats_hit.add(int(mapped))
                             tids_per_seat[int(mapped)].add(int(detection.track_id))
+                            detections_per_seat[int(mapped)].append(detection)
                             continue
                         cx = float(detection.bbox.center_x)
                         best_seat = None
@@ -1442,10 +1497,20 @@ class PodcastReframeEngine(IReframeEngine):
                         if best_seat is not None:
                             seats_hit.add(int(best_seat))
                             tids_per_seat[int(best_seat)].add(int(detection.track_id))
+                            detections_per_seat[int(best_seat)].append(detection)
 
                     if seats_hit:
                         valid_frame_count += 1
-                    both = first_id in seats_hit and second_id in seats_hit
+                    both = (
+                        first_id in seats_hit
+                        and second_id in seats_hit
+                        and self._frame_has_distinct_people(
+                            detections_per_seat[first_id],
+                            detections_per_seat[second_id],
+                            width,
+                            height,
+                        )
+                    )
                     raw_double.append(both)
                     if both:
                         pair_hit_count += 1
@@ -2353,6 +2418,21 @@ class PodcastReframeEngine(IReframeEngine):
         def get_det_profile_distance(d: TrackedDetection, prof: dict) -> float:
             box = d.face_bbox if getattr(d, 'face_bbox', None) is not None else d.bbox
             return self._bbox_profile_distance(box, prof, frame_width, frame_height)
+
+        # A single visible person is the strongest possible visual signal. Do
+        # not hold a stale diarization seat in this case: doing so leaves the
+        # only person off-centre until a later pan event is accepted.
+        if len(frame_tracked) == 1 and len(position_targets) <= 1:
+            only_detection = frame_tracked[0]
+            only_position = track_to_position.get(only_detection.track_id)
+            return (
+                int(get_det_cx(only_detection)),
+                only_detection,
+                only_position,
+                "only_visible_person",
+            )
+        if len(frame_faces) == 1 and not frame_tracked and len(position_targets) <= 1:
+            return int(frame_faces[0]), None, None, "only_visible_face"
 
         if active_speaker is not None:
             matching_detections = [

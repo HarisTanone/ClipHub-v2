@@ -49,6 +49,35 @@ def test_single_visible_face_uses_stable_position_target():
     assert assigned[0][1][0].face_id == 1
 
 
+def test_panning_centers_only_person_in_single_seat_video():
+    engine = PodcastReframeEngine()
+    visible = TrackedDetection(20, BBox(1320, 120, 1560, 520), 30)
+    stale_speaker = ActiveSpeakerResult(
+        segments=[],
+        dominant_speaker_id=0,
+        dominant_ratio=1.0,
+        per_frame_speaker={30: 0},
+        total_speakers=2,
+    )
+
+    center, detection, position_id, source = engine._choose_panning_target_x(
+        frame_faces=[visible.bbox.center_x],
+        frame_tracked=[visible],
+        speaker_result=stale_speaker,
+        frame_idx_approx=30,
+        position_targets={1: 1440},
+        position_target_profiles={},
+        track_to_position={20: 1},
+        frame_width=1920,
+        frame_height=1080,
+    )
+
+    assert center == visible.bbox.center_x
+    assert detection is visible
+    assert position_id == 1
+    assert source == "only_visible_person"
+
+
 def test_head_motion_is_keyed_after_stable_id_assignment():
     detector = ActiveSpeakerDetector()
     frame_data = [

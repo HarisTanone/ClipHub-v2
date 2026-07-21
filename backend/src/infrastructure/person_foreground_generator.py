@@ -188,7 +188,10 @@ class PersonForegroundGenerator:
                 coverage = len(generated) / max(1, expected)
                 # Tracking effects use a lower threshold (no PNG needed, just bbox metadata).
                 # With 3x subsampling, expected generated frames = expected/3, so adjust threshold.
-                min_coverage = 0.90 if needs_png else 0.20
+                # A mostly valid behind-person sequence is usable, but never
+                # hide long detector gaps with one old PNG: that makes the
+                # foreground person visibly freeze while text keeps moving.
+                min_coverage = 0.70 if needs_png else 0.20
                 if coverage < min_coverage:
                     event["effect"] = "spotlight"
                     event["fallback_reason"] = "insufficient_person_mask"
@@ -199,14 +202,17 @@ class PersonForegroundGenerator:
                     )
                     continue
 
-                # Fill rare single-frame misses with the nearest successful mask.
+                # Fill only tiny misses. Long misses intentionally have no
+                # foreground frame instead of holding a stale person image.
                 available = sorted(generated)
                 frames = []
                 for frame_number in range(start_frame, end_frame + 1):
                     nearest = frame_number if frame_number in generated else min(
                         available, key=lambda candidate: abs(candidate - frame_number)
                     )
-                    frames.append({**generated[nearest], "frame": frame_number})
+                    max_fill_gap = 2 if needs_png else frame_step
+                    if abs(nearest - frame_number) <= max_fill_gap:
+                        frames.append({**generated[nearest], "frame": frame_number})
                 event["foreground_frames"] = frames
                 event["source_width"] = width
                 event["source_height"] = height

@@ -506,6 +506,7 @@ export function NewJob() {
               isSuperadmin={user?.is_superadmin}
               isPremium={user?.is_premium}
               userFeatures={user?.features}
+              aiTextEnabled={textEmphasisEnabled}
               activePresetId={activePresetId}
               onPresetSelect={(id) => {
                 setActivePresetId(id);

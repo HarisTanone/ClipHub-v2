@@ -892,9 +892,10 @@ interface StyleEditorModalProps {
   processing?: boolean;
   processProgress?: { stage: string; percentage: number };
   aiTextPreviewContext?: { jobId: string; clipRank: number; frame: number };
+  aiTextEnabled?: boolean;
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => {}, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress, aiTextPreviewContext }: StyleEditorModalProps) {
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => {}, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress, aiTextPreviewContext, aiTextEnabled = true }: StyleEditorModalProps) {
   const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
@@ -1034,7 +1035,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
       </div>
     );
   }
@@ -1069,7 +1070,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
           </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
         </div>
       </div>
     </div>
@@ -1078,25 +1079,47 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
 
 // ─── Other Tab (Transition + AI Text combined) ────────────────────────────────
 
-function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisChange, thumbnailUrl, aiTextPreviewContext }: {
+function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisChange, thumbnailUrl, aiTextPreviewContext, aiTextEnabled }: {
   hookStyle: HookStyle;
   textEmphasisStyle: TextEmphasisStyle;
   onHookChange: (s: HookStyle) => void;
   onTextEmphasisChange: (s: TextEmphasisStyle) => void;
   thumbnailUrl?: string;
   aiTextPreviewContext?: { jobId: string; clipRank: number; frame: number };
+  aiTextEnabled: boolean;
 }) {
   const [subTab, setSubTab] = useState<"transition" | "ai_text">("transition");
+
+  useEffect(() => {
+    if (!aiTextEnabled && subTab === "ai_text") setSubTab("transition");
+  }, [aiTextEnabled, subTab]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center gap-1 px-4 pt-3 pb-2 shrink-0 border-b border-zinc-800/60">
         <button type="button" onClick={() => setSubTab("transition")} className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "transition" ? "bg-emerald-600 text-white" : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800")}>
           <MoveRight className="h-3 w-3" />Transition
         </button>
-        <button type="button" onClick={() => setSubTab("ai_text")} className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "ai_text" ? "bg-emerald-600 text-white" : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800")}>
+        <button
+          type="button"
+          onClick={() => setSubTab("ai_text")}
+          disabled={!aiTextEnabled}
+          aria-disabled={!aiTextEnabled}
+          title={!aiTextEnabled ? "Aktifkan AI Cinematic Text untuk membuka pengaturan AI Text" : undefined}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+            !aiTextEnabled
+              ? "cursor-not-allowed bg-zinc-900/60 text-zinc-600 opacity-60"
+              : subTab === "ai_text"
+                ? "bg-emerald-600 text-white"
+                : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800",
+          )}
+        >
           <Layers className="h-3 w-3" />AI Text
         </button>
-        <span className="ml-auto text-[9px] text-zinc-600">Applied to preview &amp; final render</span>
+        <span className="ml-auto text-[9px] text-zinc-600">
+          {aiTextEnabled ? "Applied to preview & final render" : "Aktifkan AI Cinematic Text untuk mengatur AI Text"}
+        </span>
       </div>
       <div className="flex-1 overflow-hidden">
         {subTab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} previewContext={aiTextPreviewContext} />}

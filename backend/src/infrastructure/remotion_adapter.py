@@ -15,6 +15,7 @@ import aiohttp
 from aiohttp import ClientError, ClientTimeout
 
 from src.config import settings
+from src.infrastructure.media_timeline import probe_media_timeline
 from src.domain.interfaces_remotion import (
     IRemotionRenderer,
     RemotionRenderConfig,
@@ -89,9 +90,23 @@ class RemotionAdapter(IRemotionRenderer):
             )
         
         # Calculate duration in frames from scene graph
-        clip_duration = scene_graph.get("duration") or scene_graph.get("clip_duration", 30)
+        clip_duration = float(scene_graph.get("duration") or scene_graph.get("clip_duration", 30))
+        # Reframe/transition output can be a few frames shorter than the logical
+        # clip. Rendering beyond the actual video makes OffthreadVideo hold its
+        # final frame while subtitles and AI text continue (apparent freeze).
+        media_timeline = probe_media_timeline(video_path) if video_path else None
+        if media_timeline and media_timeline.video_duration > 0:
+            actual_duration = float(media_timeline.video_duration)
+            if actual_duration + 0.01 < clip_duration:
+                logger.warning(
+                    "[Remotion] clip %s: limiting %.3fs composition to %.3fs input video",
+                    clip_rank,
+                    clip_duration,
+                    actual_duration,
+                )
+            clip_duration = min(clip_duration, actual_duration)
         fps = config.framerate
-        duration_in_frames = int(clip_duration * fps)
+        duration_in_frames = max(1, int(clip_duration * fps))
         
         # Use directly passed words (from Whisper), fallback to scene_graph
         render_words = words or []

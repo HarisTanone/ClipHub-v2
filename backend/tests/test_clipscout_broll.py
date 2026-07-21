@@ -17,6 +17,7 @@ from src.infrastructure.clipscout_client import (
 )
 from src.infrastructure.clipscout_ai_selector import ClipScoutAISelector
 from src.infrastructure.video_splicer import VideoSplicer
+from src.infrastructure.media_timeline import MediaTimeline
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -290,6 +291,63 @@ class TestVideoSplicer:
         ]
         result = asyncio.run(splicer.splice("/tmp/nonexistent.mp4", segments, "/tmp/out.mp4"))
         assert result == "/tmp/nonexistent.mp4"
+
+    def test_splice_all_aborts_when_final_source_part_fails(self, tmp_path):
+        """A failed long tail must not become a successful truncated output."""
+        splicer = VideoSplicer()
+        source = tmp_path / "source.mp4"
+        footage = tmp_path / "footage.mp4"
+        source.write_bytes(b"source")
+        footage.write_bytes(b"footage")
+        segment = SpliceSegment(
+            footage_path=str(footage), at_time=30.0, duration=2.5,
+            keyword="test", source_id="1", platform="youtube",
+        )
+
+        async def extract(_source, start, end, output):
+            if end == pytest.approx(98.8):
+                return False
+            open(output, "wb").close()
+            return True
+
+        with patch(
+            "src.infrastructure.video_splicer.probe_media_timeline",
+            return_value=MediaTimeline(98.8, 0.0, 98.8, 0.0, 98.8),
+        ):
+            splicer._extract_video_segment = AsyncMock(side_effect=extract)
+            result = asyncio.run(splicer._splice_all(
+                str(source), [segment], str(tmp_path / "out.mp4"),
+                str(tmp_path), [],
+            ))
+
+        assert result is None
+        assert splicer._extract_video_segment.await_count == 2
+
+    def test_validate_sync_rejects_truncated_video(self):
+        """Regression: 32.2s video with 98.8s audio must be rejected."""
+        source_timeline = MediaTimeline(98.8, 0.0, 98.8, 0.0, 98.8)
+        output_timeline = MediaTimeline(98.8, 0.0, 32.2, 0.0, 98.8)
+
+        with patch(
+            "src.infrastructure.video_splicer.probe_media_timeline",
+            side_effect=[source_timeline, output_timeline],
+        ), patch(
+            "src.infrastructure.video_splicer.timeline_is_safe",
+            return_value=False,
+        ) as safe:
+            assert VideoSplicer()._validate_sync("output.mp4", "source.mp4") is False
+
+        safe.assert_called_once_with(
+            "output.mp4", expected_duration=98.8, max_start_drift=0.1,
+            max_end_drift=0.25, max_duration_error=0.25,
+        )
+
+    def test_validate_sync_fails_closed_when_probe_fails(self):
+        with patch(
+            "src.infrastructure.video_splicer.probe_media_timeline",
+            return_value=None,
+        ):
+            assert VideoSplicer()._validate_sync("output.mp4", "source.mp4") is False
 
 
 # ─── Task 9.4: Fallback Chain Tests ───────────────────────────────────────────

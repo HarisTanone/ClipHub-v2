@@ -116,6 +116,20 @@ class TestDetectThenSwitch:
         # Ghost elimination / separation should keep this single
         assert decision["layout"] == "single"
 
+    def test_person_first_rejects_two_ids_on_the_same_physical_person(self):
+        # Regression: person-first used to trust distinct seat/track IDs and
+        # could put two overlapping detections of one person in both panels.
+        frames = []
+        for i in range(TOTAL_FRAMES):
+            frames.append([
+                make_det(1, 900, 400, 300, 360, i),
+                make_det(2, 1010, 405, 300, 360, i),
+            ])
+
+        _, decision = decide(self.engine, frames, skip_ghost_pair_check=True)
+
+        assert decision["layout"] == "single"
+
     def test_normalise_layout_events_inserts_leading_single(self):
         events = self.engine._normalise_layout_events([
             {"layout": "double", "start_time": 2.0, "end_time": 10.0}
