@@ -2,7 +2,8 @@
 import asyncio
 import os
 import sys
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,6 +13,7 @@ from src.infrastructure.text_emphasis import (
     anchor_text_emphasis_response,
     normalise_text_emphasis_style,
 )
+from src.infrastructure.person_foreground_generator import PersonForegroundGenerator
 from src.presentation.schemas.jobs import UploadJobOptions
 
 
@@ -181,3 +183,15 @@ def test_anchor_accepts_new_effect_from_ai():
     effects = [event["effect"] for event in result[1]]
     assert "around_head" in effects
     assert "floating_text" in effects
+
+
+def test_foreground_generator_loads_configured_yolo_segmentation_model():
+    fake_yolo = MagicMock(return_value=object())
+    fake_module = SimpleNamespace(YOLO=fake_yolo)
+    generator = PersonForegroundGenerator(model_path="/models/yolo11n-seg.pt")
+
+    with patch.dict(sys.modules, {"ultralytics": fake_module}):
+        loaded = generator._load_model()
+
+    fake_yolo.assert_called_once_with("/models/yolo11n-seg.pt")
+    assert loaded is generator._model

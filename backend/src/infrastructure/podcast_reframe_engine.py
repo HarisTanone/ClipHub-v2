@@ -555,6 +555,23 @@ class PodcastReframeEngine(IReframeEngine):
                         )
                         if dynamic_grid:
                             return dynamic_grid
+                        # A valid, identity-safe grid decision must remain a grid
+                        # even when FFmpeg rejects the dynamic transition graph.
+                        # Falling through to single-person panning makes the UI
+                        # Auto Grid toggle appear to do nothing.
+                        logger.warning(
+                            "podcast_reframe: dynamic grid unavailable; "
+                            "falling back to static double grid"
+                        )
+                        static_grid = self._render_double_grid(
+                            video_path, output_path, width, height, grid_decision
+                        )
+                        if static_grid:
+                            return static_grid
+                        logger.warning(
+                            "podcast_reframe: static grid fallback also failed; "
+                            "continuing with safe single-person framing"
+                        )
                     if layout_events and layout_events[0].get("layout") == "double" and layouts == {"double"}:
                         return self._render_double_grid(
                             video_path, output_path, width, height, grid_decision
@@ -2678,10 +2695,16 @@ class PodcastReframeEngine(IReframeEngine):
                 f"source={stabilized[0][3]}"
             )
         else:
+            # Layout cuts and camera movement are separate concerns.  A hard
+            # layout cut is fine, but snapping the crop between noisy detector
+            # samples creates visible left/right jumps.  Interpolate crop X on
+            # every output frame even when the selected layout style is `cut`.
+            camera_style = "slide" if transition_style == "cut" else transition_style
+            camera_transition = max(0.45, transition_duration)
             crop_x_expr = self._build_panning_expression(
                 [(t, x) for t, x, _, _ in stabilized],
-                transition_duration,
-                transition_style,
+                camera_transition,
+                camera_style,
             )
             for i, (t, x, speaker_id, source) in enumerate(stabilized):
                 logger.info(
@@ -2829,22 +2852,23 @@ class PodcastReframeEngine(IReframeEngine):
             "[0:v]setpts=PTS-STARTPTS,split=3[single_src][top_src][bottom_src]",
             (
                 f"[single_src]crop={single_crop_w}:{height}:{single_x_expr}:0,"
-                f"scale=1080:1920:flags=lanczos,format=yuv420p,"
-                f"fps={fps_value:.6f},settb=AVTB[single]"
+                f"scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1,"
+                f"fps={fps_value:.6f},settb=AVTB,setpts=PTS-STARTPTS[single]"
             ),
             (
                 f"[top_src]crop={crop_w}:{crop_h}:{top_x}:{top_y},"
                 f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,"
-                "format=yuv420p[top]"
+                "format=yuv420p,setsar=1[top]"
             ),
             (
                 f"[bottom_src]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},"
                 f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,"
-                "format=yuv420p[bottom]"
+                "format=yuv420p,setsar=1[bottom]"
             ),
             (
-                f"[top][bottom]vstack=inputs=2,format=yuv420p,"
-                f"fps={fps_value:.6f},settb=AVTB[grid]"
+                f"[top][bottom]vstack=inputs=2,scale=1080:1920:flags=lanczos,"
+                f"format=yuv420p,setsar=1,fps={fps_value:.6f},"
+                "settb=AVTB,setpts=PTS-STARTPTS[grid]"
             ),
             transition_graph,
         ]
@@ -2995,7 +3019,8 @@ class PodcastReframeEngine(IReframeEngine):
             source_label = source_labels[layout][source_index]
             parts.append(
                 f"[{source_label}]trim=start={segment_start:.6f}:end={segment_end:.6f},"
-                f"setpts=PTS-STARTPTS[layout_seg_{index}]"
+                "setpts=PTS-STARTPTS,format=yuv420p,setsar=1,settb=AVTB"
+                f"[layout_seg_{index}]"
             )
             segment_durations.append(max(0.0, segment_end - segment_start))
 

@@ -3,13 +3,14 @@
 import asyncio
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.domain.entities import AssetResult, BRollSuggestion, VisualCategory
 from src.infrastructure.broll_injector import BRollInjector, TEMPLATE_STYLES
 from src.infrastructure.groq_analyzer import GroqAnalyzer
+from src.infrastructure.asset_fetcher import AssetFetcher
 from src.infrastructure.person_tracker import BBox, TrackedDetection
 from src.infrastructure.podcast_reframe_engine import PodcastReframeEngine
 
@@ -135,3 +136,27 @@ def test_malformed_ai_broll_response_has_sparse_local_fallback():
     assert len(result["1"]) == 1
     assert 3.0 <= result["1"][0]["at_time"] < 11.0
     assert result["1"][0]["visual_category"] == "footage"
+
+
+def test_splice_mode_promotes_motion_graphic_to_footage_fallback(tmp_path):
+    fetcher = AssetFetcher()
+    suggestion = BRollSuggestion(
+        at_time=4.0,
+        keyword="KUKU BERDARAH",
+        template="word_pop_typography",
+        duration=2.0,
+        visual_category=VisualCategory.MOTION_GRAPHIC,
+    )
+    fetcher._fetch_via_clipscout = AsyncMock(return_value=None)
+
+    async def resolve(current, _direction):
+        assert current.visual_category == VisualCategory.FOOTAGE
+        current.asset_result = AssetResult.fallback()
+
+    fetcher._resolve_single = resolve
+    with patch("src.infrastructure.asset_fetcher.settings.BROLL_SPLICE_ENABLED", True), patch(
+        "src.infrastructure.asset_fetcher.settings.ASSET_FETCH_ENABLED", True
+    ):
+        asyncio.run(fetcher.fetch_assets([suggestion]))
+
+    assert suggestion.visual_category == VisualCategory.FOOTAGE

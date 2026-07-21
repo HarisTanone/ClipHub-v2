@@ -483,6 +483,26 @@ def test_layout_transition_graph_honors_selected_style():
     assert cut_output == "layout_out"
 
 
+def test_layout_segments_are_normalized_before_concat():
+    engine = PodcastReframeEngine()
+    graph, _ = engine._build_layout_transition_graph(
+        [
+            {"time": 0.0, "layout": "single"},
+            {"time": 2.0, "layout": "double"},
+            {"time": 5.0, "layout": "single"},
+        ],
+        duration=8.0,
+        transition_style="cut",
+        transition_duration=1.0,
+    )
+
+    # FFmpeg concat requires every input to have compatible pixel format,
+    # sample aspect ratio and timebase. This is the regression for
+    # "Failed to configure output pad on Parsed_concat".
+    assert graph.count("format=yuv420p,setsar=1,settb=AVTB") == 3
+    assert "concat=n=3:v=1:a=0" in graph
+
+
 def test_speaker_panning_cut_snaps_and_slide_interpolates():
     engine = PodcastReframeEngine()
     keyframes = [(0.0, 100), (2.0, 700)]

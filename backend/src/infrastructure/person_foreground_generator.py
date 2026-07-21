@@ -1,4 +1,4 @@
-"""YOLO11-seg foreground PNG generator for text-behind-person events."""
+"""YOLO11-seg foreground PNG generator for cinematic text events."""
 from __future__ import annotations
 
 import asyncio
@@ -43,9 +43,12 @@ class PersonForegroundGenerator:
     def _load_model(self):
         if self._model is not None:
             return self._model
-        
-        import rfdetr
-        self._model = rfdetr.RFDETRSegLarge()
+
+        # RF-DETR releases used by the reframe engine are detection-only and do
+        # not expose RFDETRSegLarge.  Use the segmentation model that is already
+        # configured for this feature instead of guaranteeing a runtime fallback.
+        from ultralytics import YOLO
+        self._model = YOLO(self.model_path)
         return self._model
 
     def _generate_sync(
@@ -82,7 +85,7 @@ class PersonForegroundGenerator:
             model = self._load_model()
         except Exception as exc:
             cap.release()
-            logger.warning("text_emphasis: RF-DETR-Seg unavailable, using spotlight fallback: %s", exc)
+            logger.warning("text_emphasis: YOLO segmentation unavailable, using spotlight fallback: %s", exc)
             return self._downgrade_behind_events(safe_events, "segmentation_unavailable")
 
         os.makedirs(output_dir, exist_ok=True)
@@ -109,18 +112,26 @@ class PersonForegroundGenerator:
                     if not ok:
                         continue
                     try:
-                        preds = model.predict(frame, threshold=float(settings.TEXT_EMPHASIS_SEG_CONFIDENCE))
+                        results = model.predict(
+                            source=frame,
+                            classes=[0],
+                            conf=float(settings.TEXT_EMPHASIS_SEG_CONFIDENCE),
+                            verbose=False,
+                        )
                         person_masks = []
                         person_bboxes = []
-                        for idx in range(len(preds)):
-                            cname = preds.data.get('class_name')[idx] if 'class_name' in preds.data else ""
-                            cid = preds.class_id[idx]
-                            if cname == "person" or cid == 1:
-                                person_masks.append(preds.mask[idx])
-                                if hasattr(preds, 'xyxy') and idx < len(preds.xyxy):
-                                    person_bboxes.append(preds.xyxy[idx])
+                        result = results[0] if results else None
+                        if result is not None and result.masks is not None:
+                            masks = result.masks.data.detach().cpu().numpy()
+                            boxes = (
+                                result.boxes.xyxy.detach().cpu().numpy()
+                                if result.boxes is not None
+                                else []
+                            )
+                            person_masks.extend(masks)
+                            person_bboxes.extend(boxes)
                     except Exception as exc:
-                        logger.warning("text_emphasis: RF-DETR inference failed at frame %s: %s", composition_frame, exc)
+                        logger.warning("text_emphasis: YOLO inference failed at frame %s: %s", composition_frame, exc)
                         continue
 
                     if not person_masks:

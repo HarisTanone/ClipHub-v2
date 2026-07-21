@@ -102,14 +102,11 @@ class AssetFetcher(IAssetFetcher):
             logger.info("[AssetFetcher] Disabled by ASSET_FETCH_ENABLED=false")
             return suggestions
 
-        # Try ClipScout first for footage suggestions (splice mode)
+        # In splice mode the product contract is full-frame footage.  AI visual
+        # categories are useful hints for overlay mode, but must not prevent a
+        # B-roll event from searching footage and ending as 0 timeline splices.
         if settings.BROLL_SPLICE_ENABLED:
-            footage_suggestions = [
-                s for s in suggestions
-                if (s.visual_category == VisualCategory.FOOTAGE
-                    or s.visual_category == VisualCategory.FOOTAGE.value
-                    or not s.visual_category)
-            ]
+            footage_suggestions = list(suggestions)
             if footage_suggestions:
                 try:
                     await self._fetch_via_clipscout(footage_suggestions)
@@ -131,6 +128,9 @@ class AssetFetcher(IAssetFetcher):
             if not s.asset_result and not s.splice_segment
         ]
         if unresolved:
+            if settings.BROLL_SPLICE_ENABLED:
+                for suggestion in unresolved:
+                    suggestion.visual_category = VisualCategory.FOOTAGE
             tasks = [
                 self._resolve_single(s, creative_direction)
                 for s in unresolved
@@ -140,6 +140,38 @@ class AssetFetcher(IAssetFetcher):
                 if isinstance(result, Exception):
                     logger.warning(f"[AssetFetcher] Legacy suggestion {i} failed: {result}")
                     unresolved[i].asset_result = AssetResult.fallback()
+
+        # Direct Pexels/Pixabay clients return downloaded video AssetResults.
+        # Convert those into normalized splice segments as a second route when
+        # ClipScout is unavailable or has no candidates.
+        if settings.BROLL_SPLICE_ENABLED:
+            for index, suggestion in enumerate(suggestions):
+                if suggestion.splice_segment:
+                    continue
+                asset = suggestion.asset_result
+                if not asset or asset.is_fallback or asset.asset_format != "video":
+                    continue
+                processed_path = await self._processor.process(
+                    raw_path=asset.local_path,
+                    target_duration=suggestion.duration,
+                    clip_rank=0,
+                    index=index,
+                    output_dir=os.path.join(settings.OUTPUT_DIR, "broll_footage"),
+                )
+                if processed_path:
+                    suggestion.splice_segment = SpliceSegment(
+                        footage_path=processed_path,
+                        at_time=suggestion.at_time,
+                        duration=suggestion.duration,
+                        keyword=suggestion.keyword,
+                        source_id=asset.asset_id,
+                        platform=asset.source_api,
+                    )
+                    logger.info(
+                        "[AssetFetcher] Direct footage splice ready: '%s' -> %s",
+                        suggestion.keyword,
+                        asset.source_api,
+                    )
 
         return suggestions
 

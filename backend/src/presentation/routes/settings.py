@@ -5,18 +5,66 @@ Endpoints:
 - PUT  /api/settings           — Update user settings
 - GET  /api/settings/system    — Get system info (admin only)
 """
+import json
 import logging
+import os
+import subprocess
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from src.config import settings
 from src.infrastructure.db_connection import get_dict_connection
-from src.presentation.auth_deps import CurrentUser, get_current_user
+from src.presentation.auth_deps import CurrentUser, get_current_user, require_superadmin
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+TEST_SCRIPT_PATH = PROJECT_ROOT / "test.sh"
+TEST_LOG_PATH = PROJECT_ROOT / "logs" / "test.log"
+TEST_STATUS_PATH = PROJECT_ROOT / "logs" / "test-status.json"
+TEST_VIDEO_PATH = PROJECT_ROOT / "clip_test_final.mp4"
+MAX_TEST_LOG_BYTES = 200_000
+
+
+def _read_test_status() -> dict:
+    """Read test status defensively; test.sh writes this file atomically."""
+    default = {
+        "status": "idle",
+        "stage": "not_started",
+        "message": "No test run has been started",
+        "log_available": TEST_LOG_PATH.is_file(),
+        "video_available": TEST_VIDEO_PATH.is_file(),
+        "deploy_requested": False,
+    }
+    if not TEST_STATUS_PATH.is_file():
+        return default
+    try:
+        data = json.loads(TEST_STATUS_PATH.read_text(encoding="utf-8"))
+        return {**default, **data} if isinstance(data, dict) else default
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Unable to read test status file", exc_info=True)
+        return default
+
+
+def _read_test_log_tail() -> str:
+    """Return a bounded UTF-8 tail so a large log cannot exhaust the API."""
+    if not TEST_LOG_PATH.is_file():
+        return ""
+    try:
+        with TEST_LOG_PATH.open("rb") as log_file:
+            log_file.seek(0, os.SEEK_END)
+            size = log_file.tell()
+            log_file.seek(max(0, size - MAX_TEST_LOG_BYTES))
+            content = log_file.read().decode("utf-8", errors="replace")
+        return content if size <= MAX_TEST_LOG_BYTES else "[... log truncated ...]\n" + content
+    except OSError:
+        logger.warning("Unable to read test log", exc_info=True)
+        return ""
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -50,6 +98,84 @@ class SystemInfo(BaseModel):
     gemini_keys_count: int
     cdn_enabled: bool
     asset_fetch_enabled: bool
+
+
+# ─── Pre-deployment test gate (superadmin only) ───────────────────────────────
+
+@router.post("/test-run", status_code=202)
+async def start_test_run(user: CurrentUser = Depends(require_superadmin())):
+    """Start test.sh without deployment; execution continues after this request."""
+    current = _read_test_status()
+    if current.get("status") in {"running", "deploying"}:
+        pid = current.get("pid")
+        if isinstance(pid, int):
+            try:
+                os.kill(pid, 0)
+                raise HTTPException(status_code=409, detail="A test run is already active")
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                raise HTTPException(status_code=409, detail="A test run is already active")
+
+    if not TEST_SCRIPT_PATH.is_file():
+        raise HTTPException(status_code=503, detail="test.sh was not found on the server")
+
+    TEST_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    initial_status = {
+        "status": "running",
+        "stage": "initializing",
+        "message": "Starting test process",
+        "log_available": TEST_LOG_PATH.is_file(),
+        "video_available": TEST_VIDEO_PATH.is_file(),
+        "deploy_requested": False,
+    }
+    try:
+        temp_path = TEST_STATUS_PATH.with_suffix(".json.api.tmp")
+        temp_path.write_text(json.dumps(initial_status), encoding="utf-8")
+        os.replace(temp_path, TEST_STATUS_PATH)
+        process = subprocess.Popen(
+            ["bash", str(TEST_SCRIPT_PATH), "--no-deploy"],
+            cwd=str(PROJECT_ROOT),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        initial_status["pid"] = process.pid
+        initial_status["message"] = "Test process started"
+        # Persist the PID only if test.sh has not already advanced the status.
+        # This prevents a very fast shell failure from being overwritten as running.
+        persisted = json.loads(TEST_STATUS_PATH.read_text(encoding="utf-8"))
+        if persisted.get("message") == "Starting test process" and "pid" not in persisted:
+            temp_path.write_text(json.dumps(initial_status), encoding="utf-8")
+            os.replace(temp_path, TEST_STATUS_PATH)
+    except OSError as exc:
+        logger.exception("Unable to start test.sh")
+        raise HTTPException(status_code=500, detail=f"Unable to start tests: {exc}")
+
+    return {"success": True, "data": initial_status}
+
+
+@router.get("/test-run/status")
+async def get_test_run_status(user: CurrentUser = Depends(require_superadmin())):
+    """Return current state and the bounded tail of the console log."""
+    status_data = _read_test_status()
+    if TEST_VIDEO_PATH.is_file():
+        status_data["video_version"] = int(TEST_VIDEO_PATH.stat().st_mtime)
+    return {"success": True, "data": status_data, "log": _read_test_log_tail()}
+
+
+@router.get("/test-run/video")
+async def get_test_run_video(user: CurrentUser = Depends(require_superadmin())):
+    """Return the latest smoke-test output for authenticated preview."""
+    if not TEST_VIDEO_PATH.is_file():
+        raise HTTPException(status_code=404, detail="clip_test_final.mp4 is not available")
+    return FileResponse(
+        TEST_VIDEO_PATH,
+        media_type="video/mp4",
+        filename="clip_test_final.mp4",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ─── Ensure settings table exists ─────────────────────────────────────────────

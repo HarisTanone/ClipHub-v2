@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap } from "lucide-react";
+import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -166,13 +166,51 @@ async function resetReframeTuning(): Promise<ReframeTuning | null> {
   return data.data || null;
 }
 
+interface TestRunStatus {
+  status: "idle" | "running" | "deploying" | "passed" | "failed";
+  stage: string;
+  message: string;
+  updated_at?: string;
+  video_available: boolean;
+  video_version?: number;
+  deploy_requested: boolean;
+}
+
+async function fetchTestRunStatus(): Promise<{ data: TestRunStatus; log: string } | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/test-run/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function startTestRun(): Promise<TestRunStatus> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/test-run`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || "Failed to start tests");
+  return body.data;
+}
+
+async function fetchTestVideo(): Promise<Blob | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/test-run/video`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.ok ? res.blob() : null;
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "testing">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -202,6 +240,11 @@ export function Settings() {
   const [isSavingReframe, setIsSavingReframe] = useState(false);
   const [isResettingReframe, setIsResettingReframe] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("9:16");
+  const [testStatus, setTestStatus] = useState<TestRunStatus | null>(null);
+  const [testLog, setTestLog] = useState("");
+  const [isStartingTest, setIsStartingTest] = useState(false);
+  const [testVideoUrl, setTestVideoUrl] = useState<string | null>(null);
+  const [testRefreshKey, setTestRefreshKey] = useState(0);
 
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
@@ -215,6 +258,45 @@ export function Settings() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (!isSuperadmin || tab !== "testing") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let currentVideoVersion: number | undefined;
+
+    const refresh = async () => {
+      const result = await fetchTestRunStatus();
+      if (cancelled || !result) return;
+      setTestStatus(result.data);
+      setTestLog(result.log || "");
+
+      if (result.data.video_available && result.data.video_version !== currentVideoVersion) {
+        currentVideoVersion = result.data.video_version;
+        const blob = await fetchTestVideo();
+        if (!cancelled && blob) {
+          const nextUrl = URL.createObjectURL(blob);
+          setTestVideoUrl((previous) => {
+            if (previous) URL.revokeObjectURL(previous);
+            return nextUrl;
+          });
+        }
+      }
+      if (!cancelled && ["running", "deploying"].includes(result.data.status)) {
+        timer = setTimeout(refresh, 2000);
+      }
+    };
+
+    refresh();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [isSuperadmin, tab, testRefreshKey]);
+
+  useEffect(() => () => {
+    if (testVideoUrl) URL.revokeObjectURL(testVideoUrl);
+  }, [testVideoUrl]);
 
   // Whether there are unsaved changes relative to the last persisted snapshot.
   const reframeDirty = !reframeTuningEquals(reframeTuning, reframeBaseline);
@@ -301,11 +383,28 @@ export function Settings() {
     setIsResettingReframe(false);
   }
 
+  async function handleStartTest() {
+    if (!confirm("Run all server tests now? Deployment will NOT run from this button.")) return;
+    setIsStartingTest(true);
+    try {
+      const status = await startTestRun();
+      setTestStatus(status);
+      setTestLog("");
+      setTestRefreshKey((value) => value + 1);
+      toast.success("Server tests started");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to start tests");
+    } finally {
+      setIsStartingTest(false);
+    }
+  }
+
 
   const tabs = [
     { id: "general" as const, label: "General" },
     { id: "reframe" as const, label: "Reframe Tuning" },
     ...(isSuperadmin ? [{ id: "render" as const, label: "Render Engine" }] : []),
+    ...(isSuperadmin ? [{ id: "testing" as const, label: "Test & Deploy" }] : []),
     ...(isSuperadmin ? [{ id: "users" as const, label: "Users" }] : []),
   ];
 
@@ -324,7 +423,7 @@ export function Settings() {
             ))}
           </div>
         </div>
-        {tab === "users" ? null : tab === "reframe" ? (
+        {tab === "users" || tab === "testing" ? null : tab === "reframe" ? (
           <div className="flex items-center gap-2">
             {reframeDirty && <span className="text-[10px] text-amber-400 font-medium mr-1">Unsaved changes</span>}
             <Button onClick={handleRestoreReframeDefaults} loading={isResettingReframe} size="sm" variant="outline">Restore Defaults</Button>
@@ -540,6 +639,89 @@ export function Settings() {
                   <UserRow key={u.id} user={u} isSuperadmin={isSuperadmin} onDelete={handleDeleteUser} toast={toast} />
                 ))}
               </div>
+            </Card>
+          </div>
+        )}
+
+        {tab === "testing" && isSuperadmin && (
+          <div className="max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-4">
+              <Card className="p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Terminal className="h-4 w-4 text-emerald-400" />
+                      <h3 className="text-sm font-semibold text-zinc-100">Server Test Gate</h3>
+                      {testStatus && (
+                        <Badge
+                          variant={testStatus.status === "passed" ? "success" : testStatus.status === "failed" ? "error" : testStatus.status === "running" || testStatus.status === "deploying" ? "warning" : "default"}
+                          dot
+                        >
+                          {testStatus.status}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-zinc-500">
+                      Menjalankan backend, frontend, Remotion, build, dan smoke test clip_01.mp4.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={handleStartTest}
+                    loading={isStartingTest}
+                    disabled={testStatus?.status === "running" || testStatus?.status === "deploying"}
+                    icon={<Play className="h-3.5 w-3.5" />}
+                  >
+                    Run Tests
+                  </Button>
+                </div>
+
+                <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                  <div className="flex items-center gap-2">
+                    {testStatus?.status === "passed" ? <CheckCircle2 className="h-4 w-4 text-emerald-400" /> :
+                      testStatus?.status === "failed" ? <XCircle className="h-4 w-4 text-red-400" /> :
+                        <RefreshCw className={cn("h-4 w-4 text-amber-400", testStatus?.status === "running" && "animate-spin")} />}
+                    <div>
+                      <p className="text-xs font-medium text-zinc-200">{testStatus?.stage || "Not started"}</p>
+                      <p className="text-[10px] text-zinc-500">{testStatus?.message || "Click Run Tests to begin"}</p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-[10px] text-zinc-600">
+                    Trigger dari halaman ini memakai --no-deploy. Jalankan ./test.sh via SSH untuk test lalu deploy otomatis.
+                  </p>
+                </div>
+              </Card>
+
+              <Card className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-zinc-200">Testing Log</h3>
+                  <span className="text-[10px] text-zinc-600">logs/test.log</span>
+                </div>
+                <pre data-testid="test-run-log" className="h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black p-3 font-mono text-[10px] leading-relaxed text-zinc-300 border border-zinc-800">
+                  {testLog || "Belum ada log testing."}
+                </pre>
+              </Card>
+            </div>
+
+            <Card className="p-4 self-start">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-xs font-semibold text-zinc-200">Result Preview</h3>
+                  <p className="text-[10px] text-zinc-600">clip_test_final.mp4</p>
+                </div>
+                {testStatus?.video_available && <Badge variant="success">Ready</Badge>}
+              </div>
+              {testVideoUrl ? (
+                <video data-testid="test-video-preview" src={testVideoUrl} controls preload="metadata" className="w-full max-h-[680px] rounded-lg bg-black" />
+              ) : (
+                <div className="aspect-[9/16] max-h-[620px] rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 flex items-center justify-center">
+                  <div className="text-center px-6">
+                    <Film className="h-8 w-8 text-zinc-700 mx-auto mb-2" />
+                    <p className="text-xs text-zinc-500">Preview belum tersedia</p>
+                    <p className="text-[10px] text-zinc-700 mt-1">Video muncul setelah smoke test berhasil.</p>
+                  </div>
+                </div>
+              )}
             </Card>
           </div>
         )}
