@@ -1271,14 +1271,23 @@ class PodcastReframeEngine(IReframeEngine):
         detector IDs. A valid pair must have low overlap and meaningful 2-D
         separation relative to the detections' own size. The 2-D check still
         permits front/back podcast seating where X coordinates are similar.
+
+        Nested tight/loose body boxes for one subject (low IoU, high containment)
+        are treated as the same person even when face evidence is missing.
         """
         frame_diagonal = max(1.0, float(np.hypot(width, height)))
         for first in first_detections:
-            first_box = first.person_bbox or first.bbox
             for second in second_detections:
                 if int(first.track_id) == int(second.track_id):
                     continue
-                second_box = second.person_bbox or second.bbox
+                # Prefer face boxes when both exist — one subject can get two
+                # differently-sized body boxes but only one real head.
+                if first.face_bbox is not None and second.face_bbox is not None:
+                    first_box = first.face_bbox
+                    second_box = second.face_bbox
+                else:
+                    first_box = first.person_bbox or first.bbox
+                    second_box = second.person_bbox or second.bbox
                 intersection_w = max(
                     0.0,
                     min(first_box.x2, second_box.x2) - max(first_box.x1, second_box.x1),
@@ -1290,10 +1299,29 @@ class PodcastReframeEngine(IReframeEngine):
                 intersection = intersection_w * intersection_h
                 union = max(1.0, first_box.area + second_box.area - intersection)
                 iou = intersection / union
+                containment = intersection / max(
+                    1.0,
+                    min(first_box.area, second_box.area),
+                )
                 distance = float(np.hypot(
                     first_box.center_x - second_box.center_x,
                     first_box.center_y - second_box.center_y,
                 ))
+                larger_diagonal = max(
+                    1.0,
+                    float(
+                        np.hypot(
+                            max(first_box.width, second_box.width),
+                            max(first_box.height, second_box.height),
+                        )
+                    ),
+                )
+                # Same person: high IoU OR nested box with close centers.
+                if iou >= self.GHOST_IOU_THRESHOLD or (
+                    containment >= 0.88
+                    and distance / larger_diagonal <= 0.22
+                ):
+                    continue
                 own_scale = max(
                     1.0,
                     min(
@@ -1301,7 +1329,7 @@ class PodcastReframeEngine(IReframeEngine):
                         max(second_box.width, second_box.height),
                     ),
                 )
-                if iou < self.GHOST_IOU_THRESHOLD and (
+                if (
                     distance >= own_scale * 0.45
                     or distance / frame_diagonal >= self.MIN_SEPARATION_RATIO
                 ):
@@ -3356,6 +3384,19 @@ class PodcastReframeEngine(IReframeEngine):
 
         return sorted(selected, key=lambda b: (b.center_x, b.center_y))
 
+    def _filter_duplicate_person_detections(
+        self,
+        detections: List[Tuple[float, float, float, float, float]],
+    ) -> List[Tuple[float, float, float, float, float]]:
+        """Suppress duplicate body detections before they create tracker IDs.
+
+        Shared with PersonDetector so both the legacy and person-first paths
+        use the same nested/tight-loose suppression rules.
+        """
+        from src.infrastructure.person_detector import filter_duplicate_person_boxes
+
+        return filter_duplicate_person_boxes(detections)
+
     @staticmethod
     def _compute_iou(box_a: 'BBox', box_b: 'BBox') -> float:
         """Compute IoU between two BBox instances."""
@@ -3378,7 +3419,7 @@ class PodcastReframeEngine(IReframeEngine):
     ) -> bool:
         """Check if two position profiles represent the same person (ghost pair).
 
-        Uses IoU overlap and center distance proximity to detect duplicates.
+        Uses IoU, nested containment, and center distance proximity.
         Profile values are in PIXELS (center_x, center_y, width, height).
         """
         ax, ay = prof_a.get("x", 0), prof_a.get("y", 0)
@@ -3394,9 +3435,44 @@ class PodcastReframeEngine(IReframeEngine):
         if iou > self.GHOST_IOU_THRESHOLD:
             return True
 
+        # Nested tight/loose body boxes: low IoU but high containment.
+        intersection_w = max(0.0, min(box_a.x2, box_b.x2) - max(box_a.x1, box_b.x1))
+        intersection_h = max(0.0, min(box_a.y2, box_b.y2) - max(box_a.y1, box_b.y1))
+        intersection = intersection_w * intersection_h
+        containment = intersection / max(1.0, min(box_a.area, box_b.area))
+        larger_diagonal = max(
+            1.0,
+            float(np.hypot(max(box_a.width, box_b.width), max(box_a.height, box_b.height))),
+        )
+        center_dist = float(np.hypot(ax - bx, ay - by))
+        if containment >= 0.88 and center_dist / larger_diagonal <= 0.22:
+            return True
+
+        # Shared face evidence: two body tracks resolving to one head.
+        if (
+            "face_x" in prof_a
+            and "face_y" in prof_a
+            and "face_x" in prof_b
+            and "face_y" in prof_b
+        ):
+            face_dist = float(
+                np.hypot(
+                    float(prof_a["face_x"]) - float(prof_b["face_x"]),
+                    float(prof_a["face_y"]) - float(prof_b["face_y"]),
+                )
+            )
+            face_scale = max(
+                1.0,
+                min(
+                    max(float(prof_a.get("face_width", 0)), float(prof_a.get("face_height", 0))),
+                    max(float(prof_b.get("face_width", 0)), float(prof_b.get("face_height", 0))),
+                ),
+            )
+            if face_dist <= face_scale * 0.55:
+                return True
+
         # Center distance proximity check
         frame_diag = (width**2 + height**2) ** 0.5
-        center_dist = ((ax - bx)**2 + (ay - by)**2) ** 0.5
         if frame_diag > 0:
             dist_ratio = center_dist / frame_diag
             # Tight threshold: unconditional ghost
@@ -3747,6 +3823,10 @@ class PodcastReframeEngine(IReframeEngine):
                             bbox = det.bounding_box
                             person_bboxes.append((bbox.origin_x, bbox.origin_y, bbox.origin_x + bbox.width, bbox.origin_y + bbox.height, 0.99))
 
+            # RF-DETR/YOLO may emit nested tight/loose boxes for one subject.
+            # Suppress those before ByteTrack assigns persistent IDs.
+            person_bboxes = self._filter_duplicate_person_detections(person_bboxes)
+
             # Log first frame detection details for debugging
             if len(sample_frame_indices) == 0 and person_bboxes:
                 logger.info(
@@ -3999,27 +4079,59 @@ class PodcastReframeEngine(IReframeEngine):
         }
 
         # Ghost elimination for person-first mode:
-        # Only filter by SIZE (remove noise/small detections).
-        # Do NOT filter by proximity/IoU — close speakers are legitimate in face-to-face setups.
-        if len(stable_position_profiles) > 2:
+        # 1) Drop tiny noise tracks by size.
+        # 2) Collapse nested tight/loose body boxes and same-face track fragments.
+        # Do NOT use broad proximity merges that would fuse face-to-face speakers.
+        if len(stable_position_profiles) >= 2:
             max_area = max(
                 p.get("area", p.get("width", 0) * p.get("height", 0))
                 for p in stable_position_profiles.values()
             )
 
             ghost_track_ids: set = set()
-            for track_id, profile in stable_position_profiles.items():
-                track_area = profile.get("area", profile.get("width", 0) * profile.get("height", 0))
+            sorted_by_area = sorted(
+                stable_position_profiles.items(),
+                key=lambda kv: kv[1].get(
+                    "area", kv[1].get("width", 0) * kv[1].get("height", 0)
+                ),
+                reverse=True,
+            )
 
-                # Filter: area ratio too small compared to largest track
-                # Use a fair threshold: must be at least 25% the size of the largest person
-                if max_area > 0 and track_area / max_area < 0.25:
+            for track_id, profile in sorted_by_area:
+                track_area = profile.get(
+                    "area", profile.get("width", 0) * profile.get("height", 0)
+                )
+                # Size filter only when 3+ tracks (noise fragments).
+                if (
+                    len(stable_position_profiles) > 2
+                    and max_area > 0
+                    and track_area / max_area < 0.25
+                ):
                     ghost_track_ids.add(track_id)
+                    continue
+
+                # Nested / same-face duplicates against a larger surviving track.
+                for valid_id, valid_profile in sorted_by_area:
+                    if valid_id == track_id or valid_id in ghost_track_ids:
+                        continue
+                    valid_area = valid_profile.get(
+                        "area",
+                        valid_profile.get("width", 0) * valid_profile.get("height", 0),
+                    )
+                    if valid_area < track_area:
+                        continue
+                    if self._is_ghost_pair(profile, valid_profile, width, height):
+                        ghost_track_ids.add(track_id)
+                        break
 
             if ghost_track_ids:
-                logger.info(f"podcast_reframe: ghost elimination removed tracks: {ghost_track_ids}")
+                logger.info(
+                    f"podcast_reframe: person-first ghost elimination removed tracks: "
+                    f"{ghost_track_ids}"
+                )
                 stable_position_profiles = {
-                    tid: prof for tid, prof in stable_position_profiles.items()
+                    tid: prof
+                    for tid, prof in stable_position_profiles.items()
                     if tid not in ghost_track_ids
                 }
                 stable_positions = {
@@ -4027,13 +4139,14 @@ class PodcastReframeEngine(IReframeEngine):
                     for tid, profile in stable_position_profiles.items()
                 }
                 filtered = {
-                    tid: vals for tid, vals in filtered.items()
+                    tid: vals
+                    for tid, vals in filtered.items()
                     if tid not in ghost_track_ids
                 }
 
-        # Person-first mode: ByteTrack/BoT-SORT with ReID already ensures
-        # unique track IDs = unique persons. No need to re-cluster them,
-        # which can merge two people sitting face-to-face from a center camera.
+        # Person-first mode: surviving track IDs map 1:1 to seats. Nested
+        # duplicates are already collapsed above so we do not re-cluster seats
+        # (which can merge two face-to-face speakers from a center camera).
         clusters: List[dict] = []
         for track_id, profile in sorted(
             stable_position_profiles.items(),

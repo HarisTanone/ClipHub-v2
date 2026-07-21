@@ -16,12 +16,88 @@ Design:
   - Confidence threshold configurable via settings.PERSON_CONF_THRESHOLD
 """
 import logging
+import math
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+PersonBox = Tuple[float, float, float, float, float]
+
+
+def filter_duplicate_person_boxes(
+    detections: Sequence[PersonBox],
+) -> List[PersonBox]:
+    """Suppress nested/tight-loose body boxes before tracker ID assignment.
+
+    IoU-only NMS misses nested boxes whose areas differ substantially, so
+    containment and normalized center distance are considered as well.
+    """
+    if len(detections) < 2:
+        return list(detections)
+
+    selected: List[PersonBox] = []
+    ordered = sorted(
+        detections,
+        key=lambda det: (
+            float(det[4]),
+            (float(det[2]) - float(det[0])) * (float(det[3]) - float(det[1])),
+        ),
+        reverse=True,
+    )
+    for detection in ordered:
+        x1, y1, x2, y2, _conf = map(float, detection)
+        width = max(0.0, x2 - x1)
+        height = max(0.0, y2 - y1)
+        area = width * height
+        center_x = (x1 + x2) / 2.0
+        center_y = (y1 + y2) / 2.0
+        is_duplicate = False
+        for existing in selected:
+            ex1, ey1, ex2, ey2, _ = map(float, existing)
+            e_width = max(0.0, ex2 - ex1)
+            e_height = max(0.0, ey2 - ey1)
+            e_area = e_width * e_height
+            inter_w = max(0.0, min(x2, ex2) - max(x1, ex1))
+            inter_h = max(0.0, min(y2, ey2) - max(y1, ey1))
+            intersection = inter_w * inter_h
+            union = max(1.0, area + e_area - intersection)
+            iou = intersection / union
+            containment = intersection / max(1.0, min(area, e_area))
+            larger_diagonal = max(
+                1.0,
+                math.hypot(max(width, e_width), max(height, e_height)),
+            )
+            center_distance = math.hypot(
+                center_x - (ex1 + ex2) / 2.0,
+                center_y - (ey1 + ey2) / 2.0,
+            )
+            if iou >= 0.55 or (
+                containment >= 0.88 and center_distance / larger_diagonal <= 0.22
+            ):
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            selected.append(
+                (
+                    float(detection[0]),
+                    float(detection[1]),
+                    float(detection[2]),
+                    float(detection[3]),
+                    float(detection[4]),
+                )
+            )
+
+    return sorted(
+        selected,
+        key=lambda det: (
+            (float(det[0]) + float(det[2])) / 2.0,
+            (float(det[1]) + float(det[3])) / 2.0,
+        ),
+    )
 
 
 @dataclass
@@ -56,6 +132,25 @@ class PersonDetection:
     def to_xyxy(self) -> tuple:
         """Return (x1, y1, x2, y2) tuple."""
         return (self.bbox_x1, self.bbox_y1, self.bbox_x2, self.bbox_y2)
+
+    def to_box_tuple(self) -> PersonBox:
+        return (
+            self.bbox_x1,
+            self.bbox_y1,
+            self.bbox_x2,
+            self.bbox_y2,
+            self.confidence,
+        )
+
+    @classmethod
+    def from_box_tuple(cls, box: PersonBox) -> "PersonDetection":
+        return cls(
+            bbox_x1=float(box[0]),
+            bbox_y1=float(box[1]),
+            bbox_x2=float(box[2]),
+            bbox_y2=float(box[3]),
+            confidence=float(box[4]),
+        )
 
 
 class PersonDetector:
@@ -191,6 +286,12 @@ class PersonDetector:
         except Exception as e:
             logger.warning(f"person_detector: inference error: {e}")
             return []
+
+        # Nested tight/loose boxes for one subject must not become two tracks.
+        filtered = filter_duplicate_person_boxes(
+            [det.to_box_tuple() for det in detections]
+        )
+        detections = [PersonDetection.from_box_tuple(box) for box in filtered]
 
         # Sort by area descending (largest person first)
         detections.sort(key=lambda d: d.area, reverse=True)

@@ -93,3 +93,31 @@ def test_person_first_position_model():
     assert pos_model["stable_positions"][1] == 800.0
     assert pos_model["track_to_position"][0] == 0
     assert pos_model["track_to_position"][1] == 1
+
+
+def test_duplicate_nested_person_detections_are_suppressed_before_tracking():
+    from src.infrastructure.person_detector import filter_duplicate_person_boxes
+
+    engine = PodcastReframeEngine()
+    detections = [
+        (100.0, 80.0, 1300.0, 1000.0, 0.95),
+        (800.0, 230.0, 1200.0, 780.0, 0.80),
+    ]
+
+    # Shared helper (person-first PersonDetector path) and engine wrapper
+    # (legacy podcast path) must agree.
+    assert filter_duplicate_person_boxes(detections) == [detections[0]]
+    assert engine._filter_duplicate_person_detections(detections) == [detections[0]]
+
+
+def test_separate_person_detections_are_preserved_before_tracking():
+    from src.infrastructure.person_detector import filter_duplicate_person_boxes
+
+    engine = PodcastReframeEngine()
+    detections = [
+        (100.0, 100.0, 700.0, 1000.0, 0.94),
+        (1100.0, 120.0, 1750.0, 1000.0, 0.92),
+    ]
+
+    assert filter_duplicate_person_boxes(detections) == detections
+    assert engine._filter_duplicate_person_detections(detections) == detections

@@ -243,6 +243,15 @@ echo "  Validating backend imports and syntax..."
 ./venv/bin/python -c "from src.presentation.api import app; assert app.routes"
 echo "  ✅ Backend validation passed"
 
+# Keep the server-side pre-deployment test gate ready. Test dependencies are
+# isolated from runtime requirements but installed into the backend venv that
+# test.sh and the systemd backend service consistently use.
+if [ -f "requirements-dev.txt" ]; then
+    echo "  Installing backend test dependencies..."
+    ./venv/bin/pip install -r requirements-dev.txt -q
+    echo "  ✅ Backend test dependencies ready"
+fi
+
 # GPU: Install PyTorch with CUDA 12.1 (compatible with NVIDIA driver 535+)
 # This enables GPU acceleration for: Faster-Whisper, YOLO, torchaudio
 if command -v nvidia-smi &>/dev/null; then

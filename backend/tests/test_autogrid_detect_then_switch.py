@@ -130,6 +130,92 @@ class TestDetectThenSwitch:
 
         assert decision["layout"] == "single"
 
+    def test_person_first_rejects_fragmented_tracks_pointing_to_same_face(self):
+        # Nested loose/tight body boxes can become separate seats even though
+        # crop detection resolves both tracker IDs to the same physical face.
+        frames = []
+        for i in range(TOTAL_FRAMES):
+            shared_face = make_bbox(960, 250, 120, 140)
+            frames.append([
+                TrackedDetection(
+                    track_id=1,
+                    bbox=BBox(100, 80, 1300, 1000),
+                    frame_idx=i,
+                    face_bbox=shared_face,
+                ),
+                TrackedDetection(
+                    track_id=2,
+                    bbox=BBox(800, 230, 1200, 780),
+                    frame_idx=i,
+                    face_bbox=shared_face,
+                ),
+            ])
+
+        model = self.engine._build_position_model_person_first(
+            frames, FRAME_WIDTH, FRAME_HEIGHT
+        )
+        tracked = {
+            **model,
+            "per_frame_tracked": frames,
+            "sample_timestamps": [
+                i * self.engine.SAMPLE_INTERVAL_SEC for i in range(TOTAL_FRAMES)
+            ],
+        }
+        decision = self.engine._decide_autogrid_layout(
+            tracked_data=tracked,
+            speaker_result=None,
+            width=FRAME_WIDTH,
+            height=FRAME_HEIGHT,
+            skip_ghost_pair_check=True,
+        )
+
+        assert model["person_count"] == 1
+        assert decision["layout"] == "single"
+
+    def test_nested_body_boxes_without_face_are_not_two_people(self):
+        # Nested tight-inside-loose body boxes with no face evidence must not
+        # unlock double layout (IoU alone can be low while containment is high).
+        frames = []
+        for i in range(TOTAL_FRAMES):
+            frames.append([
+                TrackedDetection(
+                    track_id=1,
+                    bbox=BBox(100, 80, 1300, 1000),
+                    frame_idx=i,
+                    person_bbox=BBox(100, 80, 1300, 1000),
+                ),
+                TrackedDetection(
+                    track_id=2,
+                    bbox=BBox(800, 230, 1200, 780),
+                    frame_idx=i,
+                    person_bbox=BBox(800, 230, 1200, 780),
+                ),
+            ])
+
+        assert not self.engine._frame_has_distinct_people(
+            frames[0][:1], frames[0][1:], FRAME_WIDTH, FRAME_HEIGHT
+        )
+
+        model = self.engine._build_position_model_person_first(
+            frames, FRAME_WIDTH, FRAME_HEIGHT
+        )
+        tracked = {
+            **model,
+            "per_frame_tracked": frames,
+            "sample_timestamps": [
+                i * self.engine.SAMPLE_INTERVAL_SEC for i in range(TOTAL_FRAMES)
+            ],
+        }
+        decision = self.engine._decide_autogrid_layout(
+            tracked_data=tracked,
+            speaker_result=None,
+            width=FRAME_WIDTH,
+            height=FRAME_HEIGHT,
+            skip_ghost_pair_check=True,
+        )
+        assert model["person_count"] == 1
+        assert decision["layout"] == "single"
+
     def test_normalise_layout_events_inserts_leading_single(self):
         events = self.engine._normalise_layout_events([
             {"layout": "double", "start_time": 2.0, "end_time": 10.0}

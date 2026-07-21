@@ -82,16 +82,24 @@ run_stage() {
   printf '[PASS] %s\n' "${CURRENT_STAGE}"
 }
 
-PYTHON_BIN="${PROJECT_ROOT}/venv/bin/python"
-[[ -x "${PYTHON_BIN}" ]] || PYTHON_BIN="${PROJECT_ROOT}/backend/venv/bin/python"
-[[ -x "${PYTHON_BIN}" ]] || PYTHON_BIN="$(command -v python3 || true)"
+BACKEND_DIR="${PROJECT_ROOT}/backend"
+BACKEND_VENV="${BACKEND_DIR}/venv"
+PYTHON_BIN="${BACKEND_VENV}/bin/python"
+PIP_BIN="${BACKEND_VENV}/bin/pip"
+DEV_REQUIREMENTS="${BACKEND_DIR}/requirements-dev.txt"
 
 printf 'ClipHub pre-deployment test gate\nStarted: %s\nProject: %s\nLog: %s\n' \
   "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "${PROJECT_ROOT}" "${LOG_FILE}"
 write_status "running" "initializing" "Validating server test environment"
 
 CURRENT_STAGE="environment validation"
-[[ -n "${PYTHON_BIN}" && -x "${PYTHON_BIN}" ]] || { echo '[ERROR] Python was not found'; false; }
+[[ -x "${PYTHON_BIN}" ]] || {
+  echo "[ERROR] Backend virtualenv Python was not found: ${PYTHON_BIN}"
+  echo "[ERROR] Run deploy.sh once or create backend/venv and install backend requirements."
+  false
+}
+[[ -x "${PIP_BIN}" ]] || { echo "[ERROR] Backend virtualenv pip was not found: ${PIP_BIN}"; false; }
+[[ -f "${DEV_REQUIREMENTS}" ]] || { echo "[ERROR] Test dependencies file is missing: ${DEV_REQUIREMENTS}"; false; }
 command -v npm >/dev/null || { echo '[ERROR] npm was not found'; false; }
 command -v ffmpeg >/dev/null || { echo '[ERROR] ffmpeg was not found'; false; }
 command -v ffprobe >/dev/null || { echo '[ERROR] ffprobe was not found'; false; }
@@ -100,7 +108,17 @@ command -v ffprobe >/dev/null || { echo '[ERROR] ffprobe was not found'; false; 
 [[ -d "${PROJECT_ROOT}/frontend/node_modules" ]] || { echo '[ERROR] frontend dependencies are missing; run npm ci'; false; }
 [[ -d "${PROJECT_ROOT}/remotion-renderer/node_modules" ]] || { echo '[ERROR] Remotion dependencies are missing; run npm ci'; false; }
 
-run_stage "Backend test suite" bash -c 'cd "$1/backend" && "$2" -m pytest -v --tb=short tests' _ "${PROJECT_ROOT}" "${PYTHON_BIN}"
+printf 'Backend Python: %s\n' "${PYTHON_BIN}"
+printf 'Backend Python version: %s\n' "$("${PYTHON_BIN}" --version 2>&1)"
+if ! "${PYTHON_BIN}" -c 'import pytest, pytest_asyncio' >/dev/null 2>&1; then
+  CURRENT_STAGE="test dependency installation"
+  write_status "running" "${CURRENT_STAGE}" "Installing backend test dependencies"
+  printf '[SETUP] Backend test dependencies are incomplete; installing %s into backend/venv\n' "${DEV_REQUIREMENTS}"
+  "${PIP_BIN}" install -r "${DEV_REQUIREMENTS}"
+fi
+printf 'Pytest version: %s\n' "$("${PYTHON_BIN}" -m pytest --version)"
+
+run_stage "Backend test suite" bash -c 'cd "$1" && "$2" -m pytest -v --tb=short tests' _ "${BACKEND_DIR}" "${PYTHON_BIN}"
 run_stage "Frontend test suite" npm --prefix "${PROJECT_ROOT}/frontend" test
 run_stage "Frontend production build" npm --prefix "${PROJECT_ROOT}/frontend" run build
 run_stage "Remotion test suite" npm --prefix "${PROJECT_ROOT}/remotion-renderer" test
