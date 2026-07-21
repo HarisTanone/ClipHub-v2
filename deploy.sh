@@ -238,6 +238,11 @@ echo "  Syncing Python dependencies..."
 ./venv/bin/pip install -r requirements.txt -q 2>/dev/null || \
     ./venv/bin/pip install -r requirements.txt
 
+echo "  Validating backend imports and syntax..."
+./venv/bin/python -m compileall -q src
+./venv/bin/python -c "from src.presentation.api import app; assert app.routes"
+echo "  ✅ Backend validation passed"
+
 # GPU: Install PyTorch with CUDA 12.1 (compatible with NVIDIA driver 535+)
 # This enables GPU acceleration for: Faster-Whisper, YOLO, torchaudio
 if command -v nvidia-smi &>/dev/null; then
@@ -441,6 +446,8 @@ if [ -d "$REMOTION_DIR" ]; then
     chmod +x "$REMOTION_DIR/node_modules/@remotion/compositor-linux-x64-gnu/remotion" 2>/dev/null || true
     chmod +x "$REMOTION_DIR/node_modules/@remotion/compositor-linux-x64-musl/remotion" 2>/dev/null || true
 
+    echo "  Type-checking Remotion server and compositions..."
+    npm run build
     echo "  ✅ Remotion ready (will re-bundle on service start)"
 else
     echo "  ⚠️  Remotion directory not found at $REMOTION_DIR"
@@ -467,14 +474,14 @@ if [ -d "$FRONTEND_DIR" ]; then
         echo "  ✅ npm dependencies up to date"
     fi
 
-    echo "  Building production bundle..."
-    VITE_API_URL="$PUBLIC_BACKEND_URL" npx vite build 2>/dev/null || \
-        VITE_API_URL="$PUBLIC_BACKEND_URL" npx vite build
+    echo "  Type-checking and building production bundle..."
+    VITE_API_URL="$PUBLIC_BACKEND_URL" npm run build
 
     if [ -d "dist" ] && [ -f "dist/index.html" ]; then
         echo "  ✅ Frontend built"
     else
-        echo "  ⚠️  Frontend build may have failed"
+        echo "  ❌ Frontend build did not produce dist/index.html"
+        exit 1
     fi
 
     # Install serve globally for static file serving

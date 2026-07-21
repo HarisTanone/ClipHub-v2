@@ -1147,6 +1147,12 @@ async def get_clip_detail(
                 or (job.clips_data or {}).get("subtitle_style_config")
                 or {}
             ),
+            "text_emphasis_style_config": (
+                clip_data.get("text_emphasis_style_config_override")
+                or (job.clips_data or {}).get("text_emphasis_style_config")
+                or {}
+            ),
+            "text_emphasis_events": clip_data.get("text_emphasis_events", [])[:2],
             "reframe_layout": clip_data.get("reframe_layout") or clip_data.get("layout") or "single",
             "file_status": file_status,
             "urls": {
@@ -1338,6 +1344,7 @@ class RestyleRequest(BaseModel):
     hook_style: Opt[str] = None
     hook_style_config: Opt[dict] = None
     subtitle_style_config: Opt[dict] = None
+    text_emphasis_style_config: Opt[dict] = None
     subtitle_enabled: bool = True
     broll_enabled: bool = True
 
@@ -1465,46 +1472,15 @@ async def restyle_clip(
                 detail="Person centering is unavailable; the existing final clip was preserved.",
             )
 
-        # Step 1: B-Roll overlay (if enabled and brolls exist for this clip).
-        # Remotion is applied after this so hook/subtitle remain on top.
+        # Step 1: Preserve the pipeline's prepared replacement-track B-roll.
+        # Restyle starts from raw so it must not reintroduce the deprecated
+        # overlay path. Use the existing brolled output when available; the
+        # Remotion pass below only adds hook/subtitle/AI text on top.
         if do_broll and service._broll_injector:
             await _set_clip_operation(job_id, clip_rank, operation_id, stage="assets", percentage=40)
-            from src.domain.entities import BRollSuggestion, Clip, VisualCategory
-            broll_suggestions = []
-            for bs in clip_data.get("broll_suggestions", []):
-                try:
-                    visual_category = VisualCategory(bs.get("visual_category", "footage"))
-                except (ValueError, KeyError):
-                    visual_category = VisualCategory.FOOTAGE
-
-                broll_suggestions.append(BRollSuggestion(
-                    at_time=float(bs.get("at_time", 0)),
-                    keyword=bs.get("keyword", ""),
-                    template=bs.get("template", "word_pop_typography"),
-                    duration=float(bs.get("duration", 2.0)),
-                    reason=bs.get("reason", ""),
-                    visual_category=visual_category,
-                ))
-
-            if broll_suggestions:
-                try:
-                    temp_clip = Clip(
-                        rank=clip_rank,
-                        score=clip_data.get("score", 0),
-                        start=clip_data.get("start", 0),
-                        end=clip_data.get("end", 0),
-                        hook=hook_text,
-                        reason="",
-                        broll_suggestions=broll_suggestions,
-                    )
-                    result = await service._broll_injector.inject_brolls(
-                        current_path, temp_clip, brolled_path
-                    )
-                    if result and os.path.exists(brolled_path):
-                        current_path = brolled_path
-                    logger.info(f"[restyle] broll applied clip {clip_rank}")
-                except Exception as e:
-                    logger.warning(f"[restyle] broll failed clip {clip_rank}: {e}")
+            if clip_data.get("broll_suggestions") and os.path.exists(brolled_path):
+                current_path = brolled_path
+                logger.info(f"[restyle] using prepared replacement-track B-roll clip {clip_rank}")
 
         # Step 2: Remotion renders hook + subtitle with the same style config
         # used by the live preview. FFmpeg fallback is intentionally disabled
@@ -1526,7 +1502,7 @@ async def restyle_clip(
             render_words = []
 
         remotion_adapter = getattr(service, "_remotion_adapter", None)
-        if remotion_adapter and (hook_text or render_words):
+        if remotion_adapter and (hook_text or render_words or clip_data.get("text_emphasis_events")):
             await _set_clip_operation(job_id, clip_rank, operation_id, stage="render", percentage=55)
             try:
                 remotion_ready = await remotion_adapter.health_check()
@@ -1545,6 +1521,13 @@ async def restyle_clip(
                     creative_direction = {
                         "hook_style_config": hook_config,
                         "subtitle_style_config": subtitle_config,
+                        "text_emphasis_style_config": (
+                            body.text_emphasis_style_config
+                            if body and body.text_emphasis_style_config is not None
+                            else (clip_data.get("text_emphasis_style_config_override")
+                                  or root_style_data.get("text_emphasis_style_config")
+                                  or {})
+                        ),
                     }
                     result = await remotion_adapter.render_clip(
                         scene_graph={
@@ -1560,6 +1543,7 @@ async def restyle_clip(
                         words=render_words,
                         hook_text=hook_text,
                         hook_style=hook_style,
+                        text_emphasis_events=clip_data.get("text_emphasis_events", []),
                     )
                     remotion_rendered = bool(result.success and os.path.exists(staged_final_path))
                     if remotion_rendered:
@@ -1619,6 +1603,8 @@ async def restyle_clip(
             clip_data["hook_style_config_override"] = hook_config
         if subtitle_config:
             clip_data["subtitle_style_config_override"] = subtitle_config
+        if body and body.text_emphasis_style_config is not None:
+            clip_data["text_emphasis_style_config_override"] = body.text_emphasis_style_config
         if body and body.hook_text:
             clip_data["hook"] = body.hook_text
 
@@ -1637,7 +1623,7 @@ async def restyle_clip(
             await session.commit()
 
         # Cleanup temp files
-        for tmp in [brolled_path, restyle_reframed_path, staged_final_path]:
+        for tmp in [restyle_reframed_path, staged_final_path]:
             if tmp != final_path and os.path.exists(tmp):
                 os.remove(tmp)
 
@@ -1661,13 +1647,13 @@ async def restyle_clip(
 
     except HTTPException as e:
         await _set_clip_operation(job_id, clip_rank, operation_id, status="failed", stage="failed", error=str(e.detail), completed_at=datetime.now(timezone.utc).isoformat())
-        for tmp in [brolled_path, restyle_reframed_path, staged_final_path]:
+        for tmp in [restyle_reframed_path, staged_final_path]:
             if os.path.exists(tmp):
                 os.remove(tmp)
         raise
     except Exception as e:
         await _set_clip_operation(job_id, clip_rank, operation_id, status="failed", stage="failed", error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
-        for tmp in [brolled_path, restyle_reframed_path, staged_final_path]:
+        for tmp in [restyle_reframed_path, staged_final_path]:
             if os.path.exists(tmp):
                 os.remove(tmp)
         logger.error(f"restyle_error: job={job_id}, clip={clip_rank}, error={e}", exc_info=True)

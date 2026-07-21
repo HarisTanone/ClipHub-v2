@@ -1579,6 +1579,14 @@ class JobService:
                 "reason": clip.reason,
                 "duration": round(clip.end - clip.start, 2),
                 "words": words,
+                "text_emphasis_events": [
+                    {
+                        key: value
+                        for key, value in event.items()
+                        if key != "foreground_frames"
+                    }
+                    for event in clip.text_emphasis_events[:2]
+                ],
                 "broll_suggestions": [
                     {"at_time": b.at_time, "keyword": b.keyword, "template": b.template, "duration": b.duration}
                     for b in clip.broll_suggestions

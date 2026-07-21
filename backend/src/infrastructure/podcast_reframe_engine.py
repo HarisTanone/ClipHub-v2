@@ -491,6 +491,8 @@ class PodcastReframeEngine(IReframeEngine):
         # Step 3: Auto Grid decisions. Grid is only allowed for two distinct,
         # concurrently visible tracked identities. Content classification alone
         # (for example a false "gaming" label) must never duplicate one person.
+        # Keep the UI toggle as a hard safety gate. In particular, do not let
+        # the legacy fallback or a stale layout decision turn grid back on.
         if autogrid:
             from src.config import settings
             is_person_first = settings.REFRAME_PIPELINE_MODE == "person_first"
@@ -1274,6 +1276,10 @@ class PodcastReframeEngine(IReframeEngine):
             tracked_data.get("position_target_profiles") or {}
         )
         person_count = int(tracked_data.get("person_count") or 0)
+        # Auto Grid counts visual people, not audio speakers. Diarization may
+        # report one speaker while several people are visible (for example one
+        # host talking while a guest listens). Speaker data is used below only
+        # to choose panel ordering; it must not veto a visually valid grid.
 
         if not per_frame_tracked or person_count < 2 or len(position_targets) < 2:
             return {"layout": "single", "person_count": person_count}

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
-import { presets as presetsApi, type Preset } from "@/lib/api";
+import { jobs, presets as presetsApi, type Preset } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RangeSlider } from "@/components/ui/RangeSlider";
 
@@ -891,9 +891,10 @@ interface StyleEditorModalProps {
   onProcess?: () => void;
   processing?: boolean;
   processProgress?: { stage: string; percentage: number };
+  aiTextPreviewContext?: { jobId: string; clipRank: number; frame: number };
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => {}, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress }: StyleEditorModalProps) {
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => {}, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress, aiTextPreviewContext }: StyleEditorModalProps) {
   const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
@@ -1033,7 +1034,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
     return (
       <div className="h-full overflow-hidden">
         <style>{animationStyles}</style>
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
+        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} />}
       </div>
     );
   }
@@ -1077,12 +1078,13 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
 
 // ─── Other Tab (Transition + AI Text combined) ────────────────────────────────
 
-function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisChange, thumbnailUrl }: {
+function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisChange, thumbnailUrl, aiTextPreviewContext }: {
   hookStyle: HookStyle;
   textEmphasisStyle: TextEmphasisStyle;
   onHookChange: (s: HookStyle) => void;
   onTextEmphasisChange: (s: TextEmphasisStyle) => void;
   thumbnailUrl?: string;
+  aiTextPreviewContext?: { jobId: string; clipRank: number; frame: number };
 }) {
   const [subTab, setSubTab] = useState<"transition" | "ai_text">("transition");
   return (
@@ -1097,7 +1099,7 @@ function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisCh
         <span className="ml-auto text-[9px] text-zinc-600">Applied to preview &amp; final render</span>
       </div>
       <div className="flex-1 overflow-hidden">
-        {subTab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} />}
+        {subTab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} previewContext={aiTextPreviewContext} />}
       </div>
     </div>
   );
@@ -1182,8 +1184,26 @@ function TransitionEditor({ style, onChange }: { style: HookStyle; onChange: (st
   );
 }
 
-function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmphasisStyle; onChange: (style: TextEmphasisStyle) => void; thumbnailUrl?: string }) {
+function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: { style: TextEmphasisStyle; onChange: (style: TextEmphasisStyle) => void; thumbnailUrl?: string; previewContext?: { jobId: string; clipRank: number; frame: number } }) {
   useGoogleFont(style.fontFamily);
+  const [exactPreview, setExactPreview] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  useEffect(() => {
+    if (!previewContext) return;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setPreviewLoading(true);
+      try {
+        const result = await jobs.renderAITextPreview(previewContext.jobId, previewContext.clipRank, previewContext.frame, style);
+        if (active) setExactPreview(result.image);
+      } catch {
+        if (active) setExactPreview(null);
+      } finally {
+        if (active) setPreviewLoading(false);
+      }
+    }, 350);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [previewContext?.jobId, previewContext?.clipRank, previewContext?.frame, style]);
   const update = <K extends keyof TextEmphasisStyle>(key: K, value: TextEmphasisStyle[K]) => onChange({ ...style, [key]: value });
   const previewEffect = style.effectMode === "auto" ? "behind_person" : style.effectMode;
   // For auto_avoid, preview shows text at top (person assumed in bottom)
@@ -1221,6 +1241,7 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
       <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.85fr)_minmax(360px,1.15fr)]">
         <div>
           <div className="sticky top-0 aspect-[9/16] max-h-[520px] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl">
+            {exactPreview && <img src={exactPreview} alt="Exact final-render AI Text preview" className="absolute inset-0 z-40 h-full w-full object-cover" />}
             {thumbnailUrl ? <img src={thumbnailUrl} alt="Video preview" className="absolute inset-0 h-full w-full object-cover opacity-70" /> : <div className="absolute inset-0 bg-gradient-to-b from-zinc-700 via-zinc-900 to-black" />}
             {previewEffect === "spotlight" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.75)_100%)]" />}
             {previewEffect === "depth_text" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,transparent_0%,rgba(0,0,0,.5)_100%)]" />}
@@ -1261,7 +1282,7 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl }: { style: TextEmph
                 <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-700 via-zinc-300 to-zinc-700 shadow-2xl" />
               </div>
             )}
-            <div className="absolute bottom-3 left-3 z-30 rounded-md bg-black/60 px-2 py-1 text-[9px] text-zinc-400">Preview style • AI menentukan teks final</div>
+            <div className="absolute bottom-3 left-3 z-50 rounded-md bg-black/60 px-2 py-1 text-[9px] text-zinc-400">{previewLoading ? "Rendering Remotion…" : exactPreview ? "Exact Remotion frame" : "Style simulation • proses clip untuk preview 1:1"}</div>
           </div>
         </div>
 

@@ -10,11 +10,13 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.application.services import JobService
 from src.config import settings
 from src.presentation.dependencies import get_job_service
+from src.presentation.auth_deps import CurrentUser, get_current_user
+from src.presentation.routes.jobs import _check_job_ownership
 
 router = APIRouter(tags=["preview"])
 logger = logging.getLogger(__name__)
@@ -183,6 +185,12 @@ class UpdateStyleRequest(BaseModel):
     subtitle_position: Optional[str] = None
 
 
+class AITextStillRequest(BaseModel):
+    """Frame/style controls for a preview rendered by the final Remotion layer."""
+    frame: int = 0
+    text_emphasis_style_config: dict = Field(default_factory=dict)
+
+
 # ─── Preview Endpoint ─────────────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}/clips/{rank}/preview", response_model=PreviewResponse)
@@ -190,6 +198,7 @@ async def get_clip_preview(
     job_id: str,
     rank: int,
     service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Get preview data for a clip — hook text, words, style config.
     
@@ -199,6 +208,7 @@ async def get_clip_preview(
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
     
     # Get clip data
     clips_data = job.clips_data or {}
@@ -254,12 +264,81 @@ async def get_clip_preview(
     )
 
 
+@router.post("/jobs/{job_id}/clips/{rank}/ai-text-preview")
+async def render_ai_text_preview(
+    job_id: str,
+    rank: int,
+    body: AITextStillRequest,
+    service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Render AI Text with the exact Remotion composition used by final export."""
+    job = await service.get_job(job_id)
+    if not job or not job.clips_data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
+    clip = next((item for item in job.clips_data.get("clips", []) if item.get("rank") == rank), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail=f"Clip {rank} not found")
+
+    adapter = getattr(service, "_remotion_adapter", None)
+    if not adapter:
+        raise HTTPException(status_code=503, detail="Remotion preview is unavailable")
+
+    output_dir = os.path.join(settings.OUTPUT_DIR, job_id)
+    video_candidates = [
+        os.path.join(output_dir, f"clip_{rank:02d}_reframed.mp4"),
+        os.path.join(output_dir, "raw", f"clip_{rank:02d}.mp4"),
+        os.path.join(output_dir, "raw", f"clip_{rank}.mp4"),
+        os.path.join(output_dir, "final", f"clip_{rank}_final.mp4"),
+    ]
+    video_path = next((path for path in video_candidates if os.path.exists(path)), None)
+    if not video_path:
+        raise HTTPException(status_code=404, detail="Clip video not found")
+
+    from src.infrastructure.text_emphasis import normalise_text_emphasis_style
+    creative = dict(job.clips_data.get("creative_direction") or {})
+    creative["hook_style_config"] = (
+        clip.get("hook_style_config_override")
+        or job.clips_data.get("hook_style_config")
+        or {}
+    )
+    creative["subtitle_style_config"] = (
+        clip.get("subtitle_style_config_override")
+        or job.clips_data.get("subtitle_style_config")
+        or {}
+    )
+    creative["text_emphasis_style_config"] = normalise_text_emphasis_style(
+        body.text_emphasis_style_config
+        or job.clips_data.get("text_emphasis_style_config")
+    )
+    creative["reframe_layout"] = clip.get("reframe_layout") or clip.get("layout") or "single"
+    events = (clip.get("text_emphasis_events") or [])[:2]
+    duration = float(clip.get("duration") or max(0, float(clip.get("end", 0)) - float(clip.get("start", 0))) or 30.0)
+    frame = max(0, min(int(body.frame), max(0, int(duration * 30) - 1)))
+    result = await adapter.render_still(
+        scene_graph=job.clips_data.get("scene_graphs", {}).get(str(rank), {"clip_rank": rank, "duration": duration, "layers": []}),
+        creative_direction=creative,
+        video_path=video_path,
+        output_path=os.path.join(output_dir, "preview", f"ai_text_{rank}.jpg"),
+        frame=frame,
+        words=clip.get("words", []),
+        hook_text="",
+        hook_style="podcast_lower_third",
+        text_emphasis_events=events,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Remotion still render failed"))
+    return {"success": True, "image": result["image"], "frame": frame}
+
+
 @router.patch("/jobs/{job_id}/clips/{rank}/style", status_code=200)
 async def update_clip_style(
     job_id: str,
     rank: int,
     body: UpdateStyleRequest,
     service: JobService = Depends(get_job_service),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Update style for a specific clip. Changes are applied on next re-render.
     
@@ -269,6 +348,7 @@ async def update_clip_style(
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
     
     clips_data = job.clips_data or {}
     clips = clips_data.get("clips", [])

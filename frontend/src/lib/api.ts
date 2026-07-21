@@ -342,6 +342,8 @@ export interface ClipDetailResponse {
     hook_style: string | null;
     hook_style_config: Record<string, any>;
     subtitle_style_config: Record<string, any>;
+    text_emphasis_style_config: Record<string, any>;
+    text_emphasis_events: Array<Record<string, any>>;
     reframe_layout?: "single" | "double";
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };
     urls: { raw: string | null; final: string | null; thumbnail: string | null };
@@ -451,6 +453,13 @@ export const jobs = {
     return request<ClipDetailResponse>(`/api/jobs/${jobId}/clips/${rank}/detail`);
   },
 
+  async renderAITextPreview(jobId: string, rank: number, frame: number, style: Record<string, any>): Promise<{ success: boolean; image: string; frame: number }> {
+    return request(`/api/jobs/${jobId}/clips/${rank}/ai-text-preview`, {
+      method: "POST",
+      body: JSON.stringify({ frame, text_emphasis_style_config: style }),
+    });
+  },
+
   async editHook(jobId: string, rank: number, hookText: string): Promise<any> {
     return request(`/api/jobs/${jobId}/clips/${rank}/hook`, {
       method: "PATCH",
@@ -481,6 +490,7 @@ export const jobs = {
     hook_style?: string;
     hook_style_config?: Record<string, any>;
     subtitle_style_config?: Record<string, any>;
+    text_emphasis_style_config?: Record<string, any>;
     subtitle_enabled?: boolean;
     broll_enabled?: boolean;
   }): Promise<any> {

@@ -108,7 +108,7 @@ def test_disabled_broll_does_not_fetch_or_render(tmp_path):
     injector.inject.assert_not_awaited()
 
 
-def test_enabled_broll_fetches_and_renders_before_subtitles(tmp_path):
+def test_enabled_text_only_broll_does_not_reintroduce_overlay(tmp_path):
     base_path = tmp_path / "clip_01.mp4"
     base_path.write_bytes(b"video")
     output_path = tmp_path / "clip_01_brolled.mp4"
@@ -116,13 +116,6 @@ def test_enabled_broll_fetches_and_renders_before_subtitles(tmp_path):
     asset_fetcher = AsyncMock()
     injector = AsyncMock()
 
-    async def inject(input_file, _suggestions, target_file):
-        assert input_file == str(base_path)
-        output_path.write_bytes(b"broll")
-        assert target_file == str(output_path)
-        return target_file
-
-    injector.inject.side_effect = inject
     service = make_service(asset_fetcher=asset_fetcher, broll_injector=injector)
     clip = Clip(
         rank=1,
@@ -148,8 +141,8 @@ def test_enabled_broll_fetches_and_renders_before_subtitles(tmp_path):
     ))
 
     asset_fetcher.fetch_assets.assert_awaited_once()
-    injector.inject.assert_awaited_once()
-    assert output_path.exists()
+    injector.inject.assert_not_awaited()
+    assert not output_path.exists()
 
 
 def test_remotion_uses_brolled_video_as_its_input(tmp_path):

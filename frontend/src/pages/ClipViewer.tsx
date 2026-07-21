@@ -10,7 +10,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
-import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, type HookStyle, type SubtitleStyle } from "@/components/StyleEditorModal";
+import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
 import { jobs, API_BASE, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
 
@@ -22,11 +22,14 @@ export function ClipViewer() {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const pendingSeekRef = useRef<number | null>(null);
+  const aiPreviewRequestRef = useRef(0);
 
   const [clip, setClip] = useState<ClipDetailResponse["data"] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [aiTextPreview, setAITextPreview] = useState<string | null>(null);
 
   // Preview - default OFF
   const [showHook, setShowHook] = useState(false);
@@ -47,6 +50,9 @@ export function ClipViewer() {
   });
   const [subtitleStyleConfig, setSubtitleStyleConfig] = useState<SubtitleStyle>(() => {
     try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? { ...DEFAULT_SUBTITLE_STYLE, ...JSON.parse(s) } : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
+  });
+  const [textEmphasisStyleConfig, setTextEmphasisStyleConfig] = useState<TextEmphasisStyle>(() => {
+    try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? { ...DEFAULT_TEXT_EMPHASIS_STYLE, ...JSON.parse(s) } : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
   });
   const [isRestyling, setIsRestyling] = useState(false);
   const [restyleProgress, setRestyleProgress] = useState<{ stage: string; percentage: number } | null>(null);
@@ -73,6 +79,9 @@ export function ClipViewer() {
       if (clipRes.data.subtitle_style_config && Object.keys(clipRes.data.subtitle_style_config).length > 0) {
         setSubtitleStyleConfig({ ...DEFAULT_SUBTITLE_STYLE, ...clipRes.data.subtitle_style_config } as SubtitleStyle);
       }
+      if (clipRes.data.text_emphasis_style_config && Object.keys(clipRes.data.text_emphasis_style_config).length > 0) {
+        setTextEmphasisStyleConfig({ ...DEFAULT_TEXT_EMPHASIS_STYLE, ...clipRes.data.text_emphasis_style_config } as TextEmphasisStyle);
+      }
       // Set other clips (exclude current)
       const allClips = detailRes.data.clips || [];
       setOtherClips(allClips.filter((c: any) => c.rank !== clipRank));
@@ -85,6 +94,22 @@ export function ClipViewer() {
   }
 
   useEffect(() => { loadClip(); }, [jobId, rank]);
+  useEffect(() => {
+    if (!previewMode || isPlaying || !jobId || !clip?.text_emphasis_events?.length) {
+      setAITextPreview(null);
+      return;
+    }
+    const requestId = ++aiPreviewRequestRef.current;
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await jobs.renderAITextPreview(jobId, clipRank, Math.round(currentTime * 30), textEmphasisStyleConfig);
+        if (requestId === aiPreviewRequestRef.current) setAITextPreview(result.image);
+      } catch {
+        if (requestId === aiPreviewRequestRef.current) setAITextPreview(null);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [previewMode, isPlaying, currentTime, jobId, clipRank, clip?.text_emphasis_events, textEmphasisStyleConfig]);
   useEffect(() => {
     if (!isRestyling || !jobId) return;
     const poll = async () => { try { const res = await jobs.getClipOperation(jobId, clipRank); if (res.data) setRestyleProgress({ stage: res.data.stage, percentage: res.data.percentage }); } catch { } };
@@ -113,6 +138,7 @@ export function ClipViewer() {
         hook_style: hookStyleConfig.animation,
         hook_style_config: hookStyleConfig,
         subtitle_style_config: subtitleStyleConfig,
+        text_emphasis_style_config: textEmphasisStyleConfig,
         subtitle_enabled: true,
       });
       setShowRaw(false);
@@ -188,6 +214,8 @@ export function ClipViewer() {
                     src={videoUrl}
                     className="w-full h-full object-contain"
                     onTimeUpdate={() => videoRef.current && setCurrentTime(videoRef.current.currentTime)}
+                    onPlay={() => setIsPlaying(true)}
+                    onPause={() => setIsPlaying(false)}
                     onLoadedMetadata={() => {
                       if (videoRef.current && pendingSeekRef.current !== null) {
                         videoRef.current.currentTime = pendingSeekRef.current;
@@ -198,7 +226,11 @@ export function ClipViewer() {
                     preload="auto"
                     controls
                   />
+                  {previewMode && aiTextPreview && !isPlaying && (
+                    <img src={aiTextPreview} alt="Exact Remotion AI Text preview" className="absolute inset-0 h-full w-full object-contain" />
+                  )}
                   {previewMode && (
+                    <div className={aiTextPreview && !isPlaying ? "hidden" : undefined}>
                     <VideoPreviewOverlay
                       currentTime={currentTime}
                       hookText={hookText || clip.hook || ""}
@@ -210,6 +242,7 @@ export function ClipViewer() {
                       showHook={showHook}
                       showSubtitles={showSubtitles}
                     />
+                    </div>
                   )}
                 </>
               ) : (
@@ -319,14 +352,21 @@ export function ClipViewer() {
         onClose={() => setStyleModalOpen(false)}
         hookStyle={hookStyleConfig}
         subtitleStyle={subtitleStyleConfig}
+        textEmphasisStyle={textEmphasisStyleConfig}
         onHookChange={setHookStyleConfig}
         onSubtitleChange={setSubtitleStyleConfig}
+        onTextEmphasisChange={setTextEmphasisStyleConfig}
         aspectRatio="9:16"
         isSuperadmin={user?.is_superadmin}
         userFeatures={user?.features}
         onProcess={handleRestyle}
         processing={isRestyling}
         processProgress={restyleProgress || undefined}
+        aiTextPreviewContext={clip.text_emphasis_events?.length ? {
+          jobId: jobId!,
+          clipRank,
+          frame: Math.round((((Number(clip.text_emphasis_events[0].start) || 0) + (Number(clip.text_emphasis_events[0].end) || 0)) / 2) * 30),
+        } : undefined}
       />
     </div>
   );

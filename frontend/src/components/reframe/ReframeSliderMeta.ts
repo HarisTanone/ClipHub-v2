@@ -258,7 +258,7 @@ export const REFRAME_SECTION_DESCRIPTIONS: Record<string, SectionMeta> = {
     title: "Auto Grid / Split-Screen (Detect-Then-Switch)",
     pipelineStage: "Split-Screen Composition",
     description:
-      "v2 detect-then-switch: 1 orang = no-grid single. ≥2 orang berbeda dalam 1 frame yang sama → auto-switch ke 2-grid 50:50. Grid hanya aktif jika toggle frontend aktif (9:16 only). Orang per panel tidak boleh sama (distinct identity + ghost check). Jika kejauhan zoom, gunakan transisi pilihan user untuk single→grid (cut/fade/slide/zoom). Mulai single di t=0, bukan langsung grid. Headroom fix: kepala tidak kepotong.",
+      "Split-screen composition v2 memakai detect-then-switch: 1 orang = no-grid single. ≥2 orang berbeda dalam 1 frame yang sama → auto-switch ke 2-grid 50:50. Grid hanya aktif jika toggle frontend aktif (9:16 only). Orang per panel tidak boleh sama (distinct identity + ghost check). Jika kejauhan zoom, gunakan transisi pilihan user untuk single→grid (cut/fade/slide/zoom). Mulai single di t=0, bukan langsung grid. Headroom fix: kepala tidak kepotong.",
   },
   ghostDetection: {
     title: "Ghost Detection",

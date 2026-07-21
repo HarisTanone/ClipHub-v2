@@ -214,6 +214,59 @@ def test_autogrid_requires_two_unique_people_visible_together():
     assert engine.GRID_PANEL_HEIGHT == 960
 
 
+def test_autogrid_counts_visual_people_even_when_only_one_audio_speaker_is_detected():
+    engine = PodcastReframeEngine()
+    tracked_data = {
+        "person_count": 2,
+        "position_targets": {0: 480, 1: 1460},
+        "track_to_position": {10: 0, 20: 1},
+        "per_frame_tracked": [
+            [
+                TrackedDetection(10, BBox(410, 100, 550, 600), frame),
+                TrackedDetection(20, BBox(1390, 100, 1530, 600), frame),
+            ]
+            for frame in range(8)
+        ],
+    }
+    one_audio_speaker = ActiveSpeakerResult(
+        segments=[],
+        dominant_speaker_id=0,
+        dominant_ratio=1.0,
+        per_frame_speaker={frame: 0 for frame in range(8)},
+        total_speakers=1,
+    )
+
+    decision = engine._decide_autogrid_layout(
+        tracked_data, one_audio_speaker, width=1920
+    )
+
+    assert decision["layout"] == "double"
+    assert decision["person_count"] == 2
+
+
+def test_position_model_treats_body_and_attached_head_as_one_person():
+    engine = PodcastReframeEngine()
+    body = BBox(300, 100, 700, 900)
+    head = BBox(430, 120, 570, 280)
+    tracked = [
+        [TrackedDetection(
+            track_id=10,
+            bbox=body,
+            frame_idx=frame,
+            person_bbox=body,
+            face_bbox=head,
+        )]
+        for frame in range(8)
+    ]
+
+    model = engine._build_position_model(tracked, width=1920, height=1080)
+
+    assert model["person_count"] == 1
+    assert model["position_target_profiles"][0]["x"] == body.center_x
+    assert model["position_target_profiles"][0]["face_x"] == head.center_x
+    assert model["position_target_profiles"][0]["face_y"] == head.center_y
+
+
 def test_autogrid_rejects_people_who_never_share_a_frame():
     engine = PodcastReframeEngine()
     tracked_data = {

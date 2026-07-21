@@ -225,7 +225,9 @@ class PersonFirstReframeEngine(IReframeEngine):
 
         self._log_speaker_summary(speaker_result, tracked_data, fps, total_frames)
 
-        # Step 5: Auto Grid (same logic as legacy, better input)
+        # Step 5: Auto Grid. Count distinct co-visible visual identities from
+        # the combined body+head model. Audio speaker count only helps choose
+        # the active panel and must not hide a visible listener.
         if autogrid and person_count >= 2:
             grid_result = self._try_auto_grid(
                 video_path, output_path, width, height, fps, total_frames,
@@ -304,14 +306,22 @@ class PersonFirstReframeEngine(IReframeEngine):
             frame_face_x: List[float] = []
             frame_tracked_compat: List[TrackedDetection] = []
 
+            persons_by_id = {tp.track_id: tp for tp in tracked_persons}
             for face in face_results:
+                person = persons_by_id.get(face.person_track_id)
+                if person is None:
+                    continue
                 frame_face_x.append(face.center_x)
-                # Map face detection to TrackedDetection for legacy compatibility
+                # A head and its body are two observations of ONE visual person.
+                # Keep the persistent body track as the identity/geometry anchor,
+                # and attach the head bbox for precise framing and headroom.
                 frame_tracked_compat.append(TrackedDetection(
                     track_id=face.person_track_id,
-                    bbox=face.bbox,
+                    bbox=person.bbox,
                     frame_idx=frame_idx,
-                    is_new=False,
+                    is_new=person.is_new,
+                    person_bbox=person.bbox,
+                    face_bbox=face.bbox,
                 ))
 
             # Also include persons without face detection (body-only anchor)
@@ -325,6 +335,7 @@ class PersonFirstReframeEngine(IReframeEngine):
                         bbox=tp.bbox,
                         frame_idx=frame_idx,
                         is_new=tp.is_new,
+                        person_bbox=tp.bbox,
                     ))
 
             per_frame_faces.append(frame_face_x)
@@ -336,8 +347,13 @@ class PersonFirstReframeEngine(IReframeEngine):
 
         cap.release()
 
-        # Build position model from tracker
-        position_model = self._person_tracker.build_position_model()
+        # Build the visual-person model from the combined body+head records.
+        # Body track IDs determine how many people exist; an attached face_bbox
+        # enriches that same identity and must never be counted separately.
+        from src.infrastructure.podcast_reframe_engine import PodcastReframeEngine
+        position_model = PodcastReframeEngine()._build_position_model(
+            per_frame_tracked, width, height
+        )
 
         person_count = position_model["person_count"]
         logger.info(
