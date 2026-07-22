@@ -629,6 +629,28 @@ class PersonFirstReframeEngine(IReframeEngine):
             if dynamic:
                 dynamic["method"] = "person_first_dynamic_auto_grid"
                 return dynamic
+            # Dynamic grid render failed (xfade filter fragile for multi-layout).
+            # Fallback to full-duration static grid — better than dropping to
+            # single-person panning when the decision is already "double".
+            logger.warning(
+                "person_first_reframe: dynamic grid render failed; "
+                "falling back to static full-duration grid"
+            )
+            crop_w = int(decision.get("crop_w") or min(width, int(height * 9 / 8 / self.GRID_BASE_ZOOM)))
+            crop_h = int(decision.get("crop_h") or min(height, int(crop_w * 8 / 9)))
+            top_crop_x = int(decision.get("top_crop_x", max(0, min(int(decision.get("top_x", 0)) - crop_w // 2, width - crop_w))))
+            bottom_crop_x = int(decision.get("bottom_crop_x", max(0, min(int(decision.get("bottom_x", 0)) - crop_w // 2, width - crop_w))))
+            if top_crop_x != bottom_crop_x or int(decision.get("top_crop_y", 0)) != int(decision.get("bottom_crop_y", 0)):
+                static = self._render_double_grid(
+                    video_path, output_path, width, height,
+                    crop_w, crop_h, top_crop_x, bottom_crop_x,
+                    tracked_data.get("person_count", 2),
+                    int(top_id), int(bottom_id),
+                )
+                if static:
+                    static["method"] = "person_first_static_auto_grid_fallback"
+                    return static
+            logger.warning("person_first_reframe: static grid fallback also failed; continuing to panning")
 
         # Full-duration grid only when both people are present for the whole clip.
         if layout_events and layout_events[0].get("layout") == "double" and layouts == {"double"}:
