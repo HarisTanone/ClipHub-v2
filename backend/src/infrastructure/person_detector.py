@@ -180,8 +180,12 @@ class PersonDetector:
         "rfdetr-2xlarge": "RFDETRLarge",  # fallback to Large if 2XLarge unavailable
     }
 
-    # COCO class ID for 'person'
+    # COCO 'person' is class 0 in Ultralytics (0-index) and often class 1 in
+    # RF-DETR/supervision exports (1-index). Accept both; never drop real people
+    # because of off-by-one class maps.
     PERSON_CLASS_ID = 0
+    PERSON_CLASS_IDS = frozenset({0, 1})
+
 
     def __init__(
         self,
@@ -285,24 +289,17 @@ class PersonDetector:
             return []
 
         threshold = confidence_override or self._confidence_threshold
-        detections: List[PersonDetection] = []
+        if self._use_supervision:
+            detections = self._detect_rfdetr(frame, threshold)
+        else:
+            detections = self._detect_ultralytics(frame, threshold)
 
-        try:
-            if self._use_supervision:
-                detections = self._detect_rfdetr(frame, threshold)
-            else:
-                detections = self._detect_ultralytics(frame, threshold)
-        except Exception as e:
-            logger.warning(f"person_detector: inference error: {e}")
-            return []
-
-        # Nested tight/loose boxes for one subject must not become two tracks.
-        filtered = filter_duplicate_person_boxes(
-            [det.to_box_tuple() for det in detections]
-        )
-        detections = [PersonDetection.from_box_tuple(box) for box in filtered]
-
-        # Sort by area descending (largest person first)
+        detections = [
+            PersonDetection.from_box_tuple(box)
+            for box in filter_duplicate_person_boxes(
+                [d.to_box_tuple() for d in detections]
+            )
+        ]
         detections.sort(key=lambda d: d.area, reverse=True)
         return detections
 
@@ -314,18 +311,19 @@ class PersonDetector:
         """Run RF-DETR inference using supervision Detections output."""
         import supervision as sv
 
-        # RF-DETR predict returns supervision.Detections
         results = self._model.predict(frame, threshold=threshold)
 
         if not isinstance(results, sv.Detections):
-            # Some versions return raw; try to adapt
             logger.debug("person_detector: unexpected result type, attempting parse")
             return []
 
         detections: List[PersonDetection] = []
+        dropped_classes: dict = {}
         for i in range(len(results)):
             class_id = int(results.class_id[i]) if results.class_id is not None else -1
-            if class_id != self.PERSON_CLASS_ID:
+            # Accept 0 (Ultralytics COCO) and 1 (RF-DETR 1-index COCO person).
+            if class_id not in self.PERSON_CLASS_IDS:
+                dropped_classes[class_id] = dropped_classes.get(class_id, 0) + 1
                 continue
 
             confidence = float(results.confidence[i]) if results.confidence is not None else 1.0
@@ -341,7 +339,17 @@ class PersonDetector:
                 confidence=confidence,
             ))
 
+        if not detections and dropped_classes and not getattr(self, "_logged_class_map", False):
+            self._logged_class_map = True
+            logger.warning(
+                f"person_detector: RF-DETR boxes present but none matched "
+                f"PERSON_CLASS_IDS={sorted(self.PERSON_CLASS_IDS)}; "
+                f"dropped_class_counts={dropped_classes} total_raw={len(results)}"
+            )
+
         return detections
+
+
 
     def _detect_ultralytics(
         self,
