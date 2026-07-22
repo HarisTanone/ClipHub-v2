@@ -59,7 +59,8 @@ class PodcastReframeEngine(IReframeEngine):
     MIN_FACE_SIZE_RATIO = 0.10
     MAX_FACE_SIZE_RATIO = 0.50
     MIN_SEPARATION_RATIO = 0.05  # [FIX] Turunkan dari 0.20 → face-to-face setup orang sangat dekat horizontal
-    MIN_COEXIST_RATIO = 0.40     # ≥40% of frames must have BOTH faces simultaneously
+    # User rule: 1 person → single, ≥2 co-visible → grid immediately.
+    MIN_COEXIST_RATIO = 0.10
 
     # Every grid panel is exactly half of the 1080x1920 output.
     GRID_PANEL_HEIGHT = 960
@@ -67,9 +68,10 @@ class PodcastReframeEngine(IReframeEngine):
     GRID_BASE_ZOOM = 1.08            # Gentle default crop; avoids excessive background.
     GRID_MAX_ZOOM = 2.20             # Head+shoulders framing for face-to-face podcast grid
     GRID_FACE_MARGIN = 0.35          # Minimum face-side breathing room inside a panel.
-    GRID_ENTER_SAMPLES = 4           # Confirm a second person for ~1.3s.
-    GRID_EXIT_SAMPLES = 2            # Close within ~0.7s when one person leaves.
-    MIN_GRID_SEGMENT_SECONDS = 1.20   # Never render a one-frame/flicker grid.
+    GRID_ENTER_SAMPLES = 1           # Grid on first co-visible sample (≥2 people).
+    GRID_EXIT_SAMPLES = 2            # Brief miss still holds grid open.
+    MIN_GRID_SEGMENT_SECONDS = 0.50  # Allow short multi-person sections.
+
     VALID_TRANSITIONS = {"cut", "fade", "slide", "zoom"}
 
     # Ghost detection constants

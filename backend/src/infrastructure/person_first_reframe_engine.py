@@ -57,15 +57,16 @@ class PersonFirstReframeEngine(IReframeEngine):
     SAMPLE_INTERVAL_SEC = 0.333
     MAX_SAMPLES = 720
     MIN_SEPARATION_RATIO = 0.05  # [FIX] Turunkan dari 0.20 → face-to-face podcast support
-    MIN_COEXIST_RATIO = 0.40
+    MIN_COEXIST_RATIO = 0.10
     DOMINANCE_SINGLE_CROP = 0.75
     GRID_PANEL_HEIGHT = 960
     GRID_BASE_ZOOM = 1.08
     GRID_MAX_ZOOM = 2.20  # Head+shoulders framing for face-to-face podcast grid
     GRID_FACE_MARGIN = 0.35
-    GRID_ENTER_SAMPLES = 4
+    GRID_ENTER_SAMPLES = 1  # Grid on first co-visible sample (≥2 people)
     GRID_EXIT_SAMPLES = 2
-    MIN_GRID_SEGMENT_SECONDS = 1.20
+    MIN_GRID_SEGMENT_SECONDS = 0.50
+
 
     PAN_DEAD_ZONE_PX = 150
     PAN_HOLD_MIN_SEC = 2.0

@@ -133,13 +133,14 @@ class Settings(BaseSettings):
 
     # === Person-First Reframe Migration ===
     PERSON_DETECTOR: str = "rfdetr-large"       # rfdetr-medium | rfdetr-large | rfdetr-2xlarge
-    PERSON_CONF_THRESHOLD: float = 0.50
+    PERSON_CONF_THRESHOLD: float = 0.35
     PERSON_TRACKER: str = "botsort"             # botsort | bytetrack
     TRACKER_MAX_LOST_FRAMES: int = 8
     FACE_DETECTOR: str = "retinaface"           # retinaface | scrfd
     FACE_REGION_HEAD_RATIO: float = 0.35
     FACE_CONFIDENCE: float = 0.55
-    REFRAME_PIPELINE_MODE: str = "legacy"       # legacy | shadow | person_first
+    REFRAME_PIPELINE_MODE: str = "person_first"  # legacy | shadow | person_first
+
 
     # === HuggingFace (Pyannote Speaker Diarization) ===
     HF_TOKEN: str = ""

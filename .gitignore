@@ -102,3 +102,6 @@ htmlcov/
 # ─── Agent skills (local reference only) ─────────────────────────────────────
 .agents/
 skills-lock.json
+
+# ─── Graphify (generated knowledge graph) ─────────────────────────────────────
+graphify-out/
