@@ -2,20 +2,20 @@
 
 Uses YouTube Transcript API/9router Groq Whisper/local fallback + 9router-backed
 dynamic chunking and router-first word-level transcription. NO Gemini dependency.
-NO MicroSlicer, NO Silero VAD.
 
 Pipeline Steps (V2):
   1. Validate              — yt-dlp validate URL, extract duration
   2. Download              — Download full video
   3. V2 Transcript         — YouTube API → 9router Groq → local Whisper
-  4. V2 Highlight Analysis — Dynamic Chunking → 9router LLM
+  4. V2 Highlight Analysis — Dynamic Chunking → 9router LLM (double-pass)
   5. Prepare Clips         — Time padding, overlap detection
+  5.5 Silero VAD           — Snap start/end to silence (no mid-speech cuts)
   6. Aspect Ratio Router   — Set pipeline flags
-  7. Trim Clips            — FFmpeg precise re-encode
+  7. Trim Clips            — FFmpeg re-encode, A/V zero-based sync
   8. YOLO Seg + Reframe    — Conditional
   9. Word-Level Transcription — 9router Groq → Faster-Whisper fallback
-  10. Build Subtitle Data  — Validate & format words for rendering
-  11. Auto B-roll        — Optional visual overlay; audio timeline unchanged
+  10. Build Subtitle Data  — Words from hook_end only (hook owns 0–3s)
+  11. Auto B-roll        — Optional; audio timeline unchanged
   12+ Hook + Subtitle Render — Remotion only, matching preview config
 """
 import asyncio
@@ -66,9 +66,9 @@ logger = logging.getLogger(__name__)
 class V2PipelineService:
     """V2 Pipeline orchestrator for non-premium users.
 
-    Architecture: YouTube API/9router Groq/local fallback → 9router LLM → Trim →
-    router-first WordLevelTranscriber → render pipeline.
-    NO Gemini. NO MicroSlicer. NO Silero VAD.
+    Architecture: YouTube API/9router Groq/local fallback → 9router LLM →
+    Silero VAD boundary snap → Trim (A/V normalized) → WordLevelTranscriber →
+    Remotion (hook 0–3s, subtitles after).
     """
 
     def __init__(
@@ -529,8 +529,51 @@ class V2PipelineService:
             await self._repo.update_clips_data(job_id, merged_clips_data)
             self._emit(job_id, 5, "prepare_clips", "complete")
 
+            # ═══ Step 5.5: Silero VAD — snap cuts to silence (no mid-speech) ═══
+            # Runs on absolute source timestamps BEFORE trim so FFmpeg seeks to
+            # silence boundaries. Audio is never re-timed relative to video —
+            # trim still re-encodes both streams onto a shared zero clock.
+            if not direct_mode and settings.VAD_ENABLED:
+                self._emit(job_id, 5, "v2_vad_refining", "start")
+                await self._repo.update_status(job_id, JobStatus.V2_VAD_REFINING)
+                try:
+                    from src.infrastructure.vad_boundary_adjuster import VADBoundaryAdjuster
+                    vad = VADBoundaryAdjuster()
+                    for clip in clips:
+                        adj_start, adj_end = await vad.adjust_clip_boundaries(
+                            video_path, clip.start, clip.end
+                        )
+                        # Keep bounds inside the source; refuse inverted ranges.
+                        adj_start = max(0.0, min(adj_start, duration - 1.0))
+                        adj_end = max(adj_start + settings.MIN_CLIP_DURATION, min(adj_end, duration))
+                        if adj_start != clip.start or adj_end != clip.end:
+                            logger.info(
+                                f"[{job_id}] VAD clip {clip.rank}: "
+                                f"{clip.start:.2f}-{clip.end:.2f} → {adj_start:.2f}-{adj_end:.2f}"
+                            )
+                            clip.start = round(adj_start, 3)
+                            clip.end = round(adj_end, 3)
+                    # Refresh published clip slots with VAD-adjusted times
+                    pending_clips_data = self._assemble_clips_data(
+                        clips,
+                        {},
+                        creative_direction,
+                        output_dir,
+                        transcript_source=transcript_result.source,
+                    )
+                    pending_clips_data["broll_enabled"] = job.broll_enabled
+                    merged_clips_data = dict(job.clips_data or {})
+                    merged_clips_data.update(pending_clips_data)
+                    job.clips_data = merged_clips_data
+                    await self._repo.update_clips_data(job_id, merged_clips_data)
+                    logger.info(f"[{job_id}] Silero VAD applied to {len(clips)} clips")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] VAD skipped (non-fatal): {e}")
+                self._emit(job_id, 5, "v2_vad_refining", "complete")
+
             # ═══ Step 6: Aspect Ratio Router ═══
             self._emit(job_id, 6, "aspect_router", "start")
+
             await self._repo.update_status(job_id, JobStatus.ROUTING)
             if self._aspect_router:
                 flags = self._aspect_router.route(job.target_aspect_ratio, job.autogrid_enabled)
@@ -722,21 +765,33 @@ class V2PipelineService:
             self._emit(job_id, 9, "word_level", "complete")
 
             # ═══ Step 10: Build Subtitle Data (words already 0-based) ═══
+            # Hook owns 0–N seconds (default 3s). Subtitles must not appear there.
+            hook_duration = float(
+                ((job.clips_data or {}).get("hook_style_config") or {}).get("duration", 3.0) or 3.0
+            )
             self._emit(job_id, 10, "highlights", "start")
             await self._repo.update_status(job_id, JobStatus.HIGHLIGHTING)
             clips_with_words: dict[int, list[dict]] = {}
             for clip in clips:
                 raw_words = words_per_clip.get(clip.rank, [])
                 clip_duration = round(clip.end - clip.start, 3)
-                valid_words = sanitize_subtitle_words(raw_words, clip_duration)
+                # Only suppress subtitles under the hook when a hook text exists.
+                sub_min = hook_duration if (clip.hook and hook_duration > 0) else 0.0
+                valid_words = sanitize_subtitle_words(
+                    raw_words,
+                    clip_duration,
+                    subtitle_min_start=sub_min,
+                )
                 clips_with_words[clip.rank] = valid_words
                 if valid_words:
                     logger.info(
                         f"v2_words clip {clip.rank}: {len(valid_words)} words, "
+                        f"first={valid_words[0]['start']:.2f}s (min={sub_min:.1f}), "
                         f"last='{valid_words[-1]['word']}' @ {valid_words[-1]['start']:.1f}s, "
                         f"clip_duration={clip_duration:.1f}s"
                     )
             self._emit(job_id, 10, "highlights", "complete")
+
 
             # ═══ Step 11: Optional Auto B-roll ═══
             # Recover missing creative-direction suggestions from the exact
@@ -1429,7 +1484,16 @@ class V2PipelineService:
                 clip_words_raw = clips_with_words.get(clip.rank, [])
                 clip_hook = clip.hook or ""
                 clip_duration = max(0.0, clip.end - clip.start)
-                clip_words = sanitize_subtitle_words(clip_words_raw, clip_duration)
+                # words already filtered at Step 10; re-sanitize with hook window
+                # so any re-entry path still keeps subtitles off during hook.
+                hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0)
+                sub_min = hook_dur if clip_hook else 0.0
+                clip_words = sanitize_subtitle_words(
+                    clip_words_raw,
+                    clip_duration,
+                    subtitle_min_start=sub_min,
+                )
+
 
                 clip_reframe = reframe_data.get(clip.rank)
 

@@ -3468,18 +3468,14 @@ class PodcastReframeEngine(IReframeEngine):
         union = area_a + area_b - intersection
         return intersection / union if union > 0 else 0.0
 
-    def _is_ghost_pair(
+    def _ghost_pair_reason(
         self,
         prof_a: dict,
         prof_b: dict,
         width: int,
         height: int,
-    ) -> bool:
-        """Check if two position profiles represent the same person (ghost pair).
-
-        Uses IoU, nested containment, and center distance proximity.
-        Profile values are in PIXELS (center_x, center_y, width, height).
-        """
+    ) -> Optional[str]:
+        """Return why two profiles are a ghost pair, or None if distinct people."""
         ax, ay = prof_a.get("x", 0), prof_a.get("y", 0)
         aw, ah = prof_a.get("width", 0), prof_a.get("height", 0)
         bx, by = prof_b.get("x", 0), prof_b.get("y", 0)
@@ -3488,12 +3484,10 @@ class PodcastReframeEngine(IReframeEngine):
         box_a = BBox(ax - aw / 2, ay - ah / 2, ax + aw / 2, ay + ah / 2)
         box_b = BBox(bx - bw / 2, by - bh / 2, bx + bw / 2, by + bh / 2)
 
-        # IoU check
         iou = self._compute_iou(box_a, box_b)
         if iou > self.GHOST_IOU_THRESHOLD:
-            return True
+            return f"iou={iou:.3f}>{self.GHOST_IOU_THRESHOLD}"
 
-        # Nested tight/loose body boxes: low IoU but high containment.
         intersection_w = max(0.0, min(box_a.x2, box_b.x2) - max(box_a.x1, box_b.x1))
         intersection_h = max(0.0, min(box_a.y2, box_b.y2) - max(box_a.y1, box_b.y1))
         intersection = intersection_w * intersection_h
@@ -3503,10 +3497,10 @@ class PodcastReframeEngine(IReframeEngine):
             float(np.hypot(max(box_a.width, box_b.width), max(box_a.height, box_b.height))),
         )
         center_dist = float(np.hypot(ax - bx, ay - by))
-        if containment >= 0.88 and center_dist / larger_diagonal <= 0.22:
-            return True
+        c_ratio = center_dist / larger_diagonal
+        if containment >= 0.88 and c_ratio <= 0.22:
+            return f"nest contain={containment:.3f} c_ratio={c_ratio:.3f}"
 
-        # Shared face evidence: two body tracks resolving to one head.
         if (
             "face_x" in prof_a
             and "face_y" in prof_a
@@ -3527,25 +3521,35 @@ class PodcastReframeEngine(IReframeEngine):
                 ),
             )
             if face_dist <= face_scale * 0.55:
-                return True
+                return f"same_face dist={face_dist:.1f} scale={face_scale:.1f}"
 
-        # Center distance proximity check
         frame_diag = (width**2 + height**2) ** 0.5
         if frame_diag > 0:
             dist_ratio = center_dist / frame_diag
-            # Tight threshold: unconditional ghost
             if dist_ratio < self.GHOST_CENTER_DIST_RATIO:
-                return True
-            # Broader threshold: ghost if areas are very similar (same person duplicate)
+                return f"center_tight dist_ratio={dist_ratio:.3f}"
             if dist_ratio < self.GHOST_CENTER_DIST_BROAD:
                 area_a = prof_a.get("area", aw * ah)
                 area_b = prof_b.get("area", bw * bh)
                 if area_a > 0 and area_b > 0:
                     area_ratio = min(area_a, area_b) / max(area_a, area_b)
                     if area_ratio > 0.65:
-                        return True
+                        return (
+                            f"center_broad dist_ratio={dist_ratio:.3f} "
+                            f"area_ratio={area_ratio:.2f}"
+                        )
+        return None
 
-        return False
+    def _is_ghost_pair(
+        self,
+        prof_a: dict,
+        prof_b: dict,
+        width: int,
+        height: int,
+    ) -> bool:
+        """True when two position profiles are the same person (ghost pair)."""
+        return self._ghost_pair_reason(prof_a, prof_b, width, height) is not None
+
 
     @staticmethod
     def _median_profile(values: Dict[str, List[float]]) -> Dict[str, float]:
@@ -4158,6 +4162,7 @@ class PodcastReframeEngine(IReframeEngine):
                 reverse=True,
             )
 
+            ghost_reasons: Dict[int, str] = {}
             for track_id, profile in sorted_by_area:
                 track_area = profile.get(
                     "area", profile.get("width", 0) * profile.get("height", 0)
@@ -4169,6 +4174,9 @@ class PodcastReframeEngine(IReframeEngine):
                     and track_area / max_area < 0.25
                 ):
                     ghost_track_ids.add(track_id)
+                    ghost_reasons[track_id] = (
+                        f"tiny area_ratio={track_area / max_area:.2f}<0.25"
+                    )
                     continue
 
                 # Nested / same-face duplicates against a larger surviving track.
@@ -4181,15 +4189,20 @@ class PodcastReframeEngine(IReframeEngine):
                     )
                     if valid_area < track_area:
                         continue
-                    if self._is_ghost_pair(profile, valid_profile, width, height):
+                    reason = self._ghost_pair_reason(
+                        profile, valid_profile, width, height
+                    )
+                    if reason:
                         ghost_track_ids.add(track_id)
+                        ghost_reasons[track_id] = f"vs T{valid_id}: {reason}"
                         break
 
             if ghost_track_ids:
                 logger.info(
                     f"podcast_reframe: person-first ghost elimination removed tracks: "
-                    f"{ghost_track_ids}"
+                    f"{ghost_track_ids} reasons={ghost_reasons}"
                 )
+
                 stable_position_profiles = {
                     tid: prof
                     for tid, prof in stable_position_profiles.items()

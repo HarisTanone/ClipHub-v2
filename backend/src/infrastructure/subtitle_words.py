@@ -33,18 +33,24 @@ def mark_important_keywords(words: list[dict], clip_duration: float) -> list[dic
 def sanitize_subtitle_words(
     raw_words: list[dict],
     clip_duration: float,
+    *,
+    subtitle_min_start: float = 0.0,
 ) -> list[dict]:
     """Normalize word timings for subtitle rendering.
 
     Word-level providers occasionally return tiny negative starts, overlapping
     words, duplicate boundary words, or words past the trim end. Remotion expects
     clean, relative, monotonic timestamps.
+
+    subtitle_min_start: drop words that start before this time (e.g. 3.0 so the
+    hook owns 0–3s and subtitles only appear after).
     """
     if not raw_words or clip_duration <= 0:
         return []
 
+    min_start = max(0.0, float(subtitle_min_start or 0.0))
     cleaned = []
-    last_end = 0.0
+    last_end = min_start
     seen_nearby: set[tuple[str, int]] = set()
 
     def _as_float(value, default: float = 0.0) -> float:
@@ -67,6 +73,12 @@ def sanitize_subtitle_words(
         raw_end = _as_float(word.get("end"))
         start = max(0.0, min(raw_start, clip_duration))
         end = max(0.0, min(raw_end, clip_duration))
+
+        # Hook window owns the first N seconds — no subtitle tokens there.
+        if start < min_start:
+            if end <= min_start:
+                continue
+            start = min_start
 
         if end <= start:
             end = min(start + 0.18, clip_duration)

@@ -882,11 +882,12 @@ TRANSKRIP (format: [SegmentID | MM:SS] teks):
 
 ATURAN:
 1. Gunakan SEGMENT ID yang ada di transkrip (contoh: S0015)
-2. "start_id" = Segment ID di mana clip MULAI
-3. "end_id" = Segment ID di mana clip BERAKHIR
-4. Durasi clip MINIMUM 45 detik. Jangan potong di tengah cerita/argumen — pastikan clip berakhir di kalimat penutup yang natural. Boleh lebih dari 90 detik jika topik belum tuntas.
+2. "start_id" = Segment ID di mana clip MULAI — WAJIB di awal kalimat/ucapan lengkap (bukan di tengah kata/kalimat)
+3. "end_id" = Segment ID di mana clip BERAKHIR — WAJIB di akhir kalimat penutup yang natural (bukan potong di tengah bicara)
+4. Durasi clip MINIMUM 45 detik. Clip harus self-contained: satu unit bicara lengkap dari pembuka sampai penutup. Boleh lebih dari 90 detik jika topik belum tuntas.
 5. Score 1-100 berdasarkan potensi viral
 6. "summary" = ringkasan 1 kalimat apa yang terjadi di clip ini
+
 
 KRITERIA VIRAL:
 - Emosi tinggi (marah, terkejut, bahagia)
@@ -1017,9 +1018,10 @@ TUGAS:
 ATURAN SELEKSI:
 1. Pilih clip dengan score tertinggi DAN diversity konten terbaik
 2. Hindari clip yang terlalu mirip (topic/scene sama)
-3. Prioritaskan clip yang bisa berdiri sendiri (self-contained)
+3. Prioritaskan clip yang bisa berdiri sendiri (self-contained) — mulai di awal kalimat, berakhir di akhir kalimat, tidak potong di tengah ucapan
 4. SPREAD CLIP: Pastikan clip terpilih berasal dari bagian video yang BERBEDA-BEDA (awal, tengah, akhir). Jangan mengambil semua clip dari 1 chunk yang sama.
 5. Jika 2 clip bagus tapi terlalu berdekatan (< 60 detik gap), pilih yang score lebih tinggi
+
 
 ATURAN HOOK:
 - Hook HARUS 3-8 kata

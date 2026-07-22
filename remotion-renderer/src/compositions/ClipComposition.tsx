@@ -83,8 +83,14 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
     : subtitle.config;
 
   const hookDurationFrames = Math.floor(hook.duration * fps);
+  // Hook owns 0–N seconds. Drop subtitle words that start inside that window
+  // so even stale word payloads never draw under the hook overlay.
+  const subtitleWords = hookText
+    ? words.filter((w) => (w.start ?? 0) >= hook.duration)
+    : words;
 
   // ─── Font loading (isolated per component) ───────────────────────
+
   useRemotionFont(subtitle.fontFamily);
   useRemotionFont(hook.fontFamily);
   if (subtitle.highlightFontFamily) {
@@ -142,13 +148,13 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
         </>
       )}
 
-      {/* L3: Keep original word timing; only hide visually during emphasis or B-roll. */}
-      {words.length > 0 && (
+      {/* L3: Subtitles only after hook window; hide during emphasis/B-roll. */}
+      {subtitleWords.length > 0 && (
         <AbsoluteFill style={{ zIndex: 3, pointerEvents: "none" }}>
           <HideDuringTextEmphasis events={textEmphasisEvents}>
             <HideDuringBroll events={brollEvents}>
               <SubtitleLayer
-                words={words}
+                words={subtitleWords}
                 config={subtitleConfig}
                 fps={fps}
               />
@@ -156,6 +162,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
           </HideDuringTextEmphasis>
         </AbsoluteFill>
       )}
+
 
       {/* L4: Hook overlay — highest z-index */}
       {hookText && (
