@@ -78,6 +78,15 @@ def filter_duplicate_person_boxes(
             if iou >= 0.55 or (
                 containment >= 0.88 and center_distance / larger_diagonal <= 0.22
             ):
+                # DEBUG: surfaces IoU/containment so we know if person-2 is
+                # killed here vs never detected. Remove once diagnosis done.
+                logger.info(
+                    f"person_detector: DUP suppress "
+                    f"iou={iou:.3f} contain={containment:.3f} "
+                    f"c_dist/diag={center_distance / larger_diagonal:.3f} "
+                    f"drop conf={float(detection[4]):.2f} "
+                    f"keep conf={float(existing[4]):.2f}"
+                )
                 is_duplicate = True
                 break
         if not is_duplicate:

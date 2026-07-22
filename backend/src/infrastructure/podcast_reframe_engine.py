@@ -3819,7 +3819,40 @@ class PodcastReframeEngine(IReframeEngine):
                 )
                 person_bboxes = [det.to_box_tuple() for det in detections]
 
+                # DEBUG: low-threshold probe — first 10 samples only.
+                # Separates "RF-DETR never saw person 2" from "cut by PERSON_CONF_THRESHOLD".
+                if len(sample_frame_indices) < 10:
+                    try:
+                        det = self._person_detector_instance
+                        if det._model is not None and getattr(det, "_use_supervision", False):
+                            import supervision as sv
+                            raw = det._model.predict(frame_rgb, threshold=0.1)
+                            confs = []
+                            if isinstance(raw, sv.Detections) and raw.confidence is not None:
+                                for i in range(len(raw)):
+                                    cid = int(raw.class_id[i]) if raw.class_id is not None else -1
+                                    if cid == det.PERSON_CLASS_ID:
+                                        confs.append(round(float(raw.confidence[i]), 2))
+                            logger.info(
+                                f"podcast_reframe: DEBUG low-thresh frame={frame_idx} "
+                                f"raw_person_count={len(confs)} confs={confs} "
+                                f"prod_count={len(person_bboxes)} "
+                                f"prod_thresh={person_conf_thresh}"
+                            )
+                        else:
+                            low = det.detect(frame_rgb, confidence_override=0.1)
+                            logger.info(
+                                f"podcast_reframe: DEBUG low-thresh frame={frame_idx} "
+                                f"count={len(low)} "
+                                f"confs={[round(d.confidence, 2) for d in low]} "
+                                f"prod_count={len(person_bboxes)} "
+                                f"prod_thresh={person_conf_thresh}"
+                            )
+                    except Exception as dbg_err:
+                        logger.debug(f"podcast_reframe: low-thresh debug failed: {dbg_err}")
+
             if not person_bboxes:
+
                 self._load_face_detector()
                 if self._use_legacy_api:
                     results = self._face_detector.process(frame_rgb)
