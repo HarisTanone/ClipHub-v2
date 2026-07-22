@@ -33,31 +33,37 @@ def filter_duplicate_person_boxes(
 ) -> List[PersonBox]:
     """Suppress nested/tight-loose body boxes before tracker ID assignment.
 
-    IoU-only NMS misses nested boxes whose areas differ substantially, so
-    containment and normalized center distance are considered as well.
+    Rules:
+      1. High IoU → same person; keep higher-confidence.
+      2. High containment (nested shell) → same person; keep the *tighter*
+         (smaller) box. Outer mega-boxes that swallow a real person are dropped.
+      3. Multi-person container: a box whose area is ≥1.8× another and that
+         contains the other's center is dropped (RF-DETR group blob).
     """
     if len(detections) < 2:
         return list(detections)
 
-    selected: List[PersonBox] = []
+    # Conf desc, then *smaller* area first so individual people win over shells.
     ordered = sorted(
         detections,
         key=lambda det: (
             float(det[4]),
-            (float(det[2]) - float(det[0])) * (float(det[3]) - float(det[1])),
+            -((float(det[2]) - float(det[0])) * (float(det[3]) - float(det[1]))),
         ),
         reverse=True,
     )
+    selected: List[PersonBox] = []
     for detection in ordered:
-        x1, y1, x2, y2, _conf = map(float, detection)
+        x1, y1, x2, y2, conf = map(float, detection)
         width = max(0.0, x2 - x1)
         height = max(0.0, y2 - y1)
         area = width * height
         center_x = (x1 + x2) / 2.0
         center_y = (y1 + y2) / 2.0
         is_duplicate = False
-        for existing in selected:
-            ex1, ey1, ex2, ey2, _ = map(float, existing)
+        replace_idx: Optional[int] = None
+        for idx, existing in enumerate(selected):
+            ex1, ey1, ex2, ey2, e_conf = map(float, existing)
             e_width = max(0.0, ex2 - ex1)
             e_height = max(0.0, ey2 - ey1)
             e_area = e_width * e_height
@@ -66,7 +72,8 @@ def filter_duplicate_person_boxes(
             intersection = inter_w * inter_h
             union = max(1.0, area + e_area - intersection)
             iou = intersection / union
-            containment = intersection / max(1.0, min(area, e_area))
+            smaller = max(1.0, min(area, e_area))
+            containment = intersection / smaller
             larger_diagonal = max(
                 1.0,
                 math.hypot(max(width, e_width), max(height, e_height)),
@@ -75,30 +82,66 @@ def filter_duplicate_person_boxes(
                 center_x - (ex1 + ex2) / 2.0,
                 center_y - (ey1 + ey2) / 2.0,
             )
-            if iou >= 0.55 or (
-                containment >= 0.88 and center_distance / larger_diagonal <= 0.22
-            ):
-                # DEBUG: surfaces IoU/containment so we know if person-2 is
-                # killed here vs never detected. Remove once diagnosis done.
+            c_ratio = center_distance / larger_diagonal
+
+            # Classic NMS: heavy overlap → keep higher conf (already ordered).
+            if iou >= 0.55:
                 logger.info(
-                    f"person_detector: DUP suppress "
-                    f"iou={iou:.3f} contain={containment:.3f} "
-                    f"c_dist/diag={center_distance / larger_diagonal:.3f} "
-                    f"drop conf={float(detection[4]):.2f} "
-                    f"keep conf={float(existing[4]):.2f}"
+                    f"person_detector: DUP suppress iou={iou:.3f} "
+                    f"drop conf={conf:.2f} keep conf={e_conf:.2f}"
                 )
                 is_duplicate = True
                 break
-        if not is_duplicate:
-            selected.append(
-                (
-                    float(detection[0]),
-                    float(detection[1]),
-                    float(detection[2]),
-                    float(detection[3]),
-                    float(detection[4]),
+
+            # Nested same-person: keep tighter (smaller) box.
+            if containment >= 0.80 and c_ratio <= 0.35:
+                if area >= e_area:
+                    logger.info(
+                        f"person_detector: DUP nest-drop-large "
+                        f"contain={containment:.3f} c_ratio={c_ratio:.3f} "
+                        f"drop conf={conf:.2f} area={area:.0f} "
+                        f"keep conf={e_conf:.2f} area={e_area:.0f}"
+                    )
+                    is_duplicate = True
+                    break
+                # Current is tighter → replace the outer shell already selected.
+                logger.info(
+                    f"person_detector: DUP nest-replace-large "
+                    f"contain={containment:.3f} c_ratio={c_ratio:.3f} "
+                    f"keep conf={conf:.2f} area={area:.0f} "
+                    f"drop conf={e_conf:.2f} area={e_area:.0f}"
                 )
-            )
+                replace_idx = idx
+                break
+
+            # Container blob: much larger box encloses another person's center.
+            if area >= e_area * 1.8:
+                e_cx, e_cy = (ex1 + ex2) / 2.0, (ey1 + ey2) / 2.0
+                if x1 <= e_cx <= x2 and y1 <= e_cy <= y2 and containment >= 0.50:
+                    logger.info(
+                        f"person_detector: DUP container-drop "
+                        f"contain={containment:.3f} area_ratio={area / max(1.0, e_area):.2f} "
+                        f"drop conf={conf:.2f}"
+                    )
+                    is_duplicate = True
+                    break
+            elif e_area >= area * 1.8:
+                if ex1 <= center_x <= ex2 and ey1 <= center_y <= ey2 and containment >= 0.50:
+                    logger.info(
+                        f"person_detector: DUP container-replace "
+                        f"contain={containment:.3f} "
+                        f"keep conf={conf:.2f} drop conf={e_conf:.2f}"
+                    )
+                    replace_idx = idx
+                    break
+
+        if is_duplicate:
+            continue
+        box = (x1, y1, x2, y2, conf)
+        if replace_idx is not None:
+            selected[replace_idx] = box
+        else:
+            selected.append(box)
 
     return sorted(
         selected,
@@ -107,6 +150,7 @@ def filter_duplicate_person_boxes(
             (float(det[1]) + float(det[3])) / 2.0,
         ),
     )
+
 
 
 @dataclass
