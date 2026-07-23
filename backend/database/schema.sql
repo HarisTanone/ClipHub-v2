@@ -338,9 +338,9 @@ CREATE TABLE IF NOT EXISTS reframe_tuning_configs (
     grid_base_zoom REAL NOT NULL DEFAULT 1.08,
     grid_max_zoom REAL NOT NULL DEFAULT 1.85,
     grid_face_margin REAL NOT NULL DEFAULT 0.35,
-    grid_enter_samples INTEGER NOT NULL DEFAULT 4,
-    grid_exit_samples INTEGER NOT NULL DEFAULT 2,
-    min_grid_segment_seconds REAL NOT NULL DEFAULT 1.20,
+    grid_enter_samples INTEGER NOT NULL DEFAULT 9,
+    grid_exit_samples INTEGER NOT NULL DEFAULT 6,
+    min_grid_segment_seconds REAL NOT NULL DEFAULT 3.0,
     -- Ghost Detection
     min_face_area_px INTEGER NOT NULL DEFAULT 4000,
     min_area_ratio_to_max REAL NOT NULL DEFAULT 0.25,

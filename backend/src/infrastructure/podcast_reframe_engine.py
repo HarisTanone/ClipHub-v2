@@ -68,9 +68,11 @@ class PodcastReframeEngine(IReframeEngine):
     GRID_BASE_ZOOM = 1.08            # Gentle default crop; avoids excessive background.
     GRID_MAX_ZOOM = 2.20             # Head+shoulders framing for face-to-face podcast grid
     GRID_FACE_MARGIN = 0.35          # Minimum face-side breathing room inside a panel.
-    GRID_ENTER_SAMPLES = 1           # Grid on first co-visible sample (≥2 people).
-    GRID_EXIT_SAMPLES = 2            # Brief miss still holds grid open.
-    MIN_GRID_SEGMENT_SECONDS = 0.50  # Allow short multi-person sections.
+    # ~3fps sampling → 9 samples ≈ 3s. Require sustained co-visibility before
+    # opening grid so single↔grid does not flicker on brief two-shots.
+    GRID_ENTER_SAMPLES = 9
+    GRID_EXIT_SAMPLES = 6            # Hold grid through short occlusions.
+    MIN_GRID_SEGMENT_SECONDS = 3.0   # Grid only when multi-person stretch ≥ 3s.
 
     VALID_TRANSITIONS = {"cut", "fade", "slide", "zoom"}
 

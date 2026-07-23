@@ -344,6 +344,60 @@ else
     echo "  ⚠️  No migrations directory found"
 fi
 
+# Verify reframe tuning defaults landed (anti-flicker + detection floor)
+echo "  Verifying reframe tuning defaults..."
+./venv/bin/python -c "
+import sys
+sys.path.insert(0, '$BACKEND_DIR')
+from src.presentation.routes.settings import get_reframe_tuning, REFRAME_TUNING_DEFAULTS
+from src.config import settings
+
+cfg = get_reframe_tuning(None)
+checks = {
+    'grid_enter_samples': 9,
+    'grid_exit_samples': 6,
+    'min_grid_segment_seconds': 3.0,
+    'min_separation_ratio': 0.05,
+    'grid_max_zoom': 2.20,
+}
+bad = []
+for k, floor in checks.items():
+    val = cfg.get(k)
+    if val is None:
+        bad.append(f'{k}=missing')
+    elif isinstance(floor, float):
+        if float(val) < float(floor) - 1e-9 and k != 'grid_max_zoom':
+            bad.append(f'{k}={val} (want>={floor})')
+        if k == 'grid_max_zoom' and abs(float(val) - float(floor)) > 1e-9:
+            # only warn if below floor; higher zoom ok
+            if float(val) < float(floor):
+                bad.append(f'{k}={val} (want>={floor})')
+    else:
+        if int(val) < int(floor):
+            bad.append(f'{k}={val} (want>={floor})')
+
+print(f'  reframe global: enter={cfg.get(\"grid_enter_samples\")} '
+      f'exit={cfg.get(\"grid_exit_samples\")} '
+      f'min_seg={cfg.get(\"min_grid_segment_seconds\")} '
+      f'sep={cfg.get(\"min_separation_ratio\")} '
+      f'max_zoom={cfg.get(\"grid_max_zoom\")}')
+print(f'  PERSON_CONF_THRESHOLD={settings.PERSON_CONF_THRESHOLD}')
+print(f'  REFRAME_PIPELINE_MODE={settings.REFRAME_PIPELINE_MODE}')
+if bad:
+    print('  ❌ reframe tuning verify failed: ' + ', '.join(bad))
+    sys.exit(1)
+print('  ✅ reframe tuning defaults OK')
+" 2>&1 | sed 's/^/  /' || {
+    echo "  ❌ Reframe tuning verification failed"
+    exit 1
+}
+
+# Detection floor — append only if missing (never overwrite ops override)
+if [ -f ".env" ]; then
+    append_env_if_missing ".env" "PERSON_CONF_THRESHOLD" "0.35"
+    append_env_if_missing ".env" "REFRAME_PIPELINE_MODE" "person_first"
+fi
+
 # ─── Step 3.2: Person-First Pipeline Models ──────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

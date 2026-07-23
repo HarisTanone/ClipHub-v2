@@ -269,8 +269,8 @@ REFRAME_TUNING_DEFAULTS = {
     "min_face_size_ratio": 0.10, "max_face_size_ratio": 0.50,
     "min_separation_ratio": 0.05, "min_coexist_ratio": 0.40,
     "dominance_single_crop": 0.75, "grid_base_zoom": 1.08, "grid_max_zoom": 2.20,
-    "grid_face_margin": 0.35, "grid_enter_samples": 4, "grid_exit_samples": 2,
-    "min_grid_segment_seconds": 1.20,
+    "grid_face_margin": 0.35, "grid_enter_samples": 9, "grid_exit_samples": 6,
+    "min_grid_segment_seconds": 3.0,
     "min_face_area_px": 4000, "min_area_ratio_to_max": 0.25, "min_frame_ratio": 0.15,
     "ghost_iou_threshold": 0.25, "ghost_center_dist_ratio": 0.08,
     "ghost_center_dist_broad": 0.20, "min_pair_size_ratio": 0.18,
@@ -289,9 +289,9 @@ class ReframeTuningConfig(BaseModel):
     grid_base_zoom: float = 1.08
     grid_max_zoom: float = 2.20
     grid_face_margin: float = 0.35
-    grid_enter_samples: int = 4
-    grid_exit_samples: int = 2
-    min_grid_segment_seconds: float = 1.20
+    grid_enter_samples: int = 9
+    grid_exit_samples: int = 6
+    min_grid_segment_seconds: float = 3.0
     min_face_area_px: int = 4000
     min_area_ratio_to_max: float = 0.25
     min_frame_ratio: float = 0.15
@@ -320,9 +320,9 @@ def _ensure_reframe_tuning_table():
                 grid_base_zoom REAL NOT NULL DEFAULT 1.08,
                 grid_max_zoom REAL NOT NULL DEFAULT 2.20,
                 grid_face_margin REAL NOT NULL DEFAULT 0.35,
-                grid_enter_samples INTEGER NOT NULL DEFAULT 4,
-                grid_exit_samples INTEGER NOT NULL DEFAULT 2,
-                min_grid_segment_seconds REAL NOT NULL DEFAULT 1.20,
+                grid_enter_samples INTEGER NOT NULL DEFAULT 9,
+                grid_exit_samples INTEGER NOT NULL DEFAULT 6,
+                min_grid_segment_seconds REAL NOT NULL DEFAULT 3.0,
                 min_face_area_px INTEGER NOT NULL DEFAULT 4000,
                 min_area_ratio_to_max REAL NOT NULL DEFAULT 0.25,
                 min_frame_ratio REAL NOT NULL DEFAULT 0.15,
@@ -369,6 +369,24 @@ def _ensure_reframe_tuning_table():
         if cur.rowcount > 0:
             conn.commit()
             print(f"  [FIX] Updated {cur.rowcount} row(s): grid_max_zoom → 2.20")
+
+        # Fix: min grid segment 3s + enter/exit hysteresis (stop single↔grid flicker)
+        cur.execute("""
+            UPDATE reframe_tuning_configs
+            SET min_grid_segment_seconds = 3.0,
+                grid_enter_samples = 9,
+                grid_exit_samples = 6,
+                updated_at = datetime('now')
+            WHERE min_grid_segment_seconds < 3.0
+               OR grid_enter_samples < 9
+               OR grid_exit_samples < 6
+        """)
+        if cur.rowcount > 0:
+            conn.commit()
+            print(
+                f"  [FIX] Updated {cur.rowcount} row(s): "
+                f"min_grid_segment=3.0s enter=9 exit=6"
+            )
 
         conn.commit()
     finally:
