@@ -408,6 +408,33 @@ class TopBehindSubjectRenderer:
             return False
 
 
+def _resolve_top_overlay_asset(suggestion) -> tuple[str, str, str] | None:
+    """Return (path, format, source) from asset_result and/or splice_segment.
+
+    ClipScout often sets splice_segment only (no asset_result). Legacy path sets
+    asset_result. Both must feed top-behind-person overlay.
+    """
+    path = ""
+    fmt = ""
+    source = ""
+    asset = getattr(suggestion, "asset_result", None)
+    if asset and not getattr(asset, "is_fallback", True):
+        path = getattr(asset, "local_path", "") or ""
+        fmt = (getattr(asset, "asset_format", "") or "").lower()
+        source = getattr(asset, "source_api", "") or ""
+        if path and os.path.exists(path):
+            return path, fmt, source
+
+    seg = getattr(suggestion, "splice_segment", None)
+    if seg and getattr(seg, "footage_path", None) and os.path.exists(seg.footage_path):
+        return (
+            seg.footage_path,
+            fmt or "video",
+            source or getattr(seg, "platform", "") or "",
+        )
+    return None
+
+
 def pick_top_overlay_suggestions(
     suggestions: list,
     max_per_clip: int | None = None,
@@ -416,35 +443,28 @@ def pick_top_overlay_suggestions(
     """Pick BRollSuggestion rows for top-overlay (prefer image; skip AI-text zones).
 
     Does not mutate suggestions used for full-frame splice. Returns a new list.
+    Accepts ClipScout splice-only rows and legacy asset_result rows.
     """
     limit = max_per_clip if max_per_clip is not None else settings.TOP_OVERLAY_MAX_PER_CLIP
     blocked = blocked_ranges or []
     scored = []
     for s in suggestions:
-        asset = getattr(s, "asset_result", None)
-        if not asset or getattr(asset, "is_fallback", True):
+        resolved = _resolve_top_overlay_asset(s)
+        if not resolved:
             continue
-        path = getattr(asset, "local_path", "") or ""
-        if not path or not os.path.exists(path):
-            # splice-processed path may live on splice_segment
-            seg = getattr(s, "splice_segment", None)
-            if seg and getattr(seg, "footage_path", None) and os.path.exists(seg.footage_path):
-                path = seg.footage_path
-            else:
-                continue
-        fmt = (getattr(asset, "asset_format", "") or "").lower()
+        path, fmt, source = resolved
         # Prefer stills for behind-person look; video still allowed
         score = 0 if fmt in {"png", "jpg", "jpeg", "webp", "gif", "svg"} else 1
         at = float(getattr(s, "at_time", 0))
         dur = float(getattr(s, "duration", 2.0))
         if any(not (at + dur <= a or at >= b) for a, b in blocked):
             continue
-        scored.append((score, at, s, path))
+        scored.append((score, at, s, path, source))
 
     scored.sort(key=lambda x: (x[0], x[1]))
     picked = []
     used: list[tuple[float, float]] = []
-    for _, at, s, path in scored:
+    for _, at, s, path, source in scored:
         dur = float(s.duration)
         if any(not (at + dur <= a or at >= b) for a, b in used):
             continue
@@ -455,9 +475,10 @@ def pick_top_overlay_suggestions(
                 duration=dur,
                 asset_path=path,
                 keyword=getattr(s, "keyword", "") or "",
-                source=getattr(getattr(s, "asset_result", None), "source_api", "") or "",
+                source=source,
             )
         )
         if len(picked) >= limit:
             break
     return picked
+

@@ -396,6 +396,16 @@ print('  ✅ reframe tuning defaults OK')
 if [ -f ".env" ]; then
     append_env_if_missing ".env" "PERSON_CONF_THRESHOLD" "0.35"
     append_env_if_missing ".env" "REFRAME_PIPELINE_MODE" "person_first"
+    append_env_if_missing ".env" "TOP_OVERLAY_ENABLED" "true"
+    append_env_if_missing ".env" "TOP_OVERLAY_SPLIT_RATIO" "0.5"
+    append_env_if_missing ".env" "TOP_OVERLAY_FADE_HEIGHT" "0.15"
+    append_env_if_missing ".env" "TOP_OVERLAY_OPACITY" "1.0"
+    append_env_if_missing ".env" "TOP_OVERLAY_MAX_PER_CLIP" "2"
+    append_env_if_missing ".env" "TOP_OVERLAY_SEG_CONFIDENCE" "0.35"
+    append_env_if_missing ".env" "TOP_OVERLAY_MASK_FEATHER" "9"
+    append_env_if_missing ".env" "TOP_OVERLAY_MASK_STRIDE" "2"
+    append_env_if_missing ".env" "BROLL_SPLICE_ENABLED" "true"
+    append_env_if_missing ".env" "ASSET_FETCH_ENABLED" "true"
 fi
 
 # ─── Step 3.2: Person-First Pipeline Models ──────────────────────────────────

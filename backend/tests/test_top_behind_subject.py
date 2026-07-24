@@ -126,3 +126,25 @@ def test_pick_skips_missing_and_fallback(tmp_path):
     picks = pick_top_overlay_suggestions([missing, fb, ok], max_per_clip=2)
     assert len(picks) == 1
     assert picks[0].keyword == "ok"
+
+
+def test_pick_accepts_clipscout_splice_only(tmp_path):
+    """ClipScout path: splice_segment only, no asset_result — must still pick."""
+    footage = tmp_path / "cs_footage.mp4"
+    footage.write_bytes(b"x")
+    s = SimpleNamespace(
+        at_time=4.0,
+        duration=2.0,
+        keyword="money",
+        asset_result=None,
+        splice_segment=SimpleNamespace(
+            footage_path=str(footage),
+            platform="pexels",
+        ),
+    )
+    picks = pick_top_overlay_suggestions([s], max_per_clip=2)
+    assert len(picks) == 1
+    assert picks[0].asset_path == str(footage)
+    assert picks[0].keyword == "money"
+    assert picks[0].source == "pexels"
+

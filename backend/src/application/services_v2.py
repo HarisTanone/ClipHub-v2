@@ -1140,13 +1140,11 @@ class V2PipelineService:
 
             if splice_count > 0:
                 logger.info(f"[{job_id}] B-roll splice: {splice_count}/{len(clips)} clips spliced")
-                # Cleanup intermediate footage files
-                footage_dir = os.path.join(output_dir, "broll_footage")
-                if os.path.exists(footage_dir):
-                    import shutil
-                    shutil.rmtree(footage_dir, ignore_errors=True)
+            # Keep broll_footage until after top-behind overlay — picker/renderer
+            # may still need splice_segment.footage_path / asset local paths.
 
         # ─── Step 10.6b: Splice legacy video assets (Pexels/Pixabay direct) ──
+
         # If ClipScout didn't provide splice_segments but legacy fetcher got video
         # assets, also splice them full-frame (not overlay).
         if settings.BROLL_SPLICE_ENABLED:
@@ -1237,7 +1235,13 @@ class V2PipelineService:
                 trim_results=trim_results,
             )
 
+        # Drop intermediate footage only after top-behind bake.
+        footage_dir = os.path.join(output_dir, "broll_footage")
+        if os.path.exists(footage_dir):
+            shutil.rmtree(footage_dir, ignore_errors=True)
+
         self._emit(job_id, 11, "broll", "complete")
+
 
 
 
@@ -1271,18 +1275,21 @@ class V2PipelineService:
                 clip.top_overlay_events = []
                 continue
 
+            # Prefer already-spliced full-frame B-roll so top-behind is additive
+            # (does not discard timeline splice when both effects run).
             reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
             base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
             brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
-            if os.path.exists(reframed_path):
-                input_path = reframed_path
-            elif os.path.exists(base_path):
-                input_path = base_path
-            else:
+            if os.path.exists(brolled_path):
                 input_path = brolled_path
+            elif os.path.exists(reframed_path):
+                input_path = reframed_path
+            else:
+                input_path = base_path
             if not os.path.exists(input_path):
                 clip.top_overlay_events = []
                 continue
+
 
             out_path = f"{output_dir}/clip_{clip.rank:02d}_top_overlay.mp4"
             try:

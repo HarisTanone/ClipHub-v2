@@ -240,7 +240,11 @@ class AssetFetcher(IAssetFetcher):
             if not processed_path:
                 continue
 
-            # Attach splice segment to suggestion
+            # Attach splice segment + asset_result so top-behind-person can use
+            # the same resolved footage without a second download.
+            platform = (selected.platform or "pexels").lower()
+            if platform not in AssetResult.VALID_SOURCES:
+                platform = "pexels"
             suggestion.splice_segment = SpliceSegment(
                 footage_path=processed_path,
                 at_time=suggestion.at_time,
@@ -249,10 +253,22 @@ class AssetFetcher(IAssetFetcher):
                 source_id=selected.id,
                 platform=selected.platform,
             )
+            suggestion.asset_result = AssetResult(
+                local_path=processed_path,
+                source_api=platform,
+                license_type="pexels_license" if platform == "pexels" else (
+                    "pixabay_license" if platform == "pixabay" else "none"
+                ),
+                original_url=getattr(selected, "url", "") or "",
+                asset_format="video",
+                asset_id=str(selected.id or ""),
+                is_fallback=False,
+            )
             logger.info(
                 f"[AssetFetcher] ClipScout splice ready: '{suggestion.keyword}' "
                 f"→ {selected.platform}/{selected.id} ({suggestion.duration:.1f}s)"
             )
+
 
     async def _resolve_single(
         self, suggestion: BRollSuggestion, creative_direction: Optional[CreativeDirection]
