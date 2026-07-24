@@ -117,7 +117,13 @@ class Subtitle:
 
 @dataclass
 class BRollSuggestion:
-    """B-Roll suggestion from Gemini analysis."""
+    """B-Roll suggestion from AI analysis.
+
+    Two placement modes (auto-chosen by AI, not fixed templates):
+      full_frame     — timeline splice: clip → stock video → clip (person gone)
+      behind_person  — top ~50% stock image/video BEHIND person cutout (person stays)
+    Tracks must use different times so both can coexist on one clip.
+    """
     at_time: float
     keyword: str
     template: str  # BRollTemplate value (legacy id, kept for DB compat)
@@ -130,6 +136,8 @@ class BRollSuggestion:
     # as a Remotion BrollLayer event (preview == final) instead of via the
     # legacy FFmpeg drawtext/overlay path.
     motion_style: Optional[BrollMotionStyle] = None
+    # full_frame | behind_person — empty = infer from visual_category/asset
+    placement: str = ""
 
 
 @dataclass

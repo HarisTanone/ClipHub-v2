@@ -982,8 +982,9 @@ class V2PipelineService:
             "line_reveal_typography",
             "particle_text_burst",
         }
+        # Up to 4: e.g. 2 full_frame + 2 behind_person on different times
         parsed: list[BRollSuggestion] = []
-        for raw in raw_suggestions[:3]:
+        for raw in raw_suggestions[:4]:
             if not isinstance(raw, dict):
                 continue
             keyword = " ".join(str(raw.get("keyword") or "").split())[:80]
@@ -1024,6 +1025,18 @@ class V2PipelineService:
             if motion_style is None:
                 motion_style = LEGACY_TEMPLATE_TO_MOTION.get(template)
 
+            placement = str(raw.get("placement") or "").strip().lower()
+            if placement in {"fullframe", "splice", "replace"}:
+                placement = "full_frame"
+            elif placement in {"behind", "top_overlay", "overlay", "top"}:
+                placement = "behind_person"
+            elif placement not in {"full_frame", "behind_person"}:
+                # Infer: footage video → full_frame; icon/image → behind_person
+                if visual_cat in (VisualCategory.ICON, VisualCategory.MOTION_GRAPHIC):
+                    placement = "behind_person"
+                else:
+                    placement = "full_frame"
+
             parsed.append(BRollSuggestion(
                 at_time=round(at_time, 3),
                 keyword=keyword,
@@ -1031,8 +1044,20 @@ class V2PipelineService:
                 duration=round(duration, 3),
                 visual_category=visual_cat,
                 motion_style=motion_style,
+                placement=placement,
             ))
+
+        # Ensure dual tracks when AI only emits one placement type.
+        # Need different times so full_frame splice + behind_person can coexist.
+        full = [s for s in parsed if s.placement == "full_frame"]
+        behind = [s for s in parsed if s.placement == "behind_person"]
+        if full and not behind and len(full) >= 2:
+            for s in full[1:]:
+                s.placement = "behind_person"
+        elif behind and not full and len(behind) >= 2:
+            behind[0].placement = "full_frame"
         return parsed
+
 
     async def _trim_all_clips(
         self,
@@ -1101,19 +1126,25 @@ class V2PipelineService:
                 logger.warning(f"[{job_id}] B-roll asset search failed; using fallback: {exc}")
 
         # ─── Step 10.6: Splice B-Roll Footage (video track replacement) ───────
+        # Only placement=full_frame (or video without behind_person). Never splice
+        # behind_person suggestions — those keep the person on screen.
+        from src.infrastructure.top_behind_subject_renderer import pick_full_frame_suggestions
+
         if settings.BROLL_SPLICE_ENABLED:
             splice_count = 0
             for clip in clips:
                 if not trim_results.get(clip.rank) or not clip.broll_suggestions:
                     continue
 
-                # Collect splice segments from suggestions
+                full_frame = pick_full_frame_suggestions(clip.broll_suggestions)
+                # Collect splice segments from full-frame suggestions only
                 splice_segments = [
-                    s.splice_segment for s in clip.broll_suggestions
+                    s.splice_segment for s in full_frame
                     if hasattr(s, 'splice_segment') and s.splice_segment
                 ]
                 if not splice_segments:
                     continue
+
 
                 # Determine input path
                 reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
@@ -1158,9 +1189,9 @@ class V2PipelineService:
                 if os.path.exists(brolled_path):
                     continue  # Already spliced by ClipScout path
 
-                # Collect video assets that have asset_result but no splice_segment
+                # Full-frame video assets only (skip behind_person placement)
                 video_suggestions = [
-                    s for s in clip.broll_suggestions
+                    s for s in pick_full_frame_suggestions(clip.broll_suggestions)
                     if (s.asset_result
                         and not s.asset_result.is_fallback
                         and s.asset_result.asset_format == "video"
@@ -1169,6 +1200,7 @@ class V2PipelineService:
                 ]
                 if not video_suggestions:
                     continue
+
 
                 # Process each legacy video asset to 1080x1920 and create SpliceSegment
                 legacy_segments = []
@@ -1253,10 +1285,15 @@ class V2PipelineService:
         output_dir: str,
         trim_results: dict[int, bool],
     ) -> None:
-        """Bake top-region behind-person overlays. Additive to full-frame splice."""
+        """Bake top-region behind-person overlays. Additive to full-frame splice.
+
+        Blocks full-frame splice time ranges — person is gone there, so
+        behind-person would be invisible. Tracks must use different times.
+        """
         from src.infrastructure.top_behind_subject_renderer import (
             TopBehindSubjectRenderer,
             pick_top_overlay_suggestions,
+            pick_full_frame_suggestions,
         )
 
         renderer = TopBehindSubjectRenderer()
@@ -1266,14 +1303,30 @@ class V2PipelineService:
                 clip.top_overlay_events = []
                 continue
 
+            # Block times already used by full-frame splice (person replaced)
+            blocked = []
+            for s in pick_full_frame_suggestions(clip.broll_suggestions):
+                has_asset = bool(
+                    (s.splice_segment and getattr(s.splice_segment, "footage_path", None))
+                    or (
+                        s.asset_result
+                        and not s.asset_result.is_fallback
+                        and s.asset_result.asset_format == "video"
+                        and s.asset_result.local_path
+                    )
+                )
+                if has_asset or (getattr(s, "placement", "") or "") == "full_frame":
+                    blocked.append((float(s.at_time), float(s.at_time) + float(s.duration)))
+
             segments = pick_top_overlay_suggestions(
                 clip.broll_suggestions,
                 max_per_clip=settings.TOP_OVERLAY_MAX_PER_CLIP,
-                blocked_ranges=[],
+                blocked_ranges=blocked,
             )
             if not segments:
                 clip.top_overlay_events = []
                 continue
+
 
             # Prefer already-spliced full-frame B-roll so top-behind is additive
             # (does not discard timeline splice when both effects run).
@@ -1733,6 +1786,7 @@ class V2PipelineService:
                         "keyword": suggestion.keyword,
                         "template": suggestion.template,
                         "duration": suggestion.duration,
+                        "placement": getattr(suggestion, "placement", "") or "",
                         "visual_category": (
                             suggestion.visual_category.value
                             if isinstance(suggestion.visual_category, VisualCategory)
@@ -1745,6 +1799,7 @@ class V2PipelineService:
                     }
                     for suggestion in clip.broll_suggestions
                 ],
+
                 "text_emphasis_events": [
                     {
                         key: value

@@ -435,26 +435,50 @@ def _resolve_top_overlay_asset(suggestion) -> tuple[str, str, str] | None:
     return None
 
 
+def _placement_of(suggestion) -> str:
+    """Normalize placement: full_frame | behind_person | ''."""
+    raw = (getattr(suggestion, "placement", "") or "").strip().lower()
+    if raw in {"full_frame", "fullframe", "splice"}:
+        return "full_frame"
+    if raw in {"behind_person", "behind", "top_overlay", "overlay"}:
+        return "behind_person"
+    return ""
+
+
 def pick_top_overlay_suggestions(
     suggestions: list,
     max_per_clip: int | None = None,
     blocked_ranges: list[tuple[float, float]] | None = None,
 ) -> list:
-    """Pick BRollSuggestion rows for top-overlay (prefer image; skip AI-text zones).
+    """Pick BRollSuggestion rows for top-behind-person (prefer image; skip splice zones).
 
-    Does not mutate suggestions used for full-frame splice. Returns a new list.
-    Accepts ClipScout splice-only rows and legacy asset_result rows.
+    Never reuses a full_frame splice window — person is gone there, so behind-person
+    would be invisible. Prefer explicit placement=behind_person, then images/icons,
+    then remaining video assets not used for full-frame.
     """
     limit = max_per_clip if max_per_clip is not None else settings.TOP_OVERLAY_MAX_PER_CLIP
-    blocked = blocked_ranges or []
+    blocked = list(blocked_ranges or [])
     scored = []
     for s in suggestions:
+        placement = _placement_of(s)
+        # Explicit full_frame never goes to behind-person track
+        if placement == "full_frame":
+            continue
         resolved = _resolve_top_overlay_asset(s)
         if not resolved:
             continue
         path, fmt, source = resolved
-        # Prefer stills for behind-person look; video still allowed
-        score = 0 if fmt in {"png", "jpg", "jpeg", "webp", "gif", "svg"} else 1
+        is_still = fmt in {"png", "jpg", "jpeg", "webp", "gif", "svg", "image"}
+        # Score: lower = better. Prefer behind_person, then stills/icons, then video.
+        score = 0
+        if placement != "behind_person":
+            score += 2
+        if not is_still:
+            score += 1
+        cat = getattr(s, "visual_category", None)
+        cat_val = cat.value if hasattr(cat, "value") else str(cat or "")
+        if cat_val in {"icon", "motion_graphic"}:
+            score -= 1  # good for behind-person
         at = float(getattr(s, "at_time", 0))
         dur = float(getattr(s, "duration", 2.0))
         if any(not (at + dur <= a or at >= b) for a, b in blocked):
@@ -467,6 +491,8 @@ def pick_top_overlay_suggestions(
     for _, at, s, path, source in scored:
         dur = float(s.duration)
         if any(not (at + dur <= a or at >= b) for a, b in used):
+            continue
+        if any(not (at + dur <= a or at >= b) for a, b in blocked):
             continue
         used.append((at, at + dur))
         picked.append(
@@ -481,4 +507,33 @@ def pick_top_overlay_suggestions(
         if len(picked) >= limit:
             break
     return picked
+
+
+def pick_full_frame_suggestions(suggestions: list) -> list:
+    """Suggestions that should timeline-splice (person replaced by stock video).
+
+    Prefer placement=full_frame or video footage. Exclude explicit behind_person.
+    """
+    out = []
+    for s in suggestions:
+        placement = _placement_of(s)
+        if placement == "behind_person":
+            continue
+        # Need spliceable video
+        has_splice = bool(
+            getattr(s, "splice_segment", None)
+            and getattr(getattr(s, "splice_segment", None), "footage_path", None)
+        )
+        asset = getattr(s, "asset_result", None)
+        is_video_asset = bool(
+            asset
+            and not getattr(asset, "is_fallback", True)
+            and (getattr(asset, "asset_format", "") or "").lower() == "video"
+            and getattr(asset, "local_path", None)
+        )
+        if placement == "full_frame" or has_splice or is_video_asset:
+            out.append(s)
+        elif placement == "" and has_splice:
+            out.append(s)
+    return out
 

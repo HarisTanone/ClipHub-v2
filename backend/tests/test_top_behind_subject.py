@@ -10,8 +10,10 @@ import pytest
 from src.infrastructure.top_behind_subject_renderer import (
     TopBehindSubjectRenderer,
     TopOverlaySegment,
+    pick_full_frame_suggestions,
     pick_top_overlay_suggestions,
 )
+
 
 
 def test_render_keeps_person_original_and_blends_top_bg():
@@ -137,6 +139,7 @@ def test_pick_accepts_clipscout_splice_only(tmp_path):
         duration=2.0,
         keyword="money",
         asset_result=None,
+        placement="behind_person",
         splice_segment=SimpleNamespace(
             footage_path=str(footage),
             platform="pexels",
@@ -147,4 +150,60 @@ def test_pick_accepts_clipscout_splice_only(tmp_path):
     assert picks[0].asset_path == str(footage)
     assert picks[0].keyword == "money"
     assert picks[0].source == "pexels"
+
+
+def test_placement_full_frame_excluded_from_top_overlay(tmp_path):
+    img = tmp_path / "i.jpg"
+    img.write_bytes(b"x")
+    vid = tmp_path / "v.mp4"
+    vid.write_bytes(b"x")
+    full = SimpleNamespace(
+        at_time=5.0,
+        duration=2.0,
+        keyword="market",
+        placement="full_frame",
+        visual_category="footage",
+        asset_result=SimpleNamespace(
+            local_path=str(vid), asset_format="video",
+            is_fallback=False, source_api="pexels",
+        ),
+        splice_segment=SimpleNamespace(footage_path=str(vid), platform="pexels"),
+    )
+    behind = SimpleNamespace(
+        at_time=12.0,
+        duration=2.0,
+        keyword="heart icon",
+        placement="behind_person",
+        visual_category="icon",
+        asset_result=SimpleNamespace(
+            local_path=str(img), asset_format="jpg",
+            is_fallback=False, source_api="pexels",
+        ),
+        splice_segment=None,
+    )
+    top = pick_top_overlay_suggestions([full, behind], max_per_clip=3, blocked_ranges=[(5.0, 7.0)])
+    assert len(top) == 1
+    assert top[0].at_time == 12.0
+    fulls = pick_full_frame_suggestions([full, behind])
+    assert len(fulls) == 1
+    assert fulls[0].placement == "full_frame"
+
+
+def test_parse_broll_dual_placement_split():
+    from src.application.services_v2 import V2PipelineService
+
+    raw = {
+        "1": [
+            {"at_time": 5.0, "keyword": "busy market floor", "duration": 2.0,
+             "visual_category": "footage", "template": "word_pop_typography"},
+            {"at_time": 14.0, "keyword": "gold coins stack", "duration": 2.0,
+             "visual_category": "footage", "template": "word_pop_typography"},
+        ]
+    }
+    parsed = V2PipelineService._parse_broll_suggestions(1, raw, 40.0)
+    assert len(parsed) == 2
+    placements = {s.placement for s in parsed}
+    assert "full_frame" in placements
+    assert "behind_person" in placements
+
 

@@ -195,34 +195,35 @@ class GroqAnalyzer(IGroqAnalyzer):
         if not context_lines:
             return {}
 
-        prompt = f"""Kamu adalah visual director video pendek. Pilih maksimal {min(max_suggestions, 3)} B-roll yang benar-benar relevan berdasarkan transkrip bertimestamp berikut.
+        # Dual tracks: full_frame splice + behind_person top overlay (different times)
+        max_items = min(max(max_suggestions, 3), 4)
+        prompt = f"""Kamu adalah visual director video pendek. Pilih maksimal {max_items} B-roll visual yang membantu pemahaman.
 
 TRANSKRIP:
 {chr(10).join(context_lines)}
 
+DUA MODE PLACEMENT (otomatis, bukan template tetap):
+1) full_frame — stock VIDEO ganti layar penuh (clip→footage→clip). Person HILANG sementara. Pakai visual_category=footage.
+2) behind_person — stock IMAGE/icon di BELAKANG person (top half). Person TETAP kelihatan. Pakai visual_category=icon atau motion_graphic.
+
 ATURAN:
-- at_time WAJIB memakai salah satu timestamp yang tertulis di transkrip.
-- Jangan pilih bagian sebelum detik 3 agar tidak menimpa area hook.
-- B-roll hanya mengganti visual; jangan mengubah durasi atau urutan ucapan.
-- keyword berupa istilah pencarian stock footage yang konkret, maksimal 6 kata.
-- duration antara 1.5 sampai 3.0 detik.
-- visual_category: footage, icon, motion_graphic, atau reaction.
-- template: word_pop_typography, line_reveal_typography, atau particle_text_burst.
-- motion_style (PILIH SALAH SATU berdasarkan mood konten):
-  * ken_burns — dokumenter, narasi tenang (zoom+pan lambat)
-  * parallax_zoom — inovasi/teknologi, kedalaman
-  * light_sweep — showcase/produk, elegan
-  * particle_float — inspiratif, abstrak
-  * depth_parallax — cinematic, kontras fg/bg
-  * glitch_reveal — energetik, breaking news
-  * typewriter — tutorial, edukasi, code
-  * stroke_draw — kutipan, motivasi
-  * word_pop — punchy keyword (legacy)
-  * line_reveal — reveal baris (legacy)
-  * particle_burst — burst energetik (legacy)
+- at_time WAJIB salah satu timestamp di transkrip; jangan sebelum detik 3.
+- JANGAN pakai waktu yang sama untuk full_frame dan behind_person (min jarak 4 detik).
+- Ideal: 1-2 full_frame + 1-2 behind_person di momen berbeda.
+- keyword = query pencarian stock ENGLISH yang KONKRET & visual, 2-5 kata.
+
+  BAIK: "busy stock market floor", "elderly couple walking park", "smartphone scrolling closeup", "gold coins stack"
+  JELEK: "success", "business", "aging", "money", "life", "technology" (terlalu abstrak)
+  Hindari nama orang, brand, dan kata abstrak. Utamakan objek/scene yang bisa difoto.
+- duration 1.5-3.0 detik.
+- visual_category: footage (video) | icon | motion_graphic | reaction
+- placement: full_frame | behind_person
+- template: word_pop_typography | line_reveal_typography | particle_text_burst
+- motion_style: ken_burns | parallax_zoom | light_sweep | particle_float | depth_parallax | glitch_reveal | typewriter | stroke_draw
 
 OUTPUT RAW JSON:
-{{"items":[{{"at_time":12.5,"keyword":"aging population","duration":2.5,"visual_category":"footage","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
+{{"items":[{{"at_time":12.5,"keyword":"elderly couple walking park","duration":2.5,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography","motion_style":"ken_burns"}},{{"at_time":20.0,"keyword":"heart rate monitor icon","duration":2.0,"visual_category":"icon","placement":"behind_person","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
+
 
         try:
             raw = await asyncio.wait_for(
@@ -285,6 +286,17 @@ OUTPUT RAW JSON:
             visual_category = str(item.get("visual_category") or "footage")
             if visual_category not in allowed_categories:
                 visual_category = "footage"
+            placement = str(item.get("placement") or "").strip().lower()
+            if placement in {"fullframe", "splice", "replace"}:
+                placement = "full_frame"
+            elif placement in {"behind", "top_overlay", "overlay", "top"}:
+                placement = "behind_person"
+            elif placement not in {"full_frame", "behind_person"}:
+                placement = (
+                    "behind_person"
+                    if visual_category in {"icon", "motion_graphic"}
+                    else "full_frame"
+                )
 
             suggestions.append({
                 "at_time": round(at_time, 3),
@@ -292,11 +304,13 @@ OUTPUT RAW JSON:
                 "template": template,
                 "duration": round(duration, 3),
                 "visual_category": visual_category,
+                "placement": placement,
             })
-            if len(suggestions) >= min(max_suggestions, 3):
+            if len(suggestions) >= max_items:
                 break
 
         return {"1": suggestions} if suggestions else {}
+
 
     async def analyze_broll_for_clips(
         self,
@@ -359,24 +373,38 @@ OUTPUT RAW JSON:
         context = "\n".join(context_lines)
         if len(context) > 14000:
             context = context[:14000]
-        prompt = f"""Kamu adalah visual director short video. Pilih maksimal {max_suggestions} momen B-roll yang benar-benar membantu pemahaman untuk setiap clip berikut.
+        # Dual tracks: full_frame splice + behind_person (different times). Keywords
+        # must be concrete English stock queries — searched via ClipScout later.
+        max_items = min(max(max_suggestions, 2), 4)
+        prompt = f"""Kamu adalah visual director short video. Pilih maksimal {max_items} momen B-roll per clip.
 
 TRANSKRIP CLIP BERTIMESTAMP:
 {context}
 
+DUA MODE PLACEMENT:
+1) full_frame — stock VIDEO ganti layar (person hilang). visual_category=footage.
+2) behind_person — IMAGE/icon di belakang person top-half (person tetap). visual_category=icon|motion_graphic.
+
 ATURAN:
-- at_time harus menyalin salah satu timestamp yang tersedia pada clip yang sama.
-- Jangan pilih sebelum detik 3 dan jangan mengubah durasi/audio.
-- keyword harus berupa query stock footage konkret dalam bahasa Inggris, 2-6 kata; hindari kata abstrak/generik.
-- Utamakan footage. Pakai icon/motion_graphic/reaction hanya bila lebih tepat.
-- duration 1.5-3.0 detik dan beri jarak minimal 6 detik antar-B-roll.
-- Boleh kosong jika tidak ada visual yang relevan.
+- at_time = salin timestamp clip yang sama; jangan sebelum detik 3; jangan ubah audio.
+- JANGAN pakai waktu sama untuk full_frame + behind_person (min jarak 4 detik).
+- Ideal: 1 full_frame + 1 behind_person di momen berbeda.
+- keyword = query stock ENGLISH konkret 2-5 kata (BUKAN abstrak).
+  BAIK: "busy stock market floor", "elderly couple walking park", "gold coins stack"
+  JELEK: "success", "money", "aging", "business"
+- duration 1.5-3.0; min jarak 6 detik antar item sama placement.
+- placement: full_frame | behind_person
+- template: word_pop_typography | line_reveal_typography | particle_text_burst
 
 OUTPUT RAW JSON:
-{{"clips":{{"1":[{{"at_time":12.5,"keyword":"elderly people city","duration":2.5,"visual_category":"footage","template":"word_pop_typography"}}]}}}}
+{{"clips":{{"1":[{{"at_time":12.5,"keyword":"elderly couple walking park","duration":2.5,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography"}},{{"at_time":22.0,"keyword":"heart rate monitor icon","duration":2.0,"visual_category":"icon","placement":"behind_person","template":"word_pop_typography"}}]}}}}
 """
 
         parsed: dict = {}
+        logger.info(
+            "v2_analyzer: B-roll keyword recovery via 9router model=%s",
+            self._model_pass1,
+        )
         try:
             raw = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -390,6 +418,7 @@ OUTPUT RAW JSON:
             parsed = self._parse_json_response(raw)
         except Exception as exc:
             logger.warning("v2_analyzer: clip B-roll recovery failed: %s", exc)
+
 
         raw_map = parsed.get("clips", {}) if isinstance(parsed, dict) else {}
         if not isinstance(raw_map, dict):
@@ -435,15 +464,30 @@ OUTPUT RAW JSON:
                     continue
                 template = str(item.get("template") or "word_pop_typography")
                 category = str(item.get("visual_category") or "footage")
+                if category not in allowed_categories:
+                    category = "footage"
+                placement = str(item.get("placement") or "").strip().lower()
+                if placement in {"fullframe", "splice", "replace"}:
+                    placement = "full_frame"
+                elif placement in {"behind", "top_overlay", "overlay", "top"}:
+                    placement = "behind_person"
+                elif placement not in {"full_frame", "behind_person"}:
+                    placement = (
+                        "behind_person"
+                        if category in {"icon", "motion_graphic"}
+                        else "full_frame"
+                    )
                 items.append({
                     "at_time": round(at_time, 3),
                     "keyword": keyword,
                     "duration": round(item_duration, 3),
-                    "visual_category": category if category in allowed_categories else "footage",
+                    "visual_category": category,
                     "template": template if template in allowed_templates else "word_pop_typography",
+                    "placement": placement,
                 })
-                if len(items) >= max_suggestions:
+                if len(items) >= max_items:
                     break
+
 
             if not items:
                 items = self._fallback_broll_from_words(words, duration, limit=1)
@@ -1189,15 +1233,21 @@ Tentukan visual identity yang konsisten untuk SEMUA clips:
 - hook_animation: "fade_scale" / "slide_up" / "glitch" / "typewriter"
 
 ═══ TUGAS 2: B-ROLL SUGGESTIONS ═══
-Untuk SETIAP clip, tentukan 1-2 momen B-Roll:
-- "at_time": offset DALAM clip (detik dari awal clip)
-- "keyword": kata kunci yang ditampilkan (MAKS 20 karakter, UPPERCASE)
+Untuk SETIAP clip, tentukan 2-4 momen B-Roll di WAKTU BERBEDA (min 4 detik jarak):
+- "at_time": offset DALAM clip (detik dari awal clip, min 3.0)
+- "keyword": query stock ENGLISH konkret 2-5 kata (BUKAN abstrak).
+  BAIK: "busy stock market floor", "elderly couple walking park"
+  JELEK: "SUCCESS", "MONEY", "AGING" (abstrak, terlalu generik)
 - "template": "word_pop_typography" / "line_reveal_typography" / "particle_text_burst"
 - "duration": 1.5 - 3.0 detik
 - "visual_category": "footage" / "icon" / "motion_graphic" / "reaction"
+- "placement": "full_frame" (stock video ganti layar, person hilang) ATAU
+  "behind_person" (image/icon di belakang person top-half, person tetap)
+  Ideal mix: 1-2 full_frame + 1-2 behind_person. Auto, bukan template tetap.
 
 OUTPUT FORMAT — RAW JSON (tanpa markdown):
-{{"creative_direction": {{"primary_color": "<hex>", "secondary_color": "<hex>", "background_accent": "<hex>", "typography_mood": "<mood>", "energy_level": "<level>", "transition_style": "<style>", "music_mood": "<mood>", "hook_animation": "<anim>"}}, "broll_suggestions": {{"1": [{{"at_time": <float>, "keyword": "<UPPERCASE>", "template": "<template>", "duration": <float>, "visual_category": "<category>"}}]}}}}"""
+{{"creative_direction": {{"primary_color": "<hex>", "secondary_color": "<hex>", "background_accent": "<hex>", "typography_mood": "<mood>", "energy_level": "<level>", "transition_style": "<style>", "music_mood": "<mood>", "hook_animation": "<anim>"}}, "broll_suggestions": {{"1": [{{"at_time": 5.0, "keyword": "elderly couple walking park", "template": "word_pop_typography", "duration": 2.5, "visual_category": "footage", "placement": "full_frame"}}, {{"at_time": 18.0, "keyword": "heart rate monitor icon", "template": "word_pop_typography", "duration": 2.0, "visual_category": "icon", "placement": "behind_person"}}]}}}}"""
+
 
         raw = self._call_groq_llm(prompt, model=self._model_pass1)
         return self._parse_json_response(raw)

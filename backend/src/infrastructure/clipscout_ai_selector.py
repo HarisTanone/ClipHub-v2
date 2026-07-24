@@ -27,7 +27,13 @@ class ClipScoutAISelector:
     """
 
     def __init__(self):
-        self._model = settings.NINE_ROUTER_AI_LAYER_MODEL
+        # Prefer AI-layer model, then main combo — always CliperHub from .env
+        self._model = (
+            settings.NINE_ROUTER_AI_LAYER_MODEL
+            or settings.NINE_ROUTER_MODEL
+            or settings.nine_router_model
+        )
+
 
     def select_best(
         self,
