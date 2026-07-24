@@ -138,6 +138,56 @@ class ClipScoutClient(IClipScoutClient):
         return results
 
 
+def _expand_search_queries(keyword: str, placement: str = "", category: str = "") -> list[str]:
+    """Multi-query variants for ClipScout — higher hit rate + subject-accurate stock."""
+    base = " ".join(str(keyword or "").split())
+    if not base:
+        return []
+    tokens = [t for t in base.split() if t]
+    lower = base.lower()
+    place = (placement or "").strip().lower()
+    behind = place in {"behind_person", "behind", "top_overlay", "overlay"}
+    cat = (category or "").strip().lower()
+
+    queries: list[str] = [base]
+
+    # Drop abstract/mood poison words that skew stock results.
+    stop = {
+        "dramatic", "cinematic", "beautiful", "success", "lifestyle",
+        "epic", "mood", "vibes", "aesthetic", "background",
+    }
+    cleaned = [t for t in tokens if t.lower() not in stop]
+    if cleaned and cleaned != tokens:
+        queries.append(" ".join(cleaned))
+
+    # Core subject (first 2-3 content words) — better stock match.
+    if len(tokens) >= 3:
+        queries.append(" ".join(tokens[:3]))
+    if len(tokens) >= 2:
+        queries.append(" ".join(tokens[:2]))
+
+    # Behind-person / icon: fill-frame subject, avoid wide scenic.
+    if behind or cat in {"icon", "motion_graphic"}:
+        for suffix in ("close up", "macro detail", "isolated object", "fill frame"):
+            if suffix not in lower:
+                queries.append(f"{base} {suffix}")
+    elif "close up" not in lower and "closeup" not in lower:
+        queries.append(f"{base} close up")
+
+    # Dedup preserve order, cap 5 (ClipScout batch budget).
+    out: list[str] = []
+    seen: set[str] = set()
+    for q in queries:
+        key = q.lower().strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(q)
+        if len(out) >= 5:
+            break
+    return out
+
+
 def build_segments_from_suggestions(
     suggestions: list[BRollSuggestion],
 ) -> list[dict]:
@@ -145,6 +195,7 @@ def build_segments_from_suggestions(
 
     Each suggestion becomes one segment in the batch request.
     Maps keyword/topic/searchQueries from the suggestion metadata.
+    Sends multiple searchQueries (close-up / core-subject) for accuracy.
 
     Args:
         suggestions: List of B-roll suggestions from AI analysis.
@@ -158,11 +209,16 @@ def build_segments_from_suggestions(
         if not keyword:
             continue
 
+        placement = str(getattr(suggestion, "placement", "") or "")
+        cat = getattr(suggestion, "visual_category", None)
+        cat_val = cat.value if hasattr(cat, "value") else str(cat or "")
+        queries = _expand_search_queries(keyword, placement=placement, category=cat_val)
+
         segment = {
             "id": str(i + 1),
             "text": keyword,
             "topic": keyword,
-            "searchQueries": [keyword],
+            "searchQueries": queries or [keyword],
             "startIndex": 0,
             "endIndex": 0,
             "chapter": 1,

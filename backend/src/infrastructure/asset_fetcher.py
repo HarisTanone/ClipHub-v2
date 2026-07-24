@@ -295,7 +295,7 @@ class AssetFetcher(IAssetFetcher):
 
             # 2. Get client chain for this category
             chain = self._client_chains.get(cat_enum, self._client_chains[VisualCategory.FOOTAGE])
-            queries = self._build_queries(keyword, creative_direction, category_str)
+            queries = self._build_queries(keyword, creative_direction, category_str, getattr(suggestion, "placement", "") or "")
 
             # 3. Try each client in chain
             for client in chain:
@@ -343,8 +343,43 @@ class AssetFetcher(IAssetFetcher):
         keyword: str,
         creative_direction: Optional[CreativeDirection],
         category_str: str,
+        placement: str = "",
     ) -> list[str]:
-        """Try the precise query first, then one optional mood variant."""
+        """Precise query first, then close-up / subject-core fallbacks."""
         base = " ".join(str(keyword).split())
+        tokens = [t for t in base.split() if t]
+        variants: list[str] = [base]
+        place = (placement or "").strip().lower()
+        behind = place in {"behind_person", "behind", "top_overlay", "overlay"}
+
+        # Prefer subject-filling stock for behind-person / stills.
+        if category_str in {
+            VisualCategory.ICON.value,
+            VisualCategory.MOTION_GRAPHIC.value,
+            VisualCategory.FOOTAGE.value,
+        } or behind:
+            lower = base.lower()
+            if behind:
+                # Fill top half cleanly: subject-forward, avoid wide scenic.
+                for suffix in ("close up", "macro detail", "isolated object"):
+                    if suffix not in lower:
+                        variants.append(f"{base} {suffix}")
+            elif not any(x in lower for x in ("close up", "closeup", "macro", "detail")):
+                variants.append(f"{base} close up")
+            if len(tokens) >= 3:
+                # Core subject only (first 2-3 content words) — better stock hit rate.
+                variants.append(" ".join(tokens[:3]))
+            if len(tokens) >= 2:
+                variants.append(" ".join(tokens[:2]))
+            # Drop generic mood-only tails that poison stock search.
+            stop = {"dramatic", "cinematic", "beautiful", "success", "lifestyle"}
+            cleaned = [t for t in tokens if t.lower() not in stop]
+            if cleaned and cleaned != tokens:
+                variants.insert(1, " ".join(cleaned))
+
         augmented = self._build_query(base, creative_direction, category_str)
-        return list(dict.fromkeys(query for query in (base, augmented) if query))
+        if augmented and augmented != base:
+            variants.append(augmented)
+
+        return list(dict.fromkeys(q for q in variants if q))
+

@@ -203,15 +203,20 @@ class Settings(BaseSettings):
 
     # ─── Top Behind Subject Overlay (portrait 9:16, additive to full-frame B-roll)
     TOP_OVERLAY_ENABLED: bool = True
-    TOP_OVERLAY_SPLIT_RATIO: float = 0.5       # top region height fraction
-    TOP_OVERLAY_FADE_HEIGHT: float = 0.15      # gradient fade as fraction of frame height
+    TOP_OVERLAY_SPLIT_RATIO: float = 0.55      # top region height fraction
+    TOP_OVERLAY_FADE_HEIGHT: float = 0.12      # gradient fade as fraction of frame height
     TOP_OVERLAY_OPACITY: float = 1.0
-    TOP_OVERLAY_PERSON_OUTLINE: bool = False
-    TOP_OVERLAY_PERSON_SHADOW: bool = False
+    TOP_OVERLAY_PERSON_OUTLINE: bool = True    # white stroke around person (reference style)
+    TOP_OVERLAY_PERSON_SHADOW: bool = True
+    TOP_OVERLAY_OUTLINE_THICKNESS: int = 6     # px stroke width (bold sticker edge)
+    TOP_OVERLAY_OUTLINE_COLOR: str = "255,255,255"
     TOP_OVERLAY_MAX_PER_CLIP: int = 2
-    TOP_OVERLAY_SEG_CONFIDENCE: float = 0.35
-    TOP_OVERLAY_MASK_FEATHER: int = 9
+    TOP_OVERLAY_SEG_CONFIDENCE: float = 0.30
+    TOP_OVERLAY_MASK_FEATHER: int = 3          # short feather = cleaner hard cutout
     TOP_OVERLAY_MASK_STRIDE: int = 2           # YOLO every N frames (hold mask between)
+    TOP_OVERLAY_CROP_BIAS_Y: float = 0.30     # cover-crop vertical bias (0=top, 0.5=center)
+
+
 
 
     # ─── Timeout Settings (seconds) ─────────────────────────────────────

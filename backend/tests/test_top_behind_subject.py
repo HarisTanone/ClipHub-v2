@@ -207,3 +207,80 @@ def test_parse_broll_dual_placement_split():
     assert "behind_person" in placements
 
 
+def test_person_outline_paints_white_edge():
+    """Sticker outline must paint bright pixels on person contour (reference style)."""
+    r = TopBehindSubjectRenderer(
+        split_ratio=0.6,
+        fade_height=0.05,
+        overlay_opacity=1.0,
+        person_outline=True,
+        person_shadow=False,
+        mask_feather=1,
+        outline_thickness=6,
+        outline_color="255,255,255",
+    )
+    h, w = 120, 80
+    frame = np.zeros((h, w, 3), dtype=np.uint8)
+    frame[:] = (40, 40, 40)
+    overlay = np.zeros((h, w, 3), dtype=np.uint8)
+    overlay[:] = (10, 180, 10)  # green stock
+    mask = np.zeros((h, w), dtype=np.float32)
+    mask[30:100, 20:60] = 1.0
+
+    out = r.render(frame, mask, overlay)
+
+    # Person interior stays near original gray
+    assert np.allclose(out[60, 40], [40, 40, 40], atol=8)
+    # Contour ring (just outside body) should be bright white-ish
+    edge = out[30:100, 18]  # left edge of person rect
+    bright = int(np.sum(edge.mean(axis=1) > 180))
+    assert bright >= 3, f"expected white outline pixels, bright={bright}"
+    # Top non-person gets overlay green
+    assert out[5, 5, 1] > 100
+
+
+def test_cover_resize_prefers_top_subject():
+    """Important subject near top of stock must land in visible top band, not center-chopped."""
+    r = TopBehindSubjectRenderer(split_ratio=0.5, crop_bias_y=0.15)
+    # Tall image: bright subject only in upper third
+    img = np.zeros((300, 100, 3), dtype=np.uint8)
+    img[20:80, 30:70] = (0, 0, 255)  # red subject near top
+    img[200:260, 30:70] = (0, 255, 0)  # green decoy lower
+    out = r.cover_resize(img, 50, 100)
+    assert out.shape == (100, 50, 3)
+    # Upper half of crop should contain more red than green
+    upper = out[:50]
+    lower = out[50:]
+    red_upper = int(upper[:, :, 2].sum())
+    red_lower = int(lower[:, :, 2].sum())
+    assert red_upper > red_lower, f"subject should sit upper: up={red_upper} lo={red_lower}"
+
+
+def test_expand_search_queries_behind_person():
+    from src.infrastructure.clipscout_client import _expand_search_queries
+
+    qs = _expand_search_queries(
+        "indonesian rupiah banknotes counting",
+        placement="behind_person",
+        category="footage",
+    )
+    assert qs[0] == "indonesian rupiah banknotes counting"
+    assert any("close up" in q.lower() for q in qs)
+    assert any(q == "indonesian rupiah banknotes" for q in qs)
+    assert len(qs) <= 5
+
+
+def test_clipscout_segments_multi_query():
+    from src.infrastructure.clipscout_client import build_segments_from_suggestions
+
+    s = SimpleNamespace(
+        keyword="fuel nozzle pumping gas car",
+        placement="behind_person",
+        visual_category="footage",
+    )
+    segs = build_segments_from_suggestions([s])
+    assert len(segs) == 1
+    assert len(segs[0]["searchQueries"]) >= 2
+    assert segs[0]["searchQueries"][0] == "fuel nozzle pumping gas car"
+
+

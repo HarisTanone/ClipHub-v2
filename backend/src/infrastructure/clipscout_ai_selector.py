@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Optional
 
 from src.config import settings
@@ -34,7 +35,6 @@ class ClipScoutAISelector:
             or settings.nine_router_model
         )
 
-
     def select_best(
         self,
         candidates: list[VideoCandidate],
@@ -44,40 +44,29 @@ class ClipScoutAISelector:
         """Select the best video from candidates using AI.
 
         Falls back to highest relevanceScore if AI fails.
-
-        Args:
-            candidates: List of VideoCandidate from ClipScout.
-            keyword: The B-roll keyword/topic for context.
-            required_duration: Minimum footage duration needed (seconds).
-
-        Returns:
-            Selected VideoCandidate, or None if no candidates.
         """
         if not candidates:
             return None
 
-        # Filter: must have enough duration
         valid_candidates = [
             c for c in candidates
             if c.duration_seconds >= required_duration
         ]
         if not valid_candidates:
-            # If none have enough duration, use all and hope for the best
             valid_candidates = candidates
 
-        # Try AI selection
         try:
             client = get_nine_router_client()
             if not client.is_configured:
                 logger.warning("clipscout_ai: 9router not configured, using relevance fallback")
-                return self._fallback_select(valid_candidates)
+                return self._fallback_select(valid_candidates, keyword)
 
             prompt = self._build_prompt(valid_candidates, keyword, required_duration)
             raw_response = client.chat(
                 messages=[{"role": "user", "content": prompt}],
                 model=self._model,
-                temperature=0.2,
-                max_tokens=500,
+                temperature=0.1,
+                max_tokens=400,
                 response_format={"type": "json_object"},
             )
 
@@ -92,7 +81,8 @@ class ClipScoutAISelector:
         except Exception as exc:
             logger.warning(f"clipscout_ai: AI selection failed ({exc}), using relevance fallback")
 
-        return self._fallback_select(valid_candidates)
+        return self._fallback_select(valid_candidates, keyword)
+
 
     def _build_prompt(
         self,
@@ -114,34 +104,121 @@ class ClipScoutAISelector:
                 f"   Relevance: {c.relevance_score}{snippet}{reason}\n\n"
             )
 
-        return f"""Kamu adalah video editor profesional. Pilih 1 video TERBAIK untuk B-roll footage dengan keyword: "{keyword}"
+        return f"""You are a senior B-roll editor. Pick EXACTLY 1 video that best MATCHES the visual keyword.
 
-KANDIDAT:
+KEYWORD (must match literally what is shown on screen): "{keyword}"
+
+CANDIDATES:
 {candidates_text}
 
-PRIORITAS PEMILIHAN:
-1. License "royalty-free" lebih aman daripada "standard" (tapi standard boleh dipilih jika jauh lebih relevan)
-2. relevanceScore tertinggi
-3. Durasi minimal {required_duration:.0f} detik
-4. Platform pexels/pixabay lebih aman dari youtube (jika score sebanding)
-5. Untuk YouTube: tentukan startTimestamp optimal dari snippet/context
+SELECTION RULES (strict):
+1. Visual match first: subject in the video must match keyword (object/action/scene). Ignore generic pretty clips.
+2. Prefer royalty-free license when relevance is close.
+3. Duration >= {required_duration:.1f}s preferred.
+4. Prefer pexels/pixabay over youtube when relevance is equal.
+5. For youtube: set start_timestamp to the second where the keyword subject is most visible.
+6. Reject mismatch (e.g. keyword "fuel nozzle" but clip is city skyline).
 
-OUTPUT JSON:
-{{"selected_id": "<video_id>", "start_timestamp": <number>, "reason": "<alasan singkat>"}}
+OUTPUT — raw JSON only, no markdown, no extra text:
+{{"selected_id":"<exact ID from list>","start_timestamp":0,"reason":"one short sentence"}}
 """
+
+    def _parse_json_tolerant(self, raw_response: str) -> dict:
+        """Parse model JSON with fence/extra-text/truncation tolerance."""
+        text = (raw_response or "").strip()
+        if not text:
+            return {}
+
+        if text.startswith("```"):
+            lines = text.split("\n")
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+
+        # Strip leading junk before first {
+        brace = text.find("{")
+        if brace > 0:
+            text = text[brace:]
+        elif brace < 0:
+            # No object — try selected_id bare patterns below
+            text = text
+
+        # Prefer raw_decode: accepts trailing junk ("Extra data" cases)
+        for candidate in (text,):
+            try:
+                data, _end = json.JSONDecoder().raw_decode(candidate.lstrip())
+                if isinstance(data, dict) and data:
+                    return data
+            except json.JSONDecodeError:
+                pass
+
+        try:
+            data = json.loads(text)
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            pass
+
+        # Extract first balanced-ish object; also try non-greedy
+        for pattern in (r"\{[^{}]*\}", r"\{.*\}"):
+            match = re.search(pattern, text, re.DOTALL)
+            if not match:
+                continue
+            chunk = re.sub(r",\s*([}\]])", r"\1", match.group(0))
+            try:
+                data, _ = json.JSONDecoder().raw_decode(chunk)
+                if isinstance(data, dict) and data:
+                    return data
+            except json.JSONDecodeError:
+                open_b = chunk.count("{") - chunk.count("}")
+                open_a = chunk.count("[") - chunk.count("]")
+                repaired = chunk + ("]" * max(0, open_a)) + ("}" * max(0, open_b))
+                repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+                try:
+                    data = json.loads(repaired)
+                    if isinstance(data, dict) and data:
+                        return data
+                except json.JSONDecodeError:
+                    continue
+
+        # Regex fallback: selected_id with/without quotes
+        mid = re.search(
+            r'"?selected_id"?\s*[:=]\s*"([^"]+)"',
+            text,
+            re.IGNORECASE,
+        ) or re.search(
+            r'"?selected_id"?\s*[:=]\s*([A-Za-z0-9_\-]+)',
+            text,
+            re.IGNORECASE,
+        )
+        if mid:
+            out: dict = {"selected_id": mid.group(1)}
+            mts = re.search(r'"?start_timestamp"?\s*[:=]\s*(-?\d+(?:\.\d+)?)', text)
+            if mts:
+                out["start_timestamp"] = float(mts.group(1))
+            return out
+
+        return {}
+
 
     def _parse_response(
         self, raw_response: str, candidates: list[VideoCandidate]
     ) -> Optional[VideoCandidate]:
         """Parse AI response and find matching candidate."""
         try:
-            data = json.loads(raw_response)
-            selected_id = str(data.get("selected_id", ""))
+            data = self._parse_json_tolerant(raw_response)
+            if not data:
+                raise ValueError(f"empty/unparseable: {str(raw_response)[:120]!r}")
+
+            selected_id = str(data.get("selected_id", "")).strip()
             start_ts = data.get("start_timestamp")
+
+            if not selected_id:
+                raise ValueError("missing selected_id")
 
             for candidate in candidates:
                 if candidate.id == selected_id:
-                    # Update startTimestamp if AI suggested a better one (YouTube)
                     if (
                         start_ts is not None
                         and candidate.platform == "youtube"
@@ -150,34 +227,62 @@ OUTPUT JSON:
                         candidate.start_timestamp = int(start_ts)
                     return candidate
 
-            # If exact ID not found, try partial match
             for candidate in candidates:
                 if selected_id in candidate.id or candidate.id in selected_id:
                     if start_ts is not None and candidate.platform == "youtube":
-                        candidate.start_timestamp = int(start_ts)
+                        try:
+                            candidate.start_timestamp = int(start_ts)
+                        except (TypeError, ValueError):
+                            pass
                     return candidate
 
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            # Index fallback: selected_id as "1"/"2"
+            if selected_id.isdigit():
+                idx = int(selected_id) - 1
+                if 0 <= idx < len(candidates):
+                    return candidates[idx]
+
+        except Exception as exc:
             logger.warning(f"clipscout_ai: failed to parse AI response: {exc}")
 
         return None
 
-    def _fallback_select(self, candidates: list[VideoCandidate]) -> Optional[VideoCandidate]:
-        """Fallback: select video with highest relevanceScore.
-
-        Secondary sort: prefer royalty-free, then pexels/pixabay platform.
-        """
+    def _fallback_select(
+        self,
+        candidates: list[VideoCandidate],
+        keyword: str = "",
+    ) -> Optional[VideoCandidate]:
+        """Fallback: keyword token match + relevance + license + platform."""
         if not candidates:
             return None
+
+        tokens = {
+            t for t in re.findall(r"[a-z0-9]+", (keyword or "").lower()) if len(t) > 2
+        }
+
+        def token_hits(c: VideoCandidate) -> float:
+            if not tokens:
+                return 0.0
+            hay = " ".join(
+                [
+                    c.title or "",
+                    c.transcript_snippet or "",
+                    c.transcript_reason or "",
+                    c.platform or "",
+                ]
+            ).lower()
+            hits = sum(1 for t in tokens if t in hay)
+            return hits / max(1, len(tokens))
 
         def sort_key(c: VideoCandidate) -> tuple:
             license_score = 1 if c.license == "royalty-free" else 0
             platform_score = 1 if c.platform in ("pexels", "pixabay") else 0
-            return (c.relevance_score, license_score, platform_score)
+            return (token_hits(c), c.relevance_score, license_score, platform_score)
 
         selected = max(candidates, key=sort_key)
         logger.info(
             f"clipscout_ai: fallback selected '{selected.id}' ({selected.platform}) "
-            f"score={selected.relevance_score}"
+            f"score={selected.relevance_score} keyword_hits={token_hits(selected):.2f}"
         )
         return selected
+
