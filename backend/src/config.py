@@ -201,6 +201,19 @@ class Settings(BaseSettings):
     BROLL_SPLICE_CROSSFADE_SEC: float = 0.15
     BROLL_MAX_FOOTAGE_SIZE_MB: int = 50
 
+    # ─── Top Behind Subject Overlay (portrait 9:16, additive to full-frame B-roll)
+    TOP_OVERLAY_ENABLED: bool = True
+    TOP_OVERLAY_SPLIT_RATIO: float = 0.5       # top region height fraction
+    TOP_OVERLAY_FADE_HEIGHT: float = 0.15      # gradient fade as fraction of frame height
+    TOP_OVERLAY_OPACITY: float = 1.0
+    TOP_OVERLAY_PERSON_OUTLINE: bool = False
+    TOP_OVERLAY_PERSON_SHADOW: bool = False
+    TOP_OVERLAY_MAX_PER_CLIP: int = 2
+    TOP_OVERLAY_SEG_CONFIDENCE: float = 0.35
+    TOP_OVERLAY_MASK_FEATHER: int = 9
+    TOP_OVERLAY_MASK_STRIDE: int = 2           # YOLO every N frames (hold mask between)
+
+
     # ─── Timeout Settings (seconds) ─────────────────────────────────────
     GEMINI_TIMEOUT: int = 30  # Fast fail — skip to Groq fallback quickly
     GROQ_LLM_TIMEOUT: int = 120  # Full transcript analysis needs more time

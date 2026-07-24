@@ -1210,20 +1210,117 @@ class V2PipelineService:
                     except Exception as exc:
                         logger.warning(f"[{job_id}] Legacy video splice failed clip {clip.rank}: {exc}")
 
-        # No overlay fallback. Every B-roll event must replace a segment of the
-        # main video track. Non-video suggestions are intentionally skipped here
-        # because rendering them as a layer violates the Clip → B-roll → Clip
-        # timeline contract. Motion-graphic events are also disabled; the same
-        # replacement timeline is used by preview/final render.
+        # No full-frame overlay fallback for splice. Non-video assets feed the
+        # additive Top Behind Subject path instead (portrait only).
         applied_count = sum(
             1 for clip in clips
             if os.path.exists(f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4")
         )
         logger.info(
-            f"[{job_id}] Auto B-roll complete: {applied_count}/{len(clips)} clips "
-            "timeline-spliced; overlay path disabled"
+            f"[{job_id}] Auto B-roll splice: {applied_count}/{len(clips)} clips "
+            "timeline-spliced"
         )
+
+        # ─── Step 10.7: Top Behind Subject Overlay (additive, portrait) ──────
+        # Full-frame splice stays as-is. Additionally place image/video assets
+        # behind the person in the top ~50% only. Runs on base/reframed (or
+        # already-spliced) clip so both effects can coexist on different times.
+        if (
+            settings.TOP_OVERLAY_ENABLED
+            and job.target_aspect_ratio == "9:16"
+        ):
+            await self._apply_top_behind_overlay(
+                job=job,
+                job_id=job_id,
+                clips=clips,
+                output_dir=output_dir,
+                trim_results=trim_results,
+            )
+
         self._emit(job_id, 11, "broll", "complete")
+
+
+
+    async def _apply_top_behind_overlay(
+        self,
+        job: Job,
+        job_id: str,
+        clips: list[Clip],
+        output_dir: str,
+        trim_results: dict[int, bool],
+    ) -> None:
+        """Bake top-region behind-person overlays. Additive to full-frame splice."""
+        from src.infrastructure.top_behind_subject_renderer import (
+            TopBehindSubjectRenderer,
+            pick_top_overlay_suggestions,
+        )
+
+        renderer = TopBehindSubjectRenderer()
+        applied = 0
+        for clip in clips:
+            if not trim_results.get(clip.rank) or not clip.broll_suggestions:
+                clip.top_overlay_events = []
+                continue
+
+            segments = pick_top_overlay_suggestions(
+                clip.broll_suggestions,
+                max_per_clip=settings.TOP_OVERLAY_MAX_PER_CLIP,
+                blocked_ranges=[],
+            )
+            if not segments:
+                clip.top_overlay_events = []
+                continue
+
+            reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+            base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+            brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+            if os.path.exists(reframed_path):
+                input_path = reframed_path
+            elif os.path.exists(base_path):
+                input_path = base_path
+            else:
+                input_path = brolled_path
+            if not os.path.exists(input_path):
+                clip.top_overlay_events = []
+                continue
+
+            out_path = f"{output_dir}/clip_{clip.rank:02d}_top_overlay.mp4"
+            try:
+                result = await renderer.apply_to_clip(
+                    video_path=input_path,
+                    segments=segments,
+                    output_path=out_path,
+                )
+            except Exception as exc:
+                logger.warning(f"[{job_id}] Top overlay failed clip {clip.rank}: {exc}")
+                clip.top_overlay_events = []
+                continue
+
+            if result and os.path.exists(out_path):
+                target = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+                try:
+                    if os.path.exists(target):
+                        os.remove(target)
+                    os.rename(out_path, target)
+                except OSError:
+                    shutil.move(out_path, target)
+                clip.top_overlay_events = [
+                    {
+                        "at_time": s.at_time,
+                        "duration": s.duration,
+                        "keyword": s.keyword,
+                        "source": s.source,
+                        "asset_path": s.asset_path,
+                    }
+                    for s in segments
+                ]
+                applied += 1
+            else:
+                clip.top_overlay_events = []
+
+        logger.info(
+            f"[{job_id}] Top behind-subject overlay: {applied}/{len(clips)} clips"
+        )
 
     async def _ensure_broll_suggestions(
         self,
@@ -1301,11 +1398,20 @@ class V2PipelineService:
         hook_duration = float((job_data.get("hook_style_config") or {}).get("duration", 3.0) or 3.0)
         for clip in clips:
             min_starts[clip.rank] = hook_duration + 0.35 if clip.hook else 1.0
-            blocked_ranges[clip.rank] = [
+            blocked = [
                 (suggestion.at_time, suggestion.at_time + suggestion.duration)
                 for suggestion in clip.broll_suggestions
                 if job.broll_enabled
             ]
+            for ev in getattr(clip, 'top_overlay_events', None) or []:
+                try:
+                    at = float(ev.get('at_time', 0))
+                    dur = float(ev.get('duration', 0))
+                except (TypeError, ValueError):
+                    continue
+                if dur > 0:
+                    blocked.append((at, at + dur))
+            blocked_ranges[clip.rank] = blocked
 
         try:
             analyzer = self._get_analyzer()
@@ -1640,6 +1746,7 @@ class V2PipelineService:
                     }
                     for event in clip.text_emphasis_events[:2]
                 ],
+                "top_overlay_events": list(getattr(clip, "top_overlay_events", None) or []),
             })
 
         return {

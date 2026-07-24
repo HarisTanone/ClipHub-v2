@@ -145,6 +145,10 @@ class Clip:
     # Sparse AI-selected cinematic text events.  Kept separate from subtitles
     # so hiding an ordinary caption never changes its Whisper timing.
     text_emphasis_events: list[dict] = field(default_factory=list)
+    # Top-behind-subject overlay windows (image/video behind person, top ~50%).
+    # Additive to full-frame B-roll splice; never co-timed with text emphasis.
+    top_overlay_events: list[dict] = field(default_factory=list)
+
 
 
 # ─── Creative Direction (v2.0 — per-job visual identity) ─────────────────────
