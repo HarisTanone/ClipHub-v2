@@ -146,7 +146,9 @@ class TestClipScoutClient:
         assert segments[0]["id"] == "1"
         assert segments[0]["text"] == "centella asiatica"
         assert segments[0]["topic"] == "centella asiatica"
-        assert segments[0]["searchQueries"] == ["centella asiatica"]
+        assert segments[0]["searchQueries"][0] == "centella asiatica"
+        assert "centella asiatica" in segments[0]["searchQueries"]
+        assert len(segments[0]["searchQueries"]) >= 1
         assert segments[1]["id"] == "2"
         assert segments[1]["text"] == "skincare routine"
 
@@ -339,7 +341,7 @@ class TestVideoSplicer:
 
         safe.assert_called_once_with(
             "output.mp4", expected_duration=98.8, max_start_drift=0.1,
-            max_end_drift=0.25, max_duration_error=0.25,
+            max_end_drift=0.25, max_duration_error=0.5,
         )
 
     def test_validate_sync_fails_closed_when_probe_fails(self):

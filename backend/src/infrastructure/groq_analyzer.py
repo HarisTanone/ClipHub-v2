@@ -211,11 +211,12 @@ ATURAN:
 - JANGAN pakai waktu yang sama untuk full_frame dan behind_person (min jarak 4 detik).
 - Ideal: 1-2 full_frame + 1-2 behind_person di momen berbeda.
 - keyword = query stock ENGLISH 3-6 kata, KONKRET, visual, searchable di Pexels/YouTube.
-  LANGKAH: (1) baca kalimat di timestamp (2) ekstrak 1 fakta visual utama (3) terjemah ke query stock literal.
+  LANGKAH: (1) baca kalimat di timestamp (2) ekstrak 1 fakta visual UTAMA yang dibahas (3) terjemah 1:1 ke query stock literal.
+  WAJIB mirror topik pembicaraan (uang→banknotes/wallet, BBM→fuel pump, minyak→oil pump jack).
   WAJIB 1:1 dengan topik kalimat — jika bicara "rupiah melemah" → banknotes/currency chart, BUKAN "business success".
   Format: [concrete subject] [action OR state] [framing/detail]
   BAIK: "indonesian rupiah banknotes counting", "fuel nozzle pumping gas car", "oil pump jack working sunset", "empty wallet hands close up", "usd idr currency exchange chart"
-  JELEK: "success", "money", "economy", "business", "inflation", "technology", "life", "people talking", "city skyline"
+  JELEK: "success", "money", "economy", "business", "inflation", "technology", "life", "people talking", "city skyline", "dramatic", "cinematic"
   Dilarang: nama orang, brand, abstraksi, 1 kata generic, mood-only ("dramatic", "cinematic").
   behind_person: CLOSE-UP object/icon/subject (fill frame). LARANG wide landscape/cityscape yang kepotong.
   full_frame: boleh medium shot action; tetap mirror topik.
@@ -395,7 +396,8 @@ ATURAN:
 - JANGAN pakai waktu sama untuk full_frame + behind_person (min jarak 4 detik).
 - Ideal: 1 full_frame + 1 behind_person di momen berbeda.
 - keyword = query stock ENGLISH 3-6 kata, KONKRET, searchable Pexels/YouTube.
-  LANGKAH: baca kalimat → 1 fakta visual utama → query stock literal (1:1 topik).
+  LANGKAH: baca kalimat → 1 fakta visual utama → query stock literal (1:1 topik yang dibahas).
+  BAGUS: "indonesian rupiah banknotes counting", "fuel nozzle pumping gas", "empty wallet hands close up"
   Format: [concrete subject] [action OR state] [framing/detail]
   BAIK: "indonesian rupiah banknotes counting", "fuel nozzle pumping gas car", "oil pump jack working sunset", "empty wallet hands close up", "usd idr currency exchange chart"
   JELEK: "success", "money", "aging", "business", "economy", "inflation", "people talking", "city skyline"

@@ -112,14 +112,15 @@ CANDIDATES:
 {candidates_text}
 
 SELECTION RULES (strict):
-1. Visual match first: subject in the video must match keyword (object/action/scene). Ignore generic pretty clips.
-2. Prefer royalty-free license when relevance is close.
-3. Duration >= {required_duration:.1f}s preferred.
-4. Prefer pexels/pixabay over youtube when relevance is equal.
-5. For youtube: set start_timestamp to the second where the keyword subject is most visible.
-6. Reject mismatch (e.g. keyword "fuel nozzle" but clip is city skyline).
+1. Visual match FIRST: on-screen subject must match keyword literally (object/action/scene). Reject generic pretty / unrelated B-roll.
+2. Prefer CLOSE-UP / FILL-FRAME of the subject over wide landscape/cityscape.
+3. Prefer royalty-free license when relevance is close.
+4. Duration >= {required_duration:.1f}s preferred.
+5. Prefer pexels/pixabay over youtube when relevance is equal.
+6. For youtube: start_timestamp = second where keyword subject is most visible (not intro/logo).
+7. Reject mismatch hard (keyword "fuel nozzle" but clip is skyline / people talking / abstract).
 
-OUTPUT — raw JSON only, no markdown, no extra text:
+OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
 {{"selected_id":"<exact ID from list>","start_timestamp":0,"reason":"one short sentence"}}
 """
 
@@ -208,6 +209,19 @@ OUTPUT — raw JSON only, no markdown, no extra text:
         """Parse AI response and find matching candidate."""
         try:
             data = self._parse_json_tolerant(raw_response)
+            # Some models wrap: {"result":{...}} or {"data":{...}}
+            if data and "selected_id" not in data:
+                for k in ("result", "data", "selection", "choice"):
+                    nested = data.get(k)
+                    if isinstance(nested, dict) and nested.get("selected_id"):
+                        data = nested
+                        break
+                if "selected_id" not in data:
+                    # array form [{"selected_id":...}]
+                    for v in data.values():
+                        if isinstance(v, list) and v and isinstance(v[0], dict) and v[0].get("selected_id"):
+                            data = v[0]
+                            break
             if not data:
                 raise ValueError(f"empty/unparseable: {str(raw_response)[:120]!r}")
 

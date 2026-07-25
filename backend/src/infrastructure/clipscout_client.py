@@ -168,13 +168,19 @@ def _expand_search_queries(keyword: str, placement: str = "", category: str = ""
 
     # Behind-person / icon: fill-frame subject, avoid wide scenic.
     if behind or cat in {"icon", "motion_graphic"}:
-        for suffix in ("close up", "macro detail", "isolated object", "fill frame"):
+        for suffix in ("close up", "macro detail", "isolated object", "object only"):
             if suffix not in lower:
                 queries.append(f"{base} {suffix}")
+        # Drop wide scenic poison if present in base.
+        scenic = {"skyline", "cityscape", "landscape", "aerial", "panorama"}
+        if any(s in lower for s in scenic):
+            core = [t for t in tokens if t.lower() not in scenic]
+            if core:
+                queries.insert(1, " ".join(core) + " close up")
     elif "close up" not in lower and "closeup" not in lower:
         queries.append(f"{base} close up")
 
-    # Dedup preserve order, cap 5 (ClipScout batch budget).
+    # Dedup preserve order, cap 6 (ClipScout batch budget).
     out: list[str] = []
     seen: set[str] = set()
     for q in queries:
@@ -183,7 +189,7 @@ def _expand_search_queries(keyword: str, placement: str = "", category: str = ""
             continue
         seen.add(key)
         out.append(q)
-        if len(out) >= 5:
+        if len(out) >= 6:
             break
     return out
 

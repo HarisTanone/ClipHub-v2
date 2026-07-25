@@ -267,7 +267,7 @@ def test_expand_search_queries_behind_person():
     assert qs[0] == "indonesian rupiah banknotes counting"
     assert any("close up" in q.lower() for q in qs)
     assert any(q == "indonesian rupiah banknotes" for q in qs)
-    assert len(qs) <= 5
+    assert len(qs) <= 6
 
 
 def test_clipscout_segments_multi_query():

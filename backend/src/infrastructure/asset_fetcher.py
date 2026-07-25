@@ -361,9 +361,14 @@ class AssetFetcher(IAssetFetcher):
             lower = base.lower()
             if behind:
                 # Fill top half cleanly: subject-forward, avoid wide scenic.
-                for suffix in ("close up", "macro detail", "isolated object"):
+                for suffix in ("close up", "macro detail", "isolated object", "object only"):
                     if suffix not in lower:
                         variants.append(f"{base} {suffix}")
+                scenic = {"skyline", "cityscape", "landscape", "aerial", "panorama"}
+                if any(s in lower for s in scenic):
+                    core = [t for t in tokens if t.lower() not in scenic]
+                    if core:
+                        variants.insert(1, " ".join(core) + " close up")
             elif not any(x in lower for x in ("close up", "closeup", "macro", "detail")):
                 variants.append(f"{base} close up")
             if len(tokens) >= 3:

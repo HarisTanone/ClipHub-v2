@@ -208,13 +208,13 @@ class Settings(BaseSettings):
     TOP_OVERLAY_OPACITY: float = 1.0
     TOP_OVERLAY_PERSON_OUTLINE: bool = True    # white stroke around person (reference style)
     TOP_OVERLAY_PERSON_SHADOW: bool = True
-    TOP_OVERLAY_OUTLINE_THICKNESS: int = 6     # px stroke width (bold sticker edge)
+    TOP_OVERLAY_OUTLINE_THICKNESS: int = 8     # px stroke width (bold sticker edge @720p; scales up)
     TOP_OVERLAY_OUTLINE_COLOR: str = "255,255,255"
     TOP_OVERLAY_MAX_PER_CLIP: int = 2
-    TOP_OVERLAY_SEG_CONFIDENCE: float = 0.30
-    TOP_OVERLAY_MASK_FEATHER: int = 3          # short feather = cleaner hard cutout
-    TOP_OVERLAY_MASK_STRIDE: int = 2           # YOLO every N frames (hold mask between)
-    TOP_OVERLAY_CROP_BIAS_Y: float = 0.30     # cover-crop vertical bias (0=top, 0.5=center)
+    TOP_OVERLAY_SEG_CONFIDENCE: float = 0.25
+    TOP_OVERLAY_MASK_FEATHER: int = 1          # short feather = cleaner hard cutout
+    TOP_OVERLAY_MASK_STRIDE: int = 1           # YOLO every frame = cleaner cutout edge
+    TOP_OVERLAY_CROP_BIAS_Y: float = 0.18     # cover-crop vertical bias (0=top, 0.5=center)
 
 
 

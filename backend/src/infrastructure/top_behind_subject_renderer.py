@@ -154,38 +154,39 @@ class TopBehindSubjectRenderer:
 
         Only top split_ratio of frame shows behind person, so important stock
         region must land in upper portion of crop — not center-chopped.
+        Slight overscale reduces edge clipping of key subject.
         """
         import cv2
 
         ih, iw = image.shape[:2]
         if ih <= 0 or iw <= 0:
             return np.zeros((target_h, target_w, 3), dtype=np.uint8)
-        scale = max(target_w / iw, target_h / ih)
+        # Mild overscale keeps subject fully in frame after smart crop.
+        scale = max(target_w / iw, target_h / ih) * 1.08
         nw, nh = max(1, int(round(iw * scale))), max(1, int(round(ih * scale)))
         resized = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_AREA)
         max_x = max(0, nw - target_w)
         max_y = max(0, nh - target_h)
 
-        # Default: horizontal center + top-biased vertical crop.
+        # Default: horizontal center + strong top bias (important content not chopped).
         x0 = max_x // 2
-        y0 = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.45))))
+        y0 = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.30))))
 
         if max_x > 0 or max_y > 0:
             try:
                 gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-                sh, sw = max(1, nh // 8), max(1, nw // 8)
+                sh, sw = max(1, nh // 6), max(1, nw // 6)
                 small = cv2.resize(gray, (sw, sh))
-                small = cv2.GaussianBlur(small, (0, 0), 1.2)
-                # Edge energy = object/detail; better than pure brightness.
+                small = cv2.GaussianBlur(small, (0, 0), 1.0)
                 gx = cv2.Sobel(small, cv2.CV_32F, 1, 0, ksize=3)
                 gy = cv2.Sobel(small, cv2.CV_32F, 0, 1, ksize=3)
                 edge = cv2.magnitude(gx, gy)
-                thr = float(np.percentile(edge, 55))
-                weight = np.clip(edge - thr, 0, None) + 0.5
-                thr_b = float(np.percentile(small, 55))
-                weight = weight + 0.35 * np.clip(small.astype(np.float32) - thr_b, 0, None)
-                # Prefer UPPER content — only top band is visible behind person.
-                row_boost = np.linspace(1.6, 0.35, sh, dtype=np.float32)[:, None]
+                thr = float(np.percentile(edge, 50))
+                weight = np.clip(edge - thr, 0, None) + 0.35
+                thr_b = float(np.percentile(small, 50))
+                weight = weight + 0.45 * np.clip(small.astype(np.float32) - thr_b, 0, None)
+                # Strong upper-band preference — only top half is visible.
+                row_boost = np.linspace(2.2, 0.25, sh, dtype=np.float32)[:, None]
                 weight = weight * row_boost
                 yy, xx = np.mgrid[0:sh, 0:sw]
                 wsum = float(weight.sum()) or 1.0
@@ -194,13 +195,12 @@ class TopBehindSubjectRenderer:
                 cx = float((xx * weight).sum() / wsum) * scale_x
                 cy = float((yy * weight).sum() / wsum) * scale_y
                 x0 = int(np.clip(cx - target_w * 0.5, 0, max_x))
-                # Pin subject center into upper visible band (~25% of frame).
-                visible_anchor = 0.25
+                # Pin subject into upper visible band (~20% from top).
+                visible_anchor = 0.20
                 smart_y = int(np.clip(cy - target_h * visible_anchor, 0, max_y))
-                bias_y = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.45))))
-                # Strong top preference: never let lower decoy pull crop down hard.
-                y0 = int(round(0.85 * smart_y + 0.15 * bias_y))
-                y0 = min(y0, int(max_y * 0.35))  # hard ceiling: stay top-biased
+                bias_y = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.25))))
+                y0 = int(round(0.90 * smart_y + 0.10 * bias_y))
+                y0 = min(y0, int(max_y * 0.28))  # hard ceiling: stay top-biased
                 y0 = int(np.clip(y0, 0, max_y))
             except Exception:
                 pass
@@ -385,86 +385,109 @@ class TopBehindSubjectRenderer:
         return np.clip(p, 0.0, 1.0)
 
     def _clean_person_mask(self, p: np.ndarray) -> np.ndarray:
-        """Close holes / kill speckles; hard core + short feather (clean cutout)."""
+        """Hard sticker cutout: fill holes, kill fringe, crisp silhouette."""
         import cv2
 
         if p.max() < 0.01:
             return p
 
-        # Higher threshold = less muddy fringe from YOLO soft probs.
-        binary = (p >= 0.45).astype(np.uint8) * 255
+        h, w = p.shape[:2]
+        # Higher threshold = less muddy YOLO fringe.
+        binary = (p >= 0.50).astype(np.uint8) * 255
+        # Scale kernels to frame size (1080p needs bigger morph than 120px tests).
+        k = max(3, int(round(min(h, w) * 0.004)))
+        if k % 2 == 0:
+            k += 1
         k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        k7 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k7, iterations=2)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, k5, iterations=1)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k5, iterations=1)
+        k_med = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        k_big = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k + 2, k + 2))
 
-        # Keep largest connected component (main subject only).
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_big, iterations=2)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, k_med, iterations=1)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_med, iterations=2)
+
+        # Largest component = main speaker only.
         n, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
         if n > 1:
             areas = stats[1:, cv2.CC_STAT_AREA]
             keep = 1 + int(np.argmax(areas))
             binary = np.where(labels == keep, 255, 0).astype(np.uint8)
 
-        # Fill internal holes so B-roll doesn't punch through torso.
+        # Fill internal holes so B-roll never punches through torso/hair.
         flood = binary.copy()
-        h, w = flood.shape
         ff_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
         cv2.floodFill(flood, ff_mask, (0, 0), 128)
         holes = (flood != 128) & (binary == 0)
         binary[holes] = 255
 
-        # Mild expand so silhouette never nibble-eats shoulders/hair.
-        binary = cv2.dilate(binary, k3, iterations=1)
+        # Expand slightly so shoulders/hair not nibble-eaten.
+        binary = cv2.dilate(binary, k3, iterations=2)
         clean = binary.astype(np.float32) / 255.0
 
-        # Very short feather; re-harden core for sticker-clean cutout.
-        feather = max(1, min(int(self.mask_feather), 5))
+        # Minimal feather + hard core (sticker edge, not soft matte).
+        feather = max(1, min(int(self.mask_feather), 3))
         if feather % 2 == 0:
             feather += 1
         if feather > 1:
             soft = cv2.GaussianBlur(clean, (feather, feather), 0)
             core = cv2.erode(binary, k3, iterations=2).astype(np.float32) / 255.0
+            # Hard interior, only 1-2px soft rim.
             clean = np.where(core > 0.5, 1.0, soft)
+            clean = np.where(clean >= 0.55, 1.0, clean)  # snap near-edge to solid
             clean = np.clip(clean, 0.0, 1.0)
+        else:
+            clean = (clean >= 0.5).astype(np.float32)
         return clean
 
     def _draw_person_outline(
         self, out: np.ndarray, p: np.ndarray, top_alpha: np.ndarray
     ) -> np.ndarray:
-        """Bold white sticker contour around person (reference cutout)."""
+        """Bold white sticker contour around person (reference cutout).
+
+        Scales thickness with frame height so 1080p gets ~10-14px visible ring.
+        Stroke sits OUTSIDE body; interior face/clothes untouched.
+        """
         import cv2
 
-        binary = (p >= 0.45).astype(np.uint8) * 255
+        binary = (p >= 0.50).astype(np.uint8) * 255
         if binary.max() == 0:
             return out
 
-        # Reference-style sticker: thick outer ring, fully opaque white.
-        th = max(5, int(self.outline_thickness))
-        k_pad = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        # Expand mask so stroke sits outside body silhouette.
+        h, w = out.shape[:2]
+        # Scale outline to resolution: config thickness is base for ~1080p.
+        scale = max(1.0, min(h, w) / 720.0)
+        th = max(6, int(round(int(self.outline_thickness) * scale)))
+        # Outer pad so ring sits clearly outside silhouette.
+        pad = max(3, th // 2)
+        k_pad = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (pad | 1, pad | 1))
         edge_src = cv2.dilate(binary, k_pad, iterations=2)
         contours, _ = cv2.findContours(edge_src, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return out
 
-        # Outline visible wherever overlay/person present — not only top solid zone.
-        region = np.clip(np.maximum(top_alpha, 0.0) + 0.95, 0.0, 1.0)
+        # Full visibility wherever person exists (not only solid top band).
+        region = np.ones(out.shape[:2], dtype=np.float32)
+        # Soft-kill outline deep in bottom non-overlay zone only.
+        region = np.clip(np.maximum(top_alpha, 0.15), 0.0, 1.0)
 
         hard = np.zeros(out.shape[:2], dtype=np.uint8)
+        # Double-pass: outer thick ring + inner bright core = sticker look.
+        cv2.drawContours(hard, contours, -1, 255, thickness=th + 2, lineType=cv2.LINE_AA)
         cv2.drawContours(hard, contours, -1, 255, thickness=th, lineType=cv2.LINE_AA)
         cv2.drawContours(hard, contours, -1, 255, thickness=max(3, th - 2), lineType=cv2.LINE_AA)
-        glow = cv2.GaussianBlur(hard, (0, 0), sigmaX=max(1.5, th * 0.55))
-        # Strict interior kill — face/clothes stay original pixels.
-        interior = cv2.erode(binary, k_pad, iterations=2).astype(np.float32) / 255.0
+        glow = cv2.GaussianBlur(hard, (0, 0), sigmaX=max(1.2, th * 0.40))
+
+        # Kill stroke that would paint ON face/clothes.
+        interior = cv2.erode(binary, k_pad, iterations=max(2, pad // 2)).astype(np.float32) / 255.0
         stroke = np.clip(
             hard.astype(np.float32) / 255.0 * 1.0
-            + glow.astype(np.float32) / 255.0 * 0.45,
+            + glow.astype(np.float32) / 255.0 * 0.55,
             0.0,
             1.0,
         )
         stroke = stroke * region * (1.0 - interior)
+        # Snap mid-alpha to solid so outline never looks dirty/grey.
+        stroke = np.where(stroke >= 0.35, np.clip(stroke * 1.25, 0.0, 1.0), stroke * 0.5)
 
         color = np.array(self.outline_color, dtype=np.float32)
         stroke3 = stroke[:, :, None]
