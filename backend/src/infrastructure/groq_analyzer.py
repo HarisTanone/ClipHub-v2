@@ -779,6 +779,22 @@ OUTPUT RAW JSON SAJA:
             self._log_metrics(metrics)
             raise GroqAnalyzerError("Pass 1 menghasilkan 0 kandidat dari semua chunks")
 
+        # Recovery: too few candidates vs target → diversify via alternate angles
+        if len(all_candidates) < max(2, max_clips):
+            logger.warning(
+                f"v2_analyzer: low candidates ({len(all_candidates)} < target {max_clips}) "
+                "→ diversify recovery pass"
+            )
+            recovered = self._diversify_low_candidates(
+                all_candidates, transcript.segments, segment_map, max_clips, video_duration
+            )
+            if recovered:
+                all_candidates = recovered
+                metrics.pass1_candidates_total = len(all_candidates)
+                logger.info(
+                    f"v2_analyzer: diversify recovery → {len(all_candidates)} candidates"
+                )
+
         logger.info(f"v2_analyzer: Pass 1 complete — {len(all_candidates)} total candidates")
 
         # ─── Pass 2: Global re-ranking (70b) ─────────────────────────
@@ -1155,6 +1171,101 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             if not clip.hook:
                 clip.hook = clip.reason[:60] if clip.reason else f"Momen viral #{i+1}"
         return selected
+
+    def _diversify_low_candidates(
+        self,
+        candidates: list[HighlightCandidate],
+        segments: list[TranscriptSegment],
+        segment_map: dict,
+        max_clips: int,
+        video_duration: float,
+    ) -> list[HighlightCandidate]:
+        """When Pass1 under-delivers, seed alternate story/conflict/punchline windows.
+
+        Deterministic (no extra LLM): split transcript into windows, score keyword
+        density, keep non-overlapping slices until target*1.5 or end.
+        """
+        if not segments or video_duration <= 0:
+            return candidates
+
+        min_dur = float(getattr(self, "MIN_CLIP_DURATION", 45.0) or 45.0)
+        max_dur = float(getattr(self, "MAX_CLIP_DURATION", 90.0) or 90.0)
+        target_n = max(max_clips, 2)
+        want = max(target_n, min(target_n * 2, 6))
+
+        # Angles: story open / conflict / punchline / energy words
+        angle_terms = {
+            "story": ("cerita", "dulu", "awal", "pertama", "mulai", "waktu itu"),
+            "conflict": ("tapi", "padahal", "masalah", "salah", "marah", "ribut", "konflik"),
+            "punchline": ("ternyata", "akhirnya", "hasilnya", "gila", "wah", "banget"),
+            "money": ("uang", "harga", "mahal", "rupiah", "bbm", "gaji", "utang"),
+        }
+        windows: list[HighlightCandidate] = list(candidates)
+        used = [(c.start, c.end) for c in candidates]
+
+        def overlaps(a0: float, a1: float) -> bool:
+            return any(not (a1 <= b0 or a0 >= b1) for b0, b1 in used)
+
+        # Build rolling windows of ~min_dur from segment starts
+        n = len(segments)
+        step = max(1, n // max(4, want))
+        for i in range(0, n, step):
+            s0 = segments[i]
+            # extend until min_dur
+            j = i
+            while j + 1 < n and (segments[j].end - s0.start) < min_dur:
+                j += 1
+            end_t = min(video_duration, max(segments[j].end, s0.start + min_dur))
+            start_t = max(0.0, s0.start)
+            if end_t - start_t < min_dur * 0.85:
+                continue
+            if end_t - start_t > max_dur:
+                end_t = start_t + max_dur
+            if overlaps(start_t, end_t):
+                continue
+            blob = " ".join(
+                segments[k].text for k in range(i, min(n, j + 1))
+            ).lower()
+            best_angle = "story"
+            best_hits = 0
+            for ang, terms in angle_terms.items():
+                hits = sum(1 for t in terms if t in blob)
+                if hits > best_hits:
+                    best_hits = hits
+                    best_angle = ang
+            score = 55 + min(25, best_hits * 5)
+            # Prefer mid/late video slightly for punch
+            if start_t > video_duration * 0.4:
+                score += 5
+            windows.append(
+                HighlightCandidate(
+                    rank=0,
+                    start=start_t,
+                    end=end_t,
+                    score=score,
+                    hook=blob[:80].strip() or f"Momen {best_angle}",
+                    reason=f"diversify:{best_angle}",
+                    content_type=best_angle,
+                    speaker_energy="medium",
+                    hook_alt="",
+                )
+            )
+            used.append((start_t, end_t))
+            if len(windows) >= want:
+                break
+
+        # Dedup by time then keep highest scores
+        windows.sort(key=lambda c: c.score, reverse=True)
+        out: list[HighlightCandidate] = []
+        kept: list[tuple[float, float]] = []
+        for c in windows:
+            if any(not (c.end <= a or c.start >= b) for a, b in kept):
+                continue
+            out.append(c)
+            kept.append((c.start, c.end))
+            if len(out) >= want:
+                break
+        return out if len(out) > len(candidates) else candidates
 
     # ─── Validation Safety Net ────────────────────────────────────────────────
 

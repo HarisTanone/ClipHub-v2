@@ -134,6 +134,11 @@ class TopBehindSubjectRenderer:
         # asset id → (cx, cy) normalized 0..1 in source image for smart crop reuse
         self._subject_cache: dict[int, tuple[float, float]] = {}
         self._max_mask_components = 1
+        # Temporal mask EMA (per-instance; reset between clips by new renderer)
+        self._prev_clean_mask: np.ndarray | None = None
+        self._mask_ema = 0.55  # weight on previous frame
+        # Speaker stickiness: prefer same person across frames (anti-flip)
+        self._prev_mask_centroid: tuple[float, float] | None = None
 
 
     # ─── Public frame compositor ────────────────────────────────────────────
@@ -159,6 +164,15 @@ class TopBehindSubjectRenderer:
 
         p = self._normalize_person_mask(person_mask, h, w)
         p = self._clean_person_mask(p)
+        # Temporal EMA: kill flicker / hair edge jitter between frames
+        if (
+            self._prev_clean_mask is not None
+            and self._prev_clean_mask.shape == p.shape
+        ):
+            a = float(np.clip(self._mask_ema, 0.0, 0.9))
+            p = a * self._prev_clean_mask + (1.0 - a) * p
+            p = np.where(p >= 0.48, 1.0, 0.0).astype(np.float32)
+        self._prev_clean_mask = p.copy()
 
         # Top region alpha with soft bottom fade (0 = no overlay, 1 = full)
         top_alpha = self._top_gradient(h, w) * float(np.clip(self.overlay_opacity, 0.0, 1.0))
@@ -168,6 +182,9 @@ class TopBehindSubjectRenderer:
 
         out = frame.astype(np.float32)
         ov = overlay_frame.astype(np.float32)
+        # Depth polish: slight blur on stock so person reads as foreground
+        ov_soft = cv2.GaussianBlur(ov, (0, 0), 1.2)
+        ov = ov * 0.55 + ov_soft * 0.45
         out = out * (1.0 - bg_blend3) + ov * bg_blend3
 
         # Person stays original (already excluded from bg_blend). Optional FX:
@@ -561,10 +578,15 @@ class TopBehindSubjectRenderer:
                     if len(a) >= 2:
                         cv2.polylines(hard, [a], False, 255, thickness=th, lineType=line_type)
         else:
-            # Triple-pass sticker: outer thick + mid + inner core = solid white rim.
-            cv2.drawContours(hard, contours, -1, 255, thickness=th + 3, lineType=line_type)
-            cv2.drawContours(hard, contours, -1, 255, thickness=th, lineType=line_type)
-            cv2.drawContours(hard, contours, -1, 255, thickness=max(3, th - 2), lineType=line_type)
+            # Dual-stroke sticker: thick white outer + thin dark inner core
+            # (comic-book rim — more product-grade than single pass).
+            outer_th = th + 4
+            mid_th = th
+            core_th = max(3, th - 3)
+            cv2.drawContours(hard, contours, -1, 255, thickness=outer_th, lineType=line_type)
+            cv2.drawContours(hard, contours, -1, 255, thickness=mid_th, lineType=line_type)
+            # Inner dark hairline for separation (painted later as black pass on white)
+            cv2.drawContours(hard, contours, -1, 255, thickness=core_th, lineType=line_type)
 
         glow_sigma = max(1.5, th * 0.45)
         if style == "neon":
@@ -608,6 +630,13 @@ class TopBehindSubjectRenderer:
 
         stroke3 = stroke[:, :, None]
         painted = out * (1.0 - stroke3) + color[None, None, :] * stroke3
+        if style in {"white", "gradient"}:
+            # Dark inner hairline under white rim (dual-stroke product look)
+            inner = cv2.erode(hard, k_pad, iterations=1)
+            inner_edge = cv2.subtract(hard, inner).astype(np.float32) / 255.0
+            inner_edge = inner_edge * region * (1.0 - interior) * 0.55
+            black = np.array((8.0, 8.0, 8.0), dtype=np.float32)
+            painted = painted * (1.0 - inner_edge[:, :, None]) + black[None, None, :] * inner_edge[:, :, None]
         if style == "neon":
             bloom = cv2.GaussianBlur(hard, (0, 0), sigmaX=max(3.0, th * 1.4)).astype(np.float32) / 255.0
             bloom = bloom * region * (1.0 - interior) * 0.50
@@ -757,11 +786,13 @@ class TopBehindSubjectRenderer:
                     )
                 # not true dual → fall through to active speaker (center)
 
-            # active / dual_auto fallback: mask centroid nearest frame center
-            # (post-reframe pan already centers active speaker → follows switch)
+            # active / dual_auto: prefer sticky speaker (prev centroid), else face band
             self._max_mask_components = 1
             cx0, cy0 = w * 0.5, h * 0.42  # slightly upper (face band)
+            if self._prev_mask_centroid is not None:
+                cx0, cy0 = self._prev_mask_centroid
             best_i, best_d = 0, 1e18
+            best_cxy: tuple[float, float] | None = None
             for i, m in enumerate(resized):
                 ys, xs = np.where(m >= 0.5)
                 if len(xs) == 0:
@@ -773,6 +804,9 @@ class TopBehindSubjectRenderer:
                 if d < best_d:
                     best_d = d
                     best_i = i
+                    best_cxy = (mx, my)
+            if best_cxy is not None:
+                self._prev_mask_centroid = best_cxy
             return resized[best_i]
 
         except Exception as exc:
@@ -878,16 +912,74 @@ def _placement_of(suggestion) -> str:
     return ""
 
 
+def snap_overlay_to_phrase(
+    at_time: float,
+    duration: float,
+    words: list[dict] | None,
+    clip_duration: float = 0.0,
+    min_dur: float = 1.2,
+    max_dur: float = 3.5,
+) -> tuple[float, float]:
+    """Snap behind-person window to nearby word/phrase bounds when available."""
+    at = max(0.0, float(at_time or 0.0))
+    dur = float(np.clip(float(duration or 2.0), min_dur, max_dur))
+    if not words:
+        if clip_duration > 0:
+            dur = min(dur, max(0.4, clip_duration - at))
+        return round(at, 3), round(max(0.4, dur), 3)
+
+    # Anchor: first word starting at/after at_time (or nearest within 0.6s)
+    starts = []
+    for w in words:
+        try:
+            ws = float(w.get("start", 0))
+            we = float(w.get("end", ws + 0.2))
+        except (TypeError, ValueError):
+            continue
+        starts.append((ws, we, str(w.get("word") or "")))
+    if not starts:
+        return round(at, 3), round(dur, 3)
+
+    # Find phrase cluster around at: extend while gap < 0.35s, cap max_dur
+    best = min(starts, key=lambda t: abs(t[0] - at))
+    if abs(best[0] - at) > 0.8:
+        # far from speech — keep original, still clamp
+        if clip_duration > 0:
+            dur = min(dur, max(0.4, clip_duration - at))
+        return round(at, 3), round(max(min_dur, min(max_dur, dur)), 3)
+
+    phrase_start = best[0]
+    phrase_end = best[1]
+    # extend forward
+    for ws, we, _ in starts:
+        if ws < phrase_start - 0.05:
+            continue
+        if ws <= phrase_end + 0.35 and (ws - phrase_start) <= max_dur:
+            phrase_end = max(phrase_end, we)
+        if phrase_end - phrase_start >= max_dur:
+            break
+    # slight pad
+    phrase_start = max(0.0, phrase_start - 0.05)
+    phrase_end = phrase_end + 0.12
+    new_dur = float(np.clip(phrase_end - phrase_start, min_dur, max_dur))
+    if clip_duration > 0:
+        new_dur = min(new_dur, max(0.4, clip_duration - phrase_start))
+    return round(phrase_start, 3), round(max(0.4, new_dur), 3)
+
+
 def pick_top_overlay_suggestions(
     suggestions: list,
     max_per_clip: int | None = None,
     blocked_ranges: list[tuple[float, float]] | None = None,
+    words: list[dict] | None = None,
+    clip_duration: float = 0.0,
 ) -> list:
     """Pick BRollSuggestion rows for top-behind-person (prefer image; skip splice zones).
 
     Never reuses a full_frame splice window — person is gone there, so behind-person
     would be invisible. Prefer explicit placement=behind_person, then images/icons,
     then remaining video assets not used for full-frame.
+    Phrase-aware: when words given, snap at/duration to speech bounds.
     """
     limit = max_per_clip if max_per_clip is not None else settings.TOP_OVERLAY_MAX_PER_CLIP
     blocked = list(blocked_ranges or [])
@@ -914,15 +1006,15 @@ def pick_top_overlay_suggestions(
             score -= 1  # good for behind-person
         at = float(getattr(s, "at_time", 0))
         dur = float(getattr(s, "duration", 2.0))
+        at, dur = snap_overlay_to_phrase(at, dur, words, clip_duration=clip_duration)
         if any(not (at + dur <= a or at >= b) for a, b in blocked):
             continue
-        scored.append((score, at, s, path, source))
+        scored.append((score, at, dur, s, path, source))
 
     scored.sort(key=lambda x: (x[0], x[1]))
     picked = []
     used: list[tuple[float, float]] = []
-    for _, at, s, path, source in scored:
-        dur = float(s.duration)
+    for _, at, dur, s, path, source in scored:
         if any(not (at + dur <= a or at >= b) for a, b in used):
             continue
         if any(not (at + dur <= a or at >= b) for a, b in blocked):

@@ -792,6 +792,26 @@ class V2PipelineService:
                     )
             self._emit(job_id, 10, "highlights", "complete")
 
+            # Stash words for phrase-aware behind-person duration (step 11 overlay)
+            self._last_clips_with_words = clips_with_words
+
+            # ═══ Step 10.5: Prosody (energy peaks → zoom punch) ═══
+            prosody_results: dict = {}
+            try:
+                from src.infrastructure.prosody_analyzer import ProsodyAnalyzer
+                analyzer = ProsodyAnalyzer()
+                for clip in clips:
+                    if not trim_results.get(clip.rank):
+                        continue
+                    clip_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+                    if not os.path.exists(clip_path):
+                        continue
+                    try:
+                        prosody_results[clip.rank] = analyzer.analyze(clip_path)
+                    except Exception as pe:
+                        logger.debug(f"[{job_id}] prosody clip {clip.rank}: {pe}")
+            except Exception as e:
+                logger.warning(f"[{job_id}] Prosody analyzer unavailable: {e}")
 
             # ═══ Step 11: Optional Auto B-roll ═══
             # Recover missing creative-direction suggestions from the exact
@@ -826,6 +846,16 @@ class V2PipelineService:
                 trim_results=trim_results,
             )
 
+            # Checkpoint before expensive Remotion renders
+            try:
+                from src.infrastructure.checkpoint_manager import CheckpointManager
+                CheckpointManager().save(
+                    job_id, 12, "pre_remotion",
+                    {"clip_ranks": [c.rank for c in clips if trim_results.get(c.rank)]},
+                )
+            except Exception:
+                pass
+
             # ═══ Step 12+: Hook, Subtitle, Encode (REUSE) ═══
             await self._render_clips(
                 job=job,
@@ -836,7 +866,20 @@ class V2PipelineService:
                 output_dir=output_dir,
                 trim_results=trim_results,
                 reframe_data=reframe_data,
+                prosody_results=prosody_results,
             )
+
+            # ═══ Step 12.5: Audio post (music bed duck under speech) ═══
+            try:
+                await self._mix_audio_clips(
+                    job_id=job_id,
+                    clips=clips,
+                    creative_direction=creative_direction,
+                    output_dir=output_dir,
+                    trim_results=trim_results,
+                )
+            except Exception as e:
+                logger.warning(f"[{job_id}] Audio mix step skipped: {e}")
 
             # ═══ Step 12: Folder Structure + Thumbnails + Meta JSON ═══
             await self._create_folder_structure(
@@ -957,11 +1000,22 @@ class V2PipelineService:
                 score=h.score,
                 start=start,
                 end=end,
-                hook=h.hook,
+                hook=self._pick_hook(h),
                 reason=h.reason,
                 broll_suggestions=broll_suggestions,
             ))
         return clips
+
+    @staticmethod
+    def _pick_hook(h) -> str:
+        """A/B: primary hook vs hook_alt (cheap heuristic; 9router rewrite optional later)."""
+        primary = getattr(h, "hook", "") or ""
+        alt = getattr(h, "hook_alt", "") or ""
+        try:
+            from src.infrastructure.hook_optimizer import HookOptimizer
+            return HookOptimizer.pick_hook_ab(primary, alt)
+        except Exception:
+            return primary or alt
 
     @staticmethod
     def _parse_broll_suggestions(
@@ -1037,11 +1091,13 @@ class V2PipelineService:
                 else:
                     placement = "full_frame"
 
+            reason = " ".join(str(raw.get("reason") or "").split())[:200]
             parsed.append(BRollSuggestion(
                 at_time=round(at_time, 3),
                 keyword=keyword,
                 template=template,
                 duration=round(duration, 3),
+                reason=reason,
                 visual_category=visual_cat,
                 motion_style=motion_style,
                 placement=placement,
@@ -1102,11 +1158,16 @@ class V2PipelineService:
             self._emit(job_id, 11, "broll", "complete")
             return
 
-        suggestions = [
-            suggestion
-            for clip in clips
-            for suggestion in clip.broll_suggestions
-        ]
+        # Stamp clip topic (hook/reason) onto suggestions for entity lock + pass-2 context.
+        suggestions: list[BRollSuggestion] = []
+        for clip in clips:
+            topic = " ".join(
+                x for x in (clip.hook or "", clip.reason or "") if x
+            ).strip()
+            for suggestion in clip.broll_suggestions:
+                if topic and not (suggestion.reason or "").strip():
+                    suggestion.reason = topic[:200]
+                suggestions.append(suggestion)
         if not suggestions:
             logger.info(f"[{job_id}] Auto B-roll enabled, but no relevant suggestions were found")
             self._emit(job_id, 11, "broll", "complete")
@@ -1265,6 +1326,7 @@ class V2PipelineService:
                 clips=clips,
                 output_dir=output_dir,
                 trim_results=trim_results,
+                clips_with_words=getattr(self, "_last_clips_with_words", None),
             )
 
         # Drop intermediate footage only after top-behind bake.
@@ -1284,11 +1346,13 @@ class V2PipelineService:
         clips: list[Clip],
         output_dir: str,
         trim_results: dict[int, bool],
+        clips_with_words: dict[int, list[dict]] | None = None,
     ) -> None:
         """Bake top-region behind-person overlays. Additive to full-frame splice.
 
         Blocks full-frame splice time ranges — person is gone there, so
         behind-person would be invisible. Tracks must use different times.
+        Phrase-aware when word timestamps available.
         """
         from src.infrastructure.top_behind_subject_renderer import (
             TopBehindSubjectRenderer,
@@ -1296,6 +1360,7 @@ class V2PipelineService:
             pick_full_frame_suggestions,
         )
 
+        words_map = clips_with_words or {}
         renderer = TopBehindSubjectRenderer()
         applied = 0
         for clip in clips:
@@ -1318,10 +1383,13 @@ class V2PipelineService:
                 if has_asset or (getattr(s, "placement", "") or "") == "full_frame":
                     blocked.append((float(s.at_time), float(s.at_time) + float(s.duration)))
 
+            clip_dur = max(0.0, float(clip.end) - float(clip.start))
             segments = pick_top_overlay_suggestions(
                 clip.broll_suggestions,
                 max_per_clip=settings.TOP_OVERLAY_MAX_PER_CLIP,
                 blocked_ranges=blocked,
+                words=words_map.get(clip.rank) or [],
+                clip_duration=clip_dur,
             )
             if not segments:
                 clip.top_overlay_events = []
@@ -1564,6 +1632,7 @@ class V2PipelineService:
         output_dir: str,
         trim_results: dict[int, bool],
         reframe_data: dict,
+        prosody_results: dict | None = None,
     ) -> None:
         """Run hook + subtitle render via Remotion only."""
         # Load custom style configs
@@ -1608,12 +1677,14 @@ class V2PipelineService:
             output_dir, trim_results, reframe_data,
             hook_style_config, subtitle_style_config,
             text_emphasis_style_config,
+            prosody_results=prosody_results or {},
         )
 
     async def _render_via_remotion(
         self, job, job_id, clips, clips_with_words, creative_direction,
         output_dir, trim_results, reframe_data,
         hook_style_config, subtitle_style_config, text_emphasis_style_config=None,
+        prosody_results: dict | None = None,
     ) -> None:
         """Render all clips via Remotion server (parallel, max 2 concurrent)."""
         self._emit(job_id, 13, "remotion_render", "start")
@@ -1631,6 +1702,7 @@ class V2PipelineService:
         # Parallel rendering: 2 clips max (prevents Remotion delayRender timeout on long clips)
         render_semaphore = asyncio.Semaphore(2)
         render_errors: list[str] = []
+        prosody_map = prosody_results or {}
 
         async def render_one_clip(clip):
             async with render_semaphore:
@@ -1687,6 +1759,22 @@ class V2PipelineService:
                         if clip_reframe.get(key) is not None:
                             cd_dict[key] = clip_reframe[key]
 
+                # Prosody punch: energy peaks → zoom_events for Remotion
+                prosody = prosody_map.get(clip.rank)
+                peaks = getattr(prosody, "energy_peaks", None) if prosody else None
+                if peaks:
+                    cd_dict["zoom_events"] = [
+                        {"time": peak.time, "intensity": peak.intensity, "duration": 0.5}
+                        for peak in peaks[:8]
+                        if peak.time > hook_dur
+                    ]
+
+                try:
+                    from src.infrastructure.clip_quality_helpers import suggest_cta
+                    clip_cta = suggest_cta(clip_hook or "", getattr(clip, "reason", "") or "", clip.rank)
+                except Exception:
+                    clip_cta = None
+
                 try:
                     result = await self._remotion_adapter.render_clip(
                         scene_graph={"clip_rank": clip.rank, "duration": clip.end - clip.start, "layers": []},
@@ -1700,6 +1788,7 @@ class V2PipelineService:
                         hook_style=hook_style,
                         text_emphasis_events=clip.text_emphasis_events,
                         broll_events=self._build_broll_events(clip, job.broll_motion_style),
+                        cta=clip_cta,
                     )
                     if result.success:
                         mark_clip_ready(output_dir, clip.rank)
@@ -1723,6 +1812,44 @@ class V2PipelineService:
             )
 
         self._emit(job_id, 14, "remotion_render", "complete")
+
+    async def _mix_audio_clips(
+        self,
+        job_id: str,
+        clips: list[Clip],
+        creative_direction: CreativeDirection,
+        output_dir: str,
+        trim_results: dict[int, bool],
+    ) -> None:
+        """Music bed auto-duck under speech (post-Remotion). Non-fatal on miss."""
+        self._emit(job_id, 13, "audio_mix", "start")
+        from src.infrastructure.audio_mixer import AudioMixer, AudioMixConfig
+
+        mood = getattr(creative_direction, "music_mood", None) or "energetic"
+        if str(mood).lower() in {"none", "off", "silent"}:
+            self._emit(job_id, 13, "audio_mix", "complete")
+            return
+
+        mixer = AudioMixer()
+        cfg = AudioMixConfig(music_mood=str(mood), music_enabled=True)
+        mixed_n = 0
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+            if not os.path.exists(final_path):
+                continue
+            mixed_path = f"{output_dir}/clip_{clip.rank:02d}_mixed.mp4"
+            try:
+                result = await asyncio.to_thread(mixer.mix_audio, final_path, mixed_path, cfg)
+                if result == mixed_path and os.path.exists(mixed_path):
+                    os.replace(mixed_path, final_path)
+                    mark_clip_ready(output_dir, clip.rank)
+                    mixed_n += 1
+            except Exception as e:
+                logger.debug(f"[{job_id}] audio mix clip {clip.rank}: {e}")
+        logger.info(f"[{job_id}] Audio mix: {mixed_n}/{len(clips)} clips")
+        self._emit(job_id, 13, "audio_mix", "complete")
 
     async def _render_via_ffmpeg(
         self, job, job_id, clips, clips_with_words, creative_direction,
@@ -1767,6 +1894,25 @@ class V2PipelineService:
 
             words = words_per_clip.get(clip.rank, [])
             broll_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+            broll_n = len(clip.broll_suggestions or [])
+            try:
+                from src.infrastructure.clip_quality_helpers import (
+                    virality_breakdown,
+                    suggest_cta,
+                    retention_trim_hints,
+                )
+                viral = virality_breakdown(
+                    clip.score,
+                    hook=clip.hook or "",
+                    reason=clip.reason or "",
+                    duration=clip.end - clip.start,
+                    words=words,
+                    broll_count=broll_n,
+                )
+                cta = suggest_cta(clip.hook or "", clip.reason or "", clip.rank)
+                retention = retention_trim_hints(words, clip.end - clip.start)
+            except Exception:
+                viral, cta, retention = {}, {}, {}
             clips_output.append({
                 "rank": clip.rank,
                 "score": clip.score,
@@ -1809,6 +1955,9 @@ class V2PipelineService:
                     for event in clip.text_emphasis_events[:2]
                 ],
                 "top_overlay_events": list(getattr(clip, "top_overlay_events", None) or []),
+                "virality": viral,
+                "cta": cta,
+                "retention_hints": retention,
             })
 
         return {
@@ -1841,16 +1990,30 @@ class V2PipelineService:
             final_path = f"{output_dir}/clip_{rank:02d}_final.mp4"
             thumb_path = f"{thumb_dir}/clip_{rank:02d}.jpg"
             if os.path.exists(final_path):
-                thumb_cmd = [
-                    "ffmpeg", "-y", "-i", final_path,
-                    "-ss", "1", "-frames:v", "1",
-                    "-vf", "scale=360:-1", "-q:v", "3",
-                    thumb_path,
-                ]
                 try:
-                    await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
+                    from src.infrastructure.clip_quality_helpers import (
+                        smart_thumbnail_seek,
+                        generate_smart_thumbnail,
+                    )
+                    words = clips_with_words.get(rank, []) if isinstance(clips_with_words, dict) else []
+                    dur = max(0.5, float(clip.end) - float(clip.start))
+                    seek = smart_thumbnail_seek(words, dur, hook=clip.hook or "")
+                    ok = generate_smart_thumbnail(final_path, thumb_path, seek=seek)
+                    if not ok:
+                        raise RuntimeError("smart thumb failed")
                 except Exception:
-                    pass
+                    thumb_cmd = [
+                        "ffmpeg", "-y", "-i", final_path,
+                        "-ss", "1", "-frames:v", "1",
+                        "-vf", "scale=360:-1", "-q:v", "3",
+                        thumb_path,
+                    ]
+                    try:
+                        await asyncio.to_thread(
+                            subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15
+                        )
+                    except Exception:
+                        pass
 
             raw_src = f"{output_dir}/clip_{rank:02d}.mp4"
             if os.path.exists(raw_src):
@@ -1866,15 +2029,39 @@ class V2PipelineService:
             "clips_total": len(clips),
             "clips_success": sum(1 for c in clips if trim_results.get(c.rank)),
             "created_at": str(job.created_at) if job.created_at else None,
-            "clips": [
+            "clips": [],
+        }
+        try:
+            from src.infrastructure.clip_quality_helpers import (
+                virality_breakdown,
+                suggest_cta,
+                retention_trim_hints,
+                smart_thumbnail_seek,
+            )
+            for c in clips:
+                words = clips_with_words.get(c.rank, []) if isinstance(clips_with_words, dict) else []
+                dur = float(c.end) - float(c.start)
+                meta["clips"].append({
+                    "rank": c.rank, "start": c.start, "end": c.end,
+                    "duration": dur, "hook": c.hook, "score": c.score,
+                    "words": words,
+                    "thumb_seek": smart_thumbnail_seek(words, dur, c.hook or ""),
+                    "virality": virality_breakdown(
+                        c.score, c.hook or "", c.reason or "", dur, words,
+                        len(c.broll_suggestions or []),
+                    ),
+                    "cta": suggest_cta(c.hook or "", c.reason or "", c.rank),
+                    "retention_hints": retention_trim_hints(words, dur),
+                })
+        except Exception:
+            meta["clips"] = [
                 {
                     "rank": c.rank, "start": c.start, "end": c.end,
                     "duration": c.end - c.start, "hook": c.hook, "score": c.score,
-                    "words": clips_with_words.get(c.rank, []),
+                    "words": clips_with_words.get(c.rank, []) if isinstance(clips_with_words, dict) else [],
                 }
                 for c in clips
-            ],
-        }
+            ]
         meta_path = f"{output_dir}/meta_{job_id}.json"
         with open(meta_path, "w") as f:
             json_mod.dump(meta, f, indent=2, default=str)

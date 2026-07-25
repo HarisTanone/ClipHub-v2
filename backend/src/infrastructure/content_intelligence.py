@@ -46,10 +46,20 @@ class ContentIntelligence:
         "ngobrol", "obrolan", "bincang", "diskusi", "host", "co host",
         "co-host", "guest", "bintang tamu", "narasumber", "episode",
         "panel", "debat", "roundtable", "conversation", "studio",
+        "speaker", "pembawa acara", "moderator", "tanya jawab", "q&a",
+        "qa", "podcaster", "mic", "mikrofon", "live talk",
     }
     TALKING_HEAD_TERMS = {
         "tutorial", "review", "reaction", "commentary", "opini", "cerita",
         "storytime", "explainer", "tips", "edukasi", "motivasi",
+        "cara", "how to", "step by step", "belajar", "rahasia",
+        "fakta", "penjelasan", "analisa", "analisis",
+    }
+    # Soft dialogue cues (transcript-heavy multi-turn chat)
+    DIALOGUE_CUES = {
+        "iya", "betul", "benar", "setuju", "menurut saya", "menurutku",
+        "kamu", "anda", "gue", "elu", "bro", "sis", "guys",
+        "you know", "i mean", "right?", "exactly", "so basically",
     }
 
     def detect(
@@ -97,16 +107,42 @@ class ContentIntelligence:
             "podcast": self._score_terms(text, self.PODCAST_TERMS),
             "talking_head": self._score_terms(text, self.TALKING_HEAD_TERMS),
         }
+        # Transcript dialogue density → podcast soft boost
+        dialogue_hits = self._score_terms(text, self.DIALOGUE_CUES)
+        if dialogue_hits >= 6:
+            scores["podcast"] += min(6, dialogue_hits // 2)
+
+        # Clip hints: multi-speaker energy / interview labels
+        if clip_hints:
+            for hint in clip_hints:
+                ct = str(hint.get("content_type") or "").lower()
+                if any(k in ct for k in ("podcast", "interview", "debate", "talk")):
+                    scores["podcast"] += 4
+                if "gaming" in ct or "gameplay" in ct:
+                    scores["gaming"] += 4
+                if any(k in ct for k in ("tutorial", "review", "explainer")):
+                    scores["talking_head"] += 3
+
         content_type, score = max(scores.items(), key=lambda item: item[1])
         confidence = min(1.0, score / 8.0)
 
         if score <= 0:
-            content_type = "general"
-            confidence = 0.0
+            # Force soft classify from length/dialogue rather than dead general@0
+            if dialogue_hits >= 3:
+                content_type = "podcast"
+                score = max(2, dialogue_hits)
+                confidence = min(0.35, score / 12.0)
+            elif len(text) > 400:
+                content_type = "talking_head"
+                score = 2
+                confidence = 0.2
+            else:
+                content_type = "general"
+                confidence = 0.0
 
         signals = self._matched_terms(text, {
             "gaming": self.GAMING_TERMS,
-            "podcast": self.PODCAST_TERMS,
+            "podcast": self.PODCAST_TERMS | self.DIALOGUE_CUES,
             "talking_head": self.TALKING_HEAD_TERMS,
         }.get(content_type, set()))
 
@@ -115,11 +151,11 @@ class ContentIntelligence:
         reason = f"{content_type}_score_{score}"
 
         if autogrid_enabled:
-            if content_type == "gaming" and confidence >= 0.25:
+            if content_type == "gaming" and confidence >= 0.2:
                 grid_strategy = "gaming_gameplay_facecam"
                 force_grid = True
                 reason = "gaming_content_game_top_person_bottom"
-            elif content_type == "podcast" and confidence >= 0.25:
+            elif content_type == "podcast" and confidence >= 0.15:
                 grid_strategy = "speaker_grid_auto"
                 reason = "podcast_content_visual_face_count"
             else:

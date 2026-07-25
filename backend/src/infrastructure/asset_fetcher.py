@@ -203,11 +203,13 @@ class AssetFetcher(IAssetFetcher):
             if not candidates:
                 continue
 
-            # AI selects best video
+            # AI selects best video (pass-2 context = reason / clip topic sentence)
             selected = self._ai_selector.select_best(
                 candidates=candidates,
                 keyword=suggestion.keyword,
                 required_duration=suggestion.duration,
+                placement=str(getattr(suggestion, "placement", "") or ""),
+                context=str(getattr(suggestion, "reason", "") or ""),
             )
             if not selected:
                 continue

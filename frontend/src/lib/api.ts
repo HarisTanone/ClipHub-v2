@@ -302,6 +302,20 @@ export interface ClipInfo {
   has_final: boolean;
   has_thumbnail: boolean;
   render_status: "ready" | "processing" | "unavailable";
+  virality?: {
+    score?: number;
+    total?: number;
+    factors?: string[];
+    hook?: number;
+    hook_punch?: number;
+    retention?: number;
+    emotion?: number;
+    visual?: number;
+    visual_density?: number;
+  } | null;
+  cta?: { text?: string; type?: string; kind?: string; duration_sec?: number; duration?: number; position?: string } | null;
+  retention_hints?: { suggested_cuts?: Array<{ start: number; end: number; reason?: string }> } | null;
+  thumb_seek?: number | null;
 }
 
 export interface JobDetailResponse {
@@ -345,6 +359,20 @@ export interface ClipDetailResponse {
     text_emphasis_style_config: Record<string, any>;
     text_emphasis_events: Array<Record<string, any>>;
     reframe_layout?: "single" | "double";
+    virality?: {
+      score?: number;
+      total?: number;
+      factors?: string[];
+      hook?: number;
+      hook_punch?: number;
+      retention?: number;
+      emotion?: number;
+      visual?: number;
+      visual_density?: number;
+    } | null;
+    cta?: { text?: string; type?: string; kind?: string; duration_sec?: number; duration?: number; position?: string } | null;
+    retention_hints?: { suggested_cuts?: Array<{ start: number; end: number; reason?: string }> } | null;
+    thumb_seek?: number | null;
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };
     urls: { raw: string | null; final: string | null; thumbnail: string | null };
   };

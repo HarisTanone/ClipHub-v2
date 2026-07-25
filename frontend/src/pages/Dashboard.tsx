@@ -163,31 +163,31 @@ export function Dashboard() {
       <Card className="p-3 shrink-0">
         <div className="flex items-center gap-3 flex-wrap">
           {/* Search */}
-          <div className="relative flex-1 min-w-[240px]">
+          <div className="relative flex-1 min-w-0 w-full sm:min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search title, URL, or job ID..."
-              className="w-full bg-zinc-950/70 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
+              className="w-full bg-zinc-950/70 border border-zinc-800 rounded-lg pl-9 pr-3 py-2.5 sm:py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
             />
           </div>
 
-          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as "all" | "youtube" | "upload")} className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-[10px] text-zinc-300 outline-none">
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as "all" | "youtube" | "upload")} className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 sm:py-2 text-[10px] text-zinc-300 outline-none w-full sm:w-auto">
             <option value="all">All sources</option><option value="youtube">YouTube</option><option value="upload">Upload</option>
           </select>
 
           {/* Status filter */}
-          <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 p-1">
-            <SlidersHorizontal className="ml-1 h-3.5 w-3.5 text-zinc-600" />
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 p-1 w-full sm:w-auto overflow-x-auto">
+            <SlidersHorizontal className="ml-1 h-3.5 w-3.5 text-zinc-600 shrink-0" />
             {["all", "completed", "failed", "processing"].map((s) => (
               <button
                 key={s}
                 type="button"
                 onClick={() => setStatusFilter(s === "processing" ? "processing" : s)}
                 className={cn(
-                  "px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors capitalize",
+                  "px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors capitalize whitespace-nowrap",
                   statusFilter === s ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300"
                 )}
               >
@@ -229,7 +229,7 @@ export function Dashboard() {
               action={!search ? <Link to="/jobs/new"><Button size="sm" icon={<PlusCircle className="h-3.5 w-3.5" />}>Create first job</Button></Link> : undefined}
             />
           ) : (
-            <div className="grid grid-cols-2 gap-3 p-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {paginated.map((job) => {
                 const isUpload = job.source_type === "upload";
                 const thumb = isUpload ? null : getYouTubeThumb(job.youtube_url);

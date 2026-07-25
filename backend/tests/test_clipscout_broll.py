@@ -237,6 +237,91 @@ class TestClipScoutAISelector:
         result = selector.select_best([], keyword="test")
         assert result is None
 
+    def test_parse_json_tolerant_extra_data_and_fence(self):
+        selector = ClipScoutAISelector()
+        raw = '```json\n{"selected_id":"px_1234","start_timestamp":0,"reason":"ok"}\n```\nExtra trailing junk'
+        data = selector._parse_json_tolerant(raw)
+        assert data.get("selected_id") == "px_1234"
+
+    def test_parse_json_tolerant_unterminated_reason(self):
+        selector = ClipScoutAISelector()
+        raw = '{"selected_id":"yt_ABC123","start_timestamp":12,"reason":"close up of'
+        data = selector._parse_json_tolerant(raw)
+        assert data.get("selected_id") == "yt_ABC123"
+
+    @patch("src.infrastructure.clipscout_ai_selector.get_nine_router_client")
+    def test_select_best_retries_after_bad_json(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.is_configured = True
+        mock_client.chat.side_effect = [
+            "not json at all {{{",
+            json.dumps({"selected_id": "px_1234", "start_timestamp": 0, "reason": "ok"}),
+        ]
+        mock_get_client.return_value = mock_client
+
+        selector = ClipScoutAISelector()
+        result = selector.select_best(_sample_candidates(), keyword="centella", required_duration=2.0)
+        assert result is not None
+        assert result.id == "px_1234"
+        assert mock_client.chat.call_count == 2
+
+    def test_behind_person_bans_talking_head(self):
+        selector = ClipScoutAISelector()
+        candidates = [
+            VideoCandidate(
+                id="yt_talk", title="Podcast interview talking head host",
+                thumbnail_url="", source_url="", embed_url="",
+                platform="youtube", license="standard",
+                duration_seconds=60, start_timestamp=0, relevance_score=0.99,
+            ),
+            VideoCandidate(
+                id="px_obj", title="Fuel nozzle close up detail",
+                thumbnail_url="", source_url="", embed_url="",
+                platform="pexels", license="royalty-free",
+                duration_seconds=8, start_timestamp=0, relevance_score=0.70,
+            ),
+        ]
+        kept = selector._filter_for_placement(candidates, "behind_person")
+        assert [c.id for c in kept] == ["px_obj"]
+        picked = selector._fallback_select(candidates, keyword="fuel nozzle", placement="behind_person")
+        assert picked.id == "px_obj"
+
+    def test_fallback_prefers_transcript_context(self):
+        """Pass-2: equal keyword hits → context sentence tips the scale."""
+        selector = ClipScoutAISelector()
+        candidates = [
+            VideoCandidate(
+                id="px_wallet",
+                title="Empty wallet hands close up",
+                thumbnail_url="", source_url="", embed_url="",
+                platform="pexels", license="royalty-free",
+                duration_seconds=8, start_timestamp=0, relevance_score=0.80,
+            ),
+            VideoCandidate(
+                id="px_generic",
+                title="Hands close up object",
+                thumbnail_url="", source_url="", embed_url="",
+                platform="pexels", license="royalty-free",
+                duration_seconds=8, start_timestamp=0, relevance_score=0.90,
+            ),
+        ]
+        picked = selector._fallback_select(
+            candidates,
+            keyword="hands close up",
+            placement="behind_person",
+            context="empty wallet cash crisis inflation",
+        )
+        assert picked.id == "px_wallet"
+
+    def test_build_prompt_includes_context(self):
+        selector = ClipScoutAISelector()
+        prompt = selector._build_prompt(
+            _sample_candidates(), "centella", 2.0, "full_frame",
+            context="Centella asiatica untuk anti aging",
+        )
+        assert "TRANSCRIPT CONTEXT" in prompt
+        assert "anti aging" in prompt
+
 
 # ─── Task 9.3: VideoSplicer Tests ─────────────────────────────────────────────
 

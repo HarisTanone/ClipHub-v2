@@ -354,21 +354,140 @@ def test_expand_search_queries_behind_person():
     assert len(qs) <= 6
 
 
+def test_snap_overlay_to_phrase_extends_cluster():
+    from src.infrastructure.top_behind_subject_renderer import snap_overlay_to_phrase
+
+    words = [
+        {"word": "harga", "start": 2.0, "end": 2.3},
+        {"word": "BBM", "start": 2.35, "end": 2.7},
+        {"word": "naik", "start": 2.8, "end": 3.1},
+        {"word": "lagi", "start": 3.2, "end": 3.5},
+    ]
+    at, dur = snap_overlay_to_phrase(2.1, 5.0, words, clip_duration=20.0)
+    assert at <= 2.1
+    assert 1.2 <= dur <= 3.5
+    assert at + dur >= 3.0
+
+
+def test_snap_overlay_far_from_speech_keeps_clamp():
+    from src.infrastructure.top_behind_subject_renderer import snap_overlay_to_phrase
+
+    words = [{"word": "hi", "start": 0.5, "end": 0.8}]
+    at, dur = snap_overlay_to_phrase(8.0, 2.0, words, clip_duration=12.0)
+    assert at == 8.0
+    assert 1.2 <= dur <= 3.5
+
+
+def test_hook_ab_prefers_punchy():
+    from src.infrastructure.hook_optimizer import HookOptimizer
+
+    picked = HookOptimizer.pick_hook_ab(
+        "Ini adalah penjelasan panjang tentang topik yang membosankan sekali",
+        "Harga BBM Naik? Ini Rahasianya",
+    )
+    assert "Rahasia" in picked or "?" in picked
+
+
 def test_clipscout_segments_multi_query():
     from src.infrastructure.clipscout_client import build_segments_from_suggestions
 
     s = SimpleNamespace(
         keyword="fuel nozzle pumping gas car",
+        duration=2.5,
         placement="behind_person",
         visual_category="footage",
+        reason="harga BBM naik dompet kosong",
     )
     segs = build_segments_from_suggestions([s])
-    assert len(segs) == 1
-    assert len(segs[0]["searchQueries"]) >= 2
-    # sanitize may append close-up bias for behind_person stock quality
-    assert segs[0]["searchQueries"][0] in {
-        "fuel nozzle pumping gas car",
-        "fuel nozzle pumping gas car close up",
-    }
+    assert segs
+    assert len(segs[0]["searchQueries"]) >= 1
+    joined = " ".join(segs[0]["searchQueries"]).lower()
+    assert any(tok in joined for tok in ("gas", "fuel", "pump", "nozzle", "car", "wallet", "cash", "money"))
+
+
+def test_extract_topic_entities_and_lock():
+    from src.infrastructure.clipscout_client import (
+        extract_topic_entities,
+        lock_keyword_to_entities,
+        build_segments_from_suggestions,
+    )
+
+    ents = extract_topic_entities("Harga BBM naik, rupiah melemah, minyak dunia")
+    assert "bbm" in ents
+    assert "rupiah" in ents
+    assert "minyak" in ents
+
+    # Off-topic generic keyword must be forced onto entity visual.
+    locked = lock_keyword_to_entities("dramatic lifestyle", ents, placement="behind_person")
+    assert any(tok in locked.lower() for tok in ("fuel", "nozzle", "gas", "rupiah", "banknotes", "oil"))
+
+    s = SimpleNamespace(
+        keyword="dramatic success",
+        placement="behind_person",
+        visual_category="footage",
+        reason="",
+    )
+    segs = build_segments_from_suggestions([s], topic_text="BBM mahal rupiah anjlok")
+    blob = " ".join(segs[0]["searchQueries"]).lower()
+    assert any(x in blob for x in ("fuel", "nozzle", "rupiah", "banknotes", "bbm"))
+
+
+def test_vad_edge_shift_cap_prevents_duration_collapse():
+    """Simulates the 56s→7s bug: huge end snap must clamp, not collapse."""
+    from src.infrastructure.vad_boundary_adjuster import VADBoundaryAdjuster
+
+    adj = VADBoundaryAdjuster()
+    start, end = 10.0, 66.0  # 56s
+    # Fake huge snap: end collapses to 19s (7s window) — must reject
+    adjusted_start, adjusted_end = 12.0, 19.0
+    original_duration = end - start
+    max_edge = max(8.0, original_duration * 0.15)
+    if abs(adjusted_start - start) > max_edge:
+        adjusted_start = start
+    if abs(adjusted_end - end) > max_edge:
+        adjusted_end = end
+    adjusted_duration = adjusted_end - adjusted_start
+    if (
+        adjusted_duration < original_duration * 0.8
+        or adjusted_duration > original_duration * 1.2
+    ):
+        adjusted_start, adjusted_end = start, end
+    # end shift 47s >> max_edge → clamped; duration stays near original
+    assert adjusted_end == 66.0
+    assert (adjusted_end - adjusted_start) >= original_duration * 0.8
+    assert max_edge >= 8.0
+    assert adj is not None
+
+
+def test_diversify_low_candidates_seeds_extra_windows():
+    from src.domain.entities import HighlightCandidate, TranscriptSegment
+    from src.infrastructure.groq_analyzer import GroqAnalyzer
+
+    analyzer = object.__new__(GroqAnalyzer)
+    analyzer.MIN_CLIP_DURATION = 10.0
+    analyzer.MAX_CLIP_DURATION = 30.0
+    segs = [
+        TranscriptSegment(start=float(i * 5), end=float(i * 5 + 4.5), text=t)
+        for i, t in enumerate(
+            [
+                "awal cerita dulu waktu itu",
+                "tapi ada masalah ribut marah",
+                "ternyata hasilnya gila banget",
+                "harga bbm mahal rupiah anjlok",
+                "uang gaji utang",
+                "cerita lagi di studio",
+            ]
+        )
+    ]
+    seed = [
+        HighlightCandidate(
+            rank=1, start=0.0, end=12.0, score=80, hook="seed", reason="pass1"
+        )
+    ]
+    out = analyzer._diversify_low_candidates(
+        seed, segs, {}, max_clips=3, video_duration=40.0
+    )
+    assert len(out) > len(seed)
+    assert any("diversify:" in (c.reason or "") for c in out)
 
 

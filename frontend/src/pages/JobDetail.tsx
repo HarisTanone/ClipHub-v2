@@ -304,17 +304,17 @@ export function JobDetail() {
             <Badge variant="default" size="sm">{data.target_aspect_ratio || "9:16"}</Badge>
           </div>
           {(data.target_aspect_ratio || "9:16") === "9:16" ? (
-            /* 9:16 portrait — horizontal scroll row */
-            <div className="flex gap-3 overflow-x-auto p-3 snap-x">
+            /* 9:16 portrait — horizontal scroll row (snap on mobile) */
+            <div className="flex gap-3 overflow-x-auto p-3 snap-x mobile-h-scroll">
               {data.clips.map((clip) => (
-                <div key={clip.rank} className="shrink-0 w-[220px] snap-start">
+                <div key={clip.rank} className="shrink-0 w-[min(72vw,220px)] sm:w-[200px] md:w-[220px] snap-start">
                   <ClipCard jobId={data.job_id} clip={clip} aspectRatio="9:16" />
                 </div>
               ))}
             </div>
           ) : (
             /* 16:9 or 1:1 — grid */
-            <div className="grid grid-cols-1 gap-3 p-3 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
               {data.clips.map((clip) => (
                 <ClipCard key={clip.rank} jobId={data.job_id} clip={clip} aspectRatio={data.target_aspect_ratio || "16:9"} />
               ))}
@@ -439,6 +439,23 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
             {clip.hook || `Clip ${clip.rank}`}
           </p>
           {clip.reason && <p className="text-[10px] text-zinc-600 line-clamp-2 leading-relaxed">{clip.reason}</p>}
+          {(clip.virality?.score != null || clip.virality?.total != null || clip.cta?.text) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(clip.virality?.score != null || clip.virality?.total != null) && (
+                <span
+                  className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300"
+                  title={(clip.virality.factors || []).join(" · ")}
+                >
+                  viral {Math.round(Number(clip.virality.score ?? clip.virality.total))}
+                </span>
+              )}
+              {clip.cta?.text && (
+                <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-400 truncate max-w-[140px]" title={clip.cta.text}>
+                  CTA · {clip.cta.text}
+                </span>
+              )}
+            </div>
+          )}
           <div className="mt-auto flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
             {clip.duration > 0 ? <span className="font-mono">{timeline}</span> : <span>Awaiting clip metadata</span>}
             {clip.has_words && <span>{clip.word_count} words</span>}

@@ -172,10 +172,8 @@ class FaceOnCropDetector:
                 logger.info("face_on_crop: MediaPipe Face Detection fallback loaded")
                 return True
             else:
-                # Task API
-                from mediapipe.tasks.vision import FaceDetector, FaceDetectorOptions
-                from mediapipe.tasks.vision.core.vision_task_running_mode import VisionTaskRunningMode
-                from mediapipe.tasks import BaseOptions
+                # Task API — mediapipe.tasks.python.vision (not .tasks.vision)
+                from mediapipe.tasks.python import BaseOptions, vision
                 import os
 
                 model_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'models')
@@ -188,12 +186,12 @@ class FaceOnCropDetector:
                     urllib.request.urlretrieve(url, model_path)
 
                 base_options = BaseOptions(model_asset_path=model_path)
-                options = FaceDetectorOptions(
+                options = vision.FaceDetectorOptions(
                     base_options=base_options,
-                    running_mode=VisionTaskRunningMode.IMAGE,
+                    running_mode=vision.RunningMode.IMAGE,
                     min_detection_confidence=self._confidence_threshold,
                 )
-                self._detector = FaceDetector.create_from_options(options)
+                self._detector = vision.FaceDetector.create_from_options(options)
                 self._active_backend = "mediapipe_task"
                 logger.info("face_on_crop: MediaPipe Task API fallback loaded")
                 return True

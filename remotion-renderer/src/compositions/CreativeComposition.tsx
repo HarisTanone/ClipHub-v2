@@ -22,6 +22,7 @@ import type { ClipCompositionProps, Word } from "../types";
 import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
+import { CTALayer } from "../layers/CTALayer";
 
 // Available creative styles
 export type CreativeStyle =
@@ -37,9 +38,15 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
   hookText,
   textEmphasisEvents = [],
   brollEvents = [],
+  cta = null,
+  sceneGraph,
 }) => {
-  const { fps, width } = useVideoConfig();
+  const { fps, width, durationInFrames } = useVideoConfig();
   const frame = useCurrentFrame();
+  const clipDurationSec =
+    (sceneGraph?.duration && sceneGraph.duration > 0
+      ? sceneGraph.duration
+      : durationInFrames / fps) || durationInFrames / fps;
 
   // Get creative style from config
   const hookConfig = creativeDirection?.hook_style_config || {};
@@ -123,6 +130,8 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
       })}
       </HideDuringBroll>
       </HideDuringTextEmphasis>
+
+      {cta && <CTALayer cta={cta} clipDurationSec={clipDurationSec} />}
     </AbsoluteFill>
   );
 };

@@ -201,9 +201,9 @@ export function NewJob() {
         </Button>
       </div>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-hidden">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Left: URL + Config (col-4) */}
-        <div className="lg:col-span-4 space-y-3 overflow-y-auto">
+        <div className="lg:col-span-4 space-y-3 overflow-y-auto pb-4 lg:pb-0">
           {/* Source */}
           <Card className="p-3">
             <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg border border-zinc-800 bg-zinc-950/70 p-1">

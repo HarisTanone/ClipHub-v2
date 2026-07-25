@@ -28,6 +28,28 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 ALLOWED_UPLOAD_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
 
 
+def _normalize_virality(v):
+    if not isinstance(v, dict):
+        return v
+    out = dict(v)
+    if "score" not in out and "total" in out:
+        out["score"] = out["total"]
+    return out
+
+
+def _normalize_cta(c):
+    if not isinstance(c, dict):
+        return c
+    out = dict(c)
+    if "type" not in out and out.get("kind"):
+        out["type"] = out["kind"]
+    if "duration_sec" not in out and out.get("duration") is not None:
+        out["duration_sec"] = out["duration"]
+    if "position" not in out and out.get("at"):
+        out["position"] = out["at"]
+    return out
+
+
 async def _set_clip_operation(job_id: str, clip_rank: int, operation_id: str, **values):
     from src.infrastructure.database import async_session, JobModel
     from sqlalchemy import select, update
@@ -917,6 +939,10 @@ async def get_job_detail(
             "has_final": has_final,
             "has_thumbnail": True,  # Auto-generated on demand from video
             "render_status": "ready" if has_final else ("unavailable" if is_terminal else "processing"),
+            "virality": _normalize_virality(clip.get("virality")),
+            "cta": _normalize_cta(clip.get("cta")),
+            "retention_hints": clip.get("retention_hints"),
+            "thumb_seek": clip.get("thumb_seek"),
         })
 
     return {
@@ -1154,6 +1180,10 @@ async def get_clip_detail(
             ),
             "text_emphasis_events": clip_data.get("text_emphasis_events", [])[:2],
             "reframe_layout": clip_data.get("reframe_layout") or clip_data.get("layout") or "single",
+            "virality": _normalize_virality(clip_data.get("virality")),
+            "cta": _normalize_cta(clip_data.get("cta")),
+            "retention_hints": clip_data.get("retention_hints"),
+            "thumb_seek": clip_data.get("thumb_seek"),
             "file_status": file_status,
             "urls": {
                 "raw": f"/api/jobs/{job_id}/clips/{clip_rank}/raw" if file_status["raw"] else None,

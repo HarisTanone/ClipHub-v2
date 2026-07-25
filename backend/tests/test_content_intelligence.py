@@ -42,8 +42,36 @@ def test_autogrid_off_disables_grid_strategy():
     assert profile.force_grid is False
 
 
+def test_dialogue_density_soft_classifies_podcast_not_general_zero():
+    """Long multi-turn transcript without podcast keywords still soft-classifies."""
+    text = " ".join(
+        ["iya betul menurut saya kamu benar setuju gue elu bro guys"] * 3
+    )
+    profile = ContentIntelligence().detect(
+        metadata={"title": "clip harian"},
+        transcript_text=text,
+        autogrid_enabled=True,
+    )
+    assert profile.content_type == "podcast"
+    assert profile.confidence > 0.0
+    assert profile.grid_strategy == "speaker_grid_auto"
+
+
+def test_clip_hint_boosts_interview_to_podcast():
+    profile = ContentIntelligence().detect(
+        metadata={"title": "random title"},
+        transcript_text="kita bahas topik hari ini",
+        clip_hints=[{"content_type": "interview"}],
+        autogrid_enabled=True,
+    )
+    assert profile.content_type == "podcast"
+    assert profile.confidence > 0.0
+
+
 if __name__ == "__main__":
     test_gaming_content_forces_gameplay_facecam_grid_when_enabled()
     test_podcast_content_uses_visual_auto_grid_when_enabled()
     test_autogrid_off_disables_grid_strategy()
+    test_dialogue_density_soft_classifies_podcast_not_general_zero()
+    test_clip_hint_boosts_interview_to_podcast()
     print("content intelligence tests passed")

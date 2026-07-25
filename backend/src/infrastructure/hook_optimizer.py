@@ -164,3 +164,42 @@ HOOKS:
             if 3 < len(result) < 100:
                 return result
         return None
+
+    @staticmethod
+    def pick_hook_ab(primary: str, alt: str = "") -> str:
+        """Pick stronger of hook vs hook_alt without LLM (cheap A/B).
+
+        Heuristic: prefer shorter punchy hooks, question/shock markers, numbers.
+        """
+        a = " ".join(str(primary or "").split()).strip()
+        b = " ".join(str(alt or "").split()).strip()
+        if not b or b.lower() == a.lower():
+            return a
+        if not a:
+            return b
+
+        def score(t: str) -> float:
+            words = t.split()
+            n = len(words)
+            s = 0.0
+            # Ideal 3–8 words
+            if 3 <= n <= 8:
+                s += 2.0
+            elif n <= 10:
+                s += 1.0
+            else:
+                s -= 0.5 * (n - 10)
+            tl = t.lower()
+            if "?" in t:
+                s += 1.5
+            if any(ch.isdigit() for ch in t):
+                s += 1.0
+            for mark in ("!", "…", "..."):
+                if mark in t:
+                    s += 0.5
+            for kw in ("rahasia", "ternyata", "stop", "jangan", "kenapa", "bagaimana", "bocoran"):
+                if kw in tl:
+                    s += 0.4
+            return s
+
+        return b if score(b) > score(a) else a

@@ -16,7 +16,7 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden bg-[#09090b]">
+    <div className="flex h-full overflow-hidden bg-[#09090b] safe-pt">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -25,8 +25,10 @@ export function AppLayout() {
       />
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
         <Header onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-3 md:p-4">
-          <Outlet />
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-5 safe-pb">
+          <div className="mx-auto w-full max-w-[1600px]">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

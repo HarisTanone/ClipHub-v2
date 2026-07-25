@@ -28,7 +28,8 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
           "transition-all duration-200 ease-out",
           "md:static md:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
-          collapsed ? "w-16" : "w-52"
+          "w-[min(80vw,16rem)]",
+          collapsed ? "md:w-16" : "md:w-52"
         )}
       >
         {/* Brand */}
@@ -37,7 +38,11 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
             <div className="h-7 w-7 rounded-lg bg-emerald-600/20 flex items-center justify-center shrink-0">
               <Zap className="h-4 w-4 text-emerald-400" />
             </div>
-            {!collapsed && <span className="text-sm font-semibold tracking-tight text-zinc-100 whitespace-nowrap">AutoCliper</span>}
+            {/* mobile drawer always shows brand; desktop hides when collapsed */}
+            <span className={cn(
+              "text-sm font-semibold tracking-tight text-zinc-100 whitespace-nowrap",
+              collapsed && "md:hidden"
+            )}>AutoCliper</span>
           </div>
           <button onClick={onClose} className="md:hidden rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
             <X className="h-4 w-4" />
@@ -54,15 +59,16 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
               onClick={onClose}
               className={({ isActive }) =>
                 cn(
-                  "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors",
-                  collapsed && "justify-center px-0",
+                  "flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 md:py-2 text-[13px] font-medium transition-colors",
+                  // on mobile drawer always show labels; desktop respects collapse
+                  collapsed && "md:justify-center md:px-0",
                   isActive ? "bg-emerald-500/10 text-emerald-400" : "text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200"
                 )
               }
               title={collapsed ? item.label : undefined}
             >
               <item.icon className="h-4 w-4 shrink-0" />
-              {!collapsed && item.label}
+              <span className={cn(collapsed && "md:hidden")}>{item.label}</span>
             </NavLink>
           ))}
         </nav>

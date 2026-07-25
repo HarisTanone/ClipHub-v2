@@ -130,29 +130,28 @@ class ActiveSpeakerDetector:
                 )
                 return True
             else:
-                # New Task API (mediapipe ≥0.10.30)
+                # New Task API (mediapipe ≥0.10.30) — package path is
+                # mediapipe.tasks.python.vision (not mediapipe.tasks.vision).
                 try:
-                    from mediapipe.tasks.vision import FaceLandmarker, FaceLandmarkerOptions
-                    from mediapipe.tasks.vision.core.vision_task_running_mode import VisionTaskRunningMode
-                    from mediapipe.tasks import BaseOptions
+                    from mediapipe.tasks.python import BaseOptions, vision
 
                     base_options = BaseOptions(model_asset_path=self._find_face_mesh_model())
-                    options = FaceLandmarkerOptions(
+                    options = vision.FaceLandmarkerOptions(
                         base_options=base_options,
-                        running_mode=VisionTaskRunningMode.IMAGE,
+                        running_mode=vision.RunningMode.IMAGE,
                         num_faces=self._max_faces,
                         min_face_detection_confidence=self.FACE_MESH_CONFIDENCE,
                         min_tracking_confidence=0.5,
                         output_face_blendshapes=False,
                     )
-                    self._face_mesh = FaceLandmarker.create_from_options(options)
+                    self._face_mesh = vision.FaceLandmarker.create_from_options(options)
                     self._use_legacy_api = False
                     logger.info(
                         "active_speaker: MediaPipe FaceLandmarker loaded "
                         f"(task API, max_faces={self._max_faces})"
                     )
                     return True
-                except (ImportError, ModuleNotFoundError) as e:
+                except (ImportError, ModuleNotFoundError, AttributeError) as e:
                     logger.warning(f"active_speaker: Task API not available: {e}")
                     return False
         except Exception as e:

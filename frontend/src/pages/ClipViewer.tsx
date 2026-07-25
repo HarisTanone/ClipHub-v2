@@ -180,33 +180,37 @@ export function ClipViewer() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between shrink-0 mb-3">
+      <div className="flex items-center justify-between shrink-0 mb-3 gap-2">
         <div className="flex items-center gap-3 min-w-0">
-          <Link to={`/jobs/${jobId}`} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">
+          <Link to={`/jobs/${jobId}`} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors shrink-0">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-base font-semibold text-zinc-100">Clip #{clipRank}</h1>
               {clip.score && <Badge variant="success" size="sm">Score: {clip.score}</Badge>}
               <Badge variant="default" size="sm">{formatDuration(clip.duration)}</Badge>
+              {clip.virality?.score != null || clip.virality?.total != null ? (
+                <Badge variant="default" size="sm">viral {Math.round(Number(clip.virality.score ?? clip.virality.total))}</Badge>
+              ) : null}
             </div>
-            {clip.hook && <p className="text-[11px] text-zinc-500 truncate max-w-[400px]">{clip.hook}</p>}
+            {clip.hook && <p className="text-[11px] text-zinc-500 truncate max-w-[min(70vw,400px)]">{clip.hook}</p>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button variant="primary" size="sm" onClick={() => setStyleModalOpen(true)} icon={<Wand2 className="h-3.5 w-3.5" />}>
-            Restyle
+            <span className="hidden sm:inline">Restyle</span>
+            <span className="sm:hidden">Style</span>
           </Button>
         </div>
       </div>
 
-      {/* Main: Video + Sidebar */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-hidden">
+      {/* Main: Video + Sidebar — stack on mobile/tablet, side-by-side desktop */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Video panel */}
         <div className="flex flex-col gap-2 lg:col-span-7 min-h-0">
           <Card className="p-0 overflow-hidden flex-1 flex flex-col min-h-0">
-            <div className="relative bg-black flex-1 min-h-[250px]">
+            <div className="relative bg-black flex-1 min-h-[220px] max-h-[55vh] sm:max-h-[60vh] lg:max-h-none aspect-[9/16] sm:aspect-auto lg:min-h-[250px]">
               {videoUrl ? (
                 <>
                   <video
@@ -323,6 +327,27 @@ export function ClipViewer() {
               <span className="text-zinc-500">Words</span><span className="text-zinc-300">{clip.words?.length || 0}</span>
               <span className="text-zinc-500">Raw</span><span className={clip.file_status.raw ? "text-emerald-400" : "text-zinc-600"}>{clip.file_status.raw ? "Ready" : "Missing"}</span>
               <span className="text-zinc-500">Final</span><span className={clip.file_status.final ? "text-emerald-400" : "text-zinc-600"}>{clip.file_status.final ? "Ready" : "Missing"}</span>
+              {(clip.virality?.score != null || clip.virality?.total != null) && (
+                <>
+                  <span className="text-zinc-500">Virality</span>
+                  <span className="text-emerald-300" title={(clip.virality.factors || []).join(" · ")}>
+                    {Math.round(Number(clip.virality.score ?? clip.virality.total))}
+                    {clip.virality.factors?.[0] ? ` · ${clip.virality.factors[0]}` : ""}
+                  </span>
+                </>
+              )}
+              {clip.cta?.text && (
+                <>
+                  <span className="text-zinc-500">CTA</span>
+                  <span className="text-zinc-300 truncate" title={clip.cta.text}>{clip.cta.text}</span>
+                </>
+              )}
+              {!!clip.retention_hints?.suggested_cuts?.length && (
+                <>
+                  <span className="text-zinc-500">Dead-air</span>
+                  <span className="text-amber-300">{clip.retention_hints.suggested_cuts.length} cut(s)</span>
+                </>
+              )}
             </div>
           </Card>
 

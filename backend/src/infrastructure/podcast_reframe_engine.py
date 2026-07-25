@@ -79,10 +79,10 @@ class PodcastReframeEngine(IReframeEngine):
     # Ghost detection constants
     MIN_FACE_AREA_PX = 4_000            # [FIX] Turunkan dari 12_000 -> Wajah jauh di studio radio tetap kebaca
     MIN_AREA_RATIO_TO_MAX = 0.25        # [FIX] Turunkan dari 0.40 -> Orang di belakang tidak dianggap ghost
-    MIN_FRAME_RATIO = 0.15              # Track must appear in ≥15% of sampled frames
-    GHOST_IOU_THRESHOLD = 0.25          # IoU overlap indicating same-person duplicate
-    GHOST_CENTER_DIST_RATIO = 0.08      # Normalized center distance for ghost proximity
-    GHOST_CENTER_DIST_BROAD = 0.20      # Broader center distance for ghost with area similarity
+    MIN_FRAME_RATIO = 0.18              # Track must appear in ≥18% of sampled frames (ghost harden)
+    GHOST_IOU_THRESHOLD = 0.22          # IoU overlap indicating same-person duplicate
+    GHOST_CENTER_DIST_RATIO = 0.07      # Normalized center distance for ghost proximity
+    GHOST_CENTER_DIST_BROAD = 0.18      # Broader center distance for ghost with area similarity
     MIN_PAIR_SIZE_RATIO = 0.18          # [FIX] Turunkan dari 0.30 -> Bisa pasangkan wajah besar & wajah kecil
     AUDIO_FILTER = "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS"
 
@@ -698,13 +698,15 @@ class PodcastReframeEngine(IReframeEngine):
                 stable_positions=tracked_data["stable_positions"],
             )
 
-            # Check mapping reliability
+            # Soft-accept weak maps (partial signal). Only hard-fail when zero mappings.
             if not mapping_result.is_reliable:
                 logger.info(
-                    f"podcast_reframe: mapping unreliable "
-                    f"(confidence={mapping_result.overall_confidence:.2f}) → fallback to lip+head"
+                    f"podcast_reframe: mapping weak "
+                    f"(confidence={mapping_result.overall_confidence:.2f}) → "
+                    f"hybrid diarization+lip (not full discard)"
                 )
-                return None
+                if not mapping_result.mappings:
+                    return None
 
             # Convert to ActiveSpeakerResult (same interface as lip-based)
             speaker_result = self._result_builder.build(
@@ -717,7 +719,14 @@ class PodcastReframeEngine(IReframeEngine):
                 track_to_position=tracked_data.get("track_to_position"),
             )
 
-            logger.info("podcast_reframe: ✓ using DIARIZATION-based speaker detection")
+            if mapping_result.is_reliable:
+                logger.info("podcast_reframe: ✓ using DIARIZATION-based speaker detection")
+            else:
+                logger.info(
+                    "podcast_reframe: ✓ DIARIZATION soft-map "
+                    f"(conf={mapping_result.overall_confidence:.2f}) — "
+                    "lip/head still available as secondary if needed"
+                )
             # Store stable_positions for N-position targeting in panning
             self._diarization_stable_positions = tracked_data["stable_positions"]
             return speaker_result
@@ -1557,7 +1566,10 @@ class PodcastReframeEngine(IReframeEngine):
 
                 if (
                     valid_frame_count <= 0
-                    or max_consecutive_pair_hits < self.GRID_ENTER_SAMPLES
+                    or (
+                        max_consecutive_pair_hits < self.GRID_ENTER_SAMPLES
+                        and pair_hit_count / max(valid_frame_count, 1) < 0.85
+                    )
                 ):
                     logger.info(
                         f"podcast_reframe: person-first grid skipped "
@@ -1692,7 +1704,8 @@ class PodcastReframeEngine(IReframeEngine):
             ),
         )
         coexist_ratio = best_hits / valid_frames
-        if best_hits < self.GRID_ENTER_SAMPLES:
+        # Sustained samples OR near-full coexist on short windows (unit clips / cold open)
+        if best_hits < self.GRID_ENTER_SAMPLES and coexist_ratio < 0.85:
             logger.info(
                 "podcast_reframe: autogrid skipped "
                 f"(distinct_pair=P{best_pair[0]}/P{best_pair[1]}, "

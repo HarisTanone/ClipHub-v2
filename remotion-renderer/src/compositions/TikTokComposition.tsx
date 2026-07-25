@@ -22,6 +22,7 @@ import type { ClipCompositionProps, Word } from "../types";
 import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
+import { CTALayer } from "../layers/CTALayer";
 
 const HIGHLIGHT_COLOR = "#39E508";
 
@@ -32,9 +33,15 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
   hookText,
   textEmphasisEvents = [],
   brollEvents = [],
+  cta = null,
+  sceneGraph,
 }) => {
-  const { fps, width } = useVideoConfig();
+  const { fps, width, durationInFrames } = useVideoConfig();
   const frame = useCurrentFrame();
+  const clipDurationSec =
+    (sceneGraph?.duration && sceneGraph.duration > 0
+      ? sceneGraph.duration
+      : durationInFrames / fps) || durationInFrames / fps;
 
   // TikTok mode always uses green highlight — ignore user subtitle config
   const highlightColor = HIGHLIGHT_COLOR; // #39E508
@@ -153,6 +160,8 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
       })}
       </HideDuringBroll>
       </HideDuringTextEmphasis>
+
+      {cta && <CTALayer cta={cta} clipDurationSec={clipDurationSec} />}
     </AbsoluteFill>
   );
 };

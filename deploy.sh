@@ -397,16 +397,48 @@ if [ -f ".env" ]; then
     append_env_if_missing ".env" "PERSON_CONF_THRESHOLD" "0.35"
     append_env_if_missing ".env" "REFRAME_PIPELINE_MODE" "person_first"
     append_env_if_missing ".env" "TOP_OVERLAY_ENABLED" "true"
-    append_env_if_missing ".env" "TOP_OVERLAY_SPLIT_RATIO" "0.5"
-    append_env_if_missing ".env" "TOP_OVERLAY_FADE_HEIGHT" "0.15"
+    append_env_if_missing ".env" "TOP_OVERLAY_SPLIT_RATIO" "0.58"
+    append_env_if_missing ".env" "TOP_OVERLAY_FADE_HEIGHT" "0.10"
     append_env_if_missing ".env" "TOP_OVERLAY_OPACITY" "1.0"
+    append_env_if_missing ".env" "TOP_OVERLAY_PERSON_OUTLINE" "true"
+    append_env_if_missing ".env" "TOP_OVERLAY_PERSON_SHADOW" "true"
+    append_env_if_missing ".env" "TOP_OVERLAY_OUTLINE_THICKNESS" "12"
+    append_env_if_missing ".env" "TOP_OVERLAY_OUTLINE_COLOR" "255,255,255"
+    append_env_if_missing ".env" "TOP_OVERLAY_OUTLINE_STYLE" "white"
     append_env_if_missing ".env" "TOP_OVERLAY_MAX_PER_CLIP" "2"
-    append_env_if_missing ".env" "TOP_OVERLAY_SEG_CONFIDENCE" "0.35"
-    append_env_if_missing ".env" "TOP_OVERLAY_MASK_FEATHER" "9"
-    append_env_if_missing ".env" "TOP_OVERLAY_MASK_STRIDE" "2"
+    append_env_if_missing ".env" "TOP_OVERLAY_SEG_CONFIDENCE" "0.25"
+    append_env_if_missing ".env" "TOP_OVERLAY_MASK_FEATHER" "1"
+    append_env_if_missing ".env" "TOP_OVERLAY_MASK_STRIDE" "1"
+    append_env_if_missing ".env" "TOP_OVERLAY_CROP_BIAS_Y" "0.08"
+    append_env_if_missing ".env" "TOP_OVERLAY_SPEAKER_MASK_MODE" "dual_auto"
+    append_env_if_missing ".env" "TOP_OVERLAY_SMART_CROP" "true"
+    append_env_if_missing ".env" "TOP_OVERLAY_SMART_CROP_CONF" "0.18"
     append_env_if_missing ".env" "BROLL_SPLICE_ENABLED" "true"
     append_env_if_missing ".env" "ASSET_FETCH_ENABLED" "true"
+    append_env_if_missing ".env" "USE_REMOTION" "true"
+    append_env_if_missing ".env" "FORCE_V2_PIPELINE" "true"
 fi
+
+# Ensure music assets dir exists (AudioMixer duck bed)
+mkdir -p "$BACKEND_DIR/assets/music"
+if [ -z "$(ls -A "$BACKEND_DIR/assets/music" 2>/dev/null)" ]; then
+    echo "  ⚠️  assets/music empty — music bed will skip until files added (non-fatal)"
+else
+    echo "  ✅ Music beds present ($(ls "$BACKEND_DIR/assets/music" | wc -l | tr -d ' ') file(s))"
+fi
+
+# Bootstrap DB schema if missing (init_db also runs on app start)
+echo "  Ensuring SQLite schema..."
+./venv/bin/python -c "
+import asyncio, sys, os
+sys.path.insert(0, '$BACKEND_DIR')
+os.chdir('$BACKEND_DIR')
+async def main():
+    from src.infrastructure.database import init_db
+    await init_db()
+    print('  ✅ DB schema ready')
+asyncio.run(main())
+" 2>&1 | sed 's/^/  /' || echo "  ⚠️  DB bootstrap deferred to app startup"
 
 # ─── Step 3.2: Person-First Pipeline Models ──────────────────────────────────
 echo ""
@@ -812,6 +844,29 @@ if curl -s "http://localhost:$BACKEND_PORT/health" | grep -q "ok" 2>/dev/null; t
     echo "  ✅ Backend API responding"
 else
     echo "  ⚠️  Backend API not responding yet (may still be starting)"
+fi
+
+# Zero-touch readiness (no manual DB/.env after deploy)
+echo ""
+echo "  Production readiness:"
+if [ -f "$BACKEND_DIR/.env" ]; then
+    for k in TOP_OVERLAY_ENABLED TOP_OVERLAY_PERSON_OUTLINE TOP_OVERLAY_SMART_CROP USE_REMOTION FORCE_V2_PIPELINE; do
+        if grep -q "^${k}=" "$BACKEND_DIR/.env" 2>/dev/null; then
+            echo "  ✅ .env has $k"
+        else
+            echo "  ⚠️  .env missing $k (append_env should have set it — re-run deploy)"
+        fi
+    done
+fi
+if [ -d "$BACKEND_DIR/assets/music" ]; then
+    echo "  ✅ assets/music ready"
+else
+    echo "  ⚠️  assets/music missing"
+fi
+if [ -f "$BACKEND_DIR/data/autocliper.db" ] || [ -f "$BACKEND_DIR/autocliper.db" ] || ls "$BACKEND_DIR"/data/*.db >/dev/null 2>&1; then
+    echo "  ✅ SQLite DB present"
+else
+    echo "  ℹ️  SQLite path may be under DATA_DIR — app init_db handles create"
 fi
 
 # ─── Done ────────────────────────────────────────────────────────────────────

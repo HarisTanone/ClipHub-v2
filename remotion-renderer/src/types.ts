@@ -176,6 +176,13 @@ export interface BrollStyleConfig {
   backdropBlur?: number; // px
 }
 
+export interface CTAProps {
+  text?: string;
+  type?: string;
+  duration_sec?: number;
+  position?: string;
+}
+
 /** Props for the main ClipComposition */
 export interface ClipCompositionProps {
   sceneGraph: SceneGraph;
@@ -186,6 +193,7 @@ export interface ClipCompositionProps {
   hookAnimation: string;
   textEmphasisEvents?: TextEmphasisEvent[];
   brollEvents?: BrollEvent[];
+  cta?: CTAProps | null;
   enableThreeJS: boolean;
   enableAI: boolean;
 }

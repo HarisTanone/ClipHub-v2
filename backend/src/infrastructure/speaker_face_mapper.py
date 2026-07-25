@@ -255,12 +255,17 @@ class SpeakerFaceMapper:
             second_best = sorted(cooccurrence[sp].values(), reverse=True)
             second_count = second_best[1] if len(second_best) > 1 else 0
 
-            # Margin-based confidence. If two visible tracks co-occur equally
-            # with the same audio speaker, the mapping is ambiguous and should
-            # fall back to lip/head detection instead of pretending 50% is OK.
+            # Blend margin + absolute so equal co-occurrence (margin=0) is not
+            # a hard zero when the speaker actually has real frame support.
             margin_confidence = (best_count - second_count) / max(best_count, 1)
             absolute_confidence = best_count / total_count if total_count > 0 else 0.0
-            confidence = margin_confidence if len(second_best) > 1 else absolute_confidence
+            if len(second_best) > 1:
+                confidence = 0.55 * margin_confidence + 0.45 * absolute_confidence
+            else:
+                confidence = absolute_confidence
+            # Tiny sample → don't claim high confidence
+            if total_count < 3:
+                confidence *= 0.5
 
             mappings[sp] = (tr, confidence, total_count)
 
@@ -282,7 +287,12 @@ class SpeakerFaceMapper:
             second_count = sorted_counts[1] if len(sorted_counts) > 1 else 0
             margin_confidence = (best_count - second_count) / max(best_count, 1)
             absolute_confidence = best_count / total_count if total_count > 0 else 0.0
-            confidence = margin_confidence if len(sorted_counts) > 1 else absolute_confidence
+            if len(sorted_counts) > 1:
+                confidence = 0.55 * margin_confidence + 0.45 * absolute_confidence
+            else:
+                confidence = absolute_confidence
+            if total_count < 3:
+                confidence *= 0.5
             mappings[speaker] = (best_track, confidence, total_count)
         return mappings
 
@@ -353,7 +363,12 @@ class SpeakerFaceMapper:
                 second_count = sorted_counts[1] if len(sorted_counts) > 1 else 0
                 margin_confidence = (best_count - second_count) / max(best_count, 1)
                 absolute_confidence = best_count / total_count if total_count > 0 else 0.0
-                confidence = margin_confidence if len(sorted_counts) > 1 else absolute_confidence
+                if len(sorted_counts) > 1:
+                    confidence = 0.55 * margin_confidence + 0.45 * absolute_confidence
+                else:
+                    confidence = absolute_confidence
+                if total_count < 3:
+                    confidence *= 0.5
                 resolved[speaker] = (track_id, confidence, total_count)
             else:
                 logger.warning(
@@ -396,11 +411,17 @@ class SpeakerFaceMapper:
         else:
             overall_confidence = 0.0
 
-        # Reliable if all mappings have sufficient margin between top1 and top2
-        # Uses MAPPING_MARGIN_THRESHOLD (default 0.3) instead of the old absolute threshold
-        is_reliable = bool(mappings) and all(
-            m.confidence >= self._confidence_threshold for m in mappings.values()
-        )
+        # Reliable if we mapped ≥1 speaker with usable confidence.
+        # Soft threshold: majority of speakers above threshold OR overall ≥ half threshold
+        # (avoids 100% lip-fallback when diarization has partial signal).
+        confs = [m.confidence for m in mappings.values()] if mappings else []
+        if not confs:
+            is_reliable = False
+        else:
+            strong = sum(1 for c in confs if c >= self._confidence_threshold)
+            soft_ok = overall_confidence >= max(0.15, self._confidence_threshold * 0.45)
+            majority_ok = strong >= max(1, (len(confs) + 1) // 2)
+            is_reliable = majority_ok or soft_ok
 
         result = MappingResult(
             mappings=mappings,

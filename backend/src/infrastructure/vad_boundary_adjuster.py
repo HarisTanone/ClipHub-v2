@@ -138,15 +138,31 @@ class VADBoundaryAdjuster:
             adjusted_start = self._snap_start(start, silence_gaps)
             adjusted_end = self._snap_end(end, silence_gaps)
 
-            # Safety guard: don't change duration more than 30%
+            # Safety: max duration change 20% AND max edge shift 8s or 15% of dur
             original_duration = end - start
             adjusted_duration = adjusted_end - adjusted_start
+            max_edge = max(8.0, original_duration * 0.15)
 
             if adjusted_duration <= 0:
                 return start, end
 
-            if adjusted_duration < original_duration * 0.7 or adjusted_duration > original_duration * 1.3:
-                logger.info(f"vad: adjustment too large ({original_duration:.1f}s → {adjusted_duration:.1f}s), keeping original")
+            # Clamp edges if snap jumped too far (prevents 56s→7s collapse)
+            if abs(adjusted_start - start) > max_edge:
+                logger.info(
+                    f"vad: start shift {adjusted_start - start:+.1f}s > {max_edge:.1f}s cap → clamp"
+                )
+                adjusted_start = start
+            if abs(adjusted_end - end) > max_edge:
+                logger.info(
+                    f"vad: end shift {adjusted_end - end:+.1f}s > {max_edge:.1f}s cap → clamp"
+                )
+                adjusted_end = end
+
+            adjusted_duration = adjusted_end - adjusted_start
+            if adjusted_duration < original_duration * 0.8 or adjusted_duration > original_duration * 1.2:
+                logger.info(
+                    f"vad: adjustment too large ({original_duration:.1f}s → {adjusted_duration:.1f}s), keeping original"
+                )
                 return start, end
 
             # Ensure minimum clip duration (5s)

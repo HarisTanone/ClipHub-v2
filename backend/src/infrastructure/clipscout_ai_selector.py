@@ -40,9 +40,13 @@ class ClipScoutAISelector:
         candidates: list[VideoCandidate],
         keyword: str,
         required_duration: float = 2.0,
+        placement: str = "",
+        context: str = "",
     ) -> Optional[VideoCandidate]:
         """Select the best video from candidates using AI.
 
+        Pass-1: keyword visual match. Pass-2 context (transcript/reason sentence)
+        re-ranks when present — same LLM call, extra scoring constraint.
         Falls back to highest relevanceScore if AI fails.
         """
         if not candidates:
@@ -55,13 +59,20 @@ class ClipScoutAISelector:
         if not valid_candidates:
             valid_candidates = candidates
 
+        # Hard ban talking-heads / scenic filler for behind-person stock.
+        filtered = self._filter_for_placement(valid_candidates, placement)
+        if filtered:
+            valid_candidates = filtered
+
         try:
             client = get_nine_router_client()
             if not client.is_configured:
                 logger.warning("clipscout_ai: 9router not configured, using relevance fallback")
-                return self._fallback_select(valid_candidates, keyword)
+                return self._fallback_select(valid_candidates, keyword, placement, context)
 
-            prompt = self._build_prompt(valid_candidates, keyword, required_duration)
+            prompt = self._build_prompt(
+                valid_candidates, keyword, required_duration, placement, context,
+            )
             raw_response = client.chat(
                 messages=[{"role": "user", "content": prompt}],
                 model=self._model,
@@ -71,6 +82,23 @@ class ClipScoutAISelector:
             )
 
             selected = self._parse_response(raw_response, valid_candidates)
+            if not selected and (raw_response or "").strip():
+                # One retry: models often wrap JSON or truncate mid-string.
+                logger.warning(
+                    "clipscout_ai: parse miss, retrying with stricter prompt "
+                    f"(raw={str(raw_response)[:80]!r})"
+                )
+                raw_response = client.chat(
+                    messages=[{"role": "user", "content": self._build_retry_prompt(
+                        valid_candidates, keyword, required_duration, placement, context,
+                    )}],
+                    model=self._model,
+                    temperature=0.0,
+                    max_tokens=120,
+                    response_format={"type": "json_object"},
+                )
+                selected = self._parse_response(raw_response, valid_candidates)
+
             if selected:
                 logger.info(
                     f"clipscout_ai: selected '{selected.id}' ({selected.platform}) "
@@ -81,14 +109,70 @@ class ClipScoutAISelector:
         except Exception as exc:
             logger.warning(f"clipscout_ai: AI selection failed ({exc}), using relevance fallback")
 
-        return self._fallback_select(valid_candidates, keyword)
+        return self._fallback_select(valid_candidates, keyword, placement, context)
 
+
+    _TALKING_HEAD_BAN = (
+        "talking head", "talking-head", "podcast", "interview", "vlog",
+        "youtuber", "influencer", "selfie", "face cam", "facecam",
+        "speaker", "host", "anchor", "news presenter", "press conference",
+        "person talking", "people talking", "man speaking", "woman speaking",
+        "speech", "lecture", "webinar", "zoom call",
+    )
+    _SCENIC_BAN = (
+        "skyline", "cityscape", "landscape", "aerial", "panorama",
+        "timelapse", "drone shot", "establishing shot",
+    )
+
+    def _is_behind_placement(self, placement: str) -> bool:
+        return (placement or "").strip().lower() in {
+            "behind_person", "behind", "top_overlay", "overlay",
+        }
+
+    def _candidate_hay(self, c: VideoCandidate) -> str:
+        return " ".join(
+            [
+                c.title or "",
+                c.transcript_snippet or "",
+                c.transcript_reason or "",
+                c.channel_or_author or "",
+            ]
+        ).lower()
+
+    def _is_talking_head(self, c: VideoCandidate) -> bool:
+        hay = self._candidate_hay(c)
+        return any(b in hay for b in self._TALKING_HEAD_BAN)
+
+    def _is_scenic_filler(self, c: VideoCandidate) -> bool:
+        hay = self._candidate_hay(c)
+        return any(b in hay for b in self._SCENIC_BAN)
+
+    def _filter_for_placement(
+        self,
+        candidates: list[VideoCandidate],
+        placement: str,
+    ) -> list[VideoCandidate]:
+        """Drop talking-head / scenic results for behind-person stock."""
+        if not self._is_behind_placement(placement):
+            return candidates
+        kept = [
+            c for c in candidates
+            if not self._is_talking_head(c) and not self._is_scenic_filler(c)
+        ]
+        if kept and len(kept) < len(candidates):
+            logger.info(
+                f"clipscout_ai: behind_person ban dropped "
+                f"{len(candidates) - len(kept)}/{len(candidates)} candidates"
+            )
+        return kept
 
     def _build_prompt(
         self,
         candidates: list[VideoCandidate],
         keyword: str,
         required_duration: float,
+        placement: str = "",
+        context: str = "",
     ) -> str:
         """Build the AI selection prompt with candidate metadata."""
         candidates_text = ""
@@ -105,16 +189,29 @@ class ClipScoutAISelector:
             )
 
         from src.infrastructure.clipscout_client import sanitize_stock_keyword
-        clean_kw = sanitize_stock_keyword(keyword) or keyword
+        clean_kw = sanitize_stock_keyword(keyword, placement=placement) or keyword
+        behind = self._is_behind_placement(placement)
+        behind_rule = (
+            "\n9. PLACEMENT=behind_person: REJECT talking-heads, podcasts, interviews, "
+            "faces, speakers. Subject must be OBJECT/SCENE close-up only."
+            if behind else ""
+        )
+        ctx = " ".join(str(context or "").split())[:240]
+        ctx_block = (
+            f'\nTRANSCRIPT CONTEXT (prefer clips that fit this sentence): "{ctx}"\n'
+            "10. Prefer candidate whose on-screen subject supports the transcript context "
+            "when keyword match is tied."
+            if ctx else ""
+        )
 
         return f"""You are a senior B-roll editor. Pick EXACTLY 1 video that best MATCHES the visual keyword.
 
 KEYWORD (must match literally what is shown on screen): "{clean_kw}"
 ORIGINAL HINT: "{keyword}"
+PLACEMENT: "{placement or "full_frame"}"{ctx_block}
 
 CANDIDATES:
 {candidates_text}
-
 SELECTION RULES (strict):
 1. Visual match FIRST: on-screen subject must match KEYWORD literally (object/action/scene). Reject generic pretty / unrelated B-roll.
 2. Prefer CLOSE-UP / FILL-FRAME of the subject over wide landscape/cityscape/talking-head.
@@ -123,11 +220,29 @@ SELECTION RULES (strict):
 5. Prefer pexels/pixabay over youtube when relevance is equal.
 6. For youtube: start_timestamp = second where keyword subject is most visible (not intro/logo).
 7. Reject mismatch hard (keyword "fuel nozzle" but clip is skyline / people talking / abstract).
-8. Prefer title/snippet that contains keyword tokens; reject pure scenic filler.
+8. Prefer title/snippet that contains keyword tokens; reject pure scenic filler.{behind_rule}
 
 OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
 {{"selected_id":"<exact ID from list>","start_timestamp":0,"reason":"one short sentence"}}
 """
+
+    def _build_retry_prompt(
+        self,
+        candidates: list[VideoCandidate],
+        keyword: str,
+        required_duration: float,
+        placement: str = "",
+        context: str = "",
+    ) -> str:
+        """Ultra-short re-prompt after JSON parse failure."""
+        ids = ", ".join(c.id for c in candidates[:12])
+        ctx = " ".join(str(context or "").split())[:120]
+        ctx_bit = f' context="{ctx}"' if ctx else ""
+        return (
+            f'Pick 1 ID for keyword "{keyword}" (placement={placement or "full_frame"}{ctx_bit}). '
+            f"IDs: [{ids}]. "
+            'Reply ONLY: {"selected_id":"<id>","start_timestamp":0,"reason":"ok"}'
+        )
 
 
     def _parse_json_tolerant(self, raw_response: str) -> dict:
@@ -271,56 +386,85 @@ OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
         self,
         candidates: list[VideoCandidate],
         keyword: str = "",
+        placement: str = "",
+        context: str = "",
     ) -> Optional[VideoCandidate]:
-        """Fallback: keyword token match + relevance + license + platform."""
+        """Fallback: keyword + transcript-context token match + relevance."""
         if not candidates:
             return None
 
+        pool = self._filter_for_placement(candidates, placement) or candidates
+
         from src.infrastructure.clipscout_client import sanitize_stock_keyword
-        clean = sanitize_stock_keyword(keyword) or (keyword or "")
+        clean = sanitize_stock_keyword(keyword, placement=placement) or (keyword or "")
         tokens = {
             t for t in re.findall(r"[a-z0-9]+", clean.lower()) if len(t) > 2
+        }
+        ctx_tokens = {
+            t for t in re.findall(r"[a-z0-9]+", (context or "").lower()) if len(t) > 3
         }
         scenic = ("skyline", "cityscape", "landscape", "aerial", "panorama", "timelapse")
 
         def token_hits(c: VideoCandidate) -> float:
             if not tokens:
                 return 0.0
-            hay = " ".join(
-                [
-                    c.title or "",
-                    c.transcript_snippet or "",
-                    c.transcript_reason or "",
-                    c.platform or "",
-                ]
-            ).lower()
+            hay = self._candidate_hay(c)
             hits = sum(1 for t in tokens if t in hay)
             return hits / max(1, len(tokens))
 
+        def context_hits(c: VideoCandidate) -> float:
+            if not ctx_tokens:
+                return 0.0
+            hay = self._candidate_hay(c)
+            hits = sum(1 for t in ctx_tokens if t in hay)
+            return hits / max(1, len(ctx_tokens))
+
         def scenic_penalty(c: VideoCandidate) -> int:
-            hay = f"{c.title or ''} {c.transcript_snippet or ''}".lower()
+            hay = self._candidate_hay(c)
             return 1 if any(s in hay for s in scenic) and token_hits(c) < 0.35 else 0
 
         def closeup_bonus(c: VideoCandidate) -> int:
-            hay = f"{c.title or ''} {c.transcript_snippet or ''}".lower()
+            hay = self._candidate_hay(c)
             return 1 if any(x in hay for x in ("close up", "closeup", "macro", "detail")) else 0
+
+        def talking_penalty(c: VideoCandidate) -> int:
+            return 1 if self._is_talking_head(c) else 0
+
+        # Entity tokens: capitalized / multi-digit from keyword (BBM, iPhone, etc.)
+        entity_tokens = {
+            t.lower()
+            for t in re.findall(r"[A-Za-z0-9]{3,}", keyword or "")
+            if t[:1].isupper() or any(ch.isdigit() for ch in t)
+        }
+
+        def entity_hits(c: VideoCandidate) -> float:
+            if not entity_tokens:
+                return 0.0
+            hay = self._candidate_hay(c)
+            hits = sum(1 for t in entity_tokens if t in hay)
+            return hits / max(1, len(entity_tokens))
 
         def sort_key(c: VideoCandidate) -> tuple:
             license_score = 1 if c.license == "royalty-free" else 0
             platform_score = 1 if c.platform in ("pexels", "pixabay") else 0
+            # Two-pass: entity lock first, then keyword, then transcript context
             return (
+                entity_hits(c),
                 token_hits(c),
+                context_hits(c),
                 closeup_bonus(c),
                 -scenic_penalty(c),
+                -talking_penalty(c),
                 c.relevance_score,
                 license_score,
                 platform_score,
             )
 
-        selected = max(candidates, key=sort_key)
+        selected = max(pool, key=sort_key)
         logger.info(
             f"clipscout_ai: fallback selected '{selected.id}' ({selected.platform}) "
-            f"score={selected.relevance_score} keyword_hits={token_hits(selected):.2f}"
+            f"score={selected.relevance_score} keyword_hits={token_hits(selected):.2f} "
+            f"ctx_hits={context_hits(selected):.2f} entity_hits={entity_hits(selected):.2f}"
         )
         return selected
 

@@ -7,6 +7,7 @@ import { ZoomLayer } from "../layers/ZoomLayer";
 import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
+import { CTALayer } from "../layers/CTALayer";
 
 // ─── Font Loader ─────────────────────────────────────────────────────────────
 
@@ -66,8 +67,14 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   hookAnimation,
   textEmphasisEvents = [],
   brollEvents = [],
+  cta = null,
+  sceneGraph,
 }) => {
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
+  const clipDurationSec =
+    (sceneGraph?.duration && sceneGraph.duration > 0
+      ? sceneGraph.duration
+      : durationInFrames / fps) || durationInFrames / fps;
 
   // ─── Per-component config extraction ─────────────────────────────
   const hook = useHookConfig(creativeDirection, hookAnimation);
@@ -172,6 +179,9 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
           </AbsoluteFill>
         </Sequence>
       )}
+
+      {/* L5: End-card CTA — last 1.5s */}
+      {cta && <CTALayer cta={cta} clipDurationSec={clipDurationSec} />}
     </AbsoluteFill>
   );
 };

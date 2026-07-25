@@ -62,6 +62,7 @@ class RemotionAdapter(IRemotionRenderer):
         hook_style: Optional[str] = None,
         text_emphasis_events: Optional[list[dict]] = None,
         broll_events: Optional[list[dict]] = None,
+        cta: Optional[dict] = None,
     ) -> RemotionRenderResult:
         """Render clip via Remotion server.
         
@@ -192,6 +193,7 @@ class RemotionAdapter(IRemotionRenderer):
                 "hookAnimation": render_hook_animation,
                 "textEmphasisEvents": (text_emphasis_events or [])[:2],
                 "brollEvents": (broll_events or [])[:3],
+                "cta": cta,
                 "enableThreeJS": config.enable_threejs,
                 "enableAI": config.enable_ai_layer,
             },
@@ -347,6 +349,7 @@ class RemotionAdapter(IRemotionRenderer):
                 "hookAnimation": render_hook_animation,
                 "textEmphasisEvents": (text_emphasis_events or [])[:2],
                 "brollEvents": (broll_events or [])[:3],
+                "cta": None,
                 "enableThreeJS": config.enable_threejs,
                 "enableAI": config.enable_ai_layer,
             },
