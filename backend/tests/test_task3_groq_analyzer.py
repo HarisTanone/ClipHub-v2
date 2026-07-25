@@ -137,6 +137,40 @@ def test_parse_invalid_json():
     print("  [PASS] Invalid JSON returns empty dict")
 
 
+def test_parse_truncated_json_without_closing_brace():
+    """Truncated LLM payload with no closing `}` still recovers complete clips.
+
+    Prod: `failed to parse JSON (no JSON object found)` even though body
+    started with `{"clips":...` — greedy `\\{.*\\}` required a closing brace.
+    """
+    a = GroqAnalyzer()
+    # Complete first clip, then cut mid-second object (no final `}`)
+    raw = (
+        'Here is the result:\n'
+        '{"clips": ['
+        '{"start_id": "S0001", "end_id": "S0003", "score": 85, "summary": "ok"}, '
+        '{"start_id": "S0004", "end_id": "S0006", "score": 90, "summary": "Podcast ini buat dunia'
+    )
+    result = a._parse_json_response(raw)
+    assert "clips" in result
+    assert len(result["clips"]) >= 1
+    assert result["clips"][0]["start_id"] == "S0001"
+    assert result["clips"][0]["score"] == 85
+    print("  [PASS] Truncated JSON without closing brace recovers clips")
+
+
+def test_parse_truncated_json_single_incomplete_clip():
+    """Mid-string cut: close string + nest → keep the partial clip."""
+    a = GroqAnalyzer()
+    raw = '{"clips": [{"start_id": "S0275", "end_id": "S0300", "score": 88, "summary": "Podcast'
+    result = a._parse_json_response(raw)
+    assert "clips" in result
+    assert len(result["clips"]) == 1
+    assert result["clips"][0]["start_id"] == "S0275"
+    assert result["clips"][0]["score"] == 88
+    print("  [PASS] Truncated sole incomplete clip recovered")
+
+
 # ─── Candidate Validation Tests ───────────────────────────────────────────────
 
 def test_parse_chunk_response_valid():

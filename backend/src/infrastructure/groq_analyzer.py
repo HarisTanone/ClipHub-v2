@@ -1506,6 +1506,23 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         json_str = re.sub(r'//[^\n]*', '', json_str)
         return json_str
 
+    def _extract_json_candidate(self, text: str) -> Optional[str]:
+        """Pull JSON object from text. Does NOT require a closing brace.
+
+        LLM responses are often truncated mid-object (`{"clips":[{...`), so a
+        greedy `\\{.*\\}` regex falsely reports 'no JSON object found'. Prefer the
+        first `{` slice; fall back to balanced `{...}` when present.
+        """
+        start = text.find("{")
+        if start < 0:
+            return None
+        # Prefer complete outermost object when both braces exist
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match and match.start() == start:
+            return match.group(0)
+        # Truncated / unclosed — take everything from first `{`
+        return text[start:]
+
     def _parse_json_response(self, raw_text: str) -> dict:
         """Parse JSON with tolerance for markdown fences, trailing commas, and truncation."""
         text = raw_text.strip()
@@ -1516,6 +1533,11 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             text = "\n".join(lines)
+        # Smart/curly quotes → plain (some providers emit these)
+        text = (
+            text.replace("\u201c", '"').replace("\u201d", '"')
+            .replace("\u2018", "'").replace("\u2019", "'")
+        )
 
         # First attempt: direct parse
         try:
@@ -1523,26 +1545,31 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         except json.JSONDecodeError:
             pass
 
-        # Second attempt: extract outermost { ... } and clean
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
-            json_str = self._clean_json_string(match.group(0))
-            try:
-                return json.loads(json_str)
-            except json.JSONDecodeError:
-                pass
+        candidate = self._extract_json_candidate(text)
+        if not candidate:
+            logger.warning(
+                f"v2_analyzer: failed to parse JSON (no JSON object found): {text[:200]}"
+            )
+            return {}
 
-            # Third attempt: repair truncated JSON (LLM cut off mid-response)
-            repaired = self._repair_truncated_json(json_str)
-            if repaired:
-                try:
-                    return json.loads(repaired)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"v2_analyzer: JSON parse failed after repair: {e}\nRaw: {json_str[:200]}")
-            else:
-                logger.warning(f"v2_analyzer: JSON parse failed after cleanup: truncated\nRaw: {json_str[:200]}")
+        json_str = self._clean_json_string(candidate)
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+        repaired = self._repair_truncated_json(json_str)
+        if repaired:
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    f"v2_analyzer: JSON parse failed after repair: {e}\nRaw: {json_str[:200]}"
+                )
         else:
-            logger.warning(f"v2_analyzer: failed to parse JSON (no JSON object found): {text[:200]}")
+            logger.warning(
+                f"v2_analyzer: JSON parse failed after cleanup: truncated\nRaw: {json_str[:200]}"
+            )
 
         return {}
 
@@ -1551,35 +1578,63 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
 
         Common patterns:
         - {"clips": [{"start_id": "S0275", ...}, {"start_id": "S0300", ...   (cut off)
-        - Missing closing brackets/braces
+        - Missing closing brackets/braces (no `}` at all in the payload)
+        - Cut mid-string value
 
-        Strategy: find last complete object in array, close the structure.
+        Strategy: keep last complete object when possible; else close open
+        string + nest (stack order). Never require a pre-existing `}`.
         """
-        # Count open vs close braces/brackets
-        open_braces = json_str.count('{') - json_str.count('}')
-        open_brackets = json_str.count('[') - json_str.count(']')
-
-        if open_braces == 0 and open_brackets == 0:
+        open_braces = json_str.count("{") - json_str.count("}")
+        open_brackets = json_str.count("[") - json_str.count("]")
+        if open_braces == 0 and open_brackets == 0 and json_str.count('"') % 2 == 0:
             return None  # Not a truncation issue
 
-        # Find the last complete object boundary ("},")
-        # Truncate to last complete item and close the structure
-        last_complete = json_str.rfind('},')
+        # Prefer last complete object in array
+        last_complete = json_str.rfind("},")
         if last_complete == -1:
-            last_complete = json_str.rfind('}')
+            last_complete = json_str.rfind("}")
 
-        if last_complete == -1:
-            return None  # No complete object found
+        if last_complete != -1:
+            candidate = json_str[: last_complete + 1]
+            closed = self._close_json_structure(candidate)
+            if closed is not None:
+                return closed
 
-        # Keep up to and including the last complete "}"
-        repaired = json_str[:last_complete + 1]
+        # No usable complete object — close mid-stream payload as-is
+        return self._close_json_structure(json_str)
 
-        # Close any remaining open brackets/braces
-        open_braces = repaired.count('{') - repaired.count('}')
-        open_brackets = repaired.count('[') - repaired.count(']')
-        repaired += ']' * open_brackets + '}' * open_braces
+    def _close_json_structure(self, s: str) -> Optional[str]:
+        """Close unclosed strings and nest braces/brackets in reverse order."""
+        stack: list[str] = []
+        in_string = False
+        escape = False
+        for ch in s:
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                stack.append("}")
+            elif ch == "[":
+                stack.append("]")
+            elif ch in "}]":
+                if stack and stack[-1] == ch:
+                    stack.pop()
+                else:
+                    return None
 
-        return repaired
+        out = s
+        if in_string:
+            out += '"'  # close truncated string value
+        # stack holds closers outer→inner; reverse to close inner first
+        out += "".join(reversed(stack))
+        return out
 
     # ─── Utility ──────────────────────────────────────────────────────────────
 

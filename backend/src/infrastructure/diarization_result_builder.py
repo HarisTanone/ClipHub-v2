@@ -75,6 +75,13 @@ class DiarizationResultBuilder:
                 for track_id, position_id in track_to_position.items()
             }
 
+        # Soft-map orphan tracks: mapper may assign a track that was filtered
+        # out of reliable track_to_position (transient / low-frame). Dropping
+        # them produced "0 segments" despite valid diarization + mappings.
+        track_to_position = DiarizationResultBuilder._ensure_mapped_tracks(
+            track_to_position, mapping, stable_positions
+        )
+
         logger.debug(
             f"diarization_result_builder: track_to_position mapping: {track_to_position}"
         )
@@ -111,6 +118,55 @@ class DiarizationResultBuilder:
         )
 
         return result
+
+    @staticmethod
+    def _ensure_mapped_tracks(
+        track_to_position: Dict[int, int],
+        mapping: MappingResult,
+        stable_positions: Dict[int, float],
+    ) -> Dict[int, int]:
+        """Guarantee every mapped track_id has a positional seat.
+
+        Orphan tracks (in speaker-face mapping but missing from the position
+        model) get a soft seat so builder does not emit 0 segments.
+        """
+        out = dict(track_to_position)
+        orphans = sorted(
+            {
+                int(m.track_id)
+                for m in mapping.mappings.values()
+                if int(m.track_id) not in out
+            },
+            key=lambda tid: (stable_positions.get(tid, float("inf")), tid),
+        )
+        if not orphans:
+            return out
+
+        next_pos = (max(out.values()) + 1) if out else 0
+        for tid in orphans:
+            if tid in stable_positions and out:
+                # Place by X among known seats when possible
+                x = stable_positions[tid]
+                pos = sum(
+                    1
+                    for ot in out
+                    if stable_positions.get(ot, float("inf")) < x
+                )
+                # Avoid colliding with an occupied seat index
+                occupied = set(out.values())
+                while pos in occupied:
+                    pos += 1
+                out[tid] = pos
+                next_pos = max(next_pos, pos + 1)
+            else:
+                out[tid] = next_pos
+                next_pos += 1
+
+        logger.info(
+            f"diarization_result_builder: soft-mapped orphan tracks {orphans} "
+            f"→ positions {[out[t] for t in orphans]}"
+        )
+        return out
 
     @staticmethod
     def _build_per_frame_speaker(
