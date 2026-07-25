@@ -29,6 +29,7 @@ from functools import partial
 from typing import Optional
 
 from src.config import settings
+from src.infrastructure.clipscout_client import sanitize_stock_keyword
 from src.domain.entities import (
     HighlightAnalysisResult,
     HighlightCandidate,
@@ -262,7 +263,8 @@ OUTPUT RAW JSON:
         for item in raw_items:
             if not isinstance(item, dict):
                 continue
-            keyword = " ".join(str(item.get("keyword") or "").split())[:80]
+            raw_kw = " ".join(str(item.get("keyword") or "").split())[:80]
+            keyword = sanitize_stock_keyword(raw_kw, placement=str(item.get("placement") or "")) or raw_kw
             if not keyword:
                 continue
             try:
@@ -454,7 +456,8 @@ OUTPUT RAW JSON:
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
-                keyword = " ".join(str(item.get("keyword") or "").split())[:80]
+                raw_kw = " ".join(str(item.get("keyword") or "").split())[:80]
+                keyword = sanitize_stock_keyword(raw_kw, placement=str(item.get("placement") or "")) or raw_kw
                 if not keyword:
                     continue
                 try:

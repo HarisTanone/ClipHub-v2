@@ -346,45 +346,20 @@ class AssetFetcher(IAssetFetcher):
         placement: str = "",
     ) -> list[str]:
         """Precise query first, then close-up / subject-core fallbacks."""
-        base = " ".join(str(keyword).split())
-        tokens = [t for t in base.split() if t]
-        variants: list[str] = [base]
-        place = (placement or "").strip().lower()
-        behind = place in {"behind_person", "behind", "top_overlay", "overlay"}
-
-        # Prefer subject-filling stock for behind-person / stills.
-        if category_str in {
-            VisualCategory.ICON.value,
-            VisualCategory.MOTION_GRAPHIC.value,
-            VisualCategory.FOOTAGE.value,
-        } or behind:
-            lower = base.lower()
-            if behind:
-                # Fill top half cleanly: subject-forward, avoid wide scenic.
-                for suffix in ("close up", "macro detail", "isolated object", "object only"):
-                    if suffix not in lower:
-                        variants.append(f"{base} {suffix}")
-                scenic = {"skyline", "cityscape", "landscape", "aerial", "panorama"}
-                if any(s in lower for s in scenic):
-                    core = [t for t in tokens if t.lower() not in scenic]
-                    if core:
-                        variants.insert(1, " ".join(core) + " close up")
-            elif not any(x in lower for x in ("close up", "closeup", "macro", "detail")):
-                variants.append(f"{base} close up")
-            if len(tokens) >= 3:
-                # Core subject only (first 2-3 content words) — better stock hit rate.
-                variants.append(" ".join(tokens[:3]))
-            if len(tokens) >= 2:
-                variants.append(" ".join(tokens[:2]))
-            # Drop generic mood-only tails that poison stock search.
-            stop = {"dramatic", "cinematic", "beautiful", "success", "lifestyle"}
-            cleaned = [t for t in tokens if t.lower() not in stop]
-            if cleaned and cleaned != tokens:
-                variants.insert(1, " ".join(cleaned))
+        from src.infrastructure.clipscout_client import (
+            sanitize_stock_keyword,
+            _expand_search_queries,
+        )
+        base = sanitize_stock_keyword(keyword, placement=placement) or " ".join(str(keyword).split())
+        # Reuse ClipScout multi-query expander (same sanitizer + synonyms).
+        variants = _expand_search_queries(keyword, placement=placement, category=category_str)
+        if base and base not in variants:
+            variants.insert(0, base)
 
         augmented = self._build_query(base, creative_direction, category_str)
-        if augmented and augmented != base:
+        if augmented and augmented not in variants:
             variants.append(augmented)
 
         return list(dict.fromkeys(q for q in variants if q))
+
 

@@ -203,18 +203,24 @@ class Settings(BaseSettings):
 
     # ─── Top Behind Subject Overlay (portrait 9:16, additive to full-frame B-roll)
     TOP_OVERLAY_ENABLED: bool = True
-    TOP_OVERLAY_SPLIT_RATIO: float = 0.55      # top region height fraction
-    TOP_OVERLAY_FADE_HEIGHT: float = 0.12      # gradient fade as fraction of frame height
+    TOP_OVERLAY_SPLIT_RATIO: float = 0.58      # top region height fraction (more room for stock)
+    TOP_OVERLAY_FADE_HEIGHT: float = 0.10      # gradient fade as fraction of frame height
     TOP_OVERLAY_OPACITY: float = 1.0
     TOP_OVERLAY_PERSON_OUTLINE: bool = True    # white stroke around person (reference style)
     TOP_OVERLAY_PERSON_SHADOW: bool = True
-    TOP_OVERLAY_OUTLINE_THICKNESS: int = 8     # px stroke width (bold sticker edge @720p; scales up)
+    TOP_OVERLAY_OUTLINE_THICKNESS: int = 12    # px stroke width (bold sticker edge @720p; scales up)
     TOP_OVERLAY_OUTLINE_COLOR: str = "255,255,255"
+    # white | neon | black | gradient | comic  (white = solid rim + soft blue bloom like reference)
+    TOP_OVERLAY_OUTLINE_STYLE: str = "white"
     TOP_OVERLAY_MAX_PER_CLIP: int = 2
     TOP_OVERLAY_SEG_CONFIDENCE: float = 0.25
     TOP_OVERLAY_MASK_FEATHER: int = 1          # short feather = cleaner hard cutout
     TOP_OVERLAY_MASK_STRIDE: int = 1           # YOLO every frame = cleaner cutout edge
-    TOP_OVERLAY_CROP_BIAS_Y: float = 0.18     # cover-crop vertical bias (0=top, 0.5=center)
+    TOP_OVERLAY_CROP_BIAS_Y: float = 0.08     # cover-crop vertical bias (0=top — keep subject in top band)
+    # active = person nearest frame center (post-reframe speaker); dual_auto = both if 2-shot; largest = P0 only
+    TOP_OVERLAY_SPEAKER_MASK_MODE: str = "dual_auto"
+    TOP_OVERLAY_SMART_CROP: bool = True        # YOLO object center on B-roll (wallet/pump), not fixed bias
+    TOP_OVERLAY_SMART_CROP_CONF: float = 0.18
 
 
 

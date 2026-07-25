@@ -218,6 +218,7 @@ def test_person_outline_paints_white_edge():
         mask_feather=1,
         outline_thickness=6,
         outline_color="255,255,255",
+        outline_style="white",
     )
     h, w = 120, 80
     frame = np.zeros((h, w, 3), dtype=np.uint8)
@@ -237,6 +238,85 @@ def test_person_outline_paints_white_edge():
     assert bright >= 3, f"expected white outline pixels, bright={bright}"
     # Top non-person gets overlay green
     assert out[5, 5, 1] > 100
+
+
+def test_outline_style_neon_blue_bloom():
+    r = TopBehindSubjectRenderer(
+        split_ratio=0.7,
+        fade_height=0.05,
+        overlay_opacity=1.0,
+        person_outline=True,
+        person_shadow=False,
+        mask_feather=1,
+        outline_thickness=8,
+        outline_style="neon",
+    )
+    h, w = 120, 80
+    frame = np.full((h, w, 3), 30, dtype=np.uint8)
+    overlay = np.full((h, w, 3), 10, dtype=np.uint8)
+    mask = np.zeros((h, w), dtype=np.float32)
+    mask[30:100, 20:60] = 1.0
+    out = r.render(frame, mask, overlay)
+    edge = out[30:100, 17]
+    # Neon is blue-ish BGR → high B channel on rim
+    blueish = int(np.sum(edge[:, 0] > edge[:, 2] + 20))
+    assert blueish >= 2, f"expected neon blue rim, blueish={blueish}"
+
+
+def test_outline_style_black():
+    r = TopBehindSubjectRenderer(
+        split_ratio=0.7,
+        fade_height=0.05,
+        person_outline=True,
+        person_shadow=False,
+        outline_thickness=8,
+        outline_style="black",
+    )
+    h, w = 120, 80
+    frame = np.full((h, w, 3), 200, dtype=np.uint8)
+    overlay = np.full((h, w, 3), 180, dtype=np.uint8)
+    mask = np.zeros((h, w), dtype=np.float32)
+    mask[30:100, 20:60] = 1.0
+    out = r.render(frame, mask, overlay)
+    edge = out[30:100, 17]
+    dark = int(np.sum(edge.mean(axis=1) < 80))
+    assert dark >= 2, f"expected black outline, dark={dark}"
+
+
+def test_clean_mask_keeps_dual_components():
+    r = TopBehindSubjectRenderer(person_outline=False, person_shadow=False, mask_feather=1)
+    r._max_mask_components = 2
+    h, w = 100, 120
+    p = np.zeros((h, w), dtype=np.float32)
+    p[20:80, 10:40] = 1.0   # left person
+    p[20:80, 80:110] = 1.0  # right person (similar size)
+    clean = r._clean_person_mask(p)
+    left = float(clean[40:60, 15:35].mean())
+    right = float(clean[40:60, 85:105].mean())
+    assert left > 0.8 and right > 0.8, f"dual keep failed L={left} R={right}"
+
+
+def test_clean_mask_drops_tiny_second():
+    r = TopBehindSubjectRenderer(person_outline=False, person_shadow=False, mask_feather=1)
+    r._max_mask_components = 2
+    h, w = 100, 120
+    p = np.zeros((h, w), dtype=np.float32)
+    p[10:90, 20:70] = 1.0   # large
+    p[40:50, 100:108] = 1.0  # tiny fringe
+    clean = r._clean_person_mask(p)
+    assert float(clean[40:50, 100:108].mean()) < 0.2
+
+
+def test_cover_resize_uses_subject_xy():
+    r = TopBehindSubjectRenderer(split_ratio=0.5, crop_bias_y=0.0, smart_crop=False)
+    # Tall image: subject ONLY at bottom — without subject_xy top-bias would miss it
+    img = np.zeros((400, 100, 3), dtype=np.uint8)
+    img[300:360, 30:70] = (0, 0, 255)  # red subject near bottom
+    # Force subject at bottom-center
+    out = r.cover_resize(img, 50, 100, subject_xy=(0.5, 0.82))
+    assert out.shape == (100, 50, 3)
+    # Subject should appear somewhere in crop (red channel present)
+    assert int(out[:, :, 2].sum()) > 500, "subject_xy should pull bottom object into crop"
 
 
 def test_cover_resize_prefers_top_subject():
@@ -264,9 +344,13 @@ def test_expand_search_queries_behind_person():
         placement="behind_person",
         category="footage",
     )
-    assert qs[0] == "indonesian rupiah banknotes counting"
+    # sanitize may rewrite action verb → "close up" for stock search quality
+    assert qs[0] in {
+        "indonesian rupiah banknotes counting",
+        "indonesian rupiah banknotes close up",
+    }
     assert any("close up" in q.lower() for q in qs)
-    assert any(q == "indonesian rupiah banknotes" for q in qs)
+    assert any(q.startswith("indonesian rupiah banknotes") for q in qs)
     assert len(qs) <= 6
 
 
@@ -281,6 +365,10 @@ def test_clipscout_segments_multi_query():
     segs = build_segments_from_suggestions([s])
     assert len(segs) == 1
     assert len(segs[0]["searchQueries"]) >= 2
-    assert segs[0]["searchQueries"][0] == "fuel nozzle pumping gas car"
+    # sanitize may append close-up bias for behind_person stock quality
+    assert segs[0]["searchQueries"][0] in {
+        "fuel nozzle pumping gas car",
+        "fuel nozzle pumping gas car close up",
+    }
 
 

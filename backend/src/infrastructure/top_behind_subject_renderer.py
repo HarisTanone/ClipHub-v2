@@ -53,8 +53,13 @@ class TopBehindSubjectRenderer:
         mask_stride: int | None = None,
         outline_thickness: int | None = None,
         outline_color: tuple[int, int, int] | str | None = None,
+        outline_style: str | None = None,
         crop_bias_y: float | None = None,
+        speaker_mask_mode: str | None = None,
+        smart_crop: bool | None = None,
+        smart_crop_conf: float | None = None,
         model_path: str | None = None,
+        det_model_path: str | None = None,
     ):
         self.split_ratio = float(
             split_ratio if split_ratio is not None else settings.TOP_OVERLAY_SPLIT_RATIO
@@ -92,6 +97,12 @@ class TopBehindSubjectRenderer:
         self.outline_color = self._parse_bgr_color(
             outline_color if outline_color is not None else settings.TOP_OVERLAY_OUTLINE_COLOR
         )
+        style = (
+            outline_style
+            if outline_style is not None
+            else getattr(settings, "TOP_OVERLAY_OUTLINE_STYLE", "white")
+        )
+        self.outline_style = str(style or "white").strip().lower()
         self.crop_bias_y = float(
             np.clip(
                 crop_bias_y if crop_bias_y is not None else settings.TOP_OVERLAY_CROP_BIAS_Y,
@@ -99,9 +110,30 @@ class TopBehindSubjectRenderer:
                 1.0,
             )
         )
+        mode = (
+            speaker_mask_mode
+            if speaker_mask_mode is not None
+            else getattr(settings, "TOP_OVERLAY_SPEAKER_MASK_MODE", "dual_auto")
+        )
+        self.speaker_mask_mode = str(mode or "dual_auto").strip().lower()
+        self.smart_crop = bool(
+            smart_crop
+            if smart_crop is not None
+            else getattr(settings, "TOP_OVERLAY_SMART_CROP", True)
+        )
+        self.smart_crop_conf = float(
+            smart_crop_conf
+            if smart_crop_conf is not None
+            else getattr(settings, "TOP_OVERLAY_SMART_CROP_CONF", 0.25)
+        )
         self.model_path = model_path or settings.YOLO_SEG_MODEL
+        self.det_model_path = det_model_path or settings.YOLO_MODEL_PATH
         self._model = None
+        self._det_model = None
         self._gradient_cache: dict[tuple[int, int], np.ndarray] = {}
+        # asset id → (cx, cy) normalized 0..1 in source image for smart crop reuse
+        self._subject_cache: dict[int, tuple[float, float]] = {}
+        self._max_mask_components = 1
 
 
     # ─── Public frame compositor ────────────────────────────────────────────
@@ -149,61 +181,84 @@ class TopBehindSubjectRenderer:
 
         return np.clip(out, 0, 255).astype(np.uint8)
 
-    def cover_resize(self, image: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
+    def cover_resize(
+        self,
+        image: np.ndarray,
+        target_w: int,
+        target_h: int,
+        subject_xy: tuple[float, float] | None = None,
+    ) -> np.ndarray:
         """object-fit: cover; pin subject into TOP visible band (behind-person).
 
-        Only top split_ratio of frame shows behind person, so important stock
-        region must land in upper portion of crop — not center-chopped.
-        Slight overscale reduces edge clipping of key subject.
+        Only top ~split_ratio of frame shows stock behind person. Subject must
+        land in that upper band — not frame center (would be hidden by body).
+        Prefer YOLO subject_xy; fall back to edge saliency.
         """
         import cv2
 
         ih, iw = image.shape[:2]
         if ih <= 0 or iw <= 0:
             return np.zeros((target_h, target_w, 3), dtype=np.uint8)
-        # Mild overscale keeps subject fully in frame after smart crop.
-        scale = max(target_w / iw, target_h / ih) * 1.08
+        # Slightly more overscale so subject has crop room without edge chop.
+        scale = max(target_w / iw, target_h / ih) * 1.22
         nw, nh = max(1, int(round(iw * scale))), max(1, int(round(ih * scale)))
         resized = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_AREA)
         max_x = max(0, nw - target_w)
         max_y = max(0, nh - target_h)
 
-        # Default: horizontal center + strong top bias (important content not chopped).
+        # Default: horizontal center + strong top bias.
         x0 = max_x // 2
-        y0 = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.30))))
+        y0 = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.28))))
 
         if max_x > 0 or max_y > 0:
-            try:
-                gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-                sh, sw = max(1, nh // 6), max(1, nw // 6)
-                small = cv2.resize(gray, (sw, sh))
-                small = cv2.GaussianBlur(small, (0, 0), 1.0)
-                gx = cv2.Sobel(small, cv2.CV_32F, 1, 0, ksize=3)
-                gy = cv2.Sobel(small, cv2.CV_32F, 0, 1, ksize=3)
-                edge = cv2.magnitude(gx, gy)
-                thr = float(np.percentile(edge, 50))
-                weight = np.clip(edge - thr, 0, None) + 0.35
-                thr_b = float(np.percentile(small, 50))
-                weight = weight + 0.45 * np.clip(small.astype(np.float32) - thr_b, 0, None)
-                # Strong upper-band preference — only top half is visible.
-                row_boost = np.linspace(2.2, 0.25, sh, dtype=np.float32)[:, None]
-                weight = weight * row_boost
-                yy, xx = np.mgrid[0:sh, 0:sw]
-                wsum = float(weight.sum()) or 1.0
-                scale_x = nw / float(sw)
-                scale_y = nh / float(sh)
-                cx = float((xx * weight).sum() / wsum) * scale_x
-                cy = float((yy * weight).sum() / wsum) * scale_y
+            cx = cy = None
+            # 1) Detector subject (wallet/pump/etc.) — strongest signal
+            if subject_xy is not None:
+                try:
+                    sx, sy = float(subject_xy[0]), float(subject_xy[1])
+                    if 0.0 <= sx <= 1.0 and 0.0 <= sy <= 1.0:
+                        cx = sx * nw
+                        cy = sy * nh
+                except (TypeError, ValueError):
+                    cx = cy = None
+            # 2) Edge saliency fallback (top-weighted)
+            if cx is None:
+                try:
+                    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+                    sh, sw = max(1, nh // 6), max(1, nw // 6)
+                    small = cv2.resize(gray, (sw, sh))
+                    small = cv2.GaussianBlur(small, (0, 0), 1.0)
+                    gx = cv2.Sobel(small, cv2.CV_32F, 1, 0, ksize=3)
+                    gy = cv2.Sobel(small, cv2.CV_32F, 0, 1, ksize=3)
+                    edge = cv2.magnitude(gx, gy)
+                    thr = float(np.percentile(edge, 50))
+                    weight = np.clip(edge - thr, 0, None) + 0.35
+                    thr_b = float(np.percentile(small, 50))
+                    weight = weight + 0.45 * np.clip(small.astype(np.float32) - thr_b, 0, None)
+                    row_boost = np.linspace(2.4, 0.20, sh, dtype=np.float32)[:, None]
+                    weight = weight * row_boost
+                    yy, xx = np.mgrid[0:sh, 0:sw]
+                    wsum = float(weight.sum()) or 1.0
+                    scale_x = nw / float(sw)
+                    scale_y = nh / float(sh)
+                    cx = float((xx * weight).sum() / wsum) * scale_x
+                    cy = float((yy * weight).sum() / wsum) * scale_y
+                except Exception:
+                    cx = cy = None
+
+            if cx is not None and cy is not None:
+                # Keep subject away from left/right chop (15% margin).
                 x0 = int(np.clip(cx - target_w * 0.5, 0, max_x))
-                # Pin subject into upper visible band (~20% from top).
-                visible_anchor = 0.20
-                smart_y = int(np.clip(cy - target_h * visible_anchor, 0, max_y))
-                bias_y = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.25))))
-                y0 = int(round(0.90 * smart_y + 0.10 * bias_y))
-                y0 = min(y0, int(max_y * 0.28))  # hard ceiling: stay top-biased
+                # Visible stock sits in top ~split_ratio of portrait frame.
+                # Pin subject center near mid of that band (~28% of full H).
+                band_mid = float(np.clip(self.split_ratio * 0.42, 0.16, 0.28))
+                smart_y = int(np.clip(cy - target_h * band_mid, 0, max_y))
+                bias_y = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.22))))
+                mix = 0.97 if subject_xy is not None else 0.92
+                y0 = int(round(mix * smart_y + (1.0 - mix) * bias_y))
+                if subject_xy is None:
+                    y0 = min(y0, int(max_y * 0.35))
                 y0 = int(np.clip(y0, 0, max_y))
-            except Exception:
-                pass
 
         return resized[y0 : y0 + target_h, x0 : x0 + target_w]
 
@@ -262,20 +317,23 @@ class TopBehindSubjectRenderer:
             return None
 
         # Preload overlay assets (image once / video caps)
-        asset_handles: list[tuple[TopOverlaySegment, object, bool]] = []
-        for seg in segs:
+        asset_handles: list[tuple[TopOverlaySegment, object, bool, int]] = []
+        for i, seg in enumerate(segs):
             is_video = self._is_video(seg.asset_path)
             if is_video:
                 oc = cv2.VideoCapture(seg.asset_path)
                 if not oc.isOpened():
                     continue
-                asset_handles.append((seg, oc, True))
+                asset_handles.append((seg, oc, True, i))
             else:
                 img = cv2.imread(seg.asset_path, cv2.IMREAD_COLOR)
                 if img is None:
                     continue
-                img = self.cover_resize(img, width, height)
-                asset_handles.append((seg, img, False))
+                subject = self._detect_subject_xy(img) if self.smart_crop else None
+                if subject is not None:
+                    self._subject_cache[i] = subject
+                img = self.cover_resize(img, width, height, subject_xy=subject)
+                asset_handles.append((seg, img, False, i))
         if not asset_handles:
             cap.release()
             return None
@@ -285,7 +343,7 @@ class TopBehindSubjectRenderer:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(tmp_video, fourcc, use_fps, (width, height))
         if not writer.isOpened():
-            for _, handle, is_vid in asset_handles:
+            for _, handle, is_vid, _ in asset_handles:
                 if is_vid:
                     handle.release()
             cap.release()
@@ -305,8 +363,8 @@ class TopBehindSubjectRenderer:
                     frame_idx += 1
                     continue
 
-                seg, handle, is_vid = active
-                overlay = self._read_overlay(handle, is_vid, width, height)
+                seg, handle, is_vid, asset_id = active
+                overlay = self._read_overlay(handle, is_vid, width, height, asset_id=asset_id)
                 if overlay is None:
                     writer.write(frame)
                     frame_idx += 1
@@ -321,7 +379,7 @@ class TopBehindSubjectRenderer:
         finally:
             writer.release()
             cap.release()
-            for _, handle, is_vid in asset_handles:
+            for _, handle, is_vid, _ in asset_handles:
                 if is_vid:
                     handle.release()
 
@@ -392,26 +450,35 @@ class TopBehindSubjectRenderer:
             return p
 
         h, w = p.shape[:2]
-        # Higher threshold = less muddy YOLO fringe.
-        binary = (p >= 0.50).astype(np.uint8) * 255
+        # Higher threshold = less muddy YOLO fringe (0.55 kills soft halo).
+        binary = (p >= 0.55).astype(np.uint8) * 255
         # Scale kernels to frame size (1080p needs bigger morph than 120px tests).
-        k = max(3, int(round(min(h, w) * 0.004)))
+        k = max(3, int(round(min(h, w) * 0.005)))
         if k % 2 == 0:
             k += 1
         k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         k_med = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
         k_big = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k + 2, k + 2))
 
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_big, iterations=2)
+        # CLOSE first (fill hair/shoulder gaps), OPEN (kill fringe), CLOSE again.
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_big, iterations=3)
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, k_med, iterations=1)
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_med, iterations=2)
 
-        # Largest component = main speaker only.
+        # Largest component = main speaker; dual_auto keeps top-2 if 2-shot.
         n, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
         if n > 1:
             areas = stats[1:, cv2.CC_STAT_AREA]
-            keep = 1 + int(np.argmax(areas))
-            binary = np.where(labels == keep, 255, 0).astype(np.uint8)
+            order = np.argsort(areas)[::-1]
+            keep_n = max(1, min(int(self._max_mask_components), len(order)))
+            # dual: 2nd person only if ≥35% of largest (real 2-shot, not fringe)
+            if keep_n >= 2 and len(order) >= 2:
+                a0 = float(areas[order[0]])
+                a1 = float(areas[order[1]])
+                if a0 <= 0 or a1 / a0 < 0.35:
+                    keep_n = 1
+            keep_labels = {1 + int(order[i]) for i in range(keep_n)}
+            binary = np.where(np.isin(labels, list(keep_labels)), 255, 0).astype(np.uint8)
 
         # Fill internal holes so B-roll never punches through torso/hair.
         flood = binary.copy()
@@ -420,8 +487,10 @@ class TopBehindSubjectRenderer:
         holes = (flood != 128) & (binary == 0)
         binary[holes] = 255
 
-        # Expand slightly so shoulders/hair not nibble-eaten.
+        # Expand slightly so shoulders/hair not nibble-eaten by stock.
         binary = cv2.dilate(binary, k3, iterations=2)
+        # One more close after dilate for smooth shoulder/arm edge.
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_med, iterations=1)
         clean = binary.astype(np.float32) / 255.0
 
         # Minimal feather + hard core (sticker edge, not soft matte).
@@ -433,7 +502,7 @@ class TopBehindSubjectRenderer:
             core = cv2.erode(binary, k3, iterations=2).astype(np.float32) / 255.0
             # Hard interior, only 1-2px soft rim.
             clean = np.where(core > 0.5, 1.0, soft)
-            clean = np.where(clean >= 0.55, 1.0, clean)  # snap near-edge to solid
+            clean = np.where(clean >= 0.50, 1.0, 0.0)  # hard binary snap
             clean = np.clip(clean, 0.0, 1.0)
         else:
             clean = (clean >= 0.5).astype(np.float32)
@@ -442,10 +511,12 @@ class TopBehindSubjectRenderer:
     def _draw_person_outline(
         self, out: np.ndarray, p: np.ndarray, top_alpha: np.ndarray
     ) -> np.ndarray:
-        """Bold white sticker contour around person (reference cutout).
+        """Full-body sticker stroke — style: white | neon | black | gradient | comic.
 
-        Scales thickness with frame height so 1080p gets ~10-14px visible ring.
-        Stroke sits OUTSIDE body; interior face/clothes untouched.
+        Reference look: solid white rim around WHOLE person (head→torso), not
+        only top overlay band. Stroke OUTSIDE body; face/clothes untouched.
+        top_alpha only softens extreme bottom (below split) so rim doesn't
+        fight lower UI — never kills head/shoulder ring.
         """
         import cv2
 
@@ -454,44 +525,100 @@ class TopBehindSubjectRenderer:
             return out
 
         h, w = out.shape[:2]
-        # Scale outline to resolution: config thickness is base for ~1080p.
+        style = self.outline_style if self.outline_style in {
+            "white", "neon", "black", "gradient", "comic",
+        } else "white"
+        # Scale outline to resolution: config thickness is base for ~720p.
         scale = max(1.0, min(h, w) / 720.0)
-        th = max(6, int(round(int(self.outline_thickness) * scale)))
+        th = max(8, int(round(int(self.outline_thickness) * scale)))
+        if style == "comic":
+            th = max(4, int(round(th * 0.75)))
         # Outer pad so ring sits clearly outside silhouette.
-        pad = max(3, th // 2)
+        pad = max(4, th // 2 + 1)
         k_pad = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (pad | 1, pad | 1))
-        edge_src = cv2.dilate(binary, k_pad, iterations=2)
+        # Contour from slightly dilated mask → stroke outside body.
+        edge_src = cv2.dilate(binary, k_pad, iterations=1)
         contours, _ = cv2.findContours(edge_src, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return out
 
-        # Full visibility wherever person exists (not only solid top band).
-        region = np.ones(out.shape[:2], dtype=np.float32)
-        # Soft-kill outline deep in bottom non-overlay zone only.
-        region = np.clip(np.maximum(top_alpha, 0.15), 0.0, 1.0)
+        # Full-body outline (reference sticker). Floor keeps rim visible even
+        # below split; only deep bottom (no person overlay) gently fades.
+        region = np.clip(np.maximum(top_alpha, 0.85), 0.0, 1.0)
 
         hard = np.zeros(out.shape[:2], dtype=np.uint8)
-        # Double-pass: outer thick ring + inner bright core = sticker look.
-        cv2.drawContours(hard, contours, -1, 255, thickness=th + 2, lineType=cv2.LINE_AA)
-        cv2.drawContours(hard, contours, -1, 255, thickness=th, lineType=cv2.LINE_AA)
-        cv2.drawContours(hard, contours, -1, 255, thickness=max(3, th - 2), lineType=cv2.LINE_AA)
-        glow = cv2.GaussianBlur(hard, (0, 0), sigmaX=max(1.2, th * 0.40))
+        line_type = cv2.LINE_AA
+        if style == "comic":
+            for cnt in contours:
+                pts = cnt.reshape(-1, 2)
+                if len(pts) < 4:
+                    cv2.drawContours(hard, [cnt], -1, 255, thickness=th, lineType=line_type)
+                    continue
+                step = max(4, len(pts) // 16)
+                dash = max(2, step // 2)
+                for i in range(0, len(pts), step):
+                    a = pts[i : i + dash]
+                    if len(a) >= 2:
+                        cv2.polylines(hard, [a], False, 255, thickness=th, lineType=line_type)
+        else:
+            # Triple-pass sticker: outer thick + mid + inner core = solid white rim.
+            cv2.drawContours(hard, contours, -1, 255, thickness=th + 3, lineType=line_type)
+            cv2.drawContours(hard, contours, -1, 255, thickness=th, lineType=line_type)
+            cv2.drawContours(hard, contours, -1, 255, thickness=max(3, th - 2), lineType=line_type)
 
-        # Kill stroke that would paint ON face/clothes.
+        glow_sigma = max(1.5, th * 0.45)
+        if style == "neon":
+            glow_sigma = max(2.2, th * 0.90)
+        glow = cv2.GaussianBlur(hard, (0, 0), sigmaX=glow_sigma)
+
+        # Kill stroke that would paint ON face/clothes (erode person interior).
         interior = cv2.erode(binary, k_pad, iterations=max(2, pad // 2)).astype(np.float32) / 255.0
+        glow_w = 0.65
+        if style == "neon":
+            glow_w = 1.20
+        elif style == "black":
+            glow_w = 0.25
+        elif style == "comic":
+            glow_w = 0.15
         stroke = np.clip(
             hard.astype(np.float32) / 255.0 * 1.0
-            + glow.astype(np.float32) / 255.0 * 0.55,
+            + glow.astype(np.float32) / 255.0 * glow_w,
             0.0,
             1.0,
         )
         stroke = stroke * region * (1.0 - interior)
-        # Snap mid-alpha to solid so outline never looks dirty/grey.
-        stroke = np.where(stroke >= 0.35, np.clip(stroke * 1.25, 0.0, 1.0), stroke * 0.5)
+        # Snap mid-alpha → solid so rim never looks dirty/grey.
+        stroke = np.where(stroke >= 0.28, 1.0, stroke * 0.35)
+        stroke = np.clip(stroke, 0.0, 1.0)
 
-        color = np.array(self.outline_color, dtype=np.float32)
+        if style == "black":
+            color = np.array((0.0, 0.0, 0.0), dtype=np.float32)
+        elif style == "neon":
+            # Electric blue neon (BGR) — reference glow
+            color = np.array((255.0, 180.0, 40.0), dtype=np.float32)
+        elif style == "gradient":
+            yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+            c_top = np.array((40.0, 200.0, 255.0), dtype=np.float32)
+            c_bot = np.array((255.0, 120.0, 40.0), dtype=np.float32)
+            color_map = c_top[None, None, :] * (1.0 - yy[:, :, None]) + c_bot[None, None, :] * yy[:, :, None]
+            stroke3 = stroke[:, :, None]
+            return out * (1.0 - stroke3) + color_map * stroke3
+        else:
+            color = np.array(self.outline_color, dtype=np.float32)
+
         stroke3 = stroke[:, :, None]
-        return out * (1.0 - stroke3) + color[None, None, :] * stroke3
+        painted = out * (1.0 - stroke3) + color[None, None, :] * stroke3
+        if style == "neon":
+            bloom = cv2.GaussianBlur(hard, (0, 0), sigmaX=max(3.0, th * 1.4)).astype(np.float32) / 255.0
+            bloom = bloom * region * (1.0 - interior) * 0.50
+            painted = painted * (1.0 - bloom[:, :, None]) + color[None, None, :] * bloom[:, :, None]
+        elif style == "white":
+            # Reference: solid white rim + soft electric-blue outer bloom.
+            blue = np.array((255.0, 140.0, 30.0), dtype=np.float32)  # BGR
+            bloom = cv2.GaussianBlur(hard, (0, 0), sigmaX=max(3.5, th * 1.5)).astype(np.float32) / 255.0
+            bloom = bloom * region * (1.0 - interior) * 0.42
+            painted = painted * (1.0 - bloom[:, :, None]) + blue[None, None, :] * bloom[:, :, None]
+        return painted
 
 
 
@@ -528,6 +655,61 @@ class TopBehindSubjectRenderer:
         self._model = YOLO(self.model_path)
         return self._model
 
+    def _load_det_model(self):
+        if self._det_model is not None:
+            return self._det_model
+        from ultralytics import YOLO
+
+        self._det_model = YOLO(self.det_model_path)
+        return self._det_model
+
+    def _detect_subject_xy(self, image: np.ndarray) -> tuple[float, float] | None:
+        """YOLO det on B-roll frame → subject center (normalized 0..1).
+
+        Prefers non-person COCO objects (wallet-ish bags, bottles, vehicles…);
+        falls back to largest non-person box. None if detector miss → saliency.
+        """
+        if image is None or image.size == 0:
+            return None
+        try:
+            model = self._load_det_model()
+            results = model.predict(
+                source=image,
+                conf=self.smart_crop_conf,
+                verbose=False,
+            )
+            result = results[0] if results else None
+            if result is None or result.boxes is None or len(result.boxes) == 0:
+                return None
+            boxes = result.boxes
+            xyxy = boxes.xyxy.detach().cpu().numpy()
+            confs = boxes.conf.detach().cpu().numpy()
+            clss = boxes.cls.detach().cpu().numpy().astype(int)
+            ih, iw = image.shape[:2]
+            # COCO person=0 — skip people on stock (want object, not stock host)
+            best = None  # (score, cx, cy)
+            for box, conf, cls_id in zip(xyxy, confs, clss):
+                if int(cls_id) == 0:
+                    continue
+                x1, y1, x2, y2 = map(float, box)
+                bw = max(1.0, x2 - x1)
+                bh = max(1.0, y2 - y1)
+                area = bw * bh
+                # Prefer mid-size objects in upper 70% of frame
+                cy = (y1 + y2) * 0.5
+                upper_bonus = 1.25 if cy < ih * 0.70 else 0.85
+                score = float(conf) * area * upper_bonus
+                cx = (x1 + x2) * 0.5 / max(1.0, float(iw))
+                cyn = cy / max(1.0, float(ih))
+                if best is None or score > best[0]:
+                    best = (score, float(np.clip(cx, 0.0, 1.0)), float(np.clip(cyn, 0.0, 1.0)))
+            if best is None:
+                return None
+            return (best[1], best[2])
+        except Exception as exc:
+            logger.debug("top_overlay: subject detect fail: %s", exc)
+            return None
+
     def _predict_person_mask(self, model, frame: np.ndarray, h: int, w: int) -> np.ndarray:
         import cv2
 
@@ -544,12 +726,54 @@ class TopBehindSubjectRenderer:
             masks = result.masks.data.detach().cpu().numpy()
             if masks.size == 0:
                 return np.zeros((h, w), dtype=np.float32)
-            # Prefer largest person instance (main speaker), not union of all.
-            areas = [float(m.sum()) for m in masks]
-            best = masks[int(np.argmax(areas))].astype(np.float32)
-            if best.shape[:2] != (h, w):
-                best = cv2.resize(best, (w, h), interpolation=cv2.INTER_LINEAR)
-            return np.clip(best, 0.0, 1.0)
+
+            # Resize each instance mask to frame size first.
+            resized = []
+            for m in masks:
+                mm = m.astype(np.float32)
+                if mm.shape[:2] != (h, w):
+                    mm = cv2.resize(mm, (w, h), interpolation=cv2.INTER_LINEAR)
+                resized.append(np.clip(mm, 0.0, 1.0))
+
+            mode = self.speaker_mask_mode
+            if mode == "largest":
+                areas = [float(m.sum()) for m in resized]
+                best = resized[int(np.argmax(areas))]
+                self._max_mask_components = 1
+                return best
+
+            if mode == "dual_auto" and len(resized) >= 2:
+                # Keep top-2 by area if 2nd is real co-host (not fringe).
+                areas = [float(m.sum()) for m in resized]
+                order = np.argsort(areas)[::-1]
+                a0 = areas[int(order[0])]
+                a1 = areas[int(order[1])]
+                if a0 > 0 and a1 / a0 >= 0.35:
+                    self._max_mask_components = 2
+                    return np.clip(
+                        np.maximum(resized[int(order[0])], resized[int(order[1])]),
+                        0.0,
+                        1.0,
+                    )
+                # not true dual → fall through to active speaker (center)
+
+            # active / dual_auto fallback: mask centroid nearest frame center
+            # (post-reframe pan already centers active speaker → follows switch)
+            self._max_mask_components = 1
+            cx0, cy0 = w * 0.5, h * 0.42  # slightly upper (face band)
+            best_i, best_d = 0, 1e18
+            for i, m in enumerate(resized):
+                ys, xs = np.where(m >= 0.5)
+                if len(xs) == 0:
+                    continue
+                mx, my = float(xs.mean()), float(ys.mean())
+                d = (mx - cx0) ** 2 + (my - cy0) ** 2
+                # slight area bias so tiny fringe never wins
+                d = d / (1.0 + 0.00001 * float(m.sum()))
+                if d < best_d:
+                    best_d = d
+                    best_i = i
+            return resized[best_i]
 
         except Exception as exc:
             logger.debug("top_overlay: mask fail: %s", exc)
@@ -562,15 +786,17 @@ class TopBehindSubjectRenderer:
 
     @staticmethod
     def _active_segment(
-        handles: list[tuple[TopOverlaySegment, object, bool]], t: float
-    ) -> Optional[tuple[TopOverlaySegment, object, bool]]:
+        handles: list, t: float
+    ) -> Optional[tuple]:
         for item in handles:
             seg = item[0]
             if seg.at_time <= t < seg.at_time + seg.duration:
                 return item
         return None
 
-    def _read_overlay(self, handle, is_vid: bool, w: int, h: int) -> Optional[np.ndarray]:
+    def _read_overlay(
+        self, handle, is_vid: bool, w: int, h: int, asset_id: int = 0
+    ) -> Optional[np.ndarray]:
         import cv2
 
         if not is_vid:
@@ -582,7 +808,15 @@ class TopBehindSubjectRenderer:
             ok, frame = handle.read()
             if not ok:
                 return None
-        return self.cover_resize(frame, w, h)
+        subject = None
+        if self.smart_crop:
+            # Cache first successful detect per asset; re-detect every ~15 frames via cache miss key
+            subject = self._subject_cache.get(asset_id)
+            if subject is None:
+                subject = self._detect_subject_xy(frame)
+                if subject is not None:
+                    self._subject_cache[asset_id] = subject
+        return self.cover_resize(frame, w, h, subject_xy=subject)
 
     @staticmethod
     def _mux_audio(src_video: str, video_only: str, output_path: str) -> bool:

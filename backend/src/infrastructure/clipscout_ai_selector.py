@@ -104,25 +104,31 @@ class ClipScoutAISelector:
                 f"   Relevance: {c.relevance_score}{snippet}{reason}\n\n"
             )
 
+        from src.infrastructure.clipscout_client import sanitize_stock_keyword
+        clean_kw = sanitize_stock_keyword(keyword) or keyword
+
         return f"""You are a senior B-roll editor. Pick EXACTLY 1 video that best MATCHES the visual keyword.
 
-KEYWORD (must match literally what is shown on screen): "{keyword}"
+KEYWORD (must match literally what is shown on screen): "{clean_kw}"
+ORIGINAL HINT: "{keyword}"
 
 CANDIDATES:
 {candidates_text}
 
 SELECTION RULES (strict):
-1. Visual match FIRST: on-screen subject must match keyword literally (object/action/scene). Reject generic pretty / unrelated B-roll.
-2. Prefer CLOSE-UP / FILL-FRAME of the subject over wide landscape/cityscape.
+1. Visual match FIRST: on-screen subject must match KEYWORD literally (object/action/scene). Reject generic pretty / unrelated B-roll.
+2. Prefer CLOSE-UP / FILL-FRAME of the subject over wide landscape/cityscape/talking-head.
 3. Prefer royalty-free license when relevance is close.
 4. Duration >= {required_duration:.1f}s preferred.
 5. Prefer pexels/pixabay over youtube when relevance is equal.
 6. For youtube: start_timestamp = second where keyword subject is most visible (not intro/logo).
 7. Reject mismatch hard (keyword "fuel nozzle" but clip is skyline / people talking / abstract).
+8. Prefer title/snippet that contains keyword tokens; reject pure scenic filler.
 
 OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
 {{"selected_id":"<exact ID from list>","start_timestamp":0,"reason":"one short sentence"}}
 """
+
 
     def _parse_json_tolerant(self, raw_response: str) -> dict:
         """Parse model JSON with fence/extra-text/truncation tolerance."""
@@ -270,9 +276,12 @@ OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
         if not candidates:
             return None
 
+        from src.infrastructure.clipscout_client import sanitize_stock_keyword
+        clean = sanitize_stock_keyword(keyword) or (keyword or "")
         tokens = {
-            t for t in re.findall(r"[a-z0-9]+", (keyword or "").lower()) if len(t) > 2
+            t for t in re.findall(r"[a-z0-9]+", clean.lower()) if len(t) > 2
         }
+        scenic = ("skyline", "cityscape", "landscape", "aerial", "panorama", "timelapse")
 
         def token_hits(c: VideoCandidate) -> float:
             if not tokens:
@@ -288,10 +297,25 @@ OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
             hits = sum(1 for t in tokens if t in hay)
             return hits / max(1, len(tokens))
 
+        def scenic_penalty(c: VideoCandidate) -> int:
+            hay = f"{c.title or ''} {c.transcript_snippet or ''}".lower()
+            return 1 if any(s in hay for s in scenic) and token_hits(c) < 0.35 else 0
+
+        def closeup_bonus(c: VideoCandidate) -> int:
+            hay = f"{c.title or ''} {c.transcript_snippet or ''}".lower()
+            return 1 if any(x in hay for x in ("close up", "closeup", "macro", "detail")) else 0
+
         def sort_key(c: VideoCandidate) -> tuple:
             license_score = 1 if c.license == "royalty-free" else 0
             platform_score = 1 if c.platform in ("pexels", "pixabay") else 0
-            return (token_hits(c), c.relevance_score, license_score, platform_score)
+            return (
+                token_hits(c),
+                closeup_bonus(c),
+                -scenic_penalty(c),
+                c.relevance_score,
+                license_score,
+                platform_score,
+            )
 
         selected = max(candidates, key=sort_key)
         logger.info(
@@ -299,4 +323,5 @@ OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
             f"score={selected.relevance_score} keyword_hits={token_hits(selected):.2f}"
         )
         return selected
+
 

@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Optional
+
 
 import httpx
 
@@ -138,9 +140,89 @@ class ClipScoutClient(IClipScoutClient):
         return results
 
 
+# Abstract/mood poison → kill or rewrite for stock search accuracy.
+_KEYWORD_STOP = {
+    "dramatic", "cinematic", "beautiful", "success", "lifestyle",
+    "epic", "mood", "vibes", "aesthetic", "background", "viral",
+    "amazing", "best", "top", "cool", "nice", "great", "awesome",
+}
+# ID/EN abstract topic → concrete English stock query (1:1 visual).
+_TOPIC_SYNONYMS: dict[str, str] = {
+    "rupiah": "indonesian rupiah banknotes",
+    "uang": "cash banknotes counting hands",
+    "money": "cash banknotes counting hands",
+    "dompet": "empty wallet hands close up",
+    "wallet": "empty wallet hands close up",
+    "bbm": "fuel nozzle pumping gas car",
+    "bensin": "fuel nozzle pumping gas car",
+    "fuel": "fuel nozzle pumping gas car",
+    "minyak": "oil pump jack working sunset",
+    "oil": "oil pump jack working sunset",
+    "inflasi": "price tag grocery shopping inflation",
+    "inflation": "price tag grocery shopping inflation",
+    "ekonomi": "stock market chart trading screen",
+    "economy": "stock market chart trading screen",
+    "kurs": "usd idr currency exchange chart",
+    "currency": "usd idr currency exchange chart",
+    "bank": "bank building exterior modern",
+    "saham": "stock market chart candlestick",
+    "stock": "stock market chart candlestick",
+    "gaji": "paycheck salary envelope cash",
+    "salary": "paycheck salary envelope cash",
+    "hutang": "debt bill unpaid invoice stack",
+    "debt": "debt bill unpaid invoice stack",
+    "emas": "gold bars bullion close up",
+    "gold": "gold bars bullion close up",
+    "crypto": "bitcoin cryptocurrency coin close up",
+    "bitcoin": "bitcoin cryptocurrency coin close up",
+    "listrik": "electric power meter close up",
+    "electricity": "electric power meter close up",
+    "pajak": "tax form documents stamp",
+    "tax": "tax form documents stamp",
+}
+
+
+def sanitize_stock_keyword(keyword: str, placement: str = "") -> str:
+    """Force concrete English stock query — kill abstract/mood noise."""
+    raw = " ".join(str(keyword or "").split())
+    if not raw:
+        return ""
+    lower = raw.lower()
+    tokens = [t for t in re.findall(r"[A-Za-z0-9]+", lower) if t]
+
+    # Exact multi-word topic hits first.
+    for needle, replacement in _TOPIC_SYNONYMS.items():
+        if needle in lower and len(needle) >= 3:
+            base = replacement
+            break
+    else:
+        # Single-token synonym rewrite.
+        mapped = []
+        for t in tokens:
+            if t in _KEYWORD_STOP:
+                continue
+            mapped.append(_TOPIC_SYNONYMS.get(t, t))
+        # Flatten synonym phrases.
+        flat: list[str] = []
+        for m in mapped:
+            flat.extend(m.split())
+        # Drop remaining stop words after expand.
+        flat = [t for t in flat if t not in _KEYWORD_STOP]
+        base = " ".join(dict.fromkeys(flat)) if flat else raw
+        # If still 1 generic word, pad with visual framing.
+        if len(base.split()) <= 1:
+            base = f"{base} close up object" if base else "object close up"
+
+    place = (placement or "").strip().lower()
+    behind = place in {"behind_person", "behind", "top_overlay", "overlay"}
+    if behind and "close up" not in base.lower() and "macro" not in base.lower():
+        base = f"{base} close up"
+    return " ".join(base.split())[:80]
+
+
 def _expand_search_queries(keyword: str, placement: str = "", category: str = "") -> list[str]:
     """Multi-query variants for ClipScout — higher hit rate + subject-accurate stock."""
-    base = " ".join(str(keyword or "").split())
+    base = sanitize_stock_keyword(keyword, placement=placement)
     if not base:
         return []
     tokens = [t for t in base.split() if t]
@@ -151,12 +233,7 @@ def _expand_search_queries(keyword: str, placement: str = "", category: str = ""
 
     queries: list[str] = [base]
 
-    # Drop abstract/mood poison words that skew stock results.
-    stop = {
-        "dramatic", "cinematic", "beautiful", "success", "lifestyle",
-        "epic", "mood", "vibes", "aesthetic", "background",
-    }
-    cleaned = [t for t in tokens if t.lower() not in stop]
+    cleaned = [t for t in tokens if t.lower() not in _KEYWORD_STOP]
     if cleaned and cleaned != tokens:
         queries.append(" ".join(cleaned))
 
@@ -166,12 +243,17 @@ def _expand_search_queries(keyword: str, placement: str = "", category: str = ""
     if len(tokens) >= 2:
         queries.append(" ".join(tokens[:2]))
 
+    # Domain synonym variants (second concrete angle).
+    for needle, replacement in _TOPIC_SYNONYMS.items():
+        if needle in lower and replacement.lower() not in lower:
+            queries.append(replacement)
+            break
+
     # Behind-person / icon: fill-frame subject, avoid wide scenic.
     if behind or cat in {"icon", "motion_graphic"}:
-        for suffix in ("close up", "macro detail", "isolated object", "object only"):
+        for suffix in ("close up", "macro detail", "isolated object", "fill frame"):
             if suffix not in lower:
                 queries.append(f"{base} {suffix}")
-        # Drop wide scenic poison if present in base.
         scenic = {"skyline", "cityscape", "landscape", "aerial", "panorama"}
         if any(s in lower for s in scenic):
             core = [t for t in tokens if t.lower() not in scenic]
@@ -219,16 +301,18 @@ def build_segments_from_suggestions(
         cat = getattr(suggestion, "visual_category", None)
         cat_val = cat.value if hasattr(cat, "value") else str(cat or "")
         queries = _expand_search_queries(keyword, placement=placement, category=cat_val)
+        topic = sanitize_stock_keyword(keyword, placement=placement) or keyword
 
         segment = {
             "id": str(i + 1),
-            "text": keyword,
-            "topic": keyword,
-            "searchQueries": queries or [keyword],
+            "text": topic,
+            "topic": topic,
+            "searchQueries": queries or [topic],
             "startIndex": 0,
             "endIndex": 0,
             "chapter": 1,
         }
+
         segments.append(segment)
 
     return segments
