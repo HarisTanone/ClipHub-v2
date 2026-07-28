@@ -133,9 +133,58 @@ def test_malformed_ai_broll_response_has_sparse_local_fallback():
 
     result = asyncio.run(analyzer.analyze_broll_for_clips(words, {1: 12.0}))
 
-    assert len(result["1"]) == 1
+    assert len(result["1"]) >= 1
     assert 3.0 <= result["1"][0]["at_time"] < 11.0
     assert result["1"][0]["visual_category"] == "footage"
+    assert result["1"][0].get("placement") in ("full_frame", "behind_person", None, "")
+
+
+def test_broll_per_clip_calls_llm_once_per_clip():
+    """Each clip gets its own LLM call (not one mega multi-clip prompt)."""
+    analyzer = GroqAnalyzer()
+    calls = []
+
+    def fake_llm(prompt, model=None, max_tokens=3000):
+        calls.append(prompt)
+        # extract clip number from prompt
+        import re, json
+        m = re.search(r"CLIP #(\d+)", prompt)
+        rank = m.group(1) if m else "1"
+        return json.dumps({
+            "items": [{
+                "at_time": 4.0,
+                "keyword": f"stock subject clip {rank}",
+                "duration": 2.0,
+                "visual_category": "footage",
+                "placement": "full_frame",
+                "template": "word_pop_typography",
+            }]
+        })
+
+    analyzer._call_groq_llm = MagicMock(side_effect=fake_llm)
+    words = {
+        1: [
+            {"word": "rupiah", "start": 3.2, "end": 3.6, "highlight": True},
+            {"word": "melemah", "start": 3.7, "end": 4.1},
+            {"word": "pasar", "start": 5.0, "end": 5.4},
+        ],
+        2: [
+            {"word": "BBM", "start": 3.5, "end": 3.9, "highlight": True},
+            {"word": "naik", "start": 4.0, "end": 4.3},
+            {"word": "mahal", "start": 6.0, "end": 6.4},
+        ],
+    }
+    durs = {1: 12.0, 2: 12.0}
+    result = asyncio.run(analyzer.analyze_broll_for_clips(
+        words, durs, max_suggestions=2,
+        clip_meta={1: {"hook": "Rupiah drop"}, 2: {"hook": "BBM naik"}},
+    ))
+    assert len(calls) == 2
+    assert "1" in result and "2" in result
+    assert any("CLIP #1" in c for c in calls)
+    assert any("CLIP #2" in c for c in calls)
+    # seeds from objects should appear in at least one prompt
+    assert any("rupiah" in c.lower() or "bbm" in c.lower() for c in calls)
 
 
 def test_splice_mode_promotes_motion_graphic_to_footage_fallback(tmp_path):

@@ -109,11 +109,13 @@ JWT_SECRET_KEY=random-64-char-hex
 
 ```
 tmp/output/{job_id}/
-├── clip_01_reframed.mp4   # After YOLO reframe
-├── clip_01_final.mp4      # Final rendered (Remotion)
-├── thumbnail/
-│   └── clip_01.jpg        # Thumbnail at 1s
-└── meta_job_xxx.json      # Job metadata
+├── clip_01_reframed.mp4
+├── clip_01_final.mp4
+├── raw/ final/ thumbnail/
+├── json_analisa/
+│   ├── clip_1.json        # Full per-clip analisa (words, objects, keywords, broll…)
+│   └── clip_2.json
+└── meta_{job_id}.json     # Slim index: [{no, path}] only
 ```
 
 ## Logs (Production)

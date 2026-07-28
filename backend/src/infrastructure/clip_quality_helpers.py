@@ -249,3 +249,264 @@ def retention_trim_hints(words: list[dict] | None, duration: float) -> dict[str,
         "suggested_cuts": cuts[:4],
         "clip_duration": round(float(duration or 0), 2),
     }
+
+
+# ─── Per-clip analisa JSON (split meta for AI / assets) ──────────────────────
+
+def extract_highlight_keywords(words: list[dict] | None, limit: int = 12) -> list[str]:
+    """Keywords for subtitle highlight / soft seed (highlight|proper|long tokens).
+
+    No stopword lexicon — AI visual_entities is the real seed path.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for w in words or []:
+        text = str(w.get("word", w.get("text", "")) or "").strip()
+        if not text or len(text) < 3:
+            continue
+        key = re.sub(r"[^\w\-]+", "", text, flags=re.UNICODE).lower()
+        if not key or key in seen:
+            continue
+        flagged = bool(w.get("highlight"))
+        proper = text[:1].isupper() and not text.isupper()
+        longish = len(key) >= 5
+        if flagged or proper or longish:
+            seen.add(key)
+            out.append(text.strip(".,!?;:\"'"))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def extract_objects(
+    words: list[dict] | None,
+    footage_keywords: list[str] | None = None,
+    limit: int = 20,
+    visual_entities: list[dict] | None = None,
+) -> list[dict[str, Any]]:
+    """Timed objects for B-roll / overlay.
+
+    Prefer AI visual_entities (query_id/query_en). Offline: highlight/proper only
+    — no hardcoded domain noun regex.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for e in visual_entities or []:
+        if not isinstance(e, dict):
+            continue
+        word = str(e.get("word") or e.get("label") or "").strip()
+        if not word:
+            continue
+        low = re.sub(r"[^\w\-]+", "", word, flags=re.UNICODE).lower()
+        if not low or low in seen:
+            continue
+        try:
+            s = float(e.get("start", 0) or 0)
+            end = float(e.get("end", s + 0.3) or s + 0.3)
+        except (TypeError, ValueError):
+            s, end = 0.0, 0.3
+        seen.add(low)
+        row = {
+            "word": word,
+            "start": round(s, 3),
+            "end": round(end, 3),
+            "label": str(e.get("label") or word),
+            "query_id": str(e.get("query_id") or ""),
+            "query_en": str(e.get("query_en") or ""),
+            "search_queries": list(e.get("search_queries") or []),
+            "source": str(e.get("source") or "ai"),
+        }
+        out.append(row)
+        if len(out) >= limit:
+            return out
+
+    seeds = {k.lower() for k in (footage_keywords or []) if k}
+    for w in words or []:
+        try:
+            text = str(w.get("word", w.get("text", "")) or "").strip()
+            s = float(w.get("start", w.get("s", 0)) or 0)
+            e = float(w.get("end", w.get("e", s + 0.2)) or s + 0.2)
+        except (TypeError, ValueError):
+            continue
+        clean = re.sub(r"[^\w\-]+", "", text, flags=re.UNICODE)
+        if len(clean) < 3:
+            continue
+        low = clean.lower()
+        if low in seen:
+            continue
+        hit = (
+            bool(w.get("highlight"))
+            or low in seeds
+            or (clean[:1].isupper() and len(clean) >= 4)
+            or len(clean) >= 6
+        )
+        if not hit:
+            continue
+        seen.add(low)
+        out.append({
+            "word": clean,
+            "start": round(s, 3),
+            "end": round(e, 3),
+            "label": clean[:1].upper() + clean[1:],
+            "query_id": f"{clean} close up",
+            "query_en": f"{clean} product close up",
+            "search_queries": [f"{clean} product close up", f"{clean} close up"],
+            "source": "heuristic",
+        })
+        if len(out) >= limit:
+            break
+    for kw in footage_keywords or []:
+        low = kw.lower().strip()
+        if not low or low in seen:
+            continue
+        seen.add(low)
+        out.append({
+            "word": kw.strip(),
+            "start": 0.0,
+            "end": 0.0,
+            "label": kw.strip(),
+            "query_id": kw.strip(),
+            "query_en": kw.strip(),
+            "search_queries": [kw.strip()],
+            "source": "footage_kw",
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def build_clip_analisa(
+    *,
+    no: int,
+    rank: int,
+    start: float,
+    end: float,
+    hook: str = "",
+    reason: str = "",
+    score: int | float = 0,
+    words: list[dict] | None = None,
+    broll_suggestions: list[dict] | None = None,
+    text_emphasis_events: list[dict] | None = None,
+    top_overlay_events: list[dict] | None = None,
+    object_overlay_events: list[dict] | None = None,
+    visual_entities: list[dict] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One-clip analisa payload written to json_analisa/clip_{n}.json."""
+    words = list(words or [])
+    broll = list(broll_suggestions or [])
+    dur = float(end) - float(start)
+    footage_kw: list[str] = []
+    seen_fk: set[str] = set()
+    for s in broll:
+        kw = str(s.get("keyword") or "").strip()
+        if not kw:
+            continue
+        low = kw.lower()
+        if low in seen_fk:
+            continue
+        seen_fk.add(low)
+        footage_kw.append(kw)
+    hl = extract_highlight_keywords(words)
+    for h in hl:
+        low = h.lower()
+        if low not in seen_fk:
+            seen_fk.add(low)
+            footage_kw.append(h)
+    # Prefer AI visual entities (dynamic ID+EN queries); no lexicon expand
+    object_queries = extract_objects(
+        words, footage_kw, visual_entities=visual_entities
+    )
+    for o in object_queries:
+        for q in (
+            str(o.get("query_en") or ""),
+            str(o.get("query_id") or ""),
+            *list(o.get("search_queries") or []),
+        ):
+            q = " ".join(str(q or "").split())
+            if not q:
+                continue
+            low = q.lower()
+            if low not in seen_fk:
+                seen_fk.add(low)
+                footage_kw.append(q)
+    try:
+        viral = virality_breakdown(score, hook, reason, dur, words, len(broll))
+        cta = suggest_cta(hook, reason, rank)
+        retention = retention_trim_hints(words, dur)
+        thumb = smart_thumbnail_seek(words, dur, hook)
+    except Exception:
+        viral, cta, retention, thumb = {}, {}, {}, 1.0
+
+    body = {
+        "rank": rank,
+        "start": start,
+        "end": end,
+        "duration": round(dur, 3),
+        "hook": hook,
+        "reason": reason,
+        "score": score,
+        "highlight_keywords": hl,
+        "footage_keywords": footage_kw[:16],
+        "objects": object_queries,
+        "broll_suggestions": broll,
+        "text_emphasis_events": list(text_emphasis_events or [])[:4],
+        "top_overlay_events": list(top_overlay_events or []),
+        "object_overlay_events": list(object_overlay_events or []),
+        "visual_entities": list(visual_entities or []),
+        "thumb_seek": thumb,
+        "virality": viral,
+        "cta": cta,
+        "retention_hints": retention,
+        "words": words,
+    }
+    if extra:
+        body.update(extra)
+    return {"no": no, "clips": [body]}
+
+
+def write_split_job_meta(
+    output_dir: str,
+    *,
+    job_id: str,
+    youtube_url: str | None,
+    aspect_ratio: str | None,
+    created_at: str | None,
+    clip_payloads: list[dict[str, Any]],
+    clips_total: int | None = None,
+    clips_success: int | None = None,
+) -> str:
+    """Write json_analisa/clip_{n}.json + slim meta_{job_id}.json. Returns meta path."""
+    import json as json_mod
+
+    analisa_dir = os.path.join(output_dir, "json_analisa")
+    os.makedirs(analisa_dir, exist_ok=True)
+    index: list[dict[str, Any]] = []
+    for payload in clip_payloads:
+        no = int(payload.get("no") or 0)
+        if no <= 0:
+            clips = payload.get("clips") or []
+            if clips:
+                no = int(clips[0].get("rank") or 0)
+        if no <= 0:
+            continue
+        rel = f"json_analisa/clip_{no}.json"
+        abs_path = os.path.join(output_dir, rel)
+        with open(abs_path, "w", encoding="utf-8") as f:
+            json_mod.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+        index.append({"no": no, "path": rel})
+
+    meta = {
+        "job_id": job_id,
+        "youtube_url": youtube_url,
+        "aspect_ratio": aspect_ratio,
+        "clips_total": clips_total if clips_total is not None else len(index),
+        "clips_success": clips_success if clips_success is not None else len(index),
+        "created_at": created_at,
+        "clips": index,
+    }
+    meta_path = os.path.join(output_dir, f"meta_{job_id}.json")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json_mod.dump(meta, f, indent=2, ensure_ascii=False, default=str)
+    return meta_path

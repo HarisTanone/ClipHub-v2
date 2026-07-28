@@ -222,8 +222,22 @@ class Settings(BaseSettings):
     TOP_OVERLAY_SMART_CROP: bool = True        # YOLO object center on B-roll (wallet/pump), not fixed bias
     TOP_OVERLAY_SMART_CROP_CONF: float = 0.18
 
-
-
+    # ─── Object image+text overlay (noun mention → stock photo card) ─────
+    OBJECT_OVERLAY_ENABLED: bool = True
+    OBJECT_OVERLAY_MAX_PER_CLIP: int = 3
+    OBJECT_OVERLAY_BOX_SIZE: float = 0.28       # fraction of min(frame w,h)
+    OBJECT_OVERLAY_CORNER_RADIUS: int = 18
+    OBJECT_OVERLAY_POSITION: str = "top_right"  # top_right|top_left|bottom_right|bottom_left|center_right|center_left
+    OBJECT_OVERLAY_ANIMATION: str = "slide_right"  # slide_right|slide_left|slide_down|slide_up|fade|pop
+    OBJECT_OVERLAY_DURATION: float = 2.4
+    OBJECT_OVERLAY_MARGIN: float = 0.04
+    OBJECT_OVERLAY_TEXT_COLOR: str = "255,255,255"
+    OBJECT_OVERLAY_BG_COLOR: str = "20,20,24"
+    OBJECT_OVERLAY_BORDER_COLOR: str = "255,255,255"
+    OBJECT_OVERLAY_FONT_SCALE: float = 0.55
+    OBJECT_OVERLAY_OPACITY: float = 0.95
+    OBJECT_OVERLAY_MIN_RELEVANCE: float = 0.35
+    OBJECT_OVERLAY_SHOW_LABEL: bool = True
 
     # ─── Timeout Settings (seconds) ─────────────────────────────────────
     GEMINI_TIMEOUT: int = 30  # Fast fail — skip to Groq fallback quickly

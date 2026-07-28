@@ -316,6 +316,9 @@ export interface ClipInfo {
   cta?: { text?: string; type?: string; kind?: string; duration_sec?: number; duration?: number; position?: string } | null;
   retention_hints?: { suggested_cuts?: Array<{ start: number; end: number; reason?: string }> } | null;
   thumb_seek?: number | null;
+  object_overlay_events?: Array<Record<string, any>>;
+  visual_entities?: Array<Record<string, any>>;
+  top_overlay_events?: Array<Record<string, any>>;
 }
 
 export interface JobDetailResponse {
@@ -373,6 +376,9 @@ export interface ClipDetailResponse {
     cta?: { text?: string; type?: string; kind?: string; duration_sec?: number; duration?: number; position?: string } | null;
     retention_hints?: { suggested_cuts?: Array<{ start: number; end: number; reason?: string }> } | null;
     thumb_seek?: number | null;
+    object_overlay_events?: Array<Record<string, any>>;
+    visual_entities?: Array<Record<string, any>>;
+    top_overlay_events?: Array<Record<string, any>>;
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };
     urls: { raw: string | null; final: string | null; thumbnail: string | null };
   };

@@ -211,15 +211,12 @@ ATURAN:
 - at_time WAJIB salah satu timestamp di transkrip; jangan sebelum detik 3.
 - JANGAN pakai waktu yang sama untuk full_frame dan behind_person (min jarak 4 detik).
 - Ideal: 1-2 full_frame + 1-2 behind_person di momen berbeda.
-- keyword = query stock ENGLISH 3-6 kata, KONKRET, visual, searchable di Pexels/YouTube.
-  LANGKAH: (1) baca kalimat di timestamp (2) ekstrak 1 fakta visual UTAMA yang dibahas (3) terjemah 1:1 ke query stock literal.
-  WAJIB mirror topik pembicaraan (uang→banknotes/wallet, BBM→fuel pump, minyak→oil pump jack).
-  WAJIB 1:1 dengan topik kalimat — jika bicara "rupiah melemah" → banknotes/currency chart, BUKAN "business success".
+- keyword = query stock ENGLISH 3-8 kata, KONKRET visual dari konteks clip ini (analisa dinamis — jangan andalkan daftar kata domain tetap).
+  LANGKAH: (1) baca kalimat di timestamp (2) ekstrak 1 fakta visual UTAMA (3) terjemah 1:1 ke query stock literal.
   Format: [concrete subject] [action OR state] [framing/detail]
-  BAIK: "indonesian rupiah banknotes counting", "fuel nozzle pumping gas car", "oil pump jack working sunset", "empty wallet hands close up", "usd idr currency exchange chart"
-  JELEK: "success", "money", "economy", "business", "inflation", "technology", "life", "people talking", "city skyline", "dramatic", "cinematic"
-  Dilarang: nama orang, brand, abstraksi, 1 kata generic, mood-only ("dramatic", "cinematic").
-  behind_person: CLOSE-UP object/icon/subject (fill frame). LARANG wide landscape/cityscape yang kepotong.
+  JELEK: abstract mood "success", "lifestyle", "viral", "city skyline generic", 1 kata generic.
+  Dilarang: nama orang, brand, abstraksi, mood-only.
+  behind_person: CLOSE-UP object/icon/subject (fill frame). LARANG wide landscape/cityscape.
   full_frame: boleh medium shot action; tetap mirror topik.
 - duration 1.5-3.0 detik.
 - visual_category: footage (video) | icon | motion_graphic | reaction
@@ -229,7 +226,7 @@ ATURAN:
 
 
 OUTPUT RAW JSON:
-{{"items":[{{"at_time":12.5,"keyword":"indonesian rupiah banknotes counting","duration":2.5,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography","motion_style":"ken_burns"}},{{"at_time":20.0,"keyword":"fuel price pump nozzle closeup","duration":2.0,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
+{{"items":[{{"at_time":12.5,"keyword":"concrete stock query from this transcript","duration":2.5,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography","motion_style":"ken_burns"}},{{"at_time":20.0,"keyword":"another concrete closeup object","duration":2.0,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
 
 
         try:
@@ -320,24 +317,330 @@ OUTPUT RAW JSON:
         return {"1": suggestions} if suggestions else {}
 
 
+    async def analyze_visual_entities_for_clips(
+        self,
+        clips_words: dict[int, list[dict]],
+        clip_durations: dict[int, float],
+        clip_meta: dict | None = None,
+        max_objects: int = 6,
+    ) -> dict[int, list[dict]]:
+        """Per-clip AI: concrete visual nouns + bilingual stock queries (no domain lexicon).
+
+        Returns {rank: [{word,start,end,label,query_id,query_en,search_queries}, ...]}.
+        Queries are dynamic from transcript context — not hardcoded synonym maps.
+        """
+        max_objects = max(1, min(int(max_objects), 8))
+        if not clips_words:
+            return {}
+
+        eligible: dict[int, list[dict]] = {}
+        for raw_rank, words in sorted(clips_words.items()):
+            rank = int(raw_rank)
+            duration = float(clip_durations.get(rank, 0.0) or 0.0)
+            clean = [
+                w for w in words
+                if str(w.get("word") or "").strip()
+                and float(w.get("start", -1) or -1) >= 0
+            ]
+            if clean and duration > 2.0:
+                eligible[rank] = clean
+        if not eligible:
+            return {}
+
+        meta = clip_meta or {}
+        sem = asyncio.Semaphore(2)
+
+        async def _one(rank: int, words: list[dict]) -> tuple[int, list[dict]]:
+            async with sem:
+                duration = float(clip_durations.get(rank, 0.0) or 0.0)
+                m = meta.get(rank) or meta.get(str(rank)) or {}
+                try:
+                    items = await self._analyze_visual_entities_one_clip(
+                        rank=rank,
+                        words=words,
+                        duration=duration,
+                        max_objects=max_objects,
+                        hook=str(m.get("hook") or ""),
+                        reason=str(m.get("reason") or ""),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "v2_analyzer: visual entities rank=%s failed: %s", rank, exc
+                    )
+                    items = []
+                if not items:
+                    items = self._fallback_visual_entities_from_words(
+                        words, duration, limit=max_objects
+                    )
+                return rank, items
+
+        logger.info(
+            "v2_analyzer: visual entities per-clip model=%s clips=%d",
+            self._model_pass1,
+            len(eligible),
+        )
+        pairs = await asyncio.gather(
+            *[_one(rank, words) for rank, words in eligible.items()]
+        )
+        return {int(rank): items for rank, items in pairs if items}
+
+    async def _analyze_visual_entities_one_clip(
+        self,
+        *,
+        rank: int,
+        words: list[dict],
+        duration: float,
+        max_objects: int = 6,
+        hook: str = "",
+        reason: str = "",
+    ) -> list[dict]:
+        """LLM extracts concrete visual objects + ID/EN stock search queries."""
+        window_size = 10
+        windows = [words[i : i + window_size] for i in range(0, len(words), window_size)]
+        if len(windows) > 18:
+            last = len(windows) - 1
+            pick = sorted({round(i * last / 17) for i in range(18)})
+            windows = [windows[i] for i in pick]
+        lines: list[str] = []
+        for window in windows:
+            text = " ".join(str(w.get("word") or "").strip() for w in window).strip()
+            if text:
+                lines.append(f"[{float(window[0]['start']):.2f}s] {text[:280]}")
+        context = "\n".join(lines)
+        if len(context) > 7000:
+            context = context[:7000]
+        topic = " | ".join(x for x in (hook.strip(), reason.strip()) if x)[:300]
+
+        prompt = f"""Kamu visual researcher untuk short-form video. Ekstrak maksimal {max_objects} OBJEK/ENTITAS KONKRET yang bisa difoto/divideo stock.
+
+CLIP #{rank} duration={duration:.1f}s
+HOOK/TOPIC: {topic or "(n/a)"}
+
+TRANSKRIP BERTIMESTAMP:
+{context}
+
+ATURAN (WAJIB):
+- Hanya benda/produk/tempat/simbol visual yang disebutkan ATAU jelas tersirat dari kalimat di timestamp.
+- JANGAN abstract mood (sukses, viral, epic, lifestyle, beautiful).
+- word = token dari transkrip (atau frasa 1-3 kata) yang memicu objek.
+- start = timestamp detik dari baris transkrip (float).
+- label = label tampilan singkat (boleh ID atau EN).
+- query_id = query pencarian stock bahasa Indonesia, 3-8 kata, KONKRET, close-up/product jika cocok.
+- query_en = query stock bahasa Inggris, 3-8 kata, KONKRET visual 1:1.
+- search_queries = array 2-4 variasi query (campur ID+EN) untuk multi-search.
+- Jangan hardcode daftar domain; analisa dari konteks clip ini saja.
+- Jika tidak ada objek visual cukup, return objects:[]
+
+OUTPUT RAW JSON only:
+{{"objects":[{{"word":"…","start":12.5,"label":"…","query_id":"…","query_en":"…","search_queries":["…","…"]}}]}}
+"""
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._call_groq_llm,
+                    prompt,
+                    self._model_pass1,
+                    1400,
+                ),
+                timeout=self._timeout,
+            )
+            parsed = self._parse_json_response(raw)
+        except Exception as exc:
+            logger.warning("v2_analyzer: visual entities clip %s LLM fail: %s", rank, exc)
+            return []
+
+        raw_objs = []
+        if isinstance(parsed, dict):
+            raw_objs = parsed.get("objects") or parsed.get("items") or []
+        if not isinstance(raw_objs, list):
+            return []
+        return self._normalize_visual_entities(
+            raw_objs, words=words, duration=duration, max_objects=max_objects
+        )
+
+    def _normalize_visual_entities(
+        self,
+        raw_objs: list,
+        *,
+        words: list[dict],
+        duration: float,
+        max_objects: int,
+    ) -> list[dict]:
+        """Anchor AI objects to transcript times; keep dynamic queries as-is."""
+        allowed_times = [float(w["start"]) for w in words if "start" in w]
+        word_index: dict[str, list[tuple[float, float, str]]] = {}
+        for w in words:
+            tok = re.sub(r"[^\w\-]+", "", str(w.get("word") or ""), flags=re.UNICODE).lower()
+            if not tok:
+                continue
+            try:
+                s = float(w.get("start", 0) or 0)
+                e = float(w.get("end", s + 0.3) or s + 0.3)
+            except (TypeError, ValueError):
+                continue
+            word_index.setdefault(tok, []).append((s, e, str(w.get("word") or "")))
+
+        out: list[dict] = []
+        seen: set[str] = set()
+        for item in raw_objs:
+            if not isinstance(item, dict):
+                continue
+            word = " ".join(str(item.get("word") or "").split())[:40]
+            if not word:
+                continue
+            low = re.sub(r"[^\w\-]+", "", word, flags=re.UNICODE).lower()
+            if not low or low in seen:
+                continue
+            try:
+                start = float(item.get("start", -1))
+            except (TypeError, ValueError):
+                start = -1.0
+            end = start + 0.4
+            # Snap to nearest transcript mention of same token if possible
+            hits = word_index.get(low) or []
+            if not hits:
+                # try first token of multi-word
+                first = low.split("-")[0] if "-" in low else low[:12]
+                for k, v in word_index.items():
+                    if first and (first in k or k in first):
+                        hits = v
+                        break
+            if hits:
+                if start < 0:
+                    s, e, raw_w = hits[0]
+                    start, end, word = s, e, raw_w
+                else:
+                    s, e, raw_w = min(hits, key=lambda t: abs(t[0] - start))
+                    start, end = s, e
+                    if len(word) < 2:
+                        word = raw_w
+            elif allowed_times and start >= 0:
+                start = min(allowed_times, key=lambda t: abs(t - start))
+                end = start + 0.4
+            elif allowed_times:
+                start = allowed_times[min(len(allowed_times) // 3, len(allowed_times) - 1)]
+                end = start + 0.4
+            else:
+                continue
+            if duration > 0 and start >= duration - 0.5:
+                continue
+
+            label = " ".join(str(item.get("label") or word).split())[:40] or word
+            query_id = " ".join(str(item.get("query_id") or "").split())[:80]
+            query_en = " ".join(str(item.get("query_en") or "").split())[:80]
+            sq_raw = item.get("search_queries") or []
+            search_queries: list[str] = []
+            if isinstance(sq_raw, list):
+                for q in sq_raw:
+                    q = " ".join(str(q or "").split())[:80]
+                    if q and q.lower() not in {x.lower() for x in search_queries}:
+                        search_queries.append(q)
+            # Always keep bilingual pair if present
+            for q in (query_id, query_en):
+                if q and q.lower() not in {x.lower() for x in search_queries}:
+                    search_queries.append(q)
+            if not query_en and not query_id:
+                # AI must produce queries; skip empty abstract
+                continue
+            if not query_en:
+                query_en = search_queries[0] if search_queries else f"{word} close up"
+            if not query_id:
+                query_id = search_queries[1] if len(search_queries) > 1 else query_en
+
+            seen.add(low)
+            out.append({
+                "word": word,
+                "start": round(float(start), 3),
+                "end": round(float(end), 3),
+                "label": label,
+                "query_id": query_id,
+                "query_en": query_en,
+                "search_queries": search_queries[:6],
+                "source": "ai",
+            })
+            if len(out) >= max_objects:
+                break
+        return out
+
+    @staticmethod
+    def _fallback_visual_entities_from_words(
+        words: list[dict],
+        duration: float,
+        limit: int = 4,
+    ) -> list[dict]:
+        """Offline fallback: highlight/proper/long tokens only — NO domain word lists.
+
+        Queries stay generic close-up of the spoken token (AI offline).
+        """
+        from src.infrastructure.clip_quality_helpers import extract_highlight_keywords
+
+        stop = {
+            "yang", "dan", "atau", "dari", "untuk", "dengan", "adalah", "itu", "ini",
+            "ada", "akan", "bisa", "jadi", "juga", "karena", "kalau", "kita", "mereka",
+            "saya", "aku", "kamu", "dia", "nya", "the", "and", "that", "this", "with",
+            "from", "have", "was", "were", "are", "you", "your", "they", "about",
+            "basically", "gitu", "lah", "nih", "sih", "aja", "kayak", "lebih", "paling",
+        }
+        seeds = {s.lower() for s in extract_highlight_keywords(words, limit=12)}
+        out: list[dict] = []
+        seen: set[str] = set()
+        for w in words or []:
+            text = str(w.get("word") or "").strip()
+            clean = re.sub(r"[^\w\-]+", "", text, flags=re.UNICODE)
+            low = clean.lower()
+            if len(clean) < 3 or low in seen or low in stop:
+                continue
+            try:
+                s = float(w.get("start", 0) or 0)
+                e = float(w.get("end", s + 0.3) or s + 0.3)
+            except (TypeError, ValueError):
+                continue
+            if s < 1.0 or (duration > 0 and s >= duration - 0.5):
+                continue
+            hit = bool(w.get("highlight")) or low in seeds or (
+                clean[:1].isupper() and len(clean) >= 4
+            ) or len(clean) >= 6
+            if not hit:
+                continue
+            seen.add(low)
+            label = clean[:1].upper() + clean[1:] if clean else text
+            # Generic bilingual — no synonym table; AI path preferred online
+            id_q = f"{clean} close up"
+            en_q = f"{clean} product close up"
+            out.append({
+                "word": clean,
+                "start": round(s, 3),
+                "end": round(e, 3),
+                "label": label,
+                "query_id": id_q,
+                "query_en": en_q,
+                "search_queries": [en_q, id_q, f"{clean} isolated object"],
+                "source": "fallback",
+            })
+            if len(out) >= max(0, int(limit)):
+                break
+        return out
+
     async def analyze_broll_for_clips(
         self,
         clips_words: dict[int, list[dict]],
         clip_durations: dict[int, float],
         max_suggestions: int = 2,
+        clip_meta: dict | None = None,
+        visual_entities: dict | None = None,
     ) -> dict:
-        """Recover B-roll suggestions from the final word-level transcript.
+        """Recover B-roll per clip (1 LLM call / clip) from word-level transcript.
 
-        Creative-direction generation is intentionally separate from highlight
-        ranking and can fail independently. This method gives Analyze First a
-        second, smaller router call and anchors every result to a real Whisper
-        word timestamp. A conservative local fallback still produces one useful
-        suggestion when the router returns malformed or empty JSON.
+        Per-clip prompts stay small → better keywords/objects than one mega-batch
+        of clip_1…N. Optional clip_meta[rank]={hook,reason} seeds topic lock.
+        visual_entities: AI-extracted objects/queries per rank (dynamic, no lexicon).
+        Fallback: local words + AI/fallback visual entities.
         """
-        max_suggestions = max(0, min(int(max_suggestions), 2))
-        eligible: dict[int, list[dict]] = {}
-        context_lines: list[str] = []
+        max_suggestions = max(0, min(int(max_suggestions), 4))
+        if max_suggestions <= 0 or not clips_words:
+            return {}
 
+        eligible: dict[int, list[dict]] = {}
         for raw_rank, words in sorted(clips_words.items()):
             rank = int(raw_rank)
             duration = float(clip_durations.get(rank, 0.0) or 0.0)
@@ -347,185 +650,281 @@ OUTPUT RAW JSON:
                 if 3.0 <= float(word.get("start", -1.0)) < duration - 1.0
                 and str(word.get("word") or "").strip()
             ]
-            if not clean_words or duration <= 4.0:
-                continue
-            eligible[rank] = clean_words
-
-            # Give every clip coverage without letting a long transcript crowd
-            # all other clips out of the prompt.
-            window_size = 8
-            windows = [
-                clean_words[index:index + window_size]
-                for index in range(0, len(clean_words), window_size)
-            ]
-            if len(windows) > 18:
-                last_index = len(windows) - 1
-                selected_indices = sorted({
-                    round(index * last_index / 17)
-                    for index in range(18)
-                })
-                windows = [windows[index] for index in selected_indices]
-            for window in windows:
-                text = " ".join(
-                    str(word.get("word") or "").strip()
-                    for word in window
-                ).strip()
-                if text:
-                    context_lines.append(
-                        f"Clip {rank} [{float(window[0]['start']):.2f}s] {text[:260]}"
-                    )
-
-        if not eligible or max_suggestions <= 0:
+            if clean_words and duration > 4.0:
+                eligible[rank] = clean_words
+        if not eligible:
             return {}
 
-        context = "\n".join(context_lines)
-        if len(context) > 14000:
-            context = context[:14000]
-        # Dual tracks: full_frame splice + behind_person (different times). Keywords
-        # must be concrete English stock queries — searched via ClipScout later.
-        max_items = min(max(max_suggestions, 2), 4)
-        prompt = f"""Kamu adalah visual director short video. Pilih maksimal {max_items} momen B-roll per clip.
+        meta = clip_meta or {}
+        entities = visual_entities or {}
+        sem = asyncio.Semaphore(2)
 
-TRANSKRIP CLIP BERTIMESTAMP:
+        async def _one(rank: int, words: list[dict]) -> tuple[int, list[dict]]:
+            async with sem:
+                duration = float(clip_durations.get(rank, 0.0) or 0.0)
+                m = meta.get(rank) or meta.get(str(rank)) or {}
+                ents = entities.get(rank) or entities.get(str(rank)) or []
+                try:
+                    items = await self._analyze_broll_one_clip(
+                        rank=rank,
+                        words=words,
+                        duration=duration,
+                        max_items=max_suggestions,
+                        hook=str(m.get("hook") or ""),
+                        reason=str(m.get("reason") or ""),
+                        visual_entities=ents,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "v2_analyzer: per-clip B-roll rank=%s failed: %s", rank, exc
+                    )
+                    items = []
+                if not items:
+                    items = self._fallback_broll_from_words(
+                        words,
+                        duration,
+                        limit=max(1, min(2, max_suggestions)),
+                        visual_entities=ents,
+                    )
+                return rank, items
+
+        logger.info(
+            "v2_analyzer: B-roll per-clip recovery model=%s clips=%d",
+            self._model_pass1,
+            len(eligible),
+        )
+        pairs = await asyncio.gather(
+            *[_one(rank, words) for rank, words in eligible.items()]
+        )
+        return {str(rank): items for rank, items in pairs if items}
+
+    async def _analyze_broll_one_clip(
+        self,
+        *,
+        rank: int,
+        words: list[dict],
+        duration: float,
+        max_items: int = 2,
+        hook: str = "",
+        reason: str = "",
+        visual_entities: list[dict] | None = None,
+    ) -> list[dict]:
+        """Single-clip B-roll LLM call — seed from AI visual entities (dynamic)."""
+        from src.infrastructure.clip_quality_helpers import extract_highlight_keywords
+
+        max_items = min(max(max_items, 2), 4)
+        # Compact transcript windows (this clip only)
+        window_size = 8
+        windows = [
+            words[i : i + window_size] for i in range(0, len(words), window_size)
+        ]
+        if len(windows) > 20:
+            last = len(windows) - 1
+            pick = sorted({round(i * last / 19) for i in range(20)})
+            windows = [windows[i] for i in pick]
+        lines: list[str] = []
+        for window in windows:
+            text = " ".join(str(w.get("word") or "").strip() for w in window).strip()
+            if text:
+                lines.append(f"[{float(window[0]['start']):.2f}s] {text[:260]}")
+        context = "\n".join(lines)
+        if len(context) > 8000:
+            context = context[:8000]
+
+        seeds: list[str] = []
+        for e in visual_entities or []:
+            if not isinstance(e, dict):
+                continue
+            for key in ("query_en", "query_id", "label", "word"):
+                val = " ".join(str(e.get(key) or "").split())
+                if val and val.lower() not in {s.lower() for s in seeds}:
+                    seeds.append(val)
+            for q in e.get("search_queries") or []:
+                q = " ".join(str(q or "").split())
+                if q and q.lower() not in {s.lower() for s in seeds}:
+                    seeds.append(q)
+        for h in extract_highlight_keywords(words, limit=8):
+            if h and h.lower() not in {s.lower() for s in seeds}:
+                seeds.append(h)
+        seed_txt = ", ".join(seeds[:14]) if seeds else "(none — derive from transcript)"
+        topic = " | ".join(x for x in (hook.strip(), reason.strip()) if x)[:300]
+
+        prompt = f"""Kamu visual director 1 short clip. Pilih maksimal {max_items} B-roll.
+
+CLIP #{rank} duration={duration:.1f}s
+HOOK/TOPIC: {topic or "(n/a)"}
+AI VISUAL ENTITIES / SEARCH SEEDS (pakai & refine, jangan hardcode domain list): {seed_txt}
+
+TRANSKRIP BERTIMESTAMP (clip ini saja):
 {context}
 
-DUA MODE PLACEMENT:
-1) full_frame — stock VIDEO ganti layar (person hilang). visual_category=footage.
-2) behind_person — IMAGE/icon di belakang person top-half (person tetap). visual_category=icon|motion_graphic|footage.
+PLACEMENT:
+1) full_frame — stock VIDEO ganti layar (person hilang). visual_category=footage
+2) behind_person — IMAGE/icon di belakang person top-half. visual_category=icon|motion_graphic|footage
 
 ATURAN:
-- at_time = salin timestamp clip yang sama; jangan sebelum detik 3; jangan ubah audio.
-- JANGAN pakai waktu sama untuk full_frame + behind_person (min jarak 4 detik).
-- Ideal: 1 full_frame + 1 behind_person di momen berbeda.
-- keyword = query stock ENGLISH 3-6 kata, KONKRET, searchable Pexels/YouTube.
-  LANGKAH: baca kalimat → 1 fakta visual utama → query stock literal (1:1 topik yang dibahas).
-  BAGUS: "indonesian rupiah banknotes counting", "fuel nozzle pumping gas", "empty wallet hands close up"
-  Format: [concrete subject] [action OR state] [framing/detail]
-  BAIK: "indonesian rupiah banknotes counting", "fuel nozzle pumping gas car", "oil pump jack working sunset", "empty wallet hands close up", "usd idr currency exchange chart"
-  JELEK: "success", "money", "aging", "business", "economy", "inflation", "people talking", "city skyline"
-  behind_person: CLOSE-UP object/icon fill-frame. LARANG wide landscape/cityscape.
-- duration 1.5-3.0; min jarak 6 detik antar item sama placement.
-- placement: full_frame | behind_person
-- template: word_pop_typography | line_reveal_typography | particle_text_burst
-
+- at_time = timestamp dari transkrip di atas; min 3.0s; max duration-1
+- full_frame dan behind_person TIDAK boleh waktu sama (min jarak 4s)
+- Ideal: 1 full_frame + 1 behind_person
+- keyword = ENGLISH stock query 3-8 kata, KONKRET visual dari konteks clip ini (boleh refine seed di atas)
+  JELEK: abstract mood "success", "lifestyle", "viral", "city skyline generic"
+  behind_person: CLOSE-UP object fill-frame (bukan wide landscape)
+- duration 1.5-3.0; min jarak 6s antar item placement sama
+- placement + visual_category + template wajib
+- Analisa dinamis dari transkrip — jangan andalkan daftar kata domain tetap
 
 OUTPUT RAW JSON:
-{{"clips":{{"1":[{{"at_time":12.5,"keyword":"indonesian rupiah banknotes counting","duration":2.5,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography"}},{{"at_time":22.0,"keyword":"fuel nozzle pumping gas car","duration":2.0,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography"}}]}}}}
+{{"items":[{{"at_time":12.5,"keyword":"concrete stock query from this clip","duration":2.5,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography"}},{{"at_time":22.0,"keyword":"another concrete closeup object","duration":2.0,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography"}}]}}
 """
-
-        parsed: dict = {}
-        logger.info(
-            "v2_analyzer: B-roll keyword recovery via 9router model=%s",
-            self._model_pass1,
-        )
         try:
             raw = await asyncio.wait_for(
                 asyncio.to_thread(
                     self._call_groq_llm,
                     prompt,
                     self._model_pass1,
-                    1800,
+                    1200,
                 ),
                 timeout=self._timeout,
             )
             parsed = self._parse_json_response(raw)
         except Exception as exc:
-            logger.warning("v2_analyzer: clip B-roll recovery failed: %s", exc)
+            logger.warning("v2_analyzer: B-roll clip %s LLM fail: %s", rank, exc)
+            return []
 
+        raw_items = []
+        if isinstance(parsed, dict):
+            if isinstance(parsed.get("items"), list):
+                raw_items = parsed["items"]
+            else:
+                clips_map = parsed.get("clips") or {}
+                if isinstance(clips_map, dict):
+                    raw_items = clips_map.get(str(rank), clips_map.get(rank, []))
+        if not isinstance(raw_items, list):
+            return []
+        return self._normalize_broll_items(
+            raw_items, words=words, duration=duration, max_items=max_items
+        )
 
-        raw_map = parsed.get("clips", {}) if isinstance(parsed, dict) else {}
-        if not isinstance(raw_map, dict):
-            raw_map = {}
-
+    def _normalize_broll_items(
+        self,
+        raw_items: list,
+        *,
+        words: list[dict],
+        duration: float,
+        max_items: int,
+    ) -> list[dict]:
+        """Anchor AI broll rows to real word timestamps + sanitize keywords."""
         allowed_templates = {
             "word_pop_typography",
             "line_reveal_typography",
             "particle_text_burst",
         }
         allowed_categories = {"footage", "icon", "motion_graphic", "reaction"}
-        result: dict[str, list[dict]] = {}
-
-        for rank, words in eligible.items():
-            duration = float(clip_durations.get(rank, 0.0) or 0.0)
-            allowed_times = [float(word["start"]) for word in words]
-            raw_items = raw_map.get(str(rank), raw_map.get(rank, []))
-            if not isinstance(raw_items, list):
-                raw_items = []
-            items: list[dict] = []
-
-            for item in raw_items:
-                if not isinstance(item, dict):
-                    continue
-                raw_kw = " ".join(str(item.get("keyword") or "").split())[:80]
-                keyword = sanitize_stock_keyword(raw_kw, placement=str(item.get("placement") or "")) or raw_kw
-                if not keyword:
-                    continue
-                try:
-                    requested_time = float(item.get("at_time"))
-                except (TypeError, ValueError):
-                    continue
-                at_time = min(allowed_times, key=lambda value: abs(value - requested_time))
-                if at_time < 3.0 or at_time >= duration - 1.0:
-                    continue
-                if any(abs(at_time - existing["at_time"]) < 6.0 for existing in items):
-                    continue
-                try:
-                    item_duration = float(item.get("duration", 2.25))
-                except (TypeError, ValueError):
-                    item_duration = 2.25
-                item_duration = min(3.0, max(1.5, item_duration), duration - at_time)
-                if item_duration < 1.0:
-                    continue
-                template = str(item.get("template") or "word_pop_typography")
-                category = str(item.get("visual_category") or "footage")
-                if category not in allowed_categories:
-                    category = "footage"
-                placement = str(item.get("placement") or "").strip().lower()
-                if placement in {"fullframe", "splice", "replace"}:
-                    placement = "full_frame"
-                elif placement in {"behind", "top_overlay", "overlay", "top"}:
-                    placement = "behind_person"
-                elif placement not in {"full_frame", "behind_person"}:
-                    placement = (
-                        "behind_person"
-                        if category in {"icon", "motion_graphic"}
-                        else "full_frame"
-                    )
-                items.append({
-                    "at_time": round(at_time, 3),
-                    "keyword": keyword,
-                    "duration": round(item_duration, 3),
-                    "visual_category": category,
-                    "template": template if template in allowed_templates else "word_pop_typography",
-                    "placement": placement,
-                })
-                if len(items) >= max_items:
-                    break
-
-
-            if not items:
-                items = self._fallback_broll_from_words(words, duration, limit=1)
-            if items:
-                result[str(rank)] = items
-
-        return result
+        allowed_times = [float(w["start"]) for w in words if "start" in w]
+        if not allowed_times:
+            return []
+        items: list[dict] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            raw_kw = " ".join(str(item.get("keyword") or "").split())[:80]
+            keyword = (
+                sanitize_stock_keyword(raw_kw, placement=str(item.get("placement") or ""))
+                or raw_kw
+            )
+            if not keyword:
+                continue
+            try:
+                requested_time = float(item.get("at_time"))
+            except (TypeError, ValueError):
+                continue
+            at_time = min(allowed_times, key=lambda value: abs(value - requested_time))
+            if at_time < 3.0 or at_time >= duration - 1.0:
+                continue
+            if any(abs(at_time - existing["at_time"]) < 4.0 for existing in items):
+                continue
+            try:
+                item_duration = float(item.get("duration", 2.25))
+            except (TypeError, ValueError):
+                item_duration = 2.25
+            item_duration = min(3.0, max(1.5, item_duration), duration - at_time)
+            if item_duration < 1.0:
+                continue
+            template = str(item.get("template") or "word_pop_typography")
+            category = str(item.get("visual_category") or "footage")
+            if category not in allowed_categories:
+                category = "footage"
+            placement = str(item.get("placement") or "").strip().lower()
+            if placement in {"fullframe", "splice", "replace"}:
+                placement = "full_frame"
+            elif placement in {"behind", "top_overlay", "overlay", "top"}:
+                placement = "behind_person"
+            elif placement not in {"full_frame", "behind_person"}:
+                placement = (
+                    "behind_person"
+                    if category in {"icon", "motion_graphic"}
+                    else "full_frame"
+                )
+            # dual-track: avoid same placement stack < 6s
+            if any(
+                e["placement"] == placement and abs(at_time - e["at_time"]) < 6.0
+                for e in items
+            ):
+                continue
+            items.append({
+                "at_time": round(at_time, 3),
+                "keyword": keyword,
+                "duration": round(item_duration, 3),
+                "visual_category": category,
+                "template": template if template in allowed_templates else "word_pop_typography",
+                "placement": placement,
+            })
+            if len(items) >= max_items:
+                break
+        return items
 
     @staticmethod
     def _fallback_broll_from_words(
         words: list[dict],
         duration: float,
         limit: int = 1,
+        visual_entities: list[dict] | None = None,
     ) -> list[dict]:
-        """Pick a sparse concrete phrase when the optional AI call is down."""
-        stopwords = {
-            "yang", "dan", "atau", "dari", "untuk", "dengan", "adalah", "itu",
-            "ini", "ada", "akan", "bisa", "jadi", "juga", "karena", "kalau",
-            "kita", "mereka", "saya", "aku", "kamu", "dia", "nya", "kan",
-            "lagi", "sudah", "belum", "lebih", "paling", "satu", "sebuah",
-            "the", "and", "that", "this", "with", "from", "have", "has",
-            "was", "were", "are", "you", "your", "they", "their", "about",
-            "basically", "gitu", "lah", "nih", "sih", "aja", "kayak",
-        }
+        """Pick sparse concrete phrases when AI broll call is down.
+
+        Prefer AI visual_entities (dynamic queries). No domain synonym maps.
+        """
+        selected: list[dict] = []
+        # 1) AI visual entities first (already have query_en) — no stopword list
+        for o in visual_entities or []:
+            if not isinstance(o, dict):
+                continue
+            try:
+                start = float(o.get("start", 0) or 0)
+            except (TypeError, ValueError):
+                start = 0.0
+            if start < 3.0 or (duration > 0 and start >= duration - 1.0):
+                start = max(3.0, min(duration * 0.35, duration - 2.0)) if duration > 4 else 3.0
+            kw = (
+                " ".join(str(o.get("query_en") or o.get("query_id") or o.get("word") or "").split())
+            )
+            if not kw:
+                continue
+            if any(abs(start - item["at_time"]) < 8.0 for item in selected):
+                continue
+            kw = sanitize_stock_keyword(kw, placement="behind_person") or kw
+            placement = "behind_person" if len(selected) % 2 else "full_frame"
+            selected.append({
+                "at_time": round(start, 3),
+                "keyword": kw[:80],
+                "duration": round(min(2.25, duration - start), 3),
+                "visual_category": "footage",
+                "template": "word_pop_typography",
+                "placement": placement,
+            })
+            if len(selected) >= max(0, int(limit)):
+                return sorted(selected, key=lambda item: item["at_time"])
+
         content_words: list[tuple[int, str, float]] = []
         for index, word in enumerate(words):
             raw = str(word.get("word") or "").strip()
@@ -536,7 +935,9 @@ OUTPUT RAW JSON:
                 continue
             if start < 3.0 or start >= duration - 1.0:
                 continue
-            if len(token) < 4 or token in stopwords:
+            # Offline only: length gate. No hardcoded stop/mood lexicon —
+            # primary path is AI visual_entities above.
+            if len(token) < 4:
                 continue
             content_words.append((index, raw, start))
 
@@ -554,16 +955,17 @@ OUTPUT RAW JSON:
                 score += 8
             candidates.append((float(score), start, keyword))
 
-        selected: list[dict] = []
         for _score, start, keyword in sorted(candidates, reverse=True):
             if any(abs(start - item["at_time"]) < 8.0 for item in selected):
                 continue
+            placement = "behind_person" if len(selected) % 2 else "full_frame"
             selected.append({
                 "at_time": round(start, 3),
                 "keyword": keyword[:80],
                 "duration": round(min(2.25, duration - start), 3),
                 "visual_category": "footage",
                 "template": "word_pop_typography",
+                "placement": placement,
             })
             if len(selected) >= max(0, int(limit)):
                 break
@@ -578,135 +980,179 @@ OUTPUT RAW JSON:
         blocked_ranges_by_clip: Optional[dict[int, list[tuple[float, float]]]] = None,
         max_events: int = 2,
     ) -> dict[int, list[dict]]:
-        """Choose sparse cinematic text moments through 9router.
+        """Per-clip cinematic text via 9router (1 LLM call / clip).
 
-        Sends the FULL word-level transcript per clip to the AI (no sampling).
-        Enforces minimum 1 event per clip. Retries 9router up to 2 times;
-        on double failure falls back to the sampled-context approach.
-
-        The model selects only Whisper word IDs. ``anchor_text_emphasis_response``
-        then reconstructs text/timing locally and enforces spacing, hook,
-        B-roll, and duration rules.
+        Avoids one mega multi-clip prompt — each clip keeps full word IDs in a
+        small context window. Model picks Whisper word IDs only; local anchor
+        rebuilds text/timing + spacing rules.
         """
         if max_events <= 0 or not any(clips_words.values()):
             return {}
 
-        # Build full context — all words per clip, no sampling
-        context, _lookup = build_text_emphasis_context_full(clips_words)
-        if not context:
+        safe_style = normalise_text_emphasis_style(style)
+        max_ev = min(2, int(max_events))
+        eligible = {
+            int(rank): words
+            for rank, words in clips_words.items()
+            if words and any(str(w.get("word") or "").strip() for w in words)
+        }
+        if not eligible:
             return {}
 
-        safe_style = normalise_text_emphasis_style(style)
-        effect_instruction = (
-            "Pilih effect paling cocok dari behind_person, spotlight, side_label, "
-            "floating_text, auto_avoid, around_head, depth_text, kinetic_type."
-            if safe_style["effectMode"] == "auto"
-            else f'Semua pilihan WAJIB memakai effect "{safe_style["effectMode"]}".'
-        )
-        prompt = f"""Kamu adalah senior motion editor video pendek. Pilih frasa yang layak ditonjolkan sebagai cinematic text.
-
-TRANSKRIP WORD-ID (lengkap per clip):
-{context}
-
-ATURAN KETAT:
-- WAJIB minimal 1 event per clip, maksimal {min(2, max_events)} event per clip. Tidak boleh 0.
-- Frasa 1-7 kata, harus memakai start_word dan end_word yang berurutan pada clip yang sama.
-- Prioritaskan angka mengejutkan, tesis utama, kontras tajam, istilah inti, atau punchline.
-- Hindari filler, salam, kalimat generik, dan jangan memilih dua frasa yang berdekatan (min 6 detik jarak).
-- behind_person: pernyataan hero sangat kuat (teks di belakang subjek, butuh segmentasi orang).
-- spotlight: angka/punchline (hero text + vignette).
-- side_label: istilah atau konteks singkat (label editorial di sisi).
-- floating_text: teks melayang mengikuti gerakan orang (gentle bob).
-- auto_avoid: teks otomatis menghindari orang (ke area kosong terbesar).
-- around_head: teks mengorbit di sekitar kepala orang.
-- depth_text: teks dengan parallax kedalaman (dekat/jauh mengikuti posisi orang).
-- kinetic_type: tipografi kinetik kata-per-kata (cocok untuk frasa pendek dan ritmis).
-- {effect_instruction}
-- position hanya left, center, atau right.
-- Jangan membuat ulang teks dan jangan membuat timestamp.
-
-OUTPUT RAW JSON SAJA:
-{{"clips":{{"1":[{{"start_word":"W0012","end_word":"W0015","effect":"behind_person","position":"center","reason":"tesis utama"}}]}}}}
-"""
         model = (
             settings.NINE_ROUTER_AI_LAYER_MODEL
             if settings.use_nine_router
             else self._model_pass1
         )
+        sem = asyncio.Semaphore(2)
+        logger.info(
+            "v2_analyzer: text emphasis per-clip model=%s clips=%d",
+            model,
+            len(eligible),
+        )
 
-        # Retry 9router up to 2 attempts with full context
+        async def _one(rank: int, words: list[dict]) -> tuple[int, list[dict]]:
+            async with sem:
+                single_words = {rank: words}
+                single_durs = {rank: float(clip_durations.get(rank, 0.0) or 0.0)}
+                single_min = {
+                    rank: (min_start_by_clip or {}).get(rank, 1.0)
+                }
+                single_blocked = {
+                    rank: (blocked_ranges_by_clip or {}).get(rank, [])
+                }
+                try:
+                    parsed = await self._analyze_text_emphasis_one_clip(
+                        rank=rank,
+                        words=words,
+                        style=safe_style,
+                        model=model,
+                        max_events=max_ev,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "v2_analyzer: text emphasis rank=%s failed: %s", rank, exc
+                    )
+                    parsed = {}
+                anchored = anchor_text_emphasis_response(
+                    parsed or {},
+                    single_words,
+                    single_durs,
+                    style=safe_style,
+                    min_start_by_clip=single_min,
+                    blocked_ranges_by_clip=single_blocked,
+                    max_events=max_ev,
+                )
+                return rank, list(anchored.get(rank, []))
+
+        pairs = await asyncio.gather(
+            *[_one(rank, words) for rank, words in eligible.items()]
+        )
+        return {rank: events for rank, events in pairs if events}
+
+    async def _analyze_text_emphasis_one_clip(
+        self,
+        *,
+        rank: int,
+        words: list[dict],
+        style: dict,
+        model: str,
+        max_events: int = 2,
+    ) -> dict:
+        """Single-clip text-emphasis LLM; full words first, sampled fallback."""
+        effect_instruction = (
+            "Pilih effect paling cocok dari behind_person, spotlight, side_label, "
+            "floating_text, auto_avoid, around_head, depth_text, kinetic_type."
+            if style.get("effectMode") == "auto"
+            else f'Semua pilihan WAJIB memakai effect "{style.get("effectMode")}".'
+        )
+        # Prefer highlight seeds so AI locks onto punch words
+        from src.infrastructure.clip_quality_helpers import extract_highlight_keywords
+        seeds = extract_highlight_keywords(words, limit=8)
+        seed_txt = ", ".join(seeds[:8]) if seeds else "(none)"
+
+        context, _ = build_text_emphasis_context_full({rank: words})
+        if not context:
+            return {}
+
+        # Cap very long clips — keep word IDs, just truncate section tail
+        if len(context) > 10000:
+            context = context[:10000]
+
+        prompt = f"""Kamu senior motion editor 1 short clip. Pilih frasa cinematic text.
+
+CLIP #{rank} saja. SEED HIGHLIGHT: {seed_txt}
+
+TRANSKRIP WORD-ID (clip ini):
+{context}
+
+ATURAN:
+- WAJIB 1–{max_events} event. Frasa 1-7 kata; start_word+end_word berurutan.
+- Prioritas: angka, tesis, kontras, istilah inti, punchline. Hindari filler.
+- Min jarak 6s antar event.
+- Effects: behind_person | spotlight | side_label | floating_text | auto_avoid | around_head | depth_text | kinetic_type
+- {effect_instruction}
+- position: left | center | right
+- Jangan rewrite teks / timestamp — pilih word ID saja.
+
+OUTPUT RAW JSON:
+{{"clips":{{"{rank}":[{{"start_word":"W0012","end_word":"W0015","effect":"behind_person","position":"center","reason":"tesis"}}]}}}}
+"""
         parsed = None
         last_error = None
         for attempt in range(2):
             try:
                 raw = await asyncio.wait_for(
-                    asyncio.to_thread(self._call_groq_llm, prompt, model, 2400),
+                    asyncio.to_thread(self._call_groq_llm, prompt, model, 1200),
                     timeout=self._timeout,
                 )
                 parsed = self._parse_json_response(raw)
                 if parsed:
-                    break
+                    return parsed
             except Exception as exc:
                 last_error = exc
                 logger.warning(
-                    f"v2_analyzer: text emphasis attempt {attempt + 1}/2 failed: {exc}"
+                    "v2_analyzer: text emphasis clip %s attempt %s/2: %s",
+                    rank, attempt + 1, exc,
                 )
                 if attempt < 1:
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(2)
 
-        # If both 9router attempts failed, fallback to sampled context approach
-        if parsed is None:
-            logger.warning(
-                f"v2_analyzer: text emphasis 9router failed 2x ({last_error}), "
-                f"using sampled fallback"
-            )
-            try:
-                fallback_context, _ = build_text_emphasis_context(clips_words)
-                if fallback_context:
-                    fallback_prompt = f"""Kamu adalah senior motion editor video pendek. Pilih frasa yang layak ditonjolkan sebagai cinematic text.
+        # Sampled fallback for this clip only
+        logger.warning(
+            "v2_analyzer: text emphasis clip %s full fail (%s), sampled fallback",
+            rank, last_error,
+        )
+        try:
+            fallback_context, _ = build_text_emphasis_context({rank: words})
+            if not fallback_context:
+                return {}
+            fallback_prompt = f"""Kamu senior motion editor 1 short clip. Pilih frasa cinematic.
 
-TRANSKRIP WORD-ID:
+CLIP #{rank}. SEED: {seed_txt}
+
+TRANSKRIP WORD-ID (sampled):
 {fallback_context}
 
-ATURAN KETAT:
-- WAJIB minimal 1 event per clip, maksimal {min(2, max_events)} event per clip. Tidak boleh 0.
-- Frasa 1-7 kata, harus memakai start_word dan end_word yang berurutan pada clip yang sama.
-- Jangan melewati penanda [... gap ...].
-- Prioritaskan angka mengejutkan, tesis utama, kontras tajam, istilah inti, atau punchline.
-- Hindari filler, salam, kalimat generik, dan jangan memilih dua frasa yang berdekatan.
-- behind_person: pernyataan hero sangat kuat (teks di belakang subjek).
-- spotlight: angka/punchline (hero text + vignette).
-- side_label: istilah atau konteks singkat (label editorial di sisi).
-- floating_text: teks melayang mengikuti gerakan orang.
-- auto_avoid: teks otomatis menghindari orang.
-- around_head: teks mengorbit di sekitar kepala orang.
-- depth_text: teks dengan parallax kedalaman.
-- kinetic_type: tipografi kinetik kata-per-kata.
-- {effect_instruction}
-- position hanya left, center, atau right.
-- Jangan membuat ulang teks dan jangan membuat timestamp.
+ATURAN: 1–{max_events} event; frasa 1-7 kata; start/end word ID berurutan; jangan span [... gap ...].
+Effects: behind_person|spotlight|side_label|floating_text|auto_avoid|around_head|depth_text|kinetic_type
+{effect_instruction}
+position: left|center|right. Jangan rewrite teks.
 
-OUTPUT RAW JSON SAJA:
-{{"clips":{{"1":[{{"start_word":"W0012","end_word":"W0015","effect":"behind_person","position":"center","reason":"tesis utama"}}]}}}}
+OUTPUT RAW JSON:
+{{"clips":{{"{rank}":[{{"start_word":"W0012","end_word":"W0015","effect":"spotlight","position":"center","reason":"angka"}}]}}}}
 """
-                    raw = await asyncio.wait_for(
-                        asyncio.to_thread(self._call_groq_llm, fallback_prompt, model, 1800),
-                        timeout=self._timeout,
-                    )
-                    parsed = self._parse_json_response(raw)
-            except Exception as exc:
-                logger.warning(f"v2_analyzer: text emphasis sampled fallback also failed: {exc}")
-                parsed = {}
-
-        return anchor_text_emphasis_response(
-            parsed or {},
-            clips_words,
-            clip_durations,
-            style=safe_style,
-            min_start_by_clip=min_start_by_clip,
-            blocked_ranges_by_clip=blocked_ranges_by_clip,
-            max_events=min(2, max_events),
-        )
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(self._call_groq_llm, fallback_prompt, model, 1000),
+                timeout=self._timeout,
+            )
+            return self._parse_json_response(raw) or {}
+        except Exception as exc:
+            logger.warning(
+                "v2_analyzer: text emphasis clip %s sampled fallback failed: %s",
+                rank, exc,
+            )
+            return {}
 
     async def _analyze_highlights_impl(
         self, transcript: TranscriptResult, video_duration: float, max_clips: int
@@ -1333,7 +1779,11 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
     def _generate_creative_direction(
         self, clips: list[HighlightCandidate], video_duration: float
     ) -> dict:
-        """Generate creative direction + B-Roll suggestions for selected clips."""
+        """Generate job-level creative direction only (colors/mood).
+
+        B-roll keywords are planned later per-clip from word-level transcript
+        (analyze_broll_for_clips) — multi-clip batch here was too coarse.
+        """
         clips_context = "\n".join([
             f"  Clip {c.rank}: [{c.start:.0f}s → {c.end:.0f}s] "
             f"score={c.score}, type={c.content_type}, energy={c.speaker_energy}\n"
@@ -1341,43 +1791,31 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             for c in clips
         ])
 
-        prompt = f"""Kamu adalah visual director dan copywriter viral. Berdasarkan clip yang terpilih, tentukan:
+        prompt = f"""Kamu adalah visual director viral shorts. Tentukan CREATIVE DIRECTION konsisten untuk SEMUA clips.
 
 ═══ CLIP TERPILIH ═══
 {clips_context}
 
-═══ TUGAS 1: CREATIVE DIRECTION ═══
-Tentukan visual identity yang konsisten untuk SEMUA clips:
-- primary_color: warna utama aksen (hex, cocok dengan mood)
-- secondary_color: warna highlight/emphasis (hex)
-- background_accent: warna tint overlay (hex gelap)
+Tugas — visual identity saja (bukan B-roll):
+- primary_color: hex aksen utama
+- secondary_color: hex highlight
+- background_accent: hex tint gelap
 - typography_mood: "bold_impact" / "elegant_minimal" / "playful" / "dramatic"
 - energy_level: "high" / "medium" / "chill"
 - transition_style: "fast_cuts" / "smooth" / "kinetic"
 - music_mood: "energetic" / "chill" / "dramatic" / "suspense"
 - hook_animation: "fade_scale" / "slide_up" / "glitch" / "typewriter"
 
-═══ TUGAS 2: B-ROLL SUGGESTIONS ═══
-Untuk SETIAP clip, tentukan 2-4 momen B-Roll di WAKTU BERBEDA (min 4 detik jarak):
-- "at_time": offset DALAM clip (detik dari awal clip, min 3.0)
-- "keyword": query stock ENGLISH 3-6 kata, KONKRET, mirror topik clip (BUKAN abstrak).
-  Format: [subject] [action/context] [detail]
-  BAIK: "indonesian rupiah banknotes counting", "fuel nozzle pumping gas car", "oil pump jack working sunset"
-  JELEK: "SUCCESS", "MONEY", "AGING", "ECONOMY" (abstrak)
-  behind_person: close-up objek/icon jelas, bukan wide landscape.
-- "template": "word_pop_typography" / "line_reveal_typography" / "particle_text_burst"
-- "duration": 1.5 - 3.0 detik
-- "visual_category": "footage" / "icon" / "motion_graphic" / "reaction"
-- "placement": "full_frame" (stock video ganti layar, person hilang) ATAU
-  "behind_person" (image/icon di belakang person top-half, person tetap)
-  Ideal mix: 1-2 full_frame + 1-2 behind_person. Auto, bukan template tetap.
-
-OUTPUT FORMAT — RAW JSON (tanpa markdown):
-{{"creative_direction": {{"primary_color": "<hex>", "secondary_color": "<hex>", "background_accent": "<hex>", "typography_mood": "<mood>", "energy_level": "<level>", "transition_style": "<style>", "music_mood": "<mood>", "hook_animation": "<anim>"}}, "broll_suggestions": {{"1": [{{"at_time": 5.0, "keyword": "elderly couple walking park", "template": "word_pop_typography", "duration": 2.5, "visual_category": "footage", "placement": "full_frame"}}, {{"at_time": 18.0, "keyword": "heart rate monitor icon", "template": "word_pop_typography", "duration": 2.0, "visual_category": "icon", "placement": "behind_person"}}]}}}}"""
-
+OUTPUT RAW JSON (tanpa markdown):
+{{"creative_direction": {{"primary_color": "#FFFFFF", "secondary_color": "#FFD700", "background_accent": "#000000", "typography_mood": "bold_impact", "energy_level": "high", "transition_style": "fast_cuts", "music_mood": "energetic", "hook_animation": "fade_scale"}}, "broll_suggestions": {{}}}}"""
 
         raw = self._call_groq_llm(prompt, model=self._model_pass1)
-        return self._parse_json_response(raw)
+        parsed = self._parse_json_response(raw)
+        if not isinstance(parsed, dict):
+            return {"creative_direction": {}, "broll_suggestions": {}}
+        # Force empty broll here — filled later per-clip after Whisper
+        parsed["broll_suggestions"] = {}
+        return parsed
 
     # ─── Groq LLM API Call ────────────────────────────────────────────────────
 

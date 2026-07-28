@@ -356,3 +356,30 @@ CREATE TABLE IF NOT EXISTS reframe_tuning_configs (
 
 CREATE INDEX IF NOT EXISTS idx_user_features_user ON user_features(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_features_code ON user_features(feature_code);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- v5.0 Object Image Overlay Configs (AI visual entities → photo card style)
+-- Entity words/queries come from AI per-clip; this table stores STYLE only.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS object_overlay_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER DEFAULT NULL,          -- NULL = global default, user_id = per-user
+    enabled INTEGER NOT NULL DEFAULT 1,
+    max_per_clip INTEGER NOT NULL DEFAULT 3,
+    box_size_ratio REAL NOT NULL DEFAULT 0.28,
+    corner_radius INTEGER NOT NULL DEFAULT 18,
+    position TEXT NOT NULL DEFAULT 'top_right',
+    animation TEXT NOT NULL DEFAULT 'slide_right',
+    duration_sec REAL NOT NULL DEFAULT 2.4,
+    margin_ratio REAL NOT NULL DEFAULT 0.04,
+    text_color TEXT NOT NULL DEFAULT '255,255,255',
+    bg_color TEXT NOT NULL DEFAULT '20,20,24',
+    border_color TEXT NOT NULL DEFAULT '255,255,255',
+    font_scale REAL NOT NULL DEFAULT 0.55,
+    opacity REAL NOT NULL DEFAULT 0.95,
+    min_relevance REAL NOT NULL DEFAULT 0.35,
+    show_label INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

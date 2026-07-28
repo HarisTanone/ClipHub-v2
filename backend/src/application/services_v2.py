@@ -823,6 +823,17 @@ class V2PipelineService:
                 clips=clips,
                 clips_with_words=clips_with_words,
             )
+            # Draft json_analisa early so asset search uses ID+EN seeds from it.
+            try:
+                self._write_early_json_analisa(
+                    job=job,
+                    job_id=job_id,
+                    clips=clips,
+                    clips_with_words=clips_with_words,
+                    output_dir=output_dir,
+                )
+            except Exception as e:
+                logger.warning(f"[{job_id}] Early json_analisa write failed: {e}")
             # The B-roll renderer keeps the same zero-based duration and audio
             # clock, so word timestamps and lip-sync remain unchanged.
             await self._apply_brolls(
@@ -1181,7 +1192,31 @@ class V2PipelineService:
         await self._repo.update_status(job_id, JobStatus.BROLL)
         if self._asset_fetcher:
             try:
-                await self._asset_fetcher.fetch_assets(suggestions, creative_direction)
+                # Footage search seeds from early json_analisa (ID + EN + objects)
+                from src.infrastructure.object_image_overlay import (
+                    footage_keywords_from_analisa,
+                    load_clip_analisa,
+                )
+                analisa_q: list[str] = []
+                seen_q: set[str] = set()
+                for clip in clips:
+                    analisa = load_clip_analisa(output_dir, clip.rank)
+                    for kw in footage_keywords_from_analisa(analisa):
+                        low = kw.lower()
+                        if low not in seen_q:
+                            seen_q.add(low)
+                            analisa_q.append(kw)
+                await self._asset_fetcher.fetch_assets(
+                    suggestions,
+                    creative_direction,
+                    analisa_extra_queries=analisa_q[:24] if analisa_q else None,
+                )
+            except TypeError:
+                # Older IAssetFetcher signature without analisa_extra_queries
+                try:
+                    await self._asset_fetcher.fetch_assets(suggestions, creative_direction)
+                except Exception as exc:
+                    logger.warning(f"[{job_id}] B-roll asset search failed; using fallback: {exc}")
             except Exception as exc:
                 # The injector can still render its typography fallback.
                 logger.warning(f"[{job_id}] B-roll asset search failed; using fallback: {exc}")
@@ -1329,6 +1364,16 @@ class V2PipelineService:
                 clips_with_words=getattr(self, "_last_clips_with_words", None),
             )
 
+        # ─── Step 10.8: Object image+text overlay (noun → stock photo card) ──
+        await self._apply_object_image_overlay(
+            job=job,
+            job_id=job_id,
+            clips=clips,
+            output_dir=output_dir,
+            trim_results=trim_results,
+            clips_with_words=getattr(self, "_last_clips_with_words", None),
+        )
+
         # Drop intermediate footage only after top-behind bake.
         footage_dir = os.path.join(output_dir, "broll_footage")
         if os.path.exists(footage_dir):
@@ -1450,6 +1495,200 @@ class V2PipelineService:
             f"[{job_id}] Top behind-subject overlay: {applied}/{len(clips)} clips"
         )
 
+    async def _apply_object_image_overlay(
+        self,
+        job: Job,
+        job_id: str,
+        clips: list[Clip],
+        output_dir: str,
+        trim_results: dict[int, bool],
+        clips_with_words: dict[int, list[dict]] | None = None,
+    ) -> None:
+        """AI visual entities → stock photo card + styled label on video.
+
+        Style from DB object_overlay_configs (or env defaults). Stack: image then text.
+        Animation/position/size/radius all configurable. No domain lexicon.
+        """
+        from src.infrastructure.object_image_overlay import (
+            ObjectImageOverlayRenderer,
+            load_clip_analisa,
+            load_object_overlay_style,
+            objects_from_analisa,
+            pick_object_mentions,
+        )
+        from src.infrastructure.clip_quality_helpers import extract_objects
+
+        try:
+            style = load_object_overlay_style(getattr(job, "user_id", None))
+        except Exception:
+            style = load_object_overlay_style(None)
+        if not style.get("enabled", True) or not getattr(settings, "OBJECT_OVERLAY_ENABLED", True):
+            for c in clips:
+                c.object_overlay_events = []
+            return
+
+        words_map = clips_with_words or {}
+        renderer = ObjectImageOverlayRenderer()
+        applied = 0
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                clip.object_overlay_events = []
+                continue
+
+            clip_dur = max(0.0, float(clip.end) - float(clip.start))
+            words = words_map.get(clip.rank) or []
+            # Prefer AI visual_entities → analisa objects → heuristic (no lexicon)
+            ve = list(getattr(clip, "visual_entities", None) or [])
+            analisa = load_clip_analisa(output_dir, clip.rank)
+            objects = objects_from_analisa(analisa) if analisa else []
+            if not objects and ve:
+                objects = list(ve)
+            if not objects:
+                objects = extract_objects(words, visual_entities=ve)
+
+            # Block full-frame splice + top-overlay + text-emphasis windows lightly
+            blocked: list[tuple[float, float]] = []
+            for s in clip.broll_suggestions or []:
+                place = (getattr(s, "placement", "") or "").lower()
+                if place in ("full_frame", "splice", ""):
+                    # only hard-block full_frame with real asset
+                    if place == "full_frame" or getattr(s, "splice_segment", None):
+                        blocked.append((float(s.at_time), float(s.at_time) + float(s.duration)))
+            for ev in getattr(clip, "top_overlay_events", None) or []:
+                try:
+                    blocked.append((float(ev["at_time"]), float(ev["at_time"]) + float(ev["duration"])))
+                except (KeyError, TypeError, ValueError):
+                    pass
+            for ev in getattr(clip, "text_emphasis_events", None) or []:
+                try:
+                    st = float(ev.get("start", ev.get("at_time", 0)) or 0)
+                    en = float(ev.get("end", st + 1.5) or st + 1.5)
+                    blocked.append((st, en))
+                except (TypeError, ValueError):
+                    pass
+
+            mentions = pick_object_mentions(
+                words,
+                objects,
+                max_items=int(style.get("max_per_clip", 3)),
+                clip_duration=clip_dur,
+                blocked_ranges=blocked,
+                style=style,
+            )
+            if not mentions:
+                clip.object_overlay_events = []
+                continue
+
+            events = await renderer.resolve_events(
+                mentions,
+                output_dir=output_dir,
+                clip_hook=clip.hook or "",
+                clip_reason=clip.reason or "",
+                style=style,
+            )
+            if not events:
+                clip.object_overlay_events = []
+                continue
+
+            reframed = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+            base = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+            brolled = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+            if os.path.exists(brolled):
+                input_path = brolled
+            elif os.path.exists(reframed):
+                input_path = reframed
+            else:
+                input_path = base
+            if not os.path.exists(input_path):
+                clip.object_overlay_events = []
+                continue
+
+            out_path = f"{output_dir}/clip_{clip.rank:02d}_obj_overlay.mp4"
+            try:
+                result = await renderer.apply_to_clip(
+                    video_path=input_path,
+                    events=events,
+                    output_path=out_path,
+                    style=style,
+                )
+            except Exception as exc:
+                logger.warning(f"[{job_id}] Object overlay failed clip {clip.rank}: {exc}")
+                clip.object_overlay_events = []
+                continue
+
+            if result and os.path.exists(out_path):
+                target = brolled
+                try:
+                    if os.path.exists(target):
+                        os.remove(target)
+                    os.rename(out_path, target)
+                except OSError:
+                    shutil.move(out_path, target)
+                clip.object_overlay_events = [e.to_dict() for e in events]
+                applied += 1
+            else:
+                clip.object_overlay_events = []
+
+        logger.info(
+            f"[{job_id}] Object image overlay: {applied}/{len(clips)} clips"
+        )
+
+    def _write_early_json_analisa(
+        self,
+        job: Job,
+        job_id: str,
+        clips: list[Clip],
+        clips_with_words: dict[int, list[dict]],
+        output_dir: str,
+    ) -> None:
+        """Draft per-clip analisa BEFORE asset fetch — seeds ID+EN footage search."""
+        from src.infrastructure.clip_quality_helpers import build_clip_analisa, write_split_job_meta
+        from src.domain.entities import VisualCategory
+
+        payloads = []
+        for c in clips:
+            words = clips_with_words.get(c.rank, []) if isinstance(clips_with_words, dict) else []
+            broll_dicts = []
+            for s in (c.broll_suggestions or []):
+                vc = s.visual_category
+                broll_dicts.append({
+                    "at_time": s.at_time,
+                    "keyword": s.keyword,
+                    "template": s.template,
+                    "duration": s.duration,
+                    "reason": getattr(s, "reason", "") or "",
+                    "placement": getattr(s, "placement", "") or "",
+                    "visual_category": (
+                        vc.value if isinstance(vc, VisualCategory) else str(vc or "")
+                    ),
+                })
+            payloads.append(build_clip_analisa(
+                no=c.rank,
+                rank=c.rank,
+                start=c.start,
+                end=c.end,
+                hook=c.hook or "",
+                reason=c.reason or "",
+                score=c.score,
+                words=words,
+                broll_suggestions=broll_dicts,
+                text_emphasis_events=list(getattr(c, "text_emphasis_events", None) or [])[:2],
+                top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
+                object_overlay_events=list(getattr(c, "object_overlay_events", None) or []),
+                visual_entities=list(getattr(c, "visual_entities", None) or []),
+            ))
+        write_split_job_meta(
+            output_dir,
+            job_id=job_id,
+            youtube_url=job.youtube_url,
+            aspect_ratio=job.target_aspect_ratio,
+            created_at=str(job.created_at) if job.created_at else None,
+            clip_payloads=payloads,
+            clips_total=len(clips),
+            clips_success=len(clips),
+        )
+        logger.info(f"[{job_id}] Early json_analisa written for footage search")
+
     async def _ensure_broll_suggestions(
         self,
         job: Job,
@@ -1457,22 +1696,60 @@ class V2PipelineService:
         clips: list[Clip],
         clips_with_words: dict[int, list[dict]],
     ) -> None:
-        """Fill only missing B-roll plans without replacing valid AI output."""
-        if not job.broll_enabled:
+        """AI visual entities always; per-clip B-roll replan when broll_enabled.
+
+        Entities feed object-image overlay + json_analisa even if B-roll off.
+        """
+        targets = [
+            clip for clip in clips
+            if clips_with_words.get(clip.rank)
+        ]
+        if not targets:
             return
 
-        missing = [clip for clip in clips if not clip.broll_suggestions]
-        if not missing:
-            return
-
-        missing_words = {
+        words_map = {
             clip.rank: clips_with_words.get(clip.rank, [])
-            for clip in missing
+            for clip in targets
         }
         durations = {
             clip.rank: max(0.0, clip.end - clip.start)
-            for clip in missing
+            for clip in targets
         }
+        clip_meta = {
+            clip.rank: {"hook": clip.hook or "", "reason": clip.reason or ""}
+            for clip in targets
+        }
+
+        visual_entities: dict = {}
+        try:
+            analyzer = self._get_analyzer()
+            extract_ve = getattr(analyzer, "analyze_visual_entities_for_clips", None)
+            if extract_ve:
+                try:
+                    visual_entities = await extract_ve(
+                        words_map,
+                        durations,
+                        clip_meta=clip_meta,
+                        max_objects=6,
+                    ) or {}
+                except Exception as exc:
+                    logger.warning(f"[{job_id}] Visual entity extract skipped: {exc}")
+                    visual_entities = {}
+            for clip in targets:
+                ents = visual_entities.get(clip.rank) or visual_entities.get(str(clip.rank)) or []
+                if ents:
+                    clip.visual_entities = list(ents)
+        except Exception as exc:
+            logger.warning(f"[{job_id}] Visual entity extract failed: {exc}")
+
+        # B-roll replan is optional; object overlay still has visual_entities above.
+        if not job.broll_enabled:
+            logger.info(
+                f"[{job_id}] B-roll off — visual_entities="
+                f"{sum(1 for c in targets if getattr(c, 'visual_entities', None))}"
+            )
+            return
+
         try:
             analyzer = self._get_analyzer()
             analyze = getattr(analyzer, "analyze_broll_for_clips", None)
@@ -1480,16 +1757,33 @@ class V2PipelineService:
                 logger.warning(f"[{job_id}] B-roll recovery analyzer unavailable")
                 return
             recovered = await analyze(
-                missing_words,
+                words_map,
                 durations,
                 max_suggestions=2,
+                clip_meta=clip_meta,
+                visual_entities=visual_entities,
             )
+        except TypeError:
+            try:
+                analyzer = self._get_analyzer()
+                analyze = getattr(analyzer, "analyze_broll_for_clips", None)
+                if not analyze:
+                    return
+                recovered = await analyze(
+                    words_map,
+                    durations,
+                    max_suggestions=2,
+                    clip_meta=clip_meta,
+                )
+            except Exception as exc:
+                logger.warning(f"[{job_id}] B-roll recovery skipped: {exc}")
+                return
         except Exception as exc:
             logger.warning(f"[{job_id}] B-roll recovery skipped: {exc}")
             return
 
         recovered_count = 0
-        for clip in missing:
+        for clip in targets:
             suggestions = self._parse_broll_suggestions(
                 clip.rank,
                 recovered,
@@ -1500,8 +1794,9 @@ class V2PipelineService:
                 recovered_count += len(suggestions)
 
         logger.info(
-            f"[{job_id}] Auto B-roll recovery: {recovered_count} suggestions "
-            f"for {sum(1 for clip in missing if clip.broll_suggestions)}/{len(missing)} clips"
+            f"[{job_id}] Auto B-roll per-clip: {recovered_count} suggestions "
+            f"for {sum(1 for clip in targets if clip.broll_suggestions)}/{len(targets)} clips "
+            f"(visual_entities={sum(1 for c in targets if getattr(c, 'visual_entities', None))})"
         )
 
     async def _prepare_text_emphasis(
@@ -1955,6 +2250,8 @@ class V2PipelineService:
                     for event in clip.text_emphasis_events[:2]
                 ],
                 "top_overlay_events": list(getattr(clip, "top_overlay_events", None) or []),
+                "object_overlay_events": list(getattr(clip, "object_overlay_events", None) or []),
+                "visual_entities": list(getattr(clip, "visual_entities", None) or []),
                 "virality": viral,
                 "cta": cta,
                 "retention_hints": retention,
@@ -1970,10 +2267,9 @@ class V2PipelineService:
     async def _create_folder_structure(
         self, job_id, job, clips, clips_with_words, creative_direction, output_dir, trim_results,
     ) -> None:
-        """Create organized folder structure: raw/, final/, thumbnail/, meta JSON."""
+        """Create raw/, final/, thumbnail/, json_analisa/ + slim meta index."""
         import subprocess
         import shutil
-        import json as json_mod
 
         thumb_dir = f"{output_dir}/thumbnail"
         raw_dir = f"{output_dir}/raw"
@@ -2022,48 +2318,59 @@ class V2PipelineService:
             if os.path.exists(final_path):
                 shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
 
-        meta = {
-            "job_id": job_id,
-            "youtube_url": job.youtube_url,
-            "aspect_ratio": job.target_aspect_ratio,
-            "clips_total": len(clips),
-            "clips_success": sum(1 for c in clips if trim_results.get(c.rank)),
-            "created_at": str(job.created_at) if job.created_at else None,
-            "clips": [],
-        }
-        try:
-            from src.infrastructure.clip_quality_helpers import (
-                virality_breakdown,
-                suggest_cta,
-                retention_trim_hints,
-                smart_thumbnail_seek,
-            )
-            for c in clips:
-                words = clips_with_words.get(c.rank, []) if isinstance(clips_with_words, dict) else []
-                dur = float(c.end) - float(c.start)
-                meta["clips"].append({
-                    "rank": c.rank, "start": c.start, "end": c.end,
-                    "duration": dur, "hook": c.hook, "score": c.score,
-                    "words": words,
-                    "thumb_seek": smart_thumbnail_seek(words, dur, c.hook or ""),
-                    "virality": virality_breakdown(
-                        c.score, c.hook or "", c.reason or "", dur, words,
-                        len(c.broll_suggestions or []),
-                    ),
-                    "cta": suggest_cta(c.hook or "", c.reason or "", c.rank),
-                    "retention_hints": retention_trim_hints(words, dur),
-                })
-        except Exception:
-            meta["clips"] = [
-                {
-                    "rank": c.rank, "start": c.start, "end": c.end,
-                    "duration": c.end - c.start, "hook": c.hook, "score": c.score,
-                    "words": clips_with_words.get(c.rank, []) if isinstance(clips_with_words, dict) else [],
-                }
-                for c in clips
-            ]
-        meta_path = f"{output_dir}/meta_{job_id}.json"
-        with open(meta_path, "w") as f:
-            json_mod.dump(meta, f, indent=2, default=str)
+        from src.infrastructure.clip_quality_helpers import (
+            build_clip_analisa,
+            write_split_job_meta,
+        )
 
-        logger.info(f"[{job_id}] Folder structure created")
+        payloads = []
+        for c in clips:
+            words = clips_with_words.get(c.rank, []) if isinstance(clips_with_words, dict) else []
+            broll_dicts = []
+            for s in (c.broll_suggestions or []):
+                vc = s.visual_category
+                broll_dicts.append({
+                    "at_time": s.at_time,
+                    "keyword": s.keyword,
+                    "template": s.template,
+                    "duration": s.duration,
+                    "reason": getattr(s, "reason", "") or "",
+                    "placement": getattr(s, "placement", "") or "",
+                    "visual_category": (
+                        vc.value if isinstance(vc, VisualCategory) else str(vc or "")
+                    ),
+                    "asset_source": (
+                        s.asset_result.source_api if s.asset_result else ""
+                    ),
+                })
+            te = [
+                {k: v for k, v in ev.items() if k != "foreground_frames"}
+                for ev in (c.text_emphasis_events or [])[:2]
+            ]
+            payloads.append(build_clip_analisa(
+                no=c.rank,
+                rank=c.rank,
+                start=c.start,
+                end=c.end,
+                hook=c.hook or "",
+                reason=c.reason or "",
+                score=c.score,
+                words=words,
+                broll_suggestions=broll_dicts,
+                text_emphasis_events=te,
+                top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
+                object_overlay_events=list(getattr(c, "object_overlay_events", None) or []),
+                visual_entities=list(getattr(c, "visual_entities", None) or []),
+            ))
+
+        write_split_job_meta(
+            output_dir,
+            job_id=job_id,
+            youtube_url=job.youtube_url,
+            aspect_ratio=job.target_aspect_ratio,
+            created_at=str(job.created_at) if job.created_at else None,
+            clip_payloads=payloads,
+            clips_total=len(clips),
+            clips_success=sum(1 for c in clips if trim_results.get(c.rank)),
+        )
+        logger.info(f"[{job_id}] Folder structure created (json_analisa split)")

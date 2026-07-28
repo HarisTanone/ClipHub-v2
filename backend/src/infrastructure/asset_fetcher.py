@@ -85,6 +85,7 @@ class AssetFetcher(IAssetFetcher):
         self,
         suggestions: list[BRollSuggestion],
         creative_direction: Optional[CreativeDirection] = None,
+        analisa_extra_queries: Optional[list[str]] = None,
     ) -> list[BRollSuggestion]:
         """Resolve assets for all suggestions.
 
@@ -92,6 +93,7 @@ class AssetFetcher(IAssetFetcher):
         1. If BROLL_SPLICE_ENABLED: try ClipScout first for footage suggestions
         2. For non-footage or ClipScout failures: fall through to legacy resolution
         3. Returns suggestions with asset_result and/or splice_segment attached
+        analisa_extra_queries: ID+EN seeds from json_analisa (footage_keywords/objects).
         """
         if not suggestions:
             return suggestions
@@ -109,7 +111,10 @@ class AssetFetcher(IAssetFetcher):
             footage_suggestions = list(suggestions)
             if footage_suggestions:
                 try:
-                    await self._fetch_via_clipscout(footage_suggestions)
+                    await self._fetch_via_clipscout(
+                        footage_suggestions,
+                        analisa_extra_queries=analisa_extra_queries,
+                    )
                     # Check which ones got splice segments
                     resolved_count = sum(
                         1 for s in footage_suggestions if s.splice_segment
@@ -176,15 +181,21 @@ class AssetFetcher(IAssetFetcher):
         return suggestions
 
     async def _fetch_via_clipscout(
-        self, suggestions: list[BRollSuggestion]
+        self,
+        suggestions: list[BRollSuggestion],
+        analisa_extra_queries: Optional[list[str]] = None,
     ) -> None:
         """Fetch footage via ClipScout API + AI selection + download + process.
 
         Attaches SpliceSegment to each suggestion that was successfully resolved.
         Raises ClipScoutUnavailableError if ClipScout API is unreachable.
+        analisa_extra_queries: bilingual seeds from json_analisa.
         """
-        # Build search segments from suggestions
-        segments = build_segments_from_suggestions(suggestions)
+        # Build search segments from suggestions (+ ID/EN analisa seeds)
+        segments = build_segments_from_suggestions(
+            suggestions,
+            analisa_extra_queries=analisa_extra_queries,
+        )
         if not segments:
             return
 
@@ -204,12 +215,16 @@ class AssetFetcher(IAssetFetcher):
                 continue
 
             # AI selects best video (pass-2 context = reason / clip topic sentence)
+            # Include analisa seeds so AI can score fit to clip context.
+            ctx = str(getattr(suggestion, "reason", "") or "")
+            if analisa_extra_queries:
+                ctx = (ctx + " | " + " / ".join(analisa_extra_queries[:6])).strip(" |")
             selected = self._ai_selector.select_best(
                 candidates=candidates,
                 keyword=suggestion.keyword,
                 required_duration=suggestion.duration,
                 placement=str(getattr(suggestion, "placement", "") or ""),
-                context=str(getattr(suggestion, "reason", "") or ""),
+                context=ctx,
             )
             if not selected:
                 continue

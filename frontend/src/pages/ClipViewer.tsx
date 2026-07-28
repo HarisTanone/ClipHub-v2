@@ -205,57 +205,97 @@ export function ClipViewer() {
         </div>
       </div>
 
-      {/* Main: Video + Sidebar — stack on mobile/tablet, side-by-side desktop */}
+      {/* Main: compact phone-sized preview + sidebar */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
-        {/* Video panel */}
-        <div className="flex flex-col gap-2 lg:col-span-7 min-h-0">
-          <Card className="p-0 overflow-hidden flex-1 flex flex-col min-h-0">
-            <div className="relative bg-black flex-1 min-h-[220px] max-h-[55vh] sm:max-h-[60vh] lg:max-h-none aspect-[9/16] sm:aspect-auto lg:min-h-[250px]">
-              {videoUrl ? (
-                <>
-                  <video
-                    ref={videoRef}
-                    src={videoUrl}
-                    className="w-full h-full object-contain"
-                    onTimeUpdate={() => videoRef.current && setCurrentTime(videoRef.current.currentTime)}
-                    onPlay={() => setIsPlaying(true)}
-                    onPause={() => setIsPlaying(false)}
-                    onLoadedMetadata={() => {
-                      if (videoRef.current && pendingSeekRef.current !== null) {
-                        videoRef.current.currentTime = pendingSeekRef.current;
-                        pendingSeekRef.current = null;
-                      }
-                    }}
-                    playsInline
-                    preload="auto"
-                    controls
-                  />
-                  {previewMode && aiTextPreview && !isPlaying && (
-                    <img src={aiTextPreview} alt="Exact Remotion AI Text preview" className="absolute inset-0 h-full w-full object-contain" />
-                  )}
-                  {previewMode && (
-                    <div className={aiTextPreview && !isPlaying ? "hidden" : undefined}>
-                    <VideoPreviewOverlay
-                      currentTime={currentTime}
-                      hookText={hookText || clip.hook || ""}
-                      hookStyle={hookStyleConfig.animation}
-                      hookStyleConfig={hookStyleConfig}
-                      subtitleStyleConfig={subtitleStyleConfig}
-                      autoGridLayout={clip.reframe_layout}
-                      words={clip.words || []}
-                      showHook={showHook}
-                      showSubtitles={showSubtitles}
+        {/* Video panel — capped height so 9:16 never fills desktop viewport */}
+        <div className="flex flex-col gap-2 lg:col-span-5 xl:col-span-4 min-h-0">
+          <Card className="p-0 overflow-hidden flex flex-col shrink-0">
+            {/* Stage: center a phone-like 9:16 frame */}
+            <div className="relative bg-zinc-950 flex items-center justify-center px-3 py-3 sm:px-4 sm:py-4">
+              <div
+                className={cn(
+                  "relative bg-black overflow-hidden rounded-xl shadow-[0_0_0_1px_rgba(255,255,255,0.06)]",
+                  // Phone frame: max ~560px tall desktop, still usable on mobile
+                  "w-full max-w-[min(100%,320px)] sm:max-w-[300px] lg:max-w-[280px] xl:max-w-[300px]",
+                  "aspect-[9/16] max-h-[min(62vh,560px)]",
+                )}
+              >
+                {videoUrl ? (
+                  <>
+                    <video
+                      ref={videoRef}
+                      src={videoUrl}
+                      className="absolute inset-0 h-full w-full object-contain"
+                      onTimeUpdate={() => videoRef.current && setCurrentTime(videoRef.current.currentTime)}
+                      onPlay={() => setIsPlaying(true)}
+                      onPause={() => setIsPlaying(false)}
+                      onLoadedMetadata={() => {
+                        if (videoRef.current && pendingSeekRef.current !== null) {
+                          videoRef.current.currentTime = pendingSeekRef.current;
+                          pendingSeekRef.current = null;
+                        }
+                      }}
+                      playsInline
+                      preload="auto"
+                      controls
                     />
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Play className="h-10 w-10 text-zinc-700" />
-                </div>
-              )}
+                    {previewMode && aiTextPreview && !isPlaying && (
+                      <img src={aiTextPreview} alt="Exact Remotion AI Text preview" className="absolute inset-0 h-full w-full object-contain pointer-events-none" />
+                    )}
+                    {previewMode && (
+                      <div className={cn("absolute inset-0 pointer-events-none", aiTextPreview && !isPlaying ? "hidden" : undefined)}>
+                        <VideoPreviewOverlay
+                          currentTime={currentTime}
+                          hookText={hookText || clip.hook || ""}
+                          hookStyle={hookStyleConfig.animation}
+                          hookStyleConfig={hookStyleConfig}
+                          subtitleStyleConfig={subtitleStyleConfig}
+                          autoGridLayout={clip.reframe_layout}
+                          words={clip.words || []}
+                          showHook={showHook}
+                          showSubtitles={showSubtitles}
+                        />
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Play className="h-10 w-10 text-zinc-700" />
+                  </div>
+                )}
+              </div>
             </div>
           </Card>
+
+          {/* Pipeline stages (visual only — final = baked through all) */}
+          <div className="flex items-center gap-1 flex-wrap shrink-0 px-0.5">
+            {(
+              [
+                { id: "raw", label: "Raw", on: showRaw || !!rawUrl },
+                { id: "motion", label: "Motion", on: !showRaw && !!finalDownloadUrl },
+                { id: "captions", label: "Captions", on: !showRaw && !!finalDownloadUrl },
+                { id: "sfx", label: "SFX + Polish", on: !showRaw && !!finalDownloadUrl },
+              ] as const
+            ).map((s, i, arr) => (
+              <div key={s.id} className="flex items-center gap-1">
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[9px] font-medium tracking-wide",
+                    s.on
+                      ? showRaw && s.id === "raw"
+                        ? "bg-amber-500/20 text-amber-300"
+                        : !showRaw && s.id !== "raw"
+                          ? "bg-emerald-500/15 text-emerald-300"
+                          : "bg-zinc-800 text-zinc-500"
+                      : "bg-zinc-900 text-zinc-600",
+                  )}
+                >
+                  {s.label}
+                </span>
+                {i < arr.length - 1 && <span className="text-[9px] text-zinc-700">→</span>}
+              </div>
+            ))}
+          </div>
 
           {/* Controls */}
           <div className="flex items-center gap-1.5 flex-wrap shrink-0">
@@ -275,8 +315,8 @@ export function ClipViewer() {
           </div>
         </div>
 
-        {/* Sidebar */}
-        <div className="lg:col-span-5 min-h-0 overflow-y-auto space-y-3">
+        {/* Sidebar — more width now that preview is phone-sized */}
+        <div className="lg:col-span-7 xl:col-span-8 min-h-0 overflow-y-auto space-y-3">
           {/* Other clips - horizontal carousel with arrows */}
           {otherClips.length > 0 && (
             <Card className="p-3">
@@ -340,6 +380,23 @@ export function ClipViewer() {
                 <>
                   <span className="text-zinc-500">CTA</span>
                   <span className="text-zinc-300 truncate" title={clip.cta.text}>{clip.cta.text}</span>
+                </>
+              )}
+              {(clip.visual_entities?.length ?? 0) > 0 && (
+                <>
+                  <span className="text-zinc-500">AI entities</span>
+                  <span
+                    className="text-sky-300 truncate"
+                    title={(clip.visual_entities || []).map((e) => e.word || e.label || e.query_en).filter(Boolean).join(" · ")}
+                  >
+                    {(clip.visual_entities || []).slice(0, 3).map((e) => e.word || e.label).filter(Boolean).join(", ") || `${clip.visual_entities!.length}`}
+                  </span>
+                </>
+              )}
+              {(clip.object_overlay_events?.length ?? 0) > 0 && (
+                <>
+                  <span className="text-zinc-500">Object cards</span>
+                  <span className="text-violet-300">{clip.object_overlay_events!.length} baked</span>
                 </>
               )}
               {!!clip.retention_hints?.suggested_cuts?.length && (

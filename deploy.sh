@@ -392,6 +392,37 @@ print('  ✅ reframe tuning defaults OK')
     exit 1
 }
 
+# Object overlay style table (AI entities → photo card; style only in DB)
+echo "  Verifying object overlay config..."
+./venv/bin/python -c "
+import sys
+sys.path.insert(0, '$BACKEND_DIR')
+from src.presentation.routes.settings import (
+    _ensure_object_overlay_table,
+    get_object_overlay_config,
+)
+from src.config import settings
+
+_ensure_object_overlay_table()
+cfg = get_object_overlay_config(None)
+need = ['enabled', 'max_per_clip', 'box_size_ratio', 'position', 'animation', 'show_label']
+bad = [k for k in need if k not in cfg]
+if bad:
+    print('  ❌ object overlay missing keys: ' + ', '.join(bad))
+    sys.exit(1)
+print(
+    f'  object_overlay: enabled={cfg.get(\"enabled\")} '
+    f'max={cfg.get(\"max_per_clip\")} '
+    f'pos={cfg.get(\"position\")} '
+    f'anim={cfg.get(\"animation\")}'
+)
+print(f'  OBJECT_OVERLAY_ENABLED={getattr(settings, \"OBJECT_OVERLAY_ENABLED\", None)}')
+print('  ✅ object overlay config OK')
+" 2>&1 | sed 's/^/  /' || {
+    echo "  ❌ Object overlay verification failed"
+    exit 1
+}
+
 # Detection floor — append only if missing (never overwrite ops override)
 if [ -f ".env" ]; then
     append_env_if_missing ".env" "PERSON_CONF_THRESHOLD" "0.35"
@@ -417,6 +448,16 @@ if [ -f ".env" ]; then
     append_env_if_missing ".env" "ASSET_FETCH_ENABLED" "true"
     append_env_if_missing ".env" "USE_REMOTION" "true"
     append_env_if_missing ".env" "FORCE_V2_PIPELINE" "true"
+    # Object image+text overlay (AI visual entities → stock photo card)
+    append_env_if_missing ".env" "OBJECT_OVERLAY_ENABLED" "true"
+    append_env_if_missing ".env" "OBJECT_OVERLAY_MAX_PER_CLIP" "3"
+    append_env_if_missing ".env" "OBJECT_OVERLAY_BOX_SIZE" "0.28"
+    append_env_if_missing ".env" "OBJECT_OVERLAY_CORNER_RADIUS" "18"
+    append_env_if_missing ".env" "OBJECT_OVERLAY_POSITION" "top_right"
+    append_env_if_missing ".env" "OBJECT_OVERLAY_ANIMATION" "slide_right"
+    append_env_if_missing ".env" "OBJECT_OVERLAY_DURATION" "2.4"
+    append_env_if_missing ".env" "OBJECT_OVERLAY_MIN_RELEVANCE" "0.35"
+    append_env_if_missing ".env" "OBJECT_OVERLAY_SHOW_LABEL" "true"
 fi
 
 # Ensure music assets dir exists (AudioMixer duck bed)

@@ -943,6 +943,9 @@ async def get_job_detail(
             "cta": _normalize_cta(clip.get("cta")),
             "retention_hints": clip.get("retention_hints"),
             "thumb_seek": clip.get("thumb_seek"),
+            "object_overlay_events": clip.get("object_overlay_events") or [],
+            "visual_entities": clip.get("visual_entities") or [],
+            "top_overlay_events": clip.get("top_overlay_events") or [],
         })
 
     return {
@@ -1184,6 +1187,9 @@ async def get_clip_detail(
             "cta": _normalize_cta(clip_data.get("cta")),
             "retention_hints": clip_data.get("retention_hints"),
             "thumb_seek": clip_data.get("thumb_seek"),
+            "object_overlay_events": clip_data.get("object_overlay_events") or [],
+            "visual_entities": clip_data.get("visual_entities") or [],
+            "top_overlay_events": clip_data.get("top_overlay_events") or [],
             "file_status": file_status,
             "urls": {
                 "raw": f"/api/jobs/{job_id}/clips/{clip_rank}/raw" if file_status["raw"] else None,

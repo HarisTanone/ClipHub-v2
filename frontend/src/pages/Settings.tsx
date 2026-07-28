@@ -166,6 +166,102 @@ async function resetReframeTuning(): Promise<ReframeTuning | null> {
   return data.data || null;
 }
 
+// ─── Object Overlay (AI visual entities → photo card style) ──────────────────
+
+interface ObjectOverlayConfig {
+  enabled: boolean;
+  max_per_clip: number;
+  box_size_ratio: number;
+  corner_radius: number;
+  position: string;
+  animation: string;
+  duration_sec: number;
+  margin_ratio: number;
+  text_color: string;
+  bg_color: string;
+  border_color: string;
+  font_scale: number;
+  opacity: number;
+  min_relevance: number;
+  show_label: boolean;
+}
+
+const OBJECT_OVERLAY_DEFAULTS: ObjectOverlayConfig = {
+  enabled: true,
+  max_per_clip: 3,
+  box_size_ratio: 0.28,
+  corner_radius: 18,
+  position: "top_right",
+  animation: "slide_right",
+  duration_sec: 2.4,
+  margin_ratio: 0.04,
+  text_color: "255,255,255",
+  bg_color: "20,20,24",
+  border_color: "255,255,255",
+  font_scale: 0.55,
+  opacity: 0.95,
+  min_relevance: 0.35,
+  show_label: true,
+};
+
+function normalizeObjectOverlay(raw: Partial<ObjectOverlayConfig> | null | undefined): ObjectOverlayConfig {
+  const out = { ...OBJECT_OVERLAY_DEFAULTS };
+  if (!raw) return out;
+  out.enabled = Boolean(raw.enabled ?? out.enabled);
+  out.show_label = Boolean(raw.show_label ?? out.show_label);
+  out.position = String(raw.position || out.position);
+  out.animation = String(raw.animation || out.animation);
+  out.text_color = String(raw.text_color || out.text_color);
+  out.bg_color = String(raw.bg_color || out.bg_color);
+  out.border_color = String(raw.border_color || out.border_color);
+  for (const key of ["max_per_clip", "box_size_ratio", "corner_radius", "duration_sec", "margin_ratio", "font_scale", "opacity", "min_relevance"] as const) {
+    const val = raw[key];
+    if (val === undefined || val === null) continue;
+    const num = typeof val === "number" ? val : parseFloat(String(val));
+    if (Number.isNaN(num)) continue;
+    (out as any)[key] = key === "max_per_clip" || key === "corner_radius" ? Math.round(num) : num;
+  }
+  return out;
+}
+
+function objectOverlayEquals(a: ObjectOverlayConfig, b: ObjectOverlayConfig): boolean {
+  return (Object.keys(OBJECT_OVERLAY_DEFAULTS) as (keyof ObjectOverlayConfig)[]).every((key) => {
+    const av = a[key];
+    const bv = b[key];
+    if (typeof av === "number" && typeof bv === "number") return Math.abs(av - bv) < 1e-6;
+    return av === bv;
+  });
+}
+
+async function fetchObjectOverlay(): Promise<ObjectOverlayConfig | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/object-overlay`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.data || null;
+}
+
+async function saveObjectOverlay(payload: ObjectOverlayConfig): Promise<boolean> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/object-overlay`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  return res.ok;
+}
+
+async function resetObjectOverlay(): Promise<ObjectOverlayConfig | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/object-overlay/reset`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.data || null;
+}
+
 interface TestRunStatus {
   status: "idle" | "running" | "deploying" | "passed" | "failed";
   stage: string;
@@ -210,7 +306,7 @@ export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "testing">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "testing">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -240,6 +336,11 @@ export function Settings() {
   const [isSavingReframe, setIsSavingReframe] = useState(false);
   const [isResettingReframe, setIsResettingReframe] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("9:16");
+  // Object overlay style (entities from AI; knobs from DB)
+  const [objectOverlay, setObjectOverlay] = useState<ObjectOverlayConfig>(OBJECT_OVERLAY_DEFAULTS);
+  const [objectBaseline, setObjectBaseline] = useState<ObjectOverlayConfig>(OBJECT_OVERLAY_DEFAULTS);
+  const [isSavingObject, setIsSavingObject] = useState(false);
+  const [isResettingObject, setIsResettingObject] = useState(false);
   const [testStatus, setTestStatus] = useState<TestRunStatus | null>(null);
   const [testLog, setTestLog] = useState("");
   const [isStartingTest, setIsStartingTest] = useState(false);
@@ -255,6 +356,13 @@ export function Settings() {
         const normalized = normalizeReframeTuning(d);
         setReframeTuning(normalized);
         setReframeBaseline(normalized);
+      }
+    });
+    fetchObjectOverlay().then((d) => {
+      if (d) {
+        const normalized = normalizeObjectOverlay(d);
+        setObjectOverlay(normalized);
+        setObjectBaseline(normalized);
       }
     });
   }, []);
@@ -300,6 +408,7 @@ export function Settings() {
 
   // Whether there are unsaved changes relative to the last persisted snapshot.
   const reframeDirty = !reframeTuningEquals(reframeTuning, reframeBaseline);
+  const objectDirty = !objectOverlayEquals(objectOverlay, objectBaseline);
 
 
   function handleChange(key: string, value: any) { setSettings((p) => ({ ...p, [key]: value })); }
@@ -383,6 +492,45 @@ export function Settings() {
     setIsResettingReframe(false);
   }
 
+  function handleObjectChange(key: keyof ObjectOverlayConfig, value: any) {
+    setObjectOverlay((p) => ({ ...p, [key]: value }));
+  }
+
+  async function handleSaveObject() {
+    setIsSavingObject(true);
+    const payload = normalizeObjectOverlay(objectOverlay);
+    const ok = await saveObjectOverlay(payload);
+    if (ok) {
+      setObjectOverlay(payload);
+      setObjectBaseline(payload);
+      toast.success("Object overlay saved");
+    } else {
+      toast.error("Failed to save object overlay");
+    }
+    setIsSavingObject(false);
+  }
+
+  function handleResetObject() {
+    if (!objectDirty) return;
+    setObjectOverlay(objectBaseline);
+    toast.success("Reverted unsaved changes");
+  }
+
+  async function handleRestoreObjectDefaults() {
+    if (!confirm("Restore object overlay style to factory defaults?")) return;
+    setIsResettingObject(true);
+    const data = await resetObjectOverlay();
+    if (data) {
+      const normalized = normalizeObjectOverlay(data);
+      setObjectOverlay(normalized);
+      setObjectBaseline(normalized);
+      toast.success("Object overlay restored to defaults");
+    } else {
+      toast.error("Failed to restore defaults");
+    }
+    setIsResettingObject(false);
+  }
+
   async function handleStartTest() {
     if (!confirm("Run all server tests now? Deployment will NOT run from this button.")) return;
     setIsStartingTest(true);
@@ -403,6 +551,7 @@ export function Settings() {
   const tabs = [
     { id: "general" as const, label: "General" },
     { id: "reframe" as const, label: "Reframe Tuning" },
+    { id: "object" as const, label: "Object Overlay" },
     ...(isSuperadmin ? [{ id: "render" as const, label: "Render Engine" }] : []),
     ...(isSuperadmin ? [{ id: "testing" as const, label: "Test & Deploy" }] : []),
     ...(isSuperadmin ? [{ id: "users" as const, label: "Users" }] : []),
@@ -429,6 +578,13 @@ export function Settings() {
             <Button onClick={handleRestoreReframeDefaults} loading={isResettingReframe} size="sm" variant="outline">Restore Defaults</Button>
             <Button onClick={handleResetReframe} disabled={!reframeDirty} size="sm" variant="outline">Reset</Button>
             <Button onClick={handleSaveReframe} disabled={!reframeDirty} loading={isSavingReframe} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+          </div>
+        ) : tab === "object" ? (
+          <div className="flex items-center gap-2">
+            {objectDirty && <span className="text-[10px] text-amber-400 font-medium mr-1">Unsaved changes</span>}
+            <Button onClick={handleRestoreObjectDefaults} loading={isResettingObject} size="sm" variant="outline">Restore Defaults</Button>
+            <Button onClick={handleResetObject} disabled={!objectDirty} size="sm" variant="outline">Reset</Button>
+            <Button onClick={handleSaveObject} disabled={!objectDirty} loading={isSavingObject} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
           </div>
         ) : (
 
@@ -610,6 +766,70 @@ export function Settings() {
                 onAspectRatioChange={setAspectRatio}
               />
             </div>
+          </div>
+        )}
+
+        {tab === "object" && (
+          <div className="max-w-2xl space-y-4">
+            <Card className="p-4">
+              <p className="text-[11px] text-zinc-500 mb-3">
+                Style only. Object/entity words + bilingual search queries come from AI per-clip (no hardcode lexicon).
+                Card is baked into video before Remotion (hook/subtitle layer).
+              </p>
+              <div className="space-y-3">
+                <FeatureToggle
+                  icon={<Sparkles className="h-3.5 w-3.5" />}
+                  label="Enable Object Overlay"
+                  desc="AI entities → stock photo card + label"
+                  active={objectOverlay.enabled}
+                  onToggle={() => handleObjectChange("enabled", !objectOverlay.enabled)}
+                />
+                <FeatureToggle
+                  icon={<Film className="h-3.5 w-3.5" />}
+                  label="Show Label"
+                  desc="Text under image card"
+                  active={objectOverlay.show_label}
+                  onToggle={() => handleObjectChange("show_label", !objectOverlay.show_label)}
+                />
+                <RangeSlider label="Max per clip" value={objectOverlay.max_per_clip} min={0} max={6} step={1} onChange={(v) => handleObjectChange("max_per_clip", v)} />
+                <RangeSlider label="Box size ratio" value={objectOverlay.box_size_ratio} min={0.12} max={0.55} step={0.01} onChange={(v) => handleObjectChange("box_size_ratio", v)} />
+                <RangeSlider label="Corner radius" value={objectOverlay.corner_radius} min={0} max={40} step={1} onChange={(v) => handleObjectChange("corner_radius", v)} />
+                <RangeSlider label="Duration (sec)" value={objectOverlay.duration_sec} min={1} max={5} step={0.1} onChange={(v) => handleObjectChange("duration_sec", v)} />
+                <RangeSlider label="Margin ratio" value={objectOverlay.margin_ratio} min={0.01} max={0.12} step={0.01} onChange={(v) => handleObjectChange("margin_ratio", v)} />
+                <RangeSlider label="Font scale" value={objectOverlay.font_scale} min={0.3} max={1.2} step={0.05} onChange={(v) => handleObjectChange("font_scale", v)} />
+                <RangeSlider label="Opacity" value={objectOverlay.opacity} min={0.3} max={1} step={0.05} onChange={(v) => handleObjectChange("opacity", v)} />
+                <RangeSlider label="Min relevance" value={objectOverlay.min_relevance} min={0.1} max={0.9} step={0.05} onChange={(v) => handleObjectChange("min_relevance", v)} />
+                <Select
+                  label="Position"
+                  value={objectOverlay.position}
+                  onChange={(e) => handleObjectChange("position", e.target.value)}
+                  options={[
+                    { value: "top_right", label: "Top right" },
+                    { value: "top_left", label: "Top left" },
+                    { value: "bottom_right", label: "Bottom right" },
+                    { value: "bottom_left", label: "Bottom left" },
+                    { value: "center_right", label: "Center right" },
+                    { value: "center_left", label: "Center left" },
+                  ]}
+                />
+                <Select
+                  label="Animation"
+                  value={objectOverlay.animation}
+                  onChange={(e) => handleObjectChange("animation", e.target.value)}
+                  options={[
+                    { value: "slide_right", label: "Slide right" },
+                    { value: "slide_left", label: "Slide left" },
+                    { value: "slide_down", label: "Slide down" },
+                    { value: "slide_up", label: "Slide up" },
+                    { value: "fade", label: "Fade" },
+                    { value: "pop", label: "Pop" },
+                  ]}
+                />
+                <Input label="Text color (R,G,B)" value={objectOverlay.text_color} onChange={(e) => handleObjectChange("text_color", e.target.value)} />
+                <Input label="BG color (R,G,B)" value={objectOverlay.bg_color} onChange={(e) => handleObjectChange("bg_color", e.target.value)} />
+                <Input label="Border color (R,G,B)" value={objectOverlay.border_color} onChange={(e) => handleObjectChange("border_color", e.target.value)} />
+              </div>
+            </Card>
           </div>
         )}
 

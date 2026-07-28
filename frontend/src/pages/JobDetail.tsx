@@ -439,7 +439,7 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
             {clip.hook || `Clip ${clip.rank}`}
           </p>
           {clip.reason && <p className="text-[10px] text-zinc-600 line-clamp-2 leading-relaxed">{clip.reason}</p>}
-          {(clip.virality?.score != null || clip.virality?.total != null || clip.cta?.text) && (
+          {(clip.virality?.score != null || clip.virality?.total != null || clip.cta?.text || (clip.visual_entities?.length ?? 0) > 0 || (clip.object_overlay_events?.length ?? 0) > 0) && (
             <div className="flex flex-wrap items-center gap-1.5">
               {(clip.virality?.score != null || clip.virality?.total != null) && (
                 <span
@@ -452,6 +452,19 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
               {clip.cta?.text && (
                 <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-400 truncate max-w-[140px]" title={clip.cta.text}>
                   CTA · {clip.cta.text}
+                </span>
+              )}
+              {(clip.visual_entities?.length ?? 0) > 0 && (
+                <span
+                  className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] text-sky-300"
+                  title={(clip.visual_entities || []).map((e) => e.word || e.label || e.query_en).filter(Boolean).join(" · ")}
+                >
+                  AI · {clip.visual_entities!.length} entity
+                </span>
+              )}
+              {(clip.object_overlay_events?.length ?? 0) > 0 && (
+                <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[9px] text-violet-300">
+                  overlay · {clip.object_overlay_events!.length}
                 </span>
               )}
             </div>

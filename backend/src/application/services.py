@@ -1022,34 +1022,51 @@ class JobService:
                 if os.path.exists(final_path):
                     shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
 
-            # Generate meta JSON
-            import json as json_mod
-            meta = {
-                "job_id": job_id,
-                "youtube_url": job.youtube_url,
-                "aspect_ratio": job.target_aspect_ratio,
-                "clips_total": clips_count,
-                "clips_success": sum(1 for c in clips if trim_results.get(c.rank)),
-                "created_at": str(job.created_at) if job.created_at else None,
-                "clips": [
+            # Generate meta JSON — slim index + per-clip json_analisa/
+            from src.infrastructure.clip_quality_helpers import (
+                build_clip_analisa,
+                write_split_job_meta,
+            )
+            payloads = []
+            for c in clips:
+                words = self._get_words_for_clip(c, clips_with_words)
+                broll_dicts = [
                     {
-                        "rank": c.rank,
-                        "start": c.start,
-                        "end": c.end,
-                        "duration": c.end - c.start,
-                        "hook": c.hook,
-                        "score": c.score,
-                        "words": self._get_words_for_clip(c, clips_with_words),
+                        "at_time": s.at_time,
+                        "keyword": s.keyword,
+                        "template": s.template,
+                        "duration": s.duration,
+                        "reason": getattr(s, "reason", "") or "",
+                        "placement": getattr(s, "placement", "") or "",
                     }
-                    for c in clips
-                ],
-            }
-            meta_path = f"{output_dir}/meta_{job_id}.json"
-            with open(meta_path, "w") as f:
-                json_mod.dump(meta, f, indent=2, default=str)
+                    for s in (c.broll_suggestions or [])
+                ]
+                payloads.append(build_clip_analisa(
+                    no=c.rank,
+                    rank=c.rank,
+                    start=c.start,
+                    end=c.end,
+                    hook=c.hook or "",
+                    reason=c.reason or "",
+                    score=c.score,
+                    words=words,
+                    broll_suggestions=broll_dicts,
+                    text_emphasis_events=list(getattr(c, "text_emphasis_events", None) or [])[:2],
+                    top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
+                ))
+            write_split_job_meta(
+                output_dir,
+                job_id=job_id,
+                youtube_url=job.youtube_url,
+                aspect_ratio=job.target_aspect_ratio,
+                created_at=str(job.created_at) if job.created_at else None,
+                clip_payloads=payloads,
+                clips_total=clips_count,
+                clips_success=sum(1 for c in clips if trim_results.get(c.rank)),
+            )
 
             self._emit(job_id, 14.5, "thumbnails", "complete")
-            logger.info(f"[{job_id}] Thumbnails generated + folder structured")
+            logger.info(f"[{job_id}] Thumbnails + json_analisa split written")
 
             # ═══ Step 15: Assemble JSON (include scene_graphs) ═══
             self._emit(job_id, 15, "assemble", "start")

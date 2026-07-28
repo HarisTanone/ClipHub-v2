@@ -156,7 +156,10 @@ class Clip:
     # Top-behind-subject overlay windows (image/video behind person, top ~50%).
     # Additive to full-frame B-roll splice; never co-timed with text emphasis.
     top_overlay_events: list[dict] = field(default_factory=list)
-
+    # Noun image+text cards — small rounded photo + label (AI visual entities).
+    object_overlay_events: list[dict] = field(default_factory=list)
+    # Dynamic AI visual entities (query_id/query_en) — no domain lexicon.
+    visual_entities: list[dict] = field(default_factory=list)
 
 
 # ─── Creative Direction (v2.0 — per-job visual identity) ─────────────────────

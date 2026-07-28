@@ -140,84 +140,22 @@ class ClipScoutClient(IClipScoutClient):
         return results
 
 
-# Abstract/mood poison → kill or rewrite for stock search accuracy.
-_KEYWORD_STOP = {
-    "dramatic", "cinematic", "beautiful", "success", "lifestyle",
-    "epic", "mood", "vibes", "aesthetic", "background", "viral",
-    "amazing", "best", "top", "cool", "nice", "great", "awesome",
-}
-# ID/EN abstract topic → concrete English stock query (1:1 visual).
-_TOPIC_SYNONYMS: dict[str, str] = {
-    "rupiah": "indonesian rupiah banknotes",
-    "uang": "cash banknotes counting hands",
-    "money": "cash banknotes counting hands",
-    "dompet": "empty wallet hands close up",
-    "wallet": "empty wallet hands close up",
-    "bbm": "fuel nozzle pumping gas car",
-    "bensin": "fuel nozzle pumping gas car",
-    "fuel": "fuel nozzle pumping gas car",
-    "minyak": "oil pump jack working sunset",
-    "oil": "oil pump jack working sunset",
-    "inflasi": "price tag grocery shopping inflation",
-    "inflation": "price tag grocery shopping inflation",
-    "ekonomi": "stock market chart trading screen",
-    "economy": "stock market chart trading screen",
-    "kurs": "usd idr currency exchange chart",
-    "currency": "usd idr currency exchange chart",
-    "bank": "bank building exterior modern",
-    "saham": "stock market chart candlestick",
-    "stock": "stock market chart candlestick",
-    "gaji": "paycheck salary envelope cash",
-    "salary": "paycheck salary envelope cash",
-    "hutang": "debt bill unpaid invoice stack",
-    "debt": "debt bill unpaid invoice stack",
-    "emas": "gold bars bullion close up",
-    "gold": "gold bars bullion close up",
-    "crypto": "bitcoin cryptocurrency coin close up",
-    "bitcoin": "bitcoin cryptocurrency coin close up",
-    "listrik": "electric power meter close up",
-    "electricity": "electric power meter close up",
-    "pajak": "tax form documents stamp",
-    "tax": "tax form documents stamp",
-}
-
-
 def extract_topic_entities(*texts: str) -> list[str]:
-    """Pull topic entity keys (rupiah/bbm/…) from free text — longest match first."""
+    """Content tokens ≥4 chars from free text (soft topic lock). No stop/mood lexicon."""
     blob = " ".join(str(t or "") for t in texts).lower()
     if not blob:
         return []
-    found: list[str] = []
-    for needle in sorted(_TOPIC_SYNONYMS.keys(), key=len, reverse=True):
-        if len(needle) < 3:
-            continue
-        if needle in blob:
-            found.append(needle)
+    tokens = re.findall(r"[a-z0-9]{4,}", blob)
     out: list[str] = []
     seen: set[str] = set()
-    for e in found:
-        if e not in seen:
-            seen.add(e)
-            out.append(e)
-        if len(out) >= 6:
+    for t in tokens:
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+        if len(out) >= 8:
             break
     return out
-
-
-def _entity_covered(text: str, entities: list[str]) -> bool:
-    """True if text already carries an entity key or its concrete synonym tokens."""
-    lower = (text or "").lower()
-    if not lower or not entities:
-        return False
-    for e in entities:
-        if e in lower:
-            return True
-        syn = _TOPIC_SYNONYMS.get(e, "")
-        # Need ≥2 concrete synonym tokens to count as covered (avoid weak 1-token).
-        syn_tokens = [t for t in syn.lower().split() if len(t) > 2 and t not in _KEYWORD_STOP]
-        if syn_tokens and sum(1 for t in syn_tokens if t in lower) >= min(2, len(syn_tokens)):
-            return True
-    return False
 
 
 def lock_keyword_to_entities(
@@ -225,47 +163,29 @@ def lock_keyword_to_entities(
     entities: list[str],
     placement: str = "",
 ) -> str:
-    """Force keyword to contain ≥1 topic entity visual (cheap per-clip lock)."""
-    if not entities:
-        return sanitize_stock_keyword(keyword, placement=placement)
-    if _entity_covered(keyword, entities):
-        return sanitize_stock_keyword(keyword, placement=placement)
-    # Prepend first entity's concrete stock phrase.
-    seed = _TOPIC_SYNONYMS.get(entities[0], entities[0])
-    return sanitize_stock_keyword(f"{seed} {keyword}", placement=placement)
+    """Keep AI/search keyword; lightly prepend first content token if totally off-topic."""
+    clean = sanitize_stock_keyword(keyword, placement=placement)
+    if not entities or not clean:
+        return clean
+    lower = clean.lower()
+    if any(e in lower for e in entities[:4]):
+        return clean
+    # Soft lock: only if keyword is very short / generic
+    if len(clean.split()) <= 2 and entities[0] not in lower:
+        return sanitize_stock_keyword(f"{entities[0]} {clean}", placement=placement)
+    return clean
 
 
 def sanitize_stock_keyword(keyword: str, placement: str = "") -> str:
-    """Force concrete English stock query — kill abstract/mood noise."""
+    """Normalize AI stock query. No mood/stopword strip — AI supplies concrete queries."""
     raw = " ".join(str(keyword or "").split())
     if not raw:
         return ""
-    lower = raw.lower()
-    tokens = [t for t in re.findall(r"[A-Za-z0-9]+", lower) if t]
-
-    # Exact multi-word topic hits first.
-    for needle, replacement in _TOPIC_SYNONYMS.items():
-        if needle in lower and len(needle) >= 3:
-            base = replacement
-            break
-    else:
-        # Single-token synonym rewrite.
-        mapped = []
-        for t in tokens:
-            if t in _KEYWORD_STOP:
-                continue
-            mapped.append(_TOPIC_SYNONYMS.get(t, t))
-        # Flatten synonym phrases.
-        flat: list[str] = []
-        for m in mapped:
-            flat.extend(m.split())
-        # Drop remaining stop words after expand.
-        flat = [t for t in flat if t not in _KEYWORD_STOP]
-        base = " ".join(dict.fromkeys(flat)) if flat else raw
-        # If still 1 generic word, pad with visual framing.
-        if len(base.split()) <= 1:
-            base = f"{base} close up object" if base else "object close up"
-
+    tokens = [t for t in re.findall(r"[A-Za-z0-9]+", raw) if t]
+    base = " ".join(tokens) if tokens else raw
+    # If still 1 weak word, pad visual framing (generic, not domain map)
+    if len(base.split()) <= 1:
+        base = f"{base} close up object" if base else "object close up"
     place = (placement or "").strip().lower()
     behind = place in {"behind_person", "behind", "top_overlay", "overlay"}
     if behind and "close up" not in base.lower() and "macro" not in base.lower():
@@ -278,8 +198,12 @@ def _expand_search_queries(
     placement: str = "",
     category: str = "",
     entities: Optional[list[str]] = None,
+    extra_queries: Optional[list[str]] = None,
 ) -> list[str]:
-    """Multi-query variants for ClipScout — higher hit rate + subject-accurate stock."""
+    """Multi-query variants for ClipScout from AI keyword + analisa seeds (ID+EN).
+
+    No hardcoded domain synonym table — extra_queries come from AI visual entities.
+    """
     locked = lock_keyword_to_entities(keyword, entities or [], placement=placement)
     base = locked or sanitize_stock_keyword(keyword, placement=placement)
     if not base:
@@ -292,29 +216,18 @@ def _expand_search_queries(
 
     queries: list[str] = [base]
 
-    cleaned = [t for t in tokens if t.lower() not in _KEYWORD_STOP]
-    if cleaned and cleaned != tokens:
-        queries.append(" ".join(cleaned))
+    # AI / analisa bilingual seeds (dynamic)
+    for eq in extra_queries or []:
+        eq = " ".join(str(eq or "").split())
+        if eq and eq.lower() not in {q.lower() for q in queries}:
+            queries.append(eq)
 
-    # Core subject (first 2-3 content words) — better stock match.
     if len(tokens) >= 3:
         queries.append(" ".join(tokens[:3]))
     if len(tokens) >= 2:
         queries.append(" ".join(tokens[:2]))
 
-    # Domain synonym variants (second concrete angle).
-    for needle, replacement in _TOPIC_SYNONYMS.items():
-        if needle in lower and replacement.lower() not in lower:
-            queries.append(replacement)
-            break
-
-    # Force entity synonym queries when lock provided entities not already primary.
-    for e in (entities or [])[:2]:
-        syn = _TOPIC_SYNONYMS.get(e)
-        if syn and syn.lower() not in lower:
-            queries.append(syn if not behind else f"{syn} close up")
-
-    # Behind-person / icon: fill-frame subject, avoid wide scenic.
+    # Behind-person / icon: fill-frame framing
     if behind or cat in {"icon", "motion_graphic"}:
         for suffix in ("close up", "macro detail", "isolated object", "fill frame"):
             if suffix not in lower:
@@ -327,7 +240,6 @@ def _expand_search_queries(
     elif "close up" not in lower and "closeup" not in lower:
         queries.append(f"{base} close up")
 
-    # Dedup preserve order, cap 6 (ClipScout batch budget).
     out: list[str] = []
     seen: set[str] = set()
     for q in queries:
@@ -336,7 +248,7 @@ def _expand_search_queries(
             continue
         seen.add(key)
         out.append(q)
-        if len(out) >= 6:
+        if len(out) >= 8:
             break
     return out
 
@@ -344,19 +256,18 @@ def _expand_search_queries(
 def build_segments_from_suggestions(
     suggestions: list[BRollSuggestion],
     topic_text: str = "",
+    analisa_extra_queries: Optional[list[str]] = None,
 ) -> list[dict]:
     """Build ClipScout segment payloads from BRollSuggestion list.
 
-    Each suggestion becomes one segment in the batch request.
-    Maps keyword/topic/searchQueries from the suggestion metadata.
-    Sends multiple searchQueries (close-up / core-subject) for accuracy.
-    Locks all queries to clip-level topic entities when present.
+    Merges AI keyword + dynamic analisa seeds (ID+EN from visual entities).
     """
-    # Clip-level entities once — force every segment to stay on-topic.
     texts = [topic_text]
     for s in suggestions:
         texts.append(str(getattr(s, "keyword", "") or ""))
         texts.append(str(getattr(s, "reason", "") or ""))
+    for q in analisa_extra_queries or []:
+        texts.append(str(q or ""))
     entities = extract_topic_entities(*texts)
 
     segments: list[dict] = []
@@ -369,7 +280,6 @@ def build_segments_from_suggestions(
         cat = getattr(suggestion, "visual_category", None)
         cat_val = cat.value if hasattr(cat, "value") else str(cat or "")
         locked = lock_keyword_to_entities(keyword, entities, placement=placement)
-        # Keep suggestion keyword aligned with what we actually search.
         if locked and locked != keyword:
             suggestion.keyword = locked
         queries = _expand_search_queries(
@@ -377,10 +287,11 @@ def build_segments_from_suggestions(
             placement=placement,
             category=cat_val,
             entities=entities,
+            extra_queries=list(analisa_extra_queries or []),
         )
         topic = locked or sanitize_stock_keyword(keyword, placement=placement) or keyword
 
-        segment = {
+        segments.append({
             "id": str(i + 1),
             "text": topic,
             "topic": topic,
@@ -388,8 +299,6 @@ def build_segments_from_suggestions(
             "startIndex": 0,
             "endIndex": 0,
             "chapter": 1,
-        }
-
-        segments.append(segment)
+        })
 
     return segments

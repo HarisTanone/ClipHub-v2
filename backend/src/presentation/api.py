@@ -148,6 +148,17 @@ async def lifespan(app: FastAPI):
     from src.infrastructure.database import init_db
     await init_db()
 
+    # Side tables not in SQLAlchemy models (settings UI / pipeline knobs)
+    try:
+        from src.presentation.routes.settings import (
+            _ensure_object_overlay_table,
+            _ensure_reframe_tuning_table,
+        )
+        _ensure_reframe_tuning_table()
+        _ensure_object_overlay_table()
+    except Exception as e:
+        logger.warning(f"settings side-tables ensure failed: {e}")
+
     # ─── Seed roles, permissions, superadmin user ─────────────────────────
     from src.infrastructure.db_seeder import seed_database
     seed_database()

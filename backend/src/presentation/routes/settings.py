@@ -395,6 +395,139 @@ def _ensure_reframe_tuning_table():
 _ensure_reframe_tuning_table()
 
 
+# ─── Object Image Overlay Config (noun → photo card) ─────────────────────────
+
+OBJECT_OVERLAY_COLUMNS = [
+    "enabled", "max_per_clip", "box_size_ratio", "corner_radius",
+    "position", "animation", "duration_sec", "margin_ratio",
+    "text_color", "bg_color", "border_color", "font_scale",
+    "opacity", "min_relevance", "show_label",
+]
+
+OBJECT_OVERLAY_DEFAULTS = {
+    "enabled": 1,
+    "max_per_clip": 3,
+    "box_size_ratio": 0.28,
+    "corner_radius": 18,
+    "position": "top_right",
+    "animation": "slide_right",
+    "duration_sec": 2.4,
+    "margin_ratio": 0.04,
+    "text_color": "255,255,255",
+    "bg_color": "20,20,24",
+    "border_color": "255,255,255",
+    "font_scale": 0.55,
+    "opacity": 0.95,
+    "min_relevance": 0.35,
+    "show_label": 1,
+}
+
+
+class ObjectOverlayConfig(BaseModel):
+    enabled: bool = True
+    max_per_clip: int = 3
+    box_size_ratio: float = 0.28
+    corner_radius: int = 18
+    position: str = "top_right"
+    animation: str = "slide_right"
+    duration_sec: float = 2.4
+    margin_ratio: float = 0.04
+    text_color: str = "255,255,255"
+    bg_color: str = "20,20,24"
+    border_color: str = "255,255,255"
+    font_scale: float = 0.55
+    opacity: float = 0.95
+    min_relevance: float = 0.35
+    show_label: bool = True
+
+
+def _ensure_object_overlay_table():
+    conn = get_dict_connection()
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS object_overlay_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER DEFAULT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                max_per_clip INTEGER NOT NULL DEFAULT 3,
+                box_size_ratio REAL NOT NULL DEFAULT 0.28,
+                corner_radius INTEGER NOT NULL DEFAULT 18,
+                position TEXT NOT NULL DEFAULT 'top_right',
+                animation TEXT NOT NULL DEFAULT 'slide_right',
+                duration_sec REAL NOT NULL DEFAULT 2.4,
+                margin_ratio REAL NOT NULL DEFAULT 0.04,
+                text_color TEXT NOT NULL DEFAULT '255,255,255',
+                bg_color TEXT NOT NULL DEFAULT '20,20,24',
+                border_color TEXT NOT NULL DEFAULT '255,255,255',
+                font_scale REAL NOT NULL DEFAULT 0.55,
+                opacity REAL NOT NULL DEFAULT 0.95,
+                min_relevance REAL NOT NULL DEFAULT 0.35,
+                show_label INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        # single global row (user_id NULL) — no UNIQUE on NULL, so check first
+        cur = conn.execute(
+            "SELECT id FROM object_overlay_configs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1"
+        )
+        if not cur.fetchone():
+            cols = ", ".join(OBJECT_OVERLAY_COLUMNS)
+            placeholders = ", ".join(["?"] * len(OBJECT_OVERLAY_COLUMNS))
+            values = [OBJECT_OVERLAY_DEFAULTS[c] for c in OBJECT_OVERLAY_COLUMNS]
+            conn.execute(
+                f"INSERT INTO object_overlay_configs (user_id, {cols}) VALUES (NULL, {placeholders})",
+                values,
+            )
+        conn.execute(
+            """
+            DELETE FROM object_overlay_configs
+            WHERE user_id IS NULL
+              AND id NOT IN (SELECT MAX(id) FROM object_overlay_configs WHERE user_id IS NULL)
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_ensure_object_overlay_table()
+
+
+def get_object_overlay_config(user_id: int | None = None) -> dict:
+    """user → global → defaults. Bools as Python bool."""
+    from src.infrastructure.object_image_overlay import normalise_object_overlay_style
+
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        row = None
+        if user_id is not None:
+            cur.execute(
+                "SELECT * FROM object_overlay_configs WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            cur.execute(
+                "SELECT * FROM object_overlay_configs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+        raw = dict(OBJECT_OVERLAY_DEFAULTS)
+        if row:
+            for k in OBJECT_OVERLAY_COLUMNS:
+                if k in row.keys() and row[k] is not None:
+                    raw[k] = row[k]
+        # int flags → bool for API
+        raw["enabled"] = bool(int(raw.get("enabled", 1)))
+        raw["show_label"] = bool(int(raw.get("show_label", 1)))
+        return normalise_object_overlay_style(raw)
+    finally:
+        conn.close()
+
+
 def get_reframe_tuning(user_id: int | None = None) -> dict:
     """Load reframe tuning config from DB. Lookup: user-specific → global → defaults."""
     conn = get_dict_connection()
@@ -620,3 +753,94 @@ async def get_model_status(user: CurrentUser = Depends(get_current_user)):
         "success": True,
         "models": tracker.get_all_status(),
     }
+
+
+@router.get("/object-overlay")
+async def get_object_overlay_endpoint(user: CurrentUser = Depends(get_current_user)):
+    """Get object image+text overlay style (DB-backed)."""
+    target = None if user.is_superadmin else user.id
+    return {
+        "success": True,
+        "data": get_object_overlay_config(target),
+        "is_global": target is None,
+    }
+
+
+@router.put("/object-overlay")
+async def update_object_overlay_endpoint(
+    body: ObjectOverlayConfig,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Save object overlay style. Superadmin = global; others = per-user."""
+    if not user.is_superadmin and not getattr(user, "is_premium", False):
+        raise HTTPException(status_code=403, detail="Premium required to tune object overlay")
+
+    target_user_id = None if user.is_superadmin else user.id
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        values = []
+        for c in OBJECT_OVERLAY_COLUMNS:
+            v = getattr(body, c)
+            if c in ("enabled", "show_label"):
+                values.append(1 if v else 0)
+            else:
+                values.append(v)
+
+        if target_user_id is None:
+            cur.execute("SELECT id FROM object_overlay_configs WHERE user_id IS NULL LIMIT 1")
+        else:
+            cur.execute(
+                "SELECT id FROM object_overlay_configs WHERE user_id = ? LIMIT 1",
+                (target_user_id,),
+            )
+        existing = cur.fetchone()
+        if existing:
+            update_set = ", ".join([f"{c} = ?" for c in OBJECT_OVERLAY_COLUMNS])
+            if target_user_id is None:
+                cur.execute(
+                    f"UPDATE object_overlay_configs SET {update_set}, updated_at = datetime('now') WHERE user_id IS NULL",
+                    values,
+                )
+            else:
+                cur.execute(
+                    f"UPDATE object_overlay_configs SET {update_set}, updated_at = datetime('now') WHERE user_id = ?",
+                    values + [target_user_id],
+                )
+        else:
+            cols = ", ".join(OBJECT_OVERLAY_COLUMNS)
+            placeholders = ", ".join(["?"] * len(OBJECT_OVERLAY_COLUMNS))
+            cur.execute(
+                f"INSERT INTO object_overlay_configs (user_id, {cols}) VALUES (?, {placeholders})",
+                [target_user_id] + values,
+            )
+        conn.commit()
+        return {"success": True, "message": "Object overlay settings saved", "data": body.model_dump()}
+    finally:
+        conn.close()
+
+
+@router.post("/object-overlay/reset")
+async def reset_object_overlay_endpoint(user: CurrentUser = Depends(get_current_user)):
+    if not user.is_superadmin and not getattr(user, "is_premium", False):
+        raise HTTPException(status_code=403, detail="Premium required to reset object overlay")
+    target_user_id = None if user.is_superadmin else user.id
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM object_overlay_configs WHERE user_id IS ?", (target_user_id,))
+        cols = ", ".join(OBJECT_OVERLAY_COLUMNS)
+        placeholders = ", ".join(["?"] * len(OBJECT_OVERLAY_COLUMNS))
+        values = [OBJECT_OVERLAY_DEFAULTS[c] for c in OBJECT_OVERLAY_COLUMNS]
+        cur.execute(
+            f"INSERT INTO object_overlay_configs (user_id, {cols}) VALUES (?, {placeholders})",
+            [target_user_id] + values,
+        )
+        conn.commit()
+        return {
+            "success": True,
+            "message": "Object overlay reset",
+            "data": get_object_overlay_config(target_user_id),
+        }
+    finally:
+        conn.close()

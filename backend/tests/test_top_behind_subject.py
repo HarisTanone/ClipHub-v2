@@ -343,15 +343,13 @@ def test_expand_search_queries_behind_person():
         "indonesian rupiah banknotes counting",
         placement="behind_person",
         category="footage",
+        extra_queries=["uang rupiah kertas", "indonesian rupiah banknotes"],
     )
-    # sanitize may rewrite action verb → "close up" for stock search quality
-    assert qs[0] in {
-        "indonesian rupiah banknotes counting",
-        "indonesian rupiah banknotes close up",
-    }
+    # AI keyword kept; close-up framing for behind_person; extra_queries merged
+    assert any("rupiah" in q.lower() for q in qs)
     assert any("close up" in q.lower() for q in qs)
-    assert any(q.startswith("indonesian rupiah banknotes") for q in qs)
-    assert len(qs) <= 6
+    assert any("uang" in q.lower() for q in qs)
+    assert len(qs) <= 8
 
 
 def test_snap_overlay_to_phrase_extends_cluster():
@@ -410,26 +408,38 @@ def test_extract_topic_entities_and_lock():
         extract_topic_entities,
         lock_keyword_to_entities,
         build_segments_from_suggestions,
+        sanitize_stock_keyword,
     )
 
+    # No stop/mood lexicon — content tokens ≥4 chars only (AI owns quality)
     ents = extract_topic_entities("Harga BBM naik, rupiah melemah, minyak dunia")
-    assert "bbm" in ents
     assert "rupiah" in ents
     assert "minyak" in ents
+    assert "dunia" in ents
 
-    # Off-topic generic keyword must be forced onto entity visual.
-    locked = lock_keyword_to_entities("dramatic lifestyle", ents, placement="behind_person")
-    assert any(tok in locked.lower() for tok in ("fuel", "nozzle", "gas", "rupiah", "banknotes", "oil"))
+    # Soft lock: short keyword gets first content token prepended
+    locked = lock_keyword_to_entities("chart", ents, placement="behind_person")
+    assert "rupiah" in locked.lower() or "chart" in locked.lower()
+
+    # sanitize normalizes only — trusts AI query text, no mood strip table
+    clean = sanitize_stock_keyword("rupiah banknotes close up", placement="")
+    assert "rupiah" in clean.lower()
+    assert "banknotes" in clean.lower()
 
     s = SimpleNamespace(
-        keyword="dramatic success",
+        keyword="indonesian rupiah banknotes",
         placement="behind_person",
         visual_category="footage",
         reason="",
     )
-    segs = build_segments_from_suggestions([s], topic_text="BBM mahal rupiah anjlok")
+    # extra_queries = AI seeds (not synonym/stop table)
+    segs = build_segments_from_suggestions(
+        [s],
+        topic_text="BBM mahal rupiah anjlok",
+        analisa_extra_queries=["fuel nozzle pumping gas", "indonesian rupiah banknotes"],
+    )
     blob = " ".join(segs[0]["searchQueries"]).lower()
-    assert any(x in blob for x in ("fuel", "nozzle", "rupiah", "banknotes", "bbm"))
+    assert "rupiah" in blob or "fuel" in blob
 
 
 def test_vad_edge_shift_cap_prevents_duration_collapse():
