@@ -310,11 +310,17 @@ def extract_objects(
             s, end = 0.0, 0.3
         seen.add(low)
         had_ai = True
+        try:
+            prio = int(e.get("priority") or 5)
+        except (TypeError, ValueError):
+            prio = 5
         out.append({
             "word": word,
             "start": round(s, 3),
             "end": round(end, 3),
             "label": str(e.get("label") or word),
+            "entity_type": str(e.get("entity_type") or e.get("type") or "object"),
+            "priority": max(1, min(10, prio)),
             "query_id": str(e.get("query_id") or ""),
             "query_en": str(e.get("query_en") or ""),
             "search_queries": list(e.get("search_queries") or []),
@@ -468,6 +474,7 @@ def build_clip_analisa(
         "top_overlay_events": list(top_overlay_events or []),
         "object_overlay_events": list(object_overlay_events or []),
         "visual_entities": list(visual_entities or []),
+        "hyperframes_polish": (extra or {}).get("hyperframes_polish") if extra else None,
         "thumb_seek": thumb,
         "virality": viral,
         "cta": cta,

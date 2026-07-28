@@ -221,7 +221,7 @@ def test_style_normalise_clamps():
     assert s["animation"] == "slide_right"
     assert s["position"] == "top_right"
     assert s["box_size_ratio"] <= 0.55
-    assert s["max_per_clip"] <= 6
+    assert s["max_per_clip"] <= 10
 
 
 def test_extract_objects_prefers_visual_entities():

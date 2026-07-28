@@ -26,7 +26,7 @@ def ensure_hyperframes_table() -> None:
             CREATE TABLE IF NOT EXISTS hyperframes_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER DEFAULT NULL,
-                enabled INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
                 default_template TEXT NOT NULL DEFAULT 'lower_third_v1',
                 server_url TEXT NOT NULL DEFAULT 'http://127.0.0.1:3003',
                 timeout_sec INTEGER NOT NULL DEFAULT 180,
@@ -36,9 +36,10 @@ def ensure_hyperframes_table() -> None:
             """
         )
         cur = conn.execute(
-            "SELECT id FROM hyperframes_configs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1"
+            "SELECT id, enabled FROM hyperframes_configs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1"
         )
-        if not cur.fetchone():
+        row = cur.fetchone()
+        if not row:
             cols = ", ".join(HYPERFRAMES_COLUMNS)
             placeholders = ", ".join(["?"] * len(HYPERFRAMES_COLUMNS))
             values = [HYPERFRAMES_DEFAULTS[c] for c in HYPERFRAMES_COLUMNS]
@@ -46,6 +47,18 @@ def ensure_hyperframes_table() -> None:
                 f"INSERT INTO hyperframes_configs (user_id, {cols}) VALUES (NULL, {placeholders})",
                 values,
             )
+        else:
+            # Migrate stale off-rows when defaults/env want polish ON
+            try:
+                from src.config import settings
+                want = 1 if bool(getattr(settings, "HYPERFRAMES_ENABLED", True)) else 0
+            except Exception:
+                want = int(HYPERFRAMES_DEFAULTS.get("enabled") or 1)
+            if want and int(row["enabled"] or 0) == 0:
+                conn.execute(
+                    "UPDATE hyperframes_configs SET enabled=1, updated_at=datetime('now') WHERE id=?",
+                    (row["id"],),
+                )
         conn.execute(
             """
             DELETE FROM hyperframes_configs

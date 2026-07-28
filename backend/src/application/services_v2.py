@@ -1689,6 +1689,7 @@ class V2PipelineService:
                 top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
                 object_overlay_events=list(getattr(c, "object_overlay_events", None) or []),
                 visual_entities=list(getattr(c, "visual_entities", None) or []),
+                extra={"hyperframes_polish": getattr(c, "hyperframes_polish", None)},
             ))
         write_split_job_meta(
             output_dir,
@@ -1743,7 +1744,7 @@ class V2PipelineService:
                         words_map,
                         durations,
                         clip_meta=clip_meta,
-                        max_objects=6,
+                        max_objects=10,
                     ) or {}
                 except Exception as exc:
                     logger.warning(f"[{job_id}] Visual entity extract skipped: {exc}")
@@ -2195,15 +2196,14 @@ class V2PipelineService:
                 os.replace(out_tmp, final)
             except OSError:
                 shutil.move(out_tmp, final)
-            # stamp meta for UI
+            # stamp meta for UI + json_analisa
             try:
-                clip.object_overlay_events = list(getattr(clip, "object_overlay_events", None) or [])
-                # lightweight flag on last event batch — keep existing cards
-                setattr(clip, "hyperframes_polish", {
+                clip.hyperframes_polish = {
                     "template": result.get("template") or cfg.get("default_template"),
                     "mode": result.get("mode"),
                     "events": len(events),
-                })
+                    "labels": [e.get("label") for e in events if e.get("label")],
+                }
             except Exception:
                 pass
             applied += 1
@@ -2466,6 +2466,9 @@ class V2PipelineService:
                 top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
                 object_overlay_events=list(getattr(c, "object_overlay_events", None) or []),
                 visual_entities=list(getattr(c, "visual_entities", None) or []),
+                extra={
+                    "hyperframes_polish": getattr(c, "hyperframes_polish", None),
+                },
             ))
 
         write_split_job_meta(

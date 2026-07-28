@@ -205,10 +205,10 @@ export function ClipViewer() {
         </div>
       </div>
 
-      {/* Main: compact phone-sized preview + sidebar */}
+      {/* Main: left video 7 · right sidebar 5 */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Video panel — capped height so 9:16 never fills desktop viewport */}
-        <div className="flex flex-col gap-2 lg:col-span-5 xl:col-span-4 min-h-0">
+        <div className="flex flex-col gap-2 lg:col-span-7 min-h-0">
           <Card className="p-0 overflow-hidden flex flex-col shrink-0">
             {/* Stage: center a phone-like 9:16 frame */}
             <div className="relative bg-zinc-950 flex items-center justify-center px-3 py-3 sm:px-4 sm:py-4">
@@ -315,8 +315,8 @@ export function ClipViewer() {
           </div>
         </div>
 
-        {/* Sidebar — more width now that preview is phone-sized */}
-        <div className="lg:col-span-7 xl:col-span-8 min-h-0 overflow-y-auto space-y-3">
+        {/* Sidebar — col 5 */}
+        <div className="lg:col-span-5 min-h-0 overflow-y-auto space-y-3">
           {/* Other clips - horizontal carousel with arrows */}
           {otherClips.length > 0 && (
             <Card className="p-3">
@@ -342,6 +342,78 @@ export function ClipViewer() {
               {hookStyleConfig.lineEnabled && <MiniRow label="Accent Line" value={hookStyleConfig.linePosition} highlight />}
             </div>
           </Card>
+
+          {/* HF polish stamp (post-Remotion lower_third) */}
+          {clip.hyperframes_polish && (
+            <Card className="p-3 border-cyan-500/20">
+              <h3 className="text-xs font-semibold text-cyan-300 mb-1">
+                HF Polish · {String(clip.hyperframes_polish.mode || "—")}
+              </h3>
+              <p className="text-[10px] text-zinc-400">
+                {String(clip.hyperframes_polish.template || "lower_third_v1")}
+                {" · "}
+                {Number(clip.hyperframes_polish.events) || 0} event
+              </p>
+              {Array.isArray(clip.hyperframes_polish.labels) && clip.hyperframes_polish.labels.length > 0 && (
+                <p className="mt-1 text-[10px] text-zinc-500 truncate">
+                  {(clip.hyperframes_polish.labels as string[]).join(" · ")}
+                </p>
+              )}
+            </Card>
+          )}
+
+          {/* AI visual entities — timed stock targets */}
+          {(clip.visual_entities?.length ?? 0) > 0 && (
+            <Card className="p-3">
+              <h3 className="text-xs font-semibold text-zinc-300 mb-2">
+                AI Visual · {clip.visual_entities!.length} entity
+              </h3>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                {(clip.visual_entities || []).map((e, i) => {
+                  const t0 = Number(e.start) || 0;
+                  const t1 = Number(e.end) || t0 + 0.4;
+                  const on = currentTime >= t0 && currentTime <= t1 + 0.5;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        if (videoRef.current) {
+                          videoRef.current.currentTime = Math.max(0, t0 - 0.05);
+                          void videoRef.current.play().catch(() => undefined);
+                        }
+                      }}
+                      className={cn(
+                        "w-full text-left rounded-lg border px-2 py-1.5 transition-colors",
+                        on
+                          ? "border-sky-500/40 bg-sky-500/10"
+                          : "border-zinc-800 bg-zinc-950/60 hover:border-zinc-700",
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold text-sky-300 truncate">
+                          {e.word || e.label || "—"}
+                        </span>
+                        {e.entity_type && (
+                          <span className="shrink-0 rounded px-1 py-0.5 text-[8px] uppercase tracking-wide bg-zinc-800 text-zinc-400">
+                            {e.entity_type}
+                          </span>
+                        )}
+                        <span className="ml-auto shrink-0 text-[9px] text-zinc-500 tabular-nums">
+                          {t0.toFixed(1)}s
+                        </span>
+                      </div>
+                      {(e.query_en || e.label) && (
+                        <p className="mt-0.5 text-[9px] text-zinc-500 truncate">
+                          {e.query_en || e.label}
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
 
           {/* Words */}
           {clip.words && clip.words.length > 0 && (

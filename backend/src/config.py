@@ -203,12 +203,12 @@ class Settings(BaseSettings):
 
     # ─── Top Behind Subject Overlay (portrait 9:16, additive to full-frame B-roll)
     TOP_OVERLAY_ENABLED: bool = True
-    TOP_OVERLAY_SPLIT_RATIO: float = 0.58      # top region height fraction (more room for stock)
+    TOP_OVERLAY_SPLIT_RATIO: float = 0.64      # stock band taller — bg dominant over person
     TOP_OVERLAY_FADE_HEIGHT: float = 0.10      # gradient fade as fraction of frame height
     TOP_OVERLAY_OPACITY: float = 1.0
     TOP_OVERLAY_PERSON_OUTLINE: bool = True    # white stroke around person (reference style)
     TOP_OVERLAY_PERSON_SHADOW: bool = True
-    TOP_OVERLAY_OUTLINE_THICKNESS: int = 12    # px stroke width (bold sticker edge @720p; scales up)
+    TOP_OVERLAY_OUTLINE_THICKNESS: int = 10    # px stroke @720p; bust glow, not full-body frame
     TOP_OVERLAY_OUTLINE_COLOR: str = "255,255,255"
     # white | neon | black | gradient | comic  (white = solid rim + soft blue bloom like reference)
     TOP_OVERLAY_OUTLINE_STYLE: str = "white"
@@ -221,10 +221,15 @@ class Settings(BaseSettings):
     TOP_OVERLAY_SPEAKER_MASK_MODE: str = "dual_auto"
     TOP_OVERLAY_SMART_CROP: bool = True        # YOLO object center on B-roll (wallet/pump), not fixed bias
     TOP_OVERLAY_SMART_CROP_CONF: float = 0.18
+    # Person as supporting element (cinematic): smaller + lower; outline bust only
+    TOP_OVERLAY_PERSON_SCALE: float = 0.82     # ~18% smaller than full-frame cutout
+    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.30   # push cutout down (~30% of free room)
+    TOP_OVERLAY_OUTLINE_BUST_RATIO: float = 0.48  # outline head→shoulder only (frac of person H)
+    TOP_OVERLAY_OUTLINE_EDGE_MARGIN: float = 0.04  # kill stroke glued to L/R/bottom frame edges
 
     # ─── Object image+text overlay (noun mention → stock photo card) ─────
     OBJECT_OVERLAY_ENABLED: bool = True
-    OBJECT_OVERLAY_MAX_PER_CLIP: int = 3
+    OBJECT_OVERLAY_MAX_PER_CLIP: int = 6
     OBJECT_OVERLAY_BOX_SIZE: float = 0.28       # fraction of min(frame w,h)
     OBJECT_OVERLAY_CORNER_RADIUS: int = 18
     OBJECT_OVERLAY_POSITION: str = "top_right"  # top_right|top_left|bottom_right|bottom_left|center_right|center_left

@@ -73,7 +73,7 @@ def normalise_object_overlay_style(raw: object = None) -> dict[str, Any]:
         out["position"] = "top_right"
     out["box_size_ratio"] = min(0.55, max(0.12, float(out["box_size_ratio"])))
     out["duration_sec"] = min(5.0, max(1.0, float(out["duration_sec"])))
-    out["max_per_clip"] = min(6, max(0, int(out["max_per_clip"])))
+    out["max_per_clip"] = min(10, max(0, int(out["max_per_clip"])))
     return out
 
 
@@ -159,6 +159,12 @@ def pick_object_mentions(
         src = str(o.get("source") or source or "").lower()
         rank = 0 if src in ("ai", "fallback") else 1
         stem = re.sub(r"[^\w\-]+", "", word, flags=re.UNICODE).lower()
+        try:
+            priority = int(o.get("priority", 5) or 5)
+        except (TypeError, ValueError):
+            priority = 5
+        priority = max(1, min(10, priority))
+        entity_type = str(o.get("entity_type") or o.get("type") or "object").lower()
         candidates.append({
             "word": word,
             "label": label,
@@ -166,10 +172,12 @@ def pick_object_mentions(
             "end": round(float(end) if end > start else start + 0.3, 3),
             "query_id": id_q,
             "query_en": en_q,
-            "search_queries": ordered[:6],
+            "search_queries": ordered[:8],
             "source": src or source,
             "rank": rank,
             "stem": stem,
+            "priority": priority,
+            "entity_type": entity_type,
         })
 
     for o in objects or []:
@@ -212,8 +220,15 @@ def pick_object_mentions(
                 return True  # merokok↔rokok
         return False
 
-    # Prefer AI first; then prefer longer stems (brands) with max time spread
-    candidates.sort(key=lambda c: (c.get("rank", 1), -len(c.get("stem") or ""), c["start"]))
+    # Prefer AI + high priority (brand/object/action) + longer stems + time spread
+    candidates.sort(
+        key=lambda c: (
+            c.get("rank", 1),
+            -int(c.get("priority") or 5),
+            -len(c.get("stem") or ""),
+            c["start"],
+        )
+    )
     selected: list[dict[str, Any]] = []
     seen_stems: list[str] = []
 

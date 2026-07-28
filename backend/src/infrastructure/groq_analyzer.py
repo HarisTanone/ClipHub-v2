@@ -322,14 +322,18 @@ OUTPUT RAW JSON:
         clips_words: dict[int, list[dict]],
         clip_durations: dict[int, float],
         clip_meta: dict | None = None,
-        max_objects: int = 6,
+        max_objects: int = 10,
     ) -> dict[int, list[dict]]:
-        """Per-clip AI: concrete visual nouns + bilingual stock queries (no domain lexicon).
+        """Per-clip AI: multi-category visual entities + bilingual stock queries.
 
-        Returns {rank: [{word,start,end,label,query_id,query_en,search_queries}, ...]}.
-        Queries are dynamic from transcript context — not hardcoded synonym maps.
+        Categories (AI-decided per mention, NO domain lexicon):
+        brand | object | action | place | food | person | phenomenon |
+        emotion | weather | tech | money | nature | building | sport | concept
+
+        Returns {rank: [{word,start,end,label,entity_type,priority,
+                         query_id,query_en,search_queries}, ...]}.
         """
-        max_objects = max(1, min(int(max_objects), 8))
+        max_objects = max(1, min(int(max_objects), 12))
         if not clips_words:
             return {}
 
@@ -375,9 +379,10 @@ OUTPUT RAW JSON:
                 return rank, items
 
         logger.info(
-            "v2_analyzer: visual entities per-clip model=%s clips=%d",
+            "v2_analyzer: visual entities per-clip model=%s clips=%d max=%d",
             self._model_pass1,
             len(eligible),
+            max_objects,
         )
         pairs = await asyncio.gather(
             *[_one(rank, words) for rank, words in eligible.items()]
@@ -390,16 +395,16 @@ OUTPUT RAW JSON:
         rank: int,
         words: list[dict],
         duration: float,
-        max_objects: int = 6,
+        max_objects: int = 10,
         hook: str = "",
         reason: str = "",
     ) -> list[dict]:
-        """LLM extracts concrete visual objects + ID/EN stock search queries."""
+        """LLM extracts multi-category timed entities + stock search queries."""
         window_size = 10
         windows = [words[i : i + window_size] for i in range(0, len(words), window_size)]
-        if len(windows) > 18:
+        if len(windows) > 22:
             last = len(windows) - 1
-            pick = sorted({round(i * last / 17) for i in range(18)})
+            pick = sorted({round(i * last / 21) for i in range(22)})
             windows = [windows[i] for i in pick]
         lines: list[str] = []
         for window in windows:
@@ -407,32 +412,45 @@ OUTPUT RAW JSON:
             if text:
                 lines.append(f"[{float(window[0]['start']):.2f}s] {text[:280]}")
         context = "\n".join(lines)
-        if len(context) > 7000:
-            context = context[:7000]
+        if len(context) > 9000:
+            context = context[:9000]
         topic = " | ".join(x for x in (hook.strip(), reason.strip()) if x)[:300]
 
-        prompt = f"""Kamu visual researcher short-form. Ambil maks {max_objects} OBJEK visual KONKRET dari transkrip — tiap objek foto stock BERBEDA.
+        prompt = f"""Kamu visual researcher short-form. Ekstrak maks {max_objects} ENTITAS visual dari transkrip word-by-word — tiap entitas → stock foto/footage BERBEDA, timed ke saat diucapkan.
 
 CLIP #{rank} duration={duration:.1f}s
 HOOK/TOPIC: {topic or "(n/a)"}
 
-TRANSKRIP BERTIMESTAMP:
+TRANSKRIP BERTIMESTAMP (word-level — gunakan start exact):
 {context}
 
+KATEGORI (pilih 1 per entitas — AI putuskan, bukan kamus tetap):
+brand | object | action | place | food | person | phenomenon | emotion | weather | tech | money | nature | building | sport | concept
+
+PRIORITAS (1–10, tinggi dulu):
+10 named brand/produk (IQOS, merek) · 9 object konkret · 8 action (merokok→smoking) · 7 place · 6 food/person · 5 phenomenon/weather · 4 emotion/concept · 3 sinonim pendukung
+
 ATURAN (WAJIB):
-- Prioritas: merek/produk/benda yang DIUCAPKAN (rokok, device, minuman, tempat, alat, makanan, kalender, dll) — dari clip ini saja, tanpa kamus domain tetap.
-- Satu objek per mention berbeda; sebarkan start di sepanjang clip (awal/tengah/akhir).
-- JANGAN filler/abstrak: itu, nah, karena, sukses, viral, lifestyle, mood.
-- word = token/frasa 1-3 kata dari transkrip (boleh ejaan ASR apa adanya).
-- start = detik float dari baris transkrip.
-- label = label kartu singkat.
-- query_id = stock ID 3-8 kata, konkret, close-up/product.
-- query_en = stock EN 3-8 kata, visual 1:1. Jika ASR salah eja merek yang jelas dari konteks, PERBAIKI di query_en/query_id saja (word tetap sesuai ucapan).
-- search_queries = 2-4 variasi ID+EN BERBEDA (bukan copy query_en 4x).
-- Target ideal 3–{max_objects} objek jika transkrip kaya produk; objects:[] hanya jika benar-benar kosong.
+1. Ambil SEMUA merek/benda/aksi/tempat yang DIUCAPKAN (contoh: rokok, IQOS/Aikos ASR, Shisha, merokok, kalender, pod, vape). Jangan stop di 1 entitas.
+2. Satu entitas per mention berbeda; sebarkan start di sepanjang clip. word = token/frasa 1-3 kata dari transkrip (ejaan ASR boleh).
+3. start = detik float EXACT dari baris di mana kata itu muncul (bukan tebak).
+4. JANGAN filler: itu, nah, karena, yang, dan, atau, sudah, masih, sangat, banget, lifestyle, mood, viral, sukses (kecuali proper noun).
+5. label = label kartu singkat.
+6. entity_type = salah satu kategori di atas.
+7. priority = 1–10 integer.
+8. query_id = stock ID 2-8 kata konkret.
+9. query_en = stock EN 2-8 kata. ASR salah eja merek → PERBAIKI di query saja (word tetap ucapan).
+10. search_queries = 3–6 variasi BERBEDA mencakup:
+    - bare entity + product close-up
+    - ACTION jika relevan (merokok → person smoking, cigarette smoke)
+    - sinonim/konsep terkait (rokok → cigarette, tobacco; IQOS → heated tobacco device)
+    - adjective compound jika ada (rokok elektrik → electric cigarette)
+    Campur ID+EN. Bukan copy query_en 4x.
+11. Target ideal 4–{max_objects} jika transkrip kaya; objects:[] hanya jika benar-benar kosong.
+12. Action lebih hidup daripada object diam — jika verb visual (merokok, mengetik, minum) sertakan sebagai entitas action terpisah ATAU perluas search_queries object-nya.
 
 OUTPUT RAW JSON only:
-{{"objects":[{{"word":"…","start":12.5,"label":"…","query_id":"…","query_en":"…","search_queries":["…","…"]}}]}}
+{{"objects":[{{"word":"…","start":12.5,"label":"…","entity_type":"object","priority":9,"query_id":"…","query_en":"…","search_queries":["…","…","…"]}}]}}
 """
         try:
             raw = await asyncio.wait_for(
@@ -440,7 +458,7 @@ OUTPUT RAW JSON only:
                     self._call_groq_llm,
                     prompt,
                     self._model_pass1,
-                    1400,
+                    2200,
                 ),
                 timeout=self._timeout,
             )
@@ -451,14 +469,14 @@ OUTPUT RAW JSON only:
 
         raw_objs = []
         if isinstance(parsed, dict):
-            raw_objs = parsed.get("objects") or parsed.get("items") or []
+            raw_objs = parsed.get("objects") or parsed.get("items") or parsed.get("entities") or []
         if not isinstance(raw_objs, list):
             raw_objs = []
         out = self._normalize_visual_entities(
             raw_objs, words=words, duration=duration, max_objects=max_objects
         )
         # Thin AI → top-up offline proper/long (no domain lexicon)
-        if len(out) < max(3, max_objects // 2):
+        if len(out) < max(4, max_objects // 2):
             seen = {
                 re.sub(r"[^\w\-]+", "", str(o.get("word") or ""), flags=re.UNICODE).lower()
                 for o in out
@@ -475,7 +493,9 @@ OUTPUT RAW JSON only:
                 out.append(fb)
                 if len(out) >= max_objects:
                     break
-        return out
+        # Prefer higher priority first for downstream pick
+        out.sort(key=lambda o: (-int(o.get("priority") or 5), float(o.get("start") or 0)))
+        return out[:max_objects]
 
     def _normalize_visual_entities(
         self,
@@ -486,6 +506,11 @@ OUTPUT RAW JSON only:
         max_objects: int,
     ) -> list[dict]:
         """Anchor AI objects to transcript times; keep dynamic queries as-is."""
+        allowed_types = {
+            "brand", "object", "action", "place", "food", "person",
+            "phenomenon", "emotion", "weather", "tech", "money",
+            "nature", "building", "sport", "concept",
+        }
         allowed_times = [float(w["start"]) for w in words if "start" in w]
         word_index: dict[str, list[tuple[float, float, str]]] = {}
         for w in words:
@@ -518,12 +543,18 @@ OUTPUT RAW JSON only:
             # Snap to nearest transcript mention of same token if possible
             hits = word_index.get(low) or []
             if not hits:
-                # try first token of multi-word
-                first = low.split("-")[0] if "-" in low else low[:12]
-                for k, v in word_index.items():
-                    if first and (first in k or k in first):
-                        hits = v
+                # multi-word / partial
+                parts = [p for p in re.split(r"[^\w]+", low) if len(p) >= 3]
+                for p in parts:
+                    if p in word_index:
+                        hits = word_index[p]
                         break
+                if not hits:
+                    first = low.split("-")[0] if "-" in low else low[:12]
+                    for k, v in word_index.items():
+                        if first and (first in k or k in first):
+                            hits = v
+                            break
             if hits:
                 if start < 0:
                     s, e, raw_w = hits[0]
@@ -545,6 +576,15 @@ OUTPUT RAW JSON only:
                 continue
 
             label = " ".join(str(item.get("label") or word).split())[:40] or word
+            et = str(item.get("entity_type") or item.get("type") or "object").strip().lower()
+            if et not in allowed_types:
+                et = "object"
+            try:
+                priority = int(item.get("priority", 5) or 5)
+            except (TypeError, ValueError):
+                priority = 5
+            priority = max(1, min(10, priority))
+
             query_id = " ".join(str(item.get("query_id") or "").split())[:80]
             query_en = " ".join(str(item.get("query_en") or "").split())[:80]
             sq_raw = item.get("search_queries") or []
@@ -555,11 +595,10 @@ OUTPUT RAW JSON only:
                     if q and q.lower() not in {x.lower() for x in search_queries}:
                         search_queries.append(q)
             # Always keep bilingual pair if present
-            for q in (query_id, query_en):
+            for q in (word, query_id, query_en):
                 if q and q.lower() not in {x.lower() for x in search_queries}:
                     search_queries.append(q)
             if not query_en and not query_id:
-                # AI must produce queries; skip empty abstract
                 continue
             if not query_en:
                 query_en = search_queries[0] if search_queries else f"{word} close up"
@@ -572,9 +611,11 @@ OUTPUT RAW JSON only:
                 "start": round(float(start), 3),
                 "end": round(float(end), 3),
                 "label": label,
+                "entity_type": et,
+                "priority": priority,
                 "query_id": query_id,
                 "query_en": query_en,
-                "search_queries": search_queries[:6],
+                "search_queries": search_queries[:8],
                 "source": "ai",
             })
             if len(out) >= max_objects:
@@ -623,6 +664,8 @@ OUTPUT RAW JSON only:
                 "start": round(s, 3),
                 "end": round(e, 3),
                 "label": label,
+                "entity_type": "object",
+                "priority": 6 if proper else 5,
                 "query_id": id_q,
                 "query_en": en_q,
                 "search_queries": [clean, id_q, f"{clean} isolated object"],

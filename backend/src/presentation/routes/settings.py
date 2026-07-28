@@ -406,7 +406,7 @@ OBJECT_OVERLAY_COLUMNS = [
 
 OBJECT_OVERLAY_DEFAULTS = {
     "enabled": 1,
-    "max_per_clip": 3,
+    "max_per_clip": 6,
     "box_size_ratio": 0.28,
     "corner_radius": 18,
     "position": "top_right",
@@ -425,7 +425,7 @@ OBJECT_OVERLAY_DEFAULTS = {
 
 class ObjectOverlayConfig(BaseModel):
     enabled: bool = True
-    max_per_clip: int = 3
+    max_per_clip: int = 6
     box_size_ratio: float = 0.28
     corner_radius: int = 18
     position: str = "top_right"

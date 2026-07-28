@@ -160,6 +160,8 @@ class Clip:
     object_overlay_events: list[dict] = field(default_factory=list)
     # Dynamic AI visual entities (query_id/query_en) — no domain lexicon.
     visual_entities: list[dict] = field(default_factory=list)
+    # Post-Remotion HyperFrames polish stamp {template, mode, events}.
+    hyperframes_polish: dict | None = None
 
 
 # ─── Creative Direction (v2.0 — per-job visual identity) ─────────────────────

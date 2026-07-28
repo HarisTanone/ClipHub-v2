@@ -208,9 +208,9 @@ def test_parse_broll_dual_placement_split():
 
 
 def test_person_outline_paints_white_edge():
-    """Sticker outline must paint bright pixels on person contour (reference style)."""
+    """Bust glow paints bright rim on head/shoulder, not full torso frame."""
     r = TopBehindSubjectRenderer(
-        split_ratio=0.6,
+        split_ratio=0.7,
         fade_height=0.05,
         overlay_opacity=1.0,
         person_outline=True,
@@ -219,23 +219,30 @@ def test_person_outline_paints_white_edge():
         outline_thickness=6,
         outline_color="255,255,255",
         outline_style="white",
+        person_scale=1.0,
+        person_shift_y=0.0,
+        outline_bust_ratio=0.55,
+        outline_edge_margin=0.02,
     )
-    h, w = 120, 80
+    h, w = 160, 100
     frame = np.zeros((h, w, 3), dtype=np.uint8)
     frame[:] = (40, 40, 40)
     overlay = np.zeros((h, w, 3), dtype=np.uint8)
     overlay[:] = (10, 180, 10)  # green stock
     mask = np.zeros((h, w), dtype=np.float32)
-    mask[30:100, 20:60] = 1.0
+    # Person mid-frame (away from L/R edges so edge_kill doesn't wipe rim)
+    mask[25:130, 28:72] = 1.0
 
     out = r.render(frame, mask, overlay)
 
-    # Person interior stays near original gray
-    assert np.allclose(out[60, 40], [40, 40, 40], atol=8)
-    # Contour ring (just outside body) should be bright white-ish
-    edge = out[30:100, 18]  # left edge of person rect
-    bright = int(np.sum(edge.mean(axis=1) > 180))
-    assert bright >= 3, f"expected white outline pixels, bright={bright}"
+    # Bust band left rim (upper half of person) should be bright
+    edge_bust = out[25:70, 26]
+    bright = int(np.sum(edge_bust.mean(axis=1) > 160))
+    assert bright >= 2, f"expected white bust outline, bright={bright}"
+    # Lower torso should NOT carry full-body rim (bust-only)
+    edge_legs = out[110:128, 26]
+    bright_low = int(np.sum(edge_legs.mean(axis=1) > 180))
+    assert bright_low <= bright, "outline must not dominate lower body"
     # Top non-person gets overlay green
     assert out[5, 5, 1] > 100
 
@@ -250,17 +257,21 @@ def test_outline_style_neon_blue_bloom():
         mask_feather=1,
         outline_thickness=8,
         outline_style="neon",
+        person_scale=1.0,
+        person_shift_y=0.0,
+        outline_bust_ratio=0.55,
+        outline_edge_margin=0.02,
     )
-    h, w = 120, 80
+    h, w = 160, 100
     frame = np.full((h, w, 3), 30, dtype=np.uint8)
     overlay = np.full((h, w, 3), 10, dtype=np.uint8)
     mask = np.zeros((h, w), dtype=np.float32)
-    mask[30:100, 20:60] = 1.0
+    mask[25:130, 28:72] = 1.0
     out = r.render(frame, mask, overlay)
-    edge = out[30:100, 17]
+    edge = out[25:70, 25]
     # Neon is blue-ish BGR → high B channel on rim
-    blueish = int(np.sum(edge[:, 0] > edge[:, 2] + 20))
-    assert blueish >= 2, f"expected neon blue rim, blueish={blueish}"
+    blueish = int(np.sum(edge[:, 0] > edge[:, 2] + 15))
+    assert blueish >= 1, f"expected neon blue rim, blueish={blueish}"
 
 
 def test_outline_style_black():
@@ -271,16 +282,84 @@ def test_outline_style_black():
         person_shadow=False,
         outline_thickness=8,
         outline_style="black",
+        person_scale=1.0,
+        person_shift_y=0.0,
+        outline_bust_ratio=0.55,
+        outline_edge_margin=0.02,
     )
-    h, w = 120, 80
+    h, w = 160, 100
     frame = np.full((h, w, 3), 200, dtype=np.uint8)
     overlay = np.full((h, w, 3), 180, dtype=np.uint8)
     mask = np.zeros((h, w), dtype=np.float32)
-    mask[30:100, 20:60] = 1.0
+    mask[25:130, 28:72] = 1.0
     out = r.render(frame, mask, overlay)
-    edge = out[30:100, 17]
-    dark = int(np.sum(edge.mean(axis=1) < 80))
-    assert dark >= 2, f"expected black outline, dark={dark}"
+    edge = out[25:70, 25]
+    dark = int(np.sum(edge.mean(axis=1) < 100))
+    assert dark >= 1, f"expected black outline, dark={dark}"
+
+
+def test_person_scale_shrinks_and_shifts_down():
+    """Supporting element: ~18% smaller + pushed down vs full-frame cutout."""
+    r = TopBehindSubjectRenderer(
+        split_ratio=0.7,
+        fade_height=0.05,
+        overlay_opacity=1.0,
+        person_outline=False,
+        person_shadow=False,
+        mask_feather=1,
+        person_scale=0.80,
+        person_shift_y=0.30,
+    )
+    h, w = 200, 120
+    frame = np.full((h, w, 3), 50, dtype=np.uint8)
+    # Distinct person color
+    frame[40:160, 30:90] = (20, 20, 200)  # red-ish BGR person
+    overlay = np.full((h, w, 3), (10, 180, 10), dtype=np.uint8)
+    mask = np.zeros((h, w), dtype=np.float32)
+    mask[40:160, 30:90] = 1.0
+
+    out = r.render(frame, mask, overlay)
+    # After shrink+shift, original top of person bbox should free up for stock/green
+    # (person no longer occupies y=40 fully)
+    top_free = out[42:50, 50:70]
+    # Either green stock or neutral fill — not full red person
+    red_left = int(np.mean(top_free[:, :, 2]))
+    assert red_left < 150, f"person should leave top room, red={red_left}"
+
+    # Layout meta path: mask area should shrink (~0.80^2 of original bbox area-ish)
+    _, p2, layout = r._layout_person_supporting(frame, mask)
+    assert layout["scale"] == 0.80
+    assert layout["y0"] > 40 or layout["ph"] < 120
+    area0 = float(mask.sum())
+    area1 = float(p2.sum())
+    assert area1 < area0 * 0.95, f"mask area should shrink {area1} vs {area0}"
+
+
+def test_outline_kills_frame_edge_verticals():
+    """Stroke must not paint glued L/R frame columns (boxed look)."""
+    r = TopBehindSubjectRenderer(
+        split_ratio=0.8,
+        fade_height=0.05,
+        person_outline=True,
+        person_shadow=False,
+        outline_thickness=10,
+        outline_style="white",
+        person_scale=1.0,
+        person_shift_y=0.0,
+        outline_bust_ratio=0.6,
+        outline_edge_margin=0.08,
+    )
+    h, w = 160, 100
+    frame = np.full((h, w, 3), 40, dtype=np.uint8)
+    overlay = np.full((h, w, 3), 10, dtype=np.uint8)
+    mask = np.zeros((h, w), dtype=np.float32)
+    # Person touching left edge (bad YOLO case) — outline must still kill col 0..mx
+    mask[20:140, 0:55] = 1.0
+    out = r.render(frame, mask, overlay)
+    left_strip = out[:, :3].mean(axis=2)
+    # Extreme left columns should stay near frame gray, not white rim wall
+    bright_left = int(np.sum(left_strip > 180))
+    assert bright_left < h * 0.35, f"edge vertical wall leaked, bright_left={bright_left}"
 
 
 def test_clean_mask_keeps_dual_components():

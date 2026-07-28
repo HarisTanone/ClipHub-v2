@@ -9,7 +9,6 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assembleHtml, listTemplates, writeComposition } from './assemble.mjs';
@@ -18,6 +17,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PORT = Number(process.env.HYPERFRAMES_SERVER_PORT || process.env.PORT || 3003);
 const WORK = process.env.HYPERFRAMES_WORK_DIR || path.join(ROOT, 'work');
+const HF_TIMEOUT = Number(process.env.HYPERFRAMES_TIMEOUT || 180) * 1000;
 
 fs.mkdirSync(WORK, { recursive: true });
 
@@ -25,10 +25,12 @@ const app = express();
 app.use(express.json({ limit: '8mb' }));
 
 app.get('/health', (_req, res) => {
+  const localBin = path.join(ROOT, 'node_modules', '.bin', 'hyperframes');
   res.json({
     status: 'healthy',
     service: 'autocliper-hyperframes',
     templates: listTemplates(),
+    cli: fs.existsSync(localBin) ? 'local' : 'npx',
     note: 'polish layer only; hook+subtitle = Remotion',
   });
 });
@@ -37,18 +39,22 @@ app.get('/templates', (_req, res) => {
   res.json({ templates: listTemplates() });
 });
 
-function runHyperframesRender(compositionDir, outFile, timeoutMs = 180000) {
+function runHyperframesRender(compositionDir, outFile, timeoutMs = HF_TIMEOUT) {
   return new Promise((resolve, reject) => {
-    // Prefer local node_modules bin, then npx
     const localBin = path.join(ROOT, 'node_modules', '.bin', 'hyperframes');
     const bin = fs.existsSync(localBin) ? localBin : 'npx';
+    // HF v0.7 uses -o / --output (NOT --out)
     const args = fs.existsSync(localBin)
-      ? ['render', compositionDir, '--out', outFile]
-      : ['--yes', 'hyperframes', 'render', compositionDir, '--out', outFile];
+      ? ['render', compositionDir, '-o', outFile, '-q', 'draft', '-w', '1']
+      : ['--yes', 'hyperframes', 'render', compositionDir, '-o', outFile, '-q', 'draft', '-w', '1'];
 
     const child = spawn(bin, args, {
       cwd: ROOT,
-      env: process.env,
+      env: {
+        ...process.env,
+        // first-run chrome download can be slow; keep gate soft for polish
+        HF_VIDEO_COVERAGE_THRESHOLD: process.env.HF_VIDEO_COVERAGE_THRESHOLD || '0.5',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -65,58 +71,109 @@ function runHyperframesRender(compositionDir, outFile, timeoutMs = 180000) {
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0 && fs.existsSync(outFile)) {
+      if (code === 0 && fs.existsSync(outFile) && fs.statSync(outFile).size > 1000) {
         resolve({ stdout, stderr, outFile });
       } else {
-        // Fallback: if CLI missing/failed, write assembled HTML + stub note
-        reject(new Error(`hyperframes exit ${code}: ${stderr || stdout || 'no output'}`));
+        reject(new Error(`hyperframes exit ${code}: ${(stderr || stdout || 'no output').slice(-800)}`));
       }
     });
   });
 }
 
-/** Lightweight ffmpeg overlay fallback when hyperframes CLI unavailable. */
+/** Portrait-aware ffmpeg lower-third when HF CLI fails. */
 function ffmpegLowerThirdFallback(baseVideo, events, outFile, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     if (!baseVideo || !fs.existsSync(baseVideo)) {
       reject(new Error('base video missing for fallback'));
       return;
     }
-    // passthrough copy if no events — still "success" for pipeline continuity
     if (!events?.length) {
       fs.copyFileSync(baseVideo, outFile);
       resolve({ mode: 'copy', outFile });
       return;
     }
-    // Draw simple text labels (first 3) — polish-lite, not full HF
-    const draws = events.slice(0, 3).map((e, i) => {
-      const start = Number(e.start) || 0;
-      const end = Number(e.end) || start + 2.4;
-      const label = String(e.label || e.word || 'item').replace(/[:\\]/g, ' ').slice(0, 40);
-      const y = 1600 - i * 90;
-      return `drawtext=text='${label}':fontsize=36:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=12:x=48:y=${y}:enable='between(t\\,${start}\\,${end})'`;
-    });
-    const filter = draws.join(',');
-    const args = [
-      '-y', '-i', baseVideo,
-      '-vf', filter,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-      '-c:a', 'copy',
-      outFile,
-    ];
-    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error('ffmpeg fallback timeout'));
-    }, timeoutMs);
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0 && fs.existsSync(outFile)) resolve({ mode: 'ffmpeg_drawtext', outFile });
-      else reject(new Error(`ffmpeg fallback exit ${code}: ${stderr.slice(-400)}`));
+
+    // Probe height for y placement (default 9:16 1920)
+    const probe = spawn('ffprobe', [
+      '-v', 'error', '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height', '-of', 'csv=p=0', baseVideo,
+    ]);
+    let probeOut = '';
+    probe.stdout.on('data', (d) => { probeOut += d.toString(); });
+    probe.on('close', () => {
+      const parts = probeOut.trim().split(',');
+      const h = Number(parts[1]) || 1920;
+      const draws = [];
+      events.slice(0, 4).forEach((e, i) => {
+        const start = Number(e.start) || 0;
+        const end = Number(e.end) || start + 2.4;
+        const label = String(e.label || e.word || 'item')
+          .replace(/[':\\]/g, ' ')
+          .replace(/%/g, '')
+          .slice(0, 36);
+        const sub = String(e.sub || '')
+          .replace(/[':\\]/g, ' ')
+          .replace(/%/g, '')
+          .slice(0, 48);
+        const boxH = 110;
+        const y = Math.max(40, h - 280 - i * (boxH + 24));
+        const enable = `between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})`;
+        draws.push(
+          `drawbox=x=36:y=${y}:w=iw-72:h=${boxH}:color=black@0.72:t=fill:enable='${enable}'`,
+        );
+        draws.push(
+          `drawbox=x=36:y=${y}:w=8:h=${boxH}:color=0x22d3ee:t=fill:enable='${enable}'`,
+        );
+        draws.push(
+          `drawtext=text='${label}':fontsize=42:fontcolor=white:x=60:y=${y + 28}:enable='${enable}'`,
+        );
+        if (sub) {
+          draws.push(
+            `drawtext=text='${sub}':fontsize=24:fontcolor=white@0.8:x=60:y=${y + 72}:enable='${enable}'`,
+          );
+        }
+      });
+      const filter = draws.join(',');
+      const args = [
+        '-y', '-i', baseVideo,
+        '-vf', filter,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-c:a', 'copy',
+        '-movflags', '+faststart',
+        outFile,
+      ];
+      const child = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        reject(new Error('ffmpeg fallback timeout'));
+      }, timeoutMs);
+      child.stderr.on('data', (d) => { stderr += d.toString(); });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0 && fs.existsSync(outFile)) {
+          resolve({ mode: 'ffmpeg_drawtext', outFile });
+        } else {
+          reject(new Error(`ffmpeg fallback exit ${code}: ${stderr.slice(-500)}`));
+        }
+      });
     });
   });
+}
+
+function stageBaseVideo(workDir, baseAbs) {
+  const dest = path.join(workDir, 'base.mp4');
+  if (!baseAbs || !fs.existsSync(baseAbs)) {
+    throw new Error(`base video missing: ${baseAbs}`);
+  }
+  // hardlink if possible (fast), else copy
+  try {
+    if (fs.existsSync(dest)) fs.unlinkSync(dest);
+    fs.linkSync(baseAbs, dest);
+  } catch {
+    fs.copyFileSync(baseAbs, dest);
+  }
+  return dest;
 }
 
 app.post('/render', async (req, res) => {
@@ -133,30 +190,63 @@ app.post('/render', async (req, res) => {
       clip_id = '0',
     } = req.body || {};
 
-    const base = base_video || base_src || '';
+    const baseIn = base_video || base_src || '';
+    const baseAbs = baseIn.startsWith('file://')
+      ? baseIn.replace(/^file:\/\//, '')
+      : path.resolve(baseIn);
+
     const workDir = path.join(WORK, `${job_id}_${clip_id}_${Date.now()}`);
     fs.mkdirSync(workDir, { recursive: true });
 
+    const staged = stageBaseVideo(workDir, baseAbs);
+
+    // Probe duration if missing
+    let dur = Number(duration) || 0;
+    if (!dur) {
+      try {
+        const out = await new Promise((resolve) => {
+          const p = spawn('ffprobe', [
+            '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'csv=p=0', staged,
+          ]);
+          let s = '';
+          p.stdout.on('data', (d) => { s += d.toString(); });
+          p.on('close', () => resolve(s));
+        });
+        dur = parseFloat(out) || 6;
+      } catch {
+        dur = 6;
+      }
+    }
+
     const indexPath = writeComposition(workDir, {
       template,
-      baseSrc: base.startsWith('http') ? base : (base ? `file://${base}` : ''),
+      baseSrc: 'base.mp4', // project-relative — required by HF frame extract
       events,
-      duration,
+      duration: dur,
     });
 
     const outFile = out_path || path.join(workDir, 'output.mp4');
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
 
     let mode = 'hyperframes';
+    let errMsg = '';
     try {
-      await runHyperframesRender(workDir, outFile, Number(process.env.HYPERFRAMES_TIMEOUT || 180) * 1000);
+      await runHyperframesRender(workDir, outFile, HF_TIMEOUT);
     } catch (err) {
+      errMsg = String(err?.message || err);
       mode = 'fallback';
-      await ffmpegLowerThirdFallback(base, events, outFile);
-      fs.writeFileSync(
-        path.join(workDir, 'fallback.txt'),
-        String(err?.message || err)
-      );
+      await ffmpegLowerThirdFallback(staged, events, outFile);
+      fs.writeFileSync(path.join(workDir, 'fallback.txt'), errMsg);
+    }
+
+    if (!fs.existsSync(outFile) || fs.statSync(outFile).size < 500) {
+      res.status(500).json({
+        ok: false,
+        error: errMsg || 'render produced empty file',
+        ms: Date.now() - started,
+      });
+      return;
     }
 
     res.json({
@@ -165,7 +255,9 @@ app.post('/render', async (req, res) => {
       template,
       out_path: outFile,
       composition: indexPath,
-      events: events.length,
+      events: Array.isArray(events) ? events.length : 0,
+      duration: dur,
+      fallback_error: mode === 'fallback' ? errMsg.slice(0, 400) : undefined,
       ms: Date.now() - started,
     });
   } catch (err) {
@@ -187,5 +279,7 @@ app.post('/assemble', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[hyperframes] listening :${PORT} templates=${listTemplates().join(',') || '(none)'} work=${WORK}`);
+  console.log(
+    `[hyperframes] listening :${PORT} templates=${listTemplates().join(',') || '(none)'} work=${WORK}`,
+  );
 });

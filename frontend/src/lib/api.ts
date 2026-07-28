@@ -318,6 +318,12 @@ export interface ClipInfo {
   thumb_seek?: number | null;
   object_overlay_events?: Array<Record<string, any>>;
   visual_entities?: Array<Record<string, any>>;
+  hyperframes_polish?: {
+    template?: string;
+    mode?: string;
+    events?: number;
+    labels?: string[];
+  } | null;
   top_overlay_events?: Array<Record<string, any>>;
 }
 
@@ -378,6 +384,12 @@ export interface ClipDetailResponse {
     thumb_seek?: number | null;
     object_overlay_events?: Array<Record<string, any>>;
     visual_entities?: Array<Record<string, any>>;
+    hyperframes_polish?: {
+      template?: string;
+      mode?: string;
+      events?: number;
+      labels?: string[];
+    } | null;
     top_overlay_events?: Array<Record<string, any>>;
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };
     urls: { raw: string | null; final: string | null; thumbnail: string | null };
