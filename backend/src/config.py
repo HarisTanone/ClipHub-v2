@@ -222,10 +222,10 @@ class Settings(BaseSettings):
     TOP_OVERLAY_SMART_CROP: bool = True        # YOLO object center on B-roll (wallet/pump), not fixed bias
     TOP_OVERLAY_SMART_CROP_CONF: float = 0.18
     # Person as supporting element (cinematic): smaller + lower; outline bust only
-    TOP_OVERLAY_PERSON_SCALE: float = 0.82     # ~18% smaller than full-frame cutout
-    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.30   # push cutout down (~30% of free room)
-    TOP_OVERLAY_OUTLINE_BUST_RATIO: float = 0.48  # outline head→shoulder only (frac of person H)
-    TOP_OVERLAY_OUTLINE_EDGE_MARGIN: float = 0.04  # kill stroke glued to L/R/bottom frame edges
+    TOP_OVERLAY_PERSON_SCALE: float = 0.70     # ~30% smaller — bg dominates, person secondary
+    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.42   # push cutout down (~42% free room → near bottom)
+    TOP_OVERLAY_OUTLINE_BUST_RATIO: float = 0.36  # head→neck→shoulder only (not arms/torso)
+    TOP_OVERLAY_OUTLINE_EDGE_MARGIN: float = 0.06  # kill stroke glued to L/R/bottom frame edges
 
     # ─── Object image+text overlay (noun mention → stock photo card) ─────
     OBJECT_OVERLAY_ENABLED: bool = True
