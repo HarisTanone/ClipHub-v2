@@ -60,11 +60,15 @@ class TopBehindSubjectRenderer:
         smart_crop_conf: float | None = None,
         person_scale: float | None = None,
         person_shift_y: float | None = None,
+        person_anchor: str | None = None,
+        person_edge_margin: float | None = None,
+        bg_black: float | None = None,
         outline_bust_ratio: float | None = None,
         outline_edge_margin: float | None = None,
         model_path: str | None = None,
         det_model_path: str | None = None,
     ):
+
         self.split_ratio = float(
             split_ratio if split_ratio is not None else settings.TOP_OVERLAY_SPLIT_RATIO
         )
@@ -134,8 +138,8 @@ class TopBehindSubjectRenderer:
             np.clip(
                 person_scale
                 if person_scale is not None
-                else getattr(settings, "TOP_OVERLAY_PERSON_SCALE", 0.82),
-                0.55,
+                else getattr(settings, "TOP_OVERLAY_PERSON_SCALE", 0.55),
+                0.35,
                 1.0,
             )
         )
@@ -143,16 +147,40 @@ class TopBehindSubjectRenderer:
             np.clip(
                 person_shift_y
                 if person_shift_y is not None
-                else getattr(settings, "TOP_OVERLAY_PERSON_SHIFT_Y", 0.30),
+                else getattr(settings, "TOP_OVERLAY_PERSON_SHIFT_Y", 0.55),
                 0.0,
-                0.6,
+                0.75,
+            )
+        )
+        anchor = (
+            person_anchor
+            if person_anchor is not None
+            else getattr(settings, "TOP_OVERLAY_PERSON_ANCHOR", "auto")
+        )
+        self.person_anchor = str(anchor or "auto").strip().lower()
+        self.person_edge_margin = float(
+            np.clip(
+                person_edge_margin
+                if person_edge_margin is not None
+                else getattr(settings, "TOP_OVERLAY_PERSON_EDGE_MARGIN", 0.04),
+                0.0,
+                0.20,
+            )
+        )
+        self.bg_black = float(
+            np.clip(
+                bg_black
+                if bg_black is not None
+                else getattr(settings, "TOP_OVERLAY_BG_BLACK", 0.72),
+                0.0,
+                1.0,
             )
         )
         self.outline_bust_ratio = float(
             np.clip(
                 outline_bust_ratio
                 if outline_bust_ratio is not None
-                else getattr(settings, "TOP_OVERLAY_OUTLINE_BUST_RATIO", 0.48),
+                else getattr(settings, "TOP_OVERLAY_OUTLINE_BUST_RATIO", 0.36),
                 0.25,
                 1.0,
             )
@@ -161,11 +189,12 @@ class TopBehindSubjectRenderer:
             np.clip(
                 outline_edge_margin
                 if outline_edge_margin is not None
-                else getattr(settings, "TOP_OVERLAY_OUTLINE_EDGE_MARGIN", 0.04),
+                else getattr(settings, "TOP_OVERLAY_OUTLINE_EDGE_MARGIN", 0.06),
                 0.0,
                 0.15,
             )
         )
+
         self.model_path = model_path or settings.YOLO_SEG_MODEL
         self.det_model_path = det_model_path or settings.YOLO_MODEL_PATH
         self._model = None
@@ -214,7 +243,7 @@ class TopBehindSubjectRenderer:
             p = np.where(p >= 0.48, 1.0, 0.0).astype(np.float32)
         self._prev_clean_mask = p.copy()
 
-        # Person as supporting element: shrink + shift down so stock dominates
+        # Person as supporting sticker: shrink + pin to edge so stock dominates
         frame_f, p, layout = self._layout_person_supporting(frame, p)
 
         # Top region alpha with soft bottom fade (0 = no overlay, 1 = full)
@@ -224,11 +253,31 @@ class TopBehindSubjectRenderer:
         bg_blend3 = bg_blend[:, :, None]
 
         out = frame_f.astype(np.float32)
+        # Black gradient base under stock (cinematic vignette, not original bg bleed)
+        black_a = float(self.bg_black)
+        if black_a > 0.01:
+            # stronger black toward bottom of stock band + outer edges
+            yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+            xx = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
+            # bottom of stock band darker; top still readable
+            vert = np.clip((yy - 0.15) / 0.70, 0.0, 1.0)
+            vert = vert * vert * (3.0 - 2.0 * vert)  # smoothstep
+            edge_x = np.minimum(xx, 1.0 - xx)
+            side = np.clip(1.0 - edge_x / 0.18, 0.0, 1.0) * 0.35
+            dark = np.clip(vert * 0.85 + side, 0.0, 1.0) * black_a
+            dark3 = (dark * top_alpha)[:, :, None]
+            out = out * (1.0 - dark3)  # pull toward black under stock zone
+
         ov = overlay_frame.astype(np.float32)
         # Depth polish: slight blur on stock so person reads as foreground
         ov_soft = cv2.GaussianBlur(ov, (0, 0), 1.2)
         ov = ov * 0.55 + ov_soft * 0.45
+        # Dim stock slightly into black gradient so footage sits on dark stage
+        if black_a > 0.01:
+            dim = 1.0 - (black_a * 0.22)
+            ov = ov * dim
         out = out * (1.0 - bg_blend3) + ov * bg_blend3
+
 
         # Person stays original (already excluded from bg_blend). Optional FX:
         if self.person_shadow and p.max() > 0.01:
@@ -246,10 +295,10 @@ class TopBehindSubjectRenderer:
         frame: np.ndarray,
         p: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, dict]:
-        """Shrink person ~15–20% and shift down ~30% so background dominates.
+        """Shrink person + pin to L/R edge so stock footage owns the frame.
 
         Returns (frame_with_relocated_person, new_mask, layout_meta).
-        Identity when scale≈1 and shift≈0.
+        Identity when scale≈1 and shift≈0 and anchor=center.
         """
         import cv2
 
@@ -259,13 +308,16 @@ class TopBehindSubjectRenderer:
         layout = {
             "scale": scale,
             "shift_y": shift,
+            "anchor": self.person_anchor,
             "y0": 0,
             "y1": h - 1,
             "x0": 0,
             "x1": w - 1,
             "ph": h,
         }
+        # Full-size no-shift: identity (edge pin only useful when shrunk)
         if p.max() < 0.01 or (scale >= 0.995 and shift <= 0.01):
+
             ys, xs = np.where(p >= 0.5)
             if len(ys):
                 layout.update(
@@ -301,26 +353,35 @@ class TopBehindSubjectRenderer:
         m_s = cv2.resize(mcrop, (nw, nh), interpolation=cv2.INTER_LINEAR)
         m_s = np.clip(m_s, 0.0, 1.0)
 
-        # Keep horizontal center of original bbox; push down by shift * free room
-        cx = (x0p + x1p) * 0.5
+        # Vertical: push down so stock owns upper frame
         free_y = max(0, h - nh)
-        # Baseline: same top as scaled-from-top of original (preserve head room feel)
-        base_y = y0p + int(round((ph - nh) * 0.15))  # slight top bias on shrink
-        # Extra push down ~30% of remaining free space under baseline
+        base_y = y0p + int(round((ph - nh) * 0.15))
         room_below = max(0, h - (base_y + nh))
         dy = int(round(room_below * shift))
-        # Also use free_y so short people still drop
         dy = max(dy, int(round(free_y * shift * 0.35)))
         ny0 = int(np.clip(base_y + dy, 0, max(0, h - nh)))
-        nx0 = int(np.clip(round(cx - nw * 0.5), 0, max(0, w - nw)))
 
-        # Clear original person from frame (fill will be stock via mask)
+        # Horizontal: pin to edge (auto = side person already leans toward)
+        margin = int(round(w * float(self.person_edge_margin)))
+        cx = (x0p + x1p) * 0.5
+        side = self.person_anchor
+        if side not in {"left", "right", "center"}:
+            # auto: keep natural side (left of center → left edge, else right)
+            side = "left" if cx < w * 0.5 else "right"
+        if side == "left":
+            nx0 = margin
+        elif side == "right":
+            nx0 = max(0, w - nw - margin)
+        else:
+            nx0 = int(round(cx - nw * 0.5))
+        nx0 = int(np.clip(nx0, 0, max(0, w - nw)))
+        layout["anchor"] = side
+
+        # Clear original person — dark fill (black gradient + stock cover rest)
         frame_out = frame.copy()
-        # Soft-clear original footprint so no ghost double-person
         clear = (p >= 0.35).astype(np.float32)
         if clear.max() > 0:
-            # neutral dark fill under cleared person (stock will cover top band)
-            fill = np.median(frame.reshape(-1, 3), axis=0).astype(np.float32)
+            fill = np.array([12.0, 12.0, 12.0], dtype=np.float32)  # near-black
             frame_out = (
                 frame_out.astype(np.float32) * (1.0 - clear[:, :, None])
                 + fill[None, None, :] * clear[:, :, None]
@@ -328,14 +389,12 @@ class TopBehindSubjectRenderer:
             frame_out = np.clip(frame_out, 0, 255).astype(np.uint8)
 
         new_p = np.zeros((h, w), dtype=np.float32)
-        # Paste scaled person
         y1n, x1n = ny0 + nh, nx0 + nw
         roi = frame_out[ny0:y1n, nx0:x1n].astype(np.float32)
         alpha = m_s[:, :, None]
         blended = roi * (1.0 - alpha) + crop_s.astype(np.float32) * alpha
         frame_out[ny0:y1n, nx0:x1n] = np.clip(blended, 0, 255).astype(np.uint8)
         new_p[ny0:y1n, nx0:x1n] = np.maximum(new_p[ny0:y1n, nx0:x1n], m_s)
-        # Hard snap mask for clean cutout
         new_p = np.where(new_p >= 0.45, 1.0, 0.0).astype(np.float32)
 
         nys, nxs = np.where(new_p >= 0.5)
@@ -348,6 +407,7 @@ class TopBehindSubjectRenderer:
                 ph=int(nys.max() - nys.min() + 1),
             )
         return frame_out, new_p, layout
+
 
     def cover_resize(
         self,

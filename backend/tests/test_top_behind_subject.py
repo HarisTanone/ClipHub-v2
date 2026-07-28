@@ -24,7 +24,12 @@ def test_render_keeps_person_original_and_blends_top_bg():
         person_outline=False,
         person_shadow=False,
         mask_feather=1,
+        person_scale=1.0,
+        person_shift_y=0.0,
+        person_anchor="center",
+        bg_black=0.0,
     )
+
     h, w = 100, 40
     frame = np.zeros((h, w, 3), dtype=np.uint8)
     frame[:] = (10, 20, 30)
@@ -221,6 +226,8 @@ def test_person_outline_paints_white_edge():
         outline_style="white",
         person_scale=1.0,
         person_shift_y=0.0,
+        person_anchor="center",
+        bg_black=0.0,
         outline_bust_ratio=0.55,
         outline_edge_margin=0.02,
     )
@@ -232,6 +239,7 @@ def test_person_outline_paints_white_edge():
     mask = np.zeros((h, w), dtype=np.float32)
     # Person mid-frame (away from L/R edges so edge_kill doesn't wipe rim)
     mask[25:130, 28:72] = 1.0
+
 
     out = r.render(frame, mask, overlay)
 

@@ -203,8 +203,9 @@ class Settings(BaseSettings):
 
     # ─── Top Behind Subject Overlay (portrait 9:16, additive to full-frame B-roll)
     TOP_OVERLAY_ENABLED: bool = True
-    TOP_OVERLAY_SPLIT_RATIO: float = 0.64      # stock band taller — bg dominant over person
-    TOP_OVERLAY_FADE_HEIGHT: float = 0.10      # gradient fade as fraction of frame height
+    TOP_OVERLAY_SPLIT_RATIO: float = 0.72      # stock band taller — footage fills upper frame
+    TOP_OVERLAY_FADE_HEIGHT: float = 0.12      # gradient fade as fraction of frame height
+
     TOP_OVERLAY_OPACITY: float = 1.0
     TOP_OVERLAY_PERSON_OUTLINE: bool = True    # white stroke around person (reference style)
     TOP_OVERLAY_PERSON_SHADOW: bool = True
@@ -221,13 +222,17 @@ class Settings(BaseSettings):
     TOP_OVERLAY_SPEAKER_MASK_MODE: str = "dual_auto"
     TOP_OVERLAY_SMART_CROP: bool = True        # YOLO object center on B-roll (wallet/pump), not fixed bias
     TOP_OVERLAY_SMART_CROP_CONF: float = 0.18
-    # Person as supporting element (cinematic): smaller + lower; outline bust only
-    TOP_OVERLAY_PERSON_SCALE: float = 0.70     # ~30% smaller — bg dominates, person secondary
-    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.42   # push cutout down (~42% free room → near bottom)
+    # Person as supporting element: small sticker at frame edge; stock + black gradient dominate
+    TOP_OVERLAY_PERSON_SCALE: float = 0.55     # ~45% smaller — person secondary, stock hero
+    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.55   # push cutout toward bottom
+    TOP_OVERLAY_PERSON_ANCHOR: str = "auto"    # auto|left|right — pin cutout to side edge
+    TOP_OVERLAY_PERSON_EDGE_MARGIN: float = 0.04  # gap from L/R frame edge
+    TOP_OVERLAY_BG_BLACK: float = 0.72         # black gradient strength under stock (0..1)
     TOP_OVERLAY_OUTLINE_BUST_RATIO: float = 0.36  # head→neck→shoulder only (not arms/torso)
     TOP_OVERLAY_OUTLINE_EDGE_MARGIN: float = 0.06  # kill stroke glued to L/R/bottom frame edges
 
     # ─── Object image+text overlay (noun mention → stock photo card) ─────
+
     OBJECT_OVERLAY_ENABLED: bool = True
     OBJECT_OVERLAY_MAX_PER_CLIP: int = 6
     OBJECT_OVERLAY_BOX_SIZE: float = 0.28       # fraction of min(frame w,h)
