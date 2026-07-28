@@ -880,6 +880,18 @@ class V2PipelineService:
                 prosody_results=prosody_results,
             )
 
+            # ═══ Step 12.4: HyperFrames polish (AI lower-third from entities) ═══
+            try:
+                await self._apply_hyperframes_polish(
+                    job=job,
+                    job_id=job_id,
+                    clips=clips,
+                    output_dir=output_dir,
+                    trim_results=trim_results,
+                )
+            except Exception as e:
+                logger.warning(f"[{job_id}] HyperFrames polish skipped: {e}")
+
             # ═══ Step 12.5: Audio post (music bed duck under speech) ═══
             try:
                 await self._mix_audio_clips(
@@ -1515,6 +1527,7 @@ class V2PipelineService:
             load_object_overlay_style,
             objects_from_analisa,
             pick_object_mentions,
+            words_from_analisa,
         )
         from src.infrastructure.clip_quality_helpers import extract_objects
 
@@ -1536,15 +1549,15 @@ class V2PipelineService:
                 continue
 
             clip_dur = max(0.0, float(clip.end) - float(clip.start))
-            words = words_map.get(clip.rank) or []
-            # Prefer AI visual_entities → analisa objects → heuristic (no lexicon)
+            words = list(words_map.get(clip.rank) or [])
+            # AI VE / analisa first; extract_objects top-ups thin VE with proper-case words
             ve = list(getattr(clip, "visual_entities", None) or [])
             analisa = load_clip_analisa(output_dir, clip.rank)
+            if not words and analisa:
+                words = words_from_analisa(analisa)
             objects = objects_from_analisa(analisa) if analisa else []
-            if not objects and ve:
-                objects = list(ve)
-            if not objects:
-                objects = extract_objects(words, visual_entities=ve)
+            seed = objects or ve
+            objects = extract_objects(words, visual_entities=seed)
 
             # Block full-frame splice + top-overlay + text-emphasis windows lightly
             blocked: list[tuple[float, float]] = []
@@ -2107,6 +2120,98 @@ class V2PipelineService:
             )
 
         self._emit(job_id, 14, "remotion_render", "complete")
+
+    async def _apply_hyperframes_polish(
+        self,
+        job: Job,
+        job_id: str,
+        clips: list[Clip],
+        output_dir: str,
+        trim_results: dict[int, bool],
+    ) -> None:
+        """Post-Remotion polish: AI visual entities → lower_third via HyperFrames.
+
+        Non-fatal. Uses object_overlay_events (stock thumbs) or visual_entities.
+        Hook/subtitle remain Remotion — this only adds compact lower-thirds.
+        """
+        from src.infrastructure.hyperframes_adapter import (
+            events_from_clip_ai,
+            get_hyperframes_adapter,
+        )
+
+        hf = get_hyperframes_adapter()
+        cfg = hf.effective_config(getattr(job, "user_id", None))
+        if not cfg.get("enabled"):
+            return
+
+        health = await hf.health()
+        if str(health.get("status") or "").lower() not in {"healthy", "ok"} and health.get("http_status") != 200:
+            logger.warning(f"[{job_id}] HyperFrames down — polish skip: {health}")
+            return
+
+        applied = 0
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            final = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+            if not os.path.exists(final):
+                continue
+            clip_dur = max(0.0, float(clip.end) - float(clip.start))
+            events = events_from_clip_ai(
+                object_overlay_events=list(getattr(clip, "object_overlay_events", None) or []),
+                visual_entities=list(getattr(clip, "visual_entities", None) or []),
+                clip_hook=clip.hook or "",
+                clip_duration=clip_dur,
+                max_events=4,
+            )
+            if not events:
+                continue
+            out_tmp = f"{output_dir}/clip_{clip.rank:02d}_hf_polish.mp4"
+            try:
+                result = await hf.render_polish(
+                    base_video=final,
+                    events=events,
+                    output_path=out_tmp,
+                    template=cfg.get("default_template") or "lower_third_v1",
+                    duration=clip_dur,
+                    job_id=job_id,
+                    clip_id=clip.rank,
+                    user_id=getattr(job, "user_id", None),
+                )
+            except Exception as exc:
+                logger.warning(f"[{job_id}] HF polish clip {clip.rank}: {exc}")
+                continue
+            if not result.get("ok") or not os.path.exists(out_tmp):
+                logger.warning(
+                    f"[{job_id}] HF polish clip {clip.rank} failed: {result}"
+                )
+                if os.path.exists(out_tmp):
+                    try:
+                        os.remove(out_tmp)
+                    except OSError:
+                        pass
+                continue
+            try:
+                os.replace(out_tmp, final)
+            except OSError:
+                shutil.move(out_tmp, final)
+            # stamp meta for UI
+            try:
+                clip.object_overlay_events = list(getattr(clip, "object_overlay_events", None) or [])
+                # lightweight flag on last event batch — keep existing cards
+                setattr(clip, "hyperframes_polish", {
+                    "template": result.get("template") or cfg.get("default_template"),
+                    "mode": result.get("mode"),
+                    "events": len(events),
+                })
+            except Exception:
+                pass
+            applied += 1
+            logger.info(
+                f"[{job_id}] HF polish clip {clip.rank}: {len(events)} events mode={result.get('mode')}"
+            )
+
+        logger.info(f"[{job_id}] HyperFrames polish: {applied}/{len(clips)} clips")
 
     async def _mix_audio_clips(
         self,

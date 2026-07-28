@@ -101,12 +101,12 @@ def bilingual_queries(entity: dict | str | None) -> tuple[str, str, str]:
         if not id_q:
             id_q = en_q or f"{word} close up"
         if not en_q:
-            en_q = id_q or f"{word} product close up"
+            en_q = id_q or f"{word} object close up"
         return id_q[:80], en_q[:80], label[:40]
     clean = re.sub(r"[^\w\-]+", "", str(entity or ""), flags=re.UNICODE)
     label = clean[:1].upper() + clean[1:] if clean else str(entity or "Object")
     id_q = f"{clean} close up" if clean else "object close up"
-    en_q = f"{clean} product close up" if clean else "product close up"
+    en_q = f"{clean} object close up" if clean else "object close up"
     return id_q, en_q, label
 
 
@@ -142,12 +142,23 @@ def pick_object_mentions(
             return
         if clip_duration > 0 and start >= clip_duration - 0.8:
             return
-        sq = list(o.get("search_queries") or [])
-        for q in (en_q, id_q):
-            if q and q.lower() not in {x.lower() for x in sq}:
-                sq.append(q)
-        # Prefer AI-sourced rows
-        rank = 0 if (o.get("source") == "ai" or o.get("query_en")) else 1
+        # bare entity first — stock APIs rank better than "... close up" noise
+        bare = re.sub(r"[^\w\-]+", " ", word, flags=re.UNICODE).strip()
+        ordered: list[str] = []
+        seen_q: set[str] = set()
+        for q in (bare, en_q, id_q, *list(o.get("search_queries") or []), f"{bare} product"):
+            q = " ".join(str(q or "").split())
+            low = q.lower()
+            if not q or low in seen_q:
+                continue
+            seen_q.add(low)
+            ordered.append(q)
+        ordered = [q for q in ordered if q.lower() == bare.lower()] + [
+            q for q in ordered if q.lower() != bare.lower()
+        ]
+        src = str(o.get("source") or source or "").lower()
+        rank = 0 if src in ("ai", "fallback") else 1
+        stem = re.sub(r"[^\w\-]+", "", word, flags=re.UNICODE).lower()
         candidates.append({
             "word": word,
             "label": label,
@@ -155,17 +166,19 @@ def pick_object_mentions(
             "end": round(float(end) if end > start else start + 0.3, 3),
             "query_id": id_q,
             "query_en": en_q,
-            "search_queries": sq[:6],
-            "source": source,
+            "search_queries": ordered[:6],
+            "source": src or source,
             "rank": rank,
+            "stem": stem,
         })
 
     for o in objects or []:
         if isinstance(o, dict):
             _add_entity(o, str(o.get("source") or "objects"))
 
-    # Soft fallback from highlighted/long words only when no AI objects
-    if not candidates:
+    if any(c.get("rank") == 0 for c in candidates):
+        candidates = [c for c in candidates if c.get("rank") == 0]
+    elif not candidates:
         for w in words or []:
             text = str(w.get("word", w.get("text", "")) or "").strip()
             if not text:
@@ -183,36 +196,80 @@ def pick_object_mentions(
                 continue
             _add_entity(
                 {"word": clean, "start": s, "end": e, "label": clean[:1].upper() + clean[1:],
-                 "query_id": f"{clean} close up", "query_en": f"{clean} product close up",
+                 "query_id": f"{clean} close up", "query_en": clean,
+                 "search_queries": [clean, f"{clean} close up"],
                  "source": "words"},
                 "words",
             )
 
-    candidates.sort(key=lambda c: (c.get("rank", 1), c["start"]))
+    def _family_hit(stem: str, taken: list[str]) -> bool:
+        if not stem:
+            return False
+        for t in taken:
+            if stem == t:
+                return True
+            if len(stem) >= 4 and len(t) >= 4 and (stem in t or t in stem):
+                return True  # merokok↔rokok
+        return False
+
+    # Prefer AI first; then prefer longer stems (brands) with max time spread
+    candidates.sort(key=lambda c: (c.get("rank", 1), -len(c.get("stem") or ""), c["start"]))
     selected: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for c in candidates:
-        key = c["label"].lower()
-        if key in seen:
-            continue
+    seen_stems: list[str] = []
+
+    def _try_add(c: dict) -> bool:
+        stem = str(c.get("stem") or "")
+        if _family_hit(stem, seen_stems):
+            return False
         at = float(c["start"])
         if at <= 0 and clip_duration > 4:
             at = 3.0 + len(selected) * 4.0
             if at >= clip_duration - 1.5:
-                continue
+                return False
             c["start"] = round(at, 3)
         card_end = at + dur_card
         if any(at < be and card_end > bs for bs, be in blocked):
-            continue
+            return False
         if any(abs(at - float(s["start"])) < 3.5 for s in selected):
-            continue
-        seen.add(key)
+            return False
+        seen_stems.append(stem)
         c["duration"] = dur_card
         c["at_time"] = round(at, 3)
         selected.append(c)
         blocked.append((at, card_end))
-        if len(selected) >= max_items:
+        return True
+
+    # Greedy max-distance: always pick farthest-from-selected among remaining
+    # (keeps Aikos/Shisha late brands instead of only early Merokok)
+    pool = list(candidates)
+    while pool and len(selected) < max_items:
+        if not selected:
+            # start with earliest AI, else earliest overall
+            pool.sort(key=lambda c: (c.get("rank", 1), c["start"]))
+            c0 = pool.pop(0)
+            if not _try_add(c0):
+                continue
+            continue
+        best_i = -1
+        best_dist = -1.0
+        for i, c in enumerate(pool):
+            stem = str(c.get("stem") or "")
+            if _family_hit(stem, seen_stems):
+                continue
+            st = float(c["start"])
+            dist = min(abs(st - float(s["start"])) for s in selected)
+            # slight bonus for longer stems (brand-like)
+            dist += 0.01 * len(stem)
+            if dist > best_dist:
+                best_dist = dist
+                best_i = i
+        if best_i < 0:
             break
+        c = pool.pop(best_i)
+        if not _try_add(c):
+            continue
+
+    selected.sort(key=lambda c: float(c["at_time"]))
     return selected
 
 
@@ -225,32 +282,90 @@ def score_image_relevance(
     photo_meta: dict,
     clip_hook: str = "",
     clip_reason: str = "",
+    search_queries: list[str] | None = None,
 ) -> float:
-    """Cheap local relevance 0..1 (no LLM). Token overlap + alt/photographer noise filter."""
+    """Cheap local relevance 0..1.
+
+    Core = word/label/query_en/matched search query (tight).
+    Extra = long query_id / search_queries (half weight) — avoids diluting EN hits
+    with many unused ID tokens from long prompts.
+    Hook/reason = soft only (never sole reason to accept).
+    """
+    # Score ONLY photo evidence — never the search query itself (self-match inflate)
     blob = " ".join([
         str(photo_meta.get("alt") or ""),
         str(photo_meta.get("url") or ""),
         str(photo_meta.get("photographer") or ""),
         " ".join(str(t) for t in (photo_meta.get("tags") or [])),
     ]).lower()
-    tokens = set()
-    for part in (word, label, query_id, query_en, clip_hook, clip_reason):
-        tokens.update(re.findall(r"[a-z0-9]{3,}", str(part or "").lower()))
-    # Drop ultra-generic
-    tokens -= {"the", "and", "for", "with", "close", "product", "image", "photo", "stock"}
-    if not tokens:
-        return 0.4 if blob else 0.2
-    hits = sum(1 for t in tokens if t in blob)
-    score = hits / max(3.0, min(8.0, float(len(tokens))))
-    # Prefer portrait-ish / product framing keywords in alt
-    for bonus in ("close", "product", "hand", "pack", "device", "macro"):
+    generic = {
+        "the", "and", "for", "with", "close", "product", "object", "image",
+        "photo", "stock", "up", "isolated", "showing", "menunjukkan", "tanggal",
+        "satu", "first", "second", "desk",
+    }
+
+    def _toks(*parts: str) -> set[str]:
+        out: set[str] = set()
+        for part in parts:
+            out.update(re.findall(r"[a-z0-9]{3,}", str(part or "").lower()))
+        return out - generic
+
+    # Core: spoken entity + EN query + the specific API query that returned this hit
+    matched_q = str(photo_meta.get("query") or "")
+    core = _toks(word, label, query_en, matched_q)
+    extra = _toks(query_id, *list(search_queries or [])) - core
+    soft = _toks(clip_hook, clip_reason) - core - extra
+    if not core and not extra and not soft:
+        return 0.15 if blob else 0.05
+    c_hits = sum(1 for t in core if t in blob)
+    e_hits = sum(1 for t in extra if t in blob)
+    s_hits = sum(1 for t in soft if t in blob)
+    # API already filtered by entity query (ID bare word) but alt often EN-only
+    entity_stems = {t for t in _toks(word, label) if len(t) >= 4}
+    mq = matched_q.lower()
+    api_trusted = bool(mq) and any(t in mq for t in entity_stems)
+    # No entity hit on alt AND query wasn't the spoken entity → weak (junk reuse)
+    if (core or extra) and c_hits == 0 and e_hits == 0 and not api_trusted:
+        return max(0.0, min(1.0, 0.08 + 0.04 * min(2, s_hits)))
+    denom = max(2.0, min(4.0, float(len(core) or 1)))
+    score = (c_hits / denom) + 0.12 * min(3, e_hits) + 0.04 * min(2, s_hits)
+    if api_trusted and c_hits == 0:
+        # Cross-lang floor: stock hit for entity query, alt in another language.
+        # Must clear default OBJECT_OVERLAY_MIN_RELEVANCE (0.35).
+        score = max(score, 0.38)
+    for bonus in ("hand", "pack", "device", "macro", "cigarette", "smoke",
+                  "calendar", "hookah", "vape", "tobacco", "ash"):
         if bonus in blob:
             score += 0.05
-    # Penalize scenic noise
-    for bad in ("landscape", "skyline", "sunset beach", "mountain", "crowd people"):
+    for bad in ("landscape", "skyline", "sunset beach", "mountain", "crowd people",
+                "dandelion", "pebble", "makeup", "yogurt"):
         if bad in blob:
-            score -= 0.15
+            score -= 0.2
     return max(0.0, min(1.0, score))
+
+
+def _photo_queries(
+    query_id: str,
+    query_en: str,
+    search_queries: list[str] | None = None,
+    word: str = "",
+    label: str = "",
+) -> list[str]:
+    """Deduped multi-query list — EN first, then ID, then extras."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(q: str) -> None:
+        q = " ".join(str(q or "").split())[:80]
+        low = q.lower()
+        if not q or low in seen:
+            return
+        seen.add(low)
+        out.append(q)
+
+    for q in (word, query_en, query_id, *(search_queries or []), label):
+        _add(q)
+    return out[:6]
 
 
 async def search_stock_photo(
@@ -263,52 +378,60 @@ async def search_stock_photo(
     label: str = "",
     clip_hook: str = "",
     clip_reason: str = "",
+    search_queries: list[str] | None = None,
+    exclude_ids: set[str] | None = None,
 ) -> Optional[dict[str, Any]]:
-    """Search Pexels then Pixabay photos with ID+EN queries; pick best relevance."""
+    """Search Pexels/Pixabay multi-query; skip already-used photo ids."""
     os.makedirs(download_dir, exist_ok=True)
     candidates: list[dict] = []
+    seen_ids: set[str] = set()
+    banned = {str(x) for x in (exclude_ids or set()) if x}
+    queries = _photo_queries(query_id, query_en, search_queries, word, label)
+    if not queries:
+        return None
 
     async with httpx.AsyncClient(timeout=float(getattr(settings, "ASSET_FETCH_TIMEOUT", 20))) as client:
-        # Pexels photos
         pexels_key = getattr(settings, "PEXELS_API_KEY", "") or ""
         if pexels_key:
-            for q in (query_en, query_id):
-                if not q:
-                    continue
+            for q in queries:
                 try:
                     r = await client.get(
                         "https://api.pexels.com/v1/search",
                         headers={"Authorization": pexels_key},
-                        params={"query": q, "per_page": 5, "orientation": "square"},
+                        params={"query": q, "per_page": 8, "orientation": "square"},
                     )
-                    if r.status_code == 200:
-                        for p in (r.json().get("photos") or [])[:5]:
-                            src = (p.get("src") or {})
-                            url = src.get("medium") or src.get("large") or src.get("original")
-                            if not url:
-                                continue
-                            meta = {
-                                "alt": p.get("alt") or "",
-                                "url": url,
-                                "photographer": p.get("photographer") or "",
-                                "platform": "pexels",
-                                "id": str(p.get("id") or ""),
-                                "query": q,
-                            }
-                            meta["relevance"] = score_image_relevance(
-                                word=word, label=label, query_id=query_id, query_en=query_en,
-                                photo_meta=meta, clip_hook=clip_hook, clip_reason=clip_reason,
-                            )
-                            candidates.append(meta)
+                    if r.status_code != 200:
+                        continue
+                    for p in (r.json().get("photos") or [])[:8]:
+                        pid = str(p.get("id") or "")
+                        if pid and (pid in banned or pid in seen_ids):
+                            continue
+                        src = (p.get("src") or {})
+                        url = src.get("medium") or src.get("large") or src.get("original")
+                        if not url:
+                            continue
+                        if pid:
+                            seen_ids.add(pid)
+                        meta = {
+                            "alt": p.get("alt") or "",
+                            "url": url,
+                            "photographer": p.get("photographer") or "",
+                            "platform": "pexels",
+                            "id": pid,
+                            "query": q,
+                        }
+                        meta["relevance"] = score_image_relevance(
+                            word=word, label=label, query_id=query_id, query_en=query_en,
+                            photo_meta=meta, clip_hook=clip_hook, clip_reason=clip_reason,
+                            search_queries=search_queries,
+                        )
+                        candidates.append(meta)
                 except Exception as exc:
                     logger.debug("object_overlay: pexels fail q=%s: %s", q, exc)
 
-        # Pixabay images
         pix_key = getattr(settings, "PIXABAY_API_KEY", "") or ""
         if pix_key:
-            for q in (query_en, query_id):
-                if not q:
-                    continue
+            for q in queries:
                 try:
                     r = await client.get(
                         "https://pixabay.com/api/",
@@ -316,30 +439,37 @@ async def search_stock_photo(
                             "key": pix_key,
                             "q": q,
                             "image_type": "photo",
-                            "per_page": 5,
+                            "per_page": 8,
                             "safesearch": "true",
                         },
                     )
-                    if r.status_code == 200:
-                        for h in (r.json().get("hits") or [])[:5]:
-                            url = h.get("webformatURL") or h.get("largeImageURL")
-                            if not url:
-                                continue
-                            tags = str(h.get("tags") or "").split(", ")
-                            meta = {
-                                "alt": h.get("tags") or "",
-                                "url": url,
-                                "photographer": h.get("user") or "",
-                                "platform": "pixabay",
-                                "id": str(h.get("id") or ""),
-                                "tags": tags,
-                                "query": q,
-                            }
-                            meta["relevance"] = score_image_relevance(
-                                word=word, label=label, query_id=query_id, query_en=query_en,
-                                photo_meta=meta, clip_hook=clip_hook, clip_reason=clip_reason,
-                            )
-                            candidates.append(meta)
+                    if r.status_code != 200:
+                        continue
+                    for h in (r.json().get("hits") or [])[:8]:
+                        pid = str(h.get("id") or "")
+                        if pid and (pid in banned or pid in seen_ids):
+                            continue
+                        url = h.get("webformatURL") or h.get("largeImageURL")
+                        if not url:
+                            continue
+                        if pid:
+                            seen_ids.add(pid)
+                        tags = str(h.get("tags") or "").split(", ")
+                        meta = {
+                            "alt": h.get("tags") or "",
+                            "url": url,
+                            "photographer": h.get("user") or "",
+                            "platform": "pixabay",
+                            "id": pid,
+                            "tags": tags,
+                            "query": q,
+                        }
+                        meta["relevance"] = score_image_relevance(
+                            word=word, label=label, query_id=query_id, query_en=query_en,
+                            photo_meta=meta, clip_hook=clip_hook, clip_reason=clip_reason,
+                            search_queries=search_queries,
+                        )
+                        candidates.append(meta)
                 except Exception as exc:
                     logger.debug("object_overlay: pixabay fail q=%s: %s", q, exc)
 
@@ -347,32 +477,33 @@ async def search_stock_photo(
         return None
     candidates.sort(key=lambda c: float(c.get("relevance") or 0), reverse=True)
     best = candidates[0]
-    if float(best.get("relevance") or 0) < min_relevance:
+    rel = float(best.get("relevance") or 0)
+    if rel < min_relevance:
         logger.info(
-            "object_overlay: best relevance %.2f < min %.2f for '%s'",
-            best.get("relevance"), min_relevance, label or word,
+            "object_overlay: best relevance %.2f < min %.2f for '%s' q=%s",
+            rel, min_relevance, label or word, best.get("query"),
         )
-        # still take best if anything — better than empty for known lexicon
-        if float(best.get("relevance") or 0) < 0.15:
+        # Weak match without entity token → skip (stops same junk image reuse)
+        if rel < 0.22:
             return None
 
-    # Download
     url = best["url"]
     ext = ".jpg"
     if ".png" in url.lower():
         ext = ".png"
     safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", (label or word or "obj"))[:40]
     local = os.path.join(download_dir, f"{safe}_{best.get('id') or 'x'}{ext}")
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get(url)
-            if r.status_code != 200:
-                return None
-            with open(local, "wb") as f:
-                f.write(r.content)
-    except Exception as exc:
-        logger.warning("object_overlay: download fail: %s", exc)
-        return None
+    if not os.path.exists(local):
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(url)
+                if r.status_code != 200:
+                    return None
+                with open(local, "wb") as f:
+                    f.write(r.content)
+        except Exception as exc:
+            logger.warning("object_overlay: download fail: %s", exc)
+            return None
     best["local_path"] = local
     return best
 
@@ -603,6 +734,7 @@ class ObjectImageOverlayRenderer:
         img_dir = os.path.join(output_dir, "object_overlay")
         os.makedirs(img_dir, exist_ok=True)
         events: list[ObjectOverlayEvent] = []
+        used_ids: set[str] = set()
         for m in mentions:
             photo = await search_stock_photo(
                 m.get("query_id", ""),
@@ -613,10 +745,15 @@ class ObjectImageOverlayRenderer:
                 label=str(m.get("label") or ""),
                 clip_hook=clip_hook,
                 clip_reason=clip_reason,
+                search_queries=list(m.get("search_queries") or []),
+                exclude_ids=used_ids,
             )
             if not photo or not photo.get("local_path"):
                 logger.info("object_overlay: no photo for %s", m.get("label"))
                 continue
+            pid = str(photo.get("id") or "")
+            if pid:
+                used_ids.add(pid)
             events.append(ObjectOverlayEvent(
                 at_time=float(m.get("at_time", m.get("start", 0))),
                 duration=float(m.get("duration", style.get("duration_sec", 2.4))),
@@ -761,6 +898,35 @@ def load_clip_analisa(output_dir: str, rank: int) -> dict:
         return {}
 
 
+def words_from_analisa(analisa: dict) -> list[dict]:
+    """Word timings from clip analisa JSON (fallback when live words map missing)."""
+    body: dict = {}
+    clips = analisa.get("clips") if isinstance(analisa, dict) else None
+    if isinstance(clips, list) and clips and isinstance(clips[0], dict):
+        body = clips[0]
+    elif isinstance(analisa, dict):
+        body = analisa
+    out: list[dict] = []
+    for w in body.get("words") or []:
+        if not isinstance(w, dict):
+            continue
+        text = str(w.get("word") or w.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            s = float(w.get("start", w.get("s", 0)) or 0)
+            e = float(w.get("end", w.get("e", s + 0.2)) or s + 0.2)
+        except (TypeError, ValueError):
+            continue
+        out.append({
+            "word": text,
+            "start": s,
+            "end": e,
+            "highlight": bool(w.get("highlight")),
+        })
+    return out
+
+
 def objects_from_analisa(analisa: dict) -> list[dict]:
     body = {}
     clips = analisa.get("clips") if isinstance(analisa, dict) else None
@@ -770,9 +936,10 @@ def objects_from_analisa(analisa: dict) -> list[dict]:
         body = analisa
     out: list[dict] = []
     seen: set[str] = set()
-    # Prefer AI visual_entities, then objects (both carry query_id/en when AI-backed)
-    for key in ("visual_entities", "objects"):
-        for o in body.get(key) or []:
+
+    ve = list(body.get("visual_entities") or [])
+    if ve:
+        for o in ve:
             if not isinstance(o, dict):
                 continue
             word = str(o.get("word") or o.get("label") or "").strip()
@@ -783,6 +950,23 @@ def objects_from_analisa(analisa: dict) -> list[dict]:
                 continue
             seen.add(low)
             out.append(o)
+        return out
+
+    # No VE: keep non-heuristic objects only
+    for o in body.get("objects") or []:
+        if not isinstance(o, dict):
+            continue
+        src = str(o.get("source") or "").lower()
+        if src in ("heuristic", "footage_kw", "words"):
+            continue
+        word = str(o.get("word") or o.get("label") or "").strip()
+        if not word:
+            continue
+        low = word.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append(o)
     return out
 
 
@@ -803,21 +987,23 @@ def footage_keywords_from_analisa(analisa: dict) -> list[str]:
             seen.add(low)
             out.append(s)
 
-    for s in body.get("footage_keywords") or []:
-        _add(str(s))
-    for s in body.get("highlight_keywords") or []:
-        _add(str(s))
     for key in ("visual_entities", "objects"):
         for o in body.get(key) or []:
             if not isinstance(o, dict):
                 continue
+            src = str(o.get("source") or "").lower()
+            if src in ("heuristic", "footage_kw", "words"):
+                continue
             for q in (
                 o.get("query_en"),
                 o.get("query_id"),
-                o.get("word"),
                 *(o.get("search_queries") or []),
             ):
                 _add(str(q or ""))
+    for s in body.get("footage_keywords") or []:
+        raw = " ".join(str(s or "").split())
+        if " " in raw or len(raw) >= 8:
+            _add(raw)
     for b in body.get("broll_suggestions") or []:
         if isinstance(b, dict):
             _add(str(b.get("keyword") or ""))

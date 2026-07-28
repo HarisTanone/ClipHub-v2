@@ -411,7 +411,7 @@ OUTPUT RAW JSON:
             context = context[:7000]
         topic = " | ".join(x for x in (hook.strip(), reason.strip()) if x)[:300]
 
-        prompt = f"""Kamu visual researcher untuk short-form video. Ekstrak maksimal {max_objects} OBJEK/ENTITAS KONKRET yang bisa difoto/divideo stock.
+        prompt = f"""Kamu visual researcher short-form. Ambil maks {max_objects} OBJEK visual KONKRET dari transkrip — tiap objek foto stock BERBEDA.
 
 CLIP #{rank} duration={duration:.1f}s
 HOOK/TOPIC: {topic or "(n/a)"}
@@ -420,16 +420,16 @@ TRANSKRIP BERTIMESTAMP:
 {context}
 
 ATURAN (WAJIB):
-- Hanya benda/produk/tempat/simbol visual yang disebutkan ATAU jelas tersirat dari kalimat di timestamp.
-- JANGAN abstract mood (sukses, viral, epic, lifestyle, beautiful).
-- word = token dari transkrip (atau frasa 1-3 kata) yang memicu objek.
-- start = timestamp detik dari baris transkrip (float).
-- label = label tampilan singkat (boleh ID atau EN).
-- query_id = query pencarian stock bahasa Indonesia, 3-8 kata, KONKRET, close-up/product jika cocok.
-- query_en = query stock bahasa Inggris, 3-8 kata, KONKRET visual 1:1.
-- search_queries = array 2-4 variasi query (campur ID+EN) untuk multi-search.
-- Jangan hardcode daftar domain; analisa dari konteks clip ini saja.
-- Jika tidak ada objek visual cukup, return objects:[]
+- Prioritas: merek/produk/benda yang DIUCAPKAN (rokok, device, minuman, tempat, alat, makanan, kalender, dll) — dari clip ini saja, tanpa kamus domain tetap.
+- Satu objek per mention berbeda; sebarkan start di sepanjang clip (awal/tengah/akhir).
+- JANGAN filler/abstrak: itu, nah, karena, sukses, viral, lifestyle, mood.
+- word = token/frasa 1-3 kata dari transkrip (boleh ejaan ASR apa adanya).
+- start = detik float dari baris transkrip.
+- label = label kartu singkat.
+- query_id = stock ID 3-8 kata, konkret, close-up/product.
+- query_en = stock EN 3-8 kata, visual 1:1. Jika ASR salah eja merek yang jelas dari konteks, PERBAIKI di query_en/query_id saja (word tetap sesuai ucapan).
+- search_queries = 2-4 variasi ID+EN BERBEDA (bukan copy query_en 4x).
+- Target ideal 3–{max_objects} objek jika transkrip kaya produk; objects:[] hanya jika benar-benar kosong.
 
 OUTPUT RAW JSON only:
 {{"objects":[{{"word":"…","start":12.5,"label":"…","query_id":"…","query_en":"…","search_queries":["…","…"]}}]}}
@@ -453,10 +453,29 @@ OUTPUT RAW JSON only:
         if isinstance(parsed, dict):
             raw_objs = parsed.get("objects") or parsed.get("items") or []
         if not isinstance(raw_objs, list):
-            return []
-        return self._normalize_visual_entities(
+            raw_objs = []
+        out = self._normalize_visual_entities(
             raw_objs, words=words, duration=duration, max_objects=max_objects
         )
+        # Thin AI → top-up offline proper/long (no domain lexicon)
+        if len(out) < max(3, max_objects // 2):
+            seen = {
+                re.sub(r"[^\w\-]+", "", str(o.get("word") or ""), flags=re.UNICODE).lower()
+                for o in out
+            }
+            for fb in self._fallback_visual_entities_from_words(
+                words, duration, limit=max_objects
+            ):
+                low = re.sub(
+                    r"[^\w\-]+", "", str(fb.get("word") or ""), flags=re.UNICODE
+                ).lower()
+                if not low or low in seen:
+                    continue
+                seen.add(low)
+                out.append(fb)
+                if len(out) >= max_objects:
+                    break
+        return out
 
     def _normalize_visual_entities(
         self,
@@ -568,45 +587,37 @@ OUTPUT RAW JSON only:
         duration: float,
         limit: int = 4,
     ) -> list[dict]:
-        """Offline fallback: highlight/proper/long tokens only — NO domain word lists.
-
-        Queries stay generic close-up of the spoken token (AI offline).
-        """
-        from src.infrastructure.clip_quality_helpers import extract_highlight_keywords
-
-        stop = {
-            "yang", "dan", "atau", "dari", "untuk", "dengan", "adalah", "itu", "ini",
-            "ada", "akan", "bisa", "jadi", "juga", "karena", "kalau", "kita", "mereka",
-            "saya", "aku", "kamu", "dia", "nya", "the", "and", "that", "this", "with",
-            "from", "have", "was", "were", "are", "you", "your", "they", "about",
-            "basically", "gitu", "lah", "nih", "sih", "aja", "kayak", "lebih", "paling",
-        }
-        seeds = {s.lower() for s in extract_highlight_keywords(words, limit=12)}
+        """Offline: proper/long/highlight only — length gates, NO stop/domain lists."""
         out: list[dict] = []
         seen: set[str] = set()
         for w in words or []:
-            text = str(w.get("word") or "").strip()
+            text = str(w.get("word") or "").strip().strip(".,!?;:\"'")
             clean = re.sub(r"[^\w\-]+", "", text, flags=re.UNICODE)
             low = clean.lower()
-            if len(clean) < 3 or low in seen or low in stop:
+            if len(clean) < 4 or low in seen:
                 continue
             try:
                 s = float(w.get("start", 0) or 0)
                 e = float(w.get("end", s + 0.3) or s + 0.3)
             except (TypeError, ValueError):
                 continue
-            if s < 1.0 or (duration > 0 and s >= duration - 0.5):
+            # Skip very early chatter; leave room at end
+            if s < 2.0 or (duration > 0 and s >= duration - 0.8):
                 continue
-            hit = bool(w.get("highlight")) or low in seeds or (
-                clean[:1].isupper() and len(clean) >= 4
-            ) or len(clean) >= 6
+            proper = clean[:1].isupper() and not clean.isupper()
+            # Prefer brand-like / long content tokens (no membership ban lists)
+            hit = (
+                (proper and len(clean) >= 4)
+                or len(clean) >= 6
+                or (bool(w.get("highlight")) and len(clean) >= 5)
+            )
             if not hit:
                 continue
             seen.add(low)
             label = clean[:1].upper() + clean[1:] if clean else text
-            # Generic bilingual — no synonym table; AI path preferred online
+            # Generic bilingual — bare token first for stock APIs
             id_q = f"{clean} close up"
-            en_q = f"{clean} product close up"
+            en_q = clean
             out.append({
                 "word": clean,
                 "start": round(s, 3),
@@ -614,7 +625,7 @@ OUTPUT RAW JSON only:
                 "label": label,
                 "query_id": id_q,
                 "query_en": en_q,
-                "search_queries": [en_q, id_q, f"{clean} isolated object"],
+                "search_queries": [clean, id_q, f"{clean} isolated object"],
                 "source": "fallback",
             })
             if len(out) >= max(0, int(limit)):

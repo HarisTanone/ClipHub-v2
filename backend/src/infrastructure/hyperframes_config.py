@@ -11,7 +11,7 @@ HYPERFRAMES_COLUMNS = (
 )
 
 HYPERFRAMES_DEFAULTS = {
-    "enabled": 0,  # off by default — Remotion owns hook/subtitle
+    "enabled": 1,  # AI lower-third polish; Remotion still owns hook/subtitle
     "default_template": "lower_third_v1",
     "server_url": "http://127.0.0.1:3003",
     "timeout_sec": 180,

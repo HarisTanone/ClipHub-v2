@@ -9,7 +9,9 @@
       --w: 1080px;
       --h: 1920px;
       --accent: #22d3ee;
-      --bg: rgba(12, 12, 16, 0.88);
+      --accent2: #a78bfa;
+      --accent3: #f472b6;
+      --bg: rgba(12, 12, 16, 0.9);
       --fg: #f8fafc;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,43 +37,56 @@
     }
     .lt {
       position: absolute;
-      left: 48px;
-      right: 48px;
-      bottom: 220px;
+      left: 40px;
+      right: 40px;
+      bottom: 210px;
       display: flex;
       align-items: center;
-      gap: 18px;
-      padding: 18px 22px;
-      border-radius: 16px;
-      background: var(--bg);
+      gap: 16px;
+      padding: 16px 20px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(12,12,16,0.92), rgba(30,20,50,0.88));
       border-left: 6px solid var(--accent);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06);
       color: var(--fg);
       opacity: 0;
-      transform: translateY(24px);
-      /* seekable-ish: driven by data-t via JS */
+      transform: translateY(28px) scale(0.96);
+      backdrop-filter: blur(8px);
     }
+    .lt.i1 { border-left-color: var(--accent2); bottom: 340px; }
+    .lt.i2 { border-left-color: var(--accent3); bottom: 470px; }
+    .lt.i3 { border-left-color: #34d399; bottom: 600px; }
     .lt .thumb {
-      width: 72px;
-      height: 72px;
-      border-radius: 12px;
+      width: 88px;
+      height: 88px;
+      border-radius: 14px;
       object-fit: cover;
       background: #1e293b;
       flex-shrink: 0;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.35);
     }
-    .lt .meta { min-width: 0; }
+    .lt .meta { min-width: 0; flex: 1; }
+    .lt .kicker {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.55;
+      margin-bottom: 4px;
+    }
     .lt .label {
-      font-size: 36px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      line-height: 1.15;
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .lt .sub {
-      margin-top: 4px;
+      margin-top: 6px;
       font-size: 22px;
-      opacity: 0.75;
+      opacity: 0.78;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -107,7 +122,7 @@
 
     const nodes = events.map((ev, i) => {
       const el = document.createElement('div');
-      el.className = 'lt';
+      el.className = 'lt i' + Math.min(i, 3);
       el.dataset.start = String(ev.start ?? 0);
       el.dataset.end = String(ev.end ?? ((ev.start ?? 0) + 2.4));
       if (ev.thumb) {
@@ -119,12 +134,16 @@
       }
       const meta = document.createElement('div');
       meta.className = 'meta';
+      const kicker = document.createElement('div');
+      kicker.className = 'kicker';
+      kicker.textContent = 'AI · visual';
       const label = document.createElement('div');
       label.className = 'label';
       label.textContent = ev.label || ev.word || '';
       const sub = document.createElement('div');
       sub.className = 'sub';
       sub.textContent = ev.sub || ev.query_en || '';
+      meta.appendChild(kicker);
       meta.appendChild(label);
       if (sub.textContent) meta.appendChild(sub);
       el.appendChild(meta);
@@ -132,20 +151,18 @@
       return el;
     });
 
-    // HyperFrames / preview: drive opacity from currentTime when available.
     function paint(t) {
       for (const el of nodes) {
         const a = parseFloat(el.dataset.start);
         const b = parseFloat(el.dataset.end);
         const on = t >= a && t < b;
         el.style.opacity = on ? '1' : '0';
-        el.style.transform = on ? 'translateY(0)' : 'translateY(24px)';
-        el.style.transition = 'opacity 180ms linear, transform 180ms linear';
+        el.style.transform = on ? 'translateY(0) scale(1)' : 'translateY(28px) scale(0.96)';
+        el.style.transition = 'opacity 200ms ease, transform 220ms cubic-bezier(.2,.8,.2,1)';
       }
     }
 
     video.addEventListener('timeupdate', () => paint(video.currentTime || 0));
-    // Export hook for headless/time-driven renderers
     window.__autocliperSeek = (t) => {
       try { video.currentTime = t; } catch {}
       paint(t);

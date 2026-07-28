@@ -461,7 +461,7 @@ if [ -f ".env" ]; then
     append_env_if_missing ".env" "USE_REMOTION" "true"
     append_env_if_missing ".env" "FORCE_V2_PIPELINE" "true"
     # HyperFrames polish (default OFF — Remotion owns hook/subtitle)
-    append_env_if_missing ".env" "HYPERFRAMES_ENABLED" "false"
+    append_env_if_missing ".env" "HYPERFRAMES_ENABLED" "true"
     append_env_if_missing ".env" "HYPERFRAMES_SERVER_URL" "http://127.0.0.1:$HYPERFRAMES_PORT"
     append_env_if_missing ".env" "HYPERFRAMES_SERVER_PORT" "$HYPERFRAMES_PORT"
     append_env_if_missing ".env" "HYPERFRAMES_PROJECT_PATH" "../hyperframes-renderer"

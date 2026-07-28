@@ -286,11 +286,13 @@ def extract_objects(
 ) -> list[dict[str, Any]]:
     """Timed objects for B-roll / overlay.
 
-    Prefer AI visual_entities (query_id/query_en). Offline: highlight/proper only
-    — no hardcoded domain noun regex.
+    AI visual_entities first. If thin (<3), top-up proper-case spoken tokens only
+    (brand-like ASR) — no domain/stopword lexicon, no bare filler pad.
+    Full offline path only when AI empty.
     """
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
+    had_ai = False
 
     for e in visual_entities or []:
         if not isinstance(e, dict):
@@ -307,7 +309,8 @@ def extract_objects(
         except (TypeError, ValueError):
             s, end = 0.0, 0.3
         seen.add(low)
-        row = {
+        had_ai = True
+        out.append({
             "word": word,
             "start": round(s, 3),
             "end": round(end, 3),
@@ -316,59 +319,74 @@ def extract_objects(
             "query_en": str(e.get("query_en") or ""),
             "search_queries": list(e.get("search_queries") or []),
             "source": str(e.get("source") or "ai"),
-        }
-        out.append(row)
+        })
         if len(out) >= limit:
             return out
 
-    seeds = {k.lower() for k in (footage_keywords or []) if k}
-    for w in words or []:
-        try:
-            text = str(w.get("word", w.get("text", "")) or "").strip()
-            s = float(w.get("start", w.get("s", 0)) or 0)
-            e = float(w.get("end", w.get("e", s + 0.2)) or s + 0.2)
-        except (TypeError, ValueError):
+    # Thin AI or empty → proper-case tokens from words (Aikos/Shisha/Rokok)
+    # Skip all-lowercase long fillers (ediknya/menyusahkan) when AI already present.
+    need = 3 if had_ai else limit
+    if len(out) < need:
+        for w in words or []:
+            try:
+                text = str(w.get("word", w.get("text", "")) or "").strip().strip(".,!?;:\"'")
+                s = float(w.get("start", w.get("s", 0)) or 0)
+                e = float(w.get("end", w.get("e", s + 0.2)) or s + 0.2)
+            except (TypeError, ValueError):
+                continue
+            clean = re.sub(r"[^\w\-]+", "", text, flags=re.UNICODE)
+            if len(clean) < 4:
+                continue
+            low = clean.lower()
+            if low in seen:
+                continue
+            proper = clean[:1].isupper() and not clean.isupper()
+            if had_ai:
+                hit = proper  # brand-like only when topping up AI
+            else:
+                hit = (
+                    bool(w.get("highlight"))
+                    or proper
+                    or len(clean) >= 6
+                )
+            if not hit:
+                continue
+            # Skip very early chatter only when topping up thin AI
+            if had_ai and s < 1.5:
+                continue
+            seen.add(low)
+            out.append({
+                "word": clean,
+                "start": round(s, 3),
+                "end": round(e, 3),
+                "label": clean[:1].upper() + clean[1:],
+                "query_id": f"{clean} close up",
+                "query_en": clean,
+                "search_queries": [clean, f"{clean} close up", f"{clean} product"],
+                "source": "fallback" if had_ai else "heuristic",
+            })
+            if len(out) >= limit:
+                break
+
+    if had_ai:
+        return out  # no footage_kw pad over AI
+
+    for kw in footage_keywords or []:
+        raw = " ".join(str(kw or "").split())
+        if not raw or " " not in raw:
             continue
-        clean = re.sub(r"[^\w\-]+", "", text, flags=re.UNICODE)
-        if len(clean) < 3:
-            continue
-        low = clean.lower()
+        low = raw.lower()
         if low in seen:
             continue
-        hit = (
-            bool(w.get("highlight"))
-            or low in seeds
-            or (clean[:1].isupper() and len(clean) >= 4)
-            or len(clean) >= 6
-        )
-        if not hit:
-            continue
         seen.add(low)
         out.append({
-            "word": clean,
-            "start": round(s, 3),
-            "end": round(e, 3),
-            "label": clean[:1].upper() + clean[1:],
-            "query_id": f"{clean} close up",
-            "query_en": f"{clean} product close up",
-            "search_queries": [f"{clean} product close up", f"{clean} close up"],
-            "source": "heuristic",
-        })
-        if len(out) >= limit:
-            break
-    for kw in footage_keywords or []:
-        low = kw.lower().strip()
-        if not low or low in seen:
-            continue
-        seen.add(low)
-        out.append({
-            "word": kw.strip(),
+            "word": raw,
             "start": 0.0,
             "end": 0.0,
-            "label": kw.strip(),
-            "query_id": kw.strip(),
-            "query_en": kw.strip(),
-            "search_queries": [kw.strip()],
+            "label": raw,
+            "query_id": raw,
+            "query_en": raw,
+            "search_queries": [raw],
             "source": "footage_kw",
         })
         if len(out) >= limit:
@@ -409,12 +427,7 @@ def build_clip_analisa(
         seen_fk.add(low)
         footage_kw.append(kw)
     hl = extract_highlight_keywords(words)
-    for h in hl:
-        low = h.lower()
-        if low not in seen_fk:
-            seen_fk.add(low)
-            footage_kw.append(h)
-    # Prefer AI visual entities (dynamic ID+EN queries); no lexicon expand
+    # AI entities only → footage; bare highlight tokens poison stock search
     object_queries = extract_objects(
         words, footage_kw, visual_entities=visual_entities
     )

@@ -254,8 +254,8 @@ class Settings(BaseSettings):
     REMOTION_ENABLE_AI_LAYER: bool = True
     REMOTION_SUBTITLE_OFFSET: float = -0.5  # seconds — negative = subtitle earlier
 
-    # ─── HyperFrames polish layer (optional; does NOT replace Remotion) ─
-    HYPERFRAMES_ENABLED: bool = False
+    # ─── HyperFrames polish layer (AI lower-third; does NOT replace Remotion) ─
+    HYPERFRAMES_ENABLED: bool = True
     HYPERFRAMES_SERVER_URL: str = "http://127.0.0.1:3003"
     HYPERFRAMES_SERVER_PORT: int = 3003
     HYPERFRAMES_PROJECT_PATH: str = "../hyperframes-renderer"

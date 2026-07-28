@@ -86,11 +86,27 @@ def test_extract_highlight_and_objects():
     ]
     hl = extract_highlight_keywords(words)
     assert "IHSG" in hl
+    # offline (no AI): proper/highlight + multi-word footage only
     objs = extract_objects(words, ["vape stock"])
     names = {o["word"].lower() for o in objs}
     assert "ihsg" in names
     assert "rokok" in names
-    assert any(o["word"].lower().startswith("vape") for o in objs)
+    assert any("vape" in o["word"].lower() for o in objs)
+    # AI present → exclusive if already ≥3; thin AI may top-up proper only (tested separately)
+    ve = [{
+        "word": "IHSG", "start": 1.0, "end": 1.3, "label": "IHSG",
+        "query_en": "stock market chart indonesia", "source": "ai",
+    }, {
+        "word": "Rokok", "start": 2.0, "end": 2.4, "label": "Rokok",
+        "query_en": "cigarette", "source": "ai",
+    }, {
+        "word": "Chart", "start": 3.5, "end": 3.8, "label": "Chart",
+        "query_en": "stock chart", "source": "ai",
+    }]
+    ai_full = extract_objects(words, ["vape stock", "Itu"], visual_entities=ve)
+    assert len(ai_full) == 3
+    assert all(o.get("source") == "ai" for o in ai_full)
+    assert not any("vape" in o["word"].lower() for o in ai_full)
 
 
 def test_write_split_job_meta(tmp_path):
