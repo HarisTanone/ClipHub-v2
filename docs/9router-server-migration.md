@@ -84,4 +84,33 @@ NINE_ROUTER_AI_LAYER_MODEL=CliperHub
 NINE_ROUTER_WHISPER_ENABLED=true
 NINE_ROUTER_WHISPER_MODEL=groq/whisper-large-v3-turbo
 NINE_ROUTER_WHISPER_MAX_RETRIES=1
+USE_REMOTION=true
+HYPERFRAMES_ENABLED=false
+HYPERFRAMES_SERVER_URL=http://127.0.0.1:3003
+HERMES_ENABLED=true
 ```
+
+## Hermes (same local + server)
+
+```bash
+# Mac: pack
+scripts/pack-hermes-data.sh
+# or just re-sync from repo ops config (no secrets):
+scripts/sync-hermes-config.sh
+
+# Server: restore archive OR sync from repo after deploy
+scripts/restore-hermes-data.sh /tmp/hermes-data-*.tar.gz
+# deploy.sh Step 4c also runs sync-hermes-config.sh
+```
+
+Hermes `model.base_url` = `http://127.0.0.1:20128/v1` (9router) — identical on Mac and Ubuntu.
+
+## HyperFrames
+
+Polish layer only. Hook + subtitle remain Remotion.
+
+- Code: `hyperframes-renderer/`
+- Service: `autocliper-hyperframes` `:3003`
+- DB side-table: `hyperframes_configs` (enabled default 0)
+
+See `docs/production-stack.md`.

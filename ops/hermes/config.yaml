@@ -1,0 +1,68 @@
+# AutoCliper Hermes profile — LOCAL == PRODUCTION
+# Synced by: scripts/sync-hermes-config.sh
+# Secrets live in $HERMES_HOME/.env (never commit).
+#
+# LLM path: Hermes → 9router (:20128) → model combo (CliperHub / gcli/…)
+# Same host/port on Mac and Ubuntu server (loopback).
+
+model:
+  default: gcli/grok-4.5-high
+  provider: custom
+  base_url: http://127.0.0.1:20128/v1
+  api_mode: chat_completions
+  # api_key loaded from HERMES/.env → NINE_ROUTER_API_KEY or OPENAI_API_KEY
+
+providers: {}
+fallback_providers: []
+credential_pool_strategies: {}
+
+toolsets:
+  - hermes-cli
+
+max_live_sessions: 16
+
+agent:
+  max_turns: 150
+  gateway_timeout: 1800
+  api_max_retries: 3
+  tool_use_enforcement: auto
+  task_completion_guidance: true
+  parallel_tool_call_guidance: true
+  environment_probe: true
+  coding_context: auto
+  verify_on_stop: false
+  reasoning_effort: medium
+  verbose: false
+
+terminal:
+  backend: local
+  timeout: 180
+  cwd: ""   # set by workdir / project root at runtime
+
+display:
+  interface: cli
+  tool_progress: new
+  show_reasoning: false
+  show_cost: false
+  language: id
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+
+security:
+  redact_secrets: true
+
+approvals:
+  mode: smart
+
+delegation:
+  max_iterations: 50
+
+# Auxiliary tasks also go through 9router when possible
+auxiliary: {}
+
+compression:
+  enabled: true
+  threshold: 0.50
+  target_ratio: 0.20

@@ -55,6 +55,15 @@ remotion-renderer/output/
 .remotion/
 .cache/
 
+# ─── HyperFrames ──────────────────────────────────────────────────────────────
+hyperframes-renderer/node_modules/
+hyperframes-renderer/work/
+hyperframes-renderer/dist/
+
+# ─── Hermes / 9router packed secrets (never commit archives) ──────────────────
+9router-data-*.tar.gz
+hermes-data-*.tar.gz
+
 # ─── IDE ──────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/

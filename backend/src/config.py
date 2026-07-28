@@ -243,7 +243,7 @@ class Settings(BaseSettings):
     GEMINI_TIMEOUT: int = 30  # Fast fail — skip to Groq fallback quickly
     GROQ_LLM_TIMEOUT: int = 120  # Full transcript analysis needs more time
 
-    # ─── Remotion Render Engine ──────────────────────────────────────────
+    # ─── Remotion Render Engine (hook + subtitle — primary) ──────────────
     USE_REMOTION: bool = True
     REMOTION_PROJECT_PATH: str = "../remotion-renderer"
     REMOTION_SERVER_URL: str = "http://localhost:3002"
@@ -253,6 +253,19 @@ class Settings(BaseSettings):
     REMOTION_ENABLE_THREEJS: bool = True
     REMOTION_ENABLE_AI_LAYER: bool = True
     REMOTION_SUBTITLE_OFFSET: float = -0.5  # seconds — negative = subtitle earlier
+
+    # ─── HyperFrames polish layer (optional; does NOT replace Remotion) ─
+    HYPERFRAMES_ENABLED: bool = False
+    HYPERFRAMES_SERVER_URL: str = "http://127.0.0.1:3003"
+    HYPERFRAMES_SERVER_PORT: int = 3003
+    HYPERFRAMES_PROJECT_PATH: str = "../hyperframes-renderer"
+    HYPERFRAMES_TIMEOUT: int = 180
+    HYPERFRAMES_DEFAULT_TEMPLATE: str = "lower_third_v1"
+
+    # ─── Hermes agent (creative/template author; not per-clip batch) ───
+    HERMES_ENABLED: bool = True
+    HERMES_BIN: str = "hermes"
+    HERMES_HOME: str = ""  # empty → ~/.hermes
 
     # ─── Groq API (V2 Pipeline) ──────────────────────────────────────────
     GROQ_API_KEY: str = ""

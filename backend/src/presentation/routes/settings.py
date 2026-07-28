@@ -755,6 +755,78 @@ async def get_model_status(user: CurrentUser = Depends(get_current_user)):
     }
 
 
+@router.get("/stack")
+async def get_production_stack_status(user: CurrentUser = Depends(get_current_user)):
+    """Local==prod stack readiness: 9router, remotion, hyperframes, hermes flags."""
+    from src.config import settings as app_settings
+    from src.infrastructure.hyperframes_adapter import get_hyperframes_adapter
+
+    hf = get_hyperframes_adapter()
+    hf_health = await hf.health()
+    remotion_ok = False
+    remotion_err = None
+    try:
+        import aiohttp
+        from aiohttp import ClientTimeout
+        async with aiohttp.ClientSession(timeout=ClientTimeout(total=3)) as s:
+            async with s.get(f"{app_settings.REMOTION_SERVER_URL.rstrip('/')}/health") as r:
+                remotion_ok = r.status < 400
+    except Exception as e:
+        remotion_err = str(e)
+
+    nine_ok = False
+    try:
+        import aiohttp
+        from aiohttp import ClientTimeout
+        base = (app_settings.NINE_ROUTER_BASE_URL or "http://127.0.0.1:20128/v1").rstrip("/")
+        root = base[:-3] if base.endswith("/v1") else base
+        async with aiohttp.ClientSession(timeout=ClientTimeout(total=3)) as s:
+            async with s.get(root) as r:
+                nine_ok = r.status < 500
+    except Exception:
+        nine_ok = False
+
+    hermes_home = app_settings.HERMES_HOME or os.path.expanduser("~/.hermes")
+    return {
+        "success": True,
+        "data": {
+            "nine_router": {
+                "ok": nine_ok,
+                "base_url": app_settings.NINE_ROUTER_BASE_URL,
+                "model": app_settings.NINE_ROUTER_MODEL,
+                "provider": app_settings.LLM_PROVIDER,
+            },
+            "remotion": {
+                "enabled": bool(app_settings.USE_REMOTION),
+                "ok": remotion_ok,
+                "url": app_settings.REMOTION_SERVER_URL,
+                "role": "hook+subtitle primary",
+                "error": remotion_err,
+            },
+            "hyperframes": {
+                "enabled": bool(app_settings.HYPERFRAMES_ENABLED),
+                "url": app_settings.HYPERFRAMES_SERVER_URL,
+                "template": app_settings.HYPERFRAMES_DEFAULT_TEMPLATE,
+                "health": hf_health,
+                "role": "polish only (lower-third); not hook/subtitle",
+            },
+            "hermes": {
+                "enabled": bool(app_settings.HERMES_ENABLED),
+                "bin": app_settings.HERMES_BIN,
+                "home": hermes_home,
+                "config_exists": os.path.isfile(os.path.join(hermes_home, "config.yaml")),
+                "role": "creative/template author; not per-clip batch",
+            },
+            "object_overlay": get_object_overlay_config(
+                None if user.is_superadmin else user.id
+            ),
+            "hyperframes_db": __import__(
+                "src.infrastructure.hyperframes_config", fromlist=["get_hyperframes_config"]
+            ).get_hyperframes_config(None if user.is_superadmin else user.id),
+        },
+    }
+
+
 @router.get("/object-overlay")
 async def get_object_overlay_endpoint(user: CurrentUser = Depends(get_current_user)):
     """Get object image+text overlay style (DB-backed)."""

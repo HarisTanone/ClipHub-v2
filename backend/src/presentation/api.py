@@ -154,8 +154,10 @@ async def lifespan(app: FastAPI):
             _ensure_object_overlay_table,
             _ensure_reframe_tuning_table,
         )
+        from src.infrastructure.hyperframes_config import ensure_hyperframes_table
         _ensure_reframe_tuning_table()
         _ensure_object_overlay_table()
+        ensure_hyperframes_table()
     except Exception as e:
         logger.warning(f"settings side-tables ensure failed: {e}")
 
@@ -262,4 +264,14 @@ app.include_router(features_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "0.4.0", "mode": "local"}
+    return {
+        "status": "ok",
+        "version": "0.5.0",
+        "mode": settings.PIPELINE_ENV,
+        "stack": {
+            "nine_router": bool(settings.use_nine_router),
+            "remotion": bool(settings.USE_REMOTION),
+            "hyperframes": bool(settings.HYPERFRAMES_ENABLED),
+            "hermes": bool(settings.HERMES_ENABLED),
+        },
+    }

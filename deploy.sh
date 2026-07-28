@@ -16,16 +16,25 @@
 #   1. Git fetch + pull latest code
 #   2. System dependencies (ffmpeg, Node.js 20, Python 3.11+)
 #   3. Backend setup (Python venv, pip install)
-#   4. Remotion server setup (Node.js, npm install)
+#   4. Remotion server setup (Node.js, npm install) — hook+subtitle
+#   4b. HyperFrames polish server (template+JSON, optional)
+#   4c. Hermes config sync (same ops/hermes as local)
 #   5. Frontend build (Vite production build)
-#   6. Systemd services (auto-restart, boot-enabled)
+#   6. Systemd services (9router, backend, remotion, hyperframes, frontend)
 #   7. Nginx reverse proxy (optional)
-#   8. Health check
+#   8. Health check + DB side-tables
 #
 # Services & Ports:
+#   - 9router LLM gateway          → :20128 (127.0.0.1)
 #   - Backend (FastAPI/Uvicorn)    → :8000
-#   - Remotion (Node.js/Express)   → :3002
+#   - Remotion (hook+subtitle)     → :3002
+#   - HyperFrames (polish)         → :3003
 #   - Frontend (static/serve)      → :3001
+#   - Hermes                       → CLI (config under $HERMES_HOME)
+#
+# Local == production config shape:
+#   ops/hermes/config.yaml , ops/env/shared.env.example
+#   scripts/sync-hermes-config.sh , pack/restore 9router+hermes
 #
 # Designed to be idempotent — safe to run multiple times.
 # Second run is fast because it skips already-installed components.
@@ -38,6 +47,7 @@ export DEBIAN_FRONTEND=noninteractive
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$PROJECT_DIR/backend"
 REMOTION_DIR="$PROJECT_DIR/remotion-renderer"
+HYPERFRAMES_DIR="$PROJECT_DIR/hyperframes-renderer"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DEPLOY_USER="${SUDO_USER:-$(whoami)}"
 DEPLOY_HOME="$(eval echo "~$DEPLOY_USER" 2>/dev/null || echo "$HOME")"
@@ -46,6 +56,7 @@ PYTHON_BIN="python3"
 # Ports (avoiding conflicts with existing services)
 BACKEND_PORT=8000
 REMOTION_PORT=3002
+HYPERFRAMES_PORT="${HYPERFRAMES_PORT:-3003}"
 FRONTEND_PORT=3001
 PUBLIC_HOST="${PUBLIC_HOST:-100.64.5.96}"
 PUBLIC_FRONTEND_URL="${PUBLIC_FRONTEND_URL:-http://$PUBLIC_HOST:$FRONTEND_PORT}"
@@ -54,6 +65,7 @@ NINE_ROUTER_PORT="${NINE_ROUTER_PORT:-20128}"
 NINE_ROUTER_HOST="${NINE_ROUTER_HOST:-127.0.0.1}"
 NINE_ROUTER_CLI_VERSION="${NINE_ROUTER_CLI_VERSION:-0.5.20}"
 NINE_ROUTER_DEFAULT_BASE_URL="http://$NINE_ROUTER_HOST:$NINE_ROUTER_PORT/v1"
+HERMES_HOME_DEPLOY="${HERMES_HOME:-$DEPLOY_HOME/.hermes}"
 CLEAR_AI_CACHE_ON_DEPLOY="${CLEAR_AI_CACHE_ON_DEPLOY:-0}"
 
 env_value() {
@@ -448,6 +460,16 @@ if [ -f ".env" ]; then
     append_env_if_missing ".env" "ASSET_FETCH_ENABLED" "true"
     append_env_if_missing ".env" "USE_REMOTION" "true"
     append_env_if_missing ".env" "FORCE_V2_PIPELINE" "true"
+    # HyperFrames polish (default OFF — Remotion owns hook/subtitle)
+    append_env_if_missing ".env" "HYPERFRAMES_ENABLED" "false"
+    append_env_if_missing ".env" "HYPERFRAMES_SERVER_URL" "http://127.0.0.1:$HYPERFRAMES_PORT"
+    append_env_if_missing ".env" "HYPERFRAMES_SERVER_PORT" "$HYPERFRAMES_PORT"
+    append_env_if_missing ".env" "HYPERFRAMES_PROJECT_PATH" "../hyperframes-renderer"
+    append_env_if_missing ".env" "HYPERFRAMES_TIMEOUT" "180"
+    append_env_if_missing ".env" "HYPERFRAMES_DEFAULT_TEMPLATE" "lower_third_v1"
+    append_env_if_missing ".env" "HERMES_ENABLED" "true"
+    append_env_if_missing ".env" "HERMES_BIN" "hermes"
+    append_env_if_missing ".env" "HERMES_HOME" "$HERMES_HOME_DEPLOY"
     # Object image+text overlay (AI visual entities → stock photo card)
     append_env_if_missing ".env" "OBJECT_OVERLAY_ENABLED" "true"
     append_env_if_missing ".env" "OBJECT_OVERLAY_MAX_PER_CLIP" "3"
@@ -599,6 +621,53 @@ else
     echo "  ⚠️  Remotion directory not found at $REMOTION_DIR"
 fi
 
+# ─── Step 4b: HyperFrames polish server ─────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Step 4b: HyperFrames polish (Node.js — port $HYPERFRAMES_PORT)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if [ -d "$HYPERFRAMES_DIR" ]; then
+    cd "$HYPERFRAMES_DIR"
+    if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules/.package-lock.json" ] 2>/dev/null; then
+        echo "  Installing HyperFrames npm dependencies..."
+        npm install 2>/dev/null || npm install
+    else
+        echo "  ✅ HyperFrames npm dependencies up to date"
+    fi
+    mkdir -p "$HYPERFRAMES_DIR/work"
+    chown -R $DEPLOY_USER:$DEPLOY_USER "$HYPERFRAMES_DIR" 2>/dev/null || true
+    # Sanity: assembler loads
+    node -e "import('./src/assemble.mjs').then(m => console.log('templates', m.listTemplates().join(',')))" \
+        || echo "  ⚠️  HyperFrames assembler check failed (non-fatal until service start)"
+    echo "  ✅ HyperFrames renderer ready (polish only; hook+subtitle = Remotion)"
+else
+    echo "  ⚠️  HyperFrames directory not found at $HYPERFRAMES_DIR"
+fi
+
+# ─── Step 4c: Hermes config (local == server) ───────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Step 4c: Hermes Agent config sync"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if [ -x "$PROJECT_DIR/scripts/sync-hermes-config.sh" ]; then
+    sudo -u "$DEPLOY_USER" env HERMES_HOME="$HERMES_HOME_DEPLOY" \
+        "$PROJECT_DIR/scripts/sync-hermes-config.sh" \
+        || HERMES_HOME="$HERMES_HOME_DEPLOY" bash "$PROJECT_DIR/scripts/sync-hermes-config.sh" || true
+    echo "  ✅ Hermes config synced → $HERMES_HOME_DEPLOY"
+else
+    echo "  ⚠️  scripts/sync-hermes-config.sh missing"
+fi
+if command -v hermes &>/dev/null; then
+    echo "  ✅ hermes binary: $(command -v hermes)"
+else
+    echo "  ℹ️  hermes not on PATH — optional install:"
+    echo "     curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+fi
+
+# Continue frontend step marker — original Step 5 follows in file
+
 # ─── Step 5: Frontend Build ─────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -728,6 +797,38 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+# HyperFrames polish service (does NOT replace Remotion)
+if [ -d "$HYPERFRAMES_DIR" ] && [ -f "$HYPERFRAMES_DIR/src/server.mjs" ]; then
+    sudo tee /etc/systemd/system/autocliper-hyperframes.service > /dev/null << EOF
+[Unit]
+Description=AutoCliper HyperFrames Polish Renderer
+After=network.target
+
+[Service]
+Type=simple
+User=$DEPLOY_USER
+WorkingDirectory=$HYPERFRAMES_DIR
+Environment=NODE_ENV=production
+Environment=HYPERFRAMES_SERVER_PORT=$HYPERFRAMES_PORT
+Environment=HYPERFRAMES_WORK_DIR=$HYPERFRAMES_DIR/work
+Environment=PATH=/usr/local/bin:/usr/bin
+ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $HYPERFRAMES_PORT/tcp 2>/dev/null || true'
+ExecStartPre=/bin/sleep 1
+ExecStart=/usr/bin/node src/server.mjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    echo "  ✅ autocliper-hyperframes.service written"
+else
+    echo "  ⚠️  HyperFrames server missing — skipping autocliper-hyperframes.service"
+fi
+
 # Frontend service
 sudo tee /etc/systemd/system/autocliper-frontend.service > /dev/null << EOF
 [Unit]
@@ -754,12 +855,13 @@ EOF
 
 # Reload and restart (Remotion FIRST — must be ready before backend)
 sudo systemctl daemon-reload
-sudo systemctl enable autocliper-9router autocliper-backend autocliper-remotion autocliper-frontend 2>/dev/null || true
+sudo systemctl enable autocliper-9router autocliper-backend autocliper-remotion autocliper-hyperframes autocliper-frontend 2>/dev/null || true
 
 # Start Remotion first and wait for bundle to be ready
 echo "  Stopping services (cleanup stale ports)..."
 sudo systemctl stop autocliper-9router 2>/dev/null || true
 sudo systemctl stop autocliper-remotion 2>/dev/null || true
+sudo systemctl stop autocliper-hyperframes 2>/dev/null || true
 sudo systemctl stop autocliper-backend 2>/dev/null || true
 sudo systemctl stop autocliper-frontend 2>/dev/null || true
 sleep 2
@@ -792,6 +894,21 @@ for i in $(seq 1 60); do
 done
 if [ $REMOTION_READY -eq 0 ]; then
     echo "  ⚠️  Remotion not ready after 60s — check logs: sudo journalctl -u autocliper-remotion -n 30"
+fi
+
+echo "  Starting HyperFrames polish server..."
+sudo systemctl start autocliper-hyperframes 2>/dev/null || true
+HF_READY=0
+for i in $(seq 1 30); do
+    if curl -s "http://localhost:$HYPERFRAMES_PORT/health" 2>/dev/null | grep -q "healthy"; then
+        HF_READY=1
+        echo "  ✅ HyperFrames ready (${i}s)"
+        break
+    fi
+    sleep 1
+done
+if [ $HF_READY -eq 0 ]; then
+    echo "  ⚠️  HyperFrames not ready — check: sudo journalctl -u autocliper-hyperframes -n 30"
 fi
 
 # Now restart backend (Remotion is ready to handle render requests)
@@ -878,6 +995,7 @@ check_service() {
 check_service "autocliper-backend" "$BACKEND_PORT"
 check_service "autocliper-9router" "$NINE_ROUTER_PORT"
 check_service "autocliper-remotion" "$REMOTION_PORT"
+check_service "autocliper-hyperframes" "$HYPERFRAMES_PORT"
 check_service "autocliper-frontend" "$FRONTEND_PORT"
 
 # API health check
@@ -887,11 +1005,17 @@ else
     echo "  ⚠️  Backend API not responding yet (may still be starting)"
 fi
 
+if curl -s "http://localhost:$HYPERFRAMES_PORT/health" 2>/dev/null | grep -q "healthy"; then
+    echo "  ✅ HyperFrames API responding"
+else
+    echo "  ⚠️  HyperFrames API not responding"
+fi
+
 # Zero-touch readiness (no manual DB/.env after deploy)
 echo ""
 echo "  Production readiness:"
 if [ -f "$BACKEND_DIR/.env" ]; then
-    for k in TOP_OVERLAY_ENABLED TOP_OVERLAY_PERSON_OUTLINE TOP_OVERLAY_SMART_CROP USE_REMOTION FORCE_V2_PIPELINE; do
+    for k in TOP_OVERLAY_ENABLED TOP_OVERLAY_PERSON_OUTLINE TOP_OVERLAY_SMART_CROP USE_REMOTION FORCE_V2_PIPELINE HYPERFRAMES_SERVER_URL HERMES_ENABLED; do
         if grep -q "^${k}=" "$BACKEND_DIR/.env" 2>/dev/null; then
             echo "  ✅ .env has $k"
         else
@@ -899,12 +1023,17 @@ if [ -f "$BACKEND_DIR/.env" ]; then
         fi
     done
 fi
+if [ -f "$HERMES_HOME_DEPLOY/config.yaml" ]; then
+    echo "  ✅ Hermes config at $HERMES_HOME_DEPLOY/config.yaml"
+else
+    echo "  ⚠️  Hermes config missing — run scripts/sync-hermes-config.sh"
+fi
 if [ -d "$BACKEND_DIR/assets/music" ]; then
     echo "  ✅ assets/music ready"
 else
     echo "  ⚠️  assets/music missing"
 fi
-if [ -f "$BACKEND_DIR/data/autocliper.db" ] || [ -f "$BACKEND_DIR/autocliper.db" ] || ls "$BACKEND_DIR"/data/*.db >/dev/null 2>&1; then
+if [ -f "$BACKEND_DIR/data/autocliper.db" ] || [ -f "$BACKEND_DIR/data/autoclip.db" ] || [ -f "$BACKEND_DIR/autocliper.db" ] || ls "$BACKEND_DIR"/data/*.db >/dev/null 2>&1; then
     echo "  ✅ SQLite DB present"
 else
     echo "  ℹ️  SQLite path may be under DATA_DIR — app init_db handles create"
@@ -916,10 +1045,12 @@ echo "════════════════════════�
 echo "  ✅ Deployment Complete!"
 echo ""
 echo "  Services:"
-echo "    9router:   http://127.0.0.1:$NINE_ROUTER_PORT"
-echo "    Backend:   $PUBLIC_BACKEND_URL"
-echo "    Remotion:  http://$PUBLIC_HOST:$REMOTION_PORT"
-echo "    Frontend:  $PUBLIC_FRONTEND_URL"
+echo "    9router:      http://127.0.0.1:$NINE_ROUTER_PORT"
+echo "    Backend:      $PUBLIC_BACKEND_URL"
+echo "    Remotion:     http://$PUBLIC_HOST:$REMOTION_PORT   (hook+subtitle)"
+echo "    HyperFrames:  http://$PUBLIC_HOST:$HYPERFRAMES_PORT  (polish)"
+echo "    Frontend:     $PUBLIC_FRONTEND_URL"
+echo "    Hermes home:  $HERMES_HOME_DEPLOY"
 echo ""
 echo "  Open:"
 echo "    $PUBLIC_FRONTEND_URL"
@@ -928,13 +1059,20 @@ echo "  Logs:"
 echo "    sudo journalctl -u autocliper-9router -f"
 echo "    sudo journalctl -u autocliper-backend -f"
 echo "    sudo journalctl -u autocliper-remotion -f"
+echo "    sudo journalctl -u autocliper-hyperframes -f"
 echo "    sudo journalctl -u autocliper-frontend -f"
 echo ""
 echo "  Management:"
 echo "    sudo systemctl status autocliper-9router"
 echo "    sudo systemctl status autocliper-backend"
+echo "    sudo systemctl status autocliper-hyperframes"
 echo "    sudo systemctl restart autocliper-backend"
-echo "    sudo systemctl stop autocliper-backend"
+echo ""
+echo "  Migrate local→server (same config):"
+echo "    scripts/pack-9router-data.sh && scripts/pack-hermes-data.sh"
+echo "    # scp archives → server → restore-*.sh → ./deploy.sh"
+echo ""
+echo "  Docs: docs/production-stack.md"
 echo ""
 echo " sudo journalctl -u autocliper-backend -f"
 echo "  Next run will be fast (skips installed components)."
