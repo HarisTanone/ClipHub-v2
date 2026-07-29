@@ -203,33 +203,31 @@ class Settings(BaseSettings):
 
     # ─── Top Behind Subject Overlay (portrait 9:16, additive to full-frame B-roll)
     TOP_OVERLAY_ENABLED: bool = True
-    TOP_OVERLAY_SPLIT_RATIO: float = 0.72      # stock band taller — footage fills upper frame
+    TOP_OVERLAY_SPLIT_RATIO: float = 0.68      # stock band upper; charcoal stage below
     TOP_OVERLAY_FADE_HEIGHT: float = 0.12      # gradient fade as fraction of frame height
-
     TOP_OVERLAY_OPACITY: float = 1.0
     TOP_OVERLAY_PERSON_OUTLINE: bool = True    # white stroke around person (reference style)
     TOP_OVERLAY_PERSON_SHADOW: bool = True
-    TOP_OVERLAY_OUTLINE_THICKNESS: int = 10    # px stroke @720p; bust glow, not full-body frame
+    TOP_OVERLAY_OUTLINE_THICKNESS: int = 9     # px stroke @720p; organic bust glow
     TOP_OVERLAY_OUTLINE_COLOR: str = "255,255,255"
-    # white | neon | black | gradient | comic  (white = solid rim + soft blue bloom like reference)
+    # white | neon | black | gradient | comic
     TOP_OVERLAY_OUTLINE_STYLE: str = "white"
     TOP_OVERLAY_MAX_PER_CLIP: int = 2
     TOP_OVERLAY_SEG_CONFIDENCE: float = 0.25
-    TOP_OVERLAY_MASK_FEATHER: int = 1          # short feather = cleaner hard cutout
-    TOP_OVERLAY_MASK_STRIDE: int = 1           # YOLO every frame = cleaner cutout edge
-    TOP_OVERLAY_CROP_BIAS_Y: float = 0.08     # cover-crop vertical bias (0=top — keep subject in top band)
-    # active = person nearest frame center (post-reframe speaker); dual_auto = both if 2-shot; largest = P0 only
+    TOP_OVERLAY_MASK_FEATHER: int = 1
+    TOP_OVERLAY_MASK_STRIDE: int = 1
+    TOP_OVERLAY_CROP_BIAS_Y: float = 0.08
     TOP_OVERLAY_SPEAKER_MASK_MODE: str = "dual_auto"
-    TOP_OVERLAY_SMART_CROP: bool = True        # YOLO object center on B-roll (wallet/pump), not fixed bias
+    TOP_OVERLAY_SMART_CROP: bool = True
     TOP_OVERLAY_SMART_CROP_CONF: float = 0.18
-    # Person as supporting element: small sticker at frame edge; stock + black gradient dominate
-    TOP_OVERLAY_PERSON_SCALE: float = 0.55     # ~45% smaller — person secondary, stock hero
-    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.55   # push cutout toward bottom
-    TOP_OVERLAY_PERSON_ANCHOR: str = "auto"    # auto|left|right — pin cutout to side edge
-    TOP_OVERLAY_PERSON_EDGE_MARGIN: float = 0.04  # gap from L/R frame edge
-    TOP_OVERLAY_BG_BLACK: float = 0.72         # black gradient strength under stock (0..1)
-    TOP_OVERLAY_OUTLINE_BUST_RATIO: float = 0.36  # head→neck→shoulder only (not arms/torso)
-    TOP_OVERLAY_OUTLINE_EDGE_MARGIN: float = 0.06  # kill stroke glued to L/R/bottom frame edges
+    # Person supporting FG: ~20% smaller, natural X (no center/edge force)
+    TOP_OVERLAY_PERSON_SCALE: float = 0.80
+    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.12   # gentle down only — keep natural layout
+    TOP_OVERLAY_PERSON_ANCHOR: str = "natural" # natural|center|left|right — natural = keep source X
+    TOP_OVERLAY_PERSON_EDGE_MARGIN: float = 0.03
+    TOP_OVERLAY_BG_BLACK: float = 0.55         # charcoal→black depth under stock (not flat pure black)
+    TOP_OVERLAY_OUTLINE_BUST_RATIO: float = 0.48  # head→neck→shoulder
+    TOP_OVERLAY_OUTLINE_EDGE_MARGIN: float = 0.05
 
     # ─── Object image+text overlay (noun mention → stock photo card) ─────
 

@@ -307,7 +307,7 @@ def test_outline_style_black():
 
 
 def test_person_scale_shrinks_and_shifts_down():
-    """Supporting element: ~18% smaller + pushed down vs full-frame cutout."""
+    """Supporting element: ~20% smaller; natural X preserved; gentle Y ease."""
     r = TopBehindSubjectRenderer(
         split_ratio=0.7,
         fade_height=0.05,
@@ -316,31 +316,61 @@ def test_person_scale_shrinks_and_shifts_down():
         person_shadow=False,
         mask_feather=1,
         person_scale=0.80,
-        person_shift_y=0.30,
+        person_shift_y=0.12,
+        person_anchor="natural",
+        bg_black=0.0,
     )
     h, w = 200, 120
     frame = np.full((h, w, 3), 50, dtype=np.uint8)
-    # Distinct person color
-    frame[40:160, 30:90] = (20, 20, 200)  # red-ish BGR person
+    # Person OFF-center left (natural layout must not jump to center/edge)
+    frame[40:160, 15:70] = (20, 20, 200)
     overlay = np.full((h, w, 3), (10, 180, 10), dtype=np.uint8)
     mask = np.zeros((h, w), dtype=np.float32)
-    mask[40:160, 30:90] = 1.0
+    mask[40:160, 15:70] = 1.0
 
     out = r.render(frame, mask, overlay)
-    # After shrink+shift, original top of person bbox should free up for stock/green
-    # (person no longer occupies y=40 fully)
-    top_free = out[42:50, 50:70]
-    # Either green stock or neutral fill — not full red person
+    top_free = out[42:50, 30:55]
     red_left = int(np.mean(top_free[:, :, 2]))
     assert red_left < 150, f"person should leave top room, red={red_left}"
 
-    # Layout meta path: mask area should shrink (~0.80^2 of original bbox area-ish)
     _, p2, layout = r._layout_person_supporting(frame, mask)
     assert layout["scale"] == 0.80
-    assert layout["y0"] > 40 or layout["ph"] < 120
+    assert layout["anchor"] == "natural"
+    # Natural X: new center near original center (~42.5), not frame center (60) or edge
+    cx_new = (layout["x0"] + layout["x1"]) * 0.5
+    assert 20 < cx_new < 55, f"natural X broken, cx={cx_new}"
     area0 = float(mask.sum())
     area1 = float(p2.sum())
     assert area1 < area0 * 0.95, f"mask area should shrink {area1} vs {area0}"
+
+
+def test_charcoal_gradient_protects_top_footage():
+    """Top stock stays bright; lower stage gets charcoal depth (not flat black)."""
+    r = TopBehindSubjectRenderer(
+        split_ratio=0.65,
+        fade_height=0.08,
+        person_outline=False,
+        person_shadow=False,
+        person_scale=1.0,
+        person_shift_y=0.0,
+        bg_black=0.55,
+        mask_feather=1,
+    )
+    h, w = 200, 100
+    frame = np.full((h, w, 3), 80, dtype=np.uint8)
+    # Bright stock (white-ish)
+    overlay = np.full((h, w, 3), 220, dtype=np.uint8)
+    mask = np.zeros((h, w), dtype=np.float32)
+    # tiny person bottom so top is pure stock
+    mask[150:190, 30:70] = 1.0
+    out = r.render(frame, mask, overlay)
+    top = float(out[8:20, 20:80].mean())
+    mid = float(out[90:110, 20:80].mean())
+    assert top > mid, f"top footage should stay brighter than mid stage top={top} mid={mid}"
+    assert top > 150, f"top stock crushed top={top}"
+    # Stage not pure black crush
+    bot = float(out[130:145, 20:80].mean())
+    assert bot > 5, f"flat pure black bot={bot}"
 
 
 def test_outline_kills_frame_edge_verticals():

@@ -138,7 +138,7 @@ class TopBehindSubjectRenderer:
             np.clip(
                 person_scale
                 if person_scale is not None
-                else getattr(settings, "TOP_OVERLAY_PERSON_SCALE", 0.55),
+                else getattr(settings, "TOP_OVERLAY_PERSON_SCALE", 0.80),
                 0.35,
                 1.0,
             )
@@ -147,7 +147,7 @@ class TopBehindSubjectRenderer:
             np.clip(
                 person_shift_y
                 if person_shift_y is not None
-                else getattr(settings, "TOP_OVERLAY_PERSON_SHIFT_Y", 0.55),
+                else getattr(settings, "TOP_OVERLAY_PERSON_SHIFT_Y", 0.12),
                 0.0,
                 0.75,
             )
@@ -155,14 +155,14 @@ class TopBehindSubjectRenderer:
         anchor = (
             person_anchor
             if person_anchor is not None
-            else getattr(settings, "TOP_OVERLAY_PERSON_ANCHOR", "auto")
+            else getattr(settings, "TOP_OVERLAY_PERSON_ANCHOR", "natural")
         )
-        self.person_anchor = str(anchor or "auto").strip().lower()
+        self.person_anchor = str(anchor or "natural").strip().lower()
         self.person_edge_margin = float(
             np.clip(
                 person_edge_margin
                 if person_edge_margin is not None
-                else getattr(settings, "TOP_OVERLAY_PERSON_EDGE_MARGIN", 0.04),
+                else getattr(settings, "TOP_OVERLAY_PERSON_EDGE_MARGIN", 0.03),
                 0.0,
                 0.20,
             )
@@ -171,7 +171,7 @@ class TopBehindSubjectRenderer:
             np.clip(
                 bg_black
                 if bg_black is not None
-                else getattr(settings, "TOP_OVERLAY_BG_BLACK", 0.72),
+                else getattr(settings, "TOP_OVERLAY_BG_BLACK", 0.55),
                 0.0,
                 1.0,
             )
@@ -180,7 +180,7 @@ class TopBehindSubjectRenderer:
             np.clip(
                 outline_bust_ratio
                 if outline_bust_ratio is not None
-                else getattr(settings, "TOP_OVERLAY_OUTLINE_BUST_RATIO", 0.36),
+                else getattr(settings, "TOP_OVERLAY_OUTLINE_BUST_RATIO", 0.48),
                 0.25,
                 1.0,
             )
@@ -189,7 +189,7 @@ class TopBehindSubjectRenderer:
             np.clip(
                 outline_edge_margin
                 if outline_edge_margin is not None
-                else getattr(settings, "TOP_OVERLAY_OUTLINE_EDGE_MARGIN", 0.06),
+                else getattr(settings, "TOP_OVERLAY_OUTLINE_EDGE_MARGIN", 0.05),
                 0.0,
                 0.15,
             )
@@ -253,29 +253,35 @@ class TopBehindSubjectRenderer:
         bg_blend3 = bg_blend[:, :, None]
 
         out = frame_f.astype(np.float32)
-        # Black gradient base under stock (cinematic vignette, not original bg bleed)
+        # Charcoal→black stage under stock (depth, not flat pure black)
         black_a = float(self.bg_black)
         if black_a > 0.01:
-            # stronger black toward bottom of stock band + outer edges
             yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
             xx = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
-            # bottom of stock band darker; top still readable
-            vert = np.clip((yy - 0.15) / 0.70, 0.0, 1.0)
-            vert = vert * vert * (3.0 - 2.0 * vert)  # smoothstep
+            # Top of stock band stays bright (footage readable); deepen downward
+            # Protect top ~18% — almost no darken so upper footage stays hero
+            top_protect = np.clip((yy - 0.06) / 0.18, 0.0, 1.0)
+            top_protect = top_protect * top_protect * (3.0 - 2.0 * top_protect)
+            vert = np.clip((yy - 0.20) / 0.65, 0.0, 1.0)
+            vert = vert * vert * (3.0 - 2.0 * vert)
             edge_x = np.minimum(xx, 1.0 - xx)
-            side = np.clip(1.0 - edge_x / 0.18, 0.0, 1.0) * 0.35
-            dark = np.clip(vert * 0.85 + side, 0.0, 1.0) * black_a
+            side = np.clip(1.0 - edge_x / 0.22, 0.0, 1.0) * 0.22
+            # charcoal lift: never crush to pure 0 — leave residual gray depth
+            dark = np.clip(vert * 0.78 + side, 0.0, 1.0) * black_a * top_protect
             dark3 = (dark * top_alpha)[:, :, None]
-            out = out * (1.0 - dark3)  # pull toward black under stock zone
+            # Pull toward charcoal (18,18,22 BGR-ish) not pure black
+            charcoal = np.array([18.0, 18.0, 22.0], dtype=np.float32)
+            out = out * (1.0 - dark3) + charcoal[None, None, :] * dark3 * 0.35
 
         ov = overlay_frame.astype(np.float32)
         # Depth polish: slight blur on stock so person reads as foreground
         ov_soft = cv2.GaussianBlur(ov, (0, 0), 1.2)
         ov = ov * 0.55 + ov_soft * 0.45
-        # Dim stock slightly into black gradient so footage sits on dark stage
+        # Mild dim only mid/bottom of stock — top footage stays clear
         if black_a > 0.01:
-            dim = 1.0 - (black_a * 0.22)
-            ov = ov * dim
+            yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+            dim_map = 1.0 - (black_a * 0.18 * np.clip((yy - 0.12) / 0.55, 0.0, 1.0))
+            ov = ov * dim_map[:, :, None]
         out = out * (1.0 - bg_blend3) + ov * bg_blend3
 
 
@@ -295,10 +301,11 @@ class TopBehindSubjectRenderer:
         frame: np.ndarray,
         p: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, dict]:
-        """Shrink person + pin to L/R edge so stock footage owns the frame.
+        """Shrink person ~20%; keep natural horizontal; gentle vertical ease.
 
-        Returns (frame_with_relocated_person, new_mask, layout_meta).
-        Identity when scale≈1 and shift≈0 and anchor=center.
+        Anchor:
+          natural (default) — preserve source X centroid (no center/edge force)
+          center | left | right — explicit pin
         """
         import cv2
 
@@ -315,9 +322,7 @@ class TopBehindSubjectRenderer:
             "x1": w - 1,
             "ph": h,
         }
-        # Full-size no-shift: identity (edge pin only useful when shrunk)
         if p.max() < 0.01 or (scale >= 0.995 and shift <= 0.01):
-
             ys, xs = np.where(p >= 0.5)
             if len(ys):
                 layout.update(
@@ -335,7 +340,6 @@ class TopBehindSubjectRenderer:
 
         y0, y1 = int(ys.min()), int(ys.max())
         x0, x1 = int(xs.min()), int(xs.max())
-        # Pad bbox so hair/shoulders not clipped on warp
         pad = max(4, int(round(min(h, w) * 0.012)))
         y0p, y1p = max(0, y0 - pad), min(h - 1, y1 + pad)
         x0p, x1p = max(0, x0 - pad), min(w - 1, x1 + pad)
@@ -343,7 +347,6 @@ class TopBehindSubjectRenderer:
         if ph < 8 or pw < 8:
             return frame, p, layout
 
-        # Extract person pixels + mask crop
         crop = frame[y0p : y1p + 1, x0p : x1p + 1].copy()
         mcrop = p[y0p : y1p + 1, x0p : x1p + 1].copy()
 
@@ -353,35 +356,38 @@ class TopBehindSubjectRenderer:
         m_s = cv2.resize(mcrop, (nw, nh), interpolation=cv2.INTER_LINEAR)
         m_s = np.clip(m_s, 0.0, 1.0)
 
-        # Vertical: push down so stock owns upper frame
+        # Vertical: gentle ease down only if room — do not destroy source layout
         free_y = max(0, h - nh)
-        base_y = y0p + int(round((ph - nh) * 0.15))
+        base_y = y0p + int(round((ph - nh) * 0.20))  # slight top bias on shrink
         room_below = max(0, h - (base_y + nh))
-        dy = int(round(room_below * shift))
-        dy = max(dy, int(round(free_y * shift * 0.35)))
+        dy = int(round(room_below * shift * 0.55))
         ny0 = int(np.clip(base_y + dy, 0, max(0, h - nh)))
 
-        # Horizontal: pin to edge (auto = side person already leans toward)
+        # Horizontal: NATURAL = keep source centroid X (never force center/edge)
         margin = int(round(w * float(self.person_edge_margin)))
         cx = (x0p + x1p) * 0.5
         side = self.person_anchor
-        if side not in {"left", "right", "center"}:
-            # auto: keep natural side (left of center → left edge, else right)
-            side = "left" if cx < w * 0.5 else "right"
-        if side == "left":
+        if side in {"auto", "natural", ""}:
+            # Preserve natural X: scaled crop centered on original person center
+            nx0 = int(round(cx - nw * 0.5))
+            side = "natural"
+        elif side == "left":
             nx0 = margin
         elif side == "right":
             nx0 = max(0, w - nw - margin)
+        elif side == "center":
+            nx0 = int(round((w - nw) * 0.5))
         else:
             nx0 = int(round(cx - nw * 0.5))
+            side = "natural"
         nx0 = int(np.clip(nx0, 0, max(0, w - nw)))
         layout["anchor"] = side
 
-        # Clear original person — dark fill (black gradient + stock cover rest)
+        # Clear original person → charcoal fill (stage + stock cover rest)
         frame_out = frame.copy()
         clear = (p >= 0.35).astype(np.float32)
         if clear.max() > 0:
-            fill = np.array([12.0, 12.0, 12.0], dtype=np.float32)  # near-black
+            fill = np.array([18.0, 18.0, 22.0], dtype=np.float32)  # charcoal
             frame_out = (
                 frame_out.astype(np.float32) * (1.0 - clear[:, :, None])
                 + fill[None, None, :] * clear[:, :, None]
@@ -745,8 +751,8 @@ class TopBehindSubjectRenderer:
     ) -> np.ndarray:
         """Organic bust glow — head → neck → shoulder only.
 
-        Not full-body frame. Not box. Not edge-glued verticals on L/R/bottom.
-        Stroke OUTSIDE body; face/clothes untouched.
+        Not full-body frame. Not frame-edge box. Stroke outside body.
+        Keeps natural person silhouette curves; kills only L/R/bottom FRAME lines.
         """
         import cv2
 
@@ -759,36 +765,28 @@ class TopBehindSubjectRenderer:
             "white", "neon", "black", "gradient", "comic",
         } else "white"
 
-        # Bust window: only top outline_bust_ratio of person bbox (head+shoulder)
         ys, xs = np.where(binary > 0)
         if len(ys) == 0:
             return out
         py0, py1 = int(ys.min()), int(ys.max())
-        px0, px1 = int(xs.min()), int(xs.max())
         if layout:
             py0 = int(layout.get("y0", py0))
             py1 = int(layout.get("y1", py1))
-            px0 = int(layout.get("x0", px0))
-            px1 = int(layout.get("x1", px1))
         ph = max(1, py1 - py0 + 1)
         bust_h = max(8, int(round(ph * float(self.outline_bust_ratio))))
         bust_y1 = min(h - 1, py0 + bust_h)
 
-        # Soft vertical falloff: full strength on head, zero past shoulders
         row = np.arange(h, dtype=np.float32)
-        # 1 above mid-bust, smoothstep 1→0 across lower half of bust band
         mid = py0 + bust_h * 0.55
-        end = float(bust_y1)
+        end_y = float(bust_y1)
         bust_w = np.ones(h, dtype=np.float32)
-        bust_w[row > end] = 0.0
-        zone = (row >= mid) & (row <= end)
-        if zone.any() and end > mid:
-            t = (row[zone] - mid) / max(1.0, end - mid)
-            # smoothstep out
+        bust_w[row > end_y] = 0.0
+        zone = (row >= mid) & (row <= end_y)
+        if zone.any() and end_y > mid:
+            t = (row[zone] - mid) / max(1.0, end_y - mid)
             bust_w[zone] = 1.0 - (t * t * (3.0 - 2.0 * t))
-        bust_w = bust_w[:, None]  # Hx1
+        bust_w = bust_w[:, None]
 
-        # Edge margin: kill stroke glued to frame L/R/bottom (vertical frame lines)
         m = float(self.outline_edge_margin)
         mx = max(2, int(round(w * m)))
         my_bot = max(2, int(round(h * max(m, 0.06))))
@@ -796,57 +794,75 @@ class TopBehindSubjectRenderer:
         edge_kill[:, :mx] = 0.0
         edge_kill[:, w - mx :] = 0.0
         edge_kill[h - my_bot :, :] = 0.0
-        # Soften kill band
         if mx > 2:
             for i in range(mx):
                 a = i / float(mx)
                 edge_kill[:, i] = np.minimum(edge_kill[:, i], a)
                 edge_kill[:, w - 1 - i] = np.minimum(edge_kill[:, w - 1 - i], a)
 
-        # Only keep person silhouette inside bust band for contour source
         bust_bin = binary.copy()
-        bust_bin[int(end) + 1 :, :] = 0
-        # Feather bottom of bust mask so outline ends organically at shoulders
+        bust_bin[int(end_y) + 1 :, :] = 0
         fade_rows = max(4, bust_h // 5)
         for i in range(fade_rows):
-            y = int(end) - fade_rows + i + 1
+            y = int(end_y) - fade_rows + i + 1
             if 0 <= y < h:
-                bust_bin[y, :] = (bust_bin[y, :].astype(np.float32) * (1.0 - (i + 1) / fade_rows)).astype(np.uint8)
-
+                bust_bin[y, :] = (
+                    bust_bin[y, :].astype(np.float32) * (1.0 - (i + 1) / fade_rows)
+                ).astype(np.uint8)
         if bust_bin.max() == 0:
             return out
 
-        # Scale outline to resolution: config thickness is base for ~720p.
+        # Soft organic mask — ellipse morph only, light blur (keep silhouette)
+        k_org = max(3, int(round(min(h, w) * 0.010)))
+        if k_org % 2 == 0:
+            k_org += 1
+        k_ell = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_org, k_org))
+        bust_bin = cv2.morphologyEx(bust_bin, cv2.MORPH_CLOSE, k_ell, iterations=1)
+        bust_bin = cv2.GaussianBlur(bust_bin, (k_org, k_org), 0)
+        bust_bin = (bust_bin >= 80).astype(np.uint8) * 255
+        if bust_bin.max() == 0:
+            return out
+
         scale = max(1.0, min(h, w) / 720.0)
-        th = max(6, int(round(int(self.outline_thickness) * scale * 0.85)))
+        th = max(5, int(round(int(self.outline_thickness) * scale * 0.85)))
         if style == "comic":
             th = max(4, int(round(th * 0.75)))
-        # Outer pad so ring sits clearly outside silhouette.
         pad = max(3, th // 2 + 1)
         k_pad = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (pad | 1, pad | 1))
-        # Contour from slightly dilated mask → stroke outside body.
         edge_src = cv2.dilate(bust_bin, k_pad, iterations=1)
-        contours, _ = cv2.findContours(edge_src, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(edge_src, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         if not contours:
             return out
 
-        # Drop contours that are basically frame-edge rectangles
         good = []
         for cnt in contours:
-            if cv2.contourArea(cnt) < 40:
+            area = float(cv2.contourArea(cnt))
+            if area < 40:
                 continue
             x, y, bw, bh = cv2.boundingRect(cnt)
-            # reject near full-width "box" glued to sides
-            if bw > w * 0.92 and bh > h * 0.35:
+            # Only reject near-full-frame boxes (frame edge artifacts)
+            if bw > w * 0.90 and bh > h * 0.50:
                 continue
-            good.append(cnt)
+            if len(cnt) >= 10:
+                pts = cnt.reshape(-1, 2).astype(np.float32)
+                k = min(7, max(3, len(pts) // 16))
+                if k % 2 == 0:
+                    k += 1
+                pad_n = k // 2
+                ext = np.concatenate([pts[-pad_n:], pts, pts[:pad_n]], axis=0)
+                ker = np.ones(k, dtype=np.float32) / float(k)
+                sx = np.convolve(ext[:, 0], ker, mode="valid")
+                sy = np.convolve(ext[:, 1], ker, mode="valid")
+                n = min(len(sx), len(sy), len(pts))
+                smooth = np.stack([sx[:n], sy[:n]], axis=1).astype(np.int32).reshape(-1, 1, 2)
+                good.append(smooth)
+            else:
+                good.append(cnt)
         if not good:
             return out
         contours = good
 
-        # Soft region: prefer top band but keep head rim even if below split slightly
         region = np.clip(np.maximum(top_alpha, 0.55), 0.0, 1.0) * bust_w * edge_kill
-
         hard = np.zeros(out.shape[:2], dtype=np.uint8)
         line_type = cv2.LINE_AA
         if style == "comic":
@@ -862,26 +878,37 @@ class TopBehindSubjectRenderer:
                     if len(a) >= 2:
                         cv2.polylines(hard, [a], False, 255, thickness=th, lineType=line_type)
         else:
-            outer_th = th + 3
-            mid_th = th
-            core_th = max(2, th - 3)
-            cv2.drawContours(hard, contours, -1, 255, thickness=outer_th, lineType=line_type)
-            cv2.drawContours(hard, contours, -1, 255, thickness=mid_th, lineType=line_type)
-            cv2.drawContours(hard, contours, -1, 255, thickness=core_th, lineType=line_type)
+            cv2.drawContours(hard, contours, -1, 255, thickness=th, lineType=line_type)
+            outer = cv2.dilate(hard, k_pad, iterations=1)
+            hard = cv2.max(hard, outer)
 
-        # Extra: zero any residual vertical runs on extreme L/R columns
+        # Zero stroke only on FRAME margins (not person silhouette sides)
         hard[:, :mx] = 0
         hard[:, w - mx :] = 0
         hard[h - my_bot :, :] = 0
-        # Kill bottom of bust contour (flat shoulder line across full width looks boxed)
-        hard[int(end) :, :] = 0
+        hard[int(end_y) + 1 :, :] = 0
+
+        # Kill residual full-height verticals ONLY near frame L/R (2*mx band)
+        near = max(mx + 2, int(round(w * 0.08)))
+        bust_rows = slice(max(0, py0 - 2), min(h, int(end_y) + 1))
+        band_h = max(1, int(end_y) - py0 + 1)
+        thr_col = 255.0 * band_h * 0.70
+        col_sum = hard[bust_rows, :].sum(axis=0).astype(np.float32)
+        for c in np.where(col_sum > thr_col)[0]:
+            if int(c) < near or int(c) >= w - near:
+                hard[bust_rows, int(c)] = 0
+        # Kill flat bottom bar only if it spans most of frame width
+        thr_row = 255.0 * w * 0.70
+        row_sum = hard.sum(axis=1).astype(np.float32)
+        for r in range(max(0, int(end_y) - 4), min(h, int(end_y) + 2)):
+            if row_sum[r] > thr_row:
+                hard[r, :] = 0
 
         glow_sigma = max(1.5, th * 0.45)
         if style == "neon":
             glow_sigma = max(2.2, th * 0.90)
         glow = cv2.GaussianBlur(hard, (0, 0), sigmaX=glow_sigma)
 
-        # Kill stroke that would paint ON face/clothes (erode person interior).
         interior = cv2.erode(binary, k_pad, iterations=max(2, pad // 2)).astype(np.float32) / 255.0
         glow_w = 0.65
         if style == "neon":
@@ -891,13 +918,12 @@ class TopBehindSubjectRenderer:
         elif style == "comic":
             glow_w = 0.15
         stroke = np.clip(
-            hard.astype(np.float32) / 255.0 * 1.0
+            hard.astype(np.float32) / 255.0
             + glow.astype(np.float32) / 255.0 * glow_w,
             0.0,
             1.0,
         )
         stroke = stroke * region * (1.0 - interior)
-        # Snap mid-alpha → solid so rim never looks dirty/grey.
         stroke = np.where(stroke >= 0.28, 1.0, stroke * 0.35)
         stroke = np.clip(stroke, 0.0, 1.0)
 
@@ -909,7 +935,10 @@ class TopBehindSubjectRenderer:
             yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
             c_top = np.array((40.0, 200.0, 255.0), dtype=np.float32)
             c_bot = np.array((255.0, 120.0, 40.0), dtype=np.float32)
-            color_map = c_top[None, None, :] * (1.0 - yy[:, :, None]) + c_bot[None, None, :] * yy[:, :, None]
+            color_map = (
+                c_top[None, None, :] * (1.0 - yy[:, :, None])
+                + c_bot[None, None, :] * yy[:, :, None]
+            )
             stroke3 = stroke[:, :, None]
             return out * (1.0 - stroke3) + color_map * stroke3
         else:
@@ -922,13 +951,16 @@ class TopBehindSubjectRenderer:
             inner_edge = cv2.subtract(hard, inner).astype(np.float32) / 255.0
             inner_edge = inner_edge * region * (1.0 - interior) * 0.55
             black = np.array((8.0, 8.0, 8.0), dtype=np.float32)
-            painted = painted * (1.0 - inner_edge[:, :, None]) + black[None, None, :] * inner_edge[:, :, None]
+            painted = (
+                painted * (1.0 - inner_edge[:, :, None])
+                + black[None, None, :] * inner_edge[:, :, None]
+            )
         if style == "neon":
             bloom = cv2.GaussianBlur(hard, (0, 0), sigmaX=max(3.0, th * 1.4)).astype(np.float32) / 255.0
             bloom = bloom * region * (1.0 - interior) * 0.50
             painted = painted * (1.0 - bloom[:, :, None]) + color[None, None, :] * bloom[:, :, None]
         elif style == "white":
-            blue = np.array((255.0, 140.0, 30.0), dtype=np.float32)  # BGR
+            blue = np.array((255.0, 140.0, 30.0), dtype=np.float32)
             bloom = cv2.GaussianBlur(hard, (0, 0), sigmaX=max(3.5, th * 1.5)).astype(np.float32) / 255.0
             bloom = bloom * region * (1.0 - interior) * 0.42
             painted = painted * (1.0 - bloom[:, :, None]) + blue[None, None, :] * bloom[:, :, None]
