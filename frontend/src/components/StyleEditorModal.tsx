@@ -163,8 +163,8 @@ export interface SubtitleStyle {
 }
 
 export interface TextEmphasisStyle {
-  effectMode: "auto" | "behind_person" | "spotlight" | "side_label" | "floating_text" | "auto_avoid" | "around_head" | "depth_text" | "kinetic_type";
-  animation: "cinematic" | "slam" | "reveal" | "glitch" | "neon";
+  effectMode: "auto" | "depth_cutout" | "hero_punch" | "side_rail" | "float_track" | "smart_gap" | "orbit_halo" | "z_parallax" | "word_cascade" | "split_impact" | "type_pulse" | "sticker_pop" | "mirror_echo";
+  animation: "rise" | "impact" | "slide" | "static_glitch" | "glow" | "elastic" | "blur_in" | "flip_y";
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
@@ -182,7 +182,6 @@ export interface TextEmphasisStyle {
   positionY: number;
   maxWidthPct: number;
   maskFeather: number;
-  // Effect-specific tuning (new)
   floatSpeed?: number;
   avoidPadding?: number;
   aroundHeadRadius?: number;
@@ -190,6 +189,9 @@ export interface TextEmphasisStyle {
   depthParallax?: number;
   depthFade?: number;
   kineticStagger?: number;
+  echoOffset?: number;
+  stickerAngle?: number;
+  typeSpeed?: number;
 }
 
 export const DEFAULT_HOOK_STYLE: HookStyle = {
@@ -297,33 +299,64 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
 
 export const DEFAULT_TEXT_EMPHASIS_STYLE: TextEmphasisStyle = {
   effectMode: "auto",
-  animation: "cinematic",
-  fontFamily: "Anton",
-  fontSize: 92,
+  animation: "impact",
+  fontFamily: "Bebas Neue",
+  fontSize: 104,
   fontWeight: "900",
-  letterSpacing: 1,
-  lineHeight: 0.95,
+  letterSpacing: 2,
+  lineHeight: 0.9,
   color: "#FFFFFF",
-  accentColor: "#FFD400",
+  accentColor: "#FF3B5C",
   uppercase: true,
   strokeEnabled: true,
-  strokeColor: "#09090B",
-  strokeWidth: 2,
+  strokeColor: "#0A0A0B",
+  strokeWidth: 3,
   shadowEnabled: true,
   shadowColor: "#000000",
-  shadowBlur: 22,
-  positionY: 50,
-  maxWidthPct: 82,
+  shadowBlur: 28,
+  positionY: 48,
+  maxWidthPct: 86,
   maskFeather: 9,
-  // Effect-specific tuning (new)
-  floatSpeed: 1.2,
-  avoidPadding: 40,
-  aroundHeadRadius: 60,
-  depthIntensity: 0.5,
-  depthParallax: 0.35,
-  depthFade: 0.45,
-  kineticStagger: 6,
+  floatSpeed: 1.15,
+  avoidPadding: 44,
+  aroundHeadRadius: 58,
+  depthIntensity: 0.55,
+  depthParallax: 0.4,
+  depthFade: 0.4,
+  kineticStagger: 5,
+  echoOffset: 10,
+  stickerAngle: -6,
+  typeSpeed: 1.4,
 };
+
+/** Map old AI-text effect/anim names so localStorage + presets keep working. */
+const LEGACY_TE_EFFECT: Record<string, TextEmphasisStyle["effectMode"]> = {
+  behind_person: "depth_cutout",
+  spotlight: "hero_punch",
+  side_label: "side_rail",
+  floating_text: "float_track",
+  auto_avoid: "smart_gap",
+  around_head: "orbit_halo",
+  depth_text: "z_parallax",
+  kinetic_type: "word_cascade",
+};
+const LEGACY_TE_ANIM: Record<string, TextEmphasisStyle["animation"]> = {
+  cinematic: "rise",
+  slam: "impact",
+  reveal: "slide",
+  glitch: "static_glitch",
+  neon: "glow",
+};
+export function normaliseTextEmphasisStyle(partial?: Partial<TextEmphasisStyle> | Record<string, unknown> | null): TextEmphasisStyle {
+  const raw = { ...DEFAULT_TEXT_EMPHASIS_STYLE, ...(partial || {}) } as TextEmphasisStyle & Record<string, unknown>;
+  const effectRaw = String(raw.effectMode || "auto");
+  raw.effectMode = (LEGACY_TE_EFFECT[effectRaw] || effectRaw) as TextEmphasisStyle["effectMode"];
+  const animRaw = String(raw.animation || "impact");
+  raw.animation = (LEGACY_TE_ANIM[animRaw] || animRaw) as TextEmphasisStyle["animation"];
+  return raw as TextEmphasisStyle;
+}
+
+
 
 // ─── Presets ─────────────────────────────────────────────────────────────────
 
@@ -1228,11 +1261,11 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
     return () => { active = false; window.clearTimeout(timer); };
   }, [previewContext?.jobId, previewContext?.clipRank, previewContext?.frame, style]);
   const update = <K extends keyof TextEmphasisStyle>(key: K, value: TextEmphasisStyle[K]) => onChange({ ...style, [key]: value });
-  const previewEffect = style.effectMode === "auto" ? "behind_person" : style.effectMode;
+  const previewEffect = style.effectMode === "auto" ? "hero_punch" : style.effectMode;
   // For auto_avoid, preview shows text at top (person assumed in bottom)
-  const previewTop = previewEffect === "auto_avoid" ? "22%" : `${style.positionY}%`;
-  const previewAlign = previewEffect === "auto_avoid" ? "justify-end text-right"
-    : previewEffect === "side_label" ? "justify-start text-left"
+  const previewTop = previewEffect === "smart_gap" ? "22%" : `${style.positionY}%`;
+  const previewAlign = previewEffect === "smart_gap" ? "justify-end text-right"
+    : previewEffect === "side_rail" ? "justify-start text-left"
     : "justify-center text-center";
   const textStyle = {
     fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`,
@@ -1248,7 +1281,7 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
   };
 
   // Kinetic typography preview: split words
-  const kineticPreviewWords = previewEffect === "kinetic_type"
+  const kineticPreviewWords = previewEffect === "word_cascade"
     ? "Ide Besar yang Perlu Diingat".split(" ") : [];
 
   return (
@@ -1266,18 +1299,20 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
           <div className="sticky top-0 aspect-[9/16] max-h-[520px] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl">
             {exactPreview && <img src={exactPreview} alt="Exact final-render AI Text preview" className="absolute inset-0 z-40 h-full w-full object-cover" />}
             {thumbnailUrl ? <img src={thumbnailUrl} alt="Video preview" className="absolute inset-0 h-full w-full object-cover opacity-70" /> : <div className="absolute inset-0 bg-gradient-to-b from-zinc-700 via-zinc-900 to-black" />}
-            {previewEffect === "spotlight" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.75)_100%)]" />}
-            {previewEffect === "depth_text" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,transparent_0%,rgba(0,0,0,.5)_100%)]" />}
-            {previewEffect === "around_head" && (
+            {previewEffect === "hero_punch" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.75)_100%)]" />}
+            {previewEffect === "z_parallax" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,transparent_0%,rgba(0,0,0,.5)_100%)]" />}
+            {previewEffect === "split_impact" && <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-rose-500/20" />}
+            {previewEffect === "sticker_pop" && <div className="absolute inset-0 bg-black/25" />}
+            {previewEffect === "orbit_halo" && (
               <div className="absolute left-1/2 top-[20%] z-20 h-12 w-12 -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
             )}
-            {(previewEffect === "floating_text" || previewEffect === "auto_avoid") && (
+            {(previewEffect === "float_track" || previewEffect === "smart_gap") && (
               <div className="absolute bottom-[12%] left-1/2 z-5 h-[55%] w-[42%] -translate-x-1/2 opacity-60">
                 <div className="absolute left-1/2 top-[8%] h-[20%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-xl" />
                 <div className="absolute bottom-0 left-1/2 h-[78%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-800 via-zinc-500 to-zinc-800 shadow-2xl" />
               </div>
             )}
-            {previewEffect === "depth_text" && (
+            {previewEffect === "z_parallax" && (
               <div className="absolute bottom-[15%] left-1/2 z-5 h-[60%] w-[46%] -translate-x-1/2 opacity-70" style={{ filter: "blur(0.5px)" }}>
                 <div className="absolute left-1/2 top-[6%] h-[18%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-xl" />
                 <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-800 via-zinc-500 to-zinc-800 shadow-2xl" />
@@ -1285,21 +1320,32 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
             )}
             <div className={cn("absolute inset-x-[7%] z-10 flex", previewAlign)} style={{ top: previewTop, transform: "translateY(-50%)" }}>
               <div style={{ ...textStyle, maxWidth: `${style.maxWidthPct}%` }}>
-                {previewEffect === "side_label" && <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: style.accentColor }} />}
-                {previewEffect === "kinetic_type" ? (
+                {previewEffect === "side_rail" && <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: style.accentColor }} />}
+                {previewEffect === "word_cascade" ? (
                   <span>
                     {kineticPreviewWords.map((word, idx) => (
                       <span key={idx} style={{ display: "inline-block", marginRight: "0.25em", opacity: 0.6 + (idx % 3) * 0.2, transform: `translateY(${(2 - (idx % 3)) * 4}px)` }}>{word}</span>
                     ))}
                   </span>
+                ) : previewEffect === "split_impact" ? (
+                  <span><span style={{ color: style.color }}>Ide Besar </span><span style={{ color: style.accentColor }}>yang Perlu</span></span>
+                ) : previewEffect === "type_pulse" ? (
+                  <span>Ide Besar|</span>
+                ) : previewEffect === "sticker_pop" ? (
+                  <span style={{ display: "inline-block", padding: "6px 10px", border: `2px solid ${style.accentColor}`, borderRadius: 8, transform: `rotate(${style.stickerAngle ?? -6}deg)`, background: `${style.accentColor}33` }}>Ide Besar</span>
+                ) : previewEffect === "mirror_echo" ? (
+                  <span style={{ position: "relative", display: "inline-block" }}>
+                    <span style={{ position: "absolute", left: -4, top: 2, opacity: 0.35, color: style.accentColor }}>Ide Besar</span>
+                    <span style={{ position: "relative" }}>Ide Besar</span>
+                  </span>
                 ) : (
                   "Ide Besar yang Perlu Diingat"
                 )}
-                {previewEffect === "spotlight" && <div className="mx-auto mt-2 h-1 w-16 rounded-full" style={{ backgroundColor: style.accentColor, boxShadow: `0 0 10px ${style.accentColor}` }} />}
-                {previewEffect === "floating_text" && <div className="mx-auto mt-2 h-1 w-12 rounded-full opacity-70" style={{ backgroundColor: style.accentColor }} />}
+                {previewEffect === "hero_punch" && <div className="mx-auto mt-2 h-1 w-16 rounded-full" style={{ backgroundColor: style.accentColor, boxShadow: `0 0 10px ${style.accentColor}` }} />}
+                {previewEffect === "float_track" && <div className="mx-auto mt-2 h-1 w-12 rounded-full opacity-70" style={{ backgroundColor: style.accentColor }} />}
               </div>
             </div>
-            {previewEffect === "behind_person" && (
+            {previewEffect === "depth_cutout" && (
               <div className="absolute bottom-0 left-1/2 z-20 h-[72%] w-[58%] -translate-x-1/2">
                 <div className="absolute left-1/2 top-[2%] h-[22%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
                 <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-700 via-zinc-300 to-zinc-700 shadow-2xl" />
@@ -1313,15 +1359,19 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
           <Section title="Visual Mode">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {([
-                ["auto", "AI Auto", "AI memilih jenis terbaik"],
-                ["behind_person", "Behind Person", "Teks di belakang subjek"],
-                ["spotlight", "Spotlight", "Hero text + vignette"],
-                ["side_label", "Side Label", "Label editorial di sisi"],
-                ["floating_text", "Floating Text", "Teks melayang mengikuti orang"],
-                ["auto_avoid", "Auto Avoid", "Teks otomatis menghindari orang"],
-                ["around_head", "Around Head", "Teks mengorbit di sekitar kepala"],
-                ["depth_text", "Depth Text", "Parallax kedalaman mengikuti orang"],
-                ["kinetic_type", "Kinetic Type", "Tipografi kinetik kata-per-kata"],
+                ["auto", "AI Auto", "AI pilih mode terbaik"],
+                ["hero_punch", "Hero Punch", "Hero center + vignette"],
+                ["depth_cutout", "Depth Cutout", "Teks di belakang subjek"],
+                ["side_rail", "Side Rail", "Label editorial sisi"],
+                ["float_track", "Float Track", "Bob mengikuti orang"],
+                ["smart_gap", "Smart Gap", "Auto isi ruang kosong"],
+                ["orbit_halo", "Orbit Halo", "Orbit di sekitar kepala"],
+                ["z_parallax", "Z Parallax", "Scale depth person"],
+                ["word_cascade", "Word Cascade", "Kata-per-kata kinetic"],
+                ["split_impact", "Split Impact", "Dua warna slam split"],
+                ["type_pulse", "Type Pulse", "Typewriter + pulse"],
+                ["sticker_pop", "Sticker Pop", "Comic sticker rotate"],
+                ["mirror_echo", "Mirror Echo", "Ghost echo trail"],
               ] as const).map(([value, label, desc]) => (
                 <button key={value} type="button" onClick={() => update("effectMode", value)} className={cn("rounded-xl border p-3 text-left transition-all", style.effectMode === value ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700")}>
                   <p className={cn("text-xs font-semibold", style.effectMode === value ? "text-emerald-300" : "text-zinc-300")}>{label}</p>
@@ -1335,7 +1385,7 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Animation
                 <select value={style.animation} onChange={(e) => update("animation", e.target.value as TextEmphasisStyle["animation"])} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-2 text-xs font-normal normal-case text-zinc-200 outline-none focus:border-emerald-500/60">
-                  <option value="cinematic">Cinematic</option><option value="slam">Slam</option><option value="reveal">Reveal</option><option value="glitch">Glitch</option><option value="neon">Neon Glow</option>
+                  <option value="rise">Rise</option><option value="impact">Impact</option><option value="slide">Slide</option><option value="static_glitch">Static Glitch</option><option value="glow">Glow</option><option value="elastic">Elastic</option><option value="blur_in">Blur In</option><option value="flip_y">Flip Y</option>
                 </select>
               </label>
               <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Font
@@ -1373,29 +1423,29 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
           </Section>
 
           {/* Effect-specific tuning sliders (conditional) */}
-          {previewEffect === "floating_text" && (
-            <Section title="Floating Text Tuning">
+          {previewEffect === "float_track" && (
+            <Section title="Float Track Tuning">
               <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Bob Speed" value={style.floatSpeed ?? 1.2} min={0.5} max={3.0} step={0.1} suffix="x" onChange={(value) => update("floatSpeed", value)} />
               </div>
             </Section>
           )}
-          {previewEffect === "auto_avoid" && (
-            <Section title="Auto Avoid Tuning">
+          {previewEffect === "smart_gap" && (
+            <Section title="Smart Gap Tuning">
               <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Avoid Padding" value={style.avoidPadding ?? 40} min={10} max={120} suffix="px" onChange={(value) => update("avoidPadding", value)} />
               </div>
             </Section>
           )}
-          {previewEffect === "around_head" && (
-            <Section title="Around Head Tuning">
+          {previewEffect === "orbit_halo" && (
+            <Section title="Orbit Halo Tuning">
               <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Orbit Radius" value={style.aroundHeadRadius ?? 60} min={30} max={120} suffix="%" onChange={(value) => update("aroundHeadRadius", value)} />
               </div>
             </Section>
           )}
-          {previewEffect === "depth_text" && (
-            <Section title="Depth Text Tuning">
+          {previewEffect === "z_parallax" && (
+            <Section title="Z Parallax Tuning">
               <div className="grid grid-cols-2 gap-3">
                 <SliderField label="Depth Intensity" value={style.depthIntensity ?? 0.5} min={0.1} max={1.0} step={0.05} suffix="" onChange={(value) => update("depthIntensity", value)} />
                 <SliderField label="Parallax Scale" value={style.depthParallax ?? 0.35} min={0.05} max={1.0} step={0.05} suffix="" onChange={(value) => update("depthParallax", value)} />
@@ -1404,10 +1454,31 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
               <p className="mt-2 text-[11px] text-zinc-500">Depth Intensity mengatur kekuatan parallax; Parallax Scale mengatur jarak fg/bg; Fade Duration mengatur transisi masuk/keluar teks.</p>
             </Section>
           )}
-          {previewEffect === "kinetic_type" && (
-            <Section title="Kinetic Type Tuning">
+          {previewEffect === "word_cascade" && (
+            <Section title="Word Cascade Tuning">
               <div className="grid grid-cols-2 gap-3">
-                <SliderField label="Word Stagger" value={style.kineticStagger ?? 6} min={1} max={18} suffix="f" onChange={(value) => update("kineticStagger", value)} />
+                <SliderField label="Word Stagger" value={style.kineticStagger ?? 5} min={1} max={18} suffix="f" onChange={(value) => update("kineticStagger", value)} />
+              </div>
+            </Section>
+          )}
+          {previewEffect === "mirror_echo" && (
+            <Section title="Mirror Echo Tuning">
+              <div className="grid grid-cols-2 gap-3">
+                <SliderField label="Echo Offset" value={style.echoOffset ?? 10} min={4} max={28} suffix="px" onChange={(value) => update("echoOffset", value)} />
+              </div>
+            </Section>
+          )}
+          {previewEffect === "sticker_pop" && (
+            <Section title="Sticker Pop Tuning">
+              <div className="grid grid-cols-2 gap-3">
+                <SliderField label="Angle" value={style.stickerAngle ?? -6} min={-18} max={18} suffix="°" onChange={(value) => update("stickerAngle", value)} />
+              </div>
+            </Section>
+          )}
+          {previewEffect === "type_pulse" && (
+            <Section title="Type Pulse Tuning">
+              <div className="grid grid-cols-2 gap-3">
+                <SliderField label="Type Speed" value={style.typeSpeed ?? 1.4} min={0.5} max={3} step={0.1} suffix="x" onChange={(value) => update("typeSpeed", value)} />
               </div>
             </Section>
           )}
@@ -1453,7 +1524,7 @@ function PresetsTab({ hookStyle, subtitleStyle, textEmphasisStyle, onHookChange,
   function loadPreset(preset: Preset) {
     onHookChange({ ...DEFAULT_HOOK_STYLE, ...preset.hook_style } as HookStyle);
     onSubtitleChange({ ...DEFAULT_SUBTITLE_STYLE, ...preset.subtitle_style } as SubtitleStyle);
-    if (preset.text_emphasis_style) onTextEmphasisChange({ ...DEFAULT_TEXT_EMPHASIS_STYLE, ...preset.text_emphasis_style } as TextEmphasisStyle);
+    if (preset.text_emphasis_style) onTextEmphasisChange(normaliseTextEmphasisStyle(preset.text_emphasis_style));
     setActivePresetId(preset.id);
     if (onPresetSelect) onPresetSelect(preset.id);
     setStatusMsg(`Loaded "${preset.name}"`);

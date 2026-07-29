@@ -279,9 +279,11 @@ class Job:
     custom_style: Optional[dict] = None
     broll_enabled: bool = True
     autogrid_enabled: bool = True
-    # ─── v3.1 B-roll motion graphic default ────────────────────────────────
-    # Per-job default motion style for B-roll events. Individual suggestions
-    # may override. None = "ken_burns" (chosen at render time).
+    # Sub-types (default True for back-compat). Only applied when broll_enabled.
+    broll_image_overlay: bool = True
+    broll_behind_person: bool = True
+    broll_video_footage: bool = True
+    # Deprecated motion style (Remotion B-roll FX); unused when subtypes used.
     broll_motion_style: Optional[str] = None
     # ─── v3.0 Remotion fields ─────────────────────────────────────────────
     use_remotion: bool = False

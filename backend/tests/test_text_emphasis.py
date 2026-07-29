@@ -10,7 +10,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.application.services_v2 import V2PipelineService
 from src.domain.entities import Clip, Job
 from src.infrastructure.text_emphasis import (
+    ALLOWED_EFFECTS,
+    LEGACY_EFFECT_MAP,
     anchor_text_emphasis_response,
+    map_legacy_effect,
     normalise_text_emphasis_style,
 )
 from src.infrastructure.person_foreground_generator import PersonForegroundGenerator
@@ -38,18 +41,28 @@ def test_option_is_explicitly_disabled_by_default_and_style_is_validated():
     assert options.text_emphasis_enabled is False
     configured = UploadJobOptions(
         text_emphasis_enabled=True,
-        text_emphasis_style_config={"effectMode": "behind_person"},
+        text_emphasis_style_config={"effectMode": "depth_cutout"},
     )
     assert configured.text_emphasis_enabled is True
+    assert configured.text_emphasis_style_config["effectMode"] == "depth_cutout"
+
+
+def test_legacy_effect_names_are_mapped_on_job_options():
+    configured = UploadJobOptions(
+        text_emphasis_enabled=True,
+        text_emphasis_style_config={"effectMode": "behind_person", "animation": "slam"},
+    )
+    assert configured.text_emphasis_style_config["effectMode"] == "depth_cutout"
+    assert configured.text_emphasis_style_config["animation"] == "impact"
 
 
 def test_ai_word_ids_are_rebuilt_from_whisper_and_capped_at_two():
     words = _words()
     result = anchor_text_emphasis_response(
         {"clips": {"1": [
-            {"start_word": "W0008", "end_word": "W0010", "effect": "behind_person"},
-            {"start_word": "W0022", "end_word": "W0024", "effect": "side_label"},
-            {"start_word": "W0032", "end_word": "W0034", "effect": "spotlight"},
+            {"start_word": "W0008", "end_word": "W0010", "effect": "depth_cutout"},
+            {"start_word": "W0022", "end_word": "W0024", "effect": "side_rail"},
+            {"start_word": "W0032", "end_word": "W0034", "effect": "hero_punch"},
         ]}},
         {1: words},
         {1: 25.0},
@@ -65,10 +78,10 @@ def test_ai_word_ids_are_rebuilt_from_whisper_and_capped_at_two():
 def test_hook_broll_and_spacing_ranges_are_enforced():
     result = anchor_text_emphasis_response(
         {"clips": {"1": [
-            {"start_word": 2, "end_word": 3, "effect": "spotlight"},
-            {"start_word": 10, "end_word": 11, "effect": "spotlight"},
-            {"start_word": 14, "end_word": 15, "effect": "spotlight"},
-            {"start_word": 28, "end_word": 29, "effect": "spotlight"},
+            {"start_word": 2, "end_word": 3, "effect": "hero_punch"},
+            {"start_word": 10, "end_word": 11, "effect": "hero_punch"},
+            {"start_word": 14, "end_word": 15, "effect": "hero_punch"},
+            {"start_word": 28, "end_word": 29, "effect": "hero_punch"},
         ]}},
         {1: _words()},
         {1: 25.0},
@@ -91,6 +104,8 @@ def test_unsafe_style_values_are_clamped():
     assert style["positionY"] == 12
     assert style["color"] == "#FFFFFF"
     assert style["maskFeather"] % 2 == 1
+    assert style["animation"] == "impact"
+    assert style["fontFamily"] == "Bebas Neue"
 
 
 def test_disabled_feature_does_not_call_ai_or_segmentation(tmp_path):
@@ -109,14 +124,8 @@ def test_disabled_feature_does_not_call_ai_or_segmentation(tmp_path):
 
 
 def test_new_effects_are_accepted_and_normalised():
-    """The five new YOLOv11-based effects must be valid effectMode values."""
-    new_effects = [
-        "floating_text",
-        "auto_avoid",
-        "around_head",
-        "depth_text",
-        "kinetic_type",
-    ]
+    """Premium pack effects must be valid effectMode values."""
+    new_effects = sorted(ALLOWED_EFFECTS)
     for effect in new_effects:
         options = UploadJobOptions(
             text_emphasis_enabled=True,
@@ -126,45 +135,57 @@ def test_new_effects_are_accepted_and_normalised():
 
         style = normalise_text_emphasis_style({"effectMode": effect})
         assert style["effectMode"] == effect
-        # New tuning fields must be present with sane defaults
         assert "floatSpeed" in style
-        assert "avoidPadding" in style
-        assert "aroundHeadRadius" in style
-        assert "depthIntensity" in style
+        assert "echoOffset" in style
+        assert "stickerAngle" in style
+        assert "typeSpeed" in style
         assert "kineticStagger" in style
+
+
+def test_legacy_map_covers_old_pack():
+    for old, new in LEGACY_EFFECT_MAP.items():
+        assert map_legacy_effect(old) == new
+        assert new in ALLOWED_EFFECTS
 
 
 def test_new_effect_tuning_is_clamped():
     """Effect-specific tuning sliders must clamp out-of-range values."""
     style = normalise_text_emphasis_style({
-        "effectMode": "floating_text",
+        "effectMode": "float_track",
         "floatSpeed": 99.0,
         "avoidPadding": -5,
         "aroundHeadRadius": 500,
         "depthIntensity": 3.0,
         "kineticStagger": 0,
+        "echoOffset": 99,
+        "stickerAngle": -40,
+        "typeSpeed": 9,
+        "animation": "cinematic",
     })
     assert style["floatSpeed"] == 3.0
     assert style["avoidPadding"] == 10
     assert style["aroundHeadRadius"] == 120
     assert style["depthIntensity"] == 1.0
     assert style["kineticStagger"] == 1
+    assert style["echoOffset"] == 28
+    assert style["stickerAngle"] == -18
+    assert style["typeSpeed"] == 3.0
+    assert style["animation"] == "rise"
 
 
 def test_anchor_preserves_new_effect_choice():
-    """anchor_text_emphasis_response must keep the new effect when user forces it."""
+    """anchor_text_emphasis_response must keep forced effectMode."""
     words = _words()
     result = anchor_text_emphasis_response(
         {"clips": {"1": [
-            {"start_word": "W0008", "end_word": "W0010", "effect": "kinetic_type"},
+            {"start_word": "W0008", "end_word": "W0010", "effect": "word_cascade"},
         ]}},
         {1: words},
         {1: 25.0},
-        style={"effectMode": "depth_text"},
+        style={"effectMode": "z_parallax"},
         min_start_by_clip={1: 3.2},
     )
-    # When user forces effectMode != auto, that effect overrides AI's choice
-    assert result[1][0]["effect"] == "depth_text"
+    assert result[1][0]["effect"] == "z_parallax"
 
 
 def test_anchor_accepts_new_effect_from_ai():
@@ -172,8 +193,8 @@ def test_anchor_accepts_new_effect_from_ai():
     words = _words()
     result = anchor_text_emphasis_response(
         {"clips": {"1": [
-            {"start_word": "W0008", "end_word": "W0010", "effect": "around_head"},
-            {"start_word": "W0022", "end_word": "W0024", "effect": "floating_text"},
+            {"start_word": "W0008", "end_word": "W0010", "effect": "orbit_halo"},
+            {"start_word": "W0022", "end_word": "W0024", "effect": "split_impact"},
         ]}},
         {1: words},
         {1: 25.0},
@@ -181,8 +202,22 @@ def test_anchor_accepts_new_effect_from_ai():
         min_start_by_clip={1: 3.2},
     )
     effects = [event["effect"] for event in result[1]]
-    assert "around_head" in effects
-    assert "floating_text" in effects
+    assert "orbit_halo" in effects
+    assert "split_impact" in effects
+
+
+def test_anchor_maps_legacy_ai_effect_names():
+    words = _words()
+    result = anchor_text_emphasis_response(
+        {"clips": {"1": [
+            {"start_word": "W0008", "end_word": "W0010", "effect": "spotlight"},
+        ]}},
+        {1: words},
+        {1: 25.0},
+        style={"effectMode": "auto"},
+        min_start_by_clip={1: 3.2},
+    )
+    assert result[1][0]["effect"] == "hero_punch"
 
 
 def test_foreground_generator_loads_configured_yolo_segmentation_model():

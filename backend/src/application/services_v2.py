@@ -523,6 +523,9 @@ class V2PipelineService:
                 transcript_source=transcript_result.source,
             )
             pending_clips_data["broll_enabled"] = job.broll_enabled
+            pending_clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", True))
+            pending_clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", True))
+            pending_clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", True))
             merged_clips_data = dict(job.clips_data or {})
             merged_clips_data.update(pending_clips_data)
             job.clips_data = merged_clips_data
@@ -562,6 +565,9 @@ class V2PipelineService:
                         transcript_source=transcript_result.source,
                     )
                     pending_clips_data["broll_enabled"] = job.broll_enabled
+                    pending_clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", True))
+                    pending_clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", True))
+                    pending_clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", True))
                     merged_clips_data = dict(job.clips_data or {})
                     merged_clips_data.update(pending_clips_data)
                     job.clips_data = merged_clips_data
@@ -930,6 +936,9 @@ class V2PipelineService:
                 transcript_source=transcript_result.source,
             )
             clips_data["broll_enabled"] = job.broll_enabled
+            clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", True))
+            clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", True))
+            clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", True))
             for clip_output in clips_data.get("clips", []):
                 layout = reframe_data.get(clip_output.get("rank"), {})
                 if isinstance(layout, dict):
@@ -1238,7 +1247,22 @@ class V2PipelineService:
         # behind_person suggestions — those keep the person on screen.
         from src.infrastructure.top_behind_subject_renderer import pick_full_frame_suggestions
 
-        if settings.BROLL_SPLICE_ENABLED:
+        allow_video = bool(getattr(job, "broll_video_footage", True))
+        allow_behind = bool(getattr(job, "broll_behind_person", True))
+        allow_image = bool(getattr(job, "broll_image_overlay", True))
+        # clips_data is source of truth when job reloaded mid-pipeline
+        cd = job.clips_data or {}
+        if "broll_video_footage" in cd:
+            allow_video = bool(cd["broll_video_footage"])
+        if "broll_behind_person" in cd:
+            allow_behind = bool(cd["broll_behind_person"])
+        if "broll_image_overlay" in cd:
+            allow_image = bool(cd["broll_image_overlay"])
+        logger.info(
+            f"[{job_id}] B-roll subtypes: image={allow_image} behind={allow_behind} video={allow_video}"
+        )
+
+        if settings.BROLL_SPLICE_ENABLED and allow_video:
             splice_count = 0
             for clip in clips:
                 if not trim_results.get(clip.rank) or not clip.broll_suggestions:
@@ -1286,7 +1310,7 @@ class V2PipelineService:
 
         # If ClipScout didn't provide splice_segments but legacy fetcher got video
         # assets, also splice them full-frame (not overlay).
-        if settings.BROLL_SPLICE_ENABLED:
+        if settings.BROLL_SPLICE_ENABLED and allow_video:
             from src.infrastructure.footage_processor import FootageProcessor
             legacy_processor = FootageProcessor()
 
@@ -1366,6 +1390,7 @@ class V2PipelineService:
         if (
             settings.TOP_OVERLAY_ENABLED
             and job.target_aspect_ratio == "9:16"
+            and allow_behind
         ):
             await self._apply_top_behind_overlay(
                 job=job,
@@ -1377,14 +1402,17 @@ class V2PipelineService:
             )
 
         # ─── Step 10.8: Object image+text overlay (noun → stock photo card) ──
-        await self._apply_object_image_overlay(
-            job=job,
-            job_id=job_id,
-            clips=clips,
-            output_dir=output_dir,
-            trim_results=trim_results,
-            clips_with_words=getattr(self, "_last_clips_with_words", None),
-        )
+        if allow_image:
+            await self._apply_object_image_overlay(
+                job=job,
+                job_id=job_id,
+                clips=clips,
+                output_dir=output_dir,
+                trim_results=trim_results,
+                clips_with_words=getattr(self, "_last_clips_with_words", None),
+            )
+        else:
+            logger.info(f"[{job_id}] Object image overlay disabled by user")
 
         # Drop intermediate footage only after top-behind bake.
         footage_dir = os.path.join(output_dir, "broll_footage")
@@ -1880,7 +1908,13 @@ class V2PipelineService:
                 continue
 
             # Effects that need person detection (segmentation PNG or bbox metadata)
-            tracking_effects = {"behind_person", "floating_text", "auto_avoid", "around_head", "depth_text"}
+            from src.infrastructure.text_emphasis import TRACKING_EFFECTS, map_legacy_effect
+            tracking_effects = TRACKING_EFFECTS
+            # Map any residual legacy effect names before FG gen / Remotion
+            events = [
+                {**event, "effect": map_legacy_effect(event.get("effect"))}
+                for event in events
+            ]
             if any(event.get("effect") in tracking_effects for event in events):
                 brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
                 reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"

@@ -11,83 +11,154 @@ import re
 from typing import Iterable
 
 
+# ─── New premium pack (2026-07-29) ────────────────────────────────────────────
+# Old names map via LEGACY_EFFECT_MAP / LEGACY_ANIM_MAP so saved presets survive.
+
 ALLOWED_EFFECTS = {
-    "behind_person",
-    "spotlight",
-    "side_label",
-    "floating_text",
-    "auto_avoid",
-    "around_head",
-    "depth_text",
-    "kinetic_type",
+    "depth_cutout",   # text behind person cutout
+    "hero_punch",     # center hero + vignette + accent bar
+    "side_rail",      # editorial side label
+    "float_track",    # bob following person
+    "smart_gap",      # auto place in empty space
+    "orbit_halo",     # orbit around head
+    "z_parallax",     # depth scale with person
+    "word_cascade",   # word-by-word kinetic
+    "split_impact",   # two-tone split slam
+    "type_pulse",     # typewriter + pulse glow
+    "sticker_pop",    # comic sticker rotate pop
+    "mirror_echo",    # ghost echo trail
 }
+
+ALLOWED_ANIMATIONS = {
+    "rise",
+    "impact",
+    "slide",
+    "static_glitch",
+    "glow",
+    "elastic",
+    "blur_in",
+    "flip_y",
+}
+
+LEGACY_EFFECT_MAP = {
+    "behind_person": "depth_cutout",
+    "spotlight": "hero_punch",
+    "side_label": "side_rail",
+    "floating_text": "float_track",
+    "auto_avoid": "smart_gap",
+    "around_head": "orbit_halo",
+    "depth_text": "z_parallax",
+    "kinetic_type": "word_cascade",
+}
+
+LEGACY_ANIM_MAP = {
+    "cinematic": "rise",
+    "slam": "impact",
+    "reveal": "slide",
+    "glitch": "static_glitch",
+    "neon": "glow",
+}
+
+# Effects that need YOLO person foreground / tracking metadata
+TRACKING_EFFECTS = {
+    "depth_cutout",
+    "float_track",
+    "smart_gap",
+    "orbit_halo",
+    "z_parallax",
+}
+
 ALLOWED_POSITIONS = {"left", "center", "right"}
 
 DEFAULT_TEXT_EMPHASIS_STYLE = {
     "effectMode": "auto",
-    "animation": "cinematic",
-    "fontFamily": "Anton",
-    "fontSize": 92,
+    "animation": "impact",
+    "fontFamily": "Bebas Neue",
+    "fontSize": 104,
     "fontWeight": "900",
-    "letterSpacing": 1,
-    "lineHeight": 0.95,
+    "letterSpacing": 2,
+    "lineHeight": 0.9,
     "color": "#FFFFFF",
-    "accentColor": "#FFD400",
+    "accentColor": "#FF3B5C",
     "uppercase": True,
     "strokeEnabled": True,
-    "strokeColor": "#09090B",
-    "strokeWidth": 2,
+    "strokeColor": "#0A0A0B",
+    "strokeWidth": 3,
     "shadowEnabled": True,
     "shadowColor": "#000000",
-    "shadowBlur": 22,
-    "positionY": 50,
-    "maxWidthPct": 82,
+    "shadowBlur": 28,
+    "positionY": 48,
+    "maxWidthPct": 86,
     "maskFeather": 9,
     # Effect-specific tuning
-    "floatSpeed": 1.2,
-    "avoidPadding": 40,
-    "aroundHeadRadius": 60,
-    "depthIntensity": 0.5,
-    "depthParallax": 0.35,
-    "depthFade": 0.45,
-    "kineticStagger": 6,
+    "floatSpeed": 1.15,
+    "avoidPadding": 44,
+    "aroundHeadRadius": 58,
+    "depthIntensity": 0.55,
+    "depthParallax": 0.4,
+    "depthFade": 0.4,
+    "kineticStagger": 5,
+    "echoOffset": 10,
+    "stickerAngle": -6,
+    "typeSpeed": 1.4,
 }
+
+
+def map_legacy_effect(name: object) -> str:
+    raw = str(name or "").strip()
+    if raw in ALLOWED_EFFECTS or raw == "auto":
+        return raw
+    return LEGACY_EFFECT_MAP.get(raw, raw)
+
+
+def map_legacy_animation(name: object) -> str:
+    raw = str(name or "").strip()
+    if raw in ALLOWED_ANIMATIONS:
+        return raw
+    return LEGACY_ANIM_MAP.get(raw, raw)
 
 
 def normalise_text_emphasis_style(style: object) -> dict:
     """Return a render-safe style without trusting arbitrary client values."""
     incoming = style if isinstance(style, dict) else {}
+    # Map legacy keys before merge so defaults win cleanly on unknown fields
+    if "effectMode" in incoming:
+        incoming = {**incoming, "effectMode": map_legacy_effect(incoming.get("effectMode"))}
+    if "animation" in incoming:
+        incoming = {**incoming, "animation": map_legacy_animation(incoming.get("animation"))}
     result = {**DEFAULT_TEXT_EMPHASIS_STYLE, **incoming}
 
-    effect_mode = str(result.get("effectMode", "auto"))
+    effect_mode = map_legacy_effect(result.get("effectMode", "auto"))
     result["effectMode"] = effect_mode if effect_mode in ALLOWED_EFFECTS | {"auto"} else "auto"
-    animation = str(result.get("animation", "cinematic"))
-    result["animation"] = animation if animation in {"cinematic", "slam", "reveal", "glitch", "neon"} else "cinematic"
-    result["fontFamily"] = str(result.get("fontFamily") or "Anton")[:80]
+    animation = map_legacy_animation(result.get("animation", "impact"))
+    result["animation"] = animation if animation in ALLOWED_ANIMATIONS else "impact"
+    result["fontFamily"] = str(result.get("fontFamily") or "Bebas Neue")[:80]
     result["fontWeight"] = str(result.get("fontWeight") or "900")[:8]
-    result["fontSize"] = _clamp_number(result.get("fontSize"), 32, 160, 92)
-    result["letterSpacing"] = _clamp_number(result.get("letterSpacing"), -4, 20, 1)
-    result["lineHeight"] = _clamp_number(result.get("lineHeight"), 0.7, 1.5, 0.95)
-    result["strokeWidth"] = _clamp_number(result.get("strokeWidth"), 0, 12, 2)
-    result["shadowBlur"] = _clamp_number(result.get("shadowBlur"), 0, 80, 22)
-    result["positionY"] = _clamp_number(result.get("positionY"), 12, 88, 50)
-    result["maxWidthPct"] = _clamp_number(result.get("maxWidthPct"), 35, 96, 82)
+    result["fontSize"] = _clamp_number(result.get("fontSize"), 32, 160, 104)
+    result["letterSpacing"] = _clamp_number(result.get("letterSpacing"), -4, 20, 2)
+    result["lineHeight"] = _clamp_number(result.get("lineHeight"), 0.7, 1.5, 0.9)
+    result["strokeWidth"] = _clamp_number(result.get("strokeWidth"), 0, 12, 3)
+    result["shadowBlur"] = _clamp_number(result.get("shadowBlur"), 0, 80, 28)
+    result["positionY"] = _clamp_number(result.get("positionY"), 12, 88, 48)
+    result["maxWidthPct"] = _clamp_number(result.get("maxWidthPct"), 35, 96, 86)
     result["maskFeather"] = int(_clamp_number(result.get("maskFeather"), 1, 31, 9))
     if result["maskFeather"] % 2 == 0:
         result["maskFeather"] += 1
-    # Effect-specific tuning (new)
-    result["floatSpeed"] = _clamp_number(result.get("floatSpeed"), 0.5, 3.0, 1.2)
-    result["avoidPadding"] = _clamp_number(result.get("avoidPadding"), 10, 120, 40)
-    result["aroundHeadRadius"] = _clamp_number(result.get("aroundHeadRadius"), 30, 120, 60)
-    result["depthIntensity"] = _clamp_number(result.get("depthIntensity"), 0.1, 1.0, 0.5)
-    result["depthParallax"] = _clamp_number(result.get("depthParallax"), 0.05, 1.0, 0.35)
-    result["depthFade"] = _clamp_number(result.get("depthFade"), 0.1, 1.5, 0.45)
-    result["kineticStagger"] = _clamp_number(result.get("kineticStagger"), 1, 18, 6)
+    result["floatSpeed"] = _clamp_number(result.get("floatSpeed"), 0.5, 3.0, 1.15)
+    result["avoidPadding"] = _clamp_number(result.get("avoidPadding"), 10, 120, 44)
+    result["aroundHeadRadius"] = _clamp_number(result.get("aroundHeadRadius"), 30, 120, 58)
+    result["depthIntensity"] = _clamp_number(result.get("depthIntensity"), 0.1, 1.0, 0.55)
+    result["depthParallax"] = _clamp_number(result.get("depthParallax"), 0.05, 1.0, 0.4)
+    result["depthFade"] = _clamp_number(result.get("depthFade"), 0.1, 1.5, 0.4)
+    result["kineticStagger"] = _clamp_number(result.get("kineticStagger"), 1, 18, 5)
+    result["echoOffset"] = _clamp_number(result.get("echoOffset"), 4, 28, 10)
+    result["stickerAngle"] = _clamp_number(result.get("stickerAngle"), -18, 18, -6)
+    result["typeSpeed"] = _clamp_number(result.get("typeSpeed"), 0.5, 3.0, 1.4)
 
     for key, fallback in (
         ("color", "#FFFFFF"),
-        ("accentColor", "#FFD400"),
-        ("strokeColor", "#09090B"),
+        ("accentColor", "#FF3B5C"),
+        ("strokeColor", "#0A0A0B"),
         ("shadowColor", "#000000"),
     ):
         value = str(result.get(key) or fallback)
@@ -242,11 +313,11 @@ def anchor_text_emphasis_response(
             if any(abs(start - event["start"]) < 6.0 for event in accepted):
                 continue
 
-            requested_effect = str(raw.get("effect") or "spotlight")
+            requested_effect = map_legacy_effect(raw.get("effect") or "hero_punch")
             effect = mode if mode != "auto" else requested_effect
             if effect not in ALLOWED_EFFECTS:
-                effect = "spotlight"
-            position = str(raw.get("position") or ("left" if effect == "side_label" else "center"))
+                effect = "hero_punch"
+            position = str(raw.get("position") or ("left" if effect == "side_rail" else "center"))
             if position not in ALLOWED_POSITIONS:
                 position = "center"
 
@@ -335,7 +406,7 @@ def _find_fallback_phrase(
                     "start": round(start, 3),
                     "end": round(end, 3),
                     "text": text,
-                    "effect": "spotlight",
+                    "effect": "hero_punch",
                     "position": "center",
                     "start_word": start_idx,
                     "end_word": end_idx,

@@ -13,8 +13,11 @@ class JobOptionsBase(BaseModel):
     hook_style: str = ""  # e.g. "slide_punch_framer"
     broll_enabled: bool = False  # B-Roll disabled by default
     autogrid_enabled: bool = False  # Enable multi-speaker grid (9:16 only)
-    # v3.1: Default motion-graphic style for B-roll events rendered in Remotion.
-    # None/empty = let the AI pick per-suggestion (recommended).
+    # Sub-types when broll_enabled (default on). Off = skip that path.
+    broll_image_overlay: bool = True   # object image+text cards
+    broll_behind_person: bool = True   # top stock behind person
+    broll_video_footage: bool = True   # full-frame video splice
+    # Deprecated: kept for old clients; ignored by pipeline.
     broll_motion_style: Optional[str] = None
     text_emphasis_enabled: bool = False  # Optional sparse AI cinematic text
     text_emphasis_style_config: Optional[dict] = None
@@ -61,24 +64,20 @@ class JobOptionsBase(BaseModel):
     def valid_text_emphasis_style(cls, value: Optional[dict]) -> Optional[dict]:
         if value is None:
             return None
-        allowed_effects = {
-            "auto",
-            "behind_person",
-            "spotlight",
-            "side_label",
-            "floating_text",
-            "auto_avoid",
-            "around_head",
-            "depth_text",
-            "kinetic_type",
-        }
-        effect = str(value.get("effectMode", "auto"))
-        if effect not in allowed_effects:
+        from src.infrastructure.text_emphasis import (
+            ALLOWED_EFFECTS,
+            LEGACY_EFFECT_MAP,
+            map_legacy_effect,
+            normalise_text_emphasis_style,
+        )
+        effect = map_legacy_effect(value.get("effectMode", "auto"))
+        if effect not in ALLOWED_EFFECTS | {"auto"} and effect not in LEGACY_EFFECT_MAP:
             raise ValueError(
-                "effectMode harus auto, behind_person, spotlight, side_label, "
-                "floating_text, auto_avoid, around_head, depth_text, atau kinetic_type"
+                "effectMode harus auto atau salah satu: "
+                + ", ".join(sorted(ALLOWED_EFFECTS))
             )
-        return value
+        # Normalise so legacy names + clamps land in DB the same as render path
+        return normalise_text_emphasis_style({**value, "effectMode": effect})
 
 
 class CreateJobRequest(JobOptionsBase):

@@ -214,9 +214,12 @@ export interface CreateJobPayload {
   hook_style?: string;
   broll_enabled?: boolean;
   autogrid_enabled?: boolean;
-  // v3.1: Default motion-graphic style for B-roll events (rendered in Remotion).
-  // Empty/undefined = AI picks per-suggestion.
-  broll_motion_style?: string;
+  /** Object image+text cards (OpenCV). Only when broll_enabled. */
+  broll_image_overlay?: boolean;
+  /** Top stock behind person cutout. Only when broll_enabled. */
+  broll_behind_person?: boolean;
+  /** Full-frame video splice. Only when broll_enabled. */
+  broll_video_footage?: boolean;
   text_emphasis_enabled?: boolean;
   // Remotion fields
   use_remotion?: boolean;

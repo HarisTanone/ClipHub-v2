@@ -64,9 +64,10 @@ class PersonForegroundGenerator:
 
         safe_events = [dict(event) for event in events[:2]]
         # Effects that need person segmentation (foreground PNG)
-        behind_events = [event for event in safe_events if event.get("effect") == "behind_person"]
-        # Effects that need person bbox/head/depth metadata (no PNG needed)
-        tracking_effects = {"floating_text", "auto_avoid", "around_head", "depth_text"}
+        # depth_cutout needs person segmentation PNG; other tracking effects need bbox/head/depth only
+        behind_events = [event for event in safe_events if event.get("effect") in {"depth_cutout", "behind_person"}]
+        tracking_effects = {"float_track", "smart_gap", "orbit_halo", "z_parallax",
+                            "floating_text", "auto_avoid", "around_head", "depth_text"}
         tracking_events = [event for event in safe_events if event.get("effect") in tracking_effects]
         if not behind_events and not tracking_events:
             return safe_events
@@ -85,7 +86,7 @@ class PersonForegroundGenerator:
             model = self._load_model()
         except Exception as exc:
             cap.release()
-            logger.warning("text_emphasis: YOLO segmentation unavailable, using spotlight fallback: %s", exc)
+            logger.warning("text_emphasis: YOLO segmentation unavailable, using hero_punch fallback: %s", exc)
             return self._downgrade_behind_events(safe_events, "segmentation_unavailable")
 
         os.makedirs(output_dir, exist_ok=True)
@@ -101,7 +102,7 @@ class PersonForegroundGenerator:
                 start_frame = max(0, round(float(event["start"]) * fps))
                 end_frame = max(start_frame + 1, round(float(event["end"]) * fps))
                 generated: dict[int, dict] = {}
-                needs_png = event.get("effect") == "behind_person"
+                needs_png = event.get("effect") in {"depth_cutout", "behind_person"}
                 # Subsample tracking effects (every 3rd frame) for performance.
                 # PNG effects need every frame for smooth mask animation.
                 frame_step = 1 if needs_png else 3
@@ -204,11 +205,11 @@ class PersonForegroundGenerator:
                 # foreground person visibly freeze while text keeps moving.
                 min_coverage = 0.70 if needs_png else 0.20
                 if coverage < min_coverage:
-                    event["effect"] = "spotlight"
+                    event["effect"] = "hero_punch"
                     event["fallback_reason"] = "insufficient_person_mask"
                     event["foreground_frames"] = []
                     logger.info(
-                        "text_emphasis: %s downgraded to spotlight (mask coverage %.0f%%)",
+                        "text_emphasis: %s downgraded to hero_punch (mask coverage %.0f%%)",
                         event.get("id"), coverage * 100,
                     )
                     continue
@@ -237,11 +238,14 @@ class PersonForegroundGenerator:
     @staticmethod
     def _downgrade_behind_events(events: list[dict], reason: str) -> list[dict]:
         output = []
-        tracking_effects = {"behind_person", "floating_text", "auto_avoid", "around_head", "depth_text"}
+        tracking_effects = {
+            "depth_cutout", "float_track", "smart_gap", "orbit_halo", "z_parallax",
+            "behind_person", "floating_text", "auto_avoid", "around_head", "depth_text",
+        }
         for event in events:
             updated = dict(event)
             if updated.get("effect") in tracking_effects:
-                updated["effect"] = "spotlight"
+                updated["effect"] = "hero_punch"
                 updated["fallback_reason"] = reason
                 updated["foreground_frames"] = []
             output.append(updated)

@@ -188,6 +188,9 @@ class JobService:
         hook_style: str = "",
         broll_enabled: bool = False,
         autogrid_enabled: bool = False,
+        broll_image_overlay: bool = True,
+        broll_behind_person: bool = True,
+        broll_video_footage: bool = True,
         broll_motion_style: Optional[str] = None,
         text_emphasis_enabled: bool = False,
         # v3.0 Remotion fields
@@ -254,6 +257,10 @@ class JobService:
         initial_clips_data["text_emphasis_enabled"] = bool(text_emphasis_enabled)
         if text_emphasis_style_config:
             initial_clips_data["text_emphasis_style_config"] = text_emphasis_style_config
+        # B-roll sub-types (explicit false must persist)
+        initial_clips_data["broll_image_overlay"] = bool(broll_image_overlay) if broll_enabled else False
+        initial_clips_data["broll_behind_person"] = bool(broll_behind_person) if broll_enabled else False
+        initial_clips_data["broll_video_footage"] = bool(broll_video_footage) if broll_enabled else False
         if is_upload_source:
             initial_clips_data["source"] = {
                 "type": "upload",
@@ -280,6 +287,9 @@ class JobService:
             # Computer-vision framing features are portrait-only. Enforce this
             # server-side as API clients must not be able to bypass the UI lock.
             autogrid_enabled=autogrid_enabled and target_aspect_ratio == "9:16",
+            broll_image_overlay=bool(broll_image_overlay) if broll_enabled else False,
+            broll_behind_person=bool(broll_behind_person) if broll_enabled else False,
+            broll_video_footage=bool(broll_video_footage) if broll_enabled else False,
             broll_motion_style=broll_motion_style or None,
             # v3.0 Remotion fields - use settings default if not specified
             use_remotion=use_remotion if use_remotion is not None else settings.USE_REMOTION,

@@ -52,6 +52,11 @@ test.describe("New Job", () => {
     await expect(brollOption.getByRole("switch")).toHaveAttribute("aria-checked", "false");
     await brollOption.getByRole("switch").click();
     await expect(brollOption.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    // Sub-types appear only when B-roll is on
+    await expect(page.locator("text=Image overlay")).toBeVisible();
+    await expect(page.locator("text=Behind person video")).toBeVisible();
+    await expect(page.locator("text=Video footage")).toBeVisible();
+    await expect(page.locator("text=B-roll Motion Style")).toHaveCount(0);
     await expect(page.locator("text=Auto-Grid")).toBeVisible();
     await expect(page.locator("text=Force Reprocess")).toBeVisible();
   });

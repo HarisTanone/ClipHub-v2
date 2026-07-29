@@ -65,6 +65,19 @@ export interface Word {
 }
 
 export type TextEmphasisEffect =
+  | "depth_cutout"
+  | "hero_punch"
+  | "side_rail"
+  | "float_track"
+  | "smart_gap"
+  | "orbit_halo"
+  | "z_parallax"
+  | "word_cascade"
+  | "split_impact"
+  | "type_pulse"
+  | "sticker_pop"
+  | "mirror_echo"
+  // Legacy aliases (mapped in AITextLayer)
   | "behind_person"
   | "spotlight"
   | "side_label"
@@ -74,6 +87,22 @@ export type TextEmphasisEffect =
   | "depth_text"
   | "kinetic_type";
 
+export type TextEmphasisAnimation =
+  | "rise"
+  | "impact"
+  | "slide"
+  | "static_glitch"
+  | "glow"
+  | "elastic"
+  | "blur_in"
+  | "flip_y"
+  // Legacy
+  | "cinematic"
+  | "slam"
+  | "reveal"
+  | "glitch"
+  | "neon";
+
 export interface PersonForegroundFrame {
   frame: number;
   path: string;
@@ -81,12 +110,11 @@ export interface PersonForegroundFrame {
   y: number;
   width: number;
   height: number;
-  // Optional person tracking metadata for advanced effects
   head_x?: number;
   head_y?: number;
   head_width?: number;
   head_height?: number;
-  depth_z?: number; // Estimated depth (0 = far, 1 = near) for depth_text effect
+  depth_z?: number;
 }
 
 export interface TextEmphasisEvent {
@@ -104,7 +132,7 @@ export interface TextEmphasisEvent {
 
 export interface TextEmphasisStyleConfig {
   effectMode?: "auto" | TextEmphasisEffect;
-  animation?: "cinematic" | "slam" | "reveal" | "glitch" | "neon";
+  animation?: TextEmphasisAnimation;
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: string;
@@ -121,14 +149,16 @@ export interface TextEmphasisStyleConfig {
   shadowBlur?: number;
   positionY?: number;
   maxWidthPct?: number;
-  // New: effect-specific tuning
-  floatSpeed?: number; // For floating_text: vertical oscillation speed (0.5-3.0)
-  avoidPadding?: number; // For auto_avoid: padding around person bbox (px)
-  aroundHeadRadius?: number; // For around_head: radius from head center (%)
-  depthIntensity?: number; // For depth_text: parallax intensity (0.1-1.0)
-  depthParallax?: number; // For depth_text: foreground/background separation scale (0.05-1.0)
-  depthFade?: number; // For depth_text: enter/exit fade duration in seconds (0.1-1.5)
-  kineticStagger?: number; // For kinetic_type: word stagger delay (frames)
+  floatSpeed?: number;
+  avoidPadding?: number;
+  aroundHeadRadius?: number;
+  depthIntensity?: number;
+  depthParallax?: number;
+  depthFade?: number;
+  kineticStagger?: number;
+  echoOffset?: number;
+  stickerAngle?: number;
+  typeSpeed?: number;
 }
 
 // ─── B-Roll Motion Graphic Events (rendered in Remotion) ─────────────────────

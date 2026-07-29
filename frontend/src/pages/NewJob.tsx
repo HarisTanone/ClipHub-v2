@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { Toggle } from "@/components/ui/Toggle";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
-import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
+import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { jobs, preview, presets as presetsApi, type VideoPreview, type Preset, API_BASE } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
@@ -27,7 +27,9 @@ export function NewJob() {
   const [templateMode] = useState<"custom">("custom");
   const [forceReprocess, setForceReprocess] = useState(false);
   const [brollEnabled, setBrollEnabled] = useState(false);
-  const [brollMotionStyle, setBrollMotionStyle] = useState<string>(""); // "" = AI picks
+  const [brollImageOverlay, setBrollImageOverlay] = useState(true);
+  const [brollBehindPerson, setBrollBehindPerson] = useState(true);
+  const [brollVideoFootage, setBrollVideoFootage] = useState(true);
   const [autogridEnabled, setAutogridEnabled] = useState(false);
   const [textEmphasisEnabled, setTextEmphasisEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -42,7 +44,7 @@ export function NewJob() {
     try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? { ...DEFAULT_SUBTITLE_STYLE, ...JSON.parse(s) } : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
   });
   const [textEmphasisStyleConfig, setTextEmphasisStyleConfig] = useState<TextEmphasisStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? { ...DEFAULT_TEXT_EMPHASIS_STYLE, ...JSON.parse(s) } : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
+    try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? normaliseTextEmphasisStyle(JSON.parse(s)) : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
   });
 
   useEffect(() => { localStorage.setItem("autocliper_hook_style", JSON.stringify(hookStyleConfig)); }, [hookStyleConfig]);
@@ -70,7 +72,7 @@ export function NewJob() {
   function loadPreset(preset: Preset) {
     setHookStyleConfig({ ...DEFAULT_HOOK_STYLE, ...preset.hook_style } as HookStyle);
     setSubtitleStyleConfig({ ...DEFAULT_SUBTITLE_STYLE, ...preset.subtitle_style } as SubtitleStyle);
-    if (preset.text_emphasis_style) setTextEmphasisStyleConfig({ ...DEFAULT_TEXT_EMPHASIS_STYLE, ...preset.text_emphasis_style } as TextEmphasisStyle);
+    if (preset.text_emphasis_style) setTextEmphasisStyleConfig(normaliseTextEmphasisStyle(preset.text_emphasis_style));
     setActivePresetId(preset.id);
     toast.success(`Loaded: ${preset.name}`);
   }
@@ -155,7 +157,9 @@ export function NewJob() {
       hook_style_config: { ...hookStyleConfig, template_mode: templateMode },
       subtitle_style_config: subtitleStyleConfig,
       broll_enabled: brollEnabled,
-      broll_motion_style: brollEnabled && brollMotionStyle ? brollMotionStyle : undefined,
+      broll_image_overlay: brollEnabled ? brollImageOverlay : false,
+      broll_behind_person: brollEnabled ? brollBehindPerson : false,
+      broll_video_footage: brollEnabled ? brollVideoFootage : false,
       autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
       text_emphasis_enabled: textEmphasisEnabled,
       text_emphasis_style_config: textEmphasisStyleConfig,
@@ -352,29 +356,29 @@ export function NewJob() {
                 onChange={setBrollEnabled}
               />
               {brollEnabled && (
-                <div className="pl-1 pt-1">
-                  <label className="block text-[10px] font-medium text-zinc-500 mb-1 uppercase tracking-wider">
-                    B-roll Motion Style
-                  </label>
-                  <select
-                    value={brollMotionStyle}
-                    onChange={(e) => setBrollMotionStyle(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600"
-                  >
-                    <option value="">Auto (AI pilih per momen)</option>
-                    <option value="ken_burns">Ken Burns — dokumenter, narasi tenang</option>
-                    <option value="parallax_zoom">Parallax Zoom — inovasi/teknologi</option>
-                    <option value="light_sweep">Light Sweep — showcase/produk elegan</option>
-                    <option value="particle_float">Particle Float — inspiratif/abstrak</option>
-                    <option value="depth_parallax">Depth Parallax — cinematic fg/bg</option>
-                    <option value="glitch_reveal">Glitch Reveal — energetik/breaking</option>
-                    <option value="typewriter">Typewriter — tutorial/edukasi</option>
-                    <option value="stroke_draw">Stroke Draw — kutipan/motivasi</option>
-                    <option value="word_pop">Word Pop — punchy keyword</option>
-                    <option value="line_reveal">Line Reveal — reveal baris</option>
-                    <option value="particle_burst">Particle Burst — burst energetik</option>
-                  </select>
-                  <p className="text-[10px] text-zinc-600 mt-1">Dirender di Remotion → preview = final export.</p>
+                <div className="ml-1 space-y-2 rounded-lg border border-zinc-800/80 bg-zinc-950/50 p-2.5">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Jenis B-roll aktif</p>
+                  <Toggle
+                    label="Image overlay"
+                    description="Kartu foto objek + label di atas footage (OpenCV)."
+                    checked={brollImageOverlay}
+                    onChange={setBrollImageOverlay}
+                  />
+                  <Toggle
+                    label="Behind person video"
+                    description="Stock di belakang subject (top overlay, person tetap)."
+                    checked={brollBehindPerson}
+                    onChange={setBrollBehindPerson}
+                  />
+                  <Toggle
+                    label="Video footage"
+                    description="Full-frame splice: ganti frame dengan stock video."
+                    checked={brollVideoFootage}
+                    onChange={setBrollVideoFootage}
+                  />
+                  {!brollImageOverlay && !brollBehindPerson && !brollVideoFootage && (
+                    <p className="text-[10px] text-amber-500/90">Centang minimal 1 jenis, atau matikan Auto B-roll.</p>
+                  )}
                 </div>
               )}
               <FeatureLock featureName="Auto Grid" featureCode="auto_grid" isSuperadmin={user?.is_superadmin} isPremium={user?.is_premium} userFeatures={user?.features}>

@@ -1115,8 +1115,9 @@ OUTPUT RAW JSON:
     ) -> dict:
         """Single-clip text-emphasis LLM; full words first, sampled fallback."""
         effect_instruction = (
-            "Pilih effect paling cocok dari behind_person, spotlight, side_label, "
-            "floating_text, auto_avoid, around_head, depth_text, kinetic_type."
+            "Pilih effect paling cocok dari: depth_cutout, hero_punch, side_rail, "
+            "float_track, smart_gap, orbit_halo, z_parallax, word_cascade, "
+            "split_impact, type_pulse, sticker_pop, mirror_echo."
             if style.get("effectMode") == "auto"
             else f'Semua pilihan WAJIB memakai effect "{style.get("effectMode")}".'
         )
@@ -1144,13 +1145,13 @@ ATURAN:
 - WAJIB 1–{max_events} event. Frasa 1-7 kata; start_word+end_word berurutan.
 - Prioritas: angka, tesis, kontras, istilah inti, punchline. Hindari filler.
 - Min jarak 6s antar event.
-- Effects: behind_person | spotlight | side_label | floating_text | auto_avoid | around_head | depth_text | kinetic_type
+- Effects: depth_cutout | hero_punch | side_rail | float_track | smart_gap | orbit_halo | z_parallax | word_cascade | split_impact | type_pulse | sticker_pop | mirror_echo
 - {effect_instruction}
 - position: left | center | right
 - Jangan rewrite teks / timestamp — pilih word ID saja.
 
 OUTPUT RAW JSON:
-{{"clips":{{"{rank}":[{{"start_word":"W0012","end_word":"W0015","effect":"behind_person","position":"center","reason":"tesis"}}]}}}}
+{{"clips":{{"{rank}":[{{"start_word":"W0012","end_word":"W0015","effect":"hero_punch","position":"center","reason":"tesis"}}]}}}}
 """
         parsed = None
         last_error = None
@@ -1189,12 +1190,12 @@ TRANSKRIP WORD-ID (sampled):
 {fallback_context}
 
 ATURAN: 1–{max_events} event; frasa 1-7 kata; start/end word ID berurutan; jangan span [... gap ...].
-Effects: behind_person|spotlight|side_label|floating_text|auto_avoid|around_head|depth_text|kinetic_type
+Effects: depth_cutout|hero_punch|side_rail|float_track|smart_gap|orbit_halo|z_parallax|word_cascade|split_impact|type_pulse|sticker_pop|mirror_echo
 {effect_instruction}
 position: left|center|right. Jangan rewrite teks.
 
 OUTPUT RAW JSON:
-{{"clips":{{"{rank}":[{{"start_word":"W0012","end_word":"W0015","effect":"spotlight","position":"center","reason":"angka"}}]}}}}
+{{"clips":{{"{rank}":[{{"start_word":"W0012","end_word":"W0015","effect":"hero_punch","position":"center","reason":"angka"}}]}}}}
 """
             raw = await asyncio.wait_for(
                 asyncio.to_thread(self._call_groq_llm, fallback_prompt, model, 1000),

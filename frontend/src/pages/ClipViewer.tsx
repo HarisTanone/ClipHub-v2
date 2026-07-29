@@ -10,7 +10,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
-import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
+import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
 import { jobs, API_BASE, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
 
@@ -52,7 +52,7 @@ export function ClipViewer() {
     try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? { ...DEFAULT_SUBTITLE_STYLE, ...JSON.parse(s) } : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
   });
   const [textEmphasisStyleConfig, setTextEmphasisStyleConfig] = useState<TextEmphasisStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? { ...DEFAULT_TEXT_EMPHASIS_STYLE, ...JSON.parse(s) } : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
+    try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? normaliseTextEmphasisStyle(JSON.parse(s)) : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
   });
   const [isRestyling, setIsRestyling] = useState(false);
   const [restyleProgress, setRestyleProgress] = useState<{ stage: string; percentage: number } | null>(null);
@@ -80,7 +80,7 @@ export function ClipViewer() {
         setSubtitleStyleConfig({ ...DEFAULT_SUBTITLE_STYLE, ...clipRes.data.subtitle_style_config } as SubtitleStyle);
       }
       if (clipRes.data.text_emphasis_style_config && Object.keys(clipRes.data.text_emphasis_style_config).length > 0) {
-        setTextEmphasisStyleConfig({ ...DEFAULT_TEXT_EMPHASIS_STYLE, ...clipRes.data.text_emphasis_style_config } as TextEmphasisStyle);
+        setTextEmphasisStyleConfig(normaliseTextEmphasisStyle(clipRes.data.text_emphasis_style_config));
       }
       // Set other clips (exclude current)
       const allClips = detailRes.data.clips || [];
