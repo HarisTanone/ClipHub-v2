@@ -19,7 +19,8 @@ export interface CanvasLayout {
 }
 
 export interface CanvasConfig {
-  aspectRatio?: string;
+  aspectRatio?: string; // final canvas — always 9:16 for TikTok
+  contentAspect?: string; // main video framing 16:9 / 1:1
   width?: number;
   height?: number;
   mode?: "template" | "upload";
@@ -183,7 +184,10 @@ export const CanvasBackgroundLayer: React.FC<{ config: CanvasConfig }> = ({ conf
   );
 };
 
-/** Style helper: position the footage window from layout fractions. */
+/** Style helper: position the footage window from layout fractions.
+ * Content keeps native aspect (object-fit: contain) — never stretch/crop
+ * into the 9:16 canvas. Template fills the letterbox zones.
+ */
 export function videoSlotStyle(layout?: CanvasLayout): React.CSSProperties {
   if (!layout) {
     return { width: "100%", height: "100%", objectFit: "cover" };
@@ -194,8 +198,21 @@ export function videoSlotStyle(layout?: CanvasLayout): React.CSSProperties {
     top: `${layout.videoY * 100}%`,
     width: `${layout.videoW * 100}%`,
     height: `${layout.videoH * 100}%`,
-    borderRadius: layout.borderRadius ?? 16,
+    borderRadius: layout.borderRadius ?? 0,
     overflow: "hidden",
-    boxShadow: layout.shadow || "0 16px 48px rgba(0,0,0,0.45)",
+    boxShadow: layout.shadow || "0 12px 40px rgba(0,0,0,0.45)",
+  };
+}
+
+/** Video element style inside the slot.
+ * Slot already sized to content aspect — cover fills slot without letterbox
+ * inside the band. Template fills outer 9:16 zones.
+ */
+export function videoFitStyle(hasCanvas: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    backgroundColor: "transparent",
   };
 }

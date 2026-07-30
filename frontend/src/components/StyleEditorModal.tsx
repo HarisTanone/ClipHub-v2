@@ -6,6 +6,7 @@ import { jobs, presets as presetsApi, type Preset } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RangeSlider } from "@/components/ui/RangeSlider";
 import { buildCanvasConfig, gradientCss } from "@/lib/canvasTemplates";
+import { CanvasAccents } from "@/components/BackgroundTemplateSection";
 import type { BackgroundMode } from "@/components/BackgroundTemplateSection";
 
 type OptionMeta = {
@@ -2535,37 +2536,31 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
         </div>
         <div className="relative w-full max-w-[240px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
           {canvas ? (
-            <div className="absolute inset-0 flex items-center justify-center p-2.5">
+            <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
+              {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
+                <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              )}
+              <CanvasAccents accents={canvas.accents || []} />
+              {(canvas.background.vignette || 0) > 0 && (
+                <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
+              )}
+              {/* Content slot — 16:9/1:1 band; template fills top/bottom (TikTok 9:16) */}
               <div
-                className="relative overflow-hidden rounded-md shadow-2xl"
+                className="absolute overflow-hidden bg-zinc-800"
                 style={{
-                  width: aspectRatio === "1:1" ? "88%" : "100%",
-                  aspectRatio: aspectRatio === "1:1" ? "1/1" : "16/9",
-                  background: gradientCss(canvas.background),
+                  left: `${canvas.layout.videoX * 100}%`,
+                  top: `${canvas.layout.videoY * 100}%`,
+                  width: `${canvas.layout.videoW * 100}%`,
+                  height: `${canvas.layout.videoH * 100}%`,
+                  borderRadius: canvas.layout.borderRadius || 0,
+                  boxShadow: canvas.layout.shadow,
                 }}
               >
-                {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
-                  <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                )}
-                {(canvas.background.vignette || 0) > 0 && (
-                  <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
-                )}
-                <div
-                  className="absolute overflow-hidden bg-zinc-800"
-                  style={{
-                    left: `${canvas.layout.videoX * 100}%`,
-                    top: `${canvas.layout.videoY * 100}%`,
-                    width: `${canvas.layout.videoW * 100}%`,
-                    height: `${canvas.layout.videoH * 100}%`,
-                    borderRadius: Math.max(4, (canvas.layout.borderRadius || 12) / 2),
-                    boxShadow: canvas.layout.shadow,
-                  }}
-                >
-                  {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-                  <HookPreviewRenderer style={style} />
-                  {style.lineEnabled && <AccentLinePreview style={style} />}
-                </div>
+                {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
               </div>
+              {/* Overlays span full 9:16 safe area — matches Remotion bake */}
+              <HookPreviewRenderer style={style} />
+              {style.lineEnabled && <AccentLinePreview style={style} />}
             </div>
           ) : (
             <>
@@ -2830,35 +2825,30 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
         </div>
         <div className="relative w-full max-w-[240px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
           {canvas ? (
-            <div className="absolute inset-0 flex items-center justify-center p-2.5">
+            <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
+              {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
+                <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              )}
+              <CanvasAccents accents={canvas.accents || []} />
+              {(canvas.background.vignette || 0) > 0 && (
+                <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
+              )}
               <div
-                className="relative overflow-hidden rounded-md shadow-2xl"
+                className="absolute overflow-hidden bg-zinc-800"
                 style={{
-                  width: aspectRatio === "1:1" ? "88%" : "100%",
-                  aspectRatio: aspectRatio === "1:1" ? "1/1" : "16/9",
-                  background: gradientCss(canvas.background),
+                  left: `${canvas.layout.videoX * 100}%`,
+                  top: `${canvas.layout.videoY * 100}%`,
+                  width: `${canvas.layout.videoW * 100}%`,
+                  height: `${canvas.layout.videoH * 100}%`,
+                  borderRadius: canvas.layout.borderRadius || 0,
+                  boxShadow: canvas.layout.shadow,
                 }}
               >
-                {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
-                  <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                )}
-                {(canvas.background.vignette || 0) > 0 && (
-                  <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
-                )}
-                <div
-                  className="absolute overflow-hidden bg-zinc-800"
-                  style={{
-                    left: `${canvas.layout.videoX * 100}%`,
-                    top: `${canvas.layout.videoY * 100}%`,
-                    width: `${canvas.layout.videoW * 100}%`,
-                    height: `${canvas.layout.videoH * 100}%`,
-                    borderRadius: Math.max(4, (canvas.layout.borderRadius || 12) / 2),
-                    boxShadow: canvas.layout.shadow,
-                  }}
-                >
-                  {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-                  <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/30 to-zinc-900/50" />
-                  <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+                {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
+              </div>
+              {/* Subtitle overlays full 9:16 — matches Remotion bake */}
+              <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/10 to-transparent pointer-events-none" />
+              <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
                     {style.lineTransition === "emphasis" ? (
                       <div className="flex flex-col items-center gap-1">
                         <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
@@ -2905,8 +2895,6 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                         })}
                       </div>
                     )}
-                  </div>
-                </div>
               </div>
             </div>
           ) : (

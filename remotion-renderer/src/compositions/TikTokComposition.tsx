@@ -23,7 +23,7 @@ import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 import { CTALayer } from "../layers/CTALayer";
-import { CanvasBackgroundLayer, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
+import { CanvasBackgroundLayer, videoFitStyle, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
 
 const HIGHLIGHT_COLOR = "#39E508";
 
@@ -80,9 +80,9 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
   const hasCanvas = Boolean(canvas && canvas.layout);
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "#000" }}>
+    <AbsoluteFill style={{ backgroundColor: hasCanvas ? "transparent" : "#000" }}>
       {hasCanvas && canvas ? <CanvasBackgroundLayer config={canvas} /> : null}
-      {/* Video layer — OffthreadVideo for stability */}
+      {/* Video: full-bleed 9:16 or contain in template slot (16:9/1:1 content) */}
       {videoPath && (
         <AbsoluteFill style={hasCanvas ? videoSlotStyle(canvas?.layout) : undefined}>
           <FramingTransitionLayer
@@ -92,7 +92,7 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
           >
             <OffthreadVideo
               src={videoPath}
-              style={{ objectFit: "cover", width: "100%", height: "100%" }}
+              style={videoFitStyle(hasCanvas)}
             />
           </FramingTransitionLayer>
         </AbsoluteFill>

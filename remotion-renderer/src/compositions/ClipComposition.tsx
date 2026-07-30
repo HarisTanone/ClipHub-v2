@@ -8,7 +8,7 @@ import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 import { CTALayer } from "../layers/CTALayer";
-import { CanvasBackgroundLayer, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
+import { CanvasBackgroundLayer, videoFitStyle, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
 
 // ─── Font Loader ─────────────────────────────────────────────────────────────
 
@@ -114,11 +114,11 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   const hasCanvas = Boolean(canvas && canvas.layout);
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      {/* L0: Designed canvas background (16:9 / 1:1 only) */}
+    <AbsoluteFill style={{ backgroundColor: hasCanvas ? "transparent" : "#000" }}>
+      {/* L0: Template fills 9:16 canvas; content 16:9/1:1 sits in slot (never black bars) */}
       {hasCanvas && canvas ? <CanvasBackgroundLayer config={canvas} /> : null}
 
-      {/* L1: Base Video + Auto Zoom — full bleed (9:16) or inset slot (template) */}
+      {/* L1: Base Video — full bleed 9:16 OR contain in template slot */}
       {videoPath && (
         <AbsoluteFill style={hasCanvas ? videoSlotStyle(canvas?.layout) : undefined}>
           <FramingTransitionLayer
@@ -129,7 +129,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
             <ZoomLayer zoomEvents={zoomEvents} maxScale={1.15} defaultDuration={0.5}>
               <OffthreadVideo
                 src={videoPath}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                style={videoFitStyle(hasCanvas)}
               />
             </ZoomLayer>
           </FramingTransitionLayer>

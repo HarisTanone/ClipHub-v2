@@ -742,8 +742,11 @@ class JobService:
                         
                         try:
                             from src.domain.interfaces_remotion import RemotionRenderConfig
-                            from src.infrastructure.canvas_templates import resolution_for_aspect, build_canvas_config
-                            res = resolution_for_aspect(job.target_aspect_ratio or "9:16")
+                            from src.infrastructure.canvas_templates import (
+                                build_canvas_config,
+                                output_resolution_for_job,
+                            )
+                            res = output_resolution_for_job(job.target_aspect_ratio)
                             render_config = RemotionRenderConfig(
                                 concurrency=settings.REMOTION_CONCURRENCY,
                                 quality=settings.REMOTION_QUALITY,
@@ -845,8 +848,11 @@ class JobService:
                             
                             try:
                                 from src.domain.interfaces_remotion import RemotionRenderConfig
-                                from src.infrastructure.canvas_templates import resolution_for_aspect, build_canvas_config
-                                res = resolution_for_aspect(job.target_aspect_ratio or "9:16")
+                                from src.infrastructure.canvas_templates import (
+                                    build_canvas_config,
+                                    output_resolution_for_job,
+                                )
+                                res = output_resolution_for_job(job.target_aspect_ratio)
                                 render_config = RemotionRenderConfig(
                                     concurrency=settings.REMOTION_CONCURRENCY,
                                     quality=settings.REMOTION_QUALITY,

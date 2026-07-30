@@ -319,9 +319,12 @@ export function NewJob() {
             )}
           </Card>
 
-          {/* Aspect */}
+          {/* Aspect — content framing; final TikTok canvas always 9:16 */}
           <Card className="p-3">
-            <label className="block text-[10px] font-medium text-zinc-500 mb-2 uppercase tracking-wider">Aspect Ratio</label>
+            <label className="block text-[10px] font-medium text-zinc-500 mb-2 uppercase tracking-wider">Content Aspect</label>
+            <p className="mb-2 text-[9px] text-zinc-600 leading-snug">
+              Output upload TikTok selalu 9:16. Pilih framing video utama: 9:16 full-bleed, atau 16:9/1:1 di tengah + template isi atas/bawah.
+            </p>
             <div className="grid grid-cols-3 gap-1.5">
               {aspectOptions.map((opt) => (
                 <button key={opt.value} type="button" onClick={() => { setAspectRatio(opt.value); if (opt.value !== "9:16") setAutogridEnabled(false); }}

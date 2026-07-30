@@ -371,7 +371,7 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
   const finalUrl = clip.has_final ? jobs.getClipFinalUrl(jobId, clip.rank) : null;
   const thumbUrl = clip.has_thumbnail ? jobs.getClipThumbUrl(jobId, clip.rank) : null;
 
-  const isPortrait = aspectRatio === "9:16";
+  const isPortrait = true; // final output always TikTok 9:16
   const hasScore = clip.score !== null && clip.score !== undefined;
   const score = hasScore ? (clip.score! <= 1 ? Math.round(clip.score! * 100) : Math.round(clip.score!)) : null;
   const timeline = `${formatDuration(clip.start)} - ${formatDuration(clip.end)}`;
@@ -385,10 +385,7 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
           ? "hover:border-emerald-500/30 hover:bg-zinc-900/80 cursor-pointer"
           : "border-zinc-800/70 bg-zinc-950/45 cursor-not-allowed"
       )}>
-        <div className={cn(
-          "bg-zinc-950 relative overflow-hidden",
-          isPortrait ? "aspect-[9/16]" : aspectRatio === "1:1" ? "aspect-square" : "aspect-video"
-        )}>
+        <div className="bg-zinc-950 relative overflow-hidden aspect-[9/16]">
           {finalUrl ? (
             <video
               src={finalUrl}

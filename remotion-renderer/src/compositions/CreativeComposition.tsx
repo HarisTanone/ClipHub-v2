@@ -23,7 +23,7 @@ import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 import { CTALayer } from "../layers/CTALayer";
-import { CanvasBackgroundLayer, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
+import { CanvasBackgroundLayer, videoFitStyle, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
 
 // Available creative styles
 export type CreativeStyle =
@@ -79,9 +79,9 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
   const hasCanvas = Boolean(canvas && canvas.layout);
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "#000" }}>
+    <AbsoluteFill style={{ backgroundColor: hasCanvas ? "transparent" : "#000" }}>
       {hasCanvas && canvas ? <CanvasBackgroundLayer config={canvas} /> : null}
-      {/* Video */}
+      {/* Video: full-bleed 9:16 or contain in template slot */}
       {videoPath && (
         <AbsoluteFill style={hasCanvas ? videoSlotStyle(canvas?.layout) : undefined}>
           <FramingTransitionLayer
@@ -89,7 +89,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
             style={hookConfig.transitionStyle || creativeDirection.transition_style || "cut"}
             duration={hookConfig.transitionDuration || creativeDirection.transition_duration || 0.35}
           >
-            <OffthreadVideo src={videoPath} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
+            <OffthreadVideo src={videoPath} style={videoFitStyle(hasCanvas)} />
           </FramingTransitionLayer>
         </AbsoluteFill>
       )}

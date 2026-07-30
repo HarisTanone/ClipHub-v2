@@ -101,7 +101,12 @@ function Accents({ accents }: { accents: CanvasAccent[] }) {
   );
 }
 
-/** Mini thumbnail of a template composition (bg + footage placeholder). */
+/** Exported for StyleEditor live preview ≡ Remotion bake. */
+export function CanvasAccents({ accents }: { accents: CanvasAccent[] }) {
+  return <Accents accents={accents} />;
+}
+
+/** Mini thumb: always 9:16 phone frame with content slot + template fill. */
 export function TemplateThumb({
   template,
   aspectRatio,
@@ -126,11 +131,9 @@ export function TemplateThumb({
           : "border-zinc-800 hover:border-zinc-600",
       )}
     >
+      {/* Always phone 9:16 — matches final TikTok output */}
       <div
-        className={cn(
-          "relative w-full overflow-hidden bg-zinc-950",
-          aspectRatio === "1:1" ? "aspect-square" : "aspect-video",
-        )}
+        className="relative w-full overflow-hidden bg-zinc-950 aspect-[9/16]"
         style={{ background: gradientCss(template.background) }}
       >
         <Accents accents={template.accents} />
@@ -142,7 +145,7 @@ export function TemplateThumb({
             }}
           />
         )}
-        {/* Footage placeholder — person/video area */}
+        {/* Content slot — 16:9 or 1:1 band, template fills top/bottom */}
         <div
           className="absolute overflow-hidden bg-zinc-700/80"
           style={{
@@ -150,14 +153,14 @@ export function TemplateThumb({
             top: `${layout.videoY * 100}%`,
             width: `${layout.videoW * 100}%`,
             height: `${layout.videoH * 100}%`,
-            borderRadius: Math.max(4, (layout.borderRadius || 12) / 3),
+            borderRadius: Math.max(0, (layout.borderRadius || 0) / 3),
             boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
           }}
         >
           <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-zinc-600/40 to-zinc-800/80">
             <div className="flex flex-col items-center gap-0.5 opacity-70">
-              <div className="h-5 w-5 rounded-full bg-zinc-400/50" />
-              <div className="h-6 w-8 rounded-t-full bg-zinc-400/40" />
+              <div className="h-3 w-3 rounded-full bg-zinc-400/50" />
+              <div className="h-4 w-6 rounded-t-full bg-zinc-400/40" />
             </div>
           </div>
         </div>
@@ -202,7 +205,14 @@ export function BackgroundTemplateSection({
 }: BackgroundTemplateSectionProps) {
   return (
     <div className="space-y-2.5">
-      <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">Background</label>
+      <div>
+        <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+          Background Template
+        </label>
+        <p className="mt-0.5 text-[9px] text-zinc-600 leading-snug">
+          Output TikTok = 9:16. Video {aspectRatio} di tengah; template isi area atas & bawah (bukan black bar).
+        </p>
+      </div>
       <div className="grid grid-cols-2 gap-1.5">
         <button
           type="button"
@@ -215,7 +225,7 @@ export function BackgroundTemplateSection({
           )}
         >
           <p className="text-[11px] font-medium">Template</p>
-          <p className="text-[9px] opacity-70">Desain layout siap pakai</p>
+          <p className="text-[9px] opacity-70">Theme + border siap pakai</p>
         </button>
         <button
           type="button"
@@ -235,7 +245,7 @@ export function BackgroundTemplateSection({
       </div>
 
       {mode === "template" && (
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-2">
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-2 max-h-[420px] overflow-y-auto pr-0.5">
           {CANVAS_TEMPLATES.map((t) => (
             <TemplateThumb
               key={t.id}
@@ -252,13 +262,21 @@ export function BackgroundTemplateSection({
         <div className="space-y-2">
           {uploadPreviewUrl ? (
             <div className="relative overflow-hidden rounded-lg border border-zinc-800">
-              <div className={cn("relative w-full", aspectRatio === "1:1" ? "aspect-square" : "aspect-video")}>
+              <div className="relative w-full aspect-[9/16]">
                 <img src={uploadPreviewUrl} alt="Background" className="absolute inset-0 h-full w-full object-cover" />
-                <div className="absolute inset-[12%] overflow-hidden rounded-md border border-white/10 bg-zinc-800/70 shadow-lg">
+                {/* Content slot preview */}
+                <div
+                  className="absolute overflow-hidden rounded-sm border border-white/10 bg-zinc-800/70 shadow-lg"
+                  style={
+                    aspectRatio === "1:1"
+                      ? { left: "4%", top: "24%", width: "92%", height: "52%" }
+                      : { left: "0%", top: "34%", width: "100%", height: "32%" }
+                  }
+                >
                   <div className="flex h-full items-center justify-center">
                     <div className="flex flex-col items-center gap-0.5 opacity-60">
-                      <div className="h-6 w-6 rounded-full bg-zinc-400/50" />
-                      <div className="h-8 w-10 rounded-t-full bg-zinc-400/40" />
+                      <div className="h-4 w-4 rounded-full bg-zinc-400/50" />
+                      <div className="h-5 w-8 rounded-t-full bg-zinc-400/40" />
                     </div>
                   </div>
                 </div>
@@ -275,7 +293,7 @@ export function BackgroundTemplateSection({
             <label className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-700 bg-zinc-950/50 px-3 py-6 text-zinc-500 transition-colors hover:border-emerald-500/40 hover:text-emerald-400">
               <ImagePlus className="h-5 w-5" />
               <span className="text-[11px] font-medium">Upload Background</span>
-              <span className="text-[9px] text-zinc-600">JPG, PNG, WEBP</span>
+              <span className="text-[9px] text-zinc-600">JPG, PNG, WEBP — full 9:16 canvas</span>
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp,image/gif"
@@ -294,7 +312,11 @@ export function BackgroundTemplateSection({
   );
 }
 
-/** Live canvas frame used inside style previews (outer shell always phone-like). */
+/**
+ * Live canvas frame for style previews.
+ * Outer shell always 9:16 (TikTok). When canvas config present, template fills
+ * full frame and content sits in video slot — preview ≡ final bake.
+ */
 export function CanvasLiveFrame({
   aspectRatio,
   canvas,
@@ -308,7 +330,6 @@ export function CanvasLiveFrame({
   children?: ReactNode;
   className?: string;
 }) {
-  // Outer UI always 9:16 phone frame; inner composition matches selected aspect
   const isPortrait = aspectRatio === "9:16" || !canvas;
   return (
     <div
@@ -328,56 +349,48 @@ export function CanvasLiveFrame({
           {children}
         </div>
       ) : (
-        <div className="absolute inset-0 flex items-center justify-center p-3">
+        /* Full 9:16 canvas with template — matches Remotion bake 1:1 */
+        <div className="absolute inset-0" style={{ background: gradientCss(canvas?.background) }}>
+          {canvas?.backgroundImageUrl || canvas?.background?.imageUrl ? (
+            <img
+              src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          ) : null}
+          <Accents accents={canvas?.accents || []} />
+          {(canvas?.background.vignette || 0) > 0 && (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas?.background.vignette}) 100%)`,
+              }}
+            />
+          )}
           <div
-            className="relative overflow-hidden rounded-md shadow-2xl"
+            className="absolute overflow-hidden bg-zinc-800"
             style={{
-              width: aspectRatio === "1:1" ? "88%" : "100%",
-              aspectRatio: aspectRatio === "1:1" ? "1/1" : "16/9",
-              background: gradientCss(canvas?.background),
+              left: `${(canvas?.layout.videoX || 0) * 100}%`,
+              top: `${(canvas?.layout.videoY || 0.34) * 100}%`,
+              width: `${(canvas?.layout.videoW || 1) * 100}%`,
+              height: `${(canvas?.layout.videoH || 0.32) * 100}%`,
+              borderRadius: canvas?.layout.borderRadius || 0,
+              boxShadow: canvas?.layout.shadow,
             }}
           >
-            {canvas?.backgroundImageUrl || canvas?.background?.imageUrl ? (
-              <img
-                src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string}
-                alt=""
-                className="absolute inset-0 h-full w-full object-cover"
-              />
-            ) : null}
-            <Accents accents={canvas?.accents || []} />
-            {(canvas?.background.vignette || 0) > 0 && (
-              <div
-                className="absolute inset-0 pointer-events-none"
-                style={{
-                  background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas?.background.vignette}) 100%)`,
-                }}
-              />
-            )}
-            <div
-              className="absolute overflow-hidden bg-zinc-800"
-              style={{
-                left: `${(canvas?.layout.videoX || 0.1) * 100}%`,
-                top: `${(canvas?.layout.videoY || 0.1) * 100}%`,
-                width: `${(canvas?.layout.videoW || 0.8) * 100}%`,
-                height: `${(canvas?.layout.videoH || 0.8) * 100}%`,
-                borderRadius: Math.max(4, (canvas?.layout.borderRadius || 12) / 2),
-                boxShadow: canvas?.layout.shadow,
-              }}
-            >
-              {thumbnailUrl ? (
-                <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-zinc-600/30 to-zinc-900/80">
-                  <div className="flex flex-col items-center gap-1 opacity-60">
-                    <div className="h-8 w-8 rounded-full bg-zinc-400/40" />
-                    <div className="h-10 w-14 rounded-t-full bg-zinc-400/30" />
-                  </div>
+            {thumbnailUrl ? (
+              <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-contain" />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-zinc-600/30 to-zinc-900/80">
+                <div className="flex flex-col items-center gap-1 opacity-60">
+                  <div className="h-6 w-6 rounded-full bg-zinc-400/40" />
+                  <div className="h-8 w-12 rounded-t-full bg-zinc-400/30" />
                 </div>
-              )}
-              {/* Scale children into footage slot */}
-              <div className="absolute inset-0 pointer-events-none">{children}</div>
-            </div>
+              </div>
+            )}
           </div>
+          {/* Overlays (hook/subtitle/AI text) span full 9:16 safe area */}
+          <div className="absolute inset-0 pointer-events-none">{children}</div>
         </div>
       )}
     </div>
