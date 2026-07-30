@@ -1150,28 +1150,12 @@ class PersonFirstReframeEngine(IReframeEngine):
         )
 
     async def _simple_crop(self, video_path: str, output_path: str, target_aspect: str) -> bool:
-        """Simple crop for non-9:16."""
-        if target_aspect == "1:1":
-            vf = "setpts=PTS-STARTPTS,crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080"
-        else:
+        """Raw passthrough for 16:9 / 1:1 — no autogrid/autocenter crop."""
+        try:
             shutil.copy2(video_path, output_path)
-            return True
-
-        cmd = [
-            "ffmpeg", "-y", "-i", video_path,
-            "-vf", vf,
-            "-af", self.AUDIO_FILTER,
-            *get_video_encoder_args("medium"),
-            "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart",
-            output_path,
-        ]
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, timeout=120
-        )
-        return (
-            result.returncode == 0
-            and os.path.exists(output_path)
-            and os.path.getsize(output_path) > 1000
-            and timeline_is_safe(output_path)
-        )
+            return (
+                os.path.exists(output_path)
+                and os.path.getsize(output_path) > 1000
+            )
+        except OSError:
+            return False

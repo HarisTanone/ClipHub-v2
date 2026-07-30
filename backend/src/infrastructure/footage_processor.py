@@ -1,7 +1,7 @@
 """Footage Processor — re-encode and trim footage for B-roll splice.
 
 Processes raw downloaded footage into the exact format needed for video splice:
-- Resolution: 1080x1920 (portrait 9:16)
+- Resolution: job aspect (9:16=1080x1920, 16:9=1920x1080, 1:1=1080x1080)
 - Codec: H.264, preset fast
 - FPS: 30
 - Center-crop for non-matching aspect ratios
@@ -21,12 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class FootageProcessor:
-    """Process raw footage into splice-ready format.
-
-    Takes raw downloaded video (any resolution/codec) and produces a
-    1080x1920 H.264 30fps video-only file trimmed to the exact duration
-    needed for the B-roll splice point.
-    """
+    """Process raw footage into splice-ready format for any output aspect."""
 
     async def process(
         self,
@@ -35,6 +30,8 @@ class FootageProcessor:
         clip_rank: int,
         index: int,
         output_dir: str,
+        width: int = 1080,
+        height: int = 1920,
     ) -> Optional[str]:
         """Re-encode and trim footage to target format.
 
@@ -44,24 +41,26 @@ class FootageProcessor:
             clip_rank: Clip rank for output filename.
             index: B-roll index within the clip (0-based).
             output_dir: Directory to save processed footage.
+            width: Output width (from resolution_for_aspect).
+            height: Output height (from resolution_for_aspect).
 
         Returns:
             Path to processed footage file, or None on failure.
         """
-        # Guard: skip if download failed (raw_path doesn't exist)
         if not raw_path or not os.path.exists(raw_path):
             logger.warning(f"footage_proc: raw file not found, skipping: {raw_path}")
             return None
+
+        w = max(2, int(width) // 2 * 2)
+        h = max(2, int(height) // 2 * 2)
 
         output_name = f"clip_{clip_rank:02d}_broll_footage_{index:02d}.mp4"
         output_path = os.path.join(output_dir, output_name)
         os.makedirs(output_dir, exist_ok=True)
 
-        # FFmpeg: scale + center-crop to 1080x1920, H.264, 30fps, trim, no audio
-        # scale to fill: increase to at least 1080x1920, then crop excess
         vf_filter = (
-            "scale=1080:1920:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,"
+            f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},"
             "setsar=1"
         )
 
@@ -75,7 +74,7 @@ class FootageProcessor:
             "-crf", "20",
             "-r", "30",
             "-pix_fmt", "yuv420p",
-            "-an",  # No audio — footage is video-only for splice
+            "-an",
             "-movflags", "+faststart",
             output_path,
         ]
@@ -92,7 +91,7 @@ class FootageProcessor:
                 size_kb = os.path.getsize(output_path) // 1024
                 logger.info(
                     f"footage_proc: processed clip_{clip_rank} broll_{index} "
-                    f"({target_duration:.1f}s, {size_kb}KB) → {output_name}"
+                    f"({target_duration:.1f}s, {w}x{h}, {size_kb}KB) → {output_name}"
                 )
                 return output_path
             else:
@@ -106,7 +105,6 @@ class FootageProcessor:
         except Exception as exc:
             logger.error(f"footage_proc: unexpected error: {exc}")
 
-        # Cleanup failed output
         if os.path.exists(output_path):
             os.remove(output_path)
         return None

@@ -12,6 +12,7 @@ import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_T
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { jobs, preview, presets as presetsApi, type VideoPreview, type Preset, API_BASE } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
+import { BackgroundTemplateSection, type BackgroundMode } from "@/components/BackgroundTemplateSection";
 
 export function NewJob() {
   const navigate = useNavigate();
@@ -25,6 +26,9 @@ export function NewJob() {
   const [directHook, setDirectHook] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [templateMode] = useState<"custom">("custom");
+  const [backgroundMode, setBackgroundMode] = useState<BackgroundMode>("template");
+  const [backgroundTemplateId, setBackgroundTemplateId] = useState("dark-studio");
+  const [backgroundImageDataUrl, setBackgroundImageDataUrl] = useState<string | null>(null);
   const [forceReprocess, setForceReprocess] = useState(false);
   const [brollEnabled, setBrollEnabled] = useState(false);
   const [brollImageOverlay, setBrollImageOverlay] = useState(true);
@@ -167,6 +171,14 @@ export function NewJob() {
       custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
         ? directHook.trim() || undefined
         : undefined,
+      ...(aspectRatio === "16:9" || aspectRatio === "1:1"
+        ? {
+            background_mode: backgroundMode,
+            background_template_id: backgroundMode === "template" ? backgroundTemplateId : undefined,
+            background_image_data_url:
+              backgroundMode === "upload" ? backgroundImageDataUrl || undefined : undefined,
+          }
+        : {}),
     };
     try {
       let res;
@@ -321,6 +333,26 @@ export function NewJob() {
               ))}
             </div>
           </Card>
+
+          {/* Background/template — 16:9 & 1:1 only */}
+          {(aspectRatio === "16:9" || aspectRatio === "1:1") && (
+            <Card className="p-3">
+              <BackgroundTemplateSection
+                aspectRatio={aspectRatio}
+                mode={backgroundMode}
+                onModeChange={setBackgroundMode}
+                templateId={backgroundTemplateId}
+                onTemplateChange={setBackgroundTemplateId}
+                uploadPreviewUrl={backgroundImageDataUrl}
+                onUpload={(file) => {
+                  const reader = new FileReader();
+                  reader.onload = () => setBackgroundImageDataUrl(String(reader.result || ""));
+                  reader.readAsDataURL(file);
+                }}
+                onClearUpload={() => setBackgroundImageDataUrl(null)}
+              />
+            </Card>
+          )}
 
           {/* Options */}
           <Card className="p-3">
@@ -507,6 +539,15 @@ export function NewJob() {
               inline
               activeTab={styleTab}
               thumbnailUrl={videoMeta?.thumbnail}
+              canvasBackground={
+                aspectRatio === "16:9" || aspectRatio === "1:1"
+                  ? {
+                      mode: backgroundMode,
+                      templateId: backgroundTemplateId,
+                      imageDataUrl: backgroundImageDataUrl,
+                    }
+                  : null
+              }
               isSuperadmin={user?.is_superadmin}
               isPremium={user?.is_premium}
               userFeatures={user?.features}

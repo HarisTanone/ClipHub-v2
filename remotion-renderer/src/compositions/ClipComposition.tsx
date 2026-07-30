@@ -8,6 +8,7 @@ import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 import { CTALayer } from "../layers/CTALayer";
+import { CanvasBackgroundLayer, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
 
 // ─── Font Loader ─────────────────────────────────────────────────────────────
 
@@ -109,12 +110,17 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   const zoomEvents = creativeDirection.zoom_events || [];
   const transitionStyle = hook.config.transitionStyle || creativeDirection.transition_style || "cut";
   const transitionDuration = hook.config.transitionDuration || creativeDirection.transition_duration || 0.35;
+  const canvas = creativeDirection.canvas_config;
+  const hasCanvas = Boolean(canvas && canvas.layout);
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      {/* L1: Base Video + Auto Zoom */}
+      {/* L0: Designed canvas background (16:9 / 1:1 only) */}
+      {hasCanvas && canvas ? <CanvasBackgroundLayer config={canvas} /> : null}
+
+      {/* L1: Base Video + Auto Zoom — full bleed (9:16) or inset slot (template) */}
       {videoPath && (
-        <AbsoluteFill>
+        <AbsoluteFill style={hasCanvas ? videoSlotStyle(canvas?.layout) : undefined}>
           <FramingTransitionLayer
             events={creativeDirection.framing_events}
             style={transitionStyle}

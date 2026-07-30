@@ -11,8 +11,8 @@ Key guarantees:
 - Audio stream is NEVER modified (copy only)
 - Output duration matches input duration exactly
 - Subtitle timing unaffected (anchored to audio)
-- All video parts normalized to 1080x1920 H.264 30fps before concat
-  (mismatched SAR/fps/res used to make concat demuxer stop early → ~before+broll only)
+- All video parts normalized to job resolution (default 1080x1920) H.264 30fps
+  before concat (mismatched SAR/fps/res used to make concat demuxer stop early)
 """
 from __future__ import annotations
 
@@ -29,16 +29,20 @@ from src.infrastructure.media_timeline import probe_media_timeline, timeline_is_
 
 logger = logging.getLogger(__name__)
 
-# Must match FootageProcessor output so concat demuxer stays continuous.
-_PART_W = 1080
-_PART_H = 1920
+_DEFAULT_W = 1080
+_DEFAULT_H = 1920
 _PART_FPS = 30
-_VF_NORMALIZE = (
-    f"scale={_PART_W}:{_PART_H}:force_original_aspect_ratio=increase,"
-    f"crop={_PART_W}:{_PART_H},"
-    "setsar=1,"
-    f"fps={_PART_FPS}"
-)
+
+
+def _vf_normalize(width: int, height: int) -> str:
+    w = max(2, int(width) // 2 * 2)
+    h = max(2, int(height) // 2 * 2)
+    return (
+        f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{h},"
+        "setsar=1,"
+        f"fps={_PART_FPS}"
+    )
 
 
 class VideoSplicer(IVideoSplicer):
@@ -64,6 +68,8 @@ class VideoSplicer(IVideoSplicer):
         clip_path: str,
         segments: list[SpliceSegment],
         output_path: str,
+        width: int = _DEFAULT_W,
+        height: int = _DEFAULT_H,
     ) -> str:
         """Splice footage segments into video track.
 
@@ -89,20 +95,28 @@ class VideoSplicer(IVideoSplicer):
             return clip_path
 
         sorted_segments = sorted(valid_segments, key=lambda s: s.at_time)
+        part_w = max(2, int(width) // 2 * 2)
+        part_h = max(2, int(height) // 2 * 2)
 
         temp_dir = tempfile.mkdtemp(prefix="splice_")
         temp_files: list[str] = []
 
         try:
             result = await self._splice_all(
-                clip_path, sorted_segments, output_path, temp_dir, temp_files
+                clip_path,
+                sorted_segments,
+                output_path,
+                temp_dir,
+                temp_files,
+                part_w,
+                part_h,
             )
 
             if result and os.path.exists(result):
                 if self._validate_sync(result, clip_path):
                     logger.info(
                         f"video_splicer: splice complete — {len(sorted_segments)} segments "
-                        f"→ {os.path.basename(result)}"
+                        f"({part_w}x{part_h}) → {os.path.basename(result)}"
                     )
                     return result
                 logger.error("video_splicer: validation failed after splice, falling back")
@@ -117,7 +131,6 @@ class VideoSplicer(IVideoSplicer):
         except Exception as exc:
             logger.error(f"video_splicer: splice failed: {exc}")
             return clip_path
-
         finally:
             self._cleanup(temp_dir, temp_files)
 
@@ -128,6 +141,8 @@ class VideoSplicer(IVideoSplicer):
         output_path: str,
         temp_dir: str,
         temp_files: list[str],
+        width: int = _DEFAULT_W,
+        height: int = _DEFAULT_H,
     ) -> Optional[str]:
         """Build [before][footage][after]… then concat + map original audio."""
         timeline = probe_media_timeline(clip_path)
@@ -138,6 +153,7 @@ class VideoSplicer(IVideoSplicer):
         clip_duration = timeline.video_duration
         concat_parts: list[str] = []
         prev_end = 0.0
+        vf = _vf_normalize(width, height)
 
         for i, segment in enumerate(segments):
             at_time = max(0.0, min(segment.at_time, clip_duration - 0.5))
@@ -147,7 +163,9 @@ class VideoSplicer(IVideoSplicer):
             # BEFORE
             if at_time > prev_end + 0.05:
                 before_path = os.path.join(temp_dir, f"part_before_{i:02d}.mp4")
-                if await self._extract_video_segment(clip_path, prev_end, at_time, before_path):
+                if await self._extract_video_segment(
+                    clip_path, prev_end, at_time, before_path, vf=vf
+                ):
                     concat_parts.append(before_path)
                     temp_files.append(before_path)
                 else:
@@ -162,7 +180,10 @@ class VideoSplicer(IVideoSplicer):
             footage_norm = os.path.join(temp_dir, f"part_footage_{i:02d}.mp4")
             actual_dur = splice_end - at_time
             if not await self._normalize_video(
-                segment.footage_path, footage_norm, target_duration=actual_dur
+                segment.footage_path,
+                footage_norm,
+                target_duration=actual_dur,
+                vf=vf,
             ):
                 logger.error(
                     "video_splicer: footage normalize failed: %s",
@@ -177,7 +198,9 @@ class VideoSplicer(IVideoSplicer):
         # AFTER
         if clip_duration > prev_end + 0.05:
             after_path = os.path.join(temp_dir, "part_after_final.mp4")
-            if await self._extract_video_segment(clip_path, prev_end, clip_duration, after_path):
+            if await self._extract_video_segment(
+                clip_path, prev_end, clip_duration, after_path, vf=vf
+            ):
                 concat_parts.append(after_path)
                 temp_files.append(after_path)
             else:
@@ -328,18 +351,20 @@ class VideoSplicer(IVideoSplicer):
         start: float,
         end: float,
         output_path: str,
+        vf: Optional[str] = None,
     ) -> bool:
-        """Extract video-only segment, normalized to 1080x1920@30fps H.264."""
+        """Extract video-only segment, normalized to job resolution@30fps H.264."""
         duration = end - start
         if duration <= 0.05:
             return False
 
+        vf_filter = vf or _vf_normalize(_DEFAULT_W, _DEFAULT_H)
         cmd = [
             "ffmpeg", "-y",
             "-ss", f"{start:.3f}",
             "-i", clip_path,
             "-t", f"{duration:.3f}",
-            "-vf", _VF_NORMALIZE,
+            "-vf", vf_filter,
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
             "-pix_fmt", "yuv420p",
             "-an",
@@ -403,15 +428,17 @@ class VideoSplicer(IVideoSplicer):
         src_path: str,
         output_path: str,
         target_duration: Optional[float] = None,
+        vf: Optional[str] = None,
     ) -> bool:
-        """Force stock footage onto the same 1080x1920@30fps params as extracts."""
+        """Force stock footage onto the same resolution@30fps params as extracts."""
         if not os.path.exists(src_path):
             return False
 
+        vf_filter = vf or _vf_normalize(_DEFAULT_W, _DEFAULT_H)
         cmd = [
             "ffmpeg", "-y",
             "-i", src_path,
-            "-vf", _VF_NORMALIZE,
+            "-vf", vf_filter,
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
             "-pix_fmt", "yuv420p",
             "-an",

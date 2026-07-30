@@ -232,6 +232,10 @@ export interface CreateJobPayload {
   text_emphasis_style_config?: Record<string, any>;
   processing_mode?: "analyze" | "direct";
   custom_hook?: string;
+  // Canvas background (16:9 / 1:1 only)
+  background_mode?: "template" | "upload" | null;
+  background_template_id?: string | null;
+  background_image_data_url?: string | null;
 }
 
 export type UploadJobPayload = Omit<CreateJobPayload, "youtube_url">;

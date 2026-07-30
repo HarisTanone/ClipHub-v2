@@ -310,6 +310,9 @@ async def create_job(
         hook_style_config=request.hook_style_config,
         subtitle_style_config=request.subtitle_style_config,
         text_emphasis_style_config=request.text_emphasis_style_config,
+        background_mode=request.background_mode,
+        background_template_id=request.background_template_id,
+        background_image_data_url=request.background_image_data_url,
         # User ownership
         user_id=user.id,
         # V2 pipeline routing
@@ -438,6 +441,9 @@ async def create_job_from_upload(
             hook_style_config=options.hook_style_config,
             subtitle_style_config=options.subtitle_style_config,
             text_emphasis_style_config=options.text_emphasis_style_config,
+            background_mode=options.background_mode,
+            background_template_id=options.background_template_id,
+            background_image_data_url=options.background_image_data_url,
             user_id=user.id,
             is_superadmin=user.is_superadmin,
             source_type="upload",

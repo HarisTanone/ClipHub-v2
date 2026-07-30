@@ -318,7 +318,7 @@ class PipelineFlags:
 
     @classmethod
     def for_landscape(cls) -> "PipelineFlags":
-        """16:9 — no YOLO, native framing."""
+        """16:9 / 1:1 — no YOLO, no autocenter, no autogrid; raw framing."""
         return cls(
             yolo_enabled=False,
             autocenter_enabled=False,

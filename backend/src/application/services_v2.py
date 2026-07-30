@@ -1227,13 +1227,18 @@ class V2PipelineService:
                         if low not in seen_q:
                             seen_q.add(low)
                             analisa_q.append(kw)
+                from src.infrastructure.canvas_templates import resolution_for_aspect
+
+                out_w, out_h = resolution_for_aspect(job.target_aspect_ratio or "9:16")
                 await self._asset_fetcher.fetch_assets(
                     suggestions,
                     creative_direction,
                     analisa_extra_queries=analisa_q[:24] if analisa_q else None,
+                    target_width=out_w,
+                    target_height=out_h,
                 )
             except TypeError:
-                # Older IAssetFetcher signature without analisa_extra_queries
+                # Older IAssetFetcher signature without analisa_extra_queries / resolution
                 try:
                     await self._asset_fetcher.fetch_assets(suggestions, creative_direction)
                 except Exception as exc:
@@ -1246,6 +1251,8 @@ class V2PipelineService:
         # Only placement=full_frame (or video without behind_person). Never splice
         # behind_person suggestions — those keep the person on screen.
         from src.infrastructure.top_behind_subject_renderer import pick_full_frame_suggestions
+        from src.infrastructure.canvas_templates import resolution_for_aspect as _res_for_aspect
+        _out_w, _out_h = _res_for_aspect(job.target_aspect_ratio or "9:16")
 
         allow_video = bool(getattr(job, "broll_video_footage", True))
         allow_behind = bool(getattr(job, "broll_behind_person", True))
@@ -1290,6 +1297,8 @@ class V2PipelineService:
                         clip_path=input_path,
                         segments=splice_segments,
                         output_path=splice_output,
+                        width=_out_w,
+                        height=_out_h,
                     )
                     if result_path == splice_output and os.path.exists(splice_output):
                         splice_count += 1
@@ -1334,7 +1343,7 @@ class V2PipelineService:
                     continue
 
 
-                # Process each legacy video asset to 1080x1920 and create SpliceSegment
+                # Process each legacy video asset to job resolution and create SpliceSegment
                 legacy_segments = []
                 for idx, s in enumerate(video_suggestions):
                     processed = await legacy_processor.process(
@@ -1343,6 +1352,8 @@ class V2PipelineService:
                         clip_rank=clip.rank,
                         index=idx,
                         output_dir=os.path.join(output_dir, "broll_footage"),
+                        width=_out_w,
+                        height=_out_h,
                     )
                     if processed:
                         legacy_segments.append(SpliceSegment(
@@ -1365,6 +1376,8 @@ class V2PipelineService:
                             clip_path=input_path,
                             segments=legacy_segments,
                             output_path=splice_output,
+                            width=_out_w,
+                            height=_out_h,
                         )
                         if result_path == splice_output and os.path.exists(splice_output):
                             os.rename(splice_output, brolled_path)
@@ -1860,9 +1873,15 @@ class V2PipelineService:
         durations = {clip.rank: max(0.0, clip.end - clip.start) for clip in clips}
         min_starts = {}
         blocked_ranges = {}
+        # Adaptive min_start for short clips (hook may consume most of a short clip).
         hook_duration = float((job_data.get("hook_style_config") or {}).get("duration", 3.0) or 3.0)
         for clip in clips:
-            min_starts[clip.rank] = hook_duration + 0.35 if clip.hook else 1.0
+            clip_dur = max(0.0, clip.end - clip.start)
+            if clip.hook:
+                # Leave room for at least one short emphasis event after hook.
+                min_starts[clip.rank] = min(hook_duration + 0.2, max(0.3, clip_dur * 0.35))
+            else:
+                min_starts[clip.rank] = min(1.0, max(0.2, clip_dur * 0.08))
             blocked = [
                 (suggestion.at_time, suggestion.at_time + suggestion.duration)
                 for suggestion in clip.broll_suggestions
@@ -2035,11 +2054,14 @@ class V2PipelineService:
         initialize_clip_readiness(output_dir)
 
         from src.domain.interfaces_remotion import RemotionRenderConfig
+        from src.infrastructure.canvas_templates import resolution_for_aspect, build_canvas_config
+        res = resolution_for_aspect(job.target_aspect_ratio or "9:16")
         render_config = RemotionRenderConfig(
             concurrency=settings.REMOTION_CONCURRENCY,
             quality=settings.REMOTION_QUALITY,
             enable_threejs=settings.REMOTION_ENABLE_THREEJS,
             enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
+            resolution=res,
         )
 
         # Parallel rendering: 2 clips max (prevents Remotion delayRender timeout on long clips)
@@ -2088,6 +2110,17 @@ class V2PipelineService:
                     text_emphasis_style_config or normalise_text_emphasis_style(None)
                 )
                 cd_dict["content_profile"] = (job.clips_data or {}).get("content_profile", {})
+                # Canvas template/upload for 16:9 and 1:1
+                canvas = (job.clips_data or {}).get("canvas_config")
+                if not canvas and (job.target_aspect_ratio or "") in ("16:9", "1:1"):
+                    canvas = build_canvas_config(
+                        job.target_aspect_ratio,
+                        background_mode=(job.clips_data or {}).get("background_mode"),
+                        background_template_id=(job.clips_data or {}).get("background_template_id"),
+                        background_image_url=(job.clips_data or {}).get("background_image_data_url"),
+                    )
+                if canvas:
+                    cd_dict["canvas_config"] = canvas
                 if clip_reframe and isinstance(clip_reframe, dict):
                     cd_dict["reframe_method"] = clip_reframe.get("method", "")
                     cd_dict["reframe_layout"] = clip_reframe.get("layout", "single")

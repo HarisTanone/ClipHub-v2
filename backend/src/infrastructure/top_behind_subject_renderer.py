@@ -253,42 +253,38 @@ class TopBehindSubjectRenderer:
         bg_blend3 = bg_blend[:, :, None]
 
         out = frame_f.astype(np.float32)
-        # Charcoal→black stage under stock (depth, not flat pure black)
+        # Soft charcoal→black stage under stock (depth; top footage stays hero)
         black_a = float(self.bg_black)
+        yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+        xx = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
         if black_a > 0.01:
-            yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
-            xx = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
-            # Top of stock band stays bright (footage readable); deepen downward
-            # Protect top ~18% — almost no darken so upper footage stays hero
-            top_protect = np.clip((yy - 0.06) / 0.18, 0.0, 1.0)
+            # Protect top band — stock readable
+            top_protect = np.clip((yy - 0.04) / 0.22, 0.0, 1.0)
             top_protect = top_protect * top_protect * (3.0 - 2.0 * top_protect)
-            vert = np.clip((yy - 0.20) / 0.65, 0.0, 1.0)
+            vert = np.clip((yy - 0.18) / 0.70, 0.0, 1.0)
             vert = vert * vert * (3.0 - 2.0 * vert)
             edge_x = np.minimum(xx, 1.0 - xx)
-            side = np.clip(1.0 - edge_x / 0.22, 0.0, 1.0) * 0.22
-            # charcoal lift: never crush to pure 0 — leave residual gray depth
-            dark = np.clip(vert * 0.78 + side, 0.0, 1.0) * black_a * top_protect
+            side = np.clip(1.0 - edge_x / 0.25, 0.0, 1.0) * 0.18
+            dark = np.clip(vert * 0.72 + side, 0.0, 1.0) * black_a * top_protect
             dark3 = (dark * top_alpha)[:, :, None]
-            # Pull toward charcoal (18,18,22 BGR-ish) not pure black
-            charcoal = np.array([18.0, 18.0, 22.0], dtype=np.float32)
-            out = out * (1.0 - dark3) + charcoal[None, None, :] * dark3 * 0.35
+            # Charcoal gray, never pure black crush
+            charcoal = np.array([28.0, 28.0, 32.0], dtype=np.float32)
+            out = out * (1.0 - dark3 * 0.85) + charcoal[None, None, :] * (dark3 * 0.55)
 
         ov = overlay_frame.astype(np.float32)
-        # Depth polish: slight blur on stock so person reads as foreground
-        ov_soft = cv2.GaussianBlur(ov, (0, 0), 1.2)
-        ov = ov * 0.55 + ov_soft * 0.45
-        # Mild dim only mid/bottom of stock — top footage stays clear
+        # Mild depth blur on stock
+        ov_soft = cv2.GaussianBlur(ov, (0, 0), 0.9)
+        ov = ov * 0.70 + ov_soft * 0.30
+        # Dim only lower stock band — top stays clear
         if black_a > 0.01:
-            yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
-            dim_map = 1.0 - (black_a * 0.18 * np.clip((yy - 0.12) / 0.55, 0.0, 1.0))
+            dim_map = 1.0 - (black_a * 0.12 * np.clip((yy - 0.15) / 0.55, 0.0, 1.0))
             ov = ov * dim_map[:, :, None]
         out = out * (1.0 - bg_blend3) + ov * bg_blend3
 
-
-        # Person stays original (already excluded from bg_blend). Optional FX:
+        # Soft contact shadow only (no hard black blob)
         if self.person_shadow and p.max() > 0.01:
-            shadow = cv2.GaussianBlur(p, (21, 21), 0)
-            shadow = shadow * top_alpha * 0.28
+            shadow = cv2.GaussianBlur(p, (31, 31), 0)
+            shadow = shadow * top_alpha * 0.14
             out = out * (1.0 - shadow[:, :, None])
 
         if self.person_outline and p.max() > 0.01:
@@ -296,16 +292,16 @@ class TopBehindSubjectRenderer:
 
         return np.clip(out, 0, 255).astype(np.uint8)
 
+
     def _layout_person_supporting(
         self,
         frame: np.ndarray,
         p: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, dict]:
-        """Shrink person ~20%; keep natural horizontal; gentle vertical ease.
+        """Shrink person ~20%; keep natural X; no black-hole clear.
 
-        Anchor:
-          natural (default) — preserve source X centroid (no center/edge force)
-          center | left | right — explicit pin
+        Gap between old large mask and new small person is filled by stock/
+        gradient via (1-new_p) — never hard charcoal paint (causes black blobs).
         """
         import cv2
 
@@ -356,19 +352,17 @@ class TopBehindSubjectRenderer:
         m_s = cv2.resize(mcrop, (nw, nh), interpolation=cv2.INTER_LINEAR)
         m_s = np.clip(m_s, 0.0, 1.0)
 
-        # Vertical: gentle ease down only if room — do not destroy source layout
-        free_y = max(0, h - nh)
-        base_y = y0p + int(round((ph - nh) * 0.20))  # slight top bias on shrink
+        # Gentle vertical ease — preserve natural composition
+        base_y = y0p + int(round((ph - nh) * 0.35))  # shrink from center-ish
         room_below = max(0, h - (base_y + nh))
-        dy = int(round(room_below * shift * 0.55))
+        dy = int(round(room_below * shift * 0.40))
         ny0 = int(np.clip(base_y + dy, 0, max(0, h - nh)))
 
-        # Horizontal: NATURAL = keep source centroid X (never force center/edge)
+        # NATURAL X = keep source centroid (never force center/edge)
         margin = int(round(w * float(self.person_edge_margin)))
         cx = (x0p + x1p) * 0.5
         side = self.person_anchor
         if side in {"auto", "natural", ""}:
-            # Preserve natural X: scaled crop centered on original person center
             nx0 = int(round(cx - nw * 0.5))
             side = "natural"
         elif side == "left":
@@ -383,17 +377,9 @@ class TopBehindSubjectRenderer:
         nx0 = int(np.clip(nx0, 0, max(0, w - nw)))
         layout["anchor"] = side
 
-        # Clear original person → charcoal fill (stage + stock cover rest)
+        # NO hard charcoal clear — black blobs come from painting old mask.
+        # Keep original frame; paste shrunk person; stock fills gap via new mask.
         frame_out = frame.copy()
-        clear = (p >= 0.35).astype(np.float32)
-        if clear.max() > 0:
-            fill = np.array([18.0, 18.0, 22.0], dtype=np.float32)  # charcoal
-            frame_out = (
-                frame_out.astype(np.float32) * (1.0 - clear[:, :, None])
-                + fill[None, None, :] * clear[:, :, None]
-            )
-            frame_out = np.clip(frame_out, 0, 255).astype(np.uint8)
-
         new_p = np.zeros((h, w), dtype=np.float32)
         y1n, x1n = ny0 + nh, nx0 + nw
         roi = frame_out[ny0:y1n, nx0:x1n].astype(np.float32)
@@ -401,7 +387,11 @@ class TopBehindSubjectRenderer:
         blended = roi * (1.0 - alpha) + crop_s.astype(np.float32) * alpha
         frame_out[ny0:y1n, nx0:x1n] = np.clip(blended, 0, 255).astype(np.uint8)
         new_p[ny0:y1n, nx0:x1n] = np.maximum(new_p[ny0:y1n, nx0:x1n], m_s)
-        new_p = np.where(new_p >= 0.45, 1.0, 0.0).astype(np.float32)
+        # Soft edge on new mask (no hard binary snap → cleaner outline)
+        new_p = np.clip(new_p, 0.0, 1.0)
+        if new_p.max() > 0.01:
+            new_p = cv2.GaussianBlur(new_p, (3, 3), 0)
+            new_p = np.where(new_p >= 0.40, 1.0, 0.0).astype(np.float32)
 
         nys, nxs = np.where(new_p >= 0.5)
         if len(nys):
@@ -413,6 +403,7 @@ class TopBehindSubjectRenderer:
                 ph=int(nys.max() - nys.min() + 1),
             )
         return frame_out, new_p, layout
+
 
 
     def cover_resize(

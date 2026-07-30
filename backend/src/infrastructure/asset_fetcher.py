@@ -86,6 +86,8 @@ class AssetFetcher(IAssetFetcher):
         suggestions: list[BRollSuggestion],
         creative_direction: Optional[CreativeDirection] = None,
         analisa_extra_queries: Optional[list[str]] = None,
+        target_width: int = 1080,
+        target_height: int = 1920,
     ) -> list[BRollSuggestion]:
         """Resolve assets for all suggestions.
 
@@ -94,7 +96,10 @@ class AssetFetcher(IAssetFetcher):
         2. For non-footage or ClipScout failures: fall through to legacy resolution
         3. Returns suggestions with asset_result and/or splice_segment attached
         analisa_extra_queries: ID+EN seeds from json_analisa (footage_keywords/objects).
+        target_width/height: job output resolution for footage normalize.
         """
+        self._target_w = max(2, int(target_width) // 2 * 2)
+        self._target_h = max(2, int(target_height) // 2 * 2)
         if not suggestions:
             return suggestions
 
@@ -162,6 +167,8 @@ class AssetFetcher(IAssetFetcher):
                     clip_rank=0,
                     index=index,
                     output_dir=os.path.join(settings.OUTPUT_DIR, "broll_footage"),
+                    width=getattr(self, "_target_w", 1080),
+                    height=getattr(self, "_target_h", 1920),
                 )
                 if processed_path:
                     suggestion.splice_segment = SpliceSegment(
@@ -237,7 +244,7 @@ class AssetFetcher(IAssetFetcher):
             if not raw_path:
                 continue
 
-            # Process to 1080x1920 and trim
+            # Process to job resolution and trim
             output_dir = os.path.join(settings.OUTPUT_DIR, "broll_footage")
             processed_path = await self._processor.process(
                 raw_path=raw_path,
@@ -245,6 +252,8 @@ class AssetFetcher(IAssetFetcher):
                 clip_rank=0,  # Will be set properly by pipeline
                 index=i,
                 output_dir=output_dir,
+                width=getattr(self, "_target_w", 1080),
+                height=getattr(self, "_target_h", 1920),
             )
 
             # Cleanup raw download

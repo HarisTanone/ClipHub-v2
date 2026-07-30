@@ -167,9 +167,9 @@ class GroqAnalyzer(IGroqAnalyzer):
         eligible_segments = [
             segment
             for segment in transcript.segments
-            if segment.start >= 3.0 and segment.text.strip()
+            if segment.start >= min(3.0, max(0.2, video_duration * 0.05)) and segment.text.strip()
         ]
-        if not eligible_segments or video_duration <= 4.0 or max_suggestions <= 0:
+        if not eligible_segments or video_duration < 1.5 or max_suggestions <= 0:
             return {}
 
         # Keep this a single, small router call even for long Direct Edit videos.
@@ -271,18 +271,20 @@ OUTPUT RAW JSON:
 
             # Anchor every suggestion to a timestamp Whisper actually produced.
             at_time = min(allowed_times, key=lambda timestamp: abs(timestamp - requested_time))
-            if at_time >= video_duration - 1.0:
+            tail = min(1.0, max(0.2, video_duration * 0.06))
+            if at_time >= max(0.5, video_duration - tail):
                 continue
-            if any(abs(at_time - existing["at_time"]) < 4.0 for existing in suggestions):
+            if any(abs(at_time - existing["at_time"]) < min(4.0, max(1.5, video_duration * 0.15)) for existing in suggestions):
                 continue
 
             try:
                 requested_duration = float(item.get("duration", 2.0))
             except (TypeError, ValueError):
                 requested_duration = 2.0
-            duration = min(3.0, max(1.5, requested_duration))
+            max_hold = min(3.0, max(0.8, video_duration * 0.35))
+            duration = min(max_hold, max(0.8, requested_duration))
             duration = min(duration, video_duration - at_time)
-            if duration < 1.0:
+            if duration < 0.6:
                 continue
 
             template = str(item.get("template") or "word_pop_typography")
@@ -698,13 +700,16 @@ OUTPUT RAW JSON only:
         for raw_rank, words in sorted(clips_words.items()):
             rank = int(raw_rank)
             duration = float(clip_durations.get(rank, 0.0) or 0.0)
+            # Adaptive pad: short clips still get b-roll (any duration ≥ 1.5s)
+            lead = min(3.0, max(0.2, duration * 0.08))
+            tail = min(1.0, max(0.2, duration * 0.06))
             clean_words = [
                 word
                 for word in words
-                if 3.0 <= float(word.get("start", -1.0)) < duration - 1.0
+                if lead <= float(word.get("start", -1.0)) < max(lead + 0.1, duration - tail)
                 and str(word.get("word") or "").strip()
             ]
-            if clean_words and duration > 4.0:
+            if clean_words and duration >= 1.5:
                 eligible[rank] = clean_words
         if not eligible:
             return {}
@@ -893,16 +898,19 @@ OUTPUT RAW JSON:
             except (TypeError, ValueError):
                 continue
             at_time = min(allowed_times, key=lambda value: abs(value - requested_time))
-            if at_time < 3.0 or at_time >= duration - 1.0:
+            lead = min(3.0, max(0.2, duration * 0.08))
+            tail = min(1.0, max(0.2, duration * 0.06))
+            if at_time < lead or at_time >= max(lead + 0.1, duration - tail):
                 continue
-            if any(abs(at_time - existing["at_time"]) < 4.0 for existing in items):
+            if any(abs(at_time - existing["at_time"]) < min(4.0, max(1.5, duration * 0.15)) for existing in items):
                 continue
             try:
                 item_duration = float(item.get("duration", 2.25))
             except (TypeError, ValueError):
                 item_duration = 2.25
-            item_duration = min(3.0, max(1.5, item_duration), duration - at_time)
-            if item_duration < 1.0:
+            max_hold = min(3.0, max(0.8, duration * 0.35))
+            item_duration = min(max_hold, max(0.8, item_duration), duration - at_time)
+            if item_duration < 0.6:
                 continue
             template = str(item.get("template") or "word_pop_typography")
             category = str(item.get("visual_category") or "footage")
@@ -957,21 +965,24 @@ OUTPUT RAW JSON:
                 start = float(o.get("start", 0) or 0)
             except (TypeError, ValueError):
                 start = 0.0
-            if start < 3.0 or (duration > 0 and start >= duration - 1.0):
-                start = max(3.0, min(duration * 0.35, duration - 2.0)) if duration > 4 else 3.0
+            lead = min(3.0, max(0.2, duration * 0.08)) if duration > 0 else 0.2
+            tail = min(1.0, max(0.2, duration * 0.06)) if duration > 0 else 0.2
+            if start < lead or (duration > 0 and start >= duration - tail):
+                start = max(lead, min(duration * 0.35, max(lead, duration - max(1.0, tail + 0.5)))) if duration > 1.5 else lead
             kw = (
                 " ".join(str(o.get("query_en") or o.get("query_id") or o.get("word") or "").split())
             )
             if not kw:
                 continue
-            if any(abs(start - item["at_time"]) < 8.0 for item in selected):
+            if any(abs(start - item["at_time"]) < min(8.0, max(1.5, duration * 0.2)) for item in selected):
                 continue
             kw = sanitize_stock_keyword(kw, placement="behind_person") or kw
             placement = "behind_person" if len(selected) % 2 else "full_frame"
+            hold = min(2.25, max(0.8, duration - start - 0.1)) if duration > 0 else 1.5
             selected.append({
                 "at_time": round(start, 3),
                 "keyword": kw[:80],
-                "duration": round(min(2.25, duration - start), 3),
+                "duration": round(hold, 3),
                 "visual_category": "footage",
                 "template": "word_pop_typography",
                 "placement": placement,
@@ -980,6 +991,8 @@ OUTPUT RAW JSON:
                 return sorted(selected, key=lambda item: item["at_time"])
 
         content_words: list[tuple[int, str, float]] = []
+        lead = min(3.0, max(0.2, duration * 0.08)) if duration > 0 else 0.2
+        tail = min(1.0, max(0.2, duration * 0.06)) if duration > 0 else 0.2
         for index, word in enumerate(words):
             raw = str(word.get("word") or "").strip()
             token = re.sub(r"[^0-9A-Za-zÀ-ÿ]+", "", raw).lower()
@@ -987,7 +1000,7 @@ OUTPUT RAW JSON:
                 start = float(word.get("start", -1.0))
             except (TypeError, ValueError):
                 continue
-            if start < 3.0 or start >= duration - 1.0:
+            if start < lead or start >= max(lead + 0.1, duration - tail):
                 continue
             # Offline only: length gate. No hardcoded stop/mood lexicon —
             # primary path is AI visual_entities above.
@@ -1010,13 +1023,14 @@ OUTPUT RAW JSON:
             candidates.append((float(score), start, keyword))
 
         for _score, start, keyword in sorted(candidates, reverse=True):
-            if any(abs(start - item["at_time"]) < 8.0 for item in selected):
+            if any(abs(start - item["at_time"]) < min(8.0, max(1.5, duration * 0.2)) for item in selected):
                 continue
             placement = "behind_person" if len(selected) % 2 else "full_frame"
+            hold = min(2.25, max(0.8, duration - start - 0.1)) if duration > 0 else 1.5
             selected.append({
                 "at_time": round(start, 3),
                 "keyword": keyword[:80],
-                "duration": round(min(2.25, duration - start), 3),
+                "duration": round(hold, 3),
                 "visual_category": "footage",
                 "template": "word_pop_typography",
                 "placement": placement,

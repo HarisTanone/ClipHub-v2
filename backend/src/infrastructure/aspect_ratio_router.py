@@ -1,9 +1,8 @@
 """AspectRatioRouter — Step 6: Set pipeline flags based on target aspect ratio.
 
-Rules (per new_flow.md v0.4):
-- 9:16 → YOLO segmentation ON, AutoCenter ON, AutoGrid ON (optional), hook: text_behind
-- 16:9 → YOLO OFF, AutoCenter OFF, AutoGrid OFF, hook: text_front only
-- 1:1  → fallback to 9:16 policy (conservative)
+Rules:
+- 9:16 → YOLO ON, AutoCenter ON, AutoGrid optional, hook: text_behind
+- 16:9 / 1:1 → YOLO OFF, AutoCenter OFF, AutoGrid OFF, raw framing, hook: text_front
 """
 import logging
 
@@ -21,15 +20,19 @@ class AspectRatioRouter(IAspectRatioRouter):
 
         Args:
             aspect_ratio: "9:16", "16:9", or "1:1"
-            autogrid_enabled: Whether multi-speaker grid is requested (from DB/job)
+            autogrid_enabled: Multi-speaker grid request (honoured only for 9:16)
 
         Returns:
             PipelineFlags with appropriate settings
         """
-        if aspect_ratio != "9:16":
-            logger.info(f"aspect_ratio_router: {aspect_ratio} → detection OFF, native framing")
-            return PipelineFlags.for_landscape()
+        if aspect_ratio == "9:16":
+            logger.info(
+                f"aspect_ratio_router: 9:16 → YOLO ON, autocenter ON, "
+                f"autogrid={bool(autogrid_enabled)}"
+            )
+            return PipelineFlags.for_portrait(autogrid=bool(autogrid_enabled))
 
-        elif aspect_ratio == "9:16":
-            logger.info(f"aspect_ratio_router: 9:16 → YOLO ON, autocenter ON, autogrid={autogrid_enabled}")
-            return PipelineFlags.for_portrait(autogrid=autogrid_enabled)
+        logger.info(
+            f"aspect_ratio_router: {aspect_ratio} → YOLO/autocenter/autogrid OFF, raw framing"
+        )
+        return PipelineFlags.for_landscape()

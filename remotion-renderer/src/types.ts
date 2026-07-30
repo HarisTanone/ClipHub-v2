@@ -45,6 +45,8 @@ export interface CreativeDirection {
   content_profile?: Record<string, any>;
   // v3.1 B-roll motion graphic global style config (rendered in Remotion)
   broll_style_config?: BrollStyleConfig;
+  // Canvas background/template for 16:9 and 1:1
+  canvas_config?: import("./layers/CanvasBackgroundLayer").CanvasConfig;
 }
 
 export type TransitionStyle = "cut" | "fade" | "slide" | "zoom";

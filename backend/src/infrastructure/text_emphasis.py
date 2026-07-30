@@ -279,6 +279,12 @@ def anchor_text_emphasis_response(
             continue
         duration = max(0.0, _safe_float(clip_durations.get(rank), 0))
         min_start = max(0.0, _safe_float(min_starts.get(rank), 1.0))
+        # Adaptive tail pad so short clips still accept emphasis events.
+        tail_pad = min(1.0, max(0.15, duration * 0.08)) if duration > 0 else 0.15
+        max_start = max(min_start + 0.05, duration - tail_pad) if duration > 0 else min_start
+        min_hold = 0.45 if duration < 3.0 else 0.8
+        max_hold = min(2.8, max(0.9, duration * 0.4))
+        gap_min = min(6.0, max(1.2, duration * 0.25))
         accepted: list[dict] = []
 
         for raw in candidates:
@@ -300,17 +306,17 @@ def anchor_text_emphasis_response(
                 continue
             start = max(0.0, _safe_float(phrase_words[0].get("start"), 0))
             spoken_end = max(start, _safe_float(phrase_words[-1].get("end"), start))
-            if start < min_start or start >= duration - 1.0:
+            if start < min_start or start >= max_start:
                 continue
 
             # A short hold makes the phrase readable without shifting its anchor.
-            end = min(duration, max(spoken_end + 0.55, start + 1.65))
-            end = min(end, start + 2.8)
-            if end - start < 1.0:
+            end = min(duration, max(spoken_end + 0.35, start + min_hold))
+            end = min(end, start + max_hold, duration)
+            if end - start < min_hold * 0.75:
                 continue
             if any(_ranges_overlap(start, end, a, b) for a, b in blocked.get(rank, [])):
                 continue
-            if any(abs(start - event["start"]) < 6.0 for event in accepted):
+            if any(abs(start - event["start"]) < gap_min for event in accepted):
                 continue
 
             requested_effect = map_legacy_effect(raw.get("effect") or "hero_punch")
@@ -360,15 +366,19 @@ def _find_fallback_phrase(
 ) -> dict | None:
     """Find the best fallback phrase when AI returned 0 events for a clip.
 
-    Scans all contiguous windows of 2-5 words that start after min_start,
+    Scans all contiguous windows of 1-5 words that start after min_start,
     don't overlap blocked ranges, and picks the one with the longest combined
-    word length (most "substantial" text).
+    word length (most "substantial" text). Works for short clips too.
     """
     best: dict | None = None
     best_length = 0
+    tail_pad = min(1.0, max(0.15, duration * 0.08)) if duration > 0 else 0.15
+    max_start = max(min_start + 0.05, duration - tail_pad) if duration > 0 else min_start
+    min_hold = 0.45 if duration < 3.0 else 0.8
+    max_hold = min(2.8, max(0.9, duration * 0.4))
 
     total = len(words)
-    for phrase_len in range(2, 6):  # 2 to 5 words
+    for phrase_len in range(1, 6):  # 1 to 5 words (short clips need 1-word)
         for start_idx in range(total - phrase_len + 1):
             end_idx = start_idx + phrase_len - 1
             phrase_words = words[start_idx:end_idx + 1]
@@ -378,13 +388,13 @@ def _find_fallback_phrase(
                 continue
 
             start = max(0.0, _safe_float(phrase_words[0].get("start"), 0))
-            if start < min_start or start >= duration - 1.0:
+            if start < min_start or start >= max_start:
                 continue
 
             spoken_end = max(start, _safe_float(phrase_words[-1].get("end"), start))
-            end = min(duration, max(spoken_end + 0.55, start + 1.65))
-            end = min(end, start + 2.8)
-            if end - start < 1.0:
+            end = min(duration, max(spoken_end + 0.35, start + min_hold))
+            end = min(end, start + max_hold, duration)
+            if end - start < min_hold * 0.75:
                 continue
 
             if any(_ranges_overlap(start, end, a, b) for a, b in blocked_ranges):

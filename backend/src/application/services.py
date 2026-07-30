@@ -202,6 +202,10 @@ class JobService:
         hook_style_config: Optional[dict] = None,
         subtitle_style_config: Optional[dict] = None,
         text_emphasis_style_config: Optional[dict] = None,
+        # Canvas background (16:9 / 1:1 only)
+        background_mode: Optional[str] = None,
+        background_template_id: Optional[str] = None,
+        background_image_data_url: Optional[str] = None,
         # User ownership
         user_id: Optional[int] = None,
         # V2 pipeline routing
@@ -261,6 +265,24 @@ class JobService:
         initial_clips_data["broll_image_overlay"] = bool(broll_image_overlay) if broll_enabled else False
         initial_clips_data["broll_behind_person"] = bool(broll_behind_person) if broll_enabled else False
         initial_clips_data["broll_video_footage"] = bool(broll_video_footage) if broll_enabled else False
+        # Background/template only for landscape/square; clear on 9:16
+        if target_aspect_ratio in ("16:9", "1:1"):
+            mode = background_mode or "template"
+            initial_clips_data["background_mode"] = mode
+            if mode == "template":
+                initial_clips_data["background_template_id"] = background_template_id or "dark-studio"
+            elif mode == "upload" and background_image_data_url:
+                # Keep data URL in clips_data (job-scoped). Remotion receives it as image src.
+                initial_clips_data["background_image_data_url"] = background_image_data_url
+            from src.infrastructure.canvas_templates import build_canvas_config
+            canvas = build_canvas_config(
+                target_aspect_ratio,
+                background_mode=initial_clips_data.get("background_mode"),
+                background_template_id=initial_clips_data.get("background_template_id"),
+                background_image_url=initial_clips_data.get("background_image_data_url"),
+            )
+            if canvas:
+                initial_clips_data["canvas_config"] = canvas
         if is_upload_source:
             initial_clips_data["source"] = {
                 "type": "upload",
@@ -720,11 +742,14 @@ class JobService:
                         
                         try:
                             from src.domain.interfaces_remotion import RemotionRenderConfig
+                            from src.infrastructure.canvas_templates import resolution_for_aspect, build_canvas_config
+                            res = resolution_for_aspect(job.target_aspect_ratio or "9:16")
                             render_config = RemotionRenderConfig(
                                 concurrency=settings.REMOTION_CONCURRENCY,
                                 quality=settings.REMOTION_QUALITY,
                                 enable_threejs=settings.REMOTION_ENABLE_THREEJS,
                                 enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
+                                resolution=res,
                             )
                             # Merge custom style configs into creative direction
                             cd_dict = asdict(creative_direction) if creative_direction else {}
@@ -733,6 +758,16 @@ class JobService:
                                     cd_dict["hook_style_config"] = job.clips_data["hook_style_config"]
                                 if job.clips_data.get("subtitle_style_config"):
                                     cd_dict["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
+                                canvas = job.clips_data.get("canvas_config")
+                                if not canvas and (job.target_aspect_ratio or "") in ("16:9", "1:1"):
+                                    canvas = build_canvas_config(
+                                        job.target_aspect_ratio,
+                                        background_mode=job.clips_data.get("background_mode"),
+                                        background_template_id=job.clips_data.get("background_template_id"),
+                                        background_image_url=job.clips_data.get("background_image_data_url"),
+                                    )
+                                if canvas:
+                                    cd_dict["canvas_config"] = canvas
                             else:
                                 # Try re-read from DB as last resort
                                 _fresh = await self._repo.get_by_job_id(job_id)
@@ -810,11 +845,14 @@ class JobService:
                             
                             try:
                                 from src.domain.interfaces_remotion import RemotionRenderConfig
+                                from src.infrastructure.canvas_templates import resolution_for_aspect, build_canvas_config
+                                res = resolution_for_aspect(job.target_aspect_ratio or "9:16")
                                 render_config = RemotionRenderConfig(
                                     concurrency=settings.REMOTION_CONCURRENCY,
                                     quality=settings.REMOTION_QUALITY,
                                     enable_threejs=settings.REMOTION_ENABLE_THREEJS,
                                     enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
+                                    resolution=res,
                                 )
                                 # Merge custom style configs
                                 cd_dict = asdict(creative_direction) if creative_direction else {}
@@ -823,6 +861,16 @@ class JobService:
                                         cd_dict["hook_style_config"] = job.clips_data["hook_style_config"]
                                     if job.clips_data.get("subtitle_style_config"):
                                         cd_dict["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
+                                    canvas = job.clips_data.get("canvas_config")
+                                    if not canvas and (job.target_aspect_ratio or "") in ("16:9", "1:1"):
+                                        canvas = build_canvas_config(
+                                            job.target_aspect_ratio,
+                                            background_mode=job.clips_data.get("background_mode"),
+                                            background_template_id=job.clips_data.get("background_template_id"),
+                                            background_image_url=job.clips_data.get("background_image_data_url"),
+                                        )
+                                    if canvas:
+                                        cd_dict["canvas_config"] = canvas
                                 self._apply_reframe_metadata(
                                     cd_dict, job, reframe_data.get(clip.rank)
                                 )

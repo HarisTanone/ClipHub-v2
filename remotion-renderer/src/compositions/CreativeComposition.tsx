@@ -23,6 +23,7 @@ import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 import { CTALayer } from "../layers/CTALayer";
+import { CanvasBackgroundLayer, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
 
 // Available creative styles
 export type CreativeStyle =
@@ -74,11 +75,15 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
     return result;
   }, [words]);
 
+  const canvas = creativeDirection?.canvas_config;
+  const hasCanvas = Boolean(canvas && canvas.layout);
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
+      {hasCanvas && canvas ? <CanvasBackgroundLayer config={canvas} /> : null}
       {/* Video */}
       {videoPath && (
-        <AbsoluteFill>
+        <AbsoluteFill style={hasCanvas ? videoSlotStyle(canvas?.layout) : undefined}>
           <FramingTransitionLayer
             events={creativeDirection.framing_events}
             style={hookConfig.transitionStyle || creativeDirection.transition_style || "cut"}

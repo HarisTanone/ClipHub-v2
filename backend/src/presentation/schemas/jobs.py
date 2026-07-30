@@ -31,11 +31,25 @@ class JobOptionsBase(BaseModel):
     hook_style_config: Optional[dict] = None
     subtitle_style_config: Optional[dict] = None
     processing_mode: str = "analyze"  # analyze viral moments | direct full-video edit
+    # Canvas background (16:9 / 1:1 only). 9:16 ignores these.
+    background_mode: Optional[str] = None  # "template" | "upload"
+    background_template_id: Optional[str] = None
+    background_image_data_url: Optional[str] = None  # data:image/...;base64,... for upload
+
     @field_validator("target_aspect_ratio")
     @classmethod
     def valid_aspect(cls, v: str) -> str:
         if v not in ("9:16", "16:9", "1:1"):
             raise ValueError("aspect_ratio harus '9:16', '16:9', atau '1:1'")
+        return v
+
+    @field_validator("background_mode")
+    @classmethod
+    def valid_background_mode(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        if v not in ("template", "upload"):
+            raise ValueError("background_mode harus 'template' atau 'upload'")
         return v
 
     @field_validator("hook_engine")

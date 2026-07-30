@@ -84,12 +84,17 @@ class YoloReframeEngine(IYoloReframeEngine):
             return {"output_path": video_path, "person_count": 0, "masks_available": False}
 
         if target_aspect != "9:16":
-            if target_aspect == "1:1":
-                success = await self._center_crop_fallback(video_path, output_path, target_aspect)
-                return {"output_path": output_path if success else video_path, "person_count": 0, "masks_available": False}
-            else:
+            # 16:9 / 1:1: raw framing only — no YOLO/autogrid/autocenter crop.
+            try:
                 shutil.copy2(video_path, output_path)
-                return {"output_path": output_path, "person_count": 0, "masks_available": False}
+                return {
+                    "output_path": output_path if os.path.exists(output_path) else video_path,
+                    "person_count": 0,
+                    "masks_available": False,
+                    "method": "raw_passthrough",
+                }
+            except OSError:
+                return {"output_path": video_path, "person_count": 0, "masks_available": False, "method": "raw_passthrough"}
 
         if self._load_model():
             try:
