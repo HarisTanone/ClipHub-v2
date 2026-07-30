@@ -125,7 +125,7 @@ export function TemplateThumb({
       type="button"
       onClick={onClick}
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-lg border text-left transition-all",
+        "group relative flex w-full flex-col overflow-hidden rounded-lg border text-left transition-all",
         selected
           ? "border-emerald-500 ring-1 ring-emerald-500/40 shadow-[0_0_0_1px_rgba(16,185,129,0.25)]"
           : "border-zinc-800 hover:border-zinc-600",
@@ -245,15 +245,19 @@ export function BackgroundTemplateSection({
       </div>
 
       {mode === "template" && (
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-2 max-h-[420px] overflow-y-auto pr-0.5">
+        <div className="flex gap-1.5 overflow-x-auto pb-1 snap-x mobile-h-scroll">
           {CANVAS_TEMPLATES.map((t) => (
-            <TemplateThumb
+            <div
               key={t.id}
-              template={t}
-              aspectRatio={aspectRatio}
-              selected={templateId === t.id}
-              onClick={() => onTemplateChange(t.id)}
-            />
+              className="shrink-0 w-[calc((100%-0.75rem)/3)] min-w-[88px] snap-start"
+            >
+              <TemplateThumb
+                template={t}
+                aspectRatio={aspectRatio}
+                selected={templateId === t.id}
+                onClick={() => onTemplateChange(t.id)}
+              />
+            </div>
           ))}
         </div>
       )}

@@ -303,23 +303,14 @@ export function JobDetail() {
             </div>
             <Badge variant="default" size="sm">{data.target_aspect_ratio || "9:16"}</Badge>
           </div>
-          {(data.target_aspect_ratio || "9:16") === "9:16" ? (
-            /* 9:16 portrait — horizontal scroll row (snap on mobile) */
-            <div className="flex gap-3 overflow-x-auto p-3 snap-x mobile-h-scroll">
-              {data.clips.map((clip) => (
-                <div key={clip.rank} className="shrink-0 w-[min(72vw,220px)] sm:w-[200px] md:w-[220px] snap-start">
-                  <ClipCard jobId={data.job_id} clip={clip} aspectRatio="9:16" />
-                </div>
-              ))}
-            </div>
-          ) : (
-            /* 16:9 or 1:1 — grid */
-            <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
-              {data.clips.map((clip) => (
-                <ClipCard key={clip.rank} jobId={data.job_id} clip={clip} aspectRatio={data.target_aspect_ratio || "16:9"} />
-              ))}
-            </div>
-          )}
+          {/* Final output always 9:16 — compact phone cards, horizontal scroll */}
+          <div className="flex gap-2 overflow-x-auto p-2.5 snap-x mobile-h-scroll">
+            {data.clips.map((clip) => (
+              <div key={clip.rank} className="shrink-0 w-[min(42vw,132px)] sm:w-[128px] md:w-[136px] snap-start">
+                <ClipCard jobId={data.job_id} clip={clip} aspectRatio="9:16" />
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 
@@ -380,7 +371,7 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
 
   const card = (
     <Card className={cn(
-        "p-0 overflow-hidden h-full flex flex-col rounded-lg transition-colors",
+        "p-0 overflow-hidden h-full flex flex-col rounded-md transition-colors",
         clip.has_final
           ? "hover:border-emerald-500/30 hover:bg-zinc-900/80 cursor-pointer"
           : "border-zinc-800/70 bg-zinc-950/45 cursor-not-allowed"
@@ -398,78 +389,43 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
           ) : (
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(63,63,70,0.28),_rgba(9,9,11,0.96)_68%)]" />
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/35" />
-          <div className="absolute left-2 top-2 flex items-center gap-1.5">
-            <span className="rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-bold text-white">#{clip.rank}</span>
-            {score !== null && <span className="rounded bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold text-white">{score}</span>}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/30" />
+          <div className="absolute left-1 top-1 flex items-center gap-1">
+            <span className="rounded bg-black/80 px-1 py-0.5 text-[8px] font-bold text-white">#{clip.rank}</span>
+            {score !== null && <span className="rounded bg-emerald-500/90 px-1 py-0.5 text-[8px] font-bold text-white">{score}</span>}
           </div>
-          <div className="absolute right-2 top-2">
+          <div className="absolute right-1 top-1">
             {clip.has_final
-              ? <Badge variant="success" size="sm">Ready</Badge>
-              : <span className="inline-flex items-center gap-1 rounded border border-amber-500/20 bg-black/75 px-1.5 py-0.5 text-[9px] font-medium text-amber-300"><Lock className="h-2.5 w-2.5" /> Locked</span>}
+              ? <span className="rounded bg-emerald-500/90 px-1 py-0.5 text-[8px] font-semibold text-white">Ready</span>
+              : <span className="inline-flex items-center gap-0.5 rounded border border-amber-500/20 bg-black/75 px-1 py-0.5 text-[8px] font-medium text-amber-300"><Lock className="h-2 w-2" /></span>}
           </div>
           {clip.has_final ? (
             <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-              <span className="rounded-lg bg-black/65 p-2 text-white">
-                <Play className="h-4 w-4 fill-current" />
+              <span className="rounded-md bg-black/65 p-1.5 text-white">
+                <Play className="h-3 w-3 fill-current" />
               </span>
             </div>
           ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-zinc-700/70 bg-zinc-900/85 text-zinc-400 shadow-lg">
-                {isProcessing ? <LoaderCircle className="h-4 w-4 animate-spin text-amber-300" /> : <Lock className="h-4 w-4" />}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 text-center">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-700/70 bg-zinc-900/85 text-zinc-400">
+                {isProcessing ? <LoaderCircle className="h-3 w-3 animate-spin text-amber-300" /> : <Lock className="h-3 w-3" />}
               </span>
-              <div>
-                <p className="text-[11px] font-medium text-zinc-300">{isProcessing ? "Rendering clip" : "Render unavailable"}</p>
-                <p className="mt-0.5 text-[9px] text-zinc-600">{isProcessing ? "Opens automatically when ready" : "This clip did not finish"}</p>
-              </div>
+              <p className="text-[8px] font-medium text-zinc-400 leading-tight">{isProcessing ? "Rendering…" : "Unavailable"}</p>
             </div>
           )}
-          {clip.duration && (
-            <div className="absolute bottom-2 right-2">
-              <span className="rounded bg-black/80 px-1.5 py-0.5 font-mono text-[9px] text-white">{formatDuration(clip.duration)}</span>
+          {clip.duration ? (
+            <div className="absolute bottom-1 right-1">
+              <span className="rounded bg-black/80 px-1 py-0.5 font-mono text-[8px] text-white">{formatDuration(clip.duration)}</span>
             </div>
-          )}
+          ) : null}
         </div>
-        <div className="p-3 flex-1 flex flex-col gap-2">
-          <p className="text-[12px] text-zinc-100 font-semibold line-clamp-2 leading-snug">
+        <div className="px-1.5 py-1.5 flex-1 flex flex-col gap-0.5 min-h-0">
+          <p className="text-[10px] text-zinc-100 font-medium line-clamp-2 leading-snug">
             {clip.hook || `Clip ${clip.rank}`}
           </p>
-          {clip.reason && <p className="text-[10px] text-zinc-600 line-clamp-2 leading-relaxed">{clip.reason}</p>}
-          {(clip.virality?.score != null || clip.virality?.total != null || clip.cta?.text || (clip.visual_entities?.length ?? 0) > 0 || (clip.object_overlay_events?.length ?? 0) > 0) && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {(clip.virality?.score != null || clip.virality?.total != null) && (
-                <span
-                  className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300"
-                  title={(clip.virality.factors || []).join(" · ")}
-                >
-                  viral {Math.round(Number(clip.virality.score ?? clip.virality.total))}
-                </span>
-              )}
-              {clip.cta?.text && (
-                <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-400 truncate max-w-[140px]" title={clip.cta.text}>
-                  CTA · {clip.cta.text}
-                </span>
-              )}
-              {(clip.visual_entities?.length ?? 0) > 0 && (
-                <span
-                  className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] text-sky-300"
-                  title={(clip.visual_entities || []).map((e) => e.word || e.label || e.query_en).filter(Boolean).join(" · ")}
-                >
-                  AI · {clip.visual_entities!.length} entity
-                </span>
-              )}
-              {(clip.object_overlay_events?.length ?? 0) > 0 && (
-                <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[9px] text-violet-300">
-                  overlay · {clip.object_overlay_events!.length}
-                </span>
-              )}
-            </div>
-          )}
-          <div className="mt-auto flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
-            {clip.duration > 0 ? <span className="font-mono">{timeline}</span> : <span>Awaiting clip metadata</span>}
-            {clip.has_words && <span>{clip.word_count} words</span>}
-            {!clip.has_final && <span className={isProcessing ? "text-amber-400" : "text-zinc-600"}>{isProcessing ? "processing" : "unavailable"}</span>}
+          <div className="mt-auto flex items-center gap-1 text-[8px] text-zinc-500 truncate">
+            {clip.duration > 0 ? <span className="font-mono truncate">{timeline}</span> : <span className="truncate">…</span>}
+            {!clip.has_final && <span className={cn("shrink-0", isProcessing ? "text-amber-400" : "text-zinc-600")}>{isProcessing ? "…" : "n/a"}</span>}
           </div>
         </div>
       </Card>

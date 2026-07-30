@@ -2326,8 +2326,9 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
   }, [style.animation]);
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 h-full">
-      <div className="xl:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800">
+    <div className="grid grid-cols-1 lg:grid-cols-12 h-full min-h-0 overflow-hidden">
+      {/* Left scrolls; right Live Preview stays put */}
+      <div className="lg:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800 min-h-0">
         {/* Presets */}
         <Section title="Quick Presets">
           <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
@@ -2528,13 +2529,13 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
         </Section>
       </div>
 
-      {/* Preview */}
-      <div className="xl:col-span-4 p-4 flex flex-col items-center bg-zinc-950 overflow-y-auto">
+      {/* Preview — fixed while left panel scrolls */}
+      <div className="lg:col-span-4 p-4 flex flex-col items-center bg-zinc-950 min-h-0 overflow-y-auto">
         <div className="mb-3 flex w-full items-center justify-between gap-2">
           <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
           <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{activeAnimation.label}</span>
         </div>
-        <div className="relative w-full max-w-[240px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
+        <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
           {canvas ? (
             <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
               {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
@@ -2631,8 +2632,9 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 h-full">
-      <div className="xl:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800">
+    <div className="grid grid-cols-1 lg:grid-cols-12 h-full min-h-0 overflow-hidden">
+      {/* Left scrolls; right Live Preview stays put */}
+      <div className="lg:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800 min-h-0">
         <Section title="Quick Presets">
           <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
             {visibleSubtitlePresets.map(p => (
@@ -2817,13 +2819,13 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
         </Section>
       </div>
 
-      {/* Preview */}
-      <div className="xl:col-span-4 p-4 flex flex-col items-center bg-zinc-950 overflow-y-auto">
+      {/* Preview — fixed while left panel scrolls */}
+      <div className="lg:col-span-4 p-4 flex flex-col items-center bg-zinc-950 min-h-0 overflow-y-auto">
         <div className="mb-3 flex w-full items-center justify-between gap-2">
           <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
           <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
         </div>
-        <div className="relative w-full max-w-[240px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
+        <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
           {canvas ? (
             <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
               {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
