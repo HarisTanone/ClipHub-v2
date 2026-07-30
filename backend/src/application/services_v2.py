@@ -1996,28 +1996,44 @@ class V2PipelineService:
         reframe_data: dict,
         prosody_results: dict | None = None,
     ) -> None:
-        """Run hook + subtitle render via Remotion only."""
+        """Run hook + subtitle via Remotion and/or HyperFrames per-engine choice."""
+        from src.infrastructure.hf_style_catalog import resolve_engine
+
         # Load custom style configs
         hook_style_config = {}
         subtitle_style_config = {}
         if job.clips_data:
-            hook_style_config = job.clips_data.get("hook_style_config", {})
-            subtitle_style_config = job.clips_data.get("subtitle_style_config", {})
+            hook_style_config = job.clips_data.get("hook_style_config", {}) or {}
+            subtitle_style_config = job.clips_data.get("subtitle_style_config", {}) or {}
         text_emphasis_style_config = normalise_text_emphasis_style(
             (job.clips_data or {}).get("text_emphasis_style_config")
         )
 
+        hook_engine = resolve_engine(hook_style_config)
+        sub_engine = resolve_engine(subtitle_style_config)
+
         logger.info(
-            f"[{job_id}] Render style: hook_anim={hook_style_config.get('animation', 'N/A')}, "
-            f"hook_color={hook_style_config.get('color', 'N/A')}, "
-            f"hook_glow={hook_style_config.get('glowEnabled', 'N/A')}, "
-            f"hook_config_keys={list(hook_style_config.keys()) if hook_style_config else '[]'}, "
+            f"[{job_id}] Render style: hook_engine={hook_engine} "
+            f"hook_anim={hook_style_config.get('animation', 'N/A')}, "
+            f"sub_engine={sub_engine} "
             f"sub_font={subtitle_style_config.get('fontFamily', 'N/A')}"
         )
 
-        # ═══ Remotion is required for hook + subtitle fidelity ═══
+        # Remotion still needed for canvas / AI text / mixed engines.
+        # Pure HF (both engines hyperframes + no canvas/ai-text) can skip.
+        need_canvas = bool((job.clips_data or {}).get("canvas_config")) or (
+            (job.target_aspect_ratio or "") in ("16:9", "1:1")
+        )
+        need_ai_text = bool(getattr(job, "text_emphasis_enabled", False) or (job.clips_data or {}).get("text_emphasis_enabled"))
+        pure_hf = (
+            hook_engine == "hyperframes"
+            and sub_engine == "hyperframes"
+            and not need_canvas
+            and not need_ai_text
+        )
+
         use_remotion = False
-        if self._remotion_adapter:
+        if not pure_hf and self._remotion_adapter:
             try:
                 if await self._remotion_adapter.health_check():
                     use_remotion = True
@@ -2028,9 +2044,26 @@ class V2PipelineService:
             except Exception as e:
                 logger.warning(f"[{job_id}] Remotion unavailable: {e}")
 
+        if pure_hf:
+            await self._render_via_hyperframes_engines(
+                job, job_id, clips, clips_with_words,
+                output_dir, trim_results,
+                hook_style_config, subtitle_style_config,
+            )
+            return
+
         if not use_remotion:
+            # Fallback: if Remotion down but HF selected for both, try HF path
+            if hook_engine == "hyperframes" and sub_engine == "hyperframes":
+                await self._render_via_hyperframes_engines(
+                    job, job_id, clips, clips_with_words,
+                    output_dir, trim_results,
+                    hook_style_config, subtitle_style_config,
+                )
+                return
             raise RuntimeError(
-                "Remotion is required for hook/subtitle rendering. "
+                "Remotion is required for hook/subtitle rendering "
+                f"(hook={hook_engine}, sub={sub_engine}). "
                 "FFmpeg fallback is disabled so final output matches preview."
             )
 
@@ -2041,6 +2074,14 @@ class V2PipelineService:
             text_emphasis_style_config,
             prosody_results=prosody_results or {},
         )
+        # Post-Remotion HF overlays when user picked HF for hook and/or subtitle
+        if hook_engine == "hyperframes" or sub_engine == "hyperframes":
+            await self._apply_hf_hook_subtitle_pass(
+                job, job_id, clips, clips_with_words,
+                output_dir, trim_results,
+                hook_style_config, subtitle_style_config,
+                hook_engine=hook_engine, sub_engine=sub_engine,
+            )
 
     async def _render_via_remotion(
         self, job, job_id, clips, clips_with_words, creative_direction,
@@ -2105,6 +2146,19 @@ class V2PipelineService:
 
                 clip_reframe = reframe_data.get(clip.rank)
 
+                from src.infrastructure.hf_style_catalog import resolve_engine as _resolve_eng
+                hook_eng = _resolve_eng(hook_style_config)
+                sub_eng = _resolve_eng(subtitle_style_config)
+                # When HF owns hook/sub, blank Remotion overlays so HF pass paints them.
+                remotion_hook_text = "" if hook_eng == "hyperframes" else clip_hook
+                remotion_words = [] if sub_eng == "hyperframes" else clip_words
+                if hook_eng == "hyperframes":
+                    sub_min = 0.0  # HF hook may not occupy full window — keep words if remotion sub
+                    if sub_eng != "hyperframes":
+                        remotion_words = sanitize_subtitle_words(
+                            clip_words_raw, clip_duration, subtitle_min_start=0.0
+                        )
+
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")
 
@@ -2164,8 +2218,8 @@ class V2PipelineService:
                         output_path=out_path,
                         clip_rank=clip.rank,
                         config=render_config,
-                        words=clip_words,
-                        hook_text=clip_hook,
+                        words=remotion_words,
+                        hook_text=remotion_hook_text,
                         hook_style=hook_style,
                         text_emphasis_events=clip.text_emphasis_events,
                         broll_events=self._build_broll_events(clip, job.broll_motion_style),
@@ -2193,6 +2247,192 @@ class V2PipelineService:
             )
 
         self._emit(job_id, 14, "remotion_render", "complete")
+
+    async def _render_via_hyperframes_engines(
+        self,
+        job,
+        job_id: str,
+        clips: list,
+        clips_with_words: dict,
+        output_dir: str,
+        trim_results: dict[int, bool],
+        hook_style_config: dict,
+        subtitle_style_config: dict,
+    ) -> None:
+        """Pure HyperFrames path: both hook+subtitle use fixed HF templates."""
+        self._emit(job_id, 13, "hyperframes_render", "start")
+        await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
+        initialize_clip_readiness(output_dir)
+        errors = await self._apply_hf_hook_subtitle_pass(
+            job, job_id, clips, clips_with_words,
+            output_dir, trim_results,
+            hook_style_config, subtitle_style_config,
+            hook_engine="hyperframes", sub_engine="hyperframes",
+            base_is_input=True,
+        )
+        if errors:
+            raise RuntimeError(
+                "HyperFrames hook/subtitle render failed: " + "; ".join(errors[:5])
+            )
+        self._emit(job_id, 14, "hyperframes_render", "complete")
+
+    async def _apply_hf_hook_subtitle_pass(
+        self,
+        job,
+        job_id: str,
+        clips: list,
+        clips_with_words: dict,
+        output_dir: str,
+        trim_results: dict[int, bool],
+        hook_style_config: dict,
+        subtitle_style_config: dict,
+        *,
+        hook_engine: str,
+        sub_engine: str,
+        base_is_input: bool = False,
+    ) -> list[str]:
+        """Overlay HF hook and/or subtitle templates onto clip finals.
+
+        base_is_input=True → start from brolled/reframed/base (pure HF path).
+        base_is_input=False → start from existing *_final.mp4 (post-Remotion).
+        """
+        from src.infrastructure.hf_style_catalog import (
+            hook_events_from_text,
+            resolve_hf_template,
+            subtitle_events_from_words,
+        )
+        from src.infrastructure.hyperframes_adapter import get_hyperframes_adapter
+
+        hf = get_hyperframes_adapter()
+        # Force enable for explicit user engine choice even if polish flag off
+        health = await hf.health()
+        healthy = str(health.get("status") or "").lower() in {"healthy", "ok"} or health.get("http_status") == 200
+        if not healthy:
+            return [f"HyperFrames down: {health}"]
+
+        hook_tpl = resolve_hf_template(hook_style_config, kind="hook")
+        sub_tpl = resolve_hf_template(subtitle_style_config, kind="subtitle")
+        hook_dur = float((hook_style_config or {}).get("duration", 3.0) or 3.0)
+        errors: list[str] = []
+        applied = 0
+
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            brolled = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+            reframed = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+            base = f"{output_dir}/clip_{clip.rank:02d}.mp4"
+            final = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+            if base_is_input:
+                in_path = (
+                    brolled if os.path.exists(brolled)
+                    else reframed if os.path.exists(reframed)
+                    else base
+                )
+            else:
+                in_path = final if os.path.exists(final) else (
+                    brolled if os.path.exists(brolled)
+                    else reframed if os.path.exists(reframed)
+                    else base
+                )
+            if not os.path.exists(in_path):
+                errors.append(f"clip {clip.rank}: input missing")
+                continue
+
+            clip_dur = max(0.0, float(clip.end) - float(clip.start))
+            current = in_path
+            tmp_hook = f"{output_dir}/clip_{clip.rank:02d}_hf_hook.mp4"
+            tmp_sub = f"{output_dir}/clip_{clip.rank:02d}_hf_sub.mp4"
+
+            try:
+                if hook_engine == "hyperframes":
+                    events = hook_events_from_text(clip.hook or "", hook_dur)
+                    if events:
+                        r = await hf.render_polish(
+                            base_video=current,
+                            events=events,
+                            output_path=tmp_hook,
+                            template=hook_tpl,
+                            duration=clip_dur,
+                            job_id=job_id,
+                            clip_id=f"{clip.rank}-hook",
+                            user_id=getattr(job, "user_id", None),
+                            force=True,
+                        )
+                        if r.get("ok") and os.path.exists(tmp_hook):
+                            current = tmp_hook
+                        else:
+                            errors.append(f"clip {clip.rank} hook: {r}")
+                            continue
+
+                if sub_engine == "hyperframes":
+                    words = clips_with_words.get(clip.rank, []) or []
+                    # Skip words during hook window when remotion/HF hook already on
+                    sub_words = []
+                    for w in words:
+                        if not isinstance(w, dict):
+                            continue
+                        try:
+                            st = float(w.get("start", 0) or 0)
+                        except (TypeError, ValueError):
+                            st = 0.0
+                        if hook_engine == "hyperframes" and st < hook_dur:
+                            continue
+                        sub_words.append(w)
+                    events = subtitle_events_from_words(sub_words)
+                    if events:
+                        r = await hf.render_polish(
+                            base_video=current,
+                            events=events,
+                            output_path=tmp_sub,
+                            template=sub_tpl,
+                            duration=clip_dur,
+                            job_id=job_id,
+                            clip_id=f"{clip.rank}-sub",
+                            user_id=getattr(job, "user_id", None),
+                            force=True,
+                        )
+                        if r.get("ok") and os.path.exists(tmp_sub):
+                            current = tmp_sub
+                        else:
+                            errors.append(f"clip {clip.rank} sub: {r}")
+                            continue
+
+                if current != final:
+                    try:
+                        os.replace(current, final)
+                    except OSError:
+                        shutil.move(current, final)
+                elif base_is_input and current == in_path:
+                    # No events — still copy base → final so readiness marks
+                    import shutil as _sh
+                    _sh.copy2(in_path, final)
+
+                for p in (tmp_hook, tmp_sub):
+                    if p != final and os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except OSError:
+                            pass
+
+                mark_clip_ready(output_dir, clip.rank)
+                applied += 1
+                try:
+                    clip.hyperframes_polish = {
+                        **(getattr(clip, "hyperframes_polish", None) or {}),
+                        "hook_engine": hook_engine,
+                        "subtitle_engine": sub_engine,
+                        "hook_template": hook_tpl if hook_engine == "hyperframes" else None,
+                        "subtitle_template": sub_tpl if sub_engine == "hyperframes" else None,
+                    }
+                except Exception:
+                    pass
+            except Exception as exc:
+                errors.append(f"clip {clip.rank}: {exc}")
+                logger.warning(f"[{job_id}] HF engine pass clip {clip.rank}: {exc}")
+
+        logger.info(f"[{job_id}] HF hook/sub pass: {applied}/{len(clips)} clips errors={len(errors)}")
+        return errors
 
     async def _apply_hyperframes_polish(
         self,

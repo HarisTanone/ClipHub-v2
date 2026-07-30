@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { jobs, presets as presetsApi, type Preset } from "@/lib/api";
@@ -8,6 +8,16 @@ import { RangeSlider } from "@/components/ui/RangeSlider";
 import { buildCanvasConfig, gradientCss } from "@/lib/canvasTemplates";
 import { CanvasAccents } from "@/components/BackgroundTemplateSection";
 import type { BackgroundMode } from "@/components/BackgroundTemplateSection";
+import {
+  ENGINE_NOTES,
+  HF_HOOK_STYLES,
+  HF_SUBTITLE_STYLES,
+  type RenderEngine,
+  resolveEngine,
+  defaultHfHookId,
+  defaultHfSubtitleId,
+  type HfStylePreset,
+} from "@/lib/renderEngines";
 
 type OptionMeta = {
   label: string;
@@ -56,6 +66,10 @@ function useGoogleFont(fontFamily: string) {
 export interface HookStyle {
   animation: string;
   text: string;
+  /** remotion = full custom (default); hyperframes = fixed fast templates */
+  engine?: RenderEngine;
+  /** HF template id when engine=hyperframes */
+  hf_template?: string;
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
@@ -113,6 +127,8 @@ export interface HookStyle {
 
 export interface SubtitleStyle {
   stylePreset: SubtitleVisualPreset;
+  engine?: RenderEngine;
+  hf_template?: string;
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
@@ -200,6 +216,8 @@ export interface TextEmphasisStyle {
 export const DEFAULT_HOOK_STYLE: HookStyle = {
   animation: "podcast_lower_third",
   text: "",
+  engine: "remotion",
+  hf_template: defaultHfHookId(),
   fontFamily: "Barlow Condensed",
   fontSize: 52,
   fontWeight: "900",
@@ -251,6 +269,8 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   stylePreset: "classic",
+  engine: "remotion",
+  hf_template: defaultHfSubtitleId(),
   fontFamily: "Poppins",
   fontSize: 34,
   fontWeight: "700",
@@ -2294,10 +2314,182 @@ function PaginationControls({ page, totalItems, onPageChange, label }: { page: n
   );
 }
 
+// ─── Engine picker (Remotion | HyperFrames) ──────────────────────────────────
+
+function EnginePicker({
+  engine,
+  onChange,
+  kind,
+}: {
+  engine: RenderEngine;
+  onChange: (e: RenderEngine) => void;
+  kind: "hook" | "subtitle";
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 overflow-hidden">
+      <div className="grid grid-cols-2 gap-0.5 p-1">
+        {(["remotion", "hyperframes"] as RenderEngine[]).map((id) => {
+          const meta = ENGINE_NOTES[id];
+          const active = engine === id;
+          const Icon = id === "remotion" ? Clapperboard : Zap;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onChange(id)}
+              className={cn(
+                "flex flex-col items-start gap-1 rounded-lg px-3 py-2.5 text-left transition-all",
+                active
+                  ? id === "remotion"
+                    ? "bg-emerald-500/15 ring-1 ring-emerald-500/40 text-emerald-100"
+                    : "bg-cyan-500/15 ring-1 ring-cyan-500/40 text-cyan-100"
+                  : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+              )}
+            >
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold">
+                <Icon className="h-3.5 w-3.5" />
+                {meta.label}
+                <span className={cn(
+                  "ml-auto rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide",
+                  active ? "bg-white/10" : "bg-zinc-800 text-zinc-500",
+                )}>{meta.badge}</span>
+              </span>
+              <span className="text-[9px] leading-snug opacity-80">
+                {meta.speed} · {meta.quality}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="border-t border-zinc-800/80 px-3 py-2">
+        <p className="text-[10px] leading-relaxed text-zinc-400">
+          <span className="font-semibold text-zinc-300">Note · {kind}: </span>
+          {ENGINE_NOTES[engine].note}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function HfStyleGrid({
+  items,
+  activeId,
+  onSelect,
+}: {
+  items: HfStylePreset[];
+  activeId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {items.map((s) => {
+        const active = activeId === s.id;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onSelect(s.id)}
+            className={cn(
+              "rounded-lg border px-3 py-2.5 text-left transition-all",
+              active
+                ? "border-cyan-500/50 bg-cyan-500/10 ring-1 ring-cyan-500/30"
+                : "border-zinc-800 bg-zinc-950/50 hover:border-zinc-700",
+            )}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold text-zinc-100">{s.name}</p>
+              <span
+                className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase"
+                style={{ color: s.accent, backgroundColor: `${s.accent}22`, border: `1px solid ${s.accent}44` }}
+              >
+                {s.mood}
+              </span>
+            </div>
+            <p className="mt-1 text-[9px] text-zinc-500 line-clamp-2">{s.desc}</p>
+            <div
+              className="mt-2 flex h-10 items-center justify-center rounded-md text-[11px] font-black tracking-wide"
+              style={{
+                background: `linear-gradient(135deg, ${s.accent}33, rgba(0,0,0,0.6))`,
+                color: s.accent,
+                border: `1px solid ${s.accent}44`,
+              }}
+            >
+              {s.preview}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function HfLivePreview({
+  preset,
+  sample,
+  kind,
+  aspectRatio,
+  thumbnailUrl,
+}: {
+  preset: HfStylePreset | undefined;
+  sample: string;
+  kind: "hook" | "subtitle";
+  aspectRatio: string;
+  thumbnailUrl?: string;
+}) {
+  const accent = preset?.accent || "#22d3ee";
+  const label = sample || preset?.preview || (kind === "hook" ? "HOOK TEXT" : "subtitle words");
+  return (
+    <div className="w-full max-w-[220px]">
+      <p className="mb-2 text-center text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+        Live Preview · HyperFrames
+      </p>
+      <div
+        className="relative mx-auto overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-xl"
+        style={{ aspectRatio: "9/16", width: "100%" }}
+      >
+        {thumbnailUrl ? (
+          <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-70" />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 to-zinc-950" />
+        )}
+        <div className="absolute inset-x-2 bottom-8 flex justify-center">
+          <div
+            className="w-full rounded-lg px-2.5 py-2 text-center text-[11px] font-black leading-tight shadow-lg"
+            style={{
+              background: kind === "hook" && preset?.id.includes("tape")
+                ? accent
+                : `linear-gradient(135deg, rgba(12,12,16,0.92), rgba(20,20,40,0.88))`,
+              color: kind === "hook" && preset?.id.includes("tape") ? "#111" : "#f8fafc",
+              borderLeft: `4px solid ${accent}`,
+              boxShadow: `0 0 24px ${accent}55`,
+            }}
+          >
+            {preset?.mood && (
+              <div className="mb-0.5 text-[7px] font-semibold uppercase tracking-widest opacity-60">
+                {preset.mood}
+              </div>
+            )}
+            {label}
+          </div>
+        </div>
+        <div className="absolute left-2 top-2 rounded bg-cyan-500/20 px-1.5 py-0.5 text-[8px] font-bold uppercase text-cyan-300">
+          HF · {preset?.name || "template"}
+        </div>
+      </div>
+      <p className="mt-2 text-center text-[9px] text-zinc-500">
+        Fast template · style fixed · {aspectRatio} content → 9:16 out
+      </p>
+    </div>
+  );
+}
+
 // ─── Hook Editor ─────────────────────────────────────────────────────────────
 
 function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackground }: { style: HookStyle; onChange: (s: HookStyle) => void; aspectRatio: string; thumbnailUrl?: string; canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null }) {
   const update = (patch: Partial<HookStyle>) => onChange({ ...style, ...patch });
+  const engine = resolveEngine(style.engine);
+  const hfId = style.hf_template || defaultHfHookId();
+  const hfPreset = HF_HOOK_STYLES.find((s) => s.id === hfId) || HF_HOOK_STYLES[0];
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [presetPage, setPresetPage] = useState(1);
   const [animationPage, setAnimationPage] = useState(() => getPageForIndex(HOOK_ANIMATIONS.indexOf(style.animation)));
@@ -2322,15 +2514,44 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
   }, [style.animation]);
 
   useEffect(() => {
-    if (!HOOK_ANIMATIONS.includes(style.animation)) {
+    if (engine === "remotion" && !HOOK_ANIMATIONS.includes(style.animation)) {
       update({ animation: DEFAULT_HOOK_STYLE.animation });
     }
-  }, [style.animation]);
+  }, [style.animation, engine]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 h-full min-h-0 overflow-hidden">
       {/* Left scrolls; right Live Preview stays put */}
       <div className="lg:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800 min-h-0">
+        <Section title="Render Engine">
+          <EnginePicker
+            engine={engine}
+            kind="hook"
+            onChange={(e) => update({
+              engine: e,
+              hf_template: style.hf_template || defaultHfHookId(),
+            })}
+          />
+        </Section>
+
+        {engine === "hyperframes" ? (
+          <>
+            <Section title="HyperFrames Hook Styles">
+              <HfStyleGrid
+                items={HF_HOOK_STYLES}
+                activeId={hfId}
+                onSelect={(id) => update({ engine: "hyperframes", hf_template: id })}
+              />
+            </Section>
+            <Section title="Hook Text">
+              <textarea value={style.text} onChange={(e) => update({ text: e.target.value })} placeholder="Leave empty for AI-generated hook..." rows={2} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-zinc-500" />
+            </Section>
+            <Section title="Duration">
+              <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
+            </Section>
+          </>
+        ) : (
+          <>
         {/* Presets */}
         <Section title="Quick Presets">
           <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
@@ -2340,7 +2561,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                 preset={p}
                 active={activePreset === p.id}
                 onClick={() => {
-                  onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text } as HookStyle);
+                  onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text, engine: "remotion" } as HookStyle);
                   setActivePreset(p.id);
                 }}
               />
@@ -2529,10 +2750,22 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             </div>
           </div>
         </Section>
+          </>
+        )}
       </div>
 
       {/* Preview — fixed col, vertically centered while left controls scroll */}
       <div className="lg:col-span-4 flex min-h-0 flex-col items-center justify-center overflow-hidden bg-zinc-950 p-4">
+        {engine === "hyperframes" ? (
+          <HfLivePreview
+            preset={hfPreset}
+            sample={style.text || hfPreset?.preview || "HOOK TEXT"}
+            kind="hook"
+            aspectRatio={aspectRatio}
+            thumbnailUrl={thumbnailUrl}
+          />
+        ) : (
+          <>
         <div className="mb-3 flex w-full items-center justify-between gap-2">
           <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
           <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{activeAnimation.label}</span>
@@ -2578,6 +2811,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.gradientEnabled ? style.gradientTo : style.color }}>{style.gradientEnabled ? "Gradient" : style.color}</p></div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2587,6 +2822,9 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
 
 function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadmin, isPremium, userFeatures, canvasBackground }: { style: SubtitleStyle; onChange: (s: SubtitleStyle) => void; aspectRatio: string; thumbnailUrl?: string; isSuperadmin?: boolean; isPremium?: boolean; userFeatures?: string[]; canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null }) {
   const update = (patch: Partial<SubtitleStyle>) => onChange({ ...style, ...patch });
+  const engine = resolveEngine(style.engine);
+  const hfId = style.hf_template || defaultHfSubtitleId();
+  const hfPreset = HF_SUBTITLE_STYLES.find((s) => s.id === hfId) || HF_SUBTITLE_STYLES[0];
   const [newWord, setNewWord] = useState("");
   const [activeWordIdx, setActiveWordIdx] = useState(0);
   const [activePreset, setActivePreset] = useState<string | null>(null);
@@ -2637,6 +2875,27 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
     <div className="grid grid-cols-1 lg:grid-cols-12 h-full min-h-0 overflow-hidden">
       {/* Left scrolls; right Live Preview stays put */}
       <div className="lg:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800 min-h-0">
+        <Section title="Render Engine">
+          <EnginePicker
+            engine={engine}
+            kind="subtitle"
+            onChange={(e) => update({
+              engine: e,
+              hf_template: style.hf_template || defaultHfSubtitleId(),
+            })}
+          />
+        </Section>
+
+        {engine === "hyperframes" ? (
+          <Section title="HyperFrames Subtitle Styles">
+            <HfStyleGrid
+              items={HF_SUBTITLE_STYLES}
+              activeId={hfId}
+              onSelect={(id) => update({ engine: "hyperframes", hf_template: id })}
+            />
+          </Section>
+        ) : (
+          <>
         <Section title="Quick Presets">
           <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
             {visibleSubtitlePresets.map(p => (
@@ -2645,7 +2904,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                 preset={p}
                 active={activePreset === p.id}
                 onClick={() => {
-                  onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords } as SubtitleStyle);
+                  onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords, engine: "remotion" } as SubtitleStyle);
                   setActivePreset(p.id);
                 }}
               />
@@ -2819,10 +3078,22 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             </div>
           )}
         </Section>
+          </>
+        )}
       </div>
 
       {/* Preview — fixed col, vertically centered while left controls scroll */}
       <div className="lg:col-span-4 flex min-h-0 flex-col items-center justify-center overflow-hidden bg-zinc-950 p-4">
+        {engine === "hyperframes" ? (
+          <HfLivePreview
+            preset={hfPreset}
+            sample={hfPreset?.preview || "subtitle words"}
+            kind="subtitle"
+            aspectRatio={aspectRatio}
+            thumbnailUrl={thumbnailUrl}
+          />
+        ) : (
+          <>
         <div className="mb-3 flex w-full items-center justify-between gap-2">
           <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
           <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
@@ -2961,6 +3232,8 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Highlight</span><p className="truncate" style={{ color: style.highlightColor }}>{style.highlightColor}</p></div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

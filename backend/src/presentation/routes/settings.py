@@ -755,6 +755,28 @@ async def get_model_status(user: CurrentUser = Depends(get_current_user)):
     }
 
 
+@router.get("/render-engines")
+async def get_render_engines_catalogue(user: CurrentUser = Depends(get_current_user)):
+    """Remotion vs HyperFrames notes + HF hook/subtitle/polish template ids."""
+    from src.infrastructure.hf_style_catalog import catalogue
+    from src.infrastructure.hyperframes_adapter import get_hyperframes_adapter
+
+    cat = catalogue()
+    live: list[str] = []
+    try:
+        live = await get_hyperframes_adapter().list_templates()
+    except Exception:
+        live = []
+    return {
+        "success": True,
+        "data": {
+            **cat,
+            "live_templates": live,
+            "default_engine": "remotion",
+        },
+    }
+
+
 @router.get("/stack")
 async def get_production_stack_status(user: CurrentUser = Depends(get_current_user)):
     """Local==prod stack readiness: 9router, remotion, hyperframes, hermes flags."""

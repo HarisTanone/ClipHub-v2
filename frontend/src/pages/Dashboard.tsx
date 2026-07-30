@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle, FileVideo } from "lucide-react";
+import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle, FileVideo, Type, Layers, Scan, Frame, Clapperboard, Zap, Palette, Wand2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -97,10 +97,10 @@ export function Dashboard() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3 shrink-0">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain pr-0.5">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-3 shrink-0">
         <Card className="p-4 overflow-hidden">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10 text-emerald-300">
@@ -119,7 +119,7 @@ export function Dashboard() {
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-2.5">
             <StatCard icon={<Activity className="h-4 w-4" />} label="Active" value={stats.active} color="blue" hint={activeJobs.length ? "Running now" : "Queue idle"} />
             <StatCard icon={<CheckCircle className="h-4 w-4" />} label="Completed" value={stats.completed} color="emerald" hint={`${completionRate}% success share`} />
             <StatCard icon={<XCircle className="h-4 w-4" />} label="Failed" value={stats.failed} color="red" hint={`${failedRate}% needs review`} />
@@ -156,8 +156,28 @@ export function Dashboard() {
         </Card>
       </div>
 
-      {/* Model Status (compact 4-col grid) */}
-      <ModelStatusPanel />
+      {/* Real product capabilities — nice-to-have that actually ship */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 shrink-0">
+        {PIPELINE_FEATURES.map((f) => (
+          <div
+            key={f.title}
+            className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-2.5 py-2 hover:border-emerald-500/25 transition-colors"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-emerald-500/20 bg-emerald-500/10 text-emerald-300">
+                <f.icon className="h-3 w-3" />
+              </span>
+              <p className="text-[11px] font-medium text-zinc-200 truncate">{f.title}</p>
+            </div>
+            <p className="mt-1 text-[9px] leading-snug text-zinc-500 line-clamp-2">{f.desc}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Model Status (compact) */}
+      <div className="shrink-0">
+        <ModelStatusPanel />
+      </div>
 
       {/* Toolbar */}
       <Card className="p-3 shrink-0">
@@ -202,8 +222,8 @@ export function Dashboard() {
         </div>
       </Card>
 
-      {/* Job list */}
-      <Card className="flex-1 p-0 flex flex-col">
+      {/* Job list — page scrolls as a whole (no trapped inner viewport) */}
+      <Card className="p-0 flex flex-col shrink-0 mb-1">
         <div className="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-zinc-100">Jobs</h2>
@@ -211,7 +231,7 @@ export function Dashboard() {
           </div>
           <Badge variant="default" size="sm">{PAGE_SIZE} per page</Badge>
         </div>
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div>
           {isLoading && !jobList.length ? (
             <div className="px-4 py-3 space-y-2">
               {Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)}
@@ -333,6 +353,20 @@ export function Dashboard() {
     </div>
   );
 }
+
+/** Shipped capabilities — not roadmap fluff. */
+const PIPELINE_FEATURES = [
+  { icon: Sparkles, title: "AI Highlights", desc: "Virality score + auto clip pick" },
+  { icon: Clapperboard, title: "Dual Engine", desc: "Remotion premium · HF fast" },
+  { icon: Type, title: "Hook & Sub", desc: "Per-layer engine · preview ≡ bake" },
+  { icon: Zap, title: "HF Templates", desc: "Fixed styles · render cepat" },
+  { icon: Layers, title: "AI Text", desc: "Emphasis layer via Remotion only" },
+  { icon: Film, title: "Smart B-Roll", desc: "Stock · behind-person · footage" },
+  { icon: Palette, title: "Theme Canvas", desc: "10+ templates · top/bot fill" },
+  { icon: Frame, title: "TikTok Out", desc: "Selalu 1080×1920 · no black bar" },
+  { icon: Scan, title: "Autogrid", desc: "YOLO framing · 9:16 only" },
+  { icon: Wand2, title: "Style Editor", desc: "Live sticky preview · hook/sub/AI" },
+] as const;
 
 function SourceThumbnail({ jobId }: { jobId: string }) {
   const [src, setSrc] = useState<string | null>(null);

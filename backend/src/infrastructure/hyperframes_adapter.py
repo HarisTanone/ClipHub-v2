@@ -219,11 +219,19 @@ class HyperFramesAdapter:
         job_id: str = "job",
         clip_id: str | int = "0",
         user_id: int | None = None,
+        force: bool = False,
     ) -> dict[str, Any]:
-        """Apply polish template over base video. Returns server JSON."""
+        """Apply polish/hook/sub template over base video. Returns server JSON.
+
+        force=True bypasses HYPERFRAMES_ENABLED (user explicitly chose HF engine).
+        """
         cfg = self.effective_config(user_id)
-        if not cfg.get("enabled"):
-            return {"ok": False, "skipped": True, "reason": "HYPERFRAMES_ENABLED=false"}
+        if not cfg.get("enabled") and not force:
+            # Still allow when template is hook/sub (engine choice) — force flag
+            # from call sites that already decided HF path.
+            tpl_peek = str(template or "")
+            if not (tpl_peek.startswith("hook_") or tpl_peek.startswith("sub_")):
+                return {"ok": False, "skipped": True, "reason": "HYPERFRAMES_ENABLED=false"}
 
         base = os.path.abspath(base_video)
         out = os.path.abspath(output_path)
