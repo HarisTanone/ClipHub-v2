@@ -97,7 +97,7 @@ export function Dashboard() {
   }
 
   return (
-    <div className="h-full flex flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3 shrink-0">
         <Card className="p-4 overflow-hidden">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

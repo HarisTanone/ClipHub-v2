@@ -1075,9 +1075,11 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
   // Inline mode: just render the content without overlay
   if (inline) {
     return (
-      <div className="h-full overflow-hidden">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <style>{animationStyles}</style>
+        <div className="min-h-0 flex-1 overflow-hidden">
         {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
+        </div>
       </div>
     );
   }
@@ -2529,8 +2531,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
         </Section>
       </div>
 
-      {/* Preview — fixed while left panel scrolls */}
-      <div className="lg:col-span-4 p-4 flex flex-col items-center bg-zinc-950 min-h-0 overflow-y-auto">
+      {/* Preview — fixed col, vertically centered while left controls scroll */}
+      <div className="lg:col-span-4 flex min-h-0 flex-col items-center justify-center overflow-hidden bg-zinc-950 p-4">
         <div className="mb-3 flex w-full items-center justify-between gap-2">
           <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
           <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{activeAnimation.label}</span>
@@ -2819,8 +2821,8 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
         </Section>
       </div>
 
-      {/* Preview — fixed while left panel scrolls */}
-      <div className="lg:col-span-4 p-4 flex flex-col items-center bg-zinc-950 min-h-0 overflow-y-auto">
+      {/* Preview — fixed col, vertically centered while left controls scroll */}
+      <div className="lg:col-span-4 flex min-h-0 flex-col items-center justify-center overflow-hidden bg-zinc-950 p-4">
         <div className="mb-3 flex w-full items-center justify-between gap-2">
           <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
           <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>

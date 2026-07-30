@@ -178,7 +178,7 @@ export function ClipViewer() {
   const videoUrl = showRaw ? (rawUrl || versionedFinalUrl) : (versionedFinalUrl || rawUrl);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
       <div className="flex items-center justify-between shrink-0 mb-3 gap-2">
         <div className="flex items-center gap-3 min-w-0">

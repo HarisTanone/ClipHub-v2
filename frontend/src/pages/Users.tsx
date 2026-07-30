@@ -87,7 +87,7 @@ export function Users() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between shrink-0 mb-4">
         <div>
           <h1 className="text-lg font-semibold text-zinc-100">User Management</h1>

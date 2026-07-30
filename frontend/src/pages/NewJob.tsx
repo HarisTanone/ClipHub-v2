@@ -203,7 +203,7 @@ export function NewJob() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
       <div className="flex items-center justify-between shrink-0 mb-3">
         <div className="flex items-center gap-3">
@@ -219,7 +219,7 @@ export function NewJob() {
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Left: URL + Config (col-4) */}
-        <div className="lg:col-span-4 space-y-3 overflow-y-auto pb-4 lg:pb-0">
+        <div className="lg:col-span-4 min-h-0 space-y-3 overflow-y-auto pb-4 lg:pb-0">
           {/* Source */}
           <Card className="p-3">
             <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg border border-zinc-800 bg-zinc-950/70 p-1">
@@ -528,7 +528,7 @@ export function NewJob() {
           </div>
 
           {/* Style editor content */}
-          <Card className="flex-1 p-0 overflow-hidden min-h-0">
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
             <StyleEditorModal
               open={true}
               onClose={() => { }}

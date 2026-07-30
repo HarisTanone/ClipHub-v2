@@ -109,7 +109,7 @@ export function JobDetail() {
 
   if (isLoading && !data) {
     return (
-      <div className="space-y-3">
+      <div className="h-full min-h-0 overflow-y-auto space-y-3">
         <SkeletonCard />
         <SkeletonCard />
       </div>
