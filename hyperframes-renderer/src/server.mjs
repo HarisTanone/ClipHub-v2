@@ -1,10 +1,10 @@
 /**
- * AutoCliper HyperFrames polish service (:3003).
+ * AutoCliper HyperFrames hook/subtitle/polish service (:3003).
  * POST /render  { template, base_src|base_video, events, duration, out_path? }
  * GET  /health
  * GET  /templates
  *
- * Does NOT replace Remotion hook/subtitle.
+ * Hook/subtitle use HF-native fixed styles when selected by the job.
  */
 import express from 'express';
 import fs from 'node:fs';
@@ -31,7 +31,7 @@ app.get('/health', (_req, res) => {
     service: 'autocliper-hyperframes',
     templates: listTemplates(),
     cli: fs.existsSync(localBin) ? 'local' : 'npx',
-    note: 'polish layer only; hook+subtitle = Remotion',
+    note: 'hook/subtitle fixed styles + optional polish',
   });
 });
 
@@ -80,7 +80,7 @@ function runHyperframesRender(compositionDir, outFile, timeoutMs = HF_TIMEOUT) {
   });
 }
 
-/** Portrait-aware ffmpeg lower-third when HF CLI fails. */
+/** Polish-only FFmpeg fallback. Hook/subtitle never use this path. */
 function ffmpegLowerThirdFallback(baseVideo, events, outFile, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     if (!baseVideo || !fs.existsSync(baseVideo)) {
@@ -188,14 +188,21 @@ app.post('/render', async (req, res) => {
       out_path,
       job_id = 'adhoc',
       clip_id = '0',
+      require_hyperframes = false,
     } = req.body || {};
+
+    if (!listTemplates().includes(String(template))) {
+      res.status(400).json({ ok: false, error: `unknown template: ${template}` });
+      return;
+    }
 
     const baseIn = base_video || base_src || '';
     const baseAbs = baseIn.startsWith('file://')
       ? baseIn.replace(/^file:\/\//, '')
       : path.resolve(baseIn);
 
-    const workDir = path.join(WORK, `${job_id}_${clip_id}_${Date.now()}`);
+    const safePart = (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || '0';
+    const workDir = path.join(WORK, `${safePart(job_id)}_${safePart(clip_id)}_${Date.now()}`);
     fs.mkdirSync(workDir, { recursive: true });
 
     const staged = stageBaseVideo(workDir, baseAbs);
@@ -235,6 +242,18 @@ app.post('/render', async (req, res) => {
       await runHyperframesRender(workDir, outFile, HF_TIMEOUT);
     } catch (err) {
       errMsg = String(err?.message || err);
+      if (require_hyperframes || String(template).startsWith('hook_') || String(template).startsWith('sub_')) {
+        fs.writeFileSync(path.join(workDir, 'render-error.txt'), errMsg);
+        res.status(500).json({
+          ok: false,
+          mode: 'failed',
+          template,
+          error: errMsg.slice(-800),
+          composition: indexPath,
+          ms: Date.now() - started,
+        });
+        return;
+      }
       mode = 'fallback';
       await ffmpegLowerThirdFallback(staged, events, outFile);
       fs.writeFileSync(path.join(workDir, 'fallback.txt'), errMsg);

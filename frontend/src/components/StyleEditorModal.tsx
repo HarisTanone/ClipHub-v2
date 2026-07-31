@@ -8,6 +8,7 @@ import { RangeSlider } from "@/components/ui/RangeSlider";
 import { buildCanvasConfig, gradientCss } from "@/lib/canvasTemplates";
 import { CanvasAccents } from "@/components/BackgroundTemplateSection";
 import type { BackgroundMode } from "@/components/BackgroundTemplateSection";
+import { HfFixedStylePreview } from "@/components/HfFixedStylePreview";
 import {
   ENGINE_NOTES,
   HF_HOOK_STYLES,
@@ -2452,26 +2453,7 @@ function HfLivePreview({
         ) : (
           <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 to-zinc-950" />
         )}
-        <div className="absolute inset-x-2 bottom-8 flex justify-center">
-          <div
-            className="w-full rounded-lg px-2.5 py-2 text-center text-[11px] font-black leading-tight shadow-lg"
-            style={{
-              background: kind === "hook" && preset?.id.includes("tape")
-                ? accent
-                : `linear-gradient(135deg, rgba(12,12,16,0.92), rgba(20,20,40,0.88))`,
-              color: kind === "hook" && preset?.id.includes("tape") ? "#111" : "#f8fafc",
-              borderLeft: `4px solid ${accent}`,
-              boxShadow: `0 0 24px ${accent}55`,
-            }}
-          >
-            {preset?.mood && (
-              <div className="mb-0.5 text-[7px] font-semibold uppercase tracking-widest opacity-60">
-                {preset.mood}
-              </div>
-            )}
-            {label}
-          </div>
-        </div>
+        <HfFixedStylePreview id={preset?.id || ""} label={label} accent={accent} />
         <div className="absolute left-2 top-2 rounded bg-cyan-500/20 px-1.5 py-0.5 text-[8px] font-bold uppercase text-cyan-300">
           HF · {preset?.name || "template"}
         </div>

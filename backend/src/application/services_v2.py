@@ -2076,12 +2076,17 @@ class V2PipelineService:
         )
         # Post-Remotion HF overlays when user picked HF for hook and/or subtitle
         if hook_engine == "hyperframes" or sub_engine == "hyperframes":
-            await self._apply_hf_hook_subtitle_pass(
+            errors = await self._apply_hf_hook_subtitle_pass(
                 job, job_id, clips, clips_with_words,
                 output_dir, trim_results,
                 hook_style_config, subtitle_style_config,
                 hook_engine=hook_engine, sub_engine=sub_engine,
             )
+            if errors:
+                raise RuntimeError(
+                    "HyperFrames hook/subtitle render failed: "
+                    + "; ".join(errors[:5])
+                )
 
     async def _render_via_remotion(
         self, job, job_id, clips, clips_with_words, creative_direction,
@@ -2152,12 +2157,6 @@ class V2PipelineService:
                 # When HF owns hook/sub, blank Remotion overlays so HF pass paints them.
                 remotion_hook_text = "" if hook_eng == "hyperframes" else clip_hook
                 remotion_words = [] if sub_eng == "hyperframes" else clip_words
-                if hook_eng == "hyperframes":
-                    sub_min = 0.0  # HF hook may not occupy full window — keep words if remotion sub
-                    if sub_eng != "hyperframes":
-                        remotion_words = sanitize_subtitle_words(
-                            clip_words_raw, clip_duration, subtitle_min_start=0.0
-                        )
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")
@@ -2226,7 +2225,10 @@ class V2PipelineService:
                         cta=clip_cta,
                     )
                     if result.success:
-                        mark_clip_ready(output_dir, clip.rank)
+                        # HF-owned layers are pending. Do not expose an
+                        # incomplete Remotion base as a ready final clip.
+                        if hook_eng != "hyperframes" and sub_eng != "hyperframes":
+                            mark_clip_ready(output_dir, clip.rank)
                         logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
                     else:
                         message = f"clip {clip.rank}: {result.error_message or 'unknown Remotion error'}"
@@ -2359,7 +2361,11 @@ class V2PipelineService:
                             user_id=getattr(job, "user_id", None),
                             force=True,
                         )
-                        if r.get("ok") and os.path.exists(tmp_hook):
+                        if (
+                            r.get("ok")
+                            and r.get("mode") == "hyperframes"
+                            and os.path.exists(tmp_hook)
+                        ):
                             current = tmp_hook
                         else:
                             errors.append(f"clip {clip.rank} hook: {r}")
@@ -2376,7 +2382,7 @@ class V2PipelineService:
                             st = float(w.get("start", 0) or 0)
                         except (TypeError, ValueError):
                             st = 0.0
-                        if hook_engine == "hyperframes" and st < hook_dur:
+                        if (clip.hook or "").strip() and st < hook_dur:
                             continue
                         sub_words.append(w)
                     events = subtitle_events_from_words(sub_words)
@@ -2392,21 +2398,25 @@ class V2PipelineService:
                             user_id=getattr(job, "user_id", None),
                             force=True,
                         )
-                        if r.get("ok") and os.path.exists(tmp_sub):
+                        if (
+                            r.get("ok")
+                            and r.get("mode") == "hyperframes"
+                            and os.path.exists(tmp_sub)
+                        ):
                             current = tmp_sub
                         else:
                             errors.append(f"clip {clip.rank} sub: {r}")
                             continue
 
-                if current != final:
+                if base_is_input and current == in_path:
+                    # No hook/subtitle events: preserve the reusable base and
+                    # still create the final output/readiness marker.
+                    shutil.copy2(in_path, final)
+                elif current != final:
                     try:
                         os.replace(current, final)
                     except OSError:
                         shutil.move(current, final)
-                elif base_is_input and current == in_path:
-                    # No events — still copy base → final so readiness marks
-                    import shutil as _sh
-                    _sh.copy2(in_path, final)
 
                 for p in (tmp_hook, tmp_sub):
                     if p != final and os.path.exists(p):
@@ -2424,6 +2434,7 @@ class V2PipelineService:
                         "subtitle_engine": sub_engine,
                         "hook_template": hook_tpl if hook_engine == "hyperframes" else None,
                         "subtitle_template": sub_tpl if sub_engine == "hyperframes" else None,
+                        "mode": "hyperframes",
                     }
                 except Exception:
                     pass
@@ -2445,7 +2456,7 @@ class V2PipelineService:
         """Post-Remotion polish: AI visual entities → lower_third via HyperFrames.
 
         Non-fatal. Uses object_overlay_events (stock thumbs) or visual_entities.
-        Hook/subtitle remain Remotion — this only adds compact lower-thirds.
+        This optional pass only adds compact lower-thirds after hook/subtitle.
         """
         from src.infrastructure.hyperframes_adapter import (
             events_from_clip_ai,
@@ -2511,6 +2522,7 @@ class V2PipelineService:
             # stamp meta for UI + json_analisa
             try:
                 clip.hyperframes_polish = {
+                    **(getattr(clip, "hyperframes_polish", None) or {}),
                     "template": result.get("template") or cfg.get("default_template"),
                     "mode": result.get("mode"),
                     "events": len(events),
@@ -2669,6 +2681,7 @@ class V2PipelineService:
                 "top_overlay_events": list(getattr(clip, "top_overlay_events", None) or []),
                 "object_overlay_events": list(getattr(clip, "object_overlay_events", None) or []),
                 "visual_entities": list(getattr(clip, "visual_entities", None) or []),
+                "hyperframes_polish": getattr(clip, "hyperframes_polish", None),
                 "virality": viral,
                 "cta": cta,
                 "retention_hints": retention,

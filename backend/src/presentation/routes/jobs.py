@@ -1365,7 +1365,7 @@ async def edit_clip_style(
             "hook_style_config": body.hook_style_config,
             "subtitle_style_config": body.subtitle_style_config,
         },
-        "message": f"Style override set for clip #{clip_rank}. Call /restyle to apply with Remotion.",
+        "message": f"Style override set for clip #{clip_rank}. Call /restyle to apply the selected engines.",
     }
 
 
@@ -1379,11 +1379,11 @@ async def rerender_clip(
 ):
     """Deprecated hook-only rerender endpoint.
 
-    Hook/subtitle rendering is Remotion-only through /restyle so output matches preview.
+    Hook/subtitle rendering runs through the selected engines via /restyle.
     """
     raise HTTPException(
         status_code=410,
-        detail="Hook-only /rerender is disabled. Use /restyle; it renders hook and subtitle via Remotion.",
+        detail="Hook-only /rerender is disabled. Use /restyle; it renders hook and subtitle via their selected engines.",
     )
 
 
@@ -1469,6 +1469,9 @@ async def restyle_clip(
         or root_style_data.get("subtitle_style_config")
         or {}
     )
+    from src.infrastructure.hf_style_catalog import resolve_engine
+    hook_render_engine = resolve_engine(hook_config)
+    subtitle_render_engine = resolve_engine(subtitle_config)
     hook_text = (body.hook_text if body and body.hook_text else clip_data.get("hook", "")).strip()
     hook_style = (
         body.hook_style if body and body.hook_style
@@ -1487,6 +1490,8 @@ async def restyle_clip(
     canonical_reframed_path = f"{output_dir}/clip_{clip_rank:02d}_reframed.mp4"
     final_path = f"{output_dir}/final/clip_{clip_rank}_final.mp4"
     staged_final_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.mp4"
+    hf_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.hf-hook.mp4"
+    hf_subtitle_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.hf-subtitle.mp4"
 
     try:
         await _set_clip_operation(job_id, clip_rank, operation_id, stage="reframe", percentage=20)
@@ -1533,27 +1538,42 @@ async def restyle_clip(
                 current_path = brolled_path
                 logger.info(f"[restyle] using prepared replacement-track B-roll clip {clip_rank}")
 
-        # Step 2: Remotion renders hook + subtitle with the same style config
-        # used by the live preview. FFmpeg fallback is intentionally disabled
-        # for hook/subtitle so the final video cannot diverge from preview.
+        # Step 2: Remotion renders only its selected layers plus canvas/AI text.
+        # HyperFrames-owned hook/subtitle layers are added below.
         remotion_rendered = False
         clip_duration = float(
             clip_data.get("duration")
             or max(0.0, float(clip_data.get("end", 0)) - float(clip_data.get("start", 0)))
             or 30.0
         )
+        hook_duration = float(hook_config.get("duration", 3.0) or 3.0)
         render_words = clip_data.get("words") or []
         if do_subtitle and render_words:
             try:
                 from src.infrastructure.subtitle_words import sanitize_subtitle_words
-                render_words = sanitize_subtitle_words(render_words, clip_duration)
+                render_words = sanitize_subtitle_words(
+                    render_words,
+                    clip_duration,
+                    subtitle_min_start=hook_duration if hook_text else 0.0,
+                )
             except Exception as e:
                 logger.warning(f"[restyle] subtitle word sanitize failed clip {clip_rank}: {e}")
         else:
             render_words = []
 
+        remotion_hook_text = hook_text if hook_render_engine == "remotion" else ""
+        remotion_words = render_words if subtitle_render_engine == "remotion" else []
+        needs_canvas = bool(root_style_data.get("canvas_config")) or (
+            (job.target_aspect_ratio or "") in ("16:9", "1:1")
+        )
+        remotion_required = bool(
+            remotion_hook_text
+            or remotion_words
+            or clip_data.get("text_emphasis_events")
+            or needs_canvas
+        )
         remotion_adapter = getattr(service, "_remotion_adapter", None)
-        if remotion_adapter and (hook_text or render_words or clip_data.get("text_emphasis_events")):
+        if remotion_adapter and remotion_required:
             await _set_clip_operation(job_id, clip_rank, operation_id, stage="render", percentage=55)
             try:
                 remotion_ready = await remotion_adapter.health_check()
@@ -1591,8 +1611,8 @@ async def restyle_clip(
                         output_path=staged_final_path,
                         clip_rank=clip_rank,
                         config=render_config,
-                        words=render_words,
-                        hook_text=hook_text,
+                        words=remotion_words,
+                        hook_text=remotion_hook_text,
                         hook_style=hook_style,
                         text_emphasis_events=clip_data.get("text_emphasis_events", []),
                     )
@@ -1608,18 +1628,88 @@ async def restyle_clip(
             except Exception as e:
                 logger.warning(f"[restyle] remotion failed clip {clip_rank}: {e}")
 
-        if (hook_text or render_words) and not remotion_rendered:
+        if remotion_required and not remotion_rendered:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "Remotion render failed or is unavailable. "
-                    "Hook/subtitle FFmpeg fallback is disabled so output matches preview."
+                    "Remotion-owned layers failed or are unavailable. "
+                    "FFmpeg fallback is disabled so output matches preview."
                 ),
             )
 
-        if not hook_text and not render_words and current_path != staged_final_path:
+        if not remotion_required and current_path != staged_final_path:
             shutil.copy2(current_path, staged_final_path)
             current_path = staged_final_path
+
+        # HyperFrames owns only the layers selected in the editor. Failure is
+        # fatal: never publish a base video missing its selected HF layer.
+        hf_applied = {}
+        if (
+            (hook_render_engine == "hyperframes" and hook_text)
+            or (subtitle_render_engine == "hyperframes" and render_words)
+        ):
+            from src.infrastructure.hf_style_catalog import (
+                hook_events_from_text,
+                resolve_hf_template,
+                subtitle_events_from_words,
+            )
+            from src.infrastructure.hyperframes_adapter import get_hyperframes_adapter
+
+            hf = get_hyperframes_adapter()
+            hf_current = staged_final_path
+            if hook_render_engine == "hyperframes" and hook_text:
+                hook_template = resolve_hf_template(hook_config, kind="hook")
+                result = await hf.render_polish(
+                    base_video=hf_current,
+                    events=hook_events_from_text(hook_text, hook_duration),
+                    output_path=hf_hook_path,
+                    template=hook_template,
+                    duration=clip_duration,
+                    job_id=job_id,
+                    clip_id=f"{clip_rank}-restyle-hook",
+                    user_id=getattr(job, "user_id", None),
+                    force=True,
+                )
+                if not (
+                    result.get("ok")
+                    and result.get("mode") == "hyperframes"
+                    and os.path.exists(hf_hook_path)
+                ):
+                    raise HTTPException(status_code=503, detail=f"HyperFrames hook failed: {result}")
+                hf_current = hf_hook_path
+                hf_applied["hook_engine"] = "hyperframes"
+                hf_applied["hook_template"] = hook_template
+
+            if subtitle_render_engine == "hyperframes" and render_words:
+                subtitle_template = resolve_hf_template(subtitle_config, kind="subtitle")
+                result = await hf.render_polish(
+                    base_video=hf_current,
+                    events=subtitle_events_from_words(render_words),
+                    output_path=hf_subtitle_path,
+                    template=subtitle_template,
+                    duration=clip_duration,
+                    job_id=job_id,
+                    clip_id=f"{clip_rank}-restyle-subtitle",
+                    user_id=getattr(job, "user_id", None),
+                    force=True,
+                )
+                if not (
+                    result.get("ok")
+                    and result.get("mode") == "hyperframes"
+                    and os.path.exists(hf_subtitle_path)
+                ):
+                    raise HTTPException(status_code=503, detail=f"HyperFrames subtitle failed: {result}")
+                hf_current = hf_subtitle_path
+                hf_applied["subtitle_engine"] = "hyperframes"
+                hf_applied["subtitle_template"] = subtitle_template
+
+            os.replace(hf_current, staged_final_path)
+            current_path = staged_final_path
+            clip_data["hyperframes_polish"] = {
+                **(clip_data.get("hyperframes_polish") or {}),
+                **hf_applied,
+                "mode": "hyperframes",
+            }
 
         if not os.path.exists(staged_final_path):
             raise HTTPException(status_code=503, detail="Restyle did not produce a final video")
@@ -1674,7 +1764,7 @@ async def restyle_clip(
             await session.commit()
 
         # Cleanup temp files
-        for tmp in [restyle_reframed_path, staged_final_path]:
+        for tmp in [restyle_reframed_path, staged_final_path, hf_hook_path, hf_subtitle_path]:
             if tmp != final_path and os.path.exists(tmp):
                 os.remove(tmp)
 
@@ -1698,13 +1788,13 @@ async def restyle_clip(
 
     except HTTPException as e:
         await _set_clip_operation(job_id, clip_rank, operation_id, status="failed", stage="failed", error=str(e.detail), completed_at=datetime.now(timezone.utc).isoformat())
-        for tmp in [restyle_reframed_path, staged_final_path]:
+        for tmp in [restyle_reframed_path, staged_final_path, hf_hook_path, hf_subtitle_path]:
             if os.path.exists(tmp):
                 os.remove(tmp)
         raise
     except Exception as e:
         await _set_clip_operation(job_id, clip_rank, operation_id, status="failed", stage="failed", error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
-        for tmp in [restyle_reframed_path, staged_final_path]:
+        for tmp in [restyle_reframed_path, staged_final_path, hf_hook_path, hf_subtitle_path]:
             if os.path.exists(tmp):
                 os.remove(tmp)
         logger.error(f"restyle_error: job={job_id}, clip={clip_rank}, error={e}", exc_info=True)

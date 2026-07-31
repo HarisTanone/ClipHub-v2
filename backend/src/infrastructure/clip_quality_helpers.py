@@ -486,6 +486,385 @@ def build_clip_analisa(
     return {"no": no, "clips": [body]}
 
 
+# ─── Selling surface: share pack / hook roulette / clip DNA / A-B / chapters ──
+
+
+def _slug_tag(text: str) -> str:
+    t = re.sub(r"[^\w\s\-]", "", (text or "").lower(), flags=re.UNICODE)
+    t = re.sub(r"\s+", "", t)
+    return t[:28]
+
+
+def hook_roulette(hook: str = "", reason: str = "", n: int = 6) -> list[dict[str, Any]]:
+    """Deterministic hook alt lines — structural transforms only, no domain lexicon."""
+    base = " ".join((hook or "").split()).strip()
+    if not base:
+        base = " ".join((reason or "").split())[:80].strip() or "Momen ini wajib ditonton"
+    words = base.split()
+    alts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(text: str, style: str) -> None:
+        t = " ".join(text.split()).strip()
+        if not t or len(t) < 4:
+            return
+        key = t.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        alts.append({"text": t[:120], "style": style, "chars": len(t)})
+
+    add(base, "original")
+    add(f"{base}?" if "?" not in base else base, "question")
+    add(f"STOP. {base}", "stop")
+    add(f"Wait… {base}", "wait")
+    if words:
+        add(f"{words[0].upper()}: {' '.join(words[1:])}".strip(": "), "colon")
+        add(" ".join(w.upper() if i < min(3, len(words)) else w for i, w in enumerate(words)), "caps_lead")
+    add(f"{base} 🔥", "emoji_fire")
+    add(f"Part {max(1, n % 5)} — {base}", "series")
+    if len(words) > 4:
+        add(" ".join(words[:4]) + "…", "tease")
+        add(" ".join(words[-4:]), "tail")
+    # numeric punch if none
+    if not any(c.isdigit() for c in base):
+        add(f"3 detikkah? {base}", "number_bait")
+    return alts[: max(1, min(n, 12))]
+
+
+def build_share_pack(
+    *,
+    hook: str = "",
+    reason: str = "",
+    score: int | float = 0,
+    duration: float = 0.0,
+    words: list[dict] | None = None,
+    visual_entities: list[dict] | None = None,
+    cta: dict | None = None,
+    virality: dict | None = None,
+    rank: int = 1,
+) -> dict[str, Any]:
+    """One-click TikTok/IG/YT caption + hashtags + hook alts. No external API."""
+    hook_s = " ".join((hook or "").split()).strip()
+    reason_s = " ".join((reason or "").split()).strip()
+    cta = cta or suggest_cta(hook_s, reason_s, rank)
+    viral = virality or virality_breakdown(score, hook_s, reason_s, duration, words or [])
+    entities = []
+    for e in visual_entities or []:
+        if not isinstance(e, dict):
+            continue
+        w = str(e.get("word") or e.get("label") or "").strip()
+        if w and w.lower() not in {x.lower() for x in entities}:
+            entities.append(w)
+        if len(entities) >= 6:
+            break
+    # hashtags from hook tokens + entities (length/proper only — no stop lexicon)
+    tags: list[str] = ["fyp", "viral", "foryou", "autoclip"]
+    for tok in re.findall(r"[\w\-]{4,}", hook_s, flags=re.UNICODE)[:5]:
+        tags.append(_slug_tag(tok) or tok.lower()[:20])
+    for ent in entities[:4]:
+        tags.append(_slug_tag(ent) or ent.lower()[:20])
+    # dedupe keep order
+    seen_t: set[str] = set()
+    hashtags = []
+    for t in tags:
+        t = t.lstrip("#").lower()
+        if not t or t in seen_t:
+            continue
+        seen_t.add(t)
+        hashtags.append(f"#{t}")
+    hashtags = hashtags[:12]
+
+    alts = hook_roulette(hook_s, reason_s, n=6)
+    caption_tt = "\n".join(
+        x for x in [
+            hook_s or "Clip siap post",
+            "",
+            (cta or {}).get("text") or "",
+            "",
+            " ".join(hashtags[:8]),
+        ] if x is not None
+    ).strip()
+    caption_ig = "\n".join(
+        x for x in [
+            hook_s,
+            reason_s[:160] if reason_s else "",
+            "",
+            (cta or {}).get("text") or "Save biar gampang dicari 📌",
+            "",
+            " ".join(hashtags),
+        ] if x
+    ).strip()
+    caption_yt = "\n".join(
+        x for x in [
+            hook_s,
+            "",
+            reason_s[:280] if reason_s else "",
+            "",
+            f"CTA: {(cta or {}).get('text') or ''}",
+            "",
+            " ".join(hashtags),
+        ] if x is not None
+    ).strip()
+
+    return {
+        "hook": hook_s,
+        "hook_alts": alts,
+        "cta": cta,
+        "hashtags": hashtags,
+        "entities": entities,
+        "captions": {
+            "tiktok": caption_tt,
+            "instagram": caption_ig,
+            "youtube": caption_yt,
+            "plain": hook_s,
+        },
+        "virality": viral,
+        "posting_tips": _posting_tips(duration, viral),
+        "best_post_windows": ["07:00-09:00", "12:00-13:30", "19:00-22:00"],
+    }
+
+
+def _posting_tips(duration: float, viral: dict) -> list[str]:
+    tips = []
+    dur = float(duration or 0)
+    if dur and dur < 15:
+        tips.append("Durasi pendek — taruh hook di 0.5s pertama")
+    elif dur > 45:
+        tips.append(">45s: potong dead-air, CTA di 3 detik terakhir")
+    else:
+        tips.append("Sweet-spot 15–45s — bagus untuk FYP")
+    total = float((viral or {}).get("total") or (viral or {}).get("score") or 0)
+    if total >= 75:
+        tips.append("Skor tinggi — post asap, pin komentar CTA")
+    elif total and total < 50:
+        tips.append("Skor sedang — coba hook roulette + A/B style")
+    if (viral or {}).get("dead_air_gaps"):
+        tips.append("Ada silent gap — apply retention trim sebelum post")
+    tips.append("Cover frame = smart thumb (bukan 0s)")
+    return tips[:5]
+
+
+def clip_dna(
+    *,
+    score: int | float = 0,
+    hook: str = "",
+    reason: str = "",
+    duration: float = 0.0,
+    words: list[dict] | None = None,
+    broll_count: int = 0,
+    visual_entities: list[dict] | None = None,
+    virality: dict | None = None,
+) -> dict[str, Any]:
+    """Radar-style clip DNA from virality components + entity density."""
+    v = virality or virality_breakdown(score, hook, reason, duration, words or [], broll_count)
+    axes = {
+        "hook_punch": float(v.get("hook_punch") or v.get("hook") or 0),
+        "retention": float(v.get("retention") or 0),
+        "emotion": float(v.get("emotion") or 0),
+        "visual_density": float(v.get("visual_density") or v.get("visual") or 0),
+        "model_score": float(v.get("model_score") or score or 0),
+    }
+    ent_n = len(visual_entities or [])
+    axes["entity_richness"] = min(100.0, 30.0 + ent_n * 12.0)
+    # archetype from top 2 axes
+    ranked = sorted(axes.items(), key=lambda x: -x[1])
+    top = [k for k, _ in ranked[:2]]
+    archetype_map = {
+        ("hook_punch", "emotion"): "shock_opener",
+        ("emotion", "hook_punch"): "shock_opener",
+        ("retention", "hook_punch"): "story_arc",
+        ("hook_punch", "retention"): "story_arc",
+        ("visual_density", "emotion"): "spectacle",
+        ("emotion", "visual_density"): "spectacle",
+        ("entity_richness", "visual_density"): "product_demo",
+        ("visual_density", "entity_richness"): "product_demo",
+    }
+    arch = archetype_map.get((top[0], top[1]), "balanced_clip") if len(top) == 2 else "balanced_clip"
+    total = float(v.get("total") or v.get("score") or 0)
+    grade = "S" if total >= 85 else "A" if total >= 70 else "B" if total >= 55 else "C" if total >= 40 else "D"
+    return {
+        "axes": {k: round(val, 1) for k, val in axes.items()},
+        "archetype": arch,
+        "grade": grade,
+        "total": round(total, 1),
+        "top_factors": list(v.get("factors") or [t[0] for t in ranked[:3]]),
+        "summary": f"{grade}-tier · {arch.replace('_', ' ')} · {round(total)} viral",
+    }
+
+
+def chapter_markers(words: list[dict] | None, duration: float = 0.0, max_n: int = 6) -> list[dict[str, Any]]:
+    """Lightweight chapters from silence gaps + long tokens (editor scrub)."""
+    words = words or []
+    gaps = dead_air_gaps(words)
+    marks: list[dict[str, Any]] = [{"t": 0.0, "label": "Hook", "kind": "start"}]
+    for g in gaps[: max_n - 2]:
+        marks.append({
+            "t": round(float(g["at"]), 2),
+            "label": f"Beat @ {g['at']:.1f}s",
+            "kind": "gap",
+            "gap": g.get("duration"),
+        })
+    # peak long word mid
+    if words:
+        mid_w = None
+        best = -1.0
+        for w in words:
+            try:
+                s = float(w.get("start", 0) or 0)
+                text = str(w.get("word") or w.get("text") or "")
+            except (TypeError, ValueError):
+                continue
+            score = len(text) + (5 if w.get("highlight") else 0)
+            if score > best and s > 1.0:
+                best = score
+                mid_w = (s, text)
+        if mid_w:
+            marks.append({"t": round(mid_w[0], 2), "label": mid_w[1][:24], "kind": "peak"})
+    dur = float(duration or 0)
+    if dur > 2:
+        marks.append({"t": round(max(0.0, dur - 1.5), 2), "label": "CTA", "kind": "cta"})
+    # unique by t
+    seen: set[float] = set()
+    out = []
+    for m in sorted(marks, key=lambda x: x["t"]):
+        key = round(float(m["t"]), 1)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(m)
+        if len(out) >= max_n:
+            break
+    return out
+
+
+def ab_style_variants(base_hook: dict | None = None, base_sub: dict | None = None, n: int = 3) -> list[dict[str, Any]]:
+    """A/B style packs for one-click multi-variant restyle (Remotion + HF mix)."""
+    from src.infrastructure.hf_style_catalog import HOOK_STYLES, SUBTITLE_STYLES
+
+    hook_ids = [h["id"] for h in HOOK_STYLES]
+    sub_ids = [s["id"] for s in SUBTITLE_STYLES]
+    remotion_hooks = [
+        "podcast_lower_third",
+        "bold_center",
+        "neon_glow",
+        "typewriter",
+        "comic_pop",
+    ]
+    remotion_subs = ["classic", "karaoke", "boxed", "minimal", "neon"]
+    packs = [
+        {
+            "id": "premium_remotion",
+            "label": "Premium Remotion",
+            "note": "Full custom · render lebih lama",
+            "hook_style_config": {
+                **(base_hook or {}),
+                "engine": "remotion",
+                "animation": remotion_hooks[0],
+            },
+            "subtitle_style_config": {
+                **(base_sub or {}),
+                "engine": "remotion",
+                "stylePreset": remotion_subs[0],
+            },
+        },
+        {
+            "id": "fast_hyperframes",
+            "label": "Fast HyperFrames",
+            "note": "Template fixed · render cepat",
+            "hook_style_config": {
+                **(base_hook or {}),
+                "engine": "hyperframes",
+                "hf_template": hook_ids[0] if hook_ids else "hook_banner_v1",
+                "animation": "podcast_lower_third",
+            },
+            "subtitle_style_config": {
+                **(base_sub or {}),
+                "engine": "hyperframes",
+                "hf_template": sub_ids[0] if sub_ids else "sub_caption_v1",
+                "stylePreset": "classic",
+            },
+        },
+        {
+            "id": "mixed_neon",
+            "label": "Mixed Neon",
+            "note": "Hook Remotion + sub HF",
+            "hook_style_config": {
+                **(base_hook or {}),
+                "engine": "remotion",
+                "animation": remotion_hooks[2] if len(remotion_hooks) > 2 else remotion_hooks[0],
+            },
+            "subtitle_style_config": {
+                **(base_sub or {}),
+                "engine": "hyperframes",
+                "hf_template": sub_ids[1] if len(sub_ids) > 1 else (sub_ids[0] if sub_ids else "sub_neon_v1"),
+                "stylePreset": "neon",
+            },
+        },
+        {
+            "id": "documentary",
+            "label": "Documentary Clean",
+            "note": "Minimal sub + lower hook",
+            "hook_style_config": {
+                **(base_hook or {}),
+                "engine": "hyperframes",
+                "hf_template": hook_ids[-1] if hook_ids else "hook_lower_v1",
+            },
+            "subtitle_style_config": {
+                **(base_sub or {}),
+                "engine": "hyperframes",
+                "hf_template": sub_ids[-1] if sub_ids else "sub_minimal_v1",
+                "stylePreset": "minimal",
+            },
+        },
+    ]
+    return packs[: max(1, min(n, len(packs)))]
+
+
+def enrich_clip_selling_fields(clip: dict[str, Any]) -> dict[str, Any]:
+    """Attach share_pack / dna / chapters onto a clip dict (mutates + returns)."""
+    words = clip.get("words") or []
+    dur = float(clip.get("duration") or (float(clip.get("end") or 0) - float(clip.get("start") or 0)))
+    viral = clip.get("virality") or virality_breakdown(
+        clip.get("score") or 0,
+        clip.get("hook") or "",
+        clip.get("reason") or "",
+        dur,
+        words,
+        len(clip.get("broll_suggestions") or []),
+    )
+    cta = clip.get("cta") or suggest_cta(clip.get("hook") or "", clip.get("reason") or "", int(clip.get("rank") or 1))
+    pack = build_share_pack(
+        hook=clip.get("hook") or "",
+        reason=clip.get("reason") or "",
+        score=clip.get("score") or 0,
+        duration=dur,
+        words=words,
+        visual_entities=clip.get("visual_entities") or [],
+        cta=cta,
+        virality=viral,
+        rank=int(clip.get("rank") or 1),
+    )
+    dna = clip_dna(
+        score=clip.get("score") or 0,
+        hook=clip.get("hook") or "",
+        reason=clip.get("reason") or "",
+        duration=dur,
+        words=words,
+        broll_count=len(clip.get("broll_suggestions") or []),
+        visual_entities=clip.get("visual_entities") or [],
+        virality=viral,
+    )
+    chapters = chapter_markers(words, dur)
+    clip["virality"] = viral
+    clip["cta"] = cta
+    clip["share_pack"] = pack
+    clip["clip_dna"] = dna
+    clip["chapters"] = chapters
+    clip["hook_alts"] = pack.get("hook_alts") or []
+    return clip
+
+
 def write_split_job_meta(
     output_dir: str,
     *,

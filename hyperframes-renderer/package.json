@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "AutoCliper HyperFrames polish layer (template + JSON). Hook/subtitle stay Remotion.",
+  "description": "AutoCliper HyperFrames fixed-style hook, subtitle, and polish renderer.",
   "scripts": {
     "start": "node src/server.mjs",
     "doctor": "npx --yes hyperframes doctor || true",
+    "test": "node src/assemble.test.mjs",
     "render:sample": "node src/render-cli.mjs --template lower_third_v1 --out /tmp/hf-sample.mp4"
   },
   "dependencies": {

@@ -330,6 +330,10 @@ export interface ClipInfo {
     mode?: string;
     events?: number;
     labels?: string[];
+    hook_engine?: string;
+    subtitle_engine?: string;
+    hook_template?: string | null;
+    subtitle_template?: string | null;
   } | null;
   top_overlay_events?: Array<Record<string, any>>;
 }
@@ -396,6 +400,10 @@ export interface ClipDetailResponse {
       mode?: string;
       events?: number;
       labels?: string[];
+      hook_engine?: string;
+      subtitle_engine?: string;
+      hook_template?: string | null;
+      subtitle_template?: string | null;
     } | null;
     top_overlay_events?: Array<Record<string, any>>;
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };

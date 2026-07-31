@@ -7,14 +7,31 @@ from __future__ import annotations
 
 from typing import Any
 
-HF_HOOK_TEMPLATES = (
+HOOK_STYLES = (
+    {"id": "hook_chromatic_gate_v2", "name": "Chromatic Gate", "design": "chromatic-gate", "accent": "#FF2E88"},
+    {"id": "hook_orbit_stamp_v2", "name": "Orbit Stamp", "design": "orbit-stamp", "accent": "#8B5CF6"},
+    {"id": "hook_pixel_ticker_v2", "name": "Pixel Ticker", "design": "pixel-ticker", "accent": "#F7FF58"},
+    {"id": "hook_blueprint_v2", "name": "Blueprint Reveal", "design": "blueprint-reveal", "accent": "#52C7FF"},
+)
+
+SUBTITLE_STYLES = (
+    {"id": "sub_speech_capsule_v2", "name": "Speech Capsule", "design": "speech-capsule", "accent": "#FFFFFF"},
+    {"id": "sub_signal_rail_v2", "name": "Signal Rail", "design": "signal-rail", "accent": "#B7FF00"},
+    {"id": "sub_vertical_caption_v2", "name": "Vertical Caption", "design": "vertical-caption", "accent": "#00D9FF"},
+    {"id": "sub_notch_transcript_v2", "name": "Notch Transcript", "design": "notch-transcript", "accent": "#FFB000"},
+)
+
+HF_HOOK_TEMPLATES = tuple(style["id"] for style in HOOK_STYLES)
+HF_SUBTITLE_TEMPLATES = tuple(style["id"] for style in SUBTITLE_STYLES)
+
+# Old jobs stay renderable. Legacy IDs are hidden from the new catalogue.
+HF_LEGACY_HOOK_TEMPLATES = (
     "hook_banner_v1",
     "hook_neon_v1",
     "hook_tape_v1",
     "hook_lower_v1",
 )
-
-HF_SUBTITLE_TEMPLATES = (
+HF_LEGACY_SUBTITLE_TEMPLATES = (
     "sub_caption_v1",
     "sub_neon_v1",
     "sub_box_v1",
@@ -37,8 +54,8 @@ ENGINE_NOTES = {
     "hyperframes": {
         "label": "HyperFrames",
         "speed": "faster",
-        "quality": "fixed templates only",
-        "note": "Render lebih cepat, style template fixed.",
+        "quality": "HF-native fixed templates",
+        "note": "Render cepat, style HF fixed dan berbeda dari Remotion.",
         "default": False,
     },
 }
@@ -47,8 +64,8 @@ ENGINE_NOTES = {
 def catalogue() -> dict[str, Any]:
     return {
         "engines": ENGINE_NOTES,
-        "hook": [{"id": t, "kind": "hook"} for t in HF_HOOK_TEMPLATES],
-        "subtitle": [{"id": t, "kind": "subtitle"} for t in HF_SUBTITLE_TEMPLATES],
+        "hook": [{**style, "kind": "hook"} for style in HOOK_STYLES],
+        "subtitle": [{**style, "kind": "subtitle"} for style in SUBTITLE_STYLES],
         "polish": [{"id": t, "kind": "polish"} for t in HF_POLISH_TEMPLATES],
         "default_hook": HF_HOOK_TEMPLATES[0],
         "default_subtitle": HF_SUBTITLE_TEMPLATES[0],
@@ -74,8 +91,8 @@ def resolve_hf_template(cfg: dict | None, *, kind: str) -> str:
     )
     raw = str(raw).strip()
     allowed = {
-        "hook": HF_HOOK_TEMPLATES,
-        "subtitle": HF_SUBTITLE_TEMPLATES,
+        "hook": (*HF_HOOK_TEMPLATES, *HF_LEGACY_HOOK_TEMPLATES),
+        "subtitle": (*HF_SUBTITLE_TEMPLATES, *HF_LEGACY_SUBTITLE_TEMPLATES),
         "polish": HF_POLISH_TEMPLATES,
     }.get(kind, ())
     if raw in allowed:

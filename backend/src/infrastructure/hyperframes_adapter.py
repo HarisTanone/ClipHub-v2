@@ -1,9 +1,4 @@
-"""HyperFrames HTTP client — optional polish layer (NOT hook/subtitle).
-
-Hook + subtitle stay on Remotion. This adapter only calls the
-hyperframes-renderer service for template+JSON compositions
-(e.g. lower_third_v1 from visual_entities / object_overlay_events).
-"""
+"""HyperFrames HTTP client for hook, subtitle, and optional polish passes."""
 from __future__ import annotations
 
 import asyncio
@@ -138,6 +133,25 @@ class HyperFramesAdapter:
         except Exception:
             return False
 
+    @staticmethod
+    def supports_template(template: str) -> bool:
+        """Reject Remotion style IDs and unknown renderer templates early."""
+        from src.infrastructure.hf_style_catalog import (
+            HF_HOOK_TEMPLATES,
+            HF_LEGACY_HOOK_TEMPLATES,
+            HF_LEGACY_SUBTITLE_TEMPLATES,
+            HF_POLISH_TEMPLATES,
+            HF_SUBTITLE_TEMPLATES,
+        )
+
+        return str(template or "") in {
+            *HF_HOOK_TEMPLATES,
+            *HF_SUBTITLE_TEMPLATES,
+            *HF_LEGACY_HOOK_TEMPLATES,
+            *HF_LEGACY_SUBTITLE_TEMPLATES,
+            *HF_POLISH_TEMPLATES,
+        }
+
     def effective_config(self, user_id: int | None = None) -> dict[str, Any]:
         cfg = {
             "enabled": self.enabled,
@@ -155,7 +169,7 @@ class HyperFramesAdapter:
                 self.base_url = cfg["server_url"]
             if db.get("timeout_sec"):
                 cfg["timeout_sec"] = int(db["timeout_sec"])
-            # env OR db enables polish
+            # env OR DB enables optional polish; engine-selected HF uses force=True
             cfg["enabled"] = bool(cfg["enabled"] or db.get("enabled"))
         except Exception:
             pass
@@ -227,8 +241,7 @@ class HyperFramesAdapter:
         """
         cfg = self.effective_config(user_id)
         if not cfg.get("enabled") and not force:
-            # Still allow when template is hook/sub (engine choice) — force flag
-            # from call sites that already decided HF path.
+            # Hook/sub call sites also pass force=True after engine resolution.
             tpl_peek = str(template or "")
             if not (tpl_peek.startswith("hook_") or tpl_peek.startswith("sub_")):
                 return {"ok": False, "skipped": True, "reason": "HYPERFRAMES_ENABLED=false"}
@@ -248,6 +261,10 @@ class HyperFramesAdapter:
             "out_path": out,
             "job_id": str(job_id),
             "clip_id": str(clip_id),
+            # Explicit hook/subtitle choice must never degrade to FFmpeg drawtext.
+            "require_hyperframes": bool(
+                str(tpl).startswith("hook_") or str(tpl).startswith("sub_")
+            ),
         }
         session = await self._session_get()
         try:

@@ -822,7 +822,7 @@ async def get_production_stack_status(user: CurrentUser = Depends(get_current_us
                 "enabled": bool(app_settings.USE_REMOTION),
                 "ok": remotion_ok,
                 "url": app_settings.REMOTION_SERVER_URL,
-                "role": "hook+subtitle primary",
+                "role": "hook+subtitle when selected; canvas/AI text",
                 "error": remotion_err,
             },
             "hyperframes": {
@@ -830,7 +830,7 @@ async def get_production_stack_status(user: CurrentUser = Depends(get_current_us
                 "url": app_settings.HYPERFRAMES_SERVER_URL,
                 "template": app_settings.HYPERFRAMES_DEFAULT_TEMPLATE,
                 "health": hf_health,
-                "role": "polish only (lower-third); not hook/subtitle",
+                "role": "hook+subtitle fixed styles; optional lower-third polish",
             },
             "hermes": {
                 "enabled": bool(app_settings.HERMES_ENABLED),

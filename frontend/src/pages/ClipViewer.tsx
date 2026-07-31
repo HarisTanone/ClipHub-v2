@@ -343,12 +343,19 @@ export function ClipViewer() {
             </div>
           </Card>
 
-          {/* HF polish stamp (post-Remotion lower_third) */}
+          {/* HyperFrames engine/polish stamp from final bake */}
           {clip.hyperframes_polish && (
             <Card className="p-3 border-cyan-500/20">
               <h3 className="text-xs font-semibold text-cyan-300 mb-1">
-                HF Polish · {String(clip.hyperframes_polish.mode || "—")}
+                HyperFrames · {String(clip.hyperframes_polish.mode || "final")}
               </h3>
+              {(clip.hyperframes_polish.hook_template || clip.hyperframes_polish.subtitle_template) && (
+                <p className="text-[10px] text-zinc-400">
+                  {clip.hyperframes_polish.hook_template && `Hook: ${clip.hyperframes_polish.hook_template}`}
+                  {clip.hyperframes_polish.hook_template && clip.hyperframes_polish.subtitle_template && " · "}
+                  {clip.hyperframes_polish.subtitle_template && `Subtitle: ${clip.hyperframes_polish.subtitle_template}`}
+                </p>
+              )}
               <p className="text-[10px] text-zinc-400">
                 {String(clip.hyperframes_polish.template || "lower_third_v1")}
                 {" · "}
