@@ -207,6 +207,21 @@ async def send_long(update: Update, text: str):
         await update.message.reply_text(chunk)
 
 
+def _get_current_model() -> str:
+    """Ambil model yang sedang aktif di config.yaml"""
+    config_path = os.path.join(HERMES_HOME, "config.yaml")
+    if not os.path.exists(config_path):
+        return "unknown (config tidak ditemukan)"
+    try:
+        with open(config_path, "r") as f:
+            for line in f:
+                if line.strip().startswith("default:") and "model:" not in line:
+                    return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 # ─── Command Handlers ─────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -394,8 +409,20 @@ async def cmd_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await deny(update)
 
     if not ctx.args:
+        # Tampilkan model yang sedang dipakai
+        current = _get_current_model()
         await update.message.reply_text(
-            "Usage: `/model <nama>`\n\nContoh: `grok`, `gemini`, `gpt-4o`, `llama`, `cliperhub`",
+            f"🤖 *Model saat ini:* `{current}`\n\n"
+            "*Ganti model:* `/model <nama>`\n\n"
+            "*Alias tersedia:*\n"
+            "• `grok` → gcli/grok-4.5-high\n"
+            "• `grok-fast` → gcli/grok-4.5-fast\n"
+            "• `gemini` → gcli/gemini-2.5-pro\n"
+            "• `gemini-flash` → gcli/gemini-2.5-flash\n"
+            "• `gpt-4o` → openai/gpt-4o\n"
+            "• `llama` → groq/llama-3.3-70b\n"
+            "• `cliperhub` → CliperHub\n\n"
+            "💡 Atau pakai nama model langsung dari 9router.",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
@@ -404,6 +431,7 @@ async def cmd_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(ChatAction.TYPING)
     result = await run_ac_tool("ac_switch_model.py", "--model", model)
     await send_long(update, result)
+
 
 
 # ─── Agentic Message Handler ──────────────────────────────────────────────────

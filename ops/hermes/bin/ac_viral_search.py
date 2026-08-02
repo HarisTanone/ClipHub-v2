@@ -2,15 +2,14 @@
 AutoCliper Tool: Cari Video YouTube Viral
 Dipanggil oleh Hermes toolset autocliper_viral_search.
 
-Menggunakan ClipScout API untuk mencari video YouTube viral/trending.
+Mencari video YouTube viral/trending langsung via yt-dlp search.
 """
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
-
-import httpx
 
 # Load .env dari HERMES_HOME
 _hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
@@ -23,57 +22,33 @@ if os.path.exists(_env_file):
                 k, _, v = line.partition("=")
                 os.environ.setdefault(k.strip(), v.strip())
 
-CLIPSCOUT_API_URL = os.environ.get(
-    "CLIPSCOUT_API_URL", "https://www.clipscout.app/api/search"
-)
-CLIPSCOUT_TIMEOUT = int(os.environ.get("CLIPSCOUT_TIMEOUT", "15"))
+# Timeout untuk yt-dlp search (detik)
+YTDLP_TIMEOUT = int(os.environ.get("YTDLP_SEARCH_TIMEOUT", "45"))
 
 
 def search_viral(query: str, limit: int = 5, language: str = "") -> list[dict]:
-    """Cari video viral via ClipScout API."""
-    params = {
-        "q": query,
-        "limit": min(limit, 10),
-        "sources": "youtube_cc,youtube_protected",
-    }
+    """Cari video viral di YouTube via yt-dlp search."""
+    search_query = f"ytsearch{limit}:{query}"
     if language:
-        params["lang"] = language
+        search_query = f"ytsearch{limit}:{query} {language}"
 
     try:
-        resp = httpx.get(CLIPSCOUT_API_URL, params=params, timeout=CLIPSCOUT_TIMEOUT)
-        resp.raise_for_status()
-        data = resp.json()
-        results = data.get("results") or data.get("items") or []
-        return results[:limit]
-    except httpx.HTTPStatusError as e:
-        return [{"error": f"ClipScout API error {e.response.status_code}: {e.response.text[:200]}"}]
-    except Exception as e:
-        # Fallback: cari via yt-dlp jika ClipScout tidak tersedia
-        return _fallback_ytdlp_search(query, limit, language)
-
-
-def _fallback_ytdlp_search(query: str, limit: int, language: str) -> list[dict]:
-    """Fallback: gunakan yt-dlp untuk search YouTube."""
-    try:
-        import subprocess
-        search_query = f"ytsearch{limit}:{query}"
-        if language:
-            search_query = f"ytsearch{limit}:{query} {language}"
-
         result = subprocess.run(
             [
                 "yt-dlp",
                 "--dump-json",
                 "--no-playlist",
                 "--flat-playlist",
+                "--no-warnings",
                 search_query,
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=YTDLP_TIMEOUT,
         )
         if result.returncode != 0:
-            return [{"error": f"yt-dlp search gagal: {result.stderr[:200]}"}]
+            stderr = result.stderr.strip()[:300]
+            return [{"error": f"yt-dlp search gagal: {stderr}"}]
 
         videos = []
         for line in result.stdout.strip().split("\n"):
@@ -84,38 +59,48 @@ def _fallback_ytdlp_search(query: str, limit: int, language: str) -> list[dict]:
                 videos.append({
                     "id": item.get("id", ""),
                     "title": item.get("title", ""),
-                    "url": f"https://www.youtube.com/watch?v={item.get('id', '')}",
+                    "url": item.get("url") or f"https://www.youtube.com/watch?v={item.get('id', '')}",
                     "channel": item.get("channel") or item.get("uploader", ""),
                     "duration": item.get("duration"),
                     "view_count": item.get("view_count"),
-                    "source": "youtube_search",
+                    "like_count": item.get("like_count"),
+                    "upload_date": item.get("upload_date"),
+                    "description": (item.get("description") or "")[:150],
+                    "source": "youtube",
                 })
             except json.JSONDecodeError:
                 continue
-        return videos
+
+        # Sort by view_count descending (most viral first)
+        videos.sort(key=lambda v: v.get("view_count") or 0, reverse=True)
+        return videos[:limit]
+
+    except FileNotFoundError:
+        return [{"error": "yt-dlp tidak terinstall. Install: pip install yt-dlp"}]
+    except subprocess.TimeoutExpired:
+        return [{"error": f"Search timeout setelah {YTDLP_TIMEOUT}s — coba kurangi limit"}]
     except Exception as e:
-        return [{"error": f"Fallback search gagal: {e}"}]
+        return [{"error": f"Search gagal: {e}"}]
 
 
 def format_results(results: list[dict]) -> str:
-    """Format hasil pencarian untuk output ke Hermes."""
+    """Format hasil pencarian untuk output ke Hermes/Telegram."""
     if not results:
         return "Tidak ada hasil ditemukan."
 
     if len(results) == 1 and "error" in results[0]:
-        return f"Error: {results[0]['error']}"
+        return f"❌ {results[0]['error']}"
 
-    lines = [f"Ditemukan {len(results)} video:\n"]
+    lines = [f"🔍 Ditemukan {len(results)} video:\n"]
     for i, video in enumerate(results, 1):
-        url = video.get("url") or video.get("webpage_url") or ""
+        url = video.get("url", "")
         if not url and video.get("id"):
             url = f"https://www.youtube.com/watch?v={video['id']}"
 
         title = video.get("title", "Untitled")
-        channel = video.get("channel") or video.get("uploader") or video.get("channel_title", "")
+        channel = video.get("channel", "")
         duration = video.get("duration")
-        views = video.get("view_count") or video.get("views")
-        virality = video.get("virality_score") or video.get("score")
+        views = video.get("view_count")
 
         duration_str = ""
         if duration:
@@ -131,11 +116,9 @@ def format_results(results: list[dict]) -> str:
             else:
                 views_str = f" | {views} views"
 
-        virality_str = f" | Virality: {virality:.1f}" if virality else ""
-
         lines.append(f"{i}. {title}")
-        lines.append(f"   Channel: {channel}{duration_str}{views_str}{virality_str}")
-        lines.append(f"   URL: {url}")
+        lines.append(f"   📺 {channel}{duration_str}{views_str}")
+        lines.append(f"   🔗 {url}")
         lines.append("")
 
     return "\n".join(lines)
