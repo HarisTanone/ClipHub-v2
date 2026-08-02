@@ -18,6 +18,7 @@ credential_pool_strategies: {}
 
 toolsets:
   - hermes-cli
+  - autocliper   # AutoCliper custom toolset (viral search, submit job, dll)
 
 max_live_sessions: 16
 

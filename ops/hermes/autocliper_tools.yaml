@@ -1,0 +1,180 @@
+# AutoCliper Custom Hermes Toolset
+# Synced ke $HERMES_HOME/skills/autocliper_tools.yaml oleh sync-hermes-config.sh
+#
+# Tools yang tersedia:
+#   autocliper_viral_search  — Cari video YouTube viral via ClipScout
+#   autocliper_submit_job    — Submit YouTube URL ke AutoCliper pipeline
+#   autocliper_job_status    — Cek status + progress job AutoCliper
+#   autocliper_list_jobs     — List job terbaru
+#   autocliper_switch_model  — Ganti default model di Hermes config
+
+name: autocliper
+display_name: AutoCliper Tools
+description: |
+  Tools untuk mengontrol AutoCliper dari Hermes:
+  mencari video YouTube viral, submit ke pipeline, memantau progress,
+  dan mengganti model LLM yang digunakan.
+
+tools:
+  - name: autocliper_viral_search
+    display_name: Cari Video Viral
+    description: |
+      Cari video YouTube viral/trending berdasarkan topik atau niche.
+      Mengembalikan daftar video dengan estimasi virality score.
+      Gunakan ini sebelum autocliper_submit_job untuk menemukan konten terbaik.
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Topik atau keyword pencarian (contoh: 'AI tutorial', 'crypto news', 'gym motivation')"
+        limit:
+          type: integer
+          description: "Jumlah hasil maksimal (default: 5, max: 10)"
+          default: 5
+        language:
+          type: string
+          description: "Filter bahasa konten: 'id' untuk Indonesia, 'en' untuk English (default: semua)"
+          default: ""
+      required:
+        - query
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_viral_search.py"
+        - "--query"
+        - "${query}"
+        - "--limit"
+        - "${limit}"
+        - "--language"
+        - "${language}"
+
+  - name: autocliper_submit_job
+    display_name: Submit Job ke AutoCliper
+    description: |
+      Submit URL YouTube ke AutoCliper untuk diproses menjadi klip pendek viral.
+      Pipeline otomatis: download → transkrip → AI analysis → trim → subtitle → render.
+      Return job_id yang bisa dipakai untuk cek status via autocliper_job_status.
+    input_schema:
+      type: object
+      properties:
+        youtube_url:
+          type: string
+          description: "URL YouTube yang akan diproses (contoh: https://youtube.com/watch?v=...)"
+        style_preset:
+          type: string
+          description: "Style preset untuk rendering: 'default', 'viral', 'minimal', 'bold'"
+          default: "default"
+        target_aspect_ratio:
+          type: string
+          description: "Aspect ratio output: '9:16' (TikTok/Reels), '16:9' (YouTube), '1:1' (Instagram)"
+          default: "9:16"
+        force_reprocess:
+          type: boolean
+          description: "Paksa proses ulang meskipun URL sudah pernah diproses (default: false)"
+          default: false
+      required:
+        - youtube_url
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_submit_job.py"
+        - "--url"
+        - "${youtube_url}"
+        - "--style"
+        - "${style_preset}"
+        - "--ratio"
+        - "${target_aspect_ratio}"
+        - "--force"
+        - "${force_reprocess}"
+
+  - name: autocliper_job_status
+    display_name: Cek Status Job
+    description: |
+      Cek status dan progress job AutoCliper.
+      Mengembalikan: status (queued/processing/completed/failed),
+      progress percentage, step saat ini, dan clip yang sudah siap.
+    input_schema:
+      type: object
+      properties:
+        job_id:
+          type: string
+          description: "Job ID yang didapat dari autocliper_submit_job"
+      required:
+        - job_id
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_job_status.py"
+        - "--job-id"
+        - "${job_id}"
+
+  - name: autocliper_list_jobs
+    display_name: List Job Terbaru
+    description: |
+      Tampilkan daftar job AutoCliper terbaru beserta status masing-masing.
+      Berguna untuk memantau antrian dan job yang sedang berjalan.
+    input_schema:
+      type: object
+      properties:
+        limit:
+          type: integer
+          description: "Jumlah job yang ditampilkan (default: 10)"
+          default: 10
+        status_filter:
+          type: string
+          description: "Filter status: 'all', 'processing', 'completed', 'failed' (default: all)"
+          default: "all"
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_list_jobs.py"
+        - "--limit"
+        - "${limit}"
+        - "--status"
+        - "${status_filter}"
+
+  - name: autocliper_switch_model
+    display_name: Ganti Model LLM
+    description: |
+      Ganti model LLM default yang digunakan Hermes.
+      Perubahan langsung diterapkan ke config dan berlaku untuk session berikutnya.
+      Daftar model diambil live dari 9router /v1/models endpoint.
+      Gunakan list_models=true untuk melihat semua model yang tersedia tanpa mengganti.
+    input_schema:
+      type: object
+      properties:
+        model:
+          type: string
+          description: |
+            Model yang ingin dipakai. Bisa pakai alias pendek atau nama langsung
+            dari 9router /v1/models. Tidak diperlukan jika list_models=true.
+
+            Alias umum:
+            - grok / grok-high → gcli/grok-4.5-high (default)
+            - grok-fast → gcli/grok-4.5-fast
+            - gemini / gemini-pro → gcli/gemini-2.5-pro
+            - gemini-flash → gcli/gemini-2.5-flash
+            - gpt-4o → openai/gpt-4o
+            - llama → groq/llama-3.3-70b
+            - cliperhub → CliperHub (9router model combo)
+
+            Atau langsung pakai nama dari 9router /v1/models.
+        list_models:
+          type: boolean
+          description: "Jika true, tampilkan semua model dari 9router tanpa mengganti model. Default: false"
+          default: false
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_switch_model.py"
+        - "--model"
+        - "${model}"
+        - "--list"
+        - "${list_models}"
+
