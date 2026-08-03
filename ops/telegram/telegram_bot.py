@@ -6,8 +6,8 @@ Setiap pesan dari user authorized diteruskan ke hermes CLI sebagai prompt,
 dan responnya dikirim balik ke Telegram.
 
 Fitur:
-- /start, /help           — onboarding
-- /model <nama>           — ganti model LLM
+- /start, /help           — onboarding dengan inline buttons
+- /model <nama>           — ganti model LLM (dengan button picker)
 - /viral <topik>          — cari video YouTube viral
 - /jobs                   — list job terbaru
 - /status <job_id>        — cek status job
@@ -39,10 +39,11 @@ if os.path.exists(_env_file):
                 os.environ.setdefault(k.strip(), v.strip())
 
 try:
-    from telegram import Update
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
     from telegram.constants import ChatAction, ParseMode
     from telegram.ext import (
         Application,
+        CallbackQueryHandler,
         CommandHandler,
         ContextTypes,
         MessageHandler,
@@ -79,22 +80,106 @@ logging.basicConfig(
 logger = logging.getLogger("autocliper_bot")
 
 
+# ─── Inline Keyboard Layouts ─────────────────────────────────────────────────
+
+def kb_main_menu() -> InlineKeyboardMarkup:
+    """Keyboard utama: menu aksi."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔍 Cari Viral", callback_data="menu_viral"),
+            InlineKeyboardButton("🚀 Submit URL", callback_data="menu_submit"),
+        ],
+        [
+            InlineKeyboardButton("📋 Job Terbaru", callback_data="act_jobs"),
+            InlineKeyboardButton("📊 Cek Status", callback_data="menu_status"),
+        ],
+        [
+            InlineKeyboardButton("🤖 Model LLM", callback_data="menu_model"),
+            InlineKeyboardButton("🆔 My ID", callback_data="act_myid"),
+        ],
+        [
+            InlineKeyboardButton("❓ Bantuan", callback_data="act_help"),
+        ],
+    ])
+
+
+def kb_model_picker(current: str) -> InlineKeyboardMarkup:
+    """Keyboard pilihan model LLM."""
+    models = [
+        ("Grok 4.5 High", "grok"),
+        ("Grok 4.5 Fast", "grok-fast"),
+        ("Gemini 2.5 Pro", "gemini"),
+        ("Gemini 2.5 Flash", "gemini-flash"),
+        ("GPT-4o", "gpt-4o"),
+        ("Llama 70B", "llama"),
+        ("CliperHub", "cliperhub"),
+    ]
+    rows = []
+    for i in range(0, len(models), 2):
+        row = []
+        for name, alias in models[i:i + 2]:
+            # Tandai model aktif dengan ✓
+            label = f"✓ {name}" if alias in current.lower() or name.lower() in current.lower() else name
+            row.append(InlineKeyboardButton(label, callback_data=f"model_{alias}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("◀️ Kembali", callback_data="act_back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def kb_viral_suggestions() -> InlineKeyboardMarkup:
+    """Keyboard topik viral populer sebagai quick-pick."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💪 Gym Motivation", callback_data="viral_gym motivation"),
+            InlineKeyboardButton("📈 Trading Crypto", callback_data="viral_trading crypto"),
+        ],
+        [
+            InlineKeyboardButton("🎮 Gaming", callback_data="viral_gaming clips"),
+            InlineKeyboardButton("🧠 AI Tutorial", callback_data="viral_AI tutorial"),
+        ],
+        [
+            InlineKeyboardButton("😂 Funny Clips", callback_data="viral_funny viral clips"),
+            InlineKeyboardButton("🍳 Cooking", callback_data="viral_cooking recipes"),
+        ],
+        [
+            InlineKeyboardButton("✏️ Ketik sendiri...", callback_data="viral_custom"),
+            InlineKeyboardButton("◀️ Kembali", callback_data="act_back"),
+        ],
+    ])
+
+
+def kb_back() -> InlineKeyboardMarkup:
+    """Keyboard kembali ke menu utama."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ Menu Utama", callback_data="act_back")],
+    ])
+
+
 # ─── Auth Guard ───────────────────────────────────────────────────────────────
 
 def is_allowed(update: Update) -> bool:
     if not ALLOWED_USERS:
         return True  # Kalau tidak dikonfigurasi, semua bisa (hati-hati!)
-    return update.effective_user.id in ALLOWED_USERS
+    user = update.effective_user
+    return user is not None and user.id in ALLOWED_USERS
 
 
 async def deny(update: Update):
     uid = update.effective_user.id
     logger.warning(f"Unauthorized access attempt: user_id={uid}")
-    await update.message.reply_text(
-        f"⛔ Akses ditolak. User ID kamu: `{uid}`\n"
-        "Tambahkan ID ini ke `TELEGRAM_ALLOWED_USERS` di `.hermes/.env`",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    target = update.message or (update.callback_query and update.callback_query.message)
+    if target:
+        await target.reply_text(
+            f"⛔ Akses ditolak. User ID kamu: `{uid}`\n"
+            "Tambahkan ID ini ke `TELEGRAM_ALLOWED_USERS` di `.hermes/.env`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+async def deny_callback(query):
+    uid = query.from_user.id
+    logger.warning(f"Unauthorized callback: user_id={uid}")
+    await query.answer(f"⛔ Akses ditolak. ID: {uid}", show_alert=True)
 
 
 # ─── Hermes Runner ────────────────────────────────────────────────────────────
@@ -201,17 +286,20 @@ def split_message(text: str, max_len: int = MAX_MSG_LEN) -> list[str]:
     return chunks
 
 
-async def send_long(update: Update, text: str):
-    """Kirim teks panjang, pecah jika perlu."""
-    for chunk in split_message(text):
-        await update.message.reply_text(chunk)
+async def send_long(message, text: str, reply_markup=None):
+    """Kirim teks panjang, pecah jika perlu. Message bisa dari update.message atau query.message."""
+    chunks = split_message(text)
+    for i, chunk in enumerate(chunks):
+        # Keyboard hanya di chunk terakhir
+        markup = reply_markup if i == len(chunks) - 1 else None
+        await message.reply_text(chunk, reply_markup=markup)
 
 
 def _get_current_model() -> str:
     """Ambil model yang sedang aktif di config.yaml"""
     config_path = os.path.join(HERMES_HOME, "config.yaml")
     if not os.path.exists(config_path):
-        return "unknown (config tidak ditemukan)"
+        return "unknown"
     try:
         with open(config_path, "r") as f:
             for line in f:
@@ -228,58 +316,57 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update):
         return await deny(update)
     name = update.effective_user.first_name
+    current_model = _get_current_model()
     await update.message.reply_text(
-        f"👋 Halo *{name}*! AutoCliper Bot siap.\n\n"
-        "*Perintah cepat:*\n"
-        "🔍 `/viral <topik>` — cari video viral\n"
-        "🚀 `/submit <url>` — submit ke pipeline\n"
-        "📊 `/status <job_id>` — cek progress\n"
-        "📋 `/jobs` — list job terbaru\n"
-        "🔄 `/model <nama>` — ganti LLM model\n"
-        "🆔 `/myid` — lihat Telegram ID kamu\n\n"
-        "*Atau ketik bebas* → Hermes akan analisis dan eksekusi 🤖",
-        parse_mode=ParseMode.MARKDOWN,
+        f"👋 Halo *{name}*\\! AutoCliper Bot siap\\.\n\n"
+        f"🤖 Model aktif: `{current_model}`\n\n"
+        "Pilih aksi di bawah atau *ketik pesan bebas*\n"
+        "untuk mode agentic — Hermes akan analisis\n"
+        "dan eksekusi otomatis\\. 🚀",
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb_main_menu(),
     )
 
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update):
         return await deny(update)
-    await update.message.reply_text(
-        "*AutoCliper Bot — Panduan*\n\n"
-        "*Cari & Submit:*\n"
-        "• `/viral gym motivation` — cari video viral topik gym\n"
-        "• `/viral crypto news --lang id` — filter bahasa Indonesia\n"
-        "• `/submit https://youtube.com/watch?v=...` — proses video\n"
+    await _send_help(update.message)
+
+
+async def _send_help(message):
+    """Kirim pesan bantuan lengkap."""
+    await message.reply_text(
+        "📖 *AutoCliper Bot — Panduan*\n\n"
+        "*🔍 Cari & Submit:*\n"
+        "• `/viral gym motivation` — cari video viral\n"
+        "• `/viral crypto --lang id` — filter bahasa\n"
+        "• `/submit <url>` — proses video\n"
         "• `/submit <url> --style viral --ratio 9:16`\n\n"
-        "*Monitor:*\n"
-        "• `/status abc123` — progress job tertentu\n"
+        "*📊 Monitor:*\n"
+        "• `/status <job_id>` — progress job\n"
         "• `/jobs` — semua job terbaru\n"
-        "• `/jobs --status completed` — filter selesai\n\n"
-        "*Konfigurasi:*\n"
-        "• `/model grok` — pakai Grok (default)\n"
-        "• `/model gemini` — pakai Gemini Pro\n"
-        "• `/model gpt-4o` — pakai GPT-4o\n"
-        "• `/model llama` — pakai Llama 70B (Groq)\n"
-        "• `/model cliperhub` — pakai 9router CliperHub\n\n"
-        "*Agentic Mode:*\n"
-        "Ketik pesan bebas dan Hermes akan:\n"
-        "• Cari video viral sesuai niche\n"
-        "• Rekomendasikan mana yang worth diproses\n"
-        "• Submit langsung ke AutoCliper\n"
-        "• Laporan saat selesai\n\n"
-        "_Contoh: \"Carikan 5 video gym motivation terbaik minggu ini "
+        "• `/jobs --status completed` — filter\n\n"
+        "*🤖 Model:*\n"
+        "• `/model` — lihat model aktif + pilih\n"
+        "• `/model grok` — ganti langsung\n\n"
+        "*💬 Agentic Mode:*\n"
+        "Ketik pesan bebas, contoh:\n"
+        "_\"Carikan 5 video gym motivation terbaik "
         "dan proses yang paling viral\"_",
         parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_back(),
     )
 
 
 async def cmd_myid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     await update.message.reply_text(
-        f"Telegram ID kamu: `{uid}`\n"
-        "Tambahkan ke `TELEGRAM_ALLOWED_USERS` di `.hermes/.env` untuk akses bot.",
+        f"🆔 Telegram ID kamu: `{uid}`\n\n"
+        "Tambahkan ke `TELEGRAM_ALLOWED_USERS`\n"
+        "di `$HERMES_HOME/.env` untuk akses bot.",
         parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_back(),
     )
 
 
@@ -289,10 +376,21 @@ async def cmd_viral(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     args = ctx.args
     if not args:
-        await update.message.reply_text("Usage: `/viral <topik> [--limit N] [--lang id]`", parse_mode=ParseMode.MARKDOWN)
+        # Tampilkan tombol topik populer
+        await update.message.reply_text(
+            "🔍 *Cari Video Viral*\n\n"
+            "Pilih topik di bawah atau ketik:\n"
+            "`/viral <topik> [--limit N] [--lang id]`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_viral_suggestions(),
+        )
         return
 
-    # Parse args sederhana
+    await _do_viral_search(update.message, ctx.args)
+
+
+async def _do_viral_search(message, args: list):
+    """Eksekusi pencarian viral."""
     query_parts = []
     limit = "5"
     language = ""
@@ -307,11 +405,11 @@ async def cmd_viral(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     query = " ".join(query_parts)
     if not query:
-        await update.message.reply_text("Masukkan topik pencarian.")
+        await message.reply_text("Masukkan topik pencarian.")
         return
 
-    await update.message.reply_text(f"🔍 Mencari video viral: *{query}*...", parse_mode=ParseMode.MARKDOWN)
-    await update.message.chat.send_action(ChatAction.TYPING)
+    await message.reply_text(f"🔍 Mencari video viral: *{query}*...", parse_mode=ParseMode.MARKDOWN)
+    await message.chat.send_action(ChatAction.TYPING)
 
     result = await run_ac_tool(
         "ac_viral_search.py",
@@ -319,7 +417,7 @@ async def cmd_viral(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "--limit", limit,
         "--language", language,
     )
-    await send_long(update, result)
+    await send_long(message, result, reply_markup=kb_back())
 
 
 async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -329,8 +427,15 @@ async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     args = ctx.args
     if not args:
         await update.message.reply_text(
-            "Usage: `/submit <youtube_url> [--style default|viral|minimal|bold] [--ratio 9:16|16:9|1:1]`",
+            "🚀 *Submit Video ke Pipeline*\n\n"
+            "Kirim YouTube URL:\n"
+            "`/submit <url>`\n\n"
+            "Opsi tambahan:\n"
+            "• `--style` default｜viral｜minimal｜bold\n"
+            "• `--ratio` 9:16｜16:9｜1:1\n"
+            "• `--force` proses ulang",
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_back(),
         )
         return
 
@@ -351,7 +456,10 @@ async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             i += 1
 
     if not url.startswith("http"):
-        await update.message.reply_text("URL tidak valid. Harus dimulai dengan `https://`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(
+            "❌ URL tidak valid. Harus dimulai dengan `https://`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
         return
 
     await update.message.reply_text(f"🚀 Submitting ke AutoCliper...\n`{url}`", parse_mode=ParseMode.MARKDOWN)
@@ -364,7 +472,7 @@ async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "--ratio", ratio,
         "--force", force,
     )
-    await send_long(update, result)
+    await send_long(update.message, result, reply_markup=kb_back())
 
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -372,14 +480,24 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await deny(update)
 
     if not ctx.args:
-        await update.message.reply_text("Usage: `/status <job_id>`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(
+            "📊 *Cek Status Job*\n\n"
+            "Kirim job ID:\n"
+            "`/status <job_id>`\n\n"
+            "Atau lihat daftar job dulu:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Lihat Semua Job", callback_data="act_jobs")],
+                [InlineKeyboardButton("◀️ Kembali", callback_data="act_back")],
+            ]),
+        )
         return
 
     job_id = ctx.args[0]
     await update.message.chat.send_action(ChatAction.TYPING)
 
     result = await run_ac_tool("ac_job_status.py", "--job-id", job_id)
-    await send_long(update, result)
+    await send_long(update.message, result, reply_markup=kb_back())
 
 
 async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -401,7 +519,7 @@ async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.chat.send_action(ChatAction.TYPING)
     result = await run_ac_tool("ac_list_jobs.py", "--limit", limit, "--status", status_filter)
-    await send_long(update, result)
+    await send_long(update.message, result, reply_markup=kb_back())
 
 
 async def cmd_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -409,29 +527,173 @@ async def cmd_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await deny(update)
 
     if not ctx.args:
-        # Tampilkan model yang sedang dipakai
-        current = _get_current_model()
-        await update.message.reply_text(
-            f"🤖 *Model saat ini:* `{current}`\n\n"
-            "*Ganti model:* `/model <nama>`\n\n"
-            "*Alias tersedia:*\n"
-            "• `grok` → gcli/grok-4.5-high\n"
-            "• `grok-fast` → gcli/grok-4.5-fast\n"
-            "• `gemini` → gcli/gemini-2.5-pro\n"
-            "• `gemini-flash` → gcli/gemini-2.5-flash\n"
-            "• `gpt-4o` → openai/gpt-4o\n"
-            "• `llama` → groq/llama-3.3-70b\n"
-            "• `cliperhub` → CliperHub\n\n"
-            "💡 Atau pakai nama model langsung dari 9router.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        await _send_model_picker(update.message)
         return
 
     model = " ".join(ctx.args)
     await update.message.chat.send_action(ChatAction.TYPING)
     result = await run_ac_tool("ac_switch_model.py", "--model", model)
-    await send_long(update, result)
+    # Setelah ganti, tampilkan picker lagi dengan status baru
+    current = _get_current_model()
+    await update.message.reply_text(result)
+    await update.message.reply_text(
+        f"🤖 Model aktif: `{current}`",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_back(),
+    )
 
+
+async def _send_model_picker(message):
+    """Tampilkan model picker dengan model saat ini."""
+    current = _get_current_model()
+    await message.reply_text(
+        f"🤖 *Model LLM*\n\n"
+        f"Model aktif: `{current}`\n\n"
+        "Pilih model di bawah atau ketik:\n"
+        "`/model <nama>`",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_model_picker(current),
+    )
+
+
+# ─── Callback Query Handler (Tombol) ─────────────────────────────────────────
+
+async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle semua inline button presses."""
+    query = update.callback_query
+    await query.answer()  # Acknowledge button press
+
+    if not ALLOWED_USERS or query.from_user.id in ALLOWED_USERS:
+        pass
+    else:
+        return await deny_callback(query)
+
+    data = query.data
+
+    # ─── Menu navigasi ────────────────────────────────────────────────────
+    if data == "act_back":
+        current_model = _get_current_model()
+        await query.message.edit_text(
+            f"🏠 *Menu Utama*\n\n"
+            f"🤖 Model aktif: `{current_model}`\n\n"
+            "Pilih aksi atau ketik pesan bebas\n"
+            "untuk mode agentic\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=kb_main_menu(),
+        )
+
+    elif data == "act_help":
+        await query.message.edit_text(
+            "📖 *AutoCliper Bot — Panduan*\n\n"
+            "*🔍 Cari & Submit:*\n"
+            "• `/viral gym motivation` — cari viral\n"
+            "• `/submit <url>` — proses video\n\n"
+            "*📊 Monitor:*\n"
+            "• `/status <job_id>` — progress\n"
+            "• `/jobs` — list job terbaru\n\n"
+            "*🤖 Model:*\n"
+            "• `/model` — lihat + pilih model\n\n"
+            "*💬 Agentic Mode:*\n"
+            "Ketik pesan bebas, Hermes eksekusi otomatis!",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_back(),
+        )
+
+    elif data == "act_myid":
+        uid = query.from_user.id
+        await query.message.edit_text(
+            f"🆔 Telegram ID kamu: `{uid}`\n\n"
+            "Tambahkan ke `TELEGRAM_ALLOWED_USERS`\n"
+            "di `$HERMES_HOME/.env` untuk akses bot.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_back(),
+        )
+
+    elif data == "act_jobs":
+        await query.message.edit_text("📋 Mengambil daftar job...")
+        await query.message.chat.send_action(ChatAction.TYPING)
+        result = await run_ac_tool("ac_list_jobs.py", "--limit", "10", "--status", "all")
+        await send_long(query.message, result, reply_markup=kb_back())
+
+    # ─── Menu viral ───────────────────────────────────────────────────────
+    elif data == "menu_viral":
+        await query.message.edit_text(
+            "🔍 *Cari Video Viral*\n\n"
+            "Pilih topik populer atau ketik:\n"
+            "`/viral <topik> [--limit N] [--lang id]`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_viral_suggestions(),
+        )
+
+    elif data.startswith("viral_"):
+        topic = data[6:]  # Setelah "viral_"
+        if topic == "custom":
+            await query.message.edit_text(
+                "✏️ Ketik topik pencarian kamu:\n"
+                "`/viral <topik>`\n\n"
+                "Contoh: `/viral motivasi bisnis --lang id`",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=kb_back(),
+            )
+        else:
+            await query.message.edit_text(f"🔍 Mencari video viral: *{topic}*...", parse_mode=ParseMode.MARKDOWN)
+            await query.message.chat.send_action(ChatAction.TYPING)
+            result = await run_ac_tool("ac_viral_search.py", "--query", topic, "--limit", "5", "--language", "")
+            await send_long(query.message, result, reply_markup=kb_back())
+
+    # ─── Menu submit ──────────────────────────────────────────────────────
+    elif data == "menu_submit":
+        await query.message.edit_text(
+            "🚀 *Submit Video ke Pipeline*\n\n"
+            "Kirim YouTube URL:\n"
+            "`/submit <url>`\n\n"
+            "Opsi:\n"
+            "• `--style` viral｜default｜minimal｜bold\n"
+            "• `--ratio` 9:16｜16:9｜1:1\n"
+            "• `--force` proses ulang\n\n"
+            "Contoh:\n"
+            "`/submit https://youtube.com/watch?v=... --style viral`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_back(),
+        )
+
+    # ─── Menu status ──────────────────────────────────────────────────────
+    elif data == "menu_status":
+        await query.message.edit_text(
+            "📊 *Cek Status Job*\n\n"
+            "Kirim job ID:\n"
+            "`/status <job_id>`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Lihat Semua Job", callback_data="act_jobs")],
+                [InlineKeyboardButton("◀️ Kembali", callback_data="act_back")],
+            ]),
+        )
+
+    # ─── Menu & aksi model ────────────────────────────────────────────────
+    elif data == "menu_model":
+        current = _get_current_model()
+        await query.message.edit_text(
+            f"🤖 *Model LLM*\n\n"
+            f"Model aktif: `{current}`\n\n"
+            "Pilih model:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_model_picker(current),
+        )
+
+    elif data.startswith("model_"):
+        alias = data[6:]  # Setelah "model_"
+        await query.message.edit_text(f"🔄 Mengganti model ke *{alias}*...", parse_mode=ParseMode.MARKDOWN)
+        await query.message.chat.send_action(ChatAction.TYPING)
+        result = await run_ac_tool("ac_switch_model.py", "--model", alias)
+        # Tampilkan hasil + picker baru
+        current = _get_current_model()
+        await query.message.reply_text(result)
+        await query.message.reply_text(
+            f"🤖 Model aktif: `{current}`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_model_picker(current),
+        )
 
 
 # ─── Agentic Message Handler ──────────────────────────────────────────────────
@@ -458,7 +720,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     result = await run_hermes(prompt)
-    await send_long(update, result)
+    await send_long(update.message, result, reply_markup=kb_back())
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -482,7 +744,7 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Register handlers
+    # Register handlers — command handlers
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("myid", cmd_myid))
@@ -491,6 +753,9 @@ def main():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("jobs", cmd_jobs))
     app.add_handler(CommandHandler("model", cmd_model))
+
+    # Callback handler — inline button presses
+    app.add_handler(CallbackQueryHandler(handle_callback))
 
     # Agentic mode: semua pesan teks biasa
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
