@@ -318,12 +318,12 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     name = update.effective_user.first_name
     current_model = _get_current_model()
     await update.message.reply_text(
-        f"👋 Halo *{name}*\\! AutoCliper Bot siap\\.\n\n"
+        f"👋 Halo *{name}*! AutoCliper Bot siap.\n\n"
         f"🤖 Model aktif: `{current_model}`\n\n"
         "Pilih aksi di bawah atau *ketik pesan bebas*\n"
         "untuk mode agentic — Hermes akan analisis\n"
-        "dan eksekusi otomatis\\. 🚀",
-        parse_mode=ParseMode.MARKDOWN_V2,
+        "dan eksekusi otomatis. 🚀",
+        parse_mode=ParseMode.MARKDOWN,
         reply_markup=kb_main_menu(),
     )
 
@@ -577,8 +577,8 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🏠 *Menu Utama*\n\n"
             f"🤖 Model aktif: `{current_model}`\n\n"
             "Pilih aksi atau ketik pesan bebas\n"
-            "untuk mode agentic\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
+            "untuk mode agentic.",
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=kb_main_menu(),
         )
 
