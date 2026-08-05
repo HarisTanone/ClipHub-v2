@@ -701,6 +701,10 @@ class UserSession:
     jobs_cache: str = ""
     jobs_page: int = 1
     jobs_filter: str = "all"
+    pending_submit_url: str = ""  # URL yang menunggu konfirmasi submit
+    pending_submit_style: str = "default"
+    pending_submit_ratio: str = "9:16"
+    pending_submit_force: bool = False
 
 
 sessions: dict[int, UserSession] = {}
@@ -1112,11 +1116,18 @@ async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Validate URL is YouTube
     yt_patterns = ["youtube.com/watch", "youtu.be/", "youtube.com/shorts"]
     if not any(p in url for p in yt_patterns):
+        # Simpan di session (callback_data Telegram max 64 byte, URL bisa panjang)
+        session = get_session(update.effective_user.id)
+        session.pending_submit_url = url
+        session.pending_submit_style = style
+        session.pending_submit_ratio = ratio
+        session.pending_submit_force = force
         await update.message.reply_text(
             f"{E['warn']} URL tidak terlihat seperti YouTube.\n"
+            f"<code>{Msg.escape(url[:80])}</code>\n\n"
             f"Tetap lanjutkan?",
             parse_mode=ParseMode.HTML,
-            reply_markup=KB.confirm("submit", url),
+            reply_markup=KB.confirm("submit", "pending"),
         )
         return
 
@@ -1507,9 +1518,20 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         payload = parts[2]
 
         if action == "submit":
-            # User confirmed non-YouTube URL submit
-            await edit_or_reply(query, Msg.submitting(payload))
-            await _do_submit(query.message, payload, "default", "9:16", False)
+            # User confirmed non-YouTube URL submit — ambil dari session
+            session = get_session(uid)
+            url = session.pending_submit_url
+            if not url:
+                await edit_or_reply(query, f"{E['warn']} Session expired. Kirim ulang /submit.", KB.back())
+                return
+            await edit_or_reply(query, Msg.submitting(url))
+            await _do_submit(
+                query.message, url,
+                session.pending_submit_style,
+                session.pending_submit_ratio,
+                session.pending_submit_force,
+            )
+            session.pending_submit_url = ""  # Clear after use
 
     else:
         logger.debug("Unknown callback data: %s", data)

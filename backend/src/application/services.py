@@ -710,20 +710,480 @@ class JobService:
                             logger.warning(f"[{job_id}] AI layer generation failed for clip {clip.rank}: {e}")
                 self._emit(job_id, 9.5, "ai_layer_gen", "complete")
 
-            # ═══ Step 10-12: Render Pipeline Router ═══
-            # Remotion is ALWAYS used for hook+subtitle. FFmpeg only as catastrophic fallback.
-            
-            # ═══ Remotion is ALWAYS used for hook+subtitle rendering ═══
-            # FFmpeg subtitle rendering is deprecated — Remotion produces correct karaoke + style
-            initialize_clip_readiness(output_dir)
-            use_remotion = False
-            if self._remotion_adapter:
-                # Emit status — Remotion render always attempted
-                self._emit(job_id, 10, "remotion_render", "start")
-                # Check Remotion server health
-                if await self._remotion_adapter.health_check():
+        # ═══ Steps 10-12: Engine Router — Remotion / FFmpeg ═══
+        # Three rendering engines:
+        #   1. Remotion   — All-in-one hook+subtitle via browser render (default, best quality)
+        #   2. FFmpeg     — Lightweight server-side drawtext (no browser needed)
+        #   3. HyperFrames — AI-powered lower-third polish layer (additive, runs after others)
+        #
+        # Engine selection priority:
+        #   a) If job.hook_engine == "ffmpeg" → use FFmpeg path explicitly
+        #   b) If Remotion adapter available → use Remotion path
+        #   c) Else → fall back to FFmpeg path
+        #
+        # Note: HyperFrames is always additive if enabled (runs after main render)
+
+        initialize_clip_readiness(output_dir)
+        render_engine = self._select_render_engine(job)
+
+        if render_engine == "ffmpeg":
+            await self._run_ffmpeg_render_path(
+                job_id=job_id,
+                job=job,
+                clips=clips,
+                output_dir=output_dir,
+                reframe_data=reframe_data,
+                trim_results=trim_results,
+                clips_with_words=clips_with_words,
+                creative_direction=creative_direction,
+            )
+        else:
+            # Remotion render path (default)
+            await self._run_remotion_render_path(
+                job_id=job_id,
+                job=job,
+                clips=clips,
+                output_dir=output_dir,
+                reframe_data=reframe_data,
+                trim_results=trim_results,
+                clips_with_words=clips_with_words,
+                scene_graphs=scene_graphs,
+                prosody_results=prosody_results,
+                creative_direction=creative_direction,
+            )
+
+        # ═══ Step 13: Audio Post-Production (ducking + normalization) ═══
+        # Common to both engine paths — runs on whatever produced _final.mp4
+        self._emit(job_id, 13, "audio_mix", "start")
+        await self._repo.update_status(job_id, JobStatus.ENCODING)
+        from src.infrastructure.audio_mixer import AudioMixer, AudioMixConfig
+        audio_mixer = AudioMixer()
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+            if not os.path.exists(final_path):
+                continue
+            mixed_path = f"{output_dir}/clip_{clip.rank:02d}_mixed.mp4"
+            mix_cfg = AudioMixConfig(
+                music_mood=creative_direction.music_mood,
+                music_enabled=True,
+            )
+            result = audio_mixer.mix_audio(final_path, mixed_path, mix_cfg)
+            if result == mixed_path and os.path.exists(mixed_path):
+                # Replace final with mixed version
+                os.replace(mixed_path, final_path)
+                logger.info(f"[{job_id}] Audio mixed clip {clip.rank}")
+            else:
+                logger.info(f"[{job_id}] Audio mix skipped clip {clip.rank} (no music available)")
+        self._emit(job_id, 13, "audio_mix", "complete")
+
+        # ═══ Step 14: CDN Upload (optional) ═══
+        self._emit(job_id, 14, "cdn_upload", "start")
+        await self._repo.update_status(job_id, JobStatus.UPLOADING)
+        if self._cdn:
+            logger.info(f"[{job_id}] CDN upload step")
+            # TODO: upload final clips to CDN
+        self._emit(job_id, 14, "cdn_upload", "complete")
+
+        # ═══ Step 14.5: Thumbnails + Folder Structure ═══
+        self._emit(job_id, 14.5, "thumbnails", "start")
+        import subprocess
+        import shutil
+        thumb_dir = f"{output_dir}/thumbnail"
+        raw_dir = f"{output_dir}/raw"
+        final_dir = f"{output_dir}/final"
+        os.makedirs(thumb_dir, exist_ok=True)
+        os.makedirs(raw_dir, exist_ok=True)
+        os.makedirs(final_dir, exist_ok=True)
+
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            rank = clip.rank
+
+            # Generate thumbnail from final video (seek to 1s)
+            final_path = f"{output_dir}/clip_{rank:02d}_final.mp4"
+            thumb_path = f"{thumb_dir}/clip_{rank:02d}.jpg"
+            if os.path.exists(final_path):
+                thumb_cmd = [
+                    "ffmpeg", "-y", "-i", final_path,
+                    "-ss", "1", "-frames:v", "1",
+                    "-vf", "scale=360:-1",
+                    "-q:v", "3",
+                    thumb_path,
+                ]
+                try:
+                    await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
+                except Exception:
+                    pass
+
+            # Move raw clip to raw/ folder
+            raw_src = f"{output_dir}/clip_{rank:02d}.mp4"
+            if os.path.exists(raw_src):
+                shutil.copy2(raw_src, f"{raw_dir}/clip_{rank:02d}.mp4")
+
+            # Move final clip to final/ folder
+            if os.path.exists(final_path):
+                shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
+
+        # Generate meta JSON — slim index + per-clip json_analisa/
+        from src.infrastructure.clip_quality_helpers import (
+            build_clip_analisa,
+            write_split_job_meta,
+        )
+        payloads = []
+        for c in clips:
+            words = self._get_words_for_clip(c, clips_with_words)
+            broll_dicts = [
+                {
+                    "at_time": s.at_time,
+                    "keyword": s.keyword,
+                    "template": s.template,
+                    "duration": s.duration,
+                    "reason": getattr(s, "reason", "") or "",
+                    "placement": getattr(s, "placement", "") or "",
+                }
+                for s in (c.broll_suggestions or [])
+            ]
+            payloads.append(build_clip_analisa(
+                no=c.rank,
+                rank=c.rank,
+                start=c.start,
+                end=c.end,
+                hook=c.hook or "",
+                reason=c.reason or "",
+                score=c.score,
+                words=words,
+                broll_suggestions=broll_dicts,
+                text_emphasis_events=list(getattr(c, "text_emphasis_events", None) or [])[:2],
+                top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
+            ))
+        write_split_job_meta(
+            output_dir,
+            job_id=job_id,
+            youtube_url=job.youtube_url,
+            aspect_ratio=job.target_aspect_ratio,
+            created_at=str(job.created_at) if job.created_at else None,
+            clip_payloads=payloads,
+            clips_total=clips_count,
+            clips_success=sum(1 for c in clips if trim_results.get(c.rank)),
+        )
+
+        self._emit(job_id, 14.5, "thumbnails", "complete")
+        logger.info(f"[{job_id}] Thumbnails + json_analisa split written")
+
+        # ═══ Step 15: Assemble JSON (include scene_graphs) ═══
+        self._emit(job_id, 15, "assemble", "start")
+        await self._repo.update_status(job_id, JobStatus.ASSEMBLING)
+
+        clips_data = self._assemble_clips_data(job, clips, clips_with_words, reframe_data, creative_direction)
+        # Include scene graphs in output
+        clips_data["scene_graphs"] = {
+            str(rank): sg.to_dict() for rank, sg in scene_graphs.items()
+        }
+        # Preserve style configs from job creation
+        if job.clips_data:
+            if job.clips_data.get("hook_style_config"):
+                clips_data["hook_style_config"] = job.clips_data["hook_style_config"]
+            if job.clips_data.get("subtitle_style_config"):
+                clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
+            if job.clips_data.get("content_profile"):
+                clips_data["content_profile"] = job.clips_data["content_profile"]
+            if job.clips_data.get("source"):
+                clips_data["source"] = job.clips_data["source"]
+            if job.clips_data.get("source_type"):
+                clips_data["source_type"] = job.clips_data["source_type"]
+        await self._repo.update_clips_data(job_id, clips_data)
+
+        success_count = sum(1 for c in clips if trim_results.get(c.rank))
+        failed_count = clips_count - success_count
+        await self._repo.update_clips_count(job_id, clips_count, success_count, failed_count)
+        await self._repo.update_status(job_id, JobStatus.COMPLETED)
+
+        total_duration = time.time() - pipeline_start
+        self._emit(job_id, 15, "assemble", "complete", total_duration)
+        self._emit(job_id, success_count, JobStatus.COMPLETED.value, "done", total_duration)
+        logger.info(f"[{job_id}] Pipeline completed in {total_duration:.1f}s — {success_count}/{clips_count} clips")
+
+    except Exception as e:
+        logger.exception(f"[{job_id}] Pipeline failed: {e}")
+        await self._repo.update_status(job_id, JobStatus.FAILED, str(e)[:512])
+    finally:
+        # Cleanup temp files
+        if self._cleanup:
+            try:
+                self._cleanup.cleanup_job_directory(output_dir)
+            except Exception:
+                pass
+
+    # ─── Pipeline Helpers ─────────────────────────────────────────────────────
+
+    # ═══ Engine Router Methods ═══════════════════════════════════════════════
+
+    def _select_render_engine(self, job: Job) -> str:
+        """Select the rendering engine based on job configuration and available adapters.
+
+        Returns:
+            "ffmpeg" if hook_engine == "ffmpeg" or Remotion unavailable,
+            "remotion" if Remotion adapter is available (will check health at render time),
+        """
+        # Explicit FFmpeg engine request
+        if job.hook_engine == "ffmpeg":
+            logger.info(f"[{job.job_id}] Explicit FFmpeg engine requested")
+            return "ffmpeg"
+
+        # Default: Remotion path
+        if self._remotion_adapter is not None:
+            return "remotion"
+
+        logger.warning(f"[{job.job_id}] No Remotion adapter — falling back to FFmpeg engine")
+        return "ffmpeg"
+
+    async def _run_ffmpeg_render_path(
+        self,
+        job_id: str,
+        job: Job,
+        clips: list[Clip],
+        output_dir: str,
+        reframe_data: dict,
+        trim_results: dict,
+        clips_with_words: list[dict],
+        creative_direction,
+    ) -> None:
+        """FFmpeg render path — Hook → B-Roll → Subtitle, all via FFmpeg drawtext.
+
+        This is the lightweight server-side path that requires no browser/Remotion.
+        Three sequential steps:
+          1. Hook rendering (burn hook text onto first ~3s of each clip)
+          2. B-Roll overlay (motion typography on top of video)
+          3. Subtitle rendering (word-by-word drawtext, rendered LAST)
+        Original audio is preserved throughout — no timeline changes.
+        """
+        import shutil
+
+        # ═══ Step 10: Hook Rendering (burn hook text onto first 3s of clip) ═══
+        self._emit(job_id, 10, "hook_render", "start")
+        await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
+            out_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
+            try:
+                # Use per-clip hook_style override if set, else job-level hook_style
+                clip_style = None
+                if job.clips_data and "clips" in job.clips_data:
+                    for cd in job.clips_data["clips"]:
+                        if cd.get("rank") == clip.rank and cd.get("hook_style"):
+                            clip_style = cd["hook_style"]
+                            break
+                hook_style = clip_style or job.hook_style or settings.HOOK_DEFAULT_STYLE
+                await self._render_hook_ffmpeg(in_path, clip.hook, out_path, hook_style=hook_style)
+                logger.info(f"[{job_id}] Hook rendered clip {clip.rank} (style={hook_style})")
+            except Exception as e:
+                logger.warning(f"[{job_id}] Hook render failed clip {clip.rank}: {e}")
+        self._emit(job_id, 10, "hook_render", "complete")
+
+        # ═══ Step 11: B-Roll Overlay (motion typography on top of video) ═══
+        # B-roll is OVERLAID on top of the video (not inserted).
+        # Original audio continues uninterrupted. Timeline does NOT change.
+        self._emit(job_id, 11, "broll", "start")
+        await self._repo.update_status(job_id, JobStatus.BROLL)
+        if job.broll_enabled and self._broll_injector:
+            for clip in clips:
+                if not trim_results.get(clip.rank) or not clip.broll_suggestions:
+                    continue
+                hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
+                in_path = hooked_path if os.path.exists(hooked_path) else self._best_clip_path(output_dir, clip.rank, reframe_data)
+                out_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+                try:
+                    result = await self._broll_injector.inject(in_path, clip.broll_suggestions, out_path)
+                    if result != in_path:
+                        logger.info(f"[{job_id}] B-roll overlaid clip {clip.rank}")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] B-roll overlay failed clip {clip.rank}: {e}")
+        else:
+            logger.info(f"[{job_id}] Step 11 skipped (broll_enabled={job.broll_enabled})")
+        self._emit(job_id, 11, "broll", "complete")
+
+        # ═══ Step 12: Subtitle Rendering (word-by-word, rendered LAST) ═══
+        # Subtitles are rendered on top of everything (hook + b-roll).
+        # Since b-roll is overlay (no timeline change), whisper timestamps still match.
+        self._emit(job_id, 12, "subtitle", "start")
+        await self._repo.update_status(job_id, JobStatus.SUBTITLE_RENDERING)
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            words = self._get_words_for_clip(clip, clips_with_words)
+            # Use best available: brolled > hooked > reframed > raw
+            brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
+            hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
+            in_path = brolled_path if os.path.exists(brolled_path) else (
+                hooked_path if os.path.exists(hooked_path) else
+                self._best_clip_path(output_dir, clip.rank, reframe_data)
+            )
+            out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+            if words and self._subtitle_renderer:
+                try:
+                    # Build style from creative direction
+                    from src.domain.entities import SubtitleStyleConfig
+                    sub_style = SubtitleStyleConfig(
+                        color=creative_direction.primary_color,
+                        highlight_color=creative_direction.secondary_color,
+                        uppercase=creative_direction.subtitle_uppercase,
+                        position=creative_direction.subtitle_position,
+                        start_offset=3.0,  # Subtitle starts after 3s hook
+                    )
+                    self._subtitle_renderer.render_subtitles(
+                        video_path=in_path,
+                        words=words,
+                        style=sub_style,
+                        output_path=out_path,
+                        start_offset=3.0,  # Subtitle starts after 3s hook
+                    )
+                    logger.info(f"[{job_id}] Subtitle rendered clip {clip.rank}")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Subtitle render failed clip {clip.rank}: {e}")
+                    if os.path.exists(in_path) and not os.path.exists(out_path):
+                        shutil.copy2(in_path, out_path)
+            else:
+                # No words / no renderer — copy best available as final
+                if os.path.exists(in_path) and not os.path.exists(out_path):
+                    shutil.copy2(in_path, out_path)
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                mark_clip_ready(output_dir, clip.rank)
+        self._emit(job_id, 12, "subtitle", "complete")
+
+    async def _run_remotion_render_path(
+        self,
+        job_id: str,
+        job: Job,
+        clips: list[Clip],
+        output_dir: str,
+        reframe_data: dict,
+        trim_results: dict,
+        clips_with_words: list[dict],
+        scene_graphs: dict,
+        prosody_results: dict,
+        creative_direction,
+    ) -> None:
+        """Remotion render path — all-in-one hook+subtitle via browser render.
+
+        Remotion is the primary rendering engine. It handles hook, subtitle,
+        B-roll motion graphics, and scene graph execution in a single pass.
+        FFmpeg fallback is used only for catastrophic Remotion failures.
+        """
+        import shutil
+        use_remotion = False
+
+        if self._remotion_adapter:
+            self._emit(job_id, 10, "remotion_render", "start")
+            if await self._remotion_adapter.health_check():
+                use_remotion = True
+                # Server healthy, proceed with Remotion render
+                for clip in clips:
+                    if not trim_results.get(clip.rank):
+                        continue
+                    
+                    scene_graph = scene_graphs.get(clip.rank)
+                    if not scene_graph:
+                        logger.warning(f"[{job_id}] No scene graph for clip {clip.rank}")
+                        continue
+                    
+                    in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
+                    out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+                    
+                    # Get words and hook for this clip
+                    clip_words = self._get_words_for_clip(clip, clips_with_words)
+                    clip_hook = clip.hook or ""
+                    
+                    try:
+                        from src.domain.interfaces_remotion import RemotionRenderConfig
+                        from src.infrastructure.canvas_templates import (
+                            build_canvas_config,
+                            output_resolution_for_job,
+                        )
+                        res = output_resolution_for_job(job.target_aspect_ratio)
+                        render_config = RemotionRenderConfig(
+                            concurrency=settings.REMOTION_CONCURRENCY,
+                            quality=settings.REMOTION_QUALITY,
+                            enable_threejs=settings.REMOTION_ENABLE_THREEJS,
+                            enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
+                            resolution=res,
+                        )
+                        # Merge custom style configs into creative direction
+                        cd_dict = asdict(creative_direction) if creative_direction else {}
+                        if job.clips_data:
+                            if job.clips_data.get("hook_style_config"):
+                                cd_dict["hook_style_config"] = job.clips_data["hook_style_config"]
+                            if job.clips_data.get("subtitle_style_config"):
+                                cd_dict["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
+                            canvas = job.clips_data.get("canvas_config")
+                            if not canvas and (job.target_aspect_ratio or "") in ("16:9", "1:1"):
+                                canvas = build_canvas_config(
+                                    job.target_aspect_ratio,
+                                    background_mode=job.clips_data.get("background_mode"),
+                                    background_template_id=job.clips_data.get("background_template_id"),
+                                    background_image_url=job.clips_data.get("background_image_data_url"),
+                                )
+                            if canvas:
+                                cd_dict["canvas_config"] = canvas
+                        else:
+                            # Try re-read from DB as last resort
+                            _fresh = await self._repo.get_by_job_id(job_id)
+                            if _fresh and _fresh.clips_data:
+                                if _fresh.clips_data.get("hook_style_config"):
+                                    cd_dict["hook_style_config"] = _fresh.clips_data["hook_style_config"]
+                                if _fresh.clips_data.get("subtitle_style_config"):
+                                    cd_dict["subtitle_style_config"] = _fresh.clips_data["subtitle_style_config"]
+                                job.clips_data = _fresh.clips_data
+
+                        # Add zoom events from prosody analysis
+                        prosody = prosody_results.get(clip.rank)
+                        if prosody and prosody.energy_peaks:
+                            cd_dict["zoom_events"] = [
+                                {"time": peak.time, "intensity": peak.intensity, "duration": 0.5}
+                                for peak in prosody.energy_peaks[:8]
+                                if peak.time > (cd_dict.get("hook_style_config", {}).get("duration", 3.0))
+                            ]
+                        self._apply_reframe_metadata(
+                            cd_dict, job, reframe_data.get(clip.rank)
+                        )
+                        
+                        result = await self._remotion_adapter.render_clip(
+                            scene_graph=scene_graph.to_dict(),
+                            creative_direction=cd_dict,
+                            video_path=in_path,
+                            output_path=out_path,
+                            clip_rank=clip.rank,
+                            config=render_config,
+                            words=clip_words,
+                            hook_text=clip_hook,
+                            hook_style=job.hook_style or "fade_scale",
+                        )
+                        if result.success:
+                            logger.info(f"[{job_id}] Remotion rendered clip {clip.rank} ({result.render_time_seconds:.1f}s)")
+                        else:
+                            logger.error(f"[{job_id}] Remotion render failed clip {clip.rank}: {result.error_message}")
+                            # Copy base clip as fallback
+                            if os.path.exists(in_path) and not os.path.exists(out_path):
+                                shutil.copy2(in_path, out_path)
+                    except Exception as e:
+                        logger.exception(f"[{job_id}] Remotion render error clip {clip.rank}: {e}")
+                        if os.path.exists(in_path) and not os.path.exists(out_path):
+                            shutil.copy2(in_path, out_path)
+                    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                        mark_clip_ready(output_dir, clip.rank)
+                
+                self._emit(job_id, 12, "remotion_render", "complete")
+            else:
+                # Server not running — start it and wait
+                logger.info(f"[{job_id}] Remotion server not running — starting...")
+                started = await self._remotion_adapter.start_server()
+                if started and await self._remotion_adapter.health_check():
                     use_remotion = True
-                    # Server healthy, proceed with Remotion render
+                    logger.info(f"[{job_id}] Remotion server started successfully")
                     for clip in clips:
                         if not trim_results.get(clip.rank):
                             continue
@@ -736,7 +1196,6 @@ class JobService:
                         in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
                         out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
                         
-                        # Get words and hook for this clip
                         clip_words = self._get_words_for_clip(clip, clips_with_words)
                         clip_hook = clip.hook or ""
                         
@@ -754,7 +1213,6 @@ class JobService:
                                 enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
                                 resolution=res,
                             )
-                            # Merge custom style configs into creative direction
                             cd_dict = asdict(creative_direction) if creative_direction else {}
                             if job.clips_data:
                                 if job.clips_data.get("hook_style_config"):
@@ -771,27 +1229,7 @@ class JobService:
                                     )
                                 if canvas:
                                     cd_dict["canvas_config"] = canvas
-                            else:
-                                # Try re-read from DB as last resort
-                                _fresh = await self._repo.get_by_job_id(job_id)
-                                if _fresh and _fresh.clips_data:
-                                    if _fresh.clips_data.get("hook_style_config"):
-                                        cd_dict["hook_style_config"] = _fresh.clips_data["hook_style_config"]
-                                    if _fresh.clips_data.get("subtitle_style_config"):
-                                        cd_dict["subtitle_style_config"] = _fresh.clips_data["subtitle_style_config"]
-                                    job.clips_data = _fresh.clips_data
-
-                            # Add zoom events from prosody analysis
-                            prosody = prosody_results.get(clip.rank)
-                            if prosody and prosody.energy_peaks:
-                                cd_dict["zoom_events"] = [
-                                    {"time": peak.time, "intensity": peak.intensity, "duration": 0.5}
-                                    for peak in prosody.energy_peaks[:8]  # Max 8 zooms per clip
-                                    if peak.time > (cd_dict.get("hook_style_config", {}).get("duration", 3.0))  # Don't zoom during hook
-                                ]
-                            self._apply_reframe_metadata(
-                                cd_dict, job, reframe_data.get(clip.rank)
-                            )
+                            self._apply_reframe_metadata(cd_dict, job, reframe_data.get(clip.rank))
                             
                             result = await self._remotion_adapter.render_clip(
                                 scene_graph=scene_graph.to_dict(),
@@ -808,375 +1246,34 @@ class JobService:
                                 logger.info(f"[{job_id}] Remotion rendered clip {clip.rank} ({result.render_time_seconds:.1f}s)")
                             else:
                                 logger.error(f"[{job_id}] Remotion render failed clip {clip.rank}: {result.error_message}")
-                                # Copy base clip as fallback
                                 if os.path.exists(in_path) and not os.path.exists(out_path):
-                                    import shutil
                                     shutil.copy2(in_path, out_path)
                         except Exception as e:
                             logger.exception(f"[{job_id}] Remotion render error clip {clip.rank}: {e}")
-                            # Fallback: copy base clip
                             if os.path.exists(in_path) and not os.path.exists(out_path):
-                                import shutil
                                 shutil.copy2(in_path, out_path)
                         if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
                             mark_clip_ready(output_dir, clip.rank)
                     
                     self._emit(job_id, 12, "remotion_render", "complete")
                 else:
-                    # Server not running — start it and wait
-                    logger.info(f"[{job_id}] Remotion server not running — starting...")
-                    started = await self._remotion_adapter.start_server()
-                    if started and await self._remotion_adapter.health_check():
-                        use_remotion = True
-                        logger.info(f"[{job_id}] Remotion server started successfully")
-                        # Server started, proceed with Remotion render
-                        for clip in clips:
-                            if not trim_results.get(clip.rank):
-                                continue
-                            
-                            scene_graph = scene_graphs.get(clip.rank)
-                            if not scene_graph:
-                                logger.warning(f"[{job_id}] No scene graph for clip {clip.rank}")
-                                continue
-                            
-                            in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
-                            out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
-                            
-                            # Get words and hook for this clip
-                            clip_words = self._get_words_for_clip(clip, clips_with_words)
-                            clip_hook = clip.hook or ""
-                            
-                            try:
-                                from src.domain.interfaces_remotion import RemotionRenderConfig
-                                from src.infrastructure.canvas_templates import (
-                                    build_canvas_config,
-                                    output_resolution_for_job,
-                                )
-                                res = output_resolution_for_job(job.target_aspect_ratio)
-                                render_config = RemotionRenderConfig(
-                                    concurrency=settings.REMOTION_CONCURRENCY,
-                                    quality=settings.REMOTION_QUALITY,
-                                    enable_threejs=settings.REMOTION_ENABLE_THREEJS,
-                                    enable_ai_layer=settings.REMOTION_ENABLE_AI_LAYER,
-                                    resolution=res,
-                                )
-                                # Merge custom style configs
-                                cd_dict = asdict(creative_direction) if creative_direction else {}
-                                if job.clips_data:
-                                    if job.clips_data.get("hook_style_config"):
-                                        cd_dict["hook_style_config"] = job.clips_data["hook_style_config"]
-                                    if job.clips_data.get("subtitle_style_config"):
-                                        cd_dict["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
-                                    canvas = job.clips_data.get("canvas_config")
-                                    if not canvas and (job.target_aspect_ratio or "") in ("16:9", "1:1"):
-                                        canvas = build_canvas_config(
-                                            job.target_aspect_ratio,
-                                            background_mode=job.clips_data.get("background_mode"),
-                                            background_template_id=job.clips_data.get("background_template_id"),
-                                            background_image_url=job.clips_data.get("background_image_data_url"),
-                                        )
-                                    if canvas:
-                                        cd_dict["canvas_config"] = canvas
-                                self._apply_reframe_metadata(
-                                    cd_dict, job, reframe_data.get(clip.rank)
-                                )
-                                
-                                result = await self._remotion_adapter.render_clip(
-                                    scene_graph=scene_graph.to_dict(),
-                                    creative_direction=cd_dict,
-                                    video_path=in_path,
-                                    output_path=out_path,
-                                    clip_rank=clip.rank,
-                                    config=render_config,
-                                    words=clip_words,
-                                    hook_text=clip_hook,
-                                    hook_style=job.hook_style or "fade_scale",
-                                )
-                                if result.success:
-                                    logger.info(f"[{job_id}] Remotion rendered clip {clip.rank} ({result.render_time_seconds:.1f}s)")
-                                else:
-                                    logger.error(f"[{job_id}] Remotion render failed clip {clip.rank}: {result.error_message}")
-                                    if os.path.exists(in_path) and not os.path.exists(out_path):
-                                        import shutil
-                                        shutil.copy2(in_path, out_path)
-                            except Exception as e:
-                                logger.exception(f"[{job_id}] Remotion render error clip {clip.rank}: {e}")
-                                if os.path.exists(in_path) and not os.path.exists(out_path):
-                                    import shutil
-                                    shutil.copy2(in_path, out_path)
-                            if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
-                                mark_clip_ready(output_dir, clip.rank)
-                        
-                        self._emit(job_id, 12, "remotion_render", "complete")
-                    else:
-                        logger.error(f"[{job_id}] Failed to start Remotion server — will attempt FFmpeg fallback")
-            else:
-                logger.warning(f"[{job_id}] No Remotion adapter configured — using FFmpeg fallback")
-            
-            if not use_remotion:
-                # ═══ FFmpeg Path — Multi-step rendering (Hook → B-Roll → Subtitle) ═══
-                
-                # ═══ Step 10: Hook Rendering (burn hook text onto first 3s of clip) ═══
-                self._emit(job_id, 10, "hook_render", "start")
-                await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
-                for clip in clips:
-                    if not trim_results.get(clip.rank):
-                        continue
-                    in_path = self._best_clip_path(output_dir, clip.rank, reframe_data)
-                    out_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
-                    try:
-                        # Use per-clip hook_style override if set, else job-level hook_style
-                        clip_style = None
-                        if job.clips_data and "clips" in job.clips_data:
-                            for cd in job.clips_data["clips"]:
-                                if cd.get("rank") == clip.rank and cd.get("hook_style"):
-                                    clip_style = cd["hook_style"]
-                                    break
-                        hook_style = clip_style or job.hook_style or settings.HOOK_DEFAULT_STYLE
-                        await self._render_hook_ffmpeg(in_path, clip.hook, out_path, hook_style=hook_style)
-                        logger.info(f"[{job_id}] Hook rendered clip {clip.rank} (style={hook_style})")
-                    except Exception as e:
-                        logger.warning(f"[{job_id}] Hook render failed clip {clip.rank}: {e}")
-                self._emit(job_id, 10, "hook_render", "complete")
-
-                # ═══ Step 11: B-Roll Overlay (motion typography on top of video) ═══
-                # B-roll is OVERLAID on top of the video (not inserted).
-                # Original audio continues uninterrupted. Timeline does NOT change.
-                # Subtitles rendered AFTER this step will appear on top of b-roll too.
-                self._emit(job_id, 11, "broll", "start")
-                await self._repo.update_status(job_id, JobStatus.BROLL)
-                if job.broll_enabled and self._broll_injector:
-                    for clip in clips:
-                        if not trim_results.get(clip.rank) or not clip.broll_suggestions:
-                            continue
-                        hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
-                        in_path = hooked_path if os.path.exists(hooked_path) else self._best_clip_path(output_dir, clip.rank, reframe_data)
-                        out_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
-                        try:
-                            result = await self._broll_injector.inject(in_path, clip.broll_suggestions, out_path)
-                            if result != in_path:
-                                logger.info(f"[{job_id}] B-roll overlaid clip {clip.rank}")
-                        except Exception as e:
-                            logger.warning(f"[{job_id}] B-roll overlay failed clip {clip.rank}: {e}")
-                else:
-                    logger.info(f"[{job_id}] Step 11 skipped (broll_enabled={job.broll_enabled})")
-                self._emit(job_id, 11, "broll", "complete")
-
-                # ═══ Step 12: Subtitle Rendering (word-by-word, rendered LAST) ═══
-                # Subtitles are rendered on top of everything (hook + b-roll).
-                # Since b-roll is overlay (no timeline change), whisper timestamps still match.
-                self._emit(job_id, 12, "subtitle", "start")
-                await self._repo.update_status(job_id, JobStatus.SUBTITLE_RENDERING)
-                for clip in clips:
-                    if not trim_results.get(clip.rank):
-                        continue
-                    words = self._get_words_for_clip(clip, clips_with_words)
-                    # Use best available: brolled > hooked > reframed > raw
-                    brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
-                    hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
-                    in_path = brolled_path if os.path.exists(brolled_path) else (
-                        hooked_path if os.path.exists(hooked_path) else
-                        self._best_clip_path(output_dir, clip.rank, reframe_data)
-                    )
-                    out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
-                    if words and self._subtitle_renderer:
-                        try:
-                            # Build style from creative direction
-                            from src.domain.entities import SubtitleStyleConfig
-                            sub_style = SubtitleStyleConfig(
-                                color=creative_direction.primary_color,
-                                highlight_color=creative_direction.secondary_color,
-                                uppercase=creative_direction.subtitle_uppercase,
-                                position=creative_direction.subtitle_position,
-                                start_offset=3.0,  # Subtitle starts after 3s hook
-                            )
-                            self._subtitle_renderer.render_subtitles(
-                                video_path=in_path,
-                                words=words,
-                                style=sub_style,
-                                output_path=out_path,
-                                start_offset=3.0,  # Subtitle starts after 3s hook
-                            )
-                            logger.info(f"[{job_id}] Subtitle rendered clip {clip.rank}")
-                        except Exception as e:
-                            logger.warning(f"[{job_id}] Subtitle render failed clip {clip.rank}: {e}")
-                            if os.path.exists(in_path) and not os.path.exists(out_path):
-                                import shutil
-                                shutil.copy2(in_path, out_path)
-                    else:
-                        # No words / no renderer — copy best available as final
-                        if os.path.exists(in_path) and not os.path.exists(out_path):
-                            import shutil
-                            shutil.copy2(in_path, out_path)
-                    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
-                        mark_clip_ready(output_dir, clip.rank)
-                self._emit(job_id, 12, "subtitle", "complete")
-
-            # ═══ Step 13: Audio Post-Production (ducking + normalization) ═══
-            self._emit(job_id, 13, "audio_mix", "start")
-            await self._repo.update_status(job_id, JobStatus.ENCODING)
-            from src.infrastructure.audio_mixer import AudioMixer, AudioMixConfig
-            audio_mixer = AudioMixer()
-            for clip in clips:
-                if not trim_results.get(clip.rank):
-                    continue
-                final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
-                if not os.path.exists(final_path):
-                    continue
-                mixed_path = f"{output_dir}/clip_{clip.rank:02d}_mixed.mp4"
-                mix_cfg = AudioMixConfig(
-                    music_mood=creative_direction.music_mood,
-                    music_enabled=True,
-                )
-                result = audio_mixer.mix_audio(final_path, mixed_path, mix_cfg)
-                if result == mixed_path and os.path.exists(mixed_path):
-                    # Replace final with mixed version
-                    os.replace(mixed_path, final_path)
-                    logger.info(f"[{job_id}] Audio mixed clip {clip.rank}")
-                else:
-                    logger.info(f"[{job_id}] Audio mix skipped clip {clip.rank} (no music available)")
-            self._emit(job_id, 13, "audio_mix", "complete")
-
-            # ═══ Step 14: CDN Upload (optional) ═══
-            self._emit(job_id, 14, "cdn_upload", "start")
-            await self._repo.update_status(job_id, JobStatus.UPLOADING)
-            if self._cdn:
-                logger.info(f"[{job_id}] CDN upload step")
-                # TODO: upload final clips to CDN
-            self._emit(job_id, 14, "cdn_upload", "complete")
-
-            # ═══ Step 14.5: Thumbnails + Folder Structure ═══
-            self._emit(job_id, 14.5, "thumbnails", "start")
-            import subprocess
-            import shutil
-            thumb_dir = f"{output_dir}/thumbnail"
-            raw_dir = f"{output_dir}/raw"
-            final_dir = f"{output_dir}/final"
-            os.makedirs(thumb_dir, exist_ok=True)
-            os.makedirs(raw_dir, exist_ok=True)
-            os.makedirs(final_dir, exist_ok=True)
-
-            for clip in clips:
-                if not trim_results.get(clip.rank):
-                    continue
-                rank = clip.rank
-
-                # Generate thumbnail from final video (seek to 1s)
-                final_path = f"{output_dir}/clip_{rank:02d}_final.mp4"
-                thumb_path = f"{thumb_dir}/clip_{rank:02d}.jpg"
-                if os.path.exists(final_path):
-                    thumb_cmd = [
-                        "ffmpeg", "-y", "-i", final_path,
-                        "-ss", "1", "-frames:v", "1",
-                        "-vf", "scale=360:-1",
-                        "-q:v", "3",
-                        thumb_path,
-                    ]
-                    try:
-                        await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
-                    except Exception:
-                        pass
-
-                # Move raw clip to raw/ folder
-                raw_src = f"{output_dir}/clip_{rank:02d}.mp4"
-                if os.path.exists(raw_src):
-                    shutil.copy2(raw_src, f"{raw_dir}/clip_{rank:02d}.mp4")
-
-                # Move final clip to final/ folder
-                if os.path.exists(final_path):
-                    shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
-
-            # Generate meta JSON — slim index + per-clip json_analisa/
-            from src.infrastructure.clip_quality_helpers import (
-                build_clip_analisa,
-                write_split_job_meta,
-            )
-            payloads = []
-            for c in clips:
-                words = self._get_words_for_clip(c, clips_with_words)
-                broll_dicts = [
-                    {
-                        "at_time": s.at_time,
-                        "keyword": s.keyword,
-                        "template": s.template,
-                        "duration": s.duration,
-                        "reason": getattr(s, "reason", "") or "",
-                        "placement": getattr(s, "placement", "") or "",
-                    }
-                    for s in (c.broll_suggestions or [])
-                ]
-                payloads.append(build_clip_analisa(
-                    no=c.rank,
-                    rank=c.rank,
-                    start=c.start,
-                    end=c.end,
-                    hook=c.hook or "",
-                    reason=c.reason or "",
-                    score=c.score,
-                    words=words,
-                    broll_suggestions=broll_dicts,
-                    text_emphasis_events=list(getattr(c, "text_emphasis_events", None) or [])[:2],
-                    top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
-                ))
-            write_split_job_meta(
-                output_dir,
+                    logger.error(f"[{job_id}] Failed to start Remotion server — will attempt FFmpeg fallback")
+        else:
+            logger.warning(f"[{job_id}] No Remotion adapter configured — using FFmpeg fallback")
+        
+        if not use_remotion:
+            # ═══ Fallback: FFmpeg Multi-step rendering (Hook → B-Roll → Subtitle) ═══
+            # Delegate to the shared FFmpeg render path
+            await self._run_ffmpeg_render_path(
                 job_id=job_id,
-                youtube_url=job.youtube_url,
-                aspect_ratio=job.target_aspect_ratio,
-                created_at=str(job.created_at) if job.created_at else None,
-                clip_payloads=payloads,
-                clips_total=clips_count,
-                clips_success=sum(1 for c in clips if trim_results.get(c.rank)),
+                job=job,
+                clips=clips,
+                output_dir=output_dir,
+                reframe_data=reframe_data,
+                trim_results=trim_results,
+                clips_with_words=clips_with_words,
+                creative_direction=creative_direction,
             )
-
-            self._emit(job_id, 14.5, "thumbnails", "complete")
-            logger.info(f"[{job_id}] Thumbnails + json_analisa split written")
-
-            # ═══ Step 15: Assemble JSON (include scene_graphs) ═══
-            self._emit(job_id, 15, "assemble", "start")
-            await self._repo.update_status(job_id, JobStatus.ASSEMBLING)
-
-            clips_data = self._assemble_clips_data(job, clips, clips_with_words, reframe_data, creative_direction)
-            # Include scene graphs in output
-            clips_data["scene_graphs"] = {
-                str(rank): sg.to_dict() for rank, sg in scene_graphs.items()
-            }
-            # Preserve style configs from job creation
-            if job.clips_data:
-                if job.clips_data.get("hook_style_config"):
-                    clips_data["hook_style_config"] = job.clips_data["hook_style_config"]
-                if job.clips_data.get("subtitle_style_config"):
-                    clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
-                if job.clips_data.get("content_profile"):
-                    clips_data["content_profile"] = job.clips_data["content_profile"]
-                if job.clips_data.get("source"):
-                    clips_data["source"] = job.clips_data["source"]
-                if job.clips_data.get("source_type"):
-                    clips_data["source_type"] = job.clips_data["source_type"]
-            await self._repo.update_clips_data(job_id, clips_data)
-
-            success_count = sum(1 for c in clips if trim_results.get(c.rank))
-            failed_count = clips_count - success_count
-            await self._repo.update_clips_count(job_id, clips_count, success_count, failed_count)
-            await self._repo.update_status(job_id, JobStatus.COMPLETED)
-
-            total_duration = time.time() - pipeline_start
-            self._emit(job_id, 15, "assemble", "complete", total_duration)
-            self._emit(job_id, success_count, JobStatus.COMPLETED.value, "done", total_duration)
-            logger.info(f"[{job_id}] Pipeline completed in {total_duration:.1f}s — {success_count}/{clips_count} clips")
-
-        except Exception as e:
-            logger.exception(f"[{job_id}] Pipeline failed: {e}")
-            await self._repo.update_status(job_id, JobStatus.FAILED, str(e)[:512])
-        finally:
-            # Cleanup temp files
-            if self._cleanup:
-                try:
-                    self._cleanup.cleanup_job_directory(output_dir)
-                except Exception:
-                    pass
-
-    # ─── Pipeline Helpers ─────────────────────────────────────────────────────
 
     def _apply_reframe_metadata(
         self,
@@ -1270,6 +1367,10 @@ class JobService:
           - fade_scale: Smooth fade + slight grow
           - slide_punch_framer: Slide from left with punch
           - typewriter: Character-by-character reveal
+          - glitch_rgb: RGB split/chromatic aberration effect
+          - shake_neon: Neon glow with random shake
+          - cinematic_reveal: Cinematic letterbox + elegant fade-in
+          - danger_bold: Bold red with pulsing border
         """
         import subprocess
         import shutil

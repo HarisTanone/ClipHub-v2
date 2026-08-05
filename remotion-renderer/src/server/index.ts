@@ -216,7 +216,7 @@ app.post("/render", async (req, res) => {
       serveUrl: bundled,
       id: request.compositionId,
       inputProps: propsWithUrl,
-      chromiumOptions: { gl: "angle" },
+      chromiumOptions: { gl: "swangle" },
     });
 
     // Override duration/dimensions
@@ -244,7 +244,7 @@ app.post("/render", async (req, res) => {
       concurrency: request.concurrency || qualityConfig.concurrency,
       crf: qualityConfig.crf,
       pixelFormat: "yuv420p",
-      chromiumOptions: { gl: "angle" },
+      chromiumOptions: { gl: "swangle" },
       onProgress: ({ progress }) => {
         activeRenders.set(renderId, {
           status: "rendering",
@@ -361,7 +361,7 @@ app.post("/render-still", async (req, res) => {
       serveUrl: bundled,
       id: request.compositionId,
       inputProps: propsWithUrl,
-      chromiumOptions: { gl: "angle" },
+      chromiumOptions: { gl: "swangle" },
     });
 
     const finalComposition = {
@@ -385,7 +385,7 @@ app.post("/render-still", async (req, res) => {
       imageFormat: "jpeg",
       jpegQuality: 80,
       inputProps: propsWithUrl,
-      chromiumOptions: { gl: "angle" },
+      chromiumOptions: { gl: "swangle" },
     });
 
     const imageData = fs.readFileSync(request.outputPath, { encoding: "base64" });

@@ -48,6 +48,7 @@ class AspectRatio(str, Enum):
 class HookEngine(str, Enum):
     V2_LEGACY = "v2"
     V3_BROWSER = "v3"
+    FFMPEG = "ffmpeg"  # Server-side FFmpeg drawtext (no browser/Remotion needed)
 
 
 class BRollTemplate(str, Enum):
