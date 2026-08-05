@@ -24,19 +24,79 @@ sys.path.insert(0, str(Path(__file__).parent))
 import ac_auth
 
 
+def lookup_preset_by_name(name: str) -> str | None:
+    """Lookup preset ID by name from API."""
+    try:
+        result = ac_auth.api_get("/style-presets")
+        presets = result.get("data", [])
+        for preset in presets:
+            if preset.get("id") == name or preset.get("name", "").lower() == name.lower():
+                return preset.get("id")
+    except Exception:
+        pass
+    return None
+
+
+def print_usage():
+    """Print detailed usage with preset IDs."""
+    print("""
+AutoCliper Submit Job Tool
+==========================
+
+Usage: ac_submit_job.py --url <youtube_url> [options]
+
+Options:
+  --url <URL>              YouTube URL yang akan diproses (WAJIB)
+  --style <ID>             Style preset ID (lihat daftar di bawah)
+  --ratio <RATIO>          Aspect ratio: 9:16, 16:9, 1:1 (default: 9:16)
+  --force <true|false>     Force reprocess (default: false)
+
+Daftar Style Preset IDs yang tersedia:
+  • bold_black   - Bold Black style
+  • viral        - Viral style dengan highlight tinggi
+  • minimal      - Minimal clean style
+  • default      - Default style
+  • neon_glow    - Neon glow effect
+  • retro        - Retro aesthetic
+  • tech         - Tech/ futuristik style
+  • podcast      - Podcast lower third style
+
+Contoh penggunaan:
+  ac_submit_job.py --url https://youtu.be/abc123 --style bold_black --ratio 9:16
+  ac_submit_job.py --url https://youtube.com/watch?v=abc123 --style viral --force true
+""")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Submit YouTube URL ke AutoCliper")
+    parser = argparse.ArgumentParser(
+        description="Submit YouTube URL ke AutoCliper",
+        add_help=False
+    )
     parser.add_argument("--url", required=True, help="YouTube URL")
-    parser.add_argument("--style", default="default", help="Style preset")
+    parser.add_argument("--style", default="", help="Style preset ID or name")
     parser.add_argument("--ratio", default="9:16", help="Aspect ratio")
     parser.add_argument("--force", default="false", help="Force reprocess (true/false)")
+    parser.add_argument("--help-extended", action="store_true", help="Show extended help with preset IDs")
+    
     args = parser.parse_args()
+
+    if args.help_extended:
+        print_usage()
+        return
 
     force = args.force.lower() in ("true", "1", "yes")
 
+    # Lookup preset ID jika yang diberikan adalah nama
+    preset_id = args.style
+    if args.style and args.style.lower() not in ("default", ""):
+        found_id = lookup_preset_by_name(args.style)
+        if found_id:
+            preset_id = found_id
+            print(f"✓ Mencocokkan '{args.style}' -> ID: {preset_id}")
+
     payload = {
         "youtube_url": args.url,
-        "style_preset": args.style,
+        "style_preset": preset_id,
         "target_aspect_ratio": args.ratio,
         "force_reprocess": force,
         "broll_enabled": True,
@@ -44,7 +104,7 @@ def main():
     }
 
     print(f"Submitting: {args.url}")
-    print(f"Style: {args.style} | Ratio: {args.ratio} | Force: {force}")
+    print(f"Style: {preset_id} | Ratio: {args.ratio} | Force: {force}")
     print("Menghubungi AutoCliper API...")
 
     result = ac_auth.api_post("/jobs", payload)

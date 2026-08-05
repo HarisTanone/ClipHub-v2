@@ -140,7 +140,7 @@ export function JobDetail() {
   const sourceLabel = data.source_label || data.youtube_url;
 
   return (
-    <div className="space-y-3">
+    <div className="h-full min-h-0 overflow-y-auto space-y-3">
       <Card className="p-4 overflow-hidden">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-start gap-3 min-w-0">
@@ -303,10 +303,10 @@ export function JobDetail() {
             </div>
             <Badge variant="default" size="sm">{data.target_aspect_ratio || "9:16"}</Badge>
           </div>
-          {/* Final output always 9:16 — compact phone cards, horizontal scroll */}
+          {/* Final output always 9:16 — medium phone cards, horizontal scroll */}
           <div className="flex gap-2 overflow-x-auto p-2.5 snap-x mobile-h-scroll">
             {data.clips.map((clip) => (
-              <div key={clip.rank} className="shrink-0 w-[min(42vw,132px)] sm:w-[128px] md:w-[136px] snap-start">
+              <div key={clip.rank} className="shrink-0 w-[min(50vw,160px)] sm:w-[144px] md:w-[160px] snap-start">
                 <ClipCard jobId={data.job_id} clip={clip} aspectRatio="9:16" />
               </div>
             ))}

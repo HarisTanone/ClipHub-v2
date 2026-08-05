@@ -95,3 +95,64 @@ export function ModelStatusPanel() {
     </div>
   );
 }
+
+export function ModelStatusBadge() {
+  const [modelList, setModelList] = useState<ModelStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchStatus();
+  }, []);
+
+  async function fetchStatus() {
+    try {
+      const data = await models.getStatus();
+      setModelList(data);
+    } catch {
+      // silently fail
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-900 border border-zinc-800">
+        <div className="h-2 w-2 rounded-full border border-emerald-500 border-t-transparent animate-spin" />
+        <span className="text-[9px] text-zinc-500">Loading...</span>
+      </div>
+    );
+  }
+
+  // Find the active model (9router)
+  const nineRouter = modelList.find((model) => model.provider === "9router" || model.key === "nine_router");
+  const activeModel = nineRouter || modelList.find((model) => model.status === "available");
+
+  if (!activeModel) {
+    return (
+      <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/10 border border-red-500/20">
+        <span className="w-2 h-2 rounded-full bg-red-400" />
+        <span className="text-[9px] text-red-400">No model</span>
+      </div>
+    );
+  }
+
+  const isActive = activeModel.status === "available";
+  const isLimited = activeModel.status === "rate_limited" || activeModel.status === "exhausted";
+
+  return (
+    <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium ${
+      isActive 
+        ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" 
+        : isLimited 
+          ? "bg-amber-500/10 border border-amber-500/20 text-amber-400" 
+          : "bg-zinc-800 border border-zinc-700 text-zinc-400"
+    }`}>
+      <span className={`w-2 h-2 rounded-full ${
+        isActive ? "bg-emerald-400" : 
+        isLimited ? "bg-amber-400" : "bg-zinc-500"
+      }`} />
+      <span>CliperHub</span>
+    </div>
+  );
+}

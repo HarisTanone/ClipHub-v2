@@ -962,6 +962,13 @@ class JobService:
         """
         import shutil
 
+        # Get custom style configs from job
+        hook_style_config = {}
+        subtitle_style_config = {}
+        if job.clips_data:
+            hook_style_config = job.clips_data.get("hook_style_config", {}) or {}
+            subtitle_style_config = job.clips_data.get("subtitle_style_config", {}) or {}
+
         # ═══ Step 10: Hook Rendering (burn hook text onto first 3s of clip) ═══
         self._emit(job_id, 10, "hook_render", "start")
         await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
@@ -1026,13 +1033,20 @@ class JobService:
             out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
             if words and self._subtitle_renderer:
                 try:
-                    # Build style from creative direction
+                    # Build style from subtitle_style_config
                     from src.domain.entities import SubtitleStyleConfig
+                    
+                    # Extract properties from subtitle_style_config
+                    color = subtitle_style_config.get("color", creative_direction.primary_color)
+                    highlight_color = subtitle_style_config.get("highlightColor", creative_direction.secondary_color)
+                    uppercase = subtitle_style_config.get("uppercase", creative_direction.subtitle_uppercase)
+                    position = subtitle_style_config.get("position", creative_direction.subtitle_position)
+                    
                     sub_style = SubtitleStyleConfig(
-                        color=creative_direction.primary_color,
-                        highlight_color=creative_direction.secondary_color,
-                        uppercase=creative_direction.subtitle_uppercase,
-                        position=creative_direction.subtitle_position,
+                        color=color,
+                        highlight_color=highlight_color,
+                        uppercase=uppercase,
+                        position=position,
                         start_offset=3.0,  # Subtitle starts after 3s hook
                     )
                     self._subtitle_renderer.render_subtitles(

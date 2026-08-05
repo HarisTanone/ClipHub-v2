@@ -6,6 +6,7 @@
 #   autocliper_submit_job    — Submit YouTube URL ke AutoCliper pipeline
 #   autocliper_job_status    — Cek status + progress job AutoCliper
 #   autocliper_list_jobs     — List job terbaru
+#   autocliper_list_presets  — List style presets
 #   autocliper_switch_model  — Ganti default model di Hermes config
 
 name: autocliper
@@ -137,6 +138,20 @@ tools:
         - "${limit}"
         - "--status"
         - "${status_filter}"
+
+  - name: autocliper_list_presets
+    display_name: List Style Presets
+    description: |
+      Tampilkan daftar style presets yang tersedia untuk digunakan dalam rendering.
+      Mengembalikan ID dan nama preset yang dapat digunakan dengan --style pada submit job.
+    input_schema:
+      type: object
+      properties: {}
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_list_presets.py"
 
   - name: autocliper_switch_model
     display_name: Ganti Model LLM

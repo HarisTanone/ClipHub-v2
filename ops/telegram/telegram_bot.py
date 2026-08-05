@@ -462,11 +462,12 @@ class Msg:
             f"Kirim YouTube URL:\n"
             f"<code>/submit &lt;url&gt;</code>\n\n"
             f"<b>Opsi:</b>\n"
-            f"• <code>--style</code> default | viral | minimal | bold\n"
+            f"• <code>--style</code> ID preset (gunakan /presets untuk lihat daftar)\n"
             f"• <code>--ratio</code> 9:16 | 16:9 | 1:1\n"
             f"• <code>--force</code> proses ulang\n\n"
             f"<b>Contoh:</b>\n"
-            f"<code>/submit https://youtu.be/... --style viral --ratio 9:16</code>"
+            f"<code>/submit https://youtu.be/... --style bold_black --ratio 9:16</code>\n\n"
+            f"💡 Gunakan <code>/presets</code> untuk melihat daftar style preset yang tersedia."
         )
 
     @staticmethod
@@ -1163,6 +1164,34 @@ async def _do_submit(message, url: str, style: str, ratio: str, force: bool):
     await send_long(message, result, reply_markup=KB.back())
 
 
+# ─── /presets ──────────────────────────────────────────────────────────────────
+
+async def cmd_presets(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id if update.effective_user else None):
+        return await deny_access(update)
+
+    await update.message.chat.send_action(ChatAction.TYPING)
+
+    try:
+        result = await run_with_progress(
+            update.message,
+            f"{E['list']} Mengambil daftar style presets...",
+            run_ac_tool,
+            "ac_list_presets.py",
+        )
+    except ToolTimeoutError:
+        await send_long(update.message, Msg.error_timeout(CONFIG.tool_timeout), reply_markup=KB.back())
+        return
+    except ToolNotFoundError:
+        await send_long(update.message, Msg.error_tool_not_found("ac_list_presets.py"), reply_markup=KB.back())
+        return
+    except Exception as e:
+        await send_long(update.message, Msg.error_generic(str(e)), reply_markup=KB.back())
+        return
+
+    await send_long(update.message, result, reply_markup=KB.back())
+
+
 # ─── /status ──────────────────────────────────────────────────────────────────
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1706,6 +1735,7 @@ async def post_init(app: Application):
         BotCommand("help",    "Panduan lengkap"),
         BotCommand("viral",   "Cari video viral"),
         BotCommand("submit",  "Submit YouTube URL"),
+        BotCommand("presets", "Daftar style presets"),
         BotCommand("status",  "Cek status job"),
         BotCommand("jobs",    "List job terbaru"),
         BotCommand("model",   "Ganti model LLM"),
@@ -1745,6 +1775,7 @@ def main():
     app.add_handler(CommandHandler("id",     cmd_id))
     app.add_handler(CommandHandler("viral",  cmd_viral))
     app.add_handler(CommandHandler("submit", cmd_submit))
+    app.add_handler(CommandHandler("presets", cmd_presets))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("jobs",   cmd_jobs))
     app.add_handler(CommandHandler("model",  cmd_model))

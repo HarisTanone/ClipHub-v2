@@ -8,7 +8,7 @@ import { SkeletonRow } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { jobs, system, type JobSummary } from "@/lib/api";
 import { formatTimeAgo, truncateUrl, formatDuration, cn } from "@/lib/utils";
-import { ModelStatusPanel } from "@/components/ModelStatusPanel";
+import { ModelStatusBadge, ModelStatusPanel } from "@/components/ModelStatusPanel";
 
 const PAGE_SIZE = 10;
 
@@ -97,7 +97,7 @@ export function Dashboard() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain pr-0.5">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain pr-0.5 relative">
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-3 shrink-0">
         <Card className="p-4 overflow-hidden">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -156,27 +156,9 @@ export function Dashboard() {
         </Card>
       </div>
 
-      {/* Real product capabilities — nice-to-have that actually ship */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 shrink-0">
-        {PIPELINE_FEATURES.map((f) => (
-          <div
-            key={f.title}
-            className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-2.5 py-2 hover:border-emerald-500/25 transition-colors"
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-emerald-500/20 bg-emerald-500/10 text-emerald-300">
-                <f.icon className="h-3 w-3" />
-              </span>
-              <p className="text-[11px] font-medium text-zinc-200 truncate">{f.title}</p>
-            </div>
-            <p className="mt-1 text-[9px] leading-snug text-zinc-500 line-clamp-2">{f.desc}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Model Status (compact) */}
-      <div className="shrink-0">
-        <ModelStatusPanel />
+      {/* Model Status Badge - Small badge in top right corner */}
+      <div className="absolute top-4 right-4 z-10">
+        <ModelStatusBadge />
       </div>
 
       {/* Toolbar */}
