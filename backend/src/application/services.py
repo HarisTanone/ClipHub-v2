@@ -710,212 +710,212 @@ class JobService:
                             logger.warning(f"[{job_id}] AI layer generation failed for clip {clip.rank}: {e}")
                 self._emit(job_id, 9.5, "ai_layer_gen", "complete")
 
-        # ═══ Steps 10-12: Engine Router — Remotion / FFmpeg ═══
-        # Three rendering engines:
-        #   1. Remotion   — All-in-one hook+subtitle via browser render (default, best quality)
-        #   2. FFmpeg     — Lightweight server-side drawtext (no browser needed)
-        #   3. HyperFrames — AI-powered lower-third polish layer (additive, runs after others)
-        #
-        # Engine selection priority:
-        #   a) If job.hook_engine == "ffmpeg" → use FFmpeg path explicitly
-        #   b) If Remotion adapter available → use Remotion path
-        #   c) Else → fall back to FFmpeg path
-        #
-        # Note: HyperFrames is always additive if enabled (runs after main render)
+            # ═══ Steps 10-12: Engine Router — Remotion / FFmpeg ═══
+            # Three rendering engines:
+            #   1. Remotion   — All-in-one hook+subtitle via browser render (default, best quality)
+            #   2. FFmpeg     — Lightweight server-side drawtext (no browser needed)
+            #   3. HyperFrames — AI-powered lower-third polish layer (additive, runs after others)
+            #
+            # Engine selection priority:
+            #   a) If job.hook_engine == "ffmpeg" → use FFmpeg path explicitly
+            #   b) If Remotion adapter available → use Remotion path
+            #   c) Else → fall back to FFmpeg path
+            #
+            # Note: HyperFrames is always additive if enabled (runs after main render)
 
-        initialize_clip_readiness(output_dir)
-        render_engine = self._select_render_engine(job)
+            initialize_clip_readiness(output_dir)
+            render_engine = self._select_render_engine(job)
 
-        if render_engine == "ffmpeg":
-            await self._run_ffmpeg_render_path(
-                job_id=job_id,
-                job=job,
-                clips=clips,
-                output_dir=output_dir,
-                reframe_data=reframe_data,
-                trim_results=trim_results,
-                clips_with_words=clips_with_words,
-                creative_direction=creative_direction,
-            )
-        else:
-            # Remotion render path (default)
-            await self._run_remotion_render_path(
-                job_id=job_id,
-                job=job,
-                clips=clips,
-                output_dir=output_dir,
-                reframe_data=reframe_data,
-                trim_results=trim_results,
-                clips_with_words=clips_with_words,
-                scene_graphs=scene_graphs,
-                prosody_results=prosody_results,
-                creative_direction=creative_direction,
-            )
-
-        # ═══ Step 13: Audio Post-Production (ducking + normalization) ═══
-        # Common to both engine paths — runs on whatever produced _final.mp4
-        self._emit(job_id, 13, "audio_mix", "start")
-        await self._repo.update_status(job_id, JobStatus.ENCODING)
-        from src.infrastructure.audio_mixer import AudioMixer, AudioMixConfig
-        audio_mixer = AudioMixer()
-        for clip in clips:
-            if not trim_results.get(clip.rank):
-                continue
-            final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
-            if not os.path.exists(final_path):
-                continue
-            mixed_path = f"{output_dir}/clip_{clip.rank:02d}_mixed.mp4"
-            mix_cfg = AudioMixConfig(
-                music_mood=creative_direction.music_mood,
-                music_enabled=True,
-            )
-            result = audio_mixer.mix_audio(final_path, mixed_path, mix_cfg)
-            if result == mixed_path and os.path.exists(mixed_path):
-                # Replace final with mixed version
-                os.replace(mixed_path, final_path)
-                logger.info(f"[{job_id}] Audio mixed clip {clip.rank}")
+            if render_engine == "ffmpeg":
+                await self._run_ffmpeg_render_path(
+                    job_id=job_id,
+                    job=job,
+                    clips=clips,
+                    output_dir=output_dir,
+                    reframe_data=reframe_data,
+                    trim_results=trim_results,
+                    clips_with_words=clips_with_words,
+                    creative_direction=creative_direction,
+                )
             else:
-                logger.info(f"[{job_id}] Audio mix skipped clip {clip.rank} (no music available)")
-        self._emit(job_id, 13, "audio_mix", "complete")
+                # Remotion render path (default)
+                await self._run_remotion_render_path(
+                    job_id=job_id,
+                    job=job,
+                    clips=clips,
+                    output_dir=output_dir,
+                    reframe_data=reframe_data,
+                    trim_results=trim_results,
+                    clips_with_words=clips_with_words,
+                    scene_graphs=scene_graphs,
+                    prosody_results=prosody_results,
+                    creative_direction=creative_direction,
+                )
 
-        # ═══ Step 14: CDN Upload (optional) ═══
-        self._emit(job_id, 14, "cdn_upload", "start")
-        await self._repo.update_status(job_id, JobStatus.UPLOADING)
-        if self._cdn:
-            logger.info(f"[{job_id}] CDN upload step")
-            # TODO: upload final clips to CDN
-        self._emit(job_id, 14, "cdn_upload", "complete")
+            # ═══ Step 13: Audio Post-Production (ducking + normalization) ═══
+            # Common to both engine paths — runs on whatever produced _final.mp4
+            self._emit(job_id, 13, "audio_mix", "start")
+            await self._repo.update_status(job_id, JobStatus.ENCODING)
+            from src.infrastructure.audio_mixer import AudioMixer, AudioMixConfig
+            audio_mixer = AudioMixer()
+            for clip in clips:
+                if not trim_results.get(clip.rank):
+                    continue
+                final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+                if not os.path.exists(final_path):
+                    continue
+                mixed_path = f"{output_dir}/clip_{clip.rank:02d}_mixed.mp4"
+                mix_cfg = AudioMixConfig(
+                    music_mood=creative_direction.music_mood,
+                    music_enabled=True,
+                )
+                result = audio_mixer.mix_audio(final_path, mixed_path, mix_cfg)
+                if result == mixed_path and os.path.exists(mixed_path):
+                    # Replace final with mixed version
+                    os.replace(mixed_path, final_path)
+                    logger.info(f"[{job_id}] Audio mixed clip {clip.rank}")
+                else:
+                    logger.info(f"[{job_id}] Audio mix skipped clip {clip.rank} (no music available)")
+            self._emit(job_id, 13, "audio_mix", "complete")
 
-        # ═══ Step 14.5: Thumbnails + Folder Structure ═══
-        self._emit(job_id, 14.5, "thumbnails", "start")
-        import subprocess
-        import shutil
-        thumb_dir = f"{output_dir}/thumbnail"
-        raw_dir = f"{output_dir}/raw"
-        final_dir = f"{output_dir}/final"
-        os.makedirs(thumb_dir, exist_ok=True)
-        os.makedirs(raw_dir, exist_ok=True)
-        os.makedirs(final_dir, exist_ok=True)
+            # ═══ Step 14: CDN Upload (optional) ═══
+            self._emit(job_id, 14, "cdn_upload", "start")
+            await self._repo.update_status(job_id, JobStatus.UPLOADING)
+            if self._cdn:
+                logger.info(f"[{job_id}] CDN upload step")
+                # TODO: upload final clips to CDN
+            self._emit(job_id, 14, "cdn_upload", "complete")
 
-        for clip in clips:
-            if not trim_results.get(clip.rank):
-                continue
-            rank = clip.rank
+            # ═══ Step 14.5: Thumbnails + Folder Structure ═══
+            self._emit(job_id, 14.5, "thumbnails", "start")
+            import subprocess
+            import shutil
+            thumb_dir = f"{output_dir}/thumbnail"
+            raw_dir = f"{output_dir}/raw"
+            final_dir = f"{output_dir}/final"
+            os.makedirs(thumb_dir, exist_ok=True)
+            os.makedirs(raw_dir, exist_ok=True)
+            os.makedirs(final_dir, exist_ok=True)
 
-            # Generate thumbnail from final video (seek to 1s)
-            final_path = f"{output_dir}/clip_{rank:02d}_final.mp4"
-            thumb_path = f"{thumb_dir}/clip_{rank:02d}.jpg"
-            if os.path.exists(final_path):
-                thumb_cmd = [
-                    "ffmpeg", "-y", "-i", final_path,
-                    "-ss", "1", "-frames:v", "1",
-                    "-vf", "scale=360:-1",
-                    "-q:v", "3",
-                    thumb_path,
+            for clip in clips:
+                if not trim_results.get(clip.rank):
+                    continue
+                rank = clip.rank
+
+                # Generate thumbnail from final video (seek to 1s)
+                final_path = f"{output_dir}/clip_{rank:02d}_final.mp4"
+                thumb_path = f"{thumb_dir}/clip_{rank:02d}.jpg"
+                if os.path.exists(final_path):
+                    thumb_cmd = [
+                        "ffmpeg", "-y", "-i", final_path,
+                        "-ss", "1", "-frames:v", "1",
+                        "-vf", "scale=360:-1",
+                        "-q:v", "3",
+                        thumb_path,
+                    ]
+                    try:
+                        await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
+                    except Exception:
+                        pass
+
+                # Move raw clip to raw/ folder
+                raw_src = f"{output_dir}/clip_{rank:02d}.mp4"
+                if os.path.exists(raw_src):
+                    shutil.copy2(raw_src, f"{raw_dir}/clip_{rank:02d}.mp4")
+
+                # Move final clip to final/ folder
+                if os.path.exists(final_path):
+                    shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
+
+            # Generate meta JSON — slim index + per-clip json_analisa/
+            from src.infrastructure.clip_quality_helpers import (
+                build_clip_analisa,
+                write_split_job_meta,
+            )
+            payloads = []
+            for c in clips:
+                words = self._get_words_for_clip(c, clips_with_words)
+                broll_dicts = [
+                    {
+                        "at_time": s.at_time,
+                        "keyword": s.keyword,
+                        "template": s.template,
+                        "duration": s.duration,
+                        "reason": getattr(s, "reason", "") or "",
+                        "placement": getattr(s, "placement", "") or "",
+                    }
+                    for s in (c.broll_suggestions or [])
                 ]
+                payloads.append(build_clip_analisa(
+                    no=c.rank,
+                    rank=c.rank,
+                    start=c.start,
+                    end=c.end,
+                    hook=c.hook or "",
+                    reason=c.reason or "",
+                    score=c.score,
+                    words=words,
+                    broll_suggestions=broll_dicts,
+                    text_emphasis_events=list(getattr(c, "text_emphasis_events", None) or [])[:2],
+                    top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
+                ))
+            write_split_job_meta(
+                output_dir,
+                job_id=job_id,
+                youtube_url=job.youtube_url,
+                aspect_ratio=job.target_aspect_ratio,
+                created_at=str(job.created_at) if job.created_at else None,
+                clip_payloads=payloads,
+                clips_total=clips_count,
+                clips_success=sum(1 for c in clips if trim_results.get(c.rank)),
+            )
+
+            self._emit(job_id, 14.5, "thumbnails", "complete")
+            logger.info(f"[{job_id}] Thumbnails + json_analisa split written")
+
+            # ═══ Step 15: Assemble JSON (include scene_graphs) ═══
+            self._emit(job_id, 15, "assemble", "start")
+            await self._repo.update_status(job_id, JobStatus.ASSEMBLING)
+
+            clips_data = self._assemble_clips_data(job, clips, clips_with_words, reframe_data, creative_direction)
+            # Include scene graphs in output
+            clips_data["scene_graphs"] = {
+                str(rank): sg.to_dict() for rank, sg in scene_graphs.items()
+            }
+            # Preserve style configs from job creation
+            if job.clips_data:
+                if job.clips_data.get("hook_style_config"):
+                    clips_data["hook_style_config"] = job.clips_data["hook_style_config"]
+                if job.clips_data.get("subtitle_style_config"):
+                    clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
+                if job.clips_data.get("content_profile"):
+                    clips_data["content_profile"] = job.clips_data["content_profile"]
+                if job.clips_data.get("source"):
+                    clips_data["source"] = job.clips_data["source"]
+                if job.clips_data.get("source_type"):
+                    clips_data["source_type"] = job.clips_data["source_type"]
+            await self._repo.update_clips_data(job_id, clips_data)
+
+            success_count = sum(1 for c in clips if trim_results.get(c.rank))
+            failed_count = clips_count - success_count
+            await self._repo.update_clips_count(job_id, clips_count, success_count, failed_count)
+            await self._repo.update_status(job_id, JobStatus.COMPLETED)
+
+            total_duration = time.time() - pipeline_start
+            self._emit(job_id, 15, "assemble", "complete", total_duration)
+            self._emit(job_id, success_count, JobStatus.COMPLETED.value, "done", total_duration)
+            logger.info(f"[{job_id}] Pipeline completed in {total_duration:.1f}s — {success_count}/{clips_count} clips")
+
+        except Exception as e:
+            logger.exception(f"[{job_id}] Pipeline failed: {e}")
+            await self._repo.update_status(job_id, JobStatus.FAILED, str(e)[:512])
+        finally:
+            # Cleanup temp files
+            if self._cleanup:
                 try:
-                    await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
+                    self._cleanup.cleanup_job_directory(output_dir)
                 except Exception:
                     pass
-
-            # Move raw clip to raw/ folder
-            raw_src = f"{output_dir}/clip_{rank:02d}.mp4"
-            if os.path.exists(raw_src):
-                shutil.copy2(raw_src, f"{raw_dir}/clip_{rank:02d}.mp4")
-
-            # Move final clip to final/ folder
-            if os.path.exists(final_path):
-                shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
-
-        # Generate meta JSON — slim index + per-clip json_analisa/
-        from src.infrastructure.clip_quality_helpers import (
-            build_clip_analisa,
-            write_split_job_meta,
-        )
-        payloads = []
-        for c in clips:
-            words = self._get_words_for_clip(c, clips_with_words)
-            broll_dicts = [
-                {
-                    "at_time": s.at_time,
-                    "keyword": s.keyword,
-                    "template": s.template,
-                    "duration": s.duration,
-                    "reason": getattr(s, "reason", "") or "",
-                    "placement": getattr(s, "placement", "") or "",
-                }
-                for s in (c.broll_suggestions or [])
-            ]
-            payloads.append(build_clip_analisa(
-                no=c.rank,
-                rank=c.rank,
-                start=c.start,
-                end=c.end,
-                hook=c.hook or "",
-                reason=c.reason or "",
-                score=c.score,
-                words=words,
-                broll_suggestions=broll_dicts,
-                text_emphasis_events=list(getattr(c, "text_emphasis_events", None) or [])[:2],
-                top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
-            ))
-        write_split_job_meta(
-            output_dir,
-            job_id=job_id,
-            youtube_url=job.youtube_url,
-            aspect_ratio=job.target_aspect_ratio,
-            created_at=str(job.created_at) if job.created_at else None,
-            clip_payloads=payloads,
-            clips_total=clips_count,
-            clips_success=sum(1 for c in clips if trim_results.get(c.rank)),
-        )
-
-        self._emit(job_id, 14.5, "thumbnails", "complete")
-        logger.info(f"[{job_id}] Thumbnails + json_analisa split written")
-
-        # ═══ Step 15: Assemble JSON (include scene_graphs) ═══
-        self._emit(job_id, 15, "assemble", "start")
-        await self._repo.update_status(job_id, JobStatus.ASSEMBLING)
-
-        clips_data = self._assemble_clips_data(job, clips, clips_with_words, reframe_data, creative_direction)
-        # Include scene graphs in output
-        clips_data["scene_graphs"] = {
-            str(rank): sg.to_dict() for rank, sg in scene_graphs.items()
-        }
-        # Preserve style configs from job creation
-        if job.clips_data:
-            if job.clips_data.get("hook_style_config"):
-                clips_data["hook_style_config"] = job.clips_data["hook_style_config"]
-            if job.clips_data.get("subtitle_style_config"):
-                clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
-            if job.clips_data.get("content_profile"):
-                clips_data["content_profile"] = job.clips_data["content_profile"]
-            if job.clips_data.get("source"):
-                clips_data["source"] = job.clips_data["source"]
-            if job.clips_data.get("source_type"):
-                clips_data["source_type"] = job.clips_data["source_type"]
-        await self._repo.update_clips_data(job_id, clips_data)
-
-        success_count = sum(1 for c in clips if trim_results.get(c.rank))
-        failed_count = clips_count - success_count
-        await self._repo.update_clips_count(job_id, clips_count, success_count, failed_count)
-        await self._repo.update_status(job_id, JobStatus.COMPLETED)
-
-        total_duration = time.time() - pipeline_start
-        self._emit(job_id, 15, "assemble", "complete", total_duration)
-        self._emit(job_id, success_count, JobStatus.COMPLETED.value, "done", total_duration)
-        logger.info(f"[{job_id}] Pipeline completed in {total_duration:.1f}s — {success_count}/{clips_count} clips")
-
-    except Exception as e:
-        logger.exception(f"[{job_id}] Pipeline failed: {e}")
-        await self._repo.update_status(job_id, JobStatus.FAILED, str(e)[:512])
-    finally:
-        # Cleanup temp files
-        if self._cleanup:
-            try:
-                self._cleanup.cleanup_job_directory(output_dir)
-            except Exception:
-                pass
 
     # ─── Pipeline Helpers ─────────────────────────────────────────────────────
 
