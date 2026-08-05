@@ -2545,6 +2545,79 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
               <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
             </Section>
           </>
+        ) : engine === "ffmpeg" ? (
+          <>
+            <Section title="FFmpeg Drawtext">
+              <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
+                <p className="text-[10px] text-purple-300 mb-1">⚡ Server-side render · no browser needed</p>
+                <p className="text-[9px] text-zinc-500">FFmpeg drawtext filter. Hanya properti dasar yang didukung — style preset Remotion tidak berlaku di sini.</p>
+              </div>
+            </Section>
+
+            <Section title="Hook Text">
+              <textarea value={style.text} onChange={(e) => update({ text: e.target.value })} placeholder="Leave empty for AI-generated hook..." rows={2} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-zinc-500" />
+            </Section>
+
+            <Section title="Typography">
+              <FontChips fonts={HOOK_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS} />
+                <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                <RangeInput label={`Size: ${style.fontSize}px`} min={24} max={96} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+              </div>
+              <div className="flex gap-4 mt-3">
+                <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v })} />
+              </div>
+            </Section>
+
+            <Section title="Colors">
+              <div className="grid grid-cols-2 gap-3">
+                <ColorPicker label="Text Color" value={style.color} onChange={(v) => update({ color: v })} />
+                <ColorPicker label="Background" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
+              </div>
+              <RangeInput label={`BG Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
+            </Section>
+
+            <Section title="Stroke & Shadow">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} />
+                  {style.strokeEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Outline" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
+                      <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={10} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text shadow" checked={style.shadowEnabled} onChange={(v) => update({ shadowEnabled: v })} />
+                  {style.shadowEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Shadow" value={style.shadowColor} onChange={(v) => update({ shadowColor: v })} />
+                      <RangeInput label={`Blur: ${style.shadowBlur}`} min={0} max={40} value={style.shadowBlur} onChange={(v) => update({ shadowBlur: v })} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Position">
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(["top", "center", "bottom"] as const).map(p => (
+                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
+                ))}
+              </div>
+              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+            </Section>
+
+            <Section title="Duration">
+              <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <RangeInput label={`Fade In: ${style.fadeIn}s`} min={1} max={15} value={Math.round(style.fadeIn * 10)} onChange={(v) => update({ fadeIn: v / 10 })} />
+                <RangeInput label={`Fade Out: ${style.fadeOut}s`} min={1} max={15} value={Math.round(style.fadeOut * 10)} onChange={(v) => update({ fadeOut: v / 10 })} />
+              </div>
+            </Section>
+          </>
         ) : (
           <>
             {/* Presets */}
@@ -2556,7 +2629,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                     preset={p}
                     active={activePreset === p.id}
                     onClick={() => {
-                      onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text, engine: "remotion" } as HookStyle);
+                      onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text, engine: style.engine || "remotion" } as HookStyle);
                       setActivePreset(p.id);
                     }}
                   />
@@ -2759,6 +2832,27 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             aspectRatio={aspectRatio}
             thumbnailUrl={thumbnailUrl}
           />
+        ) : engine === "ffmpeg" ? (
+          <>
+            <div className="mb-3 flex w-full items-center justify-between gap-2">
+              <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+              <span className="rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[9px] text-purple-300">FFmpeg Drawtext</span>
+            </div>
+            <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
+              {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+              <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+              <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+                <p style={{ fontSize: Math.max(style.fontSize * 0.32, 12), fontWeight: Number(style.fontWeight), fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`, letterSpacing: style.letterSpacing, lineHeight: style.lineHeight, color: style.color, textTransform: style.uppercase ? "uppercase" as const : "none" as const, textAlign: style.textAlign, maxWidth: "90%", whiteSpace: "pre-line", wordBreak: "break-word", paintOrder: style.strokeEnabled ? "stroke" as const : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor}` : undefined, textShadow: [style.shadowEnabled ? `${style.shadowX}px ${style.shadowY}px ${style.shadowBlur}px ${style.shadowColor}` : "", style.glowEnabled ? `0 0 ${style.glowSize}px ${style.glowColor}` : ""].filter(Boolean).join(", ") || undefined }}>
+                  {style.text || getHookPreviewSample("fade_scale")}
+                </p>
+              </div>
+              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">ffmpeg drawtext | {style.duration}s</p>
+            </div>
+            <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.color }}>{style.color}</p></div>
+            </div>
+          </>
         ) : (
           <>
             <div className="mb-3 flex w-full items-center justify-between gap-2">
@@ -2889,6 +2983,84 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
               onSelect={(id) => update({ engine: "hyperframes", hf_template: id })}
             />
           </Section>
+        ) : engine === "ffmpeg" ? (
+          <>
+            <Section title="FFmpeg Drawtext">
+              <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
+                <p className="text-[10px] text-purple-300 mb-1">⚡ Server-side render · no browser needed</p>
+                <p className="text-[9px] text-zinc-500">FFmpeg drawtext filter. Hanya properti dasar yang didukung — style preset Remotion tidak berlaku di sini.</p>
+              </div>
+            </Section>
+
+            <Section title="Typography">
+              <FontChips fonts={SUBTITLE_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS.filter((font) => font !== "monospace")} />
+                <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                <RangeInput label={`Size: ${style.fontSize}px`} min={20} max={60} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={8} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
+                <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
+              </div>
+              <div className="flex gap-4 mt-3">
+                <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v, capitalize: v ? false : style.capitalize })} />
+                <Checkbox label="Capitalize" checked={style.capitalize} onChange={(v) => update({ capitalize: v, uppercase: v ? false : style.uppercase })} />
+                <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
+              </div>
+            </Section>
+
+            <Section title="Colors">
+              <div className="grid grid-cols-3 gap-3">
+                <ColorPicker label="Text" value={style.color} onChange={(v) => update({ color: v })} />
+                <ColorPicker label="Highlight" value={style.highlightColor} onChange={(v) => update({ highlightColor: v })} />
+                <ColorPicker label="BG" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
+              </div>
+            </Section>
+
+            <Section title="Background & Stroke">
+              <div className="grid grid-cols-2 gap-3">
+                <div><Checkbox label="Background" checked={style.bgEnabled} onChange={(v) => update({ bgEnabled: v })} /></div>
+                <div><Checkbox label="Stroke/Outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} /></div>
+              </div>
+              {style.bgEnabled && (
+                <div className="grid grid-cols-3 gap-3 mt-2">
+                  <RangeInput label={`Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
+                  <RangeInput label={`Radius: ${style.bgRadius}px`} min={0} max={24} value={style.bgRadius} onChange={(v) => update({ bgRadius: v })} />
+                  <RangeInput label={`Padding: ${style.bgPadding}px`} min={4} max={32} value={style.bgPadding} onChange={(v) => update({ bgPadding: v })} />
+                </div>
+              )}
+              {style.strokeEnabled && (
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <ColorPicker label="Stroke" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
+                  <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={6} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
+                </div>
+              )}
+              <div className="mt-2"><Checkbox label="Text shadow" checked={style.shadowEnabled} onChange={(v) => update({ shadowEnabled: v })} /></div>
+              {style.shadowEnabled && (
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <ColorPicker label="Shadow" value={style.shadowColor} onChange={(v) => update({ shadowColor: v })} />
+                  <RangeInput label={`Blur: ${style.shadowBlur}px`} min={0} max={20} value={style.shadowBlur} onChange={(v) => update({ shadowBlur: v })} />
+                </div>
+              )}
+            </Section>
+
+            <Section title="Position">
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(["top", "center", "bottom"] as const).map(p => (
+                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
+                ))}
+              </div>
+              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+            </Section>
+
+            <Section title="Line Settings">
+              <div className="grid grid-cols-2 gap-3">
+                <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
+                <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
+              </div>
+            </Section>
+          </>
         ) : (
           <>
             <Section title="Quick Presets">
@@ -2899,7 +3071,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                     preset={p}
                     active={activePreset === p.id}
                     onClick={() => {
-                      onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords, engine: "remotion" } as SubtitleStyle);
+                      onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords, engine: style.engine || "remotion" } as SubtitleStyle);
                       setActivePreset(p.id);
                     }}
                   />
@@ -3091,7 +3263,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           <>
             <div className="mb-3 flex w-full items-center justify-between gap-2">
               <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
-              <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
+              <span className={cn("rounded-md border px-2 py-1 text-[9px]", engine === "ffmpeg" ? "border-purple-500/30 bg-purple-500/10 text-purple-300" : "border-zinc-800 bg-zinc-900 text-zinc-400")}>{engine === "ffmpeg" ? "FFmpeg Drawtext" : SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
             </div>
             <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
               {canvas ? (
