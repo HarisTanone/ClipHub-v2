@@ -1,9 +1,10 @@
-/** Dual render engines for hook + subtitle.
+/** Triple render engines for hook + subtitle.
  * Remotion = full custom style (slower, premium).
  * HyperFrames = fixed templates (faster, limited look).
+ * FFmpeg = server-side drawtext (fastest, no browser needed).
  */
 
-export type RenderEngine = "remotion" | "hyperframes";
+export type RenderEngine = "remotion" | "hyperframes" | "ffmpeg";
 
 export const ENGINE_NOTES = {
   remotion: {
@@ -19,6 +20,13 @@ export const ENGINE_NOTES = {
     speed: "Lebih cepat",
     quality: "Style HF-native fixed",
     note: "Render cepat. Visual HyperFrames khusus, berbeda dari preset Remotion, siap untuk bulk.",
+  },
+  ffmpeg: {
+    label: "FFmpeg",
+    badge: "Fastest",
+    speed: "Paling cepat",
+    quality: "Drawtext server-side · fixed look",
+    note: "Render tercepat. Tidak memakai browser/Remotion. Text-only overlay via FFmpeg drawtext filter.",
   },
 } as const;
 
@@ -143,5 +151,7 @@ export function defaultHfSubtitleId(): string {
 }
 
 export function resolveEngine(raw: unknown): RenderEngine {
-  return raw === "hyperframes" ? "hyperframes" : "remotion";
+  if (raw === "hyperframes") return "hyperframes";
+  if (raw === "ffmpeg") return "ffmpeg";
+  return "remotion";
 }

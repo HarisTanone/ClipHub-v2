@@ -958,7 +958,7 @@ interface StyleEditorModalProps {
   } | null;
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => {}, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress, aiTextPreviewContext, aiTextEnabled = true, canvasBackground = null }: StyleEditorModalProps) {
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => { }, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress, aiTextPreviewContext, aiTextEnabled = true, canvasBackground = null }: StyleEditorModalProps) {
   const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
@@ -1099,7 +1099,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <style>{animationStyles}</style>
         <div className="min-h-0 flex-1 overflow-hidden">
-        {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
         </div>
       </div>
     );
@@ -1300,7 +1300,7 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
   const previewTop = previewEffect === "smart_gap" ? "22%" : `${style.positionY}%`;
   const previewAlign = previewEffect === "smart_gap" ? "justify-end text-right"
     : previewEffect === "side_rail" ? "justify-start text-left"
-    : "justify-center text-center";
+      : "justify-center text-center";
   const textStyle = {
     fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`,
     fontSize: Math.max(16, style.fontSize * 0.28),
@@ -2315,7 +2315,7 @@ function PaginationControls({ page, totalItems, onPageChange, label }: { page: n
   );
 }
 
-// ─── Engine picker (Remotion | HyperFrames) ──────────────────────────────────
+// ─── Engine picker (Remotion | HyperFrames | FFmpeg) ──────────────────────────────────
 
 function EnginePicker({
   engine,
@@ -2326,13 +2326,24 @@ function EnginePicker({
   onChange: (e: RenderEngine) => void;
   kind: "hook" | "subtitle";
 }) {
+  const engineOptions = ["remotion", "hyperframes", "ffmpeg"] as RenderEngine[];
+  // Map each engine to a specific icon for better visual distinction
+  const getIcon = (id: string) => {
+    switch (id) {
+      case "remotion": return Clapperboard;
+      case "hyperframes": return Zap;
+      case "ffmpeg": return Download; // Using Download icon for FFmpeg to differentiate it
+      default: return Clapperboard;
+    }
+  };
+
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 overflow-hidden">
-      <div className="grid grid-cols-2 gap-0.5 p-1">
-        {(["remotion", "hyperframes"] as RenderEngine[]).map((id) => {
+      <div className="grid grid-cols-3 gap-0.5 p-1">
+        {engineOptions.map((id) => {
           const meta = ENGINE_NOTES[id];
           const active = engine === id;
-          const Icon = id === "remotion" ? Clapperboard : Zap;
+          const Icon = getIcon(id);
           return (
             <button
               key={id}
@@ -2343,7 +2354,9 @@ function EnginePicker({
                 active
                   ? id === "remotion"
                     ? "bg-emerald-500/15 ring-1 ring-emerald-500/40 text-emerald-100"
-                    : "bg-cyan-500/15 ring-1 ring-cyan-500/40 text-cyan-100"
+                    : id === "hyperframes"
+                      ? "bg-cyan-500/15 ring-1 ring-cyan-500/40 text-cyan-100"
+                      : "bg-purple-500/15 ring-1 ring-purple-500/40 text-purple-100" // FFmpeg specific styling
                   : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
               )}
             >
@@ -2478,10 +2491,10 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
   useGoogleFont(style.fontFamily);
   const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
     ? buildCanvasConfig(aspectRatio, {
-        backgroundMode: canvasBackground?.mode || "template",
-        templateId: canvasBackground?.templateId || "dark-studio",
-        backgroundImageUrl: canvasBackground?.imageDataUrl || null,
-      })
+      backgroundMode: canvasBackground?.mode || "template",
+      templateId: canvasBackground?.templateId || "dark-studio",
+      backgroundImageUrl: canvasBackground?.imageDataUrl || null,
+    })
     : null;
   // Outer UI shell always phone-like 9:16; inner composition matches selected aspect
   const outerAspect = "9/16";
@@ -2534,204 +2547,204 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
           </>
         ) : (
           <>
-        {/* Presets */}
-        <Section title="Quick Presets">
-          <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
-            {visibleHookPresets.map(p => (
-              <HookPresetCard
-                key={p.id}
-                preset={p}
-                active={activePreset === p.id}
-                onClick={() => {
-                  onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text, engine: "remotion" } as HookStyle);
-                  setActivePreset(p.id);
-                }}
-              />
-            ))}
-          </div>
-          <PaginationControls page={presetPage} totalItems={HOOK_PRESETS.length} onPageChange={setPresetPage} label="presets" />
-        </Section>
-
-        <Section title="Hook Text">
-          <textarea value={style.text} onChange={(e) => update({ text: e.target.value })} placeholder="Leave empty for AI-generated hook..." rows={2} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-zinc-500" />
-        </Section>
-
-        <Section title="Animation & Timing">
-          <div className="mb-3 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
-            <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-zinc-200">{activeAnimation.label}</p>
-                <p className="truncate text-[9px] text-zinc-500">{activeAnimation.desc}</p>
-              </div>
-              <span className="rounded-md px-2 py-1 text-[9px] font-black" style={{ color: activeAnimation.accent, backgroundColor: `${activeAnimation.accent}18`, border: `1px solid ${activeAnimation.accent}44` }}>{activeAnimation.mood}</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3">
-              <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
-              <RangeInput label={`Fade In: ${style.fadeIn}s`} min={1} max={15} value={Math.round(style.fadeIn * 10)} onChange={(v) => update({ fadeIn: v / 10 })} />
-              <RangeInput label={`Fade Out: ${style.fadeOut}s`} min={1} max={15} value={Math.round(style.fadeOut * 10)} onChange={(v) => update({ fadeOut: v / 10 })} />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
-            {visibleHookAnimations.map(a => (
-              <TimingOptionCard key={a} meta={HOOK_ANIMATION_META[a] || HOOK_ANIMATION_META.podcast_lower_third} active={style.animation === a} onClick={() => update({ animation: a })} kind="hook" />
-            ))}
-          </div>
-          <PaginationControls page={animationPage} totalItems={HOOK_ANIMATIONS.length} onPageChange={setAnimationPage} label="animations" />
-        </Section>
-
-        <Section title="Hook Components">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Checkbox label="Show badge / label" checked={style.badgeEnabled} onChange={(v) => update({ badgeEnabled: v })} disabled={!capabilities.badge} />
-                {!capabilities.badge && <UnavailableHint text="Style ini tidak memakai badge." />}
-                {style.badgeEnabled && capabilities.badge && (
-                  <input
-                    type="text"
-                    value={style.badgeText}
-                    onChange={(e) => update({ badgeText: e.target.value })}
-                    placeholder="Badge text"
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+            {/* Presets */}
+            <Section title="Quick Presets">
+              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
+                {visibleHookPresets.map(p => (
+                  <HookPresetCard
+                    key={p.id}
+                    preset={p}
+                    active={activePreset === p.id}
+                    onClick={() => {
+                      onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text, engine: "remotion" } as HookStyle);
+                      setActivePreset(p.id);
+                    }}
                   />
-                )}
+                ))}
               </div>
-              <div className="space-y-2">
-                <Checkbox label="Decorative motion elements" checked={style.decorativeElements} onChange={(v) => update({ decorativeElements: v })} disabled={!capabilities.decorative} />
-                {!capabilities.decorative && <UnavailableHint text="Style ini memakai motion utama tanpa dekorasi tambahan." />}
-                <RangeInput label={`Motion: ${style.motionIntensity.toFixed(1)}x`} min={0} max={20} value={Math.round(style.motionIntensity * 10)} onChange={(v) => update({ motionIntensity: v / 10 })} />
-              </div>
-            </div>
-          </div>
-        </Section>
+              <PaginationControls page={presetPage} totalItems={HOOK_PRESETS.length} onPageChange={setPresetPage} label="presets" />
+            </Section>
 
-        <Section title="Typography">
-          <FontChips fonts={HOOK_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
-          <div className="grid grid-cols-3 gap-3 mt-3">
-            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS} />
-            <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
-            <SelectSmall label="Align" value={style.textAlign} onChange={(v) => update({ textAlign: v as any })} options={["center", "left", "right"]} />
-          </div>
-          <div className="grid grid-cols-3 gap-3 mt-3">
-            <RangeInput label={`Size: ${style.fontSize}px`} min={24} max={96} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
-            <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={12} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
-            <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
-          </div>
-          <div className="flex gap-4 mt-3">
-            <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v })} />
-            <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
-          </div>
-        </Section>
+            <Section title="Hook Text">
+              <textarea value={style.text} onChange={(e) => update({ text: e.target.value })} placeholder="Leave empty for AI-generated hook..." rows={2} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-zinc-500" />
+            </Section>
 
-        <Section title="Colors & Effects">
-          <div className="grid grid-cols-2 gap-3">
-            <ColorPicker label="Text Color" value={style.color} onChange={(v) => update({ color: v })} />
-            <ColorPicker label="Background" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
-            {isModernHookStyle && <ColorPicker label="Template Accent" value={style.lineColor} onChange={(v) => update({ lineColor: v })} />}
-          </div>
-          <RangeInput label={`BG Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              <Checkbox label="Text gradient" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} disabled={!capabilities.gradient} />
-              {!capabilities.gradient && <UnavailableHint text="Style ini memakai warna solid dari template." />}
-              {style.gradientEnabled && capabilities.gradient && (
-                <div className="mt-2 space-y-2">
-                  <ColorPicker label="From" value={style.gradientFrom} onChange={(v) => update({ gradientFrom: v })} />
-                  <ColorPicker label="To" value={style.gradientTo} onChange={(v) => update({ gradientTo: v })} />
-                  <RangeInput label={`Angle: ${style.gradientAngle}deg`} min={0} max={360} value={style.gradientAngle} onChange={(v) => update({ gradientAngle: v })} />
+            <Section title="Animation & Timing">
+              <div className="mb-3 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+                <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-zinc-200">{activeAnimation.label}</p>
+                    <p className="truncate text-[9px] text-zinc-500">{activeAnimation.desc}</p>
+                  </div>
+                  <span className="rounded-md px-2 py-1 text-[9px] font-black" style={{ color: activeAnimation.accent, backgroundColor: `${activeAnimation.accent}18`, border: `1px solid ${activeAnimation.accent}44` }}>{activeAnimation.mood}</span>
                 </div>
-              )}
-            </div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              <Checkbox label="Text shadow" checked={style.shadowEnabled} onChange={(v) => update({ shadowEnabled: v })} />
-              {style.shadowEnabled && (
-                <div className="mt-2 space-y-2">
-                  <ColorPicker label="Shadow" value={style.shadowColor} onChange={(v) => update({ shadowColor: v })} />
-                  <RangeInput label={`Blur: ${style.shadowBlur}`} min={0} max={40} value={style.shadowBlur} onChange={(v) => update({ shadowBlur: v })} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <RangeInput label={`X: ${style.shadowX}`} min={-10} max={10} value={style.shadowX} onChange={(v) => update({ shadowX: v })} />
-                    <RangeInput label={`Y: ${style.shadowY}`} min={-10} max={10} value={style.shadowY} onChange={(v) => update({ shadowY: v })} />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3">
+                  <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
+                  <RangeInput label={`Fade In: ${style.fadeIn}s`} min={1} max={15} value={Math.round(style.fadeIn * 10)} onChange={(v) => update({ fadeIn: v / 10 })} />
+                  <RangeInput label={`Fade Out: ${style.fadeOut}s`} min={1} max={15} value={Math.round(style.fadeOut * 10)} onChange={(v) => update({ fadeOut: v / 10 })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
+                {visibleHookAnimations.map(a => (
+                  <TimingOptionCard key={a} meta={HOOK_ANIMATION_META[a] || HOOK_ANIMATION_META.podcast_lower_third} active={style.animation === a} onClick={() => update({ animation: a })} kind="hook" />
+                ))}
+              </div>
+              <PaginationControls page={animationPage} totalItems={HOOK_ANIMATIONS.length} onPageChange={setAnimationPage} label="animations" />
+            </Section>
+
+            <Section title="Hook Components">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Checkbox label="Show badge / label" checked={style.badgeEnabled} onChange={(v) => update({ badgeEnabled: v })} disabled={!capabilities.badge} />
+                    {!capabilities.badge && <UnavailableHint text="Style ini tidak memakai badge." />}
+                    {style.badgeEnabled && capabilities.badge && (
+                      <input
+                        type="text"
+                        value={style.badgeText}
+                        onChange={(e) => update({ badgeText: e.target.value })}
+                        placeholder="Badge text"
+                        className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+                      />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Checkbox label="Decorative motion elements" checked={style.decorativeElements} onChange={(v) => update({ decorativeElements: v })} disabled={!capabilities.decorative} />
+                    {!capabilities.decorative && <UnavailableHint text="Style ini memakai motion utama tanpa dekorasi tambahan." />}
+                    <RangeInput label={`Motion: ${style.motionIntensity.toFixed(1)}x`} min={0} max={20} value={Math.round(style.motionIntensity * 10)} onChange={(v) => update({ motionIntensity: v / 10 })} />
+                  </div>
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Typography">
+              <FontChips fonts={HOOK_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS} />
+                <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                <SelectSmall label="Align" value={style.textAlign} onChange={(v) => update({ textAlign: v as any })} options={["center", "left", "right"]} />
+              </div>
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <RangeInput label={`Size: ${style.fontSize}px`} min={24} max={96} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+                <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={12} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
+                <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
+              </div>
+              <div className="flex gap-4 mt-3">
+                <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v })} />
+                <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
+              </div>
+            </Section>
+
+            <Section title="Colors & Effects">
+              <div className="grid grid-cols-2 gap-3">
+                <ColorPicker label="Text Color" value={style.color} onChange={(v) => update({ color: v })} />
+                <ColorPicker label="Background" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
+                {isModernHookStyle && <ColorPicker label="Template Accent" value={style.lineColor} onChange={(v) => update({ lineColor: v })} />}
+              </div>
+              <RangeInput label={`BG Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text gradient" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} disabled={!capabilities.gradient} />
+                  {!capabilities.gradient && <UnavailableHint text="Style ini memakai warna solid dari template." />}
+                  {style.gradientEnabled && capabilities.gradient && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="From" value={style.gradientFrom} onChange={(v) => update({ gradientFrom: v })} />
+                      <ColorPicker label="To" value={style.gradientTo} onChange={(v) => update({ gradientTo: v })} />
+                      <RangeInput label={`Angle: ${style.gradientAngle}deg`} min={0} max={360} value={style.gradientAngle} onChange={(v) => update({ gradientAngle: v })} />
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text shadow" checked={style.shadowEnabled} onChange={(v) => update({ shadowEnabled: v })} />
+                  {style.shadowEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Shadow" value={style.shadowColor} onChange={(v) => update({ shadowColor: v })} />
+                      <RangeInput label={`Blur: ${style.shadowBlur}`} min={0} max={40} value={style.shadowBlur} onChange={(v) => update({ shadowBlur: v })} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <RangeInput label={`X: ${style.shadowX}`} min={-10} max={10} value={style.shadowX} onChange={(v) => update({ shadowX: v })} />
+                        <RangeInput label={`Y: ${style.shadowY}`} min={-10} max={10} value={style.shadowY} onChange={(v) => update({ shadowY: v })} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text glow" checked={style.glowEnabled} onChange={(v) => update({ glowEnabled: v })} />
+                  {style.glowEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Glow Color" value={style.glowColor} onChange={(v) => update({ glowColor: v })} />
+                      <RangeInput label={`Glow Size: ${style.glowSize}px`} min={5} max={70} value={style.glowSize} onChange={(v) => update({ glowSize: v })} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Position">
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(["top", "center", "bottom"] as const).map(p => (
+                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
+                ))}
+              </div>
+              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+            </Section>
+
+            <Section title="Accent Line">
+              <Checkbox label="Enable accent line" checked={style.lineEnabled} onChange={(v) => update({ lineEnabled: v })} />
+              {style.lineEnabled && (
+                <div className="mt-3 space-y-3">
+                  <div className="grid grid-cols-7 gap-2">
+                    {(["top", "center-h", "bottom", "left", "center-v", "right", "auto-bottom"] as const).map(p => (
+                      <button key={p} type="button" onClick={() => update({ linePosition: p })} className={cn("py-1.5 rounded-lg border text-[10px] font-medium capitalize transition-colors", style.linePosition === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400")}>{p.replace("-h", " <>").replace("-v", " ^").replace("auto-bottom", "Auto")}</button>
+                    ))}
+                  </div>
+                  <Checkbox label="Auto-adjust width (match text)" checked={style.lineAutoWidth} onChange={(v) => update({ lineAutoWidth: v, lineWidth: v ? 80 : style.lineWidth })} />
+                  <div className="grid grid-cols-4 gap-3">
+                    <ColorPicker label="Color" value={style.lineColor} onChange={(v) => update({ lineColor: v })} />
+                    {!style.lineAutoWidth && <RangeInput label={`Width: ${style.lineWidth}%`} min={10} max={100} value={style.lineWidth} onChange={(v) => update({ lineWidth: v })} />}
+                    <RangeInput label={`Thick: ${style.lineThickness}px`} min={1} max={12} value={style.lineThickness} onChange={(v) => update({ lineThickness: v })} />
+                    <RangeInput label={`Offset: ${style.lineOffset}px`} min={0} max={40} value={style.lineOffset} onChange={(v) => update({ lineOffset: v })} />
                   </div>
                 </div>
               )}
-            </div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              <Checkbox label="Text glow" checked={style.glowEnabled} onChange={(v) => update({ glowEnabled: v })} />
-              {style.glowEnabled && (
-                <div className="mt-2 space-y-2">
-                  <ColorPicker label="Glow Color" value={style.glowColor} onChange={(v) => update({ glowColor: v })} />
-                  <RangeInput label={`Glow Size: ${style.glowSize}px`} min={5} max={70} value={style.glowSize} onChange={(v) => update({ glowSize: v })} />
-                </div>
-              )}
-            </div>
-          </div>
-        </Section>
+            </Section>
 
-        <Section title="Position">
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            {(["top", "center", "bottom"] as const).map(p => (
-              <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
-            ))}
-          </div>
-          <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
-        </Section>
-
-        <Section title="Accent Line">
-          <Checkbox label="Enable accent line" checked={style.lineEnabled} onChange={(v) => update({ lineEnabled: v })} />
-          {style.lineEnabled && (
-            <div className="mt-3 space-y-3">
-              <div className="grid grid-cols-7 gap-2">
-                {(["top", "center-h", "bottom", "left", "center-v", "right", "auto-bottom"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ linePosition: p })} className={cn("py-1.5 rounded-lg border text-[10px] font-medium capitalize transition-colors", style.linePosition === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400")}>{p.replace("-h", " <>").replace("-v", " ^").replace("auto-bottom", "Auto")}</button>
-                ))}
-              </div>
-              <Checkbox label="Auto-adjust width (match text)" checked={style.lineAutoWidth} onChange={(v) => update({ lineAutoWidth: v, lineWidth: v ? 80 : style.lineWidth })} />
-              <div className="grid grid-cols-4 gap-3">
-                <ColorPicker label="Color" value={style.lineColor} onChange={(v) => update({ lineColor: v })} />
-                {!style.lineAutoWidth && <RangeInput label={`Width: ${style.lineWidth}%`} min={10} max={100} value={style.lineWidth} onChange={(v) => update({ lineWidth: v })} />}
-                <RangeInput label={`Thick: ${style.lineThickness}px`} min={1} max={12} value={style.lineThickness} onChange={(v) => update({ lineThickness: v })} />
-                <RangeInput label={`Offset: ${style.lineOffset}px`} min={0} max={40} value={style.lineOffset} onChange={(v) => update({ lineOffset: v })} />
-              </div>
-            </div>
-          )}
-        </Section>
-
-        <Section title="Text Box / Outline">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              {capabilities.panel ? (
-                <div className="space-y-2">
-                  <p className="text-[10px] font-medium text-zinc-400">Panel / accent surface</p>
-                  <ColorPicker label="Panel Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
-                  <RangeInput label={`Opacity: ${Math.round(style.boxOpacity * 100)}%`} min={0} max={100} value={Math.round(style.boxOpacity * 100)} onChange={(v) => update({ boxOpacity: v / 100 })} />
-                </div>
-              ) : isModernHookStyle ? (
-                <UnavailableHint text="Template hook ini tidak memakai box/panel tambahan." />
-              ) : (
-                <>
-                  <Checkbox label="Box around text" checked={style.boxEnabled} onChange={(v) => update({ boxEnabled: v })} />
-                  {style.boxEnabled && (
-                    <div className="mt-2 space-y-2">
-                      <ColorPicker label="Box Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
+            <Section title="Text Box / Outline">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  {capabilities.panel ? (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-medium text-zinc-400">Panel / accent surface</p>
+                      <ColorPicker label="Panel Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
                       <RangeInput label={`Opacity: ${Math.round(style.boxOpacity * 100)}%`} min={0} max={100} value={Math.round(style.boxOpacity * 100)} onChange={(v) => update({ boxOpacity: v / 100 })} />
-                      <RangeInput label={`Padding: ${style.boxPadding}px`} min={4} max={56} value={style.boxPadding} onChange={(v) => update({ boxPadding: v })} />
-                      <RangeInput label={`Radius: ${style.boxRadius}px`} min={0} max={28} value={style.boxRadius} onChange={(v) => update({ boxRadius: v })} />
+                    </div>
+                  ) : isModernHookStyle ? (
+                    <UnavailableHint text="Template hook ini tidak memakai box/panel tambahan." />
+                  ) : (
+                    <>
+                      <Checkbox label="Box around text" checked={style.boxEnabled} onChange={(v) => update({ boxEnabled: v })} />
+                      {style.boxEnabled && (
+                        <div className="mt-2 space-y-2">
+                          <ColorPicker label="Box Color" value={style.boxColor} onChange={(v) => update({ boxColor: v })} />
+                          <RangeInput label={`Opacity: ${Math.round(style.boxOpacity * 100)}%`} min={0} max={100} value={Math.round(style.boxOpacity * 100)} onChange={(v) => update({ boxOpacity: v / 100 })} />
+                          <RangeInput label={`Padding: ${style.boxPadding}px`} min={4} max={56} value={style.boxPadding} onChange={(v) => update({ boxPadding: v })} />
+                          <RangeInput label={`Radius: ${style.boxRadius}px`} min={0} max={28} value={style.boxRadius} onChange={(v) => update({ boxRadius: v })} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} disabled={!capabilities.outline} />
+                  {!capabilities.outline && <UnavailableHint text="Outline tidak dipakai oleh template hook ini." />}
+                  {style.strokeEnabled && capabilities.outline && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Outline" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
+                      <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={10} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
                     </div>
                   )}
-                </>
-              )}
-            </div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              <Checkbox label="Text outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} disabled={!capabilities.outline} />
-              {!capabilities.outline && <UnavailableHint text="Outline tidak dipakai oleh template hook ini." />}
-              {style.strokeEnabled && capabilities.outline && (
-                <div className="mt-2 space-y-2">
-                  <ColorPicker label="Outline" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
-                  <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={10} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
                 </div>
-              )}
-            </div>
-          </div>
-        </Section>
+              </div>
+            </Section>
           </>
         )}
       </div>
@@ -2748,51 +2761,51 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
           />
         ) : (
           <>
-        <div className="mb-3 flex w-full items-center justify-between gap-2">
-          <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
-          <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{activeAnimation.label}</span>
-        </div>
-        <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
-          {canvas ? (
-            <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
-              {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
-                <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
-              )}
-              <CanvasAccents accents={canvas.accents || []} />
-              {(canvas.background.vignette || 0) > 0 && (
-                <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
-              )}
-              {/* Content slot — 16:9/1:1 band; template fills top/bottom (TikTok 9:16) */}
-              <div
-                className="absolute overflow-hidden bg-zinc-800"
-                style={{
-                  left: `${canvas.layout.videoX * 100}%`,
-                  top: `${canvas.layout.videoY * 100}%`,
-                  width: `${canvas.layout.videoW * 100}%`,
-                  height: `${canvas.layout.videoH * 100}%`,
-                  borderRadius: canvas.layout.borderRadius || 0,
-                  boxShadow: canvas.layout.shadow,
-                }}
-              >
-                {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
-              </div>
-              {/* Overlays span full 9:16 safe area — matches Remotion bake */}
-              <HookPreviewRenderer style={style} />
-              {style.lineEnabled && <AccentLinePreview style={style} />}
+            <div className="mb-3 flex w-full items-center justify-between gap-2">
+              <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+              <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{activeAnimation.label}</span>
             </div>
-          ) : (
-            <>
-              {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-              <HookPreviewRenderer style={style} />
-              {style.lineEnabled && <AccentLinePreview style={style} />}
-            </>
-          )}
-          <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">{style.animation.replace(/_/g, " ")} | {style.duration}s</p>
-        </div>
-        <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.gradientEnabled ? style.gradientTo : style.color }}>{style.gradientEnabled ? "Gradient" : style.color}</p></div>
-        </div>
+            <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
+              {canvas ? (
+                <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
+                  {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
+                    <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                  )}
+                  <CanvasAccents accents={canvas.accents || []} />
+                  {(canvas.background.vignette || 0) > 0 && (
+                    <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
+                  )}
+                  {/* Content slot — 16:9/1:1 band; template fills top/bottom (TikTok 9:16) */}
+                  <div
+                    className="absolute overflow-hidden bg-zinc-800"
+                    style={{
+                      left: `${canvas.layout.videoX * 100}%`,
+                      top: `${canvas.layout.videoY * 100}%`,
+                      width: `${canvas.layout.videoW * 100}%`,
+                      height: `${canvas.layout.videoH * 100}%`,
+                      borderRadius: canvas.layout.borderRadius || 0,
+                      boxShadow: canvas.layout.shadow,
+                    }}
+                  >
+                    {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
+                  </div>
+                  {/* Overlays span full 9:16 safe area — matches Remotion bake */}
+                  <HookPreviewRenderer style={style} />
+                  {style.lineEnabled && <AccentLinePreview style={style} />}
+                </div>
+              ) : (
+                <>
+                  {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+                  <HookPreviewRenderer style={style} />
+                  {style.lineEnabled && <AccentLinePreview style={style} />}
+                </>
+              )}
+              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">{style.animation.replace(/_/g, " ")} | {style.duration}s</p>
+            </div>
+            <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.gradientEnabled ? style.gradientTo : style.color }}>{style.gradientEnabled ? "Gradient" : style.color}</p></div>
+            </div>
           </>
         )}
       </div>
@@ -2816,10 +2829,10 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
   useGoogleFont(style.dualStyleEnabled ? style.highlightFontFamily : "");
   const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
     ? buildCanvasConfig(aspectRatio, {
-        backgroundMode: canvasBackground?.mode || "template",
-        templateId: canvasBackground?.templateId || "dark-studio",
-        backgroundImageUrl: canvasBackground?.imageDataUrl || null,
-      })
+      backgroundMode: canvasBackground?.mode || "template",
+      templateId: canvasBackground?.templateId || "dark-studio",
+      backgroundImageUrl: canvasBackground?.imageDataUrl || null,
+    })
     : null;
   const outerAspect = "9/16";
   const subtitleTimingOptions: Array<
@@ -2878,188 +2891,188 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           </Section>
         ) : (
           <>
-        <Section title="Quick Presets">
-          <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
-            {visibleSubtitlePresets.map(p => (
-              <SubtitlePresetCard
-                key={p.id}
-                preset={p}
-                active={activePreset === p.id}
-                onClick={() => {
-                  onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords, engine: "remotion" } as SubtitleStyle);
-                  setActivePreset(p.id);
-                }}
-              />
-            ))}
-          </div>
-          <PaginationControls page={presetPage} totalItems={SUBTITLE_PRESETS.length} onPageChange={setPresetPage} label="presets" />
-        </Section>
-
-        <Section title="Animation & Timing">
-          <div className="mb-3 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
-            <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-zinc-200">{activeTimingMeta.label}</p>
-                <p className="truncate text-[9px] text-zinc-500">{activeTimingMeta.desc}</p>
+            <Section title="Quick Presets">
+              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
+                {visibleSubtitlePresets.map(p => (
+                  <SubtitlePresetCard
+                    key={p.id}
+                    preset={p}
+                    active={activePreset === p.id}
+                    onClick={() => {
+                      onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords, engine: "remotion" } as SubtitleStyle);
+                      setActivePreset(p.id);
+                    }}
+                  />
+                ))}
               </div>
-              <span className="rounded-md px-2 py-1 text-[9px] font-black" style={{ color: activeTimingMeta.accent, backgroundColor: `${activeTimingMeta.accent}18`, border: `1px solid ${activeTimingMeta.accent}44` }}>{activeTimingMeta.mood}</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3">
-              <RangeInput label={`Speed: ${style.animationSpeed.toFixed(1)}x`} min={5} max={20} value={Math.round(style.animationSpeed * 10)} onChange={(v) => update({ animationSpeed: v / 10 })} />
-              <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
-              <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
-            {visibleSubtitleTiming.map((option) => (
-              <div key={`${option.kind}-${option.id}`} className="relative">
-                <TimingOptionCard
-                  meta={option.meta}
-                  active={option.kind === "transition" ? style.lineTransition === option.id : style.animationStyle === option.id}
-                  onClick={() => option.kind === "transition" ? update({ lineTransition: option.id }) : update({ animationStyle: option.id })}
-                  kind={option.kind === "transition" ? "line" : "motion"}
-                />
+              <PaginationControls page={presetPage} totalItems={SUBTITLE_PRESETS.length} onPageChange={setPresetPage} label="presets" />
+            </Section>
+
+            <Section title="Animation & Timing">
+              <div className="mb-3 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+                <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-zinc-200">{activeTimingMeta.label}</p>
+                    <p className="truncate text-[9px] text-zinc-500">{activeTimingMeta.desc}</p>
+                  </div>
+                  <span className="rounded-md px-2 py-1 text-[9px] font-black" style={{ color: activeTimingMeta.accent, backgroundColor: `${activeTimingMeta.accent}18`, border: `1px solid ${activeTimingMeta.accent}44` }}>{activeTimingMeta.mood}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3">
+                  <RangeInput label={`Speed: ${style.animationSpeed.toFixed(1)}x`} min={5} max={20} value={Math.round(style.animationSpeed * 10)} onChange={(v) => update({ animationSpeed: v / 10 })} />
+                  <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
+                  <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
+                </div>
               </div>
-            ))}
-          </div>
-          <PaginationControls page={timingPage} totalItems={subtitleTimingOptions.length} onPageChange={setTimingPage} label="timing options" />
-        </Section>
+              <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
+                {visibleSubtitleTiming.map((option) => (
+                  <div key={`${option.kind}-${option.id}`} className="relative">
+                    <TimingOptionCard
+                      meta={option.meta}
+                      active={option.kind === "transition" ? style.lineTransition === option.id : style.animationStyle === option.id}
+                      onClick={() => option.kind === "transition" ? update({ lineTransition: option.id }) : update({ animationStyle: option.id })}
+                      kind={option.kind === "transition" ? "line" : "motion"}
+                    />
+                  </div>
+                ))}
+              </div>
+              <PaginationControls page={timingPage} totalItems={subtitleTimingOptions.length} onPageChange={setTimingPage} label="timing options" />
+            </Section>
 
-        <Section title="Typography">
-          <FontChips fonts={SUBTITLE_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
-          <div className="grid grid-cols-3 gap-3 mt-3">
-            <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS.filter((font) => font !== "monospace")} />
-            <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
-            <RangeInput label={`Size: ${style.fontSize}px`} min={20} max={60} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
-          </div>
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={8} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
-            <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
-          </div>
-          <div className="flex gap-4 mt-3">
-            <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v, capitalize: v ? false : style.capitalize })} />
-            <Checkbox label="Capitalize" checked={style.capitalize} onChange={(v) => update({ capitalize: v, uppercase: v ? false : style.uppercase })} />
-            <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
-          </div>
-        </Section>
+            <Section title="Typography">
+              <FontChips fonts={SUBTITLE_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS.filter((font) => font !== "monospace")} />
+                <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                <RangeInput label={`Size: ${style.fontSize}px`} min={20} max={60} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={8} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
+                <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
+              </div>
+              <div className="flex gap-4 mt-3">
+                <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v, capitalize: v ? false : style.capitalize })} />
+                <Checkbox label="Capitalize" checked={style.capitalize} onChange={(v) => update({ capitalize: v, uppercase: v ? false : style.uppercase })} />
+                <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
+              </div>
+            </Section>
 
-        <Section title="Colors">
-          <div className="grid grid-cols-3 gap-3">
-            <ColorPicker label="Text" value={style.color} onChange={(v) => update({ color: v })} />
-            <ColorPicker label="Highlight" value={style.highlightColor} onChange={(v) => update({ highlightColor: v })} />
-            <ColorPicker label="BG" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
-          </div>
-        </Section>
+            <Section title="Colors">
+              <div className="grid grid-cols-3 gap-3">
+                <ColorPicker label="Text" value={style.color} onChange={(v) => update({ color: v })} />
+                <ColorPicker label="Highlight" value={style.highlightColor} onChange={(v) => update({ highlightColor: v })} />
+                <ColorPicker label="BG" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
+              </div>
+            </Section>
 
-        <Section title="Highlight Effect">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
-            {(["scale", "underline", "background", "strikethrough"] as const).map(s => (
-              <MetaTile key={s} meta={HIGHLIGHT_STYLE_META[s]} active={style.highlightStyle === s} onClick={() => update({ highlightStyle: s })} />
-            ))}
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <RangeInput label={`Scale: ${style.highlightScale.toFixed(1)}x`} min={10} max={20} value={Math.round(style.highlightScale * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
-            <div className="flex flex-col justify-end"><Checkbox label="Bold" checked={style.highlightBold} onChange={(v) => update({ highlightBold: v })} /></div>
-            <div className="flex flex-col justify-end"><Checkbox label="Glow" checked={style.highlightGlow} onChange={(v) => update({ highlightGlow: v })} /></div>
-          </div>
-          {style.highlightGlow && (
-            <div className="grid grid-cols-2 gap-3 mt-2">
-              <ColorPicker label="Glow Color" value={style.highlightGlowColor} onChange={(v) => update({ highlightGlowColor: v })} />
-            </div>
-          )}
-        </Section>
-
-        <Section title="Dual Font Style (Highlight Words)">
-          <FeatureLock featureName="Dual Font Style" featureCode="dual_subtitle" isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures}>
-            <Checkbox label="Use separate style for highlight words" checked={style.dualStyleEnabled} onChange={(v) => update({ dualStyleEnabled: v })} />
-            <p className="text-[9px] text-zinc-600 mt-1 mb-2">Kata-kata penting (MAKANYA, JANGAN, dll) akan menggunakan font & style berbeda dari teks normal.</p>
-            {style.dualStyleEnabled && (
-              <div className="mt-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 space-y-3">
-                <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">Highlight Word Style</p>
-                <FontChips fonts={HIGHLIGHT_FONT_SUGGESTIONS} active={style.highlightFontFamily} onSelect={(highlightFontFamily) => update({ highlightFontFamily })} />
-                <div className="grid grid-cols-3 gap-3">
-                  <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={FONT_OPTIONS.filter((font) => font !== "monospace")} />
-                  <SelectSmall label="Weight" value={style.highlightFontWeight} onChange={(v) => update({ highlightFontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
-                  <RangeInput label={`Size: ${style.highlightFontSize}px`} min={24} max={64} value={style.highlightFontSize} onChange={(v) => update({ highlightFontSize: v })} />
+            <Section title="Highlight Effect">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+                {(["scale", "underline", "background", "strikethrough"] as const).map(s => (
+                  <MetaTile key={s} meta={HIGHLIGHT_STYLE_META[s]} active={style.highlightStyle === s} onClick={() => update({ highlightStyle: s })} />
+                ))}
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <RangeInput label={`Scale: ${style.highlightScale.toFixed(1)}x`} min={10} max={20} value={Math.round(style.highlightScale * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
+                <div className="flex flex-col justify-end"><Checkbox label="Bold" checked={style.highlightBold} onChange={(v) => update({ highlightBold: v })} /></div>
+                <div className="flex flex-col justify-end"><Checkbox label="Glow" checked={style.highlightGlow} onChange={(v) => update({ highlightGlow: v })} /></div>
+              </div>
+              {style.highlightGlow && (
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <ColorPicker label="Glow Color" value={style.highlightGlowColor} onChange={(v) => update({ highlightGlowColor: v })} />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <RangeInput label={`Spacing: ${style.highlightLetterSpacing}px`} min={0} max={8} value={style.highlightLetterSpacing} onChange={(v) => update({ highlightLetterSpacing: v })} />
-                  <div className="flex flex-col justify-end"><Checkbox label="UPPERCASE" checked={style.highlightUppercase} onChange={(v) => update({ highlightUppercase: v })} /></div>
-                  <div className="flex flex-col justify-end"><Checkbox label="Italic" checked={style.highlightItalic} onChange={(v) => update({ highlightItalic: v })} /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><Checkbox label="Stroke" checked={style.highlightStrokeEnabled} onChange={(v) => update({ highlightStrokeEnabled: v })} /></div>
-                  <div><Checkbox label="Shadow" checked={style.highlightShadowEnabled} onChange={(v) => update({ highlightShadowEnabled: v })} /></div>
-                </div>
-                {style.highlightStrokeEnabled && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <ColorPicker label="Stroke Color" value={style.highlightStrokeColor} onChange={(v) => update({ highlightStrokeColor: v })} />
-                    <RangeInput label={`Width: ${style.highlightStrokeWidth}px`} min={1} max={6} value={style.highlightStrokeWidth} onChange={(v) => update({ highlightStrokeWidth: v })} />
+              )}
+            </Section>
+
+            <Section title="Dual Font Style (Highlight Words)">
+              <FeatureLock featureName="Dual Font Style" featureCode="dual_subtitle" isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures}>
+                <Checkbox label="Use separate style for highlight words" checked={style.dualStyleEnabled} onChange={(v) => update({ dualStyleEnabled: v })} />
+                <p className="text-[9px] text-zinc-600 mt-1 mb-2">Kata-kata penting (MAKANYA, JANGAN, dll) akan menggunakan font & style berbeda dari teks normal.</p>
+                {style.dualStyleEnabled && (
+                  <div className="mt-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 space-y-3">
+                    <p className="text-[10px] text-emerald-400 font-medium uppercase tracking-wider">Highlight Word Style</p>
+                    <FontChips fonts={HIGHLIGHT_FONT_SUGGESTIONS} active={style.highlightFontFamily} onSelect={(highlightFontFamily) => update({ highlightFontFamily })} />
+                    <div className="grid grid-cols-3 gap-3">
+                      <SelectSmall label="Font" value={style.highlightFontFamily} onChange={(v) => update({ highlightFontFamily: v })} options={FONT_OPTIONS.filter((font) => font !== "monospace")} />
+                      <SelectSmall label="Weight" value={style.highlightFontWeight} onChange={(v) => update({ highlightFontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                      <RangeInput label={`Size: ${style.highlightFontSize}px`} min={24} max={64} value={style.highlightFontSize} onChange={(v) => update({ highlightFontSize: v })} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <RangeInput label={`Spacing: ${style.highlightLetterSpacing}px`} min={0} max={8} value={style.highlightLetterSpacing} onChange={(v) => update({ highlightLetterSpacing: v })} />
+                      <div className="flex flex-col justify-end"><Checkbox label="UPPERCASE" checked={style.highlightUppercase} onChange={(v) => update({ highlightUppercase: v })} /></div>
+                      <div className="flex flex-col justify-end"><Checkbox label="Italic" checked={style.highlightItalic} onChange={(v) => update({ highlightItalic: v })} /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><Checkbox label="Stroke" checked={style.highlightStrokeEnabled} onChange={(v) => update({ highlightStrokeEnabled: v })} /></div>
+                      <div><Checkbox label="Shadow" checked={style.highlightShadowEnabled} onChange={(v) => update({ highlightShadowEnabled: v })} /></div>
+                    </div>
+                    {style.highlightStrokeEnabled && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <ColorPicker label="Stroke Color" value={style.highlightStrokeColor} onChange={(v) => update({ highlightStrokeColor: v })} />
+                        <RangeInput label={`Width: ${style.highlightStrokeWidth}px`} min={1} max={6} value={style.highlightStrokeWidth} onChange={(v) => update({ highlightStrokeWidth: v })} />
+                      </div>
+                    )}
+                    {style.highlightShadowEnabled && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <ColorPicker label="Shadow Color" value={style.highlightShadowColor} onChange={(v) => update({ highlightShadowColor: v })} />
+                        <RangeInput label={`Blur: ${style.highlightShadowBlur}px`} min={0} max={24} value={style.highlightShadowBlur} onChange={(v) => update({ highlightShadowBlur: v })} />
+                      </div>
+                    )}
                   </div>
                 )}
-                {style.highlightShadowEnabled && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <ColorPicker label="Shadow Color" value={style.highlightShadowColor} onChange={(v) => update({ highlightShadowColor: v })} />
-                    <RangeInput label={`Blur: ${style.highlightShadowBlur}px`} min={0} max={24} value={style.highlightShadowBlur} onChange={(v) => update({ highlightShadowBlur: v })} />
-                  </div>
-                )}
+              </FeatureLock>
+            </Section>
+
+            <Section title="Background & Stroke">
+              <div className="grid grid-cols-2 gap-3">
+                <div><Checkbox label="Background" checked={style.bgEnabled} onChange={(v) => update({ bgEnabled: v })} /></div>
+                <div><Checkbox label="Stroke/Outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} /></div>
               </div>
-            )}
-          </FeatureLock>
-        </Section>
+              {style.bgEnabled && (
+                <div className="grid grid-cols-3 gap-3 mt-2">
+                  <RangeInput label={`Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
+                  <RangeInput label={`Radius: ${style.bgRadius}px`} min={0} max={24} value={style.bgRadius} onChange={(v) => update({ bgRadius: v })} />
+                  <RangeInput label={`Padding: ${style.bgPadding}px`} min={4} max={32} value={style.bgPadding} onChange={(v) => update({ bgPadding: v })} />
+                </div>
+              )}
+              {style.strokeEnabled && (
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <ColorPicker label="Stroke" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
+                  <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={6} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
+                </div>
+              )}
+              <div className="mt-2"><Checkbox label="Text shadow" checked={style.shadowEnabled} onChange={(v) => update({ shadowEnabled: v })} /></div>
+              {style.shadowEnabled && (
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <ColorPicker label="Shadow" value={style.shadowColor} onChange={(v) => update({ shadowColor: v })} />
+                  <RangeInput label={`Blur: ${style.shadowBlur}px`} min={0} max={20} value={style.shadowBlur} onChange={(v) => update({ shadowBlur: v })} />
+                </div>
+              )}
+            </Section>
 
-        <Section title="Background & Stroke">
-          <div className="grid grid-cols-2 gap-3">
-            <div><Checkbox label="Background" checked={style.bgEnabled} onChange={(v) => update({ bgEnabled: v })} /></div>
-            <div><Checkbox label="Stroke/Outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} /></div>
-          </div>
-          {style.bgEnabled && (
-            <div className="grid grid-cols-3 gap-3 mt-2">
-              <RangeInput label={`Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
-              <RangeInput label={`Radius: ${style.bgRadius}px`} min={0} max={24} value={style.bgRadius} onChange={(v) => update({ bgRadius: v })} />
-              <RangeInput label={`Padding: ${style.bgPadding}px`} min={4} max={32} value={style.bgPadding} onChange={(v) => update({ bgPadding: v })} />
-            </div>
-          )}
-          {style.strokeEnabled && (
-            <div className="grid grid-cols-2 gap-3 mt-2">
-              <ColorPicker label="Stroke" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
-              <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={6} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
-            </div>
-          )}
-          <div className="mt-2"><Checkbox label="Text shadow" checked={style.shadowEnabled} onChange={(v) => update({ shadowEnabled: v })} /></div>
-          {style.shadowEnabled && (
-            <div className="grid grid-cols-2 gap-3 mt-2">
-              <ColorPicker label="Shadow" value={style.shadowColor} onChange={(v) => update({ shadowColor: v })} />
-              <RangeInput label={`Blur: ${style.shadowBlur}px`} min={0} max={20} value={style.shadowBlur} onChange={(v) => update({ shadowBlur: v })} />
-            </div>
-          )}
-        </Section>
+            <Section title="Position">
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(["top", "center", "bottom"] as const).map(p => (
+                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
+                ))}
+              </div>
+              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+            </Section>
 
-        <Section title="Position">
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            {(["top", "center", "bottom"] as const).map(p => (
-              <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
-            ))}
-          </div>
-          <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
-        </Section>
-
-        <Section title="Highlight Words (kata penting)">
-          <p className="text-[10px] text-zinc-500 mb-2">AI auto-detect dari transkrip. Tambah manual jika perlu.</p>
-          <div className="flex gap-2">
-            <input type="text" value={newWord} onChange={(e) => setNewWord(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addHighlightWord())} placeholder="Tambah kata..." className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500" />
-            <Button type="button" size="xs" onClick={addHighlightWord}>Add</Button>
-          </div>
-          {style.highlightWords.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {style.highlightWords.map(w => (
-                <span key={w} className="flex items-center gap-1 bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[10px] font-medium px-2 py-0.5 rounded-full">
-                  {w}<button type="button" onClick={() => update({ highlightWords: style.highlightWords.filter(x => x !== w) })} className="hover:text-red-400"><X className="h-2.5 w-2.5" /></button>
-                </span>
-              ))}
-            </div>
-          )}
-        </Section>
+            <Section title="Highlight Words (kata penting)">
+              <p className="text-[10px] text-zinc-500 mb-2">AI auto-detect dari transkrip. Tambah manual jika perlu.</p>
+              <div className="flex gap-2">
+                <input type="text" value={newWord} onChange={(e) => setNewWord(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addHighlightWord())} placeholder="Tambah kata..." className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500" />
+                <Button type="button" size="xs" onClick={addHighlightWord}>Add</Button>
+              </div>
+              {style.highlightWords.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {style.highlightWords.map(w => (
+                    <span key={w} className="flex items-center gap-1 bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[10px] font-medium px-2 py-0.5 rounded-full">
+                      {w}<button type="button" onClick={() => update({ highlightWords: style.highlightWords.filter(x => x !== w) })} className="hover:text-red-400"><X className="h-2.5 w-2.5" /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </Section>
           </>
         )}
       </div>
@@ -3076,36 +3089,36 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           />
         ) : (
           <>
-        <div className="mb-3 flex w-full items-center justify-between gap-2">
-          <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
-          <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
-        </div>
-        <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
-          {canvas ? (
-            <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
-              {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
-                <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
-              )}
-              <CanvasAccents accents={canvas.accents || []} />
-              {(canvas.background.vignette || 0) > 0 && (
-                <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
-              )}
-              <div
-                className="absolute overflow-hidden bg-zinc-800"
-                style={{
-                  left: `${canvas.layout.videoX * 100}%`,
-                  top: `${canvas.layout.videoY * 100}%`,
-                  width: `${canvas.layout.videoW * 100}%`,
-                  height: `${canvas.layout.videoH * 100}%`,
-                  borderRadius: canvas.layout.borderRadius || 0,
-                  boxShadow: canvas.layout.shadow,
-                }}
-              >
-                {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
-              </div>
-              {/* Subtitle overlays full 9:16 — matches Remotion bake */}
-              <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/10 to-transparent pointer-events-none" />
-              <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+            <div className="mb-3 flex w-full items-center justify-between gap-2">
+              <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+              <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
+            </div>
+            <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
+              {canvas ? (
+                <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
+                  {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
+                    <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                  )}
+                  <CanvasAccents accents={canvas.accents || []} />
+                  {(canvas.background.vignette || 0) > 0 && (
+                    <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
+                  )}
+                  <div
+                    className="absolute overflow-hidden bg-zinc-800"
+                    style={{
+                      left: `${canvas.layout.videoX * 100}%`,
+                      top: `${canvas.layout.videoY * 100}%`,
+                      width: `${canvas.layout.videoW * 100}%`,
+                      height: `${canvas.layout.videoH * 100}%`,
+                      borderRadius: canvas.layout.borderRadius || 0,
+                      boxShadow: canvas.layout.shadow,
+                    }}
+                  >
+                    {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
+                  </div>
+                  {/* Subtitle overlays full 9:16 — matches Remotion bake */}
+                  <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/10 to-transparent pointer-events-none" />
+                  <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
                     {style.lineTransition === "emphasis" ? (
                       <div className="flex flex-col items-center gap-1">
                         <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
@@ -3152,68 +3165,68 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                         })}
                       </div>
                     )}
-              </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+                  <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/30 to-zinc-900/50" />
+                  <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+                    {style.lineTransition === "emphasis" ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
+                        <span style={{ color: style.highlightColor, fontSize: Math.max(style.fontSize * 0.85, 20), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: 900, textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined }}>Animasi</span>
+                      </div>
+                    ) : style.lineTransition === "line_reveal" ? (
+                      <div className={cn("overflow-hidden", getSubAnimationClass(style.animationStyle))} style={{ backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.42, borderRadius: style.bgRadius, borderLeft: `3px solid ${style.highlightColor}` }}>
+                        <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
+                        <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
+                          {["ini", "kata", "penting", "banget"].map((w, i) => {
+                            const isHighlight = i === activeWordIdx;
+                            return (
+                              <span key={w} style={{ color: isHighlight ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isHighlight ? 900 : Number(style.fontWeight), letterSpacing: style.letterSpacing, textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined }}>{w}</span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
+                        {["ini", "kata", "penting", "banget"].map((w, i) => {
+                          const isHighlight = i === activeWordIdx;
+                          const isKeyword = style.highlightWords.includes(w);
+                          const shouldHighlight = isHighlight || isKeyword;
+                          const useDual = shouldHighlight && style.dualStyleEnabled;
+                          const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
+                          const hlStyle = style.highlightStyle || "scale";
+                          const wordStyles: React.CSSProperties = {
+                            color: shouldHighlight ? style.highlightColor : style.color,
+                            fontSize: fs,
+                            fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
+                            fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
+                            fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
+                            letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
+                            textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none"),
+                            textShadow: [(useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "", shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : ""].filter(Boolean).join(", ") || undefined,
+                            WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
+                            transition: "all 0.2s ease",
+                            display: "inline-block",
+                            ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
+                            ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
+                            ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
+                          };
+                          return <span key={i} style={wordStyles}>{w}</span>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">{style.lineTransition === "emphasis" ? "emphasis" : style.animationStyle} | {style.position}</p>
             </div>
-          ) : (
-            <>
-              {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-              <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/30 to-zinc-900/50" />
-              <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                {style.lineTransition === "emphasis" ? (
-                  <div className="flex flex-col items-center gap-1">
-                    <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
-                    <span style={{ color: style.highlightColor, fontSize: Math.max(style.fontSize * 0.85, 20), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: 900, textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined }}>Animasi</span>
-                  </div>
-                ) : style.lineTransition === "line_reveal" ? (
-                  <div className={cn("overflow-hidden", getSubAnimationClass(style.animationStyle))} style={{ backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.42, borderRadius: style.bgRadius, borderLeft: `3px solid ${style.highlightColor}` }}>
-                    <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
-                    <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
-                      {["ini", "kata", "penting", "banget"].map((w, i) => {
-                        const isHighlight = i === activeWordIdx;
-                        return (
-                          <span key={w} style={{ color: isHighlight ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isHighlight ? 900 : Number(style.fontWeight), letterSpacing: style.letterSpacing, textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined }}>{w}</span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
-                    {["ini", "kata", "penting", "banget"].map((w, i) => {
-                      const isHighlight = i === activeWordIdx;
-                      const isKeyword = style.highlightWords.includes(w);
-                      const shouldHighlight = isHighlight || isKeyword;
-                      const useDual = shouldHighlight && style.dualStyleEnabled;
-                      const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
-                      const hlStyle = style.highlightStyle || "scale";
-                      const wordStyles: React.CSSProperties = {
-                        color: shouldHighlight ? style.highlightColor : style.color,
-                        fontSize: fs,
-                        fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
-                        fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
-                        fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
-                        letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
-                        textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none"),
-                        textShadow: [(useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "", shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : ""].filter(Boolean).join(", ") || undefined,
-                        WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
-                        transition: "all 0.2s ease",
-                        display: "inline-block",
-                        ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
-                        ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
-                        ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
-                      };
-                      return <span key={i} style={wordStyles}>{w}</span>;
-                    })}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-          <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">{style.lineTransition === "emphasis" ? "emphasis" : style.animationStyle} | {style.position}</p>
-        </div>
-        <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Highlight</span><p className="truncate" style={{ color: style.highlightColor }}>{style.highlightColor}</p></div>
-        </div>
+            <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Highlight</span><p className="truncate" style={{ color: style.highlightColor }}>{style.highlightColor}</p></div>
+            </div>
           </>
         )}
       </div>

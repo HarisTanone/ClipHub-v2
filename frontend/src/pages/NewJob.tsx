@@ -182,11 +182,11 @@ export function NewJob() {
         : undefined,
       ...(aspectRatio === "16:9" || aspectRatio === "1:1"
         ? {
-            background_mode: backgroundMode,
-            background_template_id: backgroundMode === "template" ? backgroundTemplateId : undefined,
-            background_image_data_url:
-              backgroundMode === "upload" ? backgroundImageDataUrl || undefined : undefined,
-          }
+          background_mode: backgroundMode,
+          background_template_id: backgroundMode === "template" ? backgroundTemplateId : undefined,
+          background_image_data_url:
+            backgroundMode === "upload" ? backgroundImageDataUrl || undefined : undefined,
+        }
         : {}),
     };
     try {
@@ -554,10 +554,10 @@ export function NewJob() {
               canvasBackground={
                 aspectRatio === "16:9" || aspectRatio === "1:1"
                   ? {
-                      mode: backgroundMode,
-                      templateId: backgroundTemplateId,
-                      imageDataUrl: backgroundImageDataUrl,
-                    }
+                    mode: backgroundMode,
+                    templateId: backgroundTemplateId,
+                    imageDataUrl: backgroundImageDataUrl,
+                  }
                   : null
               }
               isSuperadmin={user?.is_superadmin}
