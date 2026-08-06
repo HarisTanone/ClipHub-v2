@@ -1203,6 +1203,7 @@ async def get_clip_detail(
             "thumb_seek": clip_data.get("thumb_seek"),
             "object_overlay_events": clip_data.get("object_overlay_events") or [],
             "visual_entities": clip_data.get("visual_entities") or [],
+            "captions": clip_data.get("captions") or {},
             "hyperframes_polish": clip_data.get("hyperframes_polish"),
             "top_overlay_events": clip_data.get("top_overlay_events") or [],
             "file_status": file_status,

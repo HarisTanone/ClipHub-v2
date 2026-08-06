@@ -275,6 +275,14 @@ class Settings(BaseSettings):
     HERMES_BIN: str = "hermes"
     HERMES_HOME: str = ""  # empty → ~/.hermes
 
+    # === MinIO (Object Storage) ===
+    MINIO_ENDPOINT: str = "103.103.22.205:9000"
+    MINIO_ACCESS_KEY: str = "admin"
+    MINIO_SECRET_KEY: str = "admin1234"
+    MINIO_BUCKET: str = "cliperhub"
+    MINIO_SECURE: bool = False
+    TELEGRAM_BOT_NOTIFY_URL: str = ""  # URL to POST upload notifications to Telegram bot
+
     # ─── Groq API (V2 Pipeline) ──────────────────────────────────────────
     GROQ_API_KEY: str = ""
     GROQ_WHISPER_MODEL: str = "whisper-large-v3-turbo"

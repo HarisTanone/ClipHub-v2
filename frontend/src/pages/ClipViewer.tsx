@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
-import { jobs, API_BASE, type ClipDetailResponse } from "@/lib/api";
+import { jobs, API_BASE, getToken, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
 
 type PreviewQuality = "original" | "720" | "480" | "360" | "320";
@@ -42,6 +42,11 @@ export function ClipViewer() {
   const [isEditingHook, setIsEditingHook] = useState(false);
   const [hookText, setHookText] = useState("");
   const [isSavingHook, setIsSavingHook] = useState(false);
+
+  // MinIO upload
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadResult, setUploadResult] = useState<{ success: boolean; url?: string; presigned_url?: string; error?: string; telegram_sent?: boolean } | null>(null);
 
   // Style editor modal (same as NewJob) — load from localStorage
   const [styleModalOpen, setStyleModalOpen] = useState(false);
@@ -126,6 +131,59 @@ export function ClipViewer() {
       loadClip();
     } catch (e: any) { toast.error(e.message || "Failed to save"); }
     finally { setIsSavingHook(false); }
+  }
+
+  async function handleUploadToMinio(retryCount = 0) {
+    if (!jobId) return;
+    setIsUploading(true);
+    setUploadProgress(10);
+    setUploadResult(null);
+
+    try {
+      // Simulate progress stages
+      setUploadProgress(30);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/minio/upload/${jobId}/${clipRank}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setUploadProgress(70);
+
+      const data = await res.json();
+      setUploadProgress(90);
+
+      if (data.success) {
+        // Send to telegram with caption
+        let telegramSent = false;
+        try {
+          const caption = clip?.captions?.tiktok || clip?.captions?.instagram || clip?.captions?.youtube || clip?.hook || "";
+          const tgRes = await fetch(`${API_BASE}/api/minio/notify-telegram/${jobId}/${clipRank}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ url: data.presigned_url, filename: data.filename, caption }),
+          });
+          const tgData = await tgRes.json();
+          telegramSent = tgData.success || false;
+        } catch { telegramSent = false; }
+
+        setUploadProgress(100);
+        setUploadResult({ success: true, url: data.url, presigned_url: data.presigned_url, telegram_sent: telegramSent });
+        toast.success("Upload berhasil!");
+      } else {
+        throw new Error(data.error || data.detail || "Upload failed");
+      }
+    } catch (e: any) {
+      setUploadProgress(null);
+      if (retryCount < 2) {
+        toast.error(`Upload gagal, retry... (${retryCount + 1}/3)`);
+        setTimeout(() => handleUploadToMinio(retryCount + 1), 2000);
+        return;
+      }
+      setUploadResult({ success: false, error: e.message || "Upload failed after 3 attempts" });
+      toast.error("Upload gagal setelah 3 percobaan");
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   async function handleRestyle() {
@@ -311,8 +369,56 @@ export function ClipViewer() {
             <div className="ml-auto flex gap-1.5">
               {rawUrl && <a href={rawUrl} download><Button variant="outline" size="xs" icon={<Download className="h-3 w-3" />}>Raw</Button></a>}
               {finalDownloadUrl && <a href={jobs.getClipFinalUrl(jobId!, clipRank, previewQuality)} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final {previewQuality === "original" ? "" : `${previewQuality}p`}</Button></a>}
+              {finalDownloadUrl && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => handleUploadToMinio()}
+                  loading={isUploading}
+                  icon={uploadResult?.success ? <CheckCircle2 className="h-3 w-3 text-emerald-400" /> : <Upload className="h-3 w-3" />}
+                >
+                  {isUploading ? `${uploadProgress || 0}%` : uploadResult?.success ? "Uploaded" : "Upload"}
+                </Button>
+              )}
             </div>
           </div>
+
+          {/* Upload status bar */}
+          {(isUploading || uploadResult) && (
+            <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+              {isUploading && (
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="h-3 w-3 text-purple-400 animate-spin" />
+                  <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-500 rounded-full transition-all duration-300" style={{ width: `${uploadProgress || 0}%` }} />
+                  </div>
+                  <span className="text-[10px] text-zinc-400">{uploadProgress || 0}%</span>
+                </div>
+              )}
+              {uploadResult?.success && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-[10px] text-emerald-400">Upload berhasil</span>
+                    {uploadResult.telegram_sent && <Badge variant="success" size="sm">Telegram sent</Badge>}
+                    {uploadResult.telegram_sent === false && <Badge variant="warning" size="sm">Telegram pending</Badge>}
+                  </div>
+                  {uploadResult.presigned_url && (
+                    <a href={uploadResult.presigned_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-purple-400 hover:text-purple-300">Open link</a>
+                  )}
+                </div>
+              )}
+              {uploadResult && !uploadResult.success && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 text-red-400" />
+                    <span className="text-[10px] text-red-400">{uploadResult.error || "Upload gagal"}</span>
+                  </div>
+                  <Button variant="ghost" size="xs" onClick={() => handleUploadToMinio()} icon={<RefreshCw className="h-3 w-3" />}>Retry</Button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Sidebar — col 5 */}
@@ -504,6 +610,33 @@ export function ClipViewer() {
               <p className="text-[12px] text-zinc-300 bg-zinc-900/60 rounded-lg p-2.5 leading-relaxed">{clip.hook || "No hook"}</p>
             )}
           </Card>
+
+          {/* Caption (for posting) */}
+          {clip.captions && Object.keys(clip.captions).length > 0 && (
+            <Card className="p-3">
+              <h3 className="text-xs font-semibold text-zinc-300 mb-2">Caption</h3>
+              <div className="space-y-2">
+                {clip.captions.tiktok && (
+                  <div>
+                    <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">TikTok</p>
+                    <p className="text-[11px] text-zinc-300 bg-zinc-900/60 rounded-lg p-2.5 leading-relaxed whitespace-pre-line">{clip.captions.tiktok}</p>
+                  </div>
+                )}
+                {clip.captions.instagram && (
+                  <div>
+                    <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Instagram</p>
+                    <p className="text-[11px] text-zinc-300 bg-zinc-900/60 rounded-lg p-2.5 leading-relaxed whitespace-pre-line">{clip.captions.instagram}</p>
+                  </div>
+                )}
+                {clip.captions.youtube && (
+                  <div>
+                    <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">YouTube</p>
+                    <p className="text-[11px] text-zinc-300 bg-zinc-900/60 rounded-lg p-2.5 leading-relaxed whitespace-pre-line">{clip.captions.youtube}</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 

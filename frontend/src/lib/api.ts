@@ -406,6 +406,7 @@ export interface ClipDetailResponse {
       subtitle_template?: string | null;
     } | null;
     top_overlay_events?: Array<Record<string, any>>;
+    captions?: { tiktok?: string; instagram?: string; youtube?: string; plain?: string };
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };
     urls: { raw: string | null; final: string | null; thumbnail: string | null };
   };

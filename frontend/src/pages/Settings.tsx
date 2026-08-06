@@ -560,86 +560,116 @@ export function Settings() {
 
   // ─── Model Settings handlers ───────────────────────────────────────────────
 
+  const [isLoadingModelSettings, setIsLoadingModelSettings] = useState(false);
+
   async function fetchModelSettings() {
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/api/settings/models`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.success) {
-      setModelSettings(data.data);
-      // Initialize edits from current values
-      const edits: Record<string, string> = {};
-      for (const s of data.data) edits[s.key] = s.value;
-      setModelEdits(edits);
+    try {
+      setIsLoadingModelSettings(true);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/settings/models`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success) {
+        setModelSettings(data.data || []);
+        // Initialize edits from current values
+        const edits: Record<string, string> = {};
+        for (const s of (data.data || [])) edits[s.key] = s.value;
+        setModelEdits(edits);
+      }
+    } catch (e) {
+      console.warn("[Settings] fetchModelSettings failed:", e);
+    } finally {
+      setIsLoadingModelSettings(false);
     }
   }
 
   async function handleSaveModels() {
     setIsSavingModels(true);
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/api/settings/models`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ settings: modelEdits }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      toast.success(`${data.updated} model setting(s) updated`);
-      fetchModelSettings();
-    } else {
-      toast.error(data.detail || "Failed to save");
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/settings/models`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ settings: modelEdits }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`${data.updated} model setting(s) updated`);
+        fetchModelSettings();
+      } else {
+        toast.error(data.detail || "Failed to save");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Network error saving models");
+    } finally {
+      setIsSavingModels(false);
     }
-    setIsSavingModels(false);
   }
 
   async function handleTestModel() {
     setIsTestingModel(true);
     setModelTestResult(null);
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/api/settings/models/test`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        base_url: modelEdits["NINE_ROUTER_BASE_URL"] || undefined,
-        api_key: modelEdits["NINE_ROUTER_API_KEY"] || undefined,
-        model: modelEdits["NINE_ROUTER_MODEL"] || undefined,
-      }),
-    });
-    const data = await res.json();
-    setModelTestResult(data);
-    setIsTestingModel(false);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/settings/models/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          base_url: modelEdits["NINE_ROUTER_BASE_URL"] || undefined,
+          api_key: modelEdits["NINE_ROUTER_API_KEY"] || undefined,
+          model: modelEdits["NINE_ROUTER_MODEL"] || undefined,
+        }),
+      });
+      const data = await res.json();
+      setModelTestResult(data);
+    } catch (e: any) {
+      setModelTestResult({ success: false, error: e?.message || "Network error" });
+    } finally {
+      setIsTestingModel(false);
+    }
   }
 
   async function handleFetchAvailableModels() {
     setIsLoadingModels(true);
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/api/settings/models/available`, { headers: { Authorization: `Bearer ${token}` } });
-    const data = await res.json();
-    if (data.success) {
-      setAvailableModels(data.models || []);
-      toast.success(`${data.models?.length || 0} model(s) found`);
-    } else {
-      toast.error(data.error || "Failed to fetch models");
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/settings/models/available`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (data.success) {
+        setAvailableModels(data.models || []);
+        toast.success(`${data.models?.length || 0} model(s) found`);
+      } else {
+        toast.error(data.error || "Failed to fetch models");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Network error fetching models");
+    } finally {
+      setIsLoadingModels(false);
     }
-    setIsLoadingModels(false);
   }
 
   async function handleTestAllModels() {
     setIsTestingAll(true);
     setTestAllResults(null);
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/api/settings/models/test-all`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    setTestAllResults(data);
-    if (data.success) {
-      toast.success(`${data.ok}/${data.total} model(s) active`);
-    } else {
-      toast.error(data.error || "Test failed");
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/settings/models/test-all`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setTestAllResults(data);
+      if (data.success) {
+        toast.success(`${data.ok}/${data.total} model(s) active`);
+      } else {
+        toast.error(data.error || "Test failed");
+      }
+    } catch (e: any) {
+      setTestAllResults({ success: false, error: e?.message || "Network error" });
+      toast.error(e?.message || "Network error testing models");
+    } finally {
+      setIsTestingAll(false);
     }
-    setIsTestingAll(false);
   }
 
   useEffect(() => {
@@ -981,6 +1011,16 @@ export function Settings() {
                 <p className="text-[11px] text-zinc-500 mb-4">
                   Pengaturan model AI yang digunakan pipeline. Perubahan berlaku langsung setelah Save — tidak perlu restart server.
                 </p>
+                {isLoadingModelSettings ? (
+                  <div className="flex items-center justify-center py-8">
+                    <RefreshCw className="h-5 w-5 text-zinc-600 animate-spin" />
+                    <span className="ml-2 text-xs text-zinc-500">Loading model settings...</span>
+                  </div>
+                ) : modelSettings.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-[11px] text-zinc-600">Tidak ada model settings. Pastikan backend running dan migration sudah dijalankan.</p>
+                  </div>
+                ) : (
                 <div className="space-y-3">
                   {modelSettings.map((s) => (
                     <div key={s.key}>
@@ -1001,6 +1041,7 @@ export function Settings() {
                     </div>
                   ))}
                 </div>
+                )}
               </Card>
 
               {/* Available Models from 9router */}
@@ -1107,7 +1148,7 @@ export function Settings() {
                   <Server className="h-4 w-4 text-blue-400" />
                   <h3 className="text-xs font-semibold text-zinc-200">All Models Status</h3>
                 </div>
-                {testAllResults?.success ? (
+                {testAllResults?.success && testAllResults?.results ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-3 mb-3">
                       <Badge variant="success" size="sm">{testAllResults.ok} Active</Badge>
@@ -1115,14 +1156,14 @@ export function Settings() {
                       <span className="text-[10px] text-zinc-600">{testAllResults.total} total</span>
                     </div>
                     <div className="max-h-64 overflow-y-auto space-y-1">
-                      {testAllResults.results.map((r: any) => (
+                      {(testAllResults.results || []).map((r: any) => (
                         <div key={r.model} className={cn(
                           "flex items-center justify-between px-2 py-1.5 rounded text-[11px] border",
                           r.status === "ok" ? "border-emerald-900/40 bg-emerald-950/20" : "border-red-900/40 bg-red-950/20"
                         )}>
                           <div className="flex items-center gap-2 min-w-0">
                             <span className={r.status === "ok" ? "text-emerald-400" : "text-red-400"}>
-                              {r.status === "ok" ? "✅" : "❌"}
+                              {r.status === "ok" ? <CheckCircle2 className="inline w-3.5 h-3.5" /> : <XCircle className="inline w-3.5 h-3.5" />}
                             </span>
                             <span className="text-zinc-300 truncate font-mono">{r.model}</span>
                           </div>

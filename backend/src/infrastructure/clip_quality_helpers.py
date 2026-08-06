@@ -481,6 +481,21 @@ def build_clip_analisa(
         "retention_hints": retention,
         "words": words,
     }
+
+    # Generate captions for social media posting
+    try:
+        cap_pack = build_share_pack(
+            hook=hook, reason=reason, score=score or 0,
+            duration=dur, words=words,
+            visual_entities=visual_entities,
+            cta=cta, virality=viral, rank=rank,
+        )
+        body["captions"] = cap_pack.get("captions", {})
+        body["hashtags"] = cap_pack.get("hashtags", [])
+        body["hook_alts"] = cap_pack.get("hook_alts", [])
+    except Exception:
+        body["captions"] = {}
+
     if extra:
         body.update(extra)
     return {"no": no, "clips": [body]}

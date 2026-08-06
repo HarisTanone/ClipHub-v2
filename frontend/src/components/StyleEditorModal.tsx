@@ -2557,23 +2557,34 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             <Section title="Hook Style Preset">
               <div className="grid grid-cols-2 gap-2">
                 {([
-                  { id: "zoom_punch", name: "Zoom Punch", color: "white" },
-                  { id: "fade_scale", name: "Fade Scale", color: "white" },
-                  { id: "slide_punch_framer", name: "Slide Punch", color: "white" },
-                  { id: "typewriter", name: "Typewriter", color: "#00FF88" },
-                  { id: "glitch_rgb", name: "Glitch RGB", color: "white" },
-                  { id: "shake_neon", name: "Shake Neon", color: "#00FFCC" },
-                  { id: "cinematic_reveal", name: "Cinematic", color: "#FFD700" },
-                  { id: "danger_bold", name: "Danger Bold", color: "#FF2D2D" },
-                  { id: "minimal_white", name: "Minimal", color: "white" },
-                  { id: "bold_yellow", name: "Bold Yellow", color: "#FFD700" },
-                  { id: "electric_blue", name: "Electric Blue", color: "#00BFFF" },
-                  { id: "fire_red", name: "Fire Red", color: "#FF4444" },
+                  { id: "zoom_punch", name: "Zoom Punch", color: "white", fontSize: 56, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 4, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
+                  { id: "fade_scale", name: "Fade Scale", color: "white", fontSize: 48, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 3, strokeColor: "black", bgOpacity: 0.5, positionY: 42 },
+                  { id: "slide_punch_framer", name: "Slide Punch", color: "white", fontSize: 52, fontFamily: "Poppins", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "black", bgOpacity: 0.65, positionY: 38 },
+                  { id: "typewriter", name: "Typewriter", color: "#00FF88", fontSize: 44, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 2, strokeColor: "black", bgOpacity: 0.7, positionY: 45 },
+                  { id: "glitch_rgb", name: "Glitch RGB", color: "white", fontSize: 58, fontFamily: "Anton", fontWeight: "700", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.7, positionY: 40 },
+                  { id: "shake_neon", name: "Shake Neon", color: "#00FFCC", fontSize: 54, fontFamily: "Bungee", fontWeight: "400", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.65, positionY: 40 },
+                  { id: "cinematic_reveal", name: "Cinematic", color: "#FFD700", fontSize: 62, fontFamily: "Playfair Display", fontWeight: "700", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.8, positionY: 42 },
+                  { id: "danger_bold", name: "Danger Bold", color: "#FF2D2D", fontSize: 70, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 6, strokeColor: "black", bgOpacity: 0.75, positionY: 38 },
+                  { id: "minimal_white", name: "Minimal", color: "white", fontSize: 42, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 2, strokeColor: "rgba(0,0,0,0.5)", bgOpacity: 0.3, positionY: 50 },
+                  { id: "bold_yellow", name: "Bold Yellow", color: "#FFD700", fontSize: 64, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
+                  { id: "electric_blue", name: "Electric Blue", color: "#00BFFF", fontSize: 54, fontFamily: "Bungee", fontWeight: "400", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.65, positionY: 40 },
+                  { id: "fire_red", name: "Fire Red", color: "#FF4444", fontSize: 66, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "#220000", bgOpacity: 0.7, positionY: 38 },
                 ] as const).map(preset => (
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => update({ animation: preset.id })}
+                    onClick={() => update({
+                      animation: preset.id,
+                      color: preset.color,
+                      fontSize: preset.fontSize,
+                      fontFamily: preset.fontFamily,
+                      fontWeight: preset.fontWeight,
+                      strokeEnabled: preset.strokeEnabled,
+                      strokeWidth: preset.strokeWidth,
+                      strokeColor: preset.strokeColor,
+                      bgOpacity: preset.bgOpacity,
+                      positionY: preset.positionY,
+                    })}
                     className={cn(
                       "py-2 px-3 rounded-lg border text-[10px] font-medium transition-colors text-left",
                       style.animation === preset.id
@@ -2874,9 +2885,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             </div>
             <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
               {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-              <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
               <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                <p style={{ fontSize: Math.max(style.fontSize * 0.32, 12), fontWeight: Number(style.fontWeight), fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`, letterSpacing: style.letterSpacing, lineHeight: style.lineHeight, color: style.color, textTransform: style.uppercase ? "uppercase" as const : "none" as const, textAlign: style.textAlign, maxWidth: "90%", whiteSpace: "pre-line", wordBreak: "break-word", paintOrder: style.strokeEnabled ? "stroke" as const : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor}` : undefined, textShadow: [style.shadowEnabled ? `${style.shadowX}px ${style.shadowY}px ${style.shadowBlur}px ${style.shadowColor}` : "", style.glowEnabled ? `0 0 ${style.glowSize}px ${style.glowColor}` : ""].filter(Boolean).join(", ") || undefined }}>
+                <p style={{ fontSize: Math.max(style.fontSize * 0.32, 12), fontWeight: Number(style.fontWeight), fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`, color: style.color, textTransform: style.uppercase ? "uppercase" as const : "none" as const, textAlign: "center" as const, maxWidth: "90%", whiteSpace: "pre-line" as const, wordBreak: "break-word" as const, padding: "4px 8px", backgroundColor: style.bgOpacity > 0 ? `${style.bgColor || "black"}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", paintOrder: style.strokeEnabled ? "stroke" as const : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `2px 2px 0px ${style.shadowColor}` : undefined }}>
                   {style.text || getHookPreviewSample(style.animation || "zoom_punch")}
                 </p>
               </div>
@@ -3318,11 +3328,36 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             aspectRatio={aspectRatio}
             thumbnailUrl={thumbnailUrl}
           />
+        ) : engine === "ffmpeg" ? (
+          <>
+            <div className="mb-3 flex w-full items-center justify-between gap-2">
+              <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+              <span className="rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[9px] text-purple-300">FFmpeg Drawtext</span>
+            </div>
+            <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
+              {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+              <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+                <div className="flex flex-wrap justify-center" style={{ gap: 3, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgEnabled ? "4px 8px" : 0, borderRadius: 2 }}>
+                  {["ini", "kata", "penting", "banget"].map((w, i) => {
+                    const isActive = i === activeWordIdx;
+                    return (
+                      <span key={w} style={{ color: isActive ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isActive ? 900 : Number(style.fontWeight), textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", paintOrder: style.strokeEnabled ? "stroke" : undefined, WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `1px 1px 0px ${style.shadowColor}` : undefined }}>{w}</span>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">ffmpeg {style.lineTransition || "word_pop"}</p>
+            </div>
+            <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Mode</span><p className="truncate text-zinc-300">{style.lineTransition || "word_pop"}</p></div>
+            </div>
+          </>
         ) : (
           <>
             <div className="mb-3 flex w-full items-center justify-between gap-2">
               <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
-              <span className={cn("rounded-md border px-2 py-1 text-[9px]", engine === "ffmpeg" ? "border-purple-500/30 bg-purple-500/10 text-purple-300" : "border-zinc-800 bg-zinc-900 text-zinc-400")}>{engine === "ffmpeg" ? "FFmpeg Drawtext" : SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
+              <span className={cn("rounded-md border px-2 py-1 text-[9px]", "border-zinc-800 bg-zinc-900 text-zinc-400")}>{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
             </div>
             <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
               {canvas ? (
