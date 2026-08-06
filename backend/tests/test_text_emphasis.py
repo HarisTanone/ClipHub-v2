@@ -223,10 +223,10 @@ def test_anchor_maps_legacy_ai_effect_names():
 def test_foreground_generator_loads_configured_yolo_segmentation_model():
     fake_yolo = MagicMock(return_value=object())
     fake_module = SimpleNamespace(YOLO=fake_yolo)
-    generator = PersonForegroundGenerator(model_path="/models/yolo11n-seg.pt")
+    generator = PersonForegroundGenerator(model_path="/models/yolo26n-seg.pt")
 
     with patch.dict(sys.modules, {"ultralytics": fake_module}):
         loaded = generator._load_model()
 
-    fake_yolo.assert_called_once_with("/models/yolo11n-seg.pt")
+    fake_yolo.assert_called_once_with("/models/yolo26n-seg.pt")
     assert loaded is generator._model

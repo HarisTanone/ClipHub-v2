@@ -25,6 +25,7 @@ from src.presentation.routes.storage import router as storage_router
 from src.presentation.routes.features import router as features_router
 from src.presentation.routes.transcript import router as transcript_router
 from src.presentation.routes.canvas_templates import router as canvas_templates_router
+from src.presentation.routes.model_settings import router as model_settings_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -262,6 +263,7 @@ app.include_router(presets_router, prefix="/api")
 app.include_router(storage_router, prefix="/api")
 app.include_router(features_router, prefix="/api")
 app.include_router(canvas_templates_router, prefix="/api")
+app.include_router(model_settings_router, prefix="/api")
 
 
 @app.get("/health")

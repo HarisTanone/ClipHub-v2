@@ -76,7 +76,7 @@ class PersonTrackerV2:
 
     Args:
         tracker_type: 'botsort' or 'bytetrack'.
-        model_path: Path to YOLO model for tracking (default: yolo11n.pt).
+        model_path: Path to YOLO model for tracking (default: yolo26n.pt).
         max_lost_frames: How long to keep a lost track before removal.
         frame_width: Video frame width (for normalization).
         frame_height: Video frame height (for normalization).
@@ -87,7 +87,7 @@ class PersonTrackerV2:
     def __init__(
         self,
         tracker_type: str = "botsort",
-        model_path: str = "yolo11n.pt",
+        model_path: str = "yolo26n.pt",
         max_lost_frames: int = 8,
         frame_width: int = 1920,
         frame_height: int = 1080,

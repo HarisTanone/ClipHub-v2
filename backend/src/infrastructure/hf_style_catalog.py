@@ -77,7 +77,11 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     if not isinstance(cfg, dict):
         return "remotion"
     eng = str(cfg.get(key) or cfg.get("render_engine") or "remotion").lower().strip()
-    return "hyperframes" if eng in ("hyperframes", "hf", "hyperframe") else "remotion"
+    if eng in ("hyperframes", "hf", "hyperframe"):
+        return "hyperframes"
+    if eng in ("ffmpeg", "drawtext"):
+        return "ffmpeg"
+    return "remotion"
 
 
 def resolve_hf_template(cfg: dict | None, *, kind: str) -> str:

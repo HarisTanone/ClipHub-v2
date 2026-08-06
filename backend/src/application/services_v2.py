@@ -2032,8 +2032,16 @@ class V2PipelineService:
             and not need_ai_text
         )
 
+        # Pure FFmpeg path: both hook + sub use ffmpeg → no Remotion/HF needed
+        pure_ffmpeg = (
+            hook_engine == "ffmpeg"
+            and sub_engine == "ffmpeg"
+            and not need_canvas
+            and not need_ai_text
+        )
+
         use_remotion = False
-        if not pure_hf and self._remotion_adapter:
+        if not pure_hf and not pure_ffmpeg and self._remotion_adapter:
             try:
                 if await self._remotion_adapter.health_check():
                     use_remotion = True
@@ -2046,6 +2054,14 @@ class V2PipelineService:
 
         if pure_hf:
             await self._render_via_hyperframes_engines(
+                job, job_id, clips, clips_with_words,
+                output_dir, trim_results,
+                hook_style_config, subtitle_style_config,
+            )
+            return
+
+        if pure_ffmpeg:
+            await self._render_via_ffmpeg_engines(
                 job, job_id, clips, clips_with_words,
                 output_dir, trim_results,
                 hook_style_config, subtitle_style_config,
@@ -2277,6 +2293,83 @@ class V2PipelineService:
                 "HyperFrames hook/subtitle render failed: " + "; ".join(errors[:5])
             )
         self._emit(job_id, 14, "hyperframes_render", "complete")
+
+    async def _render_via_ffmpeg_engines(
+        self,
+        job,
+        job_id: str,
+        clips: list,
+        clips_with_words: dict,
+        output_dir: str,
+        trim_results: dict[int, bool],
+        hook_style_config: dict,
+        subtitle_style_config: dict,
+    ) -> None:
+        """Pure FFmpeg path: both hook+subtitle use FFmpeg drawtext (no browser)."""
+        self._emit(job_id, 13, "ffmpeg_render", "start")
+        await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
+        initialize_clip_readiness(output_dir)
+
+        from src.infrastructure.subtitle_renderer import SubtitleRenderer
+        from src.domain.entities import SubtitleStyleConfig
+
+        errors: list[str] = []
+        hook_style = hook_style_config.get("animation", "zoom_punch") if hook_style_config else "zoom_punch"
+
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+
+            # Resolve input path (brolled > reframed > trimmed)
+            base_path = self._best_clip_path(output_dir, clip.rank, {})
+            if not base_path or not os.path.exists(base_path):
+                continue
+
+            # ── Hook render (FFmpeg drawtext) ──
+            hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
+            if clip.hook:
+                try:
+                    from src.application.services import AutoClipService
+                    svc = AutoClipService.__new__(AutoClipService)
+                    svc._fonts_dir = getattr(self, "_fonts_dir", "/usr/share/fonts/truetype")
+                    await svc._render_hook_ffmpeg(
+                        base_path, clip.hook, hooked_path,
+                        hook_style=hook_style,
+                        style_config=hook_style_config,
+                    )
+                    logger.info(f"[{job_id}] FFmpeg hook rendered clip {clip.rank}")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] FFmpeg hook failed clip {clip.rank}: {e}")
+                    errors.append(f"hook clip {clip.rank}: {e}")
+                    hooked_path = base_path
+            else:
+                hooked_path = base_path
+
+            # ── Subtitle render (FFmpeg drawtext) ──
+            final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+            words = clips_with_words.get(clip.rank)
+            if words:
+                try:
+                    font_dir = getattr(self, "_fonts_dir", "assets/fonts")
+                    renderer = SubtitleRenderer(font_dir=font_dir)
+                    style_cfg = SubtitleStyleConfig(**(subtitle_style_config or {}))
+                    renderer.render_subtitles(hooked_path, words, style_cfg, final_path)
+                    logger.info(f"[{job_id}] FFmpeg subtitle rendered clip {clip.rank}")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] FFmpeg subtitle failed clip {clip.rank}: {e}")
+                    errors.append(f"subtitle clip {clip.rank}: {e}")
+                    import shutil
+                    shutil.copy2(hooked_path, final_path)
+            else:
+                import shutil
+                shutil.copy2(hooked_path, final_path)
+
+            mark_clip_ready(output_dir, clip.rank)
+
+        if errors:
+            logger.warning(f"[{job_id}] FFmpeg render had {len(errors)} errors (non-fatal)")
+
+        self._emit(job_id, 14, "ffmpeg_render", "complete")
 
     async def _apply_hf_hook_subtitle_pass(
         self,

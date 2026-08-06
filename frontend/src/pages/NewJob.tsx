@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight, Layers } from "lucide-react";
+import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight, Layers, Zap, Check, FileText } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -373,13 +373,13 @@ export function NewJob() {
               <div className={cn("mt-2 rounded-lg px-2.5 py-2 text-[10px]", videoMeta.cache.has_cache ? "bg-amber-500/8 border border-amber-500/20" : "bg-zinc-800/50 border border-zinc-800")}>
                 {videoMeta.cache.has_cache ? (
                   <div className="space-y-0.5">
-                    <p className="text-amber-400 font-medium">⚡ Cache tersedia</p>
+                    <p className="text-amber-400 font-medium"><Zap className="inline w-3 h-3 mr-1" />Cache tersedia</p>
                     <p className="text-zinc-400">{videoMeta.cache.clips_success} clips berhasil • diproses {videoMeta.cache.processed_at ? new Date(videoMeta.cache.processed_at).toLocaleDateString("id-ID") : ""}</p>
                     {!forceReprocess && <p className="text-zinc-500 italic">Akan menggunakan hasil sebelumnya</p>}
-                    {forceReprocess && <p className="text-emerald-400">✓ Akan diproses ulang dari awal</p>}
+                    {forceReprocess && <p className="text-emerald-400"><Check className="inline w-3 h-3 mr-1" />Akan diproses ulang dari awal</p>}
                   </div>
                 ) : videoMeta.cache.has_transcript ? (
-                  <p className="text-zinc-400">📝 Transcript tersedia, clip belum diproses</p>
+                  <p className="text-zinc-400"><FileText className="inline w-3 h-3 mr-1" />Transcript tersedia, clip belum diproses</p>
                 ) : (
                   <p className="text-zinc-500">Video belum pernah diproses</p>
                 )}

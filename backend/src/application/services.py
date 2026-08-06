@@ -986,7 +986,11 @@ class JobService:
                             clip_style = cd["hook_style"]
                             break
                 hook_style = clip_style or job.hook_style or settings.HOOK_DEFAULT_STYLE
-                await self._render_hook_ffmpeg(in_path, clip.hook, out_path, hook_style=hook_style)
+                await self._render_hook_ffmpeg(
+                    in_path, clip.hook, out_path,
+                    hook_style=hook_style,
+                    style_config=hook_style_config,
+                )
                 logger.info(f"[{job_id}] Hook rendered clip {clip.rank} (style={hook_style})")
             except Exception as e:
                 logger.warning(f"[{job_id}] Hook render failed clip {clip.rank}: {e}")
@@ -1370,11 +1374,14 @@ class JobService:
             ))
         return clips
 
-    async def _render_hook_ffmpeg(self, video_path: str, hook_text: str, output_path: str, hook_style: str = "zoom_punch") -> None:
+    async def _render_hook_ffmpeg(self, video_path: str, hook_text: str, output_path: str, hook_style: str = "zoom_punch", style_config: dict | None = None) -> None:
         """Burn hook text onto first 3 seconds of video using FFmpeg drawtext.
 
         Uses textfile= approach to avoid all text escaping issues.
         Renders with style-specific parameters for font, animation, and color.
+
+        If style_config is provided (from frontend StyleEditorModal), it overrides
+        the preset values for font, color, size, duration, stroke, shadow, etc.
 
         Supported hook_style values:
           - zoom_punch: Bold white text, quick scale-in (default)
@@ -1451,6 +1458,16 @@ class JobService:
         }
 
         style = HOOK_STYLES.get(hook_style, HOOK_STYLES["zoom_punch"])
+
+        # Try DB-driven style first (overrides hardcoded)
+        try:
+            from src.infrastructure.ffmpeg_styles_store import get_ffmpeg_hook_style
+            db_style = get_ffmpeg_hook_style(hook_style)
+            if db_style:
+                style = db_style
+        except Exception:
+            pass
+
         duration = style["duration"]
         fontsize = style["fontsize"]
         fontcolor = style["fontcolor"]
@@ -1458,6 +1475,33 @@ class JobService:
         bordercolor = style["bordercolor"]
         bg_opacity = style["bg_opacity"]
         y_expr = style["y_expr"]
+
+        # Apply style_config overrides from frontend (StyleEditorModal FFmpeg tab)
+        if style_config:
+            if style_config.get("duration"):
+                duration = float(style_config["duration"])
+            if style_config.get("fontSize"):
+                fontsize = int(style_config["fontSize"])
+            if style_config.get("color"):
+                fontcolor = style_config["color"]
+            if style_config.get("strokeEnabled") and style_config.get("strokeWidth"):
+                borderw = int(style_config["strokeWidth"])
+                bordercolor = style_config.get("strokeColor", "black")
+            elif style_config.get("strokeEnabled") is False:
+                borderw = 0
+            if style_config.get("bgOpacity") is not None:
+                bg_opacity = float(style_config["bgOpacity"])
+            if style_config.get("positionY"):
+                pos_y = int(style_config["positionY"])
+                y_expr = f"h*{pos_y / 100:.2f}-text_h/2"
+            if style_config.get("animation"):
+                # Map animation name to effect if it exists in HOOK_STYLES
+                anim_style = HOOK_STYLES.get(style_config["animation"])
+                if anim_style and anim_style.get("effect"):
+                    style = {**style, "effect": anim_style["effect"]}
+            # Override font_pref with custom fontFamily
+            if style_config.get("fontFamily"):
+                style = {**style, "font_pref": [style_config["fontFamily"]]}
 
         # Multi-line split if text is long (max ~6 words per line)
         words_list = hook_text.strip().split()
@@ -1477,7 +1521,7 @@ class JobService:
                 f.write(display_text)
 
             # Resolve font explicitly — use style-preferred fonts
-            font_path = self._resolve_hook_font(style.get("font_pref"))
+            font_path = self._resolve_hook_font(style.get("font_pref") or [])
             font_opt = f":fontfile='{font_path}'" if font_path else ""
 
             # Alpha fade expression — escape commas to avoid filter parser confusion

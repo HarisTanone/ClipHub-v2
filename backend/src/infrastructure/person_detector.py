@@ -305,7 +305,7 @@ class PersonDetector:
         try:
             from ultralytics import YOLO
 
-            self._model = YOLO("yolo11n.pt")
+            self._model = YOLO("yolo26n.pt")
             self._use_supervision = False
             logger.info("person_detector: using Ultralytics YOLO fallback")
             return True

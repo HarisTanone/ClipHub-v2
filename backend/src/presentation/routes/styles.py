@@ -176,3 +176,14 @@ async def list_hook_animations():
             data=sorted(by_id.values(), key=lambda item: item.name),
             total=len(by_id),
         )
+
+
+# ─── FFmpeg Hook Styles ───────────────────────────────────────────────────────
+
+
+@router.get("/ffmpeg-hook-styles")
+async def list_ffmpeg_hook_styles():
+    """List all active FFmpeg drawtext hook styles from DB."""
+    from src.infrastructure.ffmpeg_styles_store import get_all_ffmpeg_hook_styles
+    styles = get_all_ffmpeg_hook_styles()
+    return {"success": True, "data": styles, "total": len(styles)}

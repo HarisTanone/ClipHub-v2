@@ -2549,8 +2549,42 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
           <>
             <Section title="FFmpeg Drawtext">
               <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
-                <p className="text-[10px] text-purple-300 mb-1">⚡ Server-side render · no browser needed</p>
-                <p className="text-[9px] text-zinc-500">FFmpeg drawtext filter. Hanya properti dasar yang didukung — style preset Remotion tidak berlaku di sini.</p>
+                <p className="text-[10px] text-purple-300 mb-1"><Zap className="inline w-3 h-3 mr-1" />Server-side render · no browser needed</p>
+                <p className="text-[9px] text-zinc-500">FFmpeg drawtext filter. Pilih style preset di bawah atau kustomisasi manual.</p>
+              </div>
+            </Section>
+
+            <Section title="Hook Style Preset">
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { id: "zoom_punch", name: "Zoom Punch", color: "white" },
+                  { id: "fade_scale", name: "Fade Scale", color: "white" },
+                  { id: "slide_punch_framer", name: "Slide Punch", color: "white" },
+                  { id: "typewriter", name: "Typewriter", color: "#00FF88" },
+                  { id: "glitch_rgb", name: "Glitch RGB", color: "white" },
+                  { id: "shake_neon", name: "Shake Neon", color: "#00FFCC" },
+                  { id: "cinematic_reveal", name: "Cinematic", color: "#FFD700" },
+                  { id: "danger_bold", name: "Danger Bold", color: "#FF2D2D" },
+                  { id: "minimal_white", name: "Minimal", color: "white" },
+                  { id: "bold_yellow", name: "Bold Yellow", color: "#FFD700" },
+                  { id: "electric_blue", name: "Electric Blue", color: "#00BFFF" },
+                  { id: "fire_red", name: "Fire Red", color: "#FF4444" },
+                ] as const).map(preset => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => update({ animation: preset.id })}
+                    className={cn(
+                      "py-2 px-3 rounded-lg border text-[10px] font-medium transition-colors text-left",
+                      style.animation === preset.id
+                        ? "border-purple-500 bg-purple-500/10 text-purple-300"
+                        : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                    )}
+                  >
+                    <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: preset.color }} />
+                    {preset.name}
+                  </button>
+                ))}
               </div>
             </Section>
 
@@ -2843,10 +2877,10 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
               <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
               <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
                 <p style={{ fontSize: Math.max(style.fontSize * 0.32, 12), fontWeight: Number(style.fontWeight), fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`, letterSpacing: style.letterSpacing, lineHeight: style.lineHeight, color: style.color, textTransform: style.uppercase ? "uppercase" as const : "none" as const, textAlign: style.textAlign, maxWidth: "90%", whiteSpace: "pre-line", wordBreak: "break-word", paintOrder: style.strokeEnabled ? "stroke" as const : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor}` : undefined, textShadow: [style.shadowEnabled ? `${style.shadowX}px ${style.shadowY}px ${style.shadowBlur}px ${style.shadowColor}` : "", style.glowEnabled ? `0 0 ${style.glowSize}px ${style.glowColor}` : ""].filter(Boolean).join(", ") || undefined }}>
-                  {style.text || getHookPreviewSample("fade_scale")}
+                  {style.text || getHookPreviewSample(style.animation || "zoom_punch")}
                 </p>
               </div>
-              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">ffmpeg drawtext | {style.duration}s</p>
+              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">ffmpeg {style.animation || "zoom_punch"} | {style.duration}s</p>
             </div>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
@@ -2987,8 +3021,33 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           <>
             <Section title="FFmpeg Drawtext">
               <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
-                <p className="text-[10px] text-purple-300 mb-1">⚡ Server-side render · no browser needed</p>
-                <p className="text-[9px] text-zinc-500">FFmpeg drawtext filter. Hanya properti dasar yang didukung — style preset Remotion tidak berlaku di sini.</p>
+                <p className="text-[10px] text-purple-300 mb-1"><Zap className="inline w-3 h-3 mr-1" />Server-side render · no browser needed</p>
+                <p className="text-[9px] text-zinc-500">FFmpeg drawtext subtitle. Pilih mode transisi dan kustomisasi style.</p>
+              </div>
+            </Section>
+
+            <Section title="Line Transition">
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { id: "word_pop", name: "Word Pop", desc: "Satu kata per frame" },
+                  { id: "emphasis", name: "Emphasis", desc: "Highlight kata aktif" },
+                  { id: "line_reveal", name: "Line Reveal", desc: "Full line timed" },
+                ] as const).map(mode => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => update({ lineTransition: mode.id })}
+                    className={cn(
+                      "py-2 px-2 rounded-lg border text-center transition-colors",
+                      style.lineTransition === mode.id
+                        ? "border-purple-500 bg-purple-500/10"
+                        : "border-zinc-700 hover:border-zinc-600"
+                    )}
+                  >
+                    <p className="text-[10px] font-medium text-zinc-200">{mode.name}</p>
+                    <p className="text-[8px] text-zinc-500 mt-0.5">{mode.desc}</p>
+                  </button>
+                ))}
               </div>
             </Section>
 

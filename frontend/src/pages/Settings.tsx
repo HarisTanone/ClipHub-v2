@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle } from "lucide-react";
+import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -306,7 +306,7 @@ export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "testing">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "testing" | "models">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -346,6 +346,17 @@ export function Settings() {
   const [isStartingTest, setIsStartingTest] = useState(false);
   const [testVideoUrl, setTestVideoUrl] = useState<string | null>(null);
   const [testRefreshKey, setTestRefreshKey] = useState(0);
+
+  // Model settings (superadmin)
+  const [modelSettings, setModelSettings] = useState<Array<{key: string; value: string; description: string; updated_at: string | null}>>([]);
+  const [modelEdits, setModelEdits] = useState<Record<string, string>>({});
+  const [isSavingModels, setIsSavingModels] = useState(false);
+  const [modelTestResult, setModelTestResult] = useState<any>(null);
+  const [isTestingModel, setIsTestingModel] = useState(false);
+  const [availableModels, setAvailableModels] = useState<Array<{id: string; owned_by: string}>>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [testAllResults, setTestAllResults] = useState<any>(null);
+  const [isTestingAll, setIsTestingAll] = useState(false);
 
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
@@ -547,11 +558,100 @@ export function Settings() {
     }
   }
 
+  // ─── Model Settings handlers ───────────────────────────────────────────────
+
+  async function fetchModelSettings() {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/settings/models`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.success) {
+      setModelSettings(data.data);
+      // Initialize edits from current values
+      const edits: Record<string, string> = {};
+      for (const s of data.data) edits[s.key] = s.value;
+      setModelEdits(edits);
+    }
+  }
+
+  async function handleSaveModels() {
+    setIsSavingModels(true);
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/settings/models`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ settings: modelEdits }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      toast.success(`${data.updated} model setting(s) updated`);
+      fetchModelSettings();
+    } else {
+      toast.error(data.detail || "Failed to save");
+    }
+    setIsSavingModels(false);
+  }
+
+  async function handleTestModel() {
+    setIsTestingModel(true);
+    setModelTestResult(null);
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/settings/models/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        base_url: modelEdits["NINE_ROUTER_BASE_URL"] || undefined,
+        api_key: modelEdits["NINE_ROUTER_API_KEY"] || undefined,
+        model: modelEdits["NINE_ROUTER_MODEL"] || undefined,
+      }),
+    });
+    const data = await res.json();
+    setModelTestResult(data);
+    setIsTestingModel(false);
+  }
+
+  async function handleFetchAvailableModels() {
+    setIsLoadingModels(true);
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/settings/models/available`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (data.success) {
+      setAvailableModels(data.models || []);
+      toast.success(`${data.models?.length || 0} model(s) found`);
+    } else {
+      toast.error(data.error || "Failed to fetch models");
+    }
+    setIsLoadingModels(false);
+  }
+
+  async function handleTestAllModels() {
+    setIsTestingAll(true);
+    setTestAllResults(null);
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/settings/models/test-all`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    setTestAllResults(data);
+    if (data.success) {
+      toast.success(`${data.ok}/${data.total} model(s) active`);
+    } else {
+      toast.error(data.error || "Test failed");
+    }
+    setIsTestingAll(false);
+  }
+
+  useEffect(() => {
+    if (isSuperadmin && tab === "models") fetchModelSettings();
+  }, [isSuperadmin, tab]);
+
 
   const tabs = [
     { id: "general" as const, label: "General" },
     { id: "reframe" as const, label: "Reframe Tuning" },
     { id: "object" as const, label: "Object Overlay" },
+    ...(isSuperadmin ? [{ id: "models" as const, label: "AI Models" }] : []),
     ...(isSuperadmin ? [{ id: "render" as const, label: "Render Engine" }] : []),
     ...(isSuperadmin ? [{ id: "testing" as const, label: "Test & Deploy" }] : []),
     ...(isSuperadmin ? [{ id: "users" as const, label: "Users" }] : []),
@@ -585,6 +685,12 @@ export function Settings() {
             <Button onClick={handleRestoreObjectDefaults} loading={isResettingObject} size="sm" variant="outline">Restore Defaults</Button>
             <Button onClick={handleResetObject} disabled={!objectDirty} size="sm" variant="outline">Reset</Button>
             <Button onClick={handleSaveObject} disabled={!objectDirty} loading={isSavingObject} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+          </div>
+        ) : tab === "models" ? (
+          <div className="flex items-center gap-2">
+            <Button onClick={handleTestAllModels} loading={isTestingAll} size="sm" variant="outline" icon={<RefreshCw className="h-3.5 w-3.5" />}>Test All</Button>
+            <Button onClick={handleTestModel} loading={isTestingModel} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Model</Button>
+            <Button onClick={handleSaveModels} loading={isSavingModels} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
           </div>
         ) : (
 
@@ -860,6 +966,180 @@ export function Settings() {
                 ))}
               </div>
             </Card>
+          </div>
+        )}
+
+        {tab === "models" && isSuperadmin && (
+          <div className="max-w-4xl grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Left: Model Settings Form */}
+            <div className="lg:col-span-2 space-y-4">
+              <Card className="p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <BrainCircuit className="h-4 w-4 text-violet-400" />
+                  <h3 className="text-sm font-semibold text-zinc-100">9router Model Configuration</h3>
+                </div>
+                <p className="text-[11px] text-zinc-500 mb-4">
+                  Pengaturan model AI yang digunakan pipeline. Perubahan berlaku langsung setelah Save — tidak perlu restart server.
+                </p>
+                <div className="space-y-3">
+                  {modelSettings.map((s) => (
+                    <div key={s.key}>
+                      <label className="block text-[11px] font-medium text-zinc-400 mb-1">
+                        {s.key}
+                        {s.description && <span className="ml-2 text-zinc-600 font-normal">— {s.description}</span>}
+                      </label>
+                      <input
+                        type={s.key.includes("API_KEY") ? "password" : "text"}
+                        value={modelEdits[s.key] ?? ""}
+                        onChange={(e) => setModelEdits((p) => ({ ...p, [s.key]: e.target.value }))}
+                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none transition-colors"
+                        placeholder={s.key}
+                      />
+                      {s.updated_at && (
+                        <p className="text-[9px] text-zinc-700 mt-0.5">Updated: {new Date(s.updated_at).toLocaleString()}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Available Models from 9router */}
+              <Card className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-zinc-200">Available Models (from 9router)</h3>
+                  <Button onClick={handleFetchAvailableModels} loading={isLoadingModels} size="sm" variant="outline" icon={<RefreshCw className="h-3 w-3" />}>
+                    Refresh
+                  </Button>
+                </div>
+                {availableModels.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
+                    {availableModels.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setModelEdits((p) => ({ ...p, NINE_ROUTER_MODEL: m.id }));
+                          toast.success(`Model "${m.id}" selected as default`);
+                        }}
+                        className={cn(
+                          "text-left px-3 py-2 rounded-lg border text-xs transition-colors",
+                          modelEdits["NINE_ROUTER_MODEL"] === m.id
+                            ? "border-violet-500 bg-violet-500/10 text-violet-300"
+                            : "border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+                        )}
+                      >
+                        <span className="font-medium">{m.id}</span>
+                        {m.owned_by && <span className="ml-2 text-zinc-600">{m.owned_by}</span>}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-zinc-600">Klik Refresh untuk melihat model tersedia di 9router.</p>
+                )}
+              </Card>
+            </div>
+
+            {/* Right: Test Result */}
+            <div className="space-y-4">
+              <Card className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Zap className="h-4 w-4 text-amber-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Test Result</h3>
+                </div>
+                {modelTestResult ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      {modelTestResult.success ? (
+                        <Badge variant="success" dot>Connected</Badge>
+                      ) : (
+                        <Badge variant="error" dot>Failed</Badge>
+                      )}
+                      {modelTestResult.latency_hint && (
+                        <span className="text-[10px] text-zinc-500">{modelTestResult.latency_hint}</span>
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                      <p className="text-[10px] text-zinc-500 mb-1">Model: {modelTestResult.model}</p>
+                      <p className="text-[10px] text-zinc-500 mb-2">URL: {modelTestResult.base_url}</p>
+                      {modelTestResult.response && (
+                        <div className="border-t border-zinc-800 pt-2 mt-2">
+                          <p className="text-[10px] text-zinc-500 mb-1">Response:</p>
+                          <p className="text-xs text-zinc-300">{modelTestResult.response}</p>
+                        </div>
+                      )}
+                      {modelTestResult.error && (
+                        <div className="border-t border-zinc-800 pt-2 mt-2">
+                          <p className="text-[10px] text-red-400">{modelTestResult.error}</p>
+                        </div>
+                      )}
+                      {modelTestResult.usage && (
+                        <div className="border-t border-zinc-800 pt-2 mt-2">
+                          <p className="text-[10px] text-zinc-600">
+                            Tokens: {modelTestResult.usage.prompt_tokens || 0} in / {modelTestResult.usage.completion_tokens || 0} out
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 p-6 text-center">
+                    <Zap className="h-6 w-6 text-zinc-700 mx-auto mb-2" />
+                    <p className="text-[11px] text-zinc-500">Klik "Test Model" untuk cek koneksi</p>
+                    <p className="text-[10px] text-zinc-700 mt-1">Mengirim prompt sederhana ke model aktif</p>
+                  </div>
+                )}
+              </Card>
+
+              <Card className="p-4">
+                <h3 className="text-xs font-semibold text-zinc-200 mb-2">Catatan</h3>
+                <ul className="space-y-1.5 text-[11px] text-zinc-500">
+                  <li>• Setting disimpan di DB, bukan .env</li>
+                  <li>• Perubahan model langsung aktif tanpa restart</li>
+                  <li>• Gunakan Test untuk validasi sebelum Save</li>
+                  <li>• PASS1 = transcript analysis, PASS2 = highlight</li>
+                  <li>• AI_LAYER = text emphasis generation</li>
+                </ul>
+              </Card>
+
+              {/* Test All Models Results */}
+              <Card className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Server className="h-4 w-4 text-blue-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">All Models Status</h3>
+                </div>
+                {testAllResults?.success ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 mb-3">
+                      <Badge variant="success" size="sm">{testAllResults.ok} Active</Badge>
+                      {testAllResults.failed > 0 && <Badge variant="error" size="sm">{testAllResults.failed} Failed</Badge>}
+                      <span className="text-[10px] text-zinc-600">{testAllResults.total} total</span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto space-y-1">
+                      {testAllResults.results.map((r: any) => (
+                        <div key={r.model} className={cn(
+                          "flex items-center justify-between px-2 py-1.5 rounded text-[11px] border",
+                          r.status === "ok" ? "border-emerald-900/40 bg-emerald-950/20" : "border-red-900/40 bg-red-950/20"
+                        )}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={r.status === "ok" ? "text-emerald-400" : "text-red-400"}>
+                              {r.status === "ok" ? "✅" : "❌"}
+                            </span>
+                            <span className="text-zinc-300 truncate font-mono">{r.model}</span>
+                          </div>
+                          <span className="text-[10px] text-zinc-600 shrink-0 ml-2">
+                            {r.latency || (r.error ? r.error.slice(0, 20) : "")}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : testAllResults?.error ? (
+                  <p className="text-[11px] text-red-400">{testAllResults.error}</p>
+                ) : (
+                  <p className="text-[11px] text-zinc-600">Klik "Test All" untuk cek semua model sekaligus.</p>
+                )}
+              </Card>
+            </div>
           </div>
         )}
 

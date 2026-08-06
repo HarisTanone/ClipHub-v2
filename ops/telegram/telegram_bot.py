@@ -291,8 +291,13 @@ class Msg:
             f"  Dengan filter bahasa &amp; jumlah\n"
             f"• <code>/submit https://youtu.be/...</code>\n"
             f"  Submit URL ke pipeline AutoCliper\n"
-            f"• <code>/submit &lt;url&gt; --style viral --ratio 9:16</code>\n"
-            f"  Dengan opsi style dan rasio\n\n"
+            f"• <code>/submit &lt;url&gt; --preset bold_black --ratio 9:16</code>\n"
+            f"  Dengan preset style dan rasio\n\n"
+
+            f"{E['list']} <b>Presets &amp; Style</b>\n"
+            f"• <code>/presets</code> — lihat daftar style preset\n"
+            f"• <code>/submit &lt;url&gt; --preset &lt;id&gt;</code> — pakai preset\n"
+            f"• <code>/submit &lt;url&gt; --style &lt;id&gt;</code> — sama (alias)\n\n"
 
             f"{E['chart']} <b>Monitoring</b>\n"
             f"• <code>/status &lt;job_id&gt;</code> — cek progress job\n"
@@ -305,7 +310,7 @@ class Msg:
 
             f"{E['fire']} <b>Agentic Mode</b>\n"
             f"Ketik pesan bebas, contoh:\n"
-            f"{Msg.i('\"Carikan 5 video gym motivation terbaik dan proses yang paling viral\"')}\n\n"
+            f'{Msg.i("Carikan 5 video gym motivation terbaik dan proses yang paling viral")}\n\n'
 
             f"{E['gear']} <b>Lainnya</b>\n"
             f"• <code>/id</code> — tampilkan Telegram ID kamu\n"
@@ -318,6 +323,7 @@ class Msg:
             f"{E['help']} <b>Bantuan Cepat</b>\n\n"
             f"{E['search']} <code>/viral &lt;topik&gt;</code> — cari viral\n"
             f"{E['rocket']} <code>/submit &lt;url&gt;</code> — proses video\n"
+            f"{E['list']} <code>/presets</code> — daftar style\n"
             f"{E['chart']} <code>/status &lt;id&gt;</code> — cek job\n"
             f"{E['list']} <code>/jobs</code> — list job\n"
             f"{E['robot']} <code>/model</code> — ganti LLM\n\n"
@@ -462,11 +468,12 @@ class Msg:
             f"Kirim YouTube URL:\n"
             f"<code>/submit &lt;url&gt;</code>\n\n"
             f"<b>Opsi:</b>\n"
-            f"• <code>--style</code> ID preset (gunakan /presets untuk lihat daftar)\n"
+            f"• <code>--preset</code> ID preset (gunakan /presets untuk lihat daftar)\n"
+            f"• <code>--style</code> alias dari --preset\n"
             f"• <code>--ratio</code> 9:16 | 16:9 | 1:1\n"
             f"• <code>--force</code> proses ulang\n\n"
             f"<b>Contoh:</b>\n"
-            f"<code>/submit https://youtu.be/... --style bold_black --ratio 9:16</code>\n\n"
+            f"<code>/submit https://youtu.be/... --preset bold_black --ratio 9:16</code>\n\n"
             f"💡 Gunakan <code>/presets</code> untuk melihat daftar style preset yang tersedia."
         )
 
@@ -1093,7 +1100,7 @@ async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     i = 1
     while i < len(ctx.args):
-        if ctx.args[i] == "--style" and i + 1 < len(ctx.args):
+        if (ctx.args[i] == "--style" or ctx.args[i] == "--preset") and i + 1 < len(ctx.args):
             style = ctx.args[i + 1]
             i += 2
         elif ctx.args[i] == "--ratio" and i + 1 < len(ctx.args):

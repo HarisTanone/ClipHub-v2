@@ -362,6 +362,73 @@ CREATE INDEX IF NOT EXISTS idx_user_features_code ON user_features(feature_code)
 -- Entity words/queries come from AI per-clip; this table stores STYLE only.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- v5.1 Model Settings (superadmin-managed, replaces .env for 9router models)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS model_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_by INTEGER DEFAULT NULL,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Seed: Default model settings (mirrors .env defaults)
+INSERT OR IGNORE INTO model_settings (key, value, description) VALUES
+    ('NINE_ROUTER_BASE_URL', 'http://127.0.0.1:20128/v1', '9router API base URL'),
+    ('NINE_ROUTER_API_KEY', '', '9router API key (kosong jika local tanpa auth)'),
+    ('NINE_ROUTER_MODEL', 'CliperHub', 'Default model untuk general LLM calls'),
+    ('NINE_ROUTER_PASS1_MODEL', 'CliperHub', 'Model untuk transcript analysis pass 1'),
+    ('NINE_ROUTER_PASS2_MODEL', 'CliperHub', 'Model untuk highlight analysis pass 2'),
+    ('NINE_ROUTER_AI_LAYER_MODEL', 'CliperHub', 'Model untuk AI text layer generation'),
+    ('NINE_ROUTER_TIMEOUT', '120', 'Timeout per request (detik)'),
+    ('NINE_ROUTER_MAX_RETRIES', '3', 'Max retry per request'),
+    ('NINE_ROUTER_TEMPERATURE', '0.3', 'Default temperature'),
+    ('NINE_ROUTER_WHISPER_ENABLED', 'true', 'Enable whisper via 9router'),
+    ('NINE_ROUTER_WHISPER_MODEL', 'groq/whisper-large-v3-turbo', 'Whisper model name'),
+    ('NINE_ROUTER_WHISPER_TIMEOUT', '120', 'Whisper request timeout'),
+    ('NINE_ROUTER_WHISPER_MAX_RETRIES', '1', 'Whisper max retries');
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- v5.2 FFmpeg Hook Styles (DB-driven, replaces hardcoded HOOK_STYLES dict)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS ffmpeg_hook_styles (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    fontsize INTEGER NOT NULL DEFAULT 56,
+    fontcolor TEXT NOT NULL DEFAULT 'white',
+    borderw INTEGER NOT NULL DEFAULT 4,
+    bordercolor TEXT NOT NULL DEFAULT 'black',
+    duration REAL NOT NULL DEFAULT 3.0,
+    font_pref TEXT NOT NULL DEFAULT '["Anton-Regular.ttf"]',  -- JSON array
+    bg_opacity REAL NOT NULL DEFAULT 0.6,
+    y_expr TEXT NOT NULL DEFAULT 'h*0.4-text_h/2',
+    effect TEXT NOT NULL DEFAULT '',  -- glitch_rgb, shake_neon, cinematic_reveal, danger_bold, or empty
+    is_active INTEGER NOT NULL DEFAULT 1,
+    is_system INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Seed: Default FFmpeg hook styles
+INSERT OR IGNORE INTO ffmpeg_hook_styles (id, name, description, fontsize, fontcolor, borderw, bordercolor, duration, font_pref, bg_opacity, y_expr, effect) VALUES
+    ('zoom_punch', 'Zoom Punch', 'Bold white text, quick scale-in', 56, 'white', 4, 'black', 3.0, '["Anton-Regular.ttf","BebasNeue-Regular.ttf","Poppins-Bold.ttf"]', 0.6, 'h*0.4-text_h/2', ''),
+    ('fade_scale', 'Fade Scale', 'Smooth fade + slight grow', 48, 'white', 3, 'black@0.8', 3.5, '["Inter-Bold.ttf","Poppins-Bold.ttf","Montserrat-Bold.ttf"]', 0.5, 'h*0.42-text_h/2', ''),
+    ('slide_punch_framer', 'Slide Punch', 'Slide from left with punch', 52, 'white', 5, 'black', 3.0, '["Poppins-Bold.ttf","Montserrat-Bold.ttf","Inter-Bold.ttf"]', 0.65, 'h*0.38-text_h/2', ''),
+    ('typewriter', 'Typewriter', 'Character-by-character reveal', 44, '#00FF88', 2, 'black', 3.5, '["Inter-Bold.ttf","Poppins-Bold.ttf"]', 0.7, 'h*0.45-text_h/2', ''),
+    ('glitch_rgb', 'Glitch RGB', 'RGB split/chromatic aberration', 58, 'white', 0, 'black', 3.0, '["Anton-Regular.ttf","BlackOpsOne-Regular.ttf","BebasNeue-Regular.ttf"]', 0.7, 'h*0.4-text_h/2', 'glitch_rgb'),
+    ('shake_neon', 'Shake Neon', 'Neon glow with random shake', 54, '#00FFCC', 0, 'black', 3.0, '["Bungee-Regular.ttf","Anton-Regular.ttf","BlackOpsOne-Regular.ttf"]', 0.65, 'h*0.4-text_h/2', 'shake_neon'),
+    ('cinematic_reveal', 'Cinematic Reveal', 'Cinematic letterbox + elegant fade-in', 62, '#FFD700', 0, 'black', 3.5, '["PlayfairDisplay-Variable.ttf","Lora-Variable.ttf","Merriweather-Bold.ttf"]', 0.8, 'h*0.42-text_h/2', 'cinematic_reveal'),
+    ('danger_bold', 'Danger Bold', 'Bold red with pulsing border', 70, '#FF2D2D', 6, 'black', 3.0, '["BlackOpsOne-Regular.ttf","Anton-Regular.ttf","ArchivoBlack-Regular.ttf"]', 0.75, 'h*0.38-text_h/2', 'danger_bold'),
+    ('minimal_white', 'Minimal White', 'Clean minimal white on transparent', 42, 'white', 2, 'black@0.5', 3.0, '["Inter-Bold.ttf","Poppins-Medium.ttf"]', 0.3, 'h*0.5-text_h/2', ''),
+    ('bold_yellow', 'Bold Yellow', 'Bold yellow with heavy stroke', 64, '#FFD700', 5, 'black', 3.0, '["Anton-Regular.ttf","BebasNeue-Regular.ttf"]', 0.6, 'h*0.4-text_h/2', ''),
+    ('electric_blue', 'Electric Blue', 'Bright blue neon look', 54, '#00BFFF', 0, 'black', 3.0, '["Bungee-Regular.ttf","Anton-Regular.ttf"]', 0.65, 'h*0.4-text_h/2', 'shake_neon'),
+    ('fire_red', 'Fire Red', 'Aggressive red for dramatic moments', 66, '#FF4444', 5, '#220000', 2.5, '["BlackOpsOne-Regular.ttf","Anton-Regular.ttf"]', 0.7, 'h*0.38-text_h/2', 'danger_bold');
+
 CREATE TABLE IF NOT EXISTS object_overlay_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER DEFAULT NULL,          -- NULL = global default, user_id = per-user

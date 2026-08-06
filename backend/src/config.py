@@ -124,9 +124,9 @@ class Settings(BaseSettings):
     DEFAULT_STYLE_PRESET: str = "bold_black"
 
     # === YOLO Models ===
-    YOLO_MODEL_VERSION: str = "v11"
-    YOLO_MODEL_PATH: str = "models/yolo11n.pt"
-    YOLO_SEG_MODEL: str = "models/yolo11n-seg.pt"
+    YOLO_MODEL_VERSION: str = "v26"
+    YOLO_MODEL_PATH: str = "models/yolo26n.pt"
+    YOLO_SEG_MODEL: str = "models/yolo26n-seg.pt"
     TEXT_EMPHASIS_MAX_EVENTS: int = 2
     TEXT_EMPHASIS_SEG_CONFIDENCE: float = 0.35
     TEXT_EMPHASIS_MASK_FEATHER: int = 9
@@ -206,7 +206,7 @@ class Settings(BaseSettings):
     TOP_OVERLAY_SPLIT_RATIO: float = 0.68      # stock band upper; charcoal stage below
     TOP_OVERLAY_FADE_HEIGHT: float = 0.12      # gradient fade as fraction of frame height
     TOP_OVERLAY_OPACITY: float = 1.0
-    TOP_OVERLAY_PERSON_OUTLINE: bool = True    # white stroke around person (reference style)
+    TOP_OVERLAY_PERSON_OUTLINE: bool = False   # disabled — was causing messy white lines around person
     TOP_OVERLAY_PERSON_SHADOW: bool = True
     TOP_OVERLAY_OUTLINE_THICKNESS: int = 9     # px stroke @720p; organic bust glow
     TOP_OVERLAY_OUTLINE_COLOR: str = "255,255,255"
@@ -321,7 +321,28 @@ class Settings(BaseSettings):
 
     @property
     def nine_router_model(self) -> str:
+        try:
+            from src.infrastructure.model_settings_store import get_model_setting
+            val = get_model_setting("NINE_ROUTER_MODEL")
+            if val:
+                return val
+        except Exception:
+            pass
         return self.NINE_ROUTER_MODEL or "CliperHub"
+
+    def get_nine_router(self, key: str):
+        """Get a 9router setting from DB first, fallback to .env.
+
+        Usage: settings.get_nine_router("NINE_ROUTER_PASS1_MODEL")
+        """
+        try:
+            from src.infrastructure.model_settings_store import get_model_setting
+            val = get_model_setting(key)
+            if val is not None and val != "":
+                return val
+        except Exception:
+            pass
+        return getattr(self, key, "")
 
     @property
     def is_local(self) -> bool:

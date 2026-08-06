@@ -27,10 +27,10 @@ class NineRouterClient:
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
     ):
-        self.base_url = (base_url or settings.NINE_ROUTER_BASE_URL).rstrip("/")
-        self.api_key = api_key if api_key is not None else settings.NINE_ROUTER_API_KEY
-        self.timeout = timeout or settings.NINE_ROUTER_TIMEOUT
-        self.max_retries = max_retries or settings.NINE_ROUTER_MAX_RETRIES
+        self.base_url = (base_url or settings.get_nine_router("NINE_ROUTER_BASE_URL") or settings.NINE_ROUTER_BASE_URL).rstrip("/")
+        self.api_key = api_key if api_key is not None else (settings.get_nine_router("NINE_ROUTER_API_KEY") or settings.NINE_ROUTER_API_KEY)
+        self.timeout = int(timeout or settings.get_nine_router("NINE_ROUTER_TIMEOUT") or settings.NINE_ROUTER_TIMEOUT)
+        self.max_retries = int(max_retries or settings.get_nine_router("NINE_ROUTER_MAX_RETRIES") or settings.NINE_ROUTER_MAX_RETRIES)
 
     @property
     def is_configured(self) -> bool:

@@ -301,6 +301,17 @@ if [ -f ".env" ]; then
     append_env_if_missing ".env" "NINE_ROUTER_AI_LAYER_MODEL" "CliperHub"
     append_env_if_missing ".env" "NINE_ROUTER_TIMEOUT" "120"
     append_env_if_missing ".env" "NINE_ROUTER_MAX_RETRIES" "3"
+    append_env_if_missing ".env" "NINE_ROUTER_TEMPERATURE" "0.3"
+    append_env_if_missing ".env" "NINE_ROUTER_WHISPER_ENABLED" "true"
+    append_env_if_missing ".env" "NINE_ROUTER_WHISPER_MODEL" "groq/whisper-large-v3-turbo"
+    append_env_if_missing ".env" "NINE_ROUTER_WHISPER_TIMEOUT" "120"
+    append_env_if_missing ".env" "NINE_ROUTER_WHISPER_MAX_RETRIES" "1"
+
+    # YOLO model config
+    set_env_value ".env" "YOLO_MODEL_VERSION" "v26"
+    set_env_value ".env" "YOLO_MODEL_PATH" "models/yolo26n.pt"
+    set_env_value ".env" "YOLO_SEG_MODEL" "models/yolo26n-seg.pt"
+
     set_env_value ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000"
 
     LLM_PROVIDER_VAL="$(env_value ".env" "LLM_PROVIDER" "nine_router")"
@@ -548,34 +559,34 @@ except Exception as e:
 " 2>&1 || echo "  ⚠️  RetinaFace pre-download skipped (non-fatal)"
 
 # Ultralytics YOLO — pre-download for tracker fallback + person detection fallback
-echo "  Checking YOLO11n model (tracker fallback)..."
-if [ ! -f "models/yolo11n.pt" ]; then
+echo "  Checking YOLO26n model (tracker fallback)..."
+if [ ! -f "models/yolo26n.pt" ]; then
     ./venv/bin/python3 -c "
 from ultralytics import YOLO
 import shutil, os
-model = YOLO('yolo11n.pt')
+model = YOLO('yolo26n.pt')
 # Move to models/ dir if downloaded to cwd
-if os.path.exists('yolo11n.pt') and not os.path.exists('models/yolo11n.pt'):
-    shutil.move('yolo11n.pt', 'models/yolo11n.pt')
-print('  YOLO11n: ready')
-" 2>&1 || echo "  ⚠️  YOLO11n download skipped"
+if os.path.exists('yolo26n.pt') and not os.path.exists('models/yolo26n.pt'):
+    shutil.move('yolo26n.pt', 'models/yolo26n.pt')
+print('  YOLO26n: ready')
+" 2>&1 || echo "  ⚠️  YOLO26n download skipped"
 else
-    echo "  YOLO11n: already present"
+    echo "  YOLO26n: already present"
 fi
 
-# YOLO11n-seg — for text-behind-person effect (existing feature)
-echo "  Checking YOLO11n-seg model..."
-if [ ! -f "models/yolo11n-seg.pt" ]; then
+# YOLO26n-seg — for text-behind-person effect + person segmentation
+echo "  Checking YOLO26n-seg model..."
+if [ ! -f "models/yolo26n-seg.pt" ]; then
     ./venv/bin/python3 -c "
 from ultralytics import YOLO
 import shutil, os
-model = YOLO('yolo11n-seg.pt')
-if os.path.exists('yolo11n-seg.pt') and not os.path.exists('models/yolo11n-seg.pt'):
-    shutil.move('yolo11n-seg.pt', 'models/yolo11n-seg.pt')
-print('  YOLO11n-seg: ready')
-" 2>&1 || echo "  ⚠️  YOLO11n-seg download skipped"
+model = YOLO('yolo26n-seg.pt')
+if os.path.exists('yolo26n-seg.pt') and not os.path.exists('models/yolo26n-seg.pt'):
+    shutil.move('yolo26n-seg.pt', 'models/yolo26n-seg.pt')
+print('  YOLO26n-seg: ready')
+" 2>&1 || echo "  ⚠️  YOLO26n-seg download skipped"
 else
-    echo "  YOLO11n-seg: already present"
+    echo "  YOLO26n-seg: already present"
 fi
 
 echo "  ✅ Models provisioned"

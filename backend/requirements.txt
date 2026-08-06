@@ -32,7 +32,7 @@ faster-whisper==1.1.0
 # FIX: transformers 4.57.x butuh tokenizers 0.22.x
 tokenizers>=0.22,<0.23
 mediapipe>=0.10.14,<0.11
-ultralytics>=8.3.0,<9.0
+ultralytics>=8.4.0,<9.0
 
 # === FIX CONFLICT ===
 # rfdetr>=1.8.3 butuh transformers>=5.1.0, tapi pyannote.audio 3.4.0 butuh <5.0.
