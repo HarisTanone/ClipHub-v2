@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -214,6 +214,40 @@ export interface TextEmphasisStyle {
   stickerAngle?: number;
   typeSpeed?: number;
 }
+
+export interface WatermarkStyle {
+  enabled: boolean;
+  type: "image" | "text";
+  /** data:image/...;base64,... for image type */
+  imageDataUrl: string | null;
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: string;
+  color: string;
+  /** image width as % of video width */
+  sizePct: number;
+  /** 0..100 */
+  opacity: number;
+  position: "top-left" | "top-center" | "top-right" | "center-left" | "center" | "center-right" | "bottom-left" | "bottom-center" | "bottom-right";
+  /** margin from edges, % of video dimension */
+  marginPct: number;
+}
+
+export const DEFAULT_WATERMARK_STYLE: WatermarkStyle = {
+  enabled: false,
+  type: "text",
+  imageDataUrl: null,
+  text: "@yourchannel",
+  fontFamily: "Poppins",
+  fontSize: 28,
+  fontWeight: "600",
+  color: "#FFFFFF",
+  sizePct: 20,
+  opacity: 60,
+  position: "bottom-right",
+  marginPct: 3,
+};
 
 export const DEFAULT_HOOK_STYLE: HookStyle = {
   animation: "podcast_lower_third",
@@ -937,6 +971,8 @@ interface StyleEditorModalProps {
   onHookChange: (style: HookStyle) => void;
   onSubtitleChange: (style: SubtitleStyle) => void;
   onTextEmphasisChange?: (style: TextEmphasisStyle) => void;
+  watermarkStyle?: WatermarkStyle;
+  onWatermarkChange?: (style: WatermarkStyle) => void;
   aspectRatio?: string;
   inline?: boolean;
   activeTab?: "presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other";
@@ -959,7 +995,7 @@ interface StyleEditorModalProps {
   } | null;
 }
 
-export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => { }, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress, aiTextPreviewContext, aiTextEnabled = true, canvasBackground = null }: StyleEditorModalProps) {
+export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, textEmphasisStyle = DEFAULT_TEXT_EMPHASIS_STYLE, onHookChange, onSubtitleChange, onTextEmphasisChange = () => { }, watermarkStyle = DEFAULT_WATERMARK_STYLE, onWatermarkChange = () => { }, aspectRatio = "9:16", inline, activeTab, thumbnailUrl, isSuperadmin, isPremium, userFeatures, activePresetId: externalActivePresetId, onPresetSelect, onProcess, processing = false, processProgress, aiTextPreviewContext, aiTextEnabled = true, canvasBackground = null }: StyleEditorModalProps) {
   const [tab, setTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other">(activeTab || "hook");
 
   useEffect(() => { if (activeTab) setTab(activeTab); }, [activeTab]);
@@ -1100,7 +1136,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <style>{animationStyles}</style>
         <div className="min-h-0 flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} watermarkStyle={watermarkStyle} onWatermarkChange={onWatermarkChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
         </div>
       </div>
     );
@@ -1136,7 +1172,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
           </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} watermarkStyle={watermarkStyle} onWatermarkChange={onWatermarkChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
         </div>
       </div>
     </div>
@@ -1145,18 +1181,20 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
 
 // ─── Other Tab (Transition + AI Text combined) ────────────────────────────────
 
-function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisChange, thumbnailUrl, aiTextPreviewContext, aiTextEnabled, aspectRatio, canvasBackground }: {
+function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisChange, watermarkStyle, onWatermarkChange, thumbnailUrl, aiTextPreviewContext, aiTextEnabled, aspectRatio, canvasBackground }: {
   hookStyle: HookStyle;
   textEmphasisStyle: TextEmphasisStyle;
   onHookChange: (s: HookStyle) => void;
   onTextEmphasisChange: (s: TextEmphasisStyle) => void;
+  watermarkStyle: WatermarkStyle;
+  onWatermarkChange: (s: WatermarkStyle) => void;
   thumbnailUrl?: string;
   aiTextPreviewContext?: { jobId: string; clipRank: number; frame: number };
   aiTextEnabled: boolean;
   aspectRatio?: string;
   canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null;
 }) {
-  const [subTab, setSubTab] = useState<"transition" | "ai_text">("transition");
+  const [subTab, setSubTab] = useState<"transition" | "ai_text" | "watermark">("transition");
 
   useEffect(() => {
     if (!aiTextEnabled && subTab === "ai_text") setSubTab("transition");
@@ -1185,13 +1223,225 @@ function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisCh
         >
           <Layers className="h-3 w-3" />AI Text
         </button>
+        <button
+          type="button"
+          onClick={() => setSubTab("watermark")}
+          className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors", subTab === "watermark" ? "bg-emerald-600 text-white" : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800")}
+        >
+          <ImageIcon className="h-3 w-3" />Watermark
+        </button>
         <span className="ml-auto text-[9px] text-zinc-600">
-          {aiTextEnabled ? "Applied to preview & final render" : "Aktifkan AI Cinematic Text untuk mengatur AI Text"}
+          {subTab === "watermark" ? "Dirender server-side via FFmpeg" : aiTextEnabled ? "Applied to preview & final render" : "Aktifkan AI Cinematic Text untuk mengatur AI Text"}
         </span>
       </div>
       <div className="flex-1 overflow-hidden">
-        {subTab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} /> : <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} previewContext={aiTextPreviewContext} />}
+        {subTab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} thumbnailUrl={thumbnailUrl} /> : subTab === "ai_text" ? <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} previewContext={aiTextPreviewContext} /> : <WatermarkEditor style={watermarkStyle} onChange={onWatermarkChange} thumbnailUrl={thumbnailUrl} />}
       </div>
+    </div>
+  );
+}
+
+const WATERMARK_POSITIONS: { id: WatermarkStyle["position"]; label: string }[] = [
+  { id: "top-left", label: "TL" },
+  { id: "top-center", label: "TC" },
+  { id: "top-right", label: "TR" },
+  { id: "center-left", label: "CL" },
+  { id: "center", label: "C" },
+  { id: "center-right", label: "CR" },
+  { id: "bottom-left", label: "BL" },
+  { id: "bottom-center", label: "BC" },
+  { id: "bottom-right", label: "BR" },
+];
+
+const WATERMARK_POS_CLASS: Record<WatermarkStyle["position"], string> = {
+  "top-left": "left-2 top-2",
+  "top-center": "left-1/2 -translate-x-1/2 top-2",
+  "top-right": "right-2 top-2",
+  "center-left": "left-2 top-1/2 -translate-y-1/2",
+  center: "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+  "center-right": "right-2 top-1/2 -translate-y-1/2",
+  "bottom-left": "left-2 bottom-2",
+  "bottom-center": "left-1/2 -translate-x-1/2 bottom-2",
+  "bottom-right": "right-2 bottom-2",
+};
+
+/** Downscale an uploaded watermark image to a max of 512px so the data URL
+ *  stays small (it is persisted in job payloads & presets). PNG is re-encoded
+ *  to preserve alpha transparency. */
+function downscaleImageDataUrl(file: File, maxSize = 512): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxSize / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          // No canvas context — fall back to reading the raw file as a data URL
+          URL.revokeObjectURL(url);
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(new Error("Gagal membaca gambar"));
+          reader.readAsDataURL(file);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL("image/png"));
+      } catch { URL.revokeObjectURL(url); reject(new Error("Gagal memproses gambar")); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Gagal membaca gambar")); };
+    img.src = url;
+  });
+}
+
+function WatermarkEditor({ style, onChange, thumbnailUrl }: { style: WatermarkStyle; onChange: (s: WatermarkStyle) => void; thumbnailUrl?: string }) {
+  const update = (patch: Partial<WatermarkStyle>) => onChange({ ...style, ...patch });
+  const posClass = WATERMARK_POS_CLASS[style.position];
+
+  return (
+    <div className="space-y-4">
+      <Section title="Watermark">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-zinc-200">Tampilkan watermark di video akhir</p>
+              <p className="text-[9px] text-zinc-500">Dirender server-side via FFmpeg — overlay untuk gambar, drawtext untuk teks.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={style.enabled}
+              onClick={() => update({ enabled: !style.enabled })}
+              className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", style.enabled ? "bg-emerald-600" : "bg-zinc-700")}
+            >
+              <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all", style.enabled ? "left-[18px]" : "left-0.5")} />
+            </button>
+          </div>
+        </div>
+      </Section>
+
+      {style.enabled && (
+        <>
+          <Section title="Tipe Watermark">
+            <div className="grid grid-cols-2 gap-2">
+              {(["text", "image"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => update({ type: t })}
+                  className={cn("rounded-xl border p-3 text-left transition-all", style.type === t ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700")}
+                >
+                  <p className="text-[11px] font-semibold text-zinc-200">{t === "text" ? "Text" : "Gambar / Logo"}</p>
+                  <p className="mt-0.5 text-[9px] text-zinc-500">{t === "text" ? "Teks watermark (drawtext)" : "Upload PNG/JPG/WebP (overlay)"}</p>
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          {style.type === "text" ? (
+            <Section title="Konten Teks">
+              <input
+                type="text"
+                value={style.text}
+                onChange={(e) => update({ text: e.target.value })}
+                placeholder="mis. @channelmu"
+                maxLength={60}
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none transition-colors"
+              />
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS} />
+                <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <RangeInput label={`Ukuran: ${style.fontSize}px`} min={10} max={120} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+                <ColorPicker label="Warna" value={style.color} onChange={(v) => update({ color: v })} />
+              </div>
+            </Section>
+          ) : (
+            <Section title="Gambar Watermark">
+              {style.imageDataUrl ? (
+                <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <img src={style.imageDataUrl} alt="Watermark" className="h-14 w-14 rounded-lg border border-zinc-700 bg-white/5 object-contain" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[10px] text-zinc-400">Gambar siap dipakai</p>
+                    <button type="button" onClick={() => update({ imageDataUrl: null })} className="mt-1 text-[10px] font-medium text-red-400 hover:text-red-300">
+                      Hapus gambar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label className="flex min-h-20 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 px-3 py-4 text-center transition-colors hover:border-zinc-500">
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      e.target.value = ""; // allow re-selecting the same file
+                      void downscaleImageDataUrl(file)
+                        .then((dataUrl) => update({ imageDataUrl: dataUrl }))
+                        .catch(() => update({ imageDataUrl: null }));
+                    }}
+                  />
+                  <Upload className="mb-1 h-4 w-4 text-zinc-500" />
+                  <span className="text-[10px] text-zinc-400">Pilih gambar (PNG dengan transparansi disarankan)</span>
+                </label>
+              )}
+              <div className="mt-3">
+                <RangeInput label={`Ukuran: ${style.sizePct}% dari lebar video`} min={2} max={60} value={style.sizePct} onChange={(v) => update({ sizePct: v })} />
+              </div>
+            </Section>
+          )}
+
+          <Section title="Transparansi & Posisi">
+            <div className="grid grid-cols-2 gap-3">
+              <RangeInput label={`Opacity: ${style.opacity}%`} min={0} max={100} value={style.opacity} onChange={(v) => update({ opacity: v })} />
+              <RangeInput label={`Jarak tepi: ${style.marginPct}%`} min={0} max={20} value={style.marginPct} onChange={(v) => update({ marginPct: v })} />
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-1.5">
+              {WATERMARK_POSITIONS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => update({ position: p.id })}
+                  className={cn("rounded-md border py-1.5 text-[9px] font-medium transition-colors", style.position === p.id ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300")}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Preview">
+            <div className="relative h-28 overflow-hidden rounded-lg border border-zinc-800 bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950">
+              {thumbnailUrl ? (
+                <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              ) : (
+                <span className="absolute inset-0 flex items-center justify-center text-[8px] font-medium uppercase tracking-widest text-zinc-700">Video Preview</span>
+              )}
+              <span className={cn("absolute z-10", posClass)} style={{ opacity: Math.max(0.05, style.opacity / 100) }}>
+                {style.type === "image" && style.imageDataUrl ? (
+                  <img src={style.imageDataUrl} alt="" className="h-auto w-auto object-contain" style={{ maxWidth: `${Math.max(8, style.sizePct)}%`, maxHeight: 44 }} />
+                ) : (
+                  <span
+                    className="font-semibold"
+                    style={{ fontSize: Math.max(6, Math.round(style.fontSize * 0.3)), fontFamily: `'${style.fontFamily}', sans-serif`, color: style.color }}
+                  >
+                    {style.text || "WATERMARK"}
+                  </span>
+                )}
+              </span>
+            </div>
+          </Section>
+        </>
+      )}
     </div>
   );
 }
@@ -1203,7 +1453,7 @@ const TRANSITION_META: Record<string, { label: string; desc: string; icon: strin
   zoom: { label: "Zoom", desc: "Zoom in/out transisi. Dramatis.", icon: "⊙" },
 };
 
-function TransitionEditor({ style, onChange }: { style: HookStyle; onChange: (style: HookStyle) => void }) {
+function TransitionEditor({ style, onChange, thumbnailUrl }: { style: HookStyle; onChange: (style: HookStyle) => void; thumbnailUrl?: string }) {
   const active = style.transitionStyle || "cut";
   const duration = style.transitionDuration ?? 0.35;
   const durationInt = Math.round(duration * 100);
@@ -1217,8 +1467,14 @@ function TransitionEditor({ style, onChange }: { style: HookStyle; onChange: (st
         <Section title="Live Preview">
           <div className="flex justify-center">
             <div className="relative aspect-[9/16] w-full max-w-[200px] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
+              {/* Real video thumbnail as base layer — same as Live Preview in Hook/Subtitle tabs */}
+              {thumbnailUrl ? (
+                <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-br from-zinc-700 to-zinc-950" />
+              )}
               <div className="absolute inset-0 flex items-center justify-center" style={{ animation: `${active === "cut" ? "transCut" : active === "fade" ? "transFade" : active === "slide" ? "transSlide" : "transZoom"} ${previewDur}s ease-in-out infinite` }}>
-                <div className="h-full w-full bg-gradient-to-br from-emerald-500/50 to-blue-500/40" />
+                <div className="h-full w-full bg-gradient-to-br from-emerald-500/60 to-blue-500/50" />
               </div>
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <span className="rounded-full bg-black/60 px-2.5 py-0.5 text-[9px] font-medium text-white backdrop-blur-sm">{active} · {duration.toFixed(2)}s</span>
@@ -2556,7 +2812,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             </Section>
 
             <Section title="Hook Style Preset">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {([
                   { id: "zoom_punch", name: "Zoom Punch", desc: "Bold white + quick scale-in", color: "white", fontSize: 56, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 4, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
                   { id: "fade_scale", name: "Fade Scale", desc: "Smooth fade + slight grow", color: "white", fontSize: 48, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 3, strokeColor: "black", bgOpacity: 0.5, positionY: 42 },

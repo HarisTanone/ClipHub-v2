@@ -106,17 +106,21 @@ export function CanvasAccents({ accents }: { accents: CanvasAccent[] }) {
   return <Accents accents={accents} />;
 }
 
-/** Mini thumb: always 9:16 phone frame with content slot + template fill. */
+/** Mini thumb: always 9:16 phone frame with content slot + template fill.
+ *  When a video thumbnail is available it is shown in the content slot (same as
+ *  the Live Preview) instead of a generic silhouette placeholder. */
 export function TemplateThumb({
   template,
   aspectRatio,
   selected,
   onClick,
+  thumbnailUrl,
 }: {
   template: CanvasTemplate;
   aspectRatio: "16:9" | "1:1";
   selected?: boolean;
   onClick?: () => void;
+  thumbnailUrl?: string;
 }) {
   const layout = template.layout[aspectRatio] || template.layout["16:9"];
   const vignette = template.background.vignette ?? 0;
@@ -157,12 +161,16 @@ export function TemplateThumb({
             boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
           }}
         >
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-zinc-600/40 to-zinc-800/80">
-            <div className="flex flex-col items-center gap-0.5 opacity-70">
-              <div className="h-3 w-3 rounded-full bg-zinc-400/50" />
-              <div className="h-4 w-6 rounded-t-full bg-zinc-400/40" />
+          {thumbnailUrl ? (
+            <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-contain" />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-zinc-600/40 to-zinc-800/80">
+              <div className="flex flex-col items-center gap-0.5 opacity-70">
+                <div className="h-3 w-3 rounded-full bg-zinc-400/50" />
+                <div className="h-4 w-6 rounded-t-full bg-zinc-400/40" />
+              </div>
             </div>
-          </div>
+          )}
         </div>
         {selected && (
           <div className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
@@ -191,6 +199,9 @@ interface BackgroundTemplateSectionProps {
   uploadPreviewUrl: string | null;
   onUpload: (file: File) => void;
   onClearUpload: () => void;
+  /** Real video thumbnail — shown inside the content slot of template thumbs
+   *  and the upload preview so all previews match the Live Preview. */
+  thumbnailUrl?: string;
 }
 
 export function BackgroundTemplateSection({
@@ -202,6 +213,7 @@ export function BackgroundTemplateSection({
   uploadPreviewUrl,
   onUpload,
   onClearUpload,
+  thumbnailUrl,
 }: BackgroundTemplateSectionProps) {
   return (
     <div className="space-y-2.5">
@@ -256,6 +268,7 @@ export function BackgroundTemplateSection({
                 aspectRatio={aspectRatio}
                 selected={templateId === t.id}
                 onClick={() => onTemplateChange(t.id)}
+                thumbnailUrl={thumbnailUrl}
               />
             </div>
           ))}
@@ -277,12 +290,16 @@ export function BackgroundTemplateSection({
                       : { left: "0%", top: "34%", width: "100%", height: "32%" }
                   }
                 >
-                  <div className="flex h-full items-center justify-center">
-                    <div className="flex flex-col items-center gap-0.5 opacity-60">
-                      <div className="h-4 w-4 rounded-full bg-zinc-400/50" />
-                      <div className="h-5 w-8 rounded-t-full bg-zinc-400/40" />
+                  {thumbnailUrl ? (
+                    <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-contain" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center">
+                      <div className="flex flex-col items-center gap-0.5 opacity-60">
+                        <div className="h-4 w-4 rounded-full bg-zinc-400/50" />
+                        <div className="h-5 w-8 rounded-t-full bg-zinc-400/40" />
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
               <button

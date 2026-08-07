@@ -30,6 +30,7 @@ class JobOptionsBase(BaseModel):
     # Full style configs from Custom Style Editor
     hook_style_config: Optional[dict] = None
     subtitle_style_config: Optional[dict] = None
+    watermark_config: Optional[dict] = None  # image/text watermark on final clips
     processing_mode: str = "analyze"  # analyze viral moments | direct full-video edit
     # Canvas background (16:9 / 1:1 only). 9:16 ignores these.
     background_mode: Optional[str] = None  # "template" | "upload"

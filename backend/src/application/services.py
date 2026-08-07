@@ -202,6 +202,7 @@ class JobService:
         hook_style_config: Optional[dict] = None,
         subtitle_style_config: Optional[dict] = None,
         text_emphasis_style_config: Optional[dict] = None,
+        watermark_config: Optional[dict] = None,
         # Canvas background (16:9 / 1:1 only)
         background_mode: Optional[str] = None,
         background_template_id: Optional[str] = None,
@@ -256,6 +257,8 @@ class JobService:
             initial_clips_data["hook_style_config"] = hook_style_config
         if subtitle_style_config:
             initial_clips_data["subtitle_style_config"] = subtitle_style_config
+        if watermark_config:
+            initial_clips_data["watermark_config"] = watermark_config
         # Persist explicit false as well. This makes retries deterministic and
         # preserves the opt-in contract even when defaults change later.
         initial_clips_data["text_emphasis_enabled"] = bool(text_emphasis_enabled)
@@ -1070,6 +1073,8 @@ class JobService:
                 if os.path.exists(in_path) and not os.path.exists(out_path):
                     shutil.copy2(in_path, out_path)
             if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
+                await self._apply_watermark(job, clip.rank, output_dir, out_path, job_id)
                 mark_clip_ready(output_dir, clip.rank)
         self._emit(job_id, 12, "subtitle", "complete")
 
@@ -1192,6 +1197,8 @@ class JobService:
                         if os.path.exists(in_path) and not os.path.exists(out_path):
                             shutil.copy2(in_path, out_path)
                     if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                        # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
+                        await self._apply_watermark(job, clip.rank, output_dir, out_path, job_id)
                         mark_clip_ready(output_dir, clip.rank)
                 
                 self._emit(job_id, 12, "remotion_render", "complete")
@@ -1271,6 +1278,8 @@ class JobService:
                             if os.path.exists(in_path) and not os.path.exists(out_path):
                                 shutil.copy2(in_path, out_path)
                         if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                            # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
+                            await self._apply_watermark(job, clip.rank, output_dir, out_path, job_id)
                             mark_clip_ready(output_dir, clip.rank)
                     
                     self._emit(job_id, 12, "remotion_render", "complete")
@@ -1730,6 +1739,15 @@ class JobService:
                 if f.endswith(".ttf"):
                     return os.path.abspath(os.path.join(font_dir, f))
         return ""
+
+    async def _apply_watermark(self, job, clip_rank: int, output_dir: str, final_path: str, job_id: str) -> None:
+        """Apply the user-configured watermark (FFmpeg) to a finished clip, in place."""
+        from src.infrastructure.watermark_renderer import apply_watermark_for_job
+        await apply_watermark_for_job(
+            job, clip_rank, output_dir, final_path,
+            fonts_dir=getattr(self, "_fonts_dir", "assets/fonts"),
+            job_id=job_id,
+        )
 
     async def _trim_all_clips(self, job_id: str, video_path: str, clips: list[Clip], output_dir: str) -> dict[int, bool]:
         """Trim all clips using FFmpeg."""

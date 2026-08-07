@@ -4,9 +4,12 @@ Endpoints:
 - GET  /api/settings/models       — Get all model settings
 - PUT  /api/settings/models       — Bulk update model settings
 - POST /api/settings/models/test  — Test model connectivity
+- GET  /api/settings/models/available — List models from 9router
+- POST /api/settings/models/test-all  — Test every model from 9router
 """
+import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -36,6 +39,126 @@ class ModelTestRequest(BaseModel):
     api_key: Optional[str] = None
     model: Optional[str] = None
     prompt: str = "Say hello in one word."
+
+
+# ─── Response parsing helpers ─────────────────────────────────────────────────
+
+
+def _stringify_content(content: Any) -> str:
+    """Flatten content that may be a list of {text} parts or a plain string."""
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text", "")))
+            else:
+                parts.append(str(item))
+        return "".join(parts)
+    return str(content or "")
+
+
+def _extract_chat_response(resp: httpx.Response) -> tuple[bool, str, str, Optional[dict]]:
+    """Robustly parse a /chat/completions response (JSON body or SSE stream).
+
+    Returns ``(streamed, text, finish_reason, usage)``.
+
+    Some 9router combos (reasoning models, e.g. ``ag/gemini-3.6-flash-high``)
+    always stream and return ``Content-Type: text/event-stream`` even when
+    ``stream`` is not requested. A naive ``resp.json()`` on that body raises
+    ``JSONDecodeError: Expecting value: line 1 column 1 (char 0)``, so we
+    fall back to decoding SSE ``data:`` chunks (and tolerate a JSON object
+    followed by a trailing ``data: [DONE]`` marker).
+
+    Raises ``ValueError`` with a human-readable message when nothing can be
+    parsed, so the UI never shows a raw JSONDecodeError string.
+    """
+    text = resp.text or ""
+    content_type = resp.headers.get("content-type", "")
+    is_sse = "text/event-stream" in content_type
+
+    # 1. Plain JSON body.
+    if not is_sse:
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and data.get("choices"):
+            choice = data["choices"][0]
+            message = choice.get("message") or {}
+            content = message.get("content") or choice.get("text") or ""
+            return (
+                False,
+                _stringify_content(content),
+                str(choice.get("finish_reason") or ""),
+                data.get("usage"),
+            )
+
+    # 2. SSE stream: concatenate delta chunks, keep finish_reason + usage.
+    parts: list[str] = []
+    finish_reason = ""
+    usage: Optional[dict] = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        raw = line[5:].strip()
+        if not raw or raw == "[DONE]":
+            continue
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            continue
+        choices = event.get("choices") or []
+        if choices:
+            choice = choices[0]
+            delta = choice.get("delta") or {}
+            content = (
+                delta.get("content")
+                or (choice.get("message") or {}).get("content")
+                or choice.get("text")
+            )
+            if content:
+                parts.append(_stringify_content(content))
+            if choice.get("finish_reason"):
+                finish_reason = str(choice.get("finish_reason"))
+        if event.get("usage"):
+            usage = event.get("usage")
+
+    if parts or finish_reason:
+        return True, "".join(parts).strip(), finish_reason, usage
+
+    # 3. Tolerant raw decode: JSON object followed by a trailing SSE marker.
+    try:
+        data, _ = json.JSONDecoder().raw_decode(text.lstrip())
+    except (ValueError, TypeError):
+        data = None
+    if isinstance(data, dict):
+        if data.get("choices"):
+            choice = data["choices"][0]
+            message = choice.get("message") or {}
+            content = message.get("content") or choice.get("text") or ""
+            return (
+                False,
+                _stringify_content(content),
+                str(choice.get("finish_reason") or ""),
+                data.get("usage"),
+            )
+        raise ValueError(
+            f"Response JSON tidak mengandung 'choices' "
+            f"(HTTP {resp.status_code}, content-type: {content_type or 'unknown'}): "
+            f"{text[:300]}"
+        )
+
+    if not text:
+        raise ValueError(
+            f"9router mengembalikan response kosong (HTTP {resp.status_code}, "
+            f"content-type: {content_type or 'unknown'})"
+        )
+    raise ValueError(
+        f"Response tidak bisa diparse sebagai JSON "
+        f"(HTTP {resp.status_code}, content-type: {content_type or 'unknown'}): "
+        f"{text[:300]}"
+    )
 
 
 # ─── GET /api/settings/models ─────────────────────────────────────────────────
@@ -116,25 +239,51 @@ async def test_model_connection(
             return {
                 "success": False,
                 "status_code": resp.status_code,
-                "error": resp.text[:500],
+                "error": resp.text[:500] or f"HTTP {resp.status_code}",
                 "model": model,
                 "base_url": base_url,
+                "content_type": resp.headers.get("content-type", ""),
             }
 
-        data = resp.json()
-        # Extract response text
-        choices = data.get("choices", [])
-        response_text = ""
-        if choices:
-            message = choices[0].get("message", {})
-            response_text = message.get("content", "")
+        try:
+            streamed, response_text, finish_reason, usage = _extract_chat_response(resp)
+        except ValueError as e:
+            # Never surface raw JSONDecodeError strings like
+            # "Expecting value: line 1 column 1 (char 0)" to the user.
+            return {
+                "success": False,
+                "error": str(e)[:500],
+                "model": model,
+                "base_url": base_url,
+                "status_code": resp.status_code,
+                "content_type": resp.headers.get("content-type", ""),
+            }
+
+        # A response with no content (e.g. finish_reason "length") is not a
+        # successful connection — report it instead of showing "Connected".
+        if not (finish_reason == "stop" or bool(response_text.strip())):
+            return {
+                "success": False,
+                "error": (
+                    f"Model merespon tapi tidak ada konten "
+                    f"(finish_reason: {finish_reason or 'unknown'})"
+                ),
+                "model": model,
+                "base_url": base_url,
+                "streamed": streamed,
+                "finish_reason": finish_reason,
+                "status_code": resp.status_code,
+                "content_type": resp.headers.get("content-type", ""),
+            }
 
         return {
             "success": True,
             "model": model,
             "base_url": base_url,
             "response": response_text[:200],
-            "usage": data.get("usage"),
+            "streamed": streamed,
+            "finish_reason": finish_reason,
+            "usage": usage,
             "latency_hint": f"{resp.elapsed.total_seconds():.2f}s" if hasattr(resp, "elapsed") else None,
         }
     except httpx.TimeoutException:
@@ -235,7 +384,9 @@ async def test_all_models(user: CurrentUser = Depends(require_superadmin())):
             payload = {
                 "model": model_id,
                 "messages": [{"role": "user", "content": "Reply with OK"}],
-                "max_tokens": 5,
+                # Reasoning models (e.g. ag/gemini-*) spend tokens on thinking;
+                # give them the same headroom as the single-model test.
+                "max_tokens": 50,
                 "temperature": 0.0,
             }
 
@@ -248,16 +399,24 @@ async def test_all_models(user: CurrentUser = Depends(require_superadmin())):
                 latency = test_resp.elapsed.total_seconds() if hasattr(test_resp, "elapsed") else None
 
                 if test_resp.status_code == 200:
-                    body = test_resp.json()
-                    choices = body.get("choices", [])
-                    finish_reason = choices[0].get("finish_reason", "") if choices else ""
-                    content = choices[0].get("message", {}).get("content", "") if choices else ""
+                    try:
+                        streamed, content, finish_reason, _usage = _extract_chat_response(test_resp)
+                    except ValueError as e:
+                        results.append({
+                            "model": model_id,
+                            "status": "error",
+                            "http_code": 200,
+                            "error": str(e)[:200],
+                            "latency": f"{latency:.2f}s" if latency else None,
+                        })
+                        continue
                     is_ok = finish_reason == "stop" or bool(content.strip())
                     results.append({
                         "model": model_id,
                         "status": "ok" if is_ok else "warning",
                         "http_code": 200,
                         "response": content[:50],
+                        "streamed": streamed,
                         "finish_reason": finish_reason,
                         "latency": f"{latency:.2f}s" if latency else None,
                     })

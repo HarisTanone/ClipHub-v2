@@ -230,6 +230,7 @@ export interface CreateJobPayload {
   hook_style_config?: Record<string, any>;
   subtitle_style_config?: Record<string, any>;
   text_emphasis_style_config?: Record<string, any>;
+  watermark_config?: Record<string, any>;
   processing_mode?: "analyze" | "direct";
   custom_hook?: string;
   // Canvas background (16:9 / 1:1 only)
@@ -555,6 +556,7 @@ export const jobs = {
     hook_style_config?: Record<string, any>;
     subtitle_style_config?: Record<string, any>;
     text_emphasis_style_config?: Record<string, any>;
+    watermark_config?: Record<string, any>;
     subtitle_enabled?: boolean;
     broll_enabled?: boolean;
   }): Promise<any> {
@@ -618,6 +620,7 @@ export interface Preset {
   hook_style: Record<string, any>;
   subtitle_style: Record<string, any>;
   text_emphasis_style: Record<string, any>;
+  watermark_style?: Record<string, any>;
   created_at: string | null;
   owner_email?: string;
   owner_name?: string;
@@ -635,10 +638,10 @@ export const presets = {
     return res.data;
   },
 
-  async create(name: string, hook_style: Record<string, any>, subtitle_style: Record<string, any>, text_emphasis_style: Record<string, any> = {}): Promise<{ success: boolean; id: number; message: string }> {
+  async create(name: string, hook_style: Record<string, any>, subtitle_style: Record<string, any>, text_emphasis_style: Record<string, any> = {}, watermark_style: Record<string, any> = {}): Promise<{ success: boolean; id: number; message: string }> {
     return request("/api/presets", {
       method: "POST",
-      body: JSON.stringify({ name, hook_style, subtitle_style, text_emphasis_style }),
+      body: JSON.stringify({ name, hook_style, subtitle_style, text_emphasis_style, watermark_style }),
     });
   },
 

@@ -310,6 +310,7 @@ async def create_job(
         hook_style_config=request.hook_style_config,
         subtitle_style_config=request.subtitle_style_config,
         text_emphasis_style_config=request.text_emphasis_style_config,
+        watermark_config=request.watermark_config,
         background_mode=request.background_mode,
         background_template_id=request.background_template_id,
         background_image_data_url=request.background_image_data_url,
@@ -441,6 +442,7 @@ async def create_job_from_upload(
             hook_style_config=options.hook_style_config,
             subtitle_style_config=options.subtitle_style_config,
             text_emphasis_style_config=options.text_emphasis_style_config,
+            watermark_config=options.watermark_config,
             background_mode=options.background_mode,
             background_template_id=options.background_template_id,
             background_image_data_url=options.background_image_data_url,
@@ -1457,6 +1459,7 @@ class RestyleRequest(BaseModel):
     hook_style_config: Opt[dict] = None
     subtitle_style_config: Opt[dict] = None
     text_emphasis_style_config: Opt[dict] = None
+    watermark_config: Opt[dict] = None  # optional per-restyle watermark override
     subtitle_enabled: bool = True
     broll_enabled: bool = True
 
@@ -1772,6 +1775,25 @@ async def restyle_clip(
                 "mode": "hyperframes",
             }
 
+        # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything.
+        watermark_config = (
+            body.watermark_config if body and body.watermark_config is not None
+            else root_style_data.get("watermark_config")
+            or {}
+        )
+        try:
+            from src.infrastructure.watermark_renderer import apply_watermark_if_configured
+            await apply_watermark_if_configured(
+                watermark_config,
+                output_dir,
+                clip_rank,
+                staged_final_path,
+                fonts_dir=getattr(service, "_fonts_dir", "assets/fonts"),
+                job_id=job_id,
+            )
+        except Exception as e:
+            logger.warning(f"[restyle] watermark failed clip {clip_rank}: {e}")
+
         if not os.path.exists(staged_final_path):
             raise HTTPException(status_code=503, detail="Restyle did not produce a final video")
 
@@ -1807,6 +1829,9 @@ async def restyle_clip(
             clip_data["subtitle_style_config_override"] = subtitle_config
         if body and body.text_emphasis_style_config is not None:
             clip_data["text_emphasis_style_config_override"] = body.text_emphasis_style_config
+        if body and body.watermark_config is not None:
+            # Persist at job level so the whole pipeline renders the same watermark.
+            root_style_data["watermark_config"] = body.watermark_config
         if body and body.hook_text:
             clip_data["hook"] = body.hook_text
 

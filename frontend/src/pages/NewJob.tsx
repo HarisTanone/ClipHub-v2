@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { Toggle } from "@/components/ui/Toggle";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
-import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
+import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle } from "@/components/StyleEditorModal";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { jobs, preview, presets as presetsApi, type VideoPreview, type Preset, API_BASE } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
@@ -50,10 +50,14 @@ export function NewJob() {
   const [textEmphasisStyleConfig, setTextEmphasisStyleConfig] = useState<TextEmphasisStyle>(() => {
     try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? normaliseTextEmphasisStyle(JSON.parse(s)) : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
   });
+  const [watermarkStyleConfig, setWatermarkStyleConfig] = useState<WatermarkStyle>(() => {
+    try { const s = localStorage.getItem("autocliper_watermark_style"); return s ? { ...DEFAULT_WATERMARK_STYLE, ...JSON.parse(s) } : DEFAULT_WATERMARK_STYLE; } catch { return DEFAULT_WATERMARK_STYLE; }
+  });
 
   useEffect(() => { localStorage.setItem("autocliper_hook_style", JSON.stringify(hookStyleConfig)); }, [hookStyleConfig]);
   useEffect(() => { localStorage.setItem("autocliper_subtitle_style", JSON.stringify(subtitleStyleConfig)); }, [subtitleStyleConfig]);
   useEffect(() => { localStorage.setItem("autocliper_text_emphasis_style", JSON.stringify(textEmphasisStyleConfig)); }, [textEmphasisStyleConfig]);
+  useEffect(() => { localStorage.setItem("autocliper_watermark_style", JSON.stringify(watermarkStyleConfig)); }, [watermarkStyleConfig]);
 
   // YouTube preview
   const [videoMeta, setVideoMeta] = useState<VideoPreview | null>(null);
@@ -77,6 +81,7 @@ export function NewJob() {
     setHookStyleConfig({ ...DEFAULT_HOOK_STYLE, ...preset.hook_style } as HookStyle);
     setSubtitleStyleConfig({ ...DEFAULT_SUBTITLE_STYLE, ...preset.subtitle_style } as SubtitleStyle);
     if (preset.text_emphasis_style) setTextEmphasisStyleConfig(normaliseTextEmphasisStyle(preset.text_emphasis_style));
+    if (preset.watermark_style) setWatermarkStyleConfig({ ...DEFAULT_WATERMARK_STYLE, ...preset.watermark_style } as WatermarkStyle);
     setActivePresetId(preset.id);
     toast.success(`Loaded: ${preset.name}`);
   }
@@ -85,7 +90,7 @@ export function NewJob() {
     if (!presetName.trim()) { toast.error("Name required"); return; }
     setSavingPreset(true);
     try {
-      await presetsApi.create(presetName.trim(), hookStyleConfig, subtitleStyleConfig, textEmphasisStyleConfig);
+      await presetsApi.create(presetName.trim(), hookStyleConfig, subtitleStyleConfig, textEmphasisStyleConfig, watermarkStyleConfig);
       toast.success(`Preset "${presetName}" saved`);
       setPresetName("");
       setShowSavePreset(false);
@@ -176,6 +181,7 @@ export function NewJob() {
       autogrid_enabled: aspectRatio === "9:16" ? autogridEnabled : false,
       text_emphasis_enabled: textEmphasisEnabled,
       text_emphasis_style_config: textEmphasisStyleConfig,
+      watermark_config: watermarkStyleConfig,
       processing_mode: sourceMode === "upload" ? uploadProcessingMode : "analyze" as const,
       custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
         ? directHook.trim() || undefined
@@ -362,6 +368,7 @@ export function NewJob() {
                   reader.readAsDataURL(file);
                 }}
                 onClearUpload={() => setBackgroundImageDataUrl(null)}
+                thumbnailUrl={videoMeta?.thumbnail}
               />
             </Card>
           )}
@@ -513,6 +520,7 @@ export function NewJob() {
               <Row label="Sub Highlight" value={subtitleStyleConfig.highlightColor} color={subtitleStyleConfig.highlightColor} />
               <Row label="Sub Position" value={`${subtitleStyleConfig.position} ${subtitleStyleConfig.positionY}%`} />
               <Row label="AI Text" value={textEmphasisEnabled ? textEmphasisStyleConfig.effectMode.replace(/_/g, " ") : "off"} />
+              <Row label="Watermark" value={watermarkStyleConfig.enabled ? (watermarkStyleConfig.type === "text" ? watermarkStyleConfig.text || "text" : "image") : "off"} />
             </div>
           </Card>
         </div>
@@ -547,6 +555,8 @@ export function NewJob() {
               onHookChange={setHookStyleConfig}
               onSubtitleChange={setSubtitleStyleConfig}
               onTextEmphasisChange={setTextEmphasisStyleConfig}
+              watermarkStyle={watermarkStyleConfig}
+              onWatermarkChange={setWatermarkStyleConfig}
               aspectRatio={aspectRatio}
               inline
               activeTab={styleTab}

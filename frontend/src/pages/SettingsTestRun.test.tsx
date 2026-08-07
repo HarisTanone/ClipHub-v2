@@ -11,6 +11,13 @@ vi.mock("@/components/ui/Toast", () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
 }));
 
+// Settings uses the promise-based confirmDialog (a singleton that only resolves
+// when a mounted <ConfirmDialog /> is clicked). Mock it to auto-confirm so the
+// "Run Tests" click actually proceeds to the fetch POST.
+vi.mock("@/components/ui/ConfirmDialog", () => ({
+  confirmDialog: vi.fn(() => Promise.resolve(true)),
+}));
+
 vi.mock("@/lib/api", () => ({
   system: { health: () => Promise.resolve({ version: "1.0", mode: "test" }) },
   storage: { clearProcessingData: vi.fn() },

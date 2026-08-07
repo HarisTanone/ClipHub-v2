@@ -10,7 +10,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
-import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle } from "@/components/StyleEditorModal";
+import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle } from "@/components/StyleEditorModal";
 import { jobs, API_BASE, getToken, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
 
@@ -62,6 +62,9 @@ export function ClipViewer() {
   });
   const [textEmphasisStyleConfig, setTextEmphasisStyleConfig] = useState<TextEmphasisStyle>(() => {
     try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? normaliseTextEmphasisStyle(JSON.parse(s)) : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
+  });
+  const [watermarkStyleConfig, setWatermarkStyleConfig] = useState<WatermarkStyle>(() => {
+    try { const s = localStorage.getItem("autocliper_watermark_style"); return s ? { ...DEFAULT_WATERMARK_STYLE, ...JSON.parse(s) } : DEFAULT_WATERMARK_STYLE; } catch { return DEFAULT_WATERMARK_STYLE; }
   });
   const [isRestyling, setIsRestyling] = useState(false);
   const [restyleProgress, setRestyleProgress] = useState<{ stage: string; percentage: number } | null>(null);
@@ -202,6 +205,7 @@ export function ClipViewer() {
         hook_style_config: hookStyleConfig,
         subtitle_style_config: subtitleStyleConfig,
         text_emphasis_style_config: textEmphasisStyleConfig,
+        watermark_config: watermarkStyleConfig,
         subtitle_enabled: true,
       });
       setShowRaw(false);
@@ -702,6 +706,8 @@ export function ClipViewer() {
         onHookChange={setHookStyleConfig}
         onSubtitleChange={setSubtitleStyleConfig}
         onTextEmphasisChange={setTextEmphasisStyleConfig}
+        watermarkStyle={watermarkStyleConfig}
+        onWatermarkChange={setWatermarkStyleConfig}
         aspectRatio="9:16"
         isSuperadmin={user?.is_superadmin}
         userFeatures={user?.features}

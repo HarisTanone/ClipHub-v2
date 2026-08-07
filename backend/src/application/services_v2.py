@@ -2268,6 +2268,8 @@ class V2PipelineService:
                         # HF-owned layers are pending. Do not expose an
                         # incomplete Remotion base as a ready final clip.
                         if hook_eng != "hyperframes" and sub_eng != "hyperframes":
+                            # Watermark (FFmpeg overlay/drawtext) — final pass
+                            await self._apply_watermark(job, clip.rank, output_dir, out_path, job_id)
                             mark_clip_ready(output_dir, clip.rank)
                         logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
                     else:
@@ -2317,6 +2319,15 @@ class V2PipelineService:
                 "HyperFrames hook/subtitle render failed: " + "; ".join(errors[:5])
             )
         self._emit(job_id, 14, "hyperframes_render", "complete")
+
+    async def _apply_watermark(self, job, clip_rank: int, output_dir: str, final_path: str, job_id: str) -> None:
+        """Apply the user-configured watermark (FFmpeg) to a finished clip, in place."""
+        from src.infrastructure.watermark_renderer import apply_watermark_for_job
+        await apply_watermark_for_job(
+            job, clip_rank, output_dir, final_path,
+            fonts_dir=getattr(self, "_fonts_dir", "assets/fonts"),
+            job_id=job_id,
+        )
 
     async def _render_via_ffmpeg_engines(
         self,
@@ -2388,6 +2399,8 @@ class V2PipelineService:
                 import shutil
                 shutil.copy2(hooked_path, final_path)
 
+            # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
+            await self._apply_watermark(job, clip.rank, output_dir, final_path, job_id)
             mark_clip_ready(output_dir, clip.rank)
 
         if errors:
@@ -2542,6 +2555,8 @@ class V2PipelineService:
                         except OSError:
                             pass
 
+                # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
+                await self._apply_watermark(job, clip.rank, output_dir, final, job_id)
                 mark_clip_ready(output_dir, clip.rank)
                 applied += 1
                 try:
