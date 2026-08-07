@@ -7,6 +7,7 @@ import { JobDetail } from "@/pages/JobDetail";
 import { ClipViewer } from "@/pages/ClipViewer";
 import { Settings } from "@/pages/Settings";
 import { Login } from "@/pages/Login";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -31,21 +32,24 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route
-        element={
-          <ProtectedRoute>
-            <AppLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route index element={<Dashboard />} />
-        <Route path="jobs/new" element={<NewJob />} />
-        <Route path="jobs/:jobId" element={<JobDetail />} />
-        <Route path="jobs/:jobId/clips/:rank" element={<ClipViewer />} />
-        <Route path="settings" element={<Settings />} />
-      </Route>
-    </Routes>
+    <>
+      <ConfirmDialog />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          element={
+            <ProtectedRoute>
+              <AppLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Dashboard />} />
+          <Route path="jobs/new" element={<NewJob />} />
+          <Route path="jobs/:jobId" element={<JobDetail />} />
+          <Route path="jobs/:jobId/clips/:rank" element={<ClipViewer />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
+      </Routes>
+    </>
   );
 }

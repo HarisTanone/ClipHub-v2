@@ -28,6 +28,11 @@ def run_async(coro):
     return asyncio.run(coro)
 
 
+async def _noop_sleep(seconds):
+    """Replace asyncio.sleep in integration tests to skip rate-limit delays."""
+    return None
+
+
 # ─── Chunking Tests ──────────────────────────────────────────────────────────
 
 def test_chunk_short_video_single_chunk():
@@ -44,36 +49,44 @@ def test_chunk_short_video_single_chunk():
 
 
 def test_chunk_by_time_limit():
-    """Chunking respects 600s (10 min) time limit."""
+    """Chunking respects 600s (10 min) time limit (with 60s overlap)."""
     a = GroqAnalyzer()
-    # 30 segments × 60s each = 1800s (30 min) → should split into ~3 chunks
+    # 30 segments × 60s each = 1800s (30 min)
+    # → 4 chunks: 3 full 600s chunks + 1 trailing (60s overlap between chunks)
     segments = [
         TranscriptSegment(text=f"Segment {i}", start=i * 60.0, end=(i + 1) * 60.0)
         for i in range(30)
     ]
     chunks = [segs for segs, _ in a._chunk_transcript_with_ids(segments)]
-    assert len(chunks) == 3  # 1800s / 600s = 3
-    # Each chunk ~10 segments (10 × 60s = 600s)
+    assert len(chunks) == 4
+    # Each chunk stays within the 600s limit (+ 60s overlap tolerance)
     for chunk in chunks:
         total_duration = sum(s.end - s.start for s in chunk)
         assert total_duration <= 660  # Some tolerance
-    print("  [PASS] Chunking respects 600s time limit")
+    # Full coverage: every segment appears in at least one chunk
+    covered = {id(s) for chunk in chunks for s in chunk}
+    assert len(covered) == 30
+    print("  [PASS] Chunking respects 600s time limit (with overlap)")
 
 
 def test_chunk_by_char_limit():
-    """Chunking respects 4000 char limit."""
+    """Chunking respects 4000 char limit (with 60s overlap)."""
     a = GroqAnalyzer()
     # Each segment is 1000 chars, duration 60s → char limit hit at 4 segments
+    # → 4 chunks: 3 full 4000-char chunks + 1 trailing (1-segment overlap)
     segments = [
         TranscriptSegment(text="x" * 1000, start=i * 60.0, end=(i + 1) * 60.0)
         for i in range(12)
     ]
     chunks = [segs for segs, _ in a._chunk_transcript_with_ids(segments)]
-    assert len(chunks) == 3  # 12000 chars / 4000 = 3
+    assert len(chunks) == 4
     for chunk in chunks:
         total_chars = sum(len(s.text) for s in chunk)
         assert total_chars <= 4000
-    print("  [PASS] Chunking respects 4000 char limit")
+    # Full coverage: every segment appears in at least one chunk
+    covered = {id(s) for chunk in chunks for s in chunk}
+    assert len(covered) == 12
+    print("  [PASS] Chunking respects 4000 char limit (with overlap)")
 
 
 def test_chunk_empty_segments():
@@ -85,17 +98,29 @@ def test_chunk_empty_segments():
 
 
 def test_chunk_mixed_limits():
-    """Char limit triggers before time limit."""
+    """Char limit triggers before time limit (overlap capped to avoid oversized chunks)."""
     a = GroqAnalyzer()
     # Each segment 2000 chars but only 30s → char limit triggers at 2 segments (4000 chars)
-    # even though time would allow 20 segments (600s / 30s)
+    # even though time would allow 20 segments (600s / 30s). Overlap rewind is capped
+    # at half the char budget (2000 chars = 1 segment) so chunks never exceed the limit.
     segments = [
         TranscriptSegment(text="y" * 2000, start=i * 30.0, end=(i + 1) * 30.0)
         for i in range(8)
     ]
     chunks = [segs for segs, _ in a._chunk_transcript_with_ids(segments)]
-    assert len(chunks) == 4  # 8 segments, 2 per chunk (4000 char limit)
-    print("  [PASS] Char limit triggers before time limit")
+    # Every chunk must respect the 4000 char limit (previously the rewind could
+    # produce a 6000-char chunk)
+    for chunk in chunks:
+        total_chars = sum(len(s.text) for s in chunk)
+        assert total_chars <= 4000
+        total_duration = sum(s.end - s.start for s in chunk)
+        assert total_duration <= 660
+    # Full coverage: every segment appears in at least one chunk
+    covered = {id(s) for chunk in chunks for s in chunk}
+    assert len(covered) == 8
+    # Overlap rewind produces more than the naive 4 non-overlapping chunks
+    assert len(chunks) > 4
+    print("  [PASS] Char limit triggers before time limit (overlap capped)")
 
 
 # ─── JSON Parsing Tests ───────────────────────────────────────────────────────
@@ -236,25 +261,32 @@ def test_parse_chunk_response_clamps_score():
     print("  [PASS] Scores clamped to 1-100 range")
 
 
-def test_parse_chunk_response_clamps_timestamps():
-    """Timestamps outside chunk bounds are clamped."""
+def test_parse_chunk_response_uses_raw_timestamps_fallback():
+    """Without segment IDs, raw timestamps are used as-is and duration is validated."""
     a = GroqAnalyzer()
     raw = json.dumps({
         "clips": [
-            # start=-10 is before chunk_start=50 with >5s gap → gets clamped to 50.0
-            # end=120 is fine (within chunk_end=300), duration 120-50=70s → valid
+            # No start_id/end_id → raw timestamps fallback (-10 to 120 = 130s,
+            # within 45-300s allowed range → kept as-is, no clamping to chunk bounds)
             {"start": -10.0, "end": 120.0, "score": 80, "hook": "Neg start", "reason": "x"},
         ]
     })
-    # In two-pass, timestamps from raw start/end without IDs — -10 to 120 = 130s > 120s max → filtered
     candidates = a._parse_pass1_response(raw, {}, 50.0, 300.0)
-    assert len(candidates) >= 0 # May be filtered due to duration > 120s
-    assert candidates[0].start == 50.0  # Clamped from -10
-    print("  [PASS] Timestamps clamped to chunk bounds")
+    assert len(candidates) == 1
+    assert candidates[0].start == -10.0
+    assert candidates[0].end == 120.0
+
+    # Out-of-range duration (below MIN_CLIP_DURATION) → filtered out
+    raw_short = json.dumps({
+        "clips": [{"start": 10.0, "end": 30.0, "score": 80, "hook": "Too short", "reason": "x"}]
+    })
+    candidates_short = a._parse_pass1_response(raw_short, {}, 0.0, 300.0)
+    assert len(candidates_short) == 0  # 20s < 45s min → filtered
+    print("  [PASS] Raw timestamp fallback + duration validation")
 
 
-def test_parse_chunk_truncates_long_hooks():
-    """Hooks longer than 60 chars are truncated."""
+def test_parse_chunk_defers_hook_to_pass2():
+    """Pass 1 parser does not set hooks — they are generated in Pass 2."""
     a = GroqAnalyzer()
     long_hook = "A" * 100
     raw = json.dumps({
@@ -263,8 +295,10 @@ def test_parse_chunk_truncates_long_hooks():
         ]
     })
     candidates = a._parse_pass1_response(raw, {}, 0.0, chunk_end=300.0)
-    assert len(candidates[0].hook) == 60
-    print("  [PASS] Long hooks truncated to 60 chars")
+    assert len(candidates) == 1
+    assert candidates[0].hook == ""  # Hook generated in Pass 2
+    assert candidates[0].reason == "x"
+    print("  [PASS] Pass 1 defers hooks to Pass 2")
 
 
 # ─── Ranking & Overlap Tests ─────────────────────────────────────────────────
@@ -317,19 +351,28 @@ def test_rank_removes_overlaps():
 
 
 def test_overlap_detection():
-    """Test overlap detection helper."""
+    """Overlap detection requires ≥50% shared duration (OVERLAP_THRESHOLD)."""
     a = GroqAnalyzer()
     clip = HighlightCandidate(rank=0, start=50.0, end=100.0, score=80, hook="", reason="")
-    selected = [
-        HighlightCandidate(rank=1, start=10.0, end=60.0, score=90, hook="", reason=""),  # Overlaps
-    ]
-    assert a._overlaps_with_any(clip, selected) is True
 
+    # 40s of a 50s window shared (80%) → duplicate
+    overlapping = [
+        HighlightCandidate(rank=1, start=40.0, end=90.0, score=90, hook="", reason=""),
+    ]
+    assert a._overlaps_with_any(clip, overlapping) is True
+
+    # No overlap at all
     non_overlapping = [
-        HighlightCandidate(rank=1, start=10.0, end=45.0, score=90, hook="", reason=""),  # No overlap
+        HighlightCandidate(rank=1, start=10.0, end=45.0, score=90, hook="", reason=""),
     ]
     assert a._overlaps_with_any(clip, non_overlapping) is False
-    print("  [PASS] Overlap detection works correctly")
+
+    # Only 20% shared (10s of 50s) → below threshold, allowed to coexist
+    low_overlap = [
+        HighlightCandidate(rank=1, start=10.0, end=60.0, score=90, hook="", reason=""),
+    ]
+    assert a._overlaps_with_any(clip, low_overlap) is False
+    print("  [PASS] Overlap detection requires ≥50% shared duration")
 
 
 def test_rank_empty_candidates():
@@ -374,11 +417,16 @@ def test_full_analyze_highlights_success():
 
     call_count = [0]
 
-    def mock_call(prompt):
+    def mock_call(prompt, **kwargs):
         call_count[0] += 1
-        if call_count[0] == 1:
+        # Both passes may use the same model — branch on prompt content instead
+        if "creative_direction" in prompt:
+            return creative_response
+        if "Scan transkrip" in prompt:
+            # Pass 1 chunk scan
             return chunk_response
-        return creative_response
+        # Pass 2 re-ranking: pick candidate #1 and generate its hook
+        return json.dumps({"clips": [{"candidate_idx": 1, "score": 85, "hook": "Viral moment"}]})
 
     transcript = TranscriptResult(
         segments=[TranscriptSegment(text="Test content " * 20, start=0.0, end=120.0)],
@@ -388,13 +436,15 @@ def test_full_analyze_highlights_success():
     )
 
     async def run():
-        with patch.object(a, "_call_groq_llm", side_effect=mock_call):
+        with patch.object(a, "_call_groq_llm", side_effect=mock_call), \
+             patch("asyncio.sleep", new=_noop_sleep):
             result = await a.analyze_highlights(transcript, video_duration=120.0, max_clips=5)
             assert isinstance(result, HighlightAnalysisResult)
             assert len(result.clips) == 1
             assert result.clips[0].hook == "Viral moment"
             assert result.creative_direction["primary_color"] == "#FF3366"
-            assert "1" in result.broll_suggestions
+            # B-roll is generated per-clip later (after Whisper), not here
+            assert result.broll_suggestions == {}
 
     run_async(run())
     print("  [PASS] Full analyze_highlights pipeline success")
@@ -414,12 +464,13 @@ def test_full_analyze_no_candidates_raises():
     )
 
     async def run():
-        with patch.object(a, "_call_groq_llm", return_value=empty_response):
+        with patch.object(a, "_call_groq_llm", return_value=empty_response), \
+             patch("asyncio.sleep", new=_noop_sleep):
             try:
                 await a.analyze_highlights(transcript, video_duration=10.0, max_clips=5)
                 assert False, "Should have raised"
             except GroqAnalyzerError as e:
-                assert "tidak menghasilkan" in str(e)
+                assert "menghasilkan 0 kandidat" in str(e)
 
     run_async(run())
     print("  [PASS] Raises GroqAnalyzerError when no candidates")
@@ -438,7 +489,7 @@ def test_creative_direction_failure_non_fatal():
 
     call_count = [0]
 
-    def mock_call(prompt):
+    def mock_call(prompt, **kwargs):
         call_count[0] += 1
         if call_count[0] == 1:
             return chunk_response
@@ -452,7 +503,8 @@ def test_creative_direction_failure_non_fatal():
     )
 
     async def run():
-        with patch.object(a, "_call_groq_llm", side_effect=mock_call):
+        with patch.object(a, "_call_groq_llm", side_effect=mock_call), \
+             patch("asyncio.sleep", new=_noop_sleep):
             result = await a.analyze_highlights(transcript, video_duration=120.0, max_clips=5)
             # Should still succeed with empty creative direction
             assert len(result.clips) == 1
@@ -480,8 +532,8 @@ if __name__ == "__main__":
     test_parse_chunk_response_filters_short_clips()
     test_parse_chunk_response_filters_long_clips()
     test_parse_chunk_response_clamps_score()
-    test_parse_chunk_response_clamps_timestamps()
-    test_parse_chunk_truncates_long_hooks()
+    test_parse_chunk_response_uses_raw_timestamps_fallback()
+    test_parse_chunk_defers_hook_to_pass2()
     # Ranking
     test_rank_by_score()
     test_rank_respects_max_clips()

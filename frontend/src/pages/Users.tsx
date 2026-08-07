@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { API_BASE, getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +81,7 @@ export function Users() {
   }
 
   async function handleDelete(userId: number, email: string) {
-    if (!confirm(`Deactivate user ${email}?`)) return;
+    if (!(await confirmDialog({ title: "Deactivate user?", message: `${email} will be deactivated and lose access to the dashboard.`, confirmText: "Deactivate", danger: true }))) return;
     const ok = await deleteUser(userId);
     if (ok) { toast.success("User deactivated"); load(); }
     else { toast.error("Failed to delete user"); }

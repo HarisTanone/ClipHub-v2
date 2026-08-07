@@ -1166,6 +1166,42 @@ async def get_clip_detail(
 
     file_status = {"raw": has_raw, "final": has_final, "thumbnail": has_thumb or has_raw or has_final}
 
+    # Captions may be missing in DB clips_data for jobs processed before the
+    # share-pack was persisted. Derive a fresh share pack first (current logic:
+    # caption differs from hook), then fall back to the per-clip json_analisa
+    # file written on disk during the pipeline.
+    captions = clip_data.get("captions") or {}
+    hashtags = clip_data.get("hashtags") or []
+    hook_alts = clip_data.get("hook_alts") or []
+    if not captions:
+        try:
+            from src.infrastructure.clip_quality_helpers import share_pack_for_clip
+            captions, hashtags, hook_alts = share_pack_for_clip(
+                hook=clip_data.get("hook") or "",
+                reason=clip_data.get("reason") or "",
+                score=clip_data.get("score") or 0,
+                duration=max(0.0, float(clip_data.get("end", 0)) - float(clip_data.get("start", 0))),
+                words=clip_data.get("words") or [],
+                visual_entities=clip_data.get("visual_entities") or [],
+                cta=clip_data.get("cta"),
+                virality=clip_data.get("virality"),
+                rank=clip_rank,
+            )
+        except Exception:
+            pass
+    if not captions:
+        try:
+            analisa_path = os.path.join(output_dir, "json_analisa", f"clip_{clip_rank}.json")
+            if os.path.exists(analisa_path):
+                with open(analisa_path, encoding="utf-8") as f:
+                    analisa = json.load(f)
+                body = ((analisa or {}).get("clips") or [{}])[0]
+                captions = body.get("captions") or {}
+                hashtags = body.get("hashtags") or []
+                hook_alts = body.get("hook_alts") or []
+        except Exception:
+            pass
+
     return {
         "success": True,
         "data": {
@@ -1203,7 +1239,9 @@ async def get_clip_detail(
             "thumb_seek": clip_data.get("thumb_seek"),
             "object_overlay_events": clip_data.get("object_overlay_events") or [],
             "visual_entities": clip_data.get("visual_entities") or [],
-            "captions": clip_data.get("captions") or {},
+            "captions": captions,
+            "hashtags": hashtags,
+            "hook_alts": hook_alts,
             "hyperframes_polish": clip_data.get("hyperframes_polish"),
             "top_overlay_events": clip_data.get("top_overlay_events") or [],
             "file_status": file_status,
@@ -1273,6 +1311,28 @@ async def edit_clip_hook(
 
     if not clip_found:
         raise HTTPException(status_code=404, detail=f"Clip #{clip_rank} not found")
+
+    # Keep captions in sync with the new hook so the caption stays related
+    # to what is shown on screen (caption must differ from hook but connect).
+    try:
+        from src.infrastructure.clip_quality_helpers import share_pack_for_clip
+        captions, hashtags, hook_alts = share_pack_for_clip(
+            hook=body.hook_text,
+            reason=clip.get("reason") or "",
+            score=clip.get("score") or 0,
+            duration=max(0.0, float(clip.get("end", 0)) - float(clip.get("start", 0))),
+            words=clip.get("words") or [],
+            visual_entities=clip.get("visual_entities") or [],
+            cta=clip.get("cta"),
+            virality=clip.get("virality"),
+            rank=clip_rank,
+        )
+        if captions:
+            clip["captions"] = captions
+            clip["hashtags"] = hashtags
+            clip["hook_alts"] = hook_alts
+    except Exception:
+        pass
 
     # Persist updated clips_data
     from src.infrastructure.database import async_session, JobModel

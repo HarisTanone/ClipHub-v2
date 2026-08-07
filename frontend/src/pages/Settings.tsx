@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
 import { RangeSlider } from "@/components/ui/RangeSlider";
 import { useToast } from "@/components/ui/Toast";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { system, storage, API_BASE, getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -358,6 +359,7 @@ export function Settings() {
   const [testAllResults, setTestAllResults] = useState<any>(null);
   const [isTestingAll, setIsTestingAll] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
+  const [testingModelId, setTestingModelId] = useState<string | null>(null);
 
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
@@ -440,14 +442,19 @@ export function Settings() {
   }
 
   async function handleDeleteUser(id: number, email: string) {
-    if (!confirm(`Deactivate ${email}?`)) return;
+    if (!(await confirmDialog({ title: "Deactivate user?", message: `${email} will be deactivated and lose access to the dashboard.`, confirmText: "Deactivate", danger: true }))) return;
     const ok = await deleteUserApi(id);
     if (ok) { toast.success("User deactivated"); fetchUsers().then(setUsers); }
     else toast.error("Failed");
   }
 
   async function handleClearStorage() {
-    if (!confirm("This will delete ALL job records, output files, and downloads.\n\nPresets and user accounts will be preserved.\n\nContinue?")) return;
+    if (!(await confirmDialog({
+      title: "Clear all storage?",
+      message: "This will delete ALL job records, output files, downloads, and every object in the MinIO bucket (cliperhub).\n\nPresets and user accounts will be preserved.\n\nThis action cannot be undone.",
+      confirmText: "Yes, Clear Everything",
+      danger: true,
+    }))) return;
     setIsClearing(true);
     try {
       const res = await storage.clearProcessingData();
@@ -490,7 +497,7 @@ export function Settings() {
   // "Restore defaults" pulls the factory defaults from the backend and applies
   // them locally (still requires an explicit Save to persist).
   async function handleRestoreReframeDefaults() {
-    if (!confirm("Restore all reframe tuning to factory defaults? This will be applied after you Save.")) return;
+    if (!(await confirmDialog({ title: "Restore reframe tuning?", message: "All reframe tuning will be reset to factory defaults. This will be applied after you Save.", confirmText: "Restore" }))) return;
     setIsResettingReframe(true);
     const data = await resetReframeTuning();
     if (data) {
@@ -529,7 +536,7 @@ export function Settings() {
   }
 
   async function handleRestoreObjectDefaults() {
-    if (!confirm("Restore object overlay style to factory defaults?")) return;
+    if (!(await confirmDialog({ title: "Restore object overlay style?", message: "The object overlay style will be reset to factory defaults.", confirmText: "Restore" }))) return;
     setIsResettingObject(true);
     const data = await resetObjectOverlay();
     if (data) {
@@ -544,7 +551,7 @@ export function Settings() {
   }
 
   async function handleStartTest() {
-    if (!confirm("Run all server tests now? Deployment will NOT run from this button.")) return;
+    if (!(await confirmDialog({ title: "Run server tests?", message: "All server tests will run now. Deployment will NOT run from this button.", confirmText: "Run Tests" }))) return;
     setIsStartingTest(true);
     try {
       const status = await startTestRun();
@@ -607,7 +614,8 @@ export function Settings() {
     }
   }
 
-  async function handleTestModel() {
+  async function handleTestModel(modelId?: string) {
+    const model = modelId || modelEdits["NINE_ROUTER_MODEL"] || undefined;
     setIsTestingModel(true);
     setModelTestResult(null);
     try {
@@ -618,13 +626,20 @@ export function Settings() {
         body: JSON.stringify({
           base_url: modelEdits["NINE_ROUTER_BASE_URL"] || undefined,
           api_key: modelEdits["NINE_ROUTER_API_KEY"] || undefined,
-          model: modelEdits["NINE_ROUTER_MODEL"] || undefined,
+          model,
+          prompt: "Reply with OK",
         }),
       });
       const data = await res.json();
       setModelTestResult(data);
+      if (data.success) {
+        toast.success(`Model "${model || "default"}" connected`);
+      } else {
+        toast.error(data.error || data.detail || `Model test failed`);
+      }
     } catch (e: any) {
-      setModelTestResult({ success: false, error: e?.message || "Network error" });
+      setModelTestResult({ success: false, error: e?.message || "Network error", model });
+      toast.error(e?.message || "Network error testing model");
     } finally {
       setIsTestingModel(false);
     }
@@ -670,6 +685,15 @@ export function Settings() {
       toast.error(e?.message || "Network error testing models");
     } finally {
       setIsTestingAll(false);
+    }
+  }
+
+  async function handleTestAvailableModel(modelId: string) {
+    setTestingModelId(modelId);
+    try {
+      await handleTestModel(modelId);
+    } finally {
+      setTestingModelId(null);
     }
   }
 
@@ -720,7 +744,7 @@ export function Settings() {
         ) : tab === "models" ? (
           <div className="flex items-center gap-2">
             <Button onClick={handleTestAllModels} loading={isTestingAll} size="sm" variant="outline" icon={<RefreshCw className="h-3.5 w-3.5" />}>Test All</Button>
-            <Button onClick={handleTestModel} loading={isTestingModel} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Model</Button>
+            <Button onClick={() => handleTestModel()} loading={isTestingModel} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Model</Button>
             <Button onClick={handleSaveModels} loading={isSavingModels} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
           </div>
         ) : (
@@ -1049,44 +1073,105 @@ export function Settings() {
               <Card className="p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-semibold text-zinc-200">Available Models (from 9router)</h3>
-                  <Button onClick={handleFetchAvailableModels} loading={isLoadingModels} size="sm" variant="outline" icon={<RefreshCw className="h-3 w-3" />}>
-                    Refresh
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    <Button onClick={handleTestAllModels} loading={isTestingAll} size="sm" variant="outline" icon={<RefreshCw className="h-3 w-3" />}>
+                      Test All
+                    </Button>
+                    <Button onClick={handleFetchAvailableModels} loading={isLoadingModels} size="sm" variant="outline" icon={<RefreshCw className="h-3 w-3" />}>
+                      Refresh
+                    </Button>
+                  </div>
                 </div>
                 {availableModels.length > 0 && (
-                  <input
-                    type="text"
-                    placeholder="Cari model..."
-                    value={modelSearch}
-                    onChange={(e) => setModelSearch(e.target.value)}
-                    className="w-full mb-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none transition-colors"
-                  />
-                )}
-                {availableModels.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
-                    {availableModels
-                      .filter((m) => !modelSearch || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
-                      .map((m) => (
+                  <div className="relative mb-3">
+                    <input
+                      type="text"
+                      placeholder="Cari model atau penyedia (mis. groq, openai)..."
+                      value={modelSearch}
+                      onChange={(e) => setModelSearch(e.target.value)}
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 pl-3 pr-8 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none transition-colors"
+                    />
+                    {modelSearch && (
                       <button
-                        key={m.id}
                         type="button"
-                        onClick={() => {
-                          setModelEdits((p) => ({ ...p, NINE_ROUTER_MODEL: m.id }));
-                          toast.success(`Model "${m.id}" selected as default`);
-                        }}
-                        className={cn(
-                          "text-left px-3 py-2 rounded-lg border text-xs transition-colors",
-                          modelEdits["NINE_ROUTER_MODEL"] === m.id
-                            ? "border-violet-500 bg-violet-500/10 text-violet-300"
-                            : "border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-                        )}
+                        onClick={() => setModelSearch("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                        aria-label="Clear search"
                       >
-                        <span className="font-medium">{m.id}</span>
-                        {m.owned_by && <span className="ml-2 text-zinc-600">{m.owned_by}</span>}
+                        <XCircle className="h-3.5 w-3.5" />
                       </button>
-                    ))}
+                    )}
                   </div>
-                ) : (
+                )}
+                {availableModels.length > 0 ? (() => {
+                  const filtered = availableModels.filter((m) => {
+                    const q = modelSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return m.id.toLowerCase().includes(q) || (m.owned_by || "").toLowerCase().includes(q);
+                  });
+                  return (
+                    <>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[9px] text-zinc-600">
+                          {filtered.length}/{availableModels.length} model
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
+                        {filtered.map((m) => (
+                          <div
+                            key={m.id}
+                            className={cn(
+                              "group flex items-center gap-1 rounded-lg border px-3 py-2 text-xs transition-colors",
+                              modelEdits["NINE_ROUTER_MODEL"] === m.id
+                                ? "border-violet-500 bg-violet-500/10"
+                                : "border-zinc-800 bg-zinc-950/60 hover:border-zinc-600"
+                            )}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModelEdits((p) => ({ ...p, NINE_ROUTER_MODEL: m.id }));
+                                toast.success(`Model "${m.id}" selected as default`);
+                              }}
+                              className={cn(
+                                "flex-1 min-w-0 text-left transition-colors",
+                                modelEdits["NINE_ROUTER_MODEL"] === m.id
+                                  ? "text-violet-300"
+                                  : "text-zinc-400 group-hover:text-zinc-200"
+                              )}
+                            >
+                              <span className="font-medium truncate block">{m.id}</span>
+                              {m.owned_by && <span className="text-zinc-600 text-[10px] truncate block">{m.owned_by}</span>}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleTestAvailableModel(m.id)}
+                              disabled={testingModelId !== null}
+                              title={`Test model ${m.id}`}
+                              className={cn(
+                                "shrink-0 flex items-center gap-1 rounded-md border px-1.5 py-1 text-[9px] font-medium transition-colors",
+                                testingModelId === m.id
+                                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                                  : "border-zinc-700/60 text-zinc-500 hover:border-emerald-500/50 hover:text-emerald-400",
+                                testingModelId !== null && testingModelId !== m.id && "opacity-40 cursor-not-allowed"
+                              )}
+                            >
+                              {testingModelId === m.id ? (
+                                <RefreshCw className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Zap className="h-3 w-3" />
+                              )}
+                              Test
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      {filtered.length === 0 && (
+                        <p className="text-[11px] text-zinc-600">Tidak ada model yang cocok dengan "{modelSearch}".</p>
+                      )}
+                    </>
+                  );
+                })() : (
                   <p className="text-[11px] text-zinc-600">Klik Refresh untuk melihat model tersedia di 9router.</p>
                 )}
               </Card>

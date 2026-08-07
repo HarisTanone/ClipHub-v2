@@ -777,25 +777,9 @@ class V2PipelineService:
             )
             self._emit(job_id, 10, "highlights", "start")
             await self._repo.update_status(job_id, JobStatus.HIGHLIGHTING)
-            clips_with_words: dict[int, list[dict]] = {}
-            for clip in clips:
-                raw_words = words_per_clip.get(clip.rank, [])
-                clip_duration = round(clip.end - clip.start, 3)
-                # Only suppress subtitles under the hook when a hook text exists.
-                sub_min = hook_duration if (clip.hook and hook_duration > 0) else 0.0
-                valid_words = sanitize_subtitle_words(
-                    raw_words,
-                    clip_duration,
-                    subtitle_min_start=sub_min,
-                )
-                clips_with_words[clip.rank] = valid_words
-                if valid_words:
-                    logger.info(
-                        f"v2_words clip {clip.rank}: {len(valid_words)} words, "
-                        f"first={valid_words[0]['start']:.2f}s (min={sub_min:.1f}), "
-                        f"last='{valid_words[-1]['word']}' @ {valid_words[-1]['start']:.1f}s, "
-                        f"clip_duration={clip_duration:.1f}s"
-                    )
+            clips_with_words: dict[int, list[dict]] = self._build_clips_with_words(
+                clips, words_per_clip, hook_duration=hook_duration
+            )
             self._emit(job_id, 10, "highlights", "complete")
 
             # Stash words for phrase-aware behind-person duration (step 11 overlay)
@@ -1009,6 +993,46 @@ class V2PipelineService:
             model_used="direct",
             chunks_processed=0,
         )
+
+    def _build_clips_with_words(
+        self,
+        clips: list[Clip],
+        words_per_clip: dict[int, list],
+        hook_duration: float = 0.0,
+    ) -> dict[int, list[dict]]:
+        """Build subtitle word dicts per clip from word-level transcription output.
+
+        Word-level transcription returns 0-based words (relative to each clip's
+        start) — no timestamp shifting happens here. This method sanitizes them
+        (clamp to clip duration, dedupe, mark highlights) and suppresses words
+        that fall under the hook window when the clip has a hook text (the hook
+        owns 0–hook_duration seconds).
+
+        Returns {clip_rank: [{"word", "start", "end", "highlight"}]}.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        from src.infrastructure.subtitle_words import sanitize_subtitle_words
+        clips_with_words: dict[int, list[dict]] = {}
+        for clip in clips:
+            raw_words = words_per_clip.get(clip.rank, [])
+            clip_duration = round(clip.end - clip.start, 3)
+            # Only suppress subtitles under the hook when a hook text exists.
+            sub_min = hook_duration if (clip.hook and hook_duration > 0) else 0.0
+            valid_words = sanitize_subtitle_words(
+                raw_words,
+                clip_duration,
+                subtitle_min_start=sub_min,
+            )
+            clips_with_words[clip.rank] = valid_words
+            if valid_words:
+                logger.info(
+                    f"v2_words clip {clip.rank}: {len(valid_words)} words, "
+                    f"first={valid_words[0]['start']:.2f}s (min={sub_min:.1f}), "
+                    f"last='{valid_words[-1]['word']}' @ {valid_words[-1]['start']:.1f}s, "
+                    f"clip_duration={clip_duration:.1f}s"
+                )
+        return clips_with_words
 
     def _prepare_clips_from_v2(
         self, highlights: list, broll_map: dict, video_duration: float
@@ -2730,6 +2754,21 @@ class V2PipelineService:
                 retention = retention_trim_hints(words, clip.end - clip.start)
             except Exception:
                 viral, cta, retention = {}, {}, {}
+            try:
+                from src.infrastructure.clip_quality_helpers import share_pack_for_clip
+                captions, hashtags, hook_alts = share_pack_for_clip(
+                    hook=clip.hook or "",
+                    reason=clip.reason or "",
+                    score=clip.score,
+                    duration=clip.end - clip.start,
+                    words=words,
+                    visual_entities=list(getattr(clip, "visual_entities", None) or []),
+                    cta=cta,
+                    virality=viral,
+                    rank=clip.rank,
+                )
+            except Exception:
+                captions, hashtags, hook_alts = {}, [], []
             clips_output.append({
                 "rank": clip.rank,
                 "score": clip.score,
@@ -2778,6 +2817,9 @@ class V2PipelineService:
                 "virality": viral,
                 "cta": cta,
                 "retention_hints": retention,
+                "captions": captions,
+                "hashtags": hashtags,
+                "hook_alts": hook_alts,
             })
 
         return {

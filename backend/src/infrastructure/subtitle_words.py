@@ -48,6 +48,19 @@ def sanitize_subtitle_words(
     if not raw_words or clip_duration <= 0:
         return []
 
+    def _as_word_dict(w) -> dict:
+        """Accept both dict words and domain Word entities."""
+        if isinstance(w, dict):
+            return w
+        return {
+            "word": getattr(w, "word", ""),
+            "start": getattr(w, "start", 0.0),
+            "end": getattr(w, "end", 0.0),
+            "highlight": bool(getattr(w, "highlight", False)),
+        }
+
+    raw_words = [_as_word_dict(w) for w in raw_words]
+
     min_start = max(0.0, float(subtitle_min_start or 0.0))
     cleaned = []
     last_end = min_start

@@ -109,6 +109,55 @@ def test_extract_highlight_and_objects():
     assert not any("vape" in o["word"].lower() for o in ai_full)
 
 
+def test_build_share_pack_caption_differs_from_hook_but_related():
+    from src.infrastructure.clip_quality_helpers import build_share_pack
+
+    pack = build_share_pack(
+        hook="Kenapa BBM mahal banget?",
+        reason="Harga BBM naik dua kali lipat",
+        score=85,
+        duration=30.0,
+        words=[{"word": "BBM", "start": 1.0, "end": 1.3, "highlight": True}],
+        rank=1,
+    )
+    caps = pack.get("captions") or {}
+    # Captions must exist for every platform
+    assert caps.get("tiktok"), "tiktok caption missing"
+    assert caps.get("instagram"), "instagram caption missing"
+    assert caps.get("youtube"), "youtube caption missing"
+    assert caps.get("plain"), "plain caption missing"
+
+    hook_lower = "kenapa bbm mahal banget?"
+    # Opener must NOT be a verbatim copy of the hook
+    assert caps["tiktok"].strip().lower() != hook_lower
+    assert caps["instagram"].strip().lower() != hook_lower
+    assert caps["youtube"].strip().lower() != hook_lower
+    # But must stay related — shares the hook's core tokens
+    assert any(tok in caps["tiktok"].lower() for tok in ("bbm", "mahal", "kenapa"))
+    # Hashtags still present
+    assert any(h.startswith("#") for h in pack.get("hashtags") or [])
+    # hook_alts exposed for the UI
+    assert pack.get("hook_alts")
+
+
+def test_build_share_pack_short_hook_still_gets_caption():
+    from src.infrastructure.clip_quality_helpers import build_share_pack
+
+    pack = build_share_pack(
+        hook="Wow",
+        reason="",
+        score=70,
+        duration=20.0,
+        words=[],
+        rank=1,
+    )
+    caps = pack.get("captions") or {}
+    # Even a very short hook gets a caption (opener is "Wow?" — a variant, not
+    # the verbatim hook, so it still differs from the on-screen hook).
+    assert caps.get("tiktok") or caps.get("instagram") or caps.get("youtube")
+    assert caps["plain"].strip() != "Wow"
+
+
 def test_write_split_job_meta(tmp_path):
     import json
     from src.infrastructure.clip_quality_helpers import (

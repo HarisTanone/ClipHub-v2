@@ -1411,16 +1411,26 @@ OUTPUT RAW JSON:
                 text = self._format_segments_with_ids(current_segments, chunk_start_idx)
                 chunks.append((list(current_segments), text))
 
-                # Apply overlap: rewind by CHUNK_OVERLAP_SECONDS
-                # Find how many trailing segments fit within the overlap window
+                # Apply overlap: rewind by CHUNK_OVERLAP_SECONDS (capped at half the
+                # chunk limits so a rewind can never consume the entire chunk budget,
+                # which would produce near-duplicate oversized chunks that exceed
+                # the char/time limits)
                 overlap_segments = []
                 overlap_duration = 0.0
+                overlap_chars = 0
+                max_overlap_dur = min(self.CHUNK_OVERLAP_SECONDS, self._chunk_max_seconds / 2)
+                max_overlap_chars = self._chunk_max_chars / 2
                 for s in reversed(current_segments):
                     s_dur = s.end - s.start
-                    if overlap_duration + s_dur > self.CHUNK_OVERLAP_SECONDS:
+                    s_chars = len(s.text)
+                    if (
+                        overlap_duration + s_dur > max_overlap_dur
+                        or overlap_chars + s_chars > max_overlap_chars
+                    ):
                         break
                     overlap_segments.insert(0, s)
                     overlap_duration += s_dur
+                    overlap_chars += s_chars
 
                 # Start new chunk from overlap segments
                 chunk_start_idx = global_idx - len(overlap_segments)

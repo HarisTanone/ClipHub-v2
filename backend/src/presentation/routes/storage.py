@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.config import settings
 from src.infrastructure.db_connection import get_dict_connection
@@ -55,13 +55,23 @@ async def clear_processing_data(user: CurrentUser = Depends(get_current_user)):
     finally:
         conn.close()
 
-    logger.info(f"Storage cleared by user {user.id}: dirs={removed_dirs}, jobs={jobs_deleted}, errors={errors}")
+    # 4. Clear ALL objects in the MinIO bucket (cliperhub)
+    minio_deleted = 0
+    try:
+        from src.infrastructure.minio_service import get_minio_service
+        minio_deleted = get_minio_service().clear_bucket()
+        removed_dirs.append(f"minio:{getattr(settings, 'MINIO_BUCKET', 'cliperhub')}")
+    except Exception as e:
+        errors.append(f"minio: {e}")
+
+    logger.info(f"Storage cleared by user {user.id}: dirs={removed_dirs}, jobs={jobs_deleted}, minio={minio_deleted}, errors={errors}")
 
     return {
         "success": len(errors) == 0,
-        "message": f"Cleared {jobs_deleted} jobs, removed: {', '.join(removed_dirs) or 'nothing'}",
+        "message": f"Cleared {jobs_deleted} jobs and {minio_deleted} MinIO objects, removed: {', '.join(removed_dirs) or 'nothing'}",
         "details": {
             "jobs_deleted": jobs_deleted,
+            "minio_objects_deleted": minio_deleted,
             "dirs_cleared": removed_dirs,
             "errors": errors,
         },

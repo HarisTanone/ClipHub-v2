@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.config import settings
 from src.infrastructure.pipeline_router import PipelineRouter
 from src.domain.entities import Job, JobStatus
 
@@ -35,26 +36,31 @@ def test_non_premium_user_gets_v2():
 
 
 def test_premium_user_gets_v1():
-    """User WITH is_premium=true → V1."""
+    """User WITH is_premium=true → V1 (when V2 is not force-enabled)."""
     router = PipelineRouter()
-    with patch.object(router, "_check_user_premium", return_value=True):
+    with patch.object(router, "_check_user_premium", return_value=True), \
+         patch.object(settings, "FORCE_V2_PIPELINE", False), \
+         patch.object(settings, "V2_PIPELINE_ENABLED", True):
         assert router.should_use_v2(user_id=3, is_superadmin=False) is False
     print("  [PASS] Premium user → V1")
 
 
 def test_superadmin_always_v1():
-    """Superadmin always gets V1 regardless of features."""
+    """Superadmin defaults to V1 when no pipeline override (V2 not forced)."""
     router = PipelineRouter()
-    with patch.object(router, "_check_user_premium", return_value=False):
+    with patch.object(router, "_get_superadmin_override", return_value="v1"), \
+         patch.object(settings, "FORCE_V2_PIPELINE", False), \
+         patch.object(settings, "V2_PIPELINE_ENABLED", True):
         assert router.should_use_v2(user_id=1, is_superadmin=True) is False
-    print("  [PASS] Superadmin → always V1")
+    print("  [PASS] Superadmin → defaults to V1")
 
 
 def test_v2_disabled_globally():
     """V2_PIPELINE_ENABLED=False → everyone gets V1."""
     router = PipelineRouter()
-    with patch("src.infrastructure.pipeline_router.settings") as mock_settings:
-        mock_settings.V2_PIPELINE_ENABLED = False
+    with patch.object(router, "_check_user_premium", return_value=False), \
+         patch.object(settings, "FORCE_V2_PIPELINE", False), \
+         patch.object(settings, "V2_PIPELINE_ENABLED", False):
         assert router.should_use_v2(user_id=99, is_superadmin=False) is False
     print("  [PASS] V2 disabled globally → V1 for all")
 
@@ -73,9 +79,11 @@ def test_db_error_defaults_to_v2():
 
 
 def test_get_pipeline_version_v1():
-    """get_pipeline_version returns 'v1' for premium users."""
+    """get_pipeline_version returns 'v1' for premium users (V2 not forced)."""
     router = PipelineRouter()
-    with patch.object(router, "_check_user_premium", return_value=True):
+    with patch.object(router, "_check_user_premium", return_value=True), \
+         patch.object(settings, "FORCE_V2_PIPELINE", False), \
+         patch.object(settings, "V2_PIPELINE_ENABLED", True):
         assert router.get_pipeline_version(user_id=3, is_superadmin=False) == "v1"
     print("  [PASS] get_pipeline_version returns 'v1' for premium")
 

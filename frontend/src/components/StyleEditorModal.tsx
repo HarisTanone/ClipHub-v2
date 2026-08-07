@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { jobs, presets as presetsApi, type Preset } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RangeSlider } from "@/components/ui/RangeSlider";
@@ -1580,7 +1581,7 @@ function PresetsTab({ hookStyle, subtitleStyle, textEmphasisStyle, onHookChange,
   }
 
   async function handleDelete(id: number, name: string) {
-    if (!confirm(`Delete preset "${name}"?`)) return;
+    if (!(await confirmDialog({ title: "Delete preset?", message: `Preset "${name}" will be permanently deleted.`, confirmText: "Delete", danger: true }))) return;
     try {
       await presetsApi.remove(id);
       setUserPresets((prev) => prev.filter((p) => p.id !== id));
@@ -2557,18 +2558,18 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             <Section title="Hook Style Preset">
               <div className="grid grid-cols-2 gap-2">
                 {([
-                  { id: "zoom_punch", name: "Zoom Punch", color: "white", fontSize: 56, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 4, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
-                  { id: "fade_scale", name: "Fade Scale", color: "white", fontSize: 48, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 3, strokeColor: "black", bgOpacity: 0.5, positionY: 42 },
-                  { id: "slide_punch_framer", name: "Slide Punch", color: "white", fontSize: 52, fontFamily: "Poppins", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "black", bgOpacity: 0.65, positionY: 38 },
-                  { id: "typewriter", name: "Typewriter", color: "#00FF88", fontSize: 44, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 2, strokeColor: "black", bgOpacity: 0.7, positionY: 45 },
-                  { id: "glitch_rgb", name: "Glitch RGB", color: "white", fontSize: 58, fontFamily: "Anton", fontWeight: "700", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.7, positionY: 40 },
-                  { id: "shake_neon", name: "Shake Neon", color: "#00FFCC", fontSize: 54, fontFamily: "Bungee", fontWeight: "400", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.65, positionY: 40 },
-                  { id: "cinematic_reveal", name: "Cinematic", color: "#FFD700", fontSize: 62, fontFamily: "Playfair Display", fontWeight: "700", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.8, positionY: 42 },
-                  { id: "danger_bold", name: "Danger Bold", color: "#FF2D2D", fontSize: 70, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 6, strokeColor: "black", bgOpacity: 0.75, positionY: 38 },
-                  { id: "minimal_white", name: "Minimal", color: "white", fontSize: 42, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 2, strokeColor: "rgba(0,0,0,0.5)", bgOpacity: 0.3, positionY: 50 },
-                  { id: "bold_yellow", name: "Bold Yellow", color: "#FFD700", fontSize: 64, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
-                  { id: "electric_blue", name: "Electric Blue", color: "#00BFFF", fontSize: 54, fontFamily: "Bungee", fontWeight: "400", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.65, positionY: 40 },
-                  { id: "fire_red", name: "Fire Red", color: "#FF4444", fontSize: 66, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "#220000", bgOpacity: 0.7, positionY: 38 },
+                  { id: "zoom_punch", name: "Zoom Punch", desc: "Bold white + quick scale-in", color: "white", fontSize: 56, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 4, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
+                  { id: "fade_scale", name: "Fade Scale", desc: "Smooth fade + slight grow", color: "white", fontSize: 48, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 3, strokeColor: "black", bgOpacity: 0.5, positionY: 42 },
+                  { id: "slide_punch_framer", name: "Slide Punch", desc: "Slide from left with punch", color: "white", fontSize: 52, fontFamily: "Poppins", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "black", bgOpacity: 0.65, positionY: 38 },
+                  { id: "typewriter", name: "Typewriter", desc: "Character-by-character", color: "#00FF88", fontSize: 44, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 2, strokeColor: "black", bgOpacity: 0.7, positionY: 45 },
+                  { id: "glitch_rgb", name: "Glitch RGB", desc: "RGB split chromatic aberr.", color: "white", fontSize: 58, fontFamily: "Anton", fontWeight: "700", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.7, positionY: 40 },
+                  { id: "shake_neon", name: "Shake Neon", desc: "Neon glow + random shake", color: "#00FFCC", fontSize: 54, fontFamily: "Bungee", fontWeight: "400", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.65, positionY: 40 },
+                  { id: "cinematic_reveal", name: "Cinematic", desc: "Letterbox + elegant fade", color: "#FFD700", fontSize: 62, fontFamily: "Playfair Display", fontWeight: "700", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.8, positionY: 42 },
+                  { id: "danger_bold", name: "Danger Bold", desc: "Bold red pulsing border", color: "#FF2D2D", fontSize: 70, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 6, strokeColor: "black", bgOpacity: 0.75, positionY: 38 },
+                  { id: "minimal_white", name: "Minimal", desc: "Clean minimal white", color: "white", fontSize: 42, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 2, strokeColor: "rgba(0,0,0,0.5)", bgOpacity: 0.3, positionY: 50 },
+                  { id: "bold_yellow", name: "Bold Yellow", desc: "Bold yellow heavy stroke", color: "#FFD700", fontSize: 64, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
+                  { id: "electric_blue", name: "Electric Blue", desc: "Bright blue neon look", color: "#00BFFF", fontSize: 54, fontFamily: "Bungee", fontWeight: "400", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.65, positionY: 40 },
+                  { id: "fire_red", name: "Fire Red", desc: "Aggressive red dramatic", color: "#FF4444", fontSize: 66, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "#220000", bgOpacity: 0.7, positionY: 38 },
                 ] as const).map(preset => (
                   <button
                     key={preset.id}
@@ -2586,14 +2587,54 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                       positionY: preset.positionY,
                     })}
                     className={cn(
-                      "py-2 px-3 rounded-lg border text-[10px] font-medium transition-colors text-left",
+                      "group overflow-hidden rounded-xl border text-left transition-all",
                       style.animation === preset.id
-                        ? "border-purple-500 bg-purple-500/10 text-purple-300"
-                        : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                        ? "border-purple-500 bg-purple-500/10 ring-1 ring-purple-500/40"
+                        : "border-zinc-700/80 bg-zinc-900/40 hover:border-zinc-500 hover:bg-zinc-900"
                     )}
                   >
-                    <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: preset.color }} />
-                    {preset.name}
+                    {/* Mini preview replicating the FFmpeg drawtext style */}
+                    <span
+                      className="block relative w-full overflow-hidden bg-zinc-950"
+                      style={{ aspectRatio: "16/9" }}
+                    >
+                      <span
+                        className="absolute left-0 right-0 flex justify-center px-2"
+                        style={{ top: `${preset.positionY}%`, transform: "translateY(-50%)" }}
+                      >
+                        <span
+                          className="truncate whitespace-nowrap font-semibold"
+                          style={{
+                            fontSize: Math.max(preset.fontSize * 0.24, 12),
+                            fontWeight: Number(preset.fontWeight),
+                            fontFamily: `'${preset.fontFamily}', sans-serif`,
+                            color: preset.color,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.02em",
+                            padding: "2px 6px",
+                            backgroundColor: preset.bgOpacity > 0 ? `#000${Math.round(Math.min(1, preset.bgOpacity) * 255).toString(16).padStart(2, "0")}` : "transparent",
+                            paintOrder: preset.strokeEnabled ? "stroke" : undefined,
+                            WebkitTextStroke: preset.strokeEnabled ? `${Math.max(preset.strokeWidth * 0.18, 0.6)}px ${preset.strokeColor}` : undefined,
+                          }}
+                        >
+                          HOOK
+                        </span>
+                      </span>
+                      {/* active check overlay */}
+                      {style.animation === preset.id && (
+                        <span className="absolute top-1.5 right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-[9px] font-bold text-white shadow">✓</span>
+                      )}
+                    </span>
+                    {/* Name + description */}
+                    <span className="block px-2.5 py-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: preset.color }} />
+                        <span className={cn("truncate text-[10px] font-semibold", style.animation === preset.id ? "text-purple-300" : "text-zinc-300 group-hover:text-zinc-100")}>
+                          {preset.name}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 block truncate text-[8px] text-zinc-600">{preset.desc}</span>
+                    </span>
                   </button>
                 ))}
               </div>

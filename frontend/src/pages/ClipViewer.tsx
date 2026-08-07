@@ -43,6 +43,10 @@ export function ClipViewer() {
   const [hookText, setHookText] = useState("");
   const [isSavingHook, setIsSavingHook] = useState(false);
 
+  // Caption variant (hook_alts) — lets the user pick a caption opener that
+  // differs from the hook text but stays related.
+  const [captionVariant, setCaptionVariant] = useState<string | null>(null);
+
   // MinIO upload
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -78,6 +82,7 @@ export function ClipViewer() {
       ]);
       setClip(clipRes.data);
       setHookText(clipRes.data.hook || "");
+      setCaptionVariant(null);
       if (clipRes.data.hook_style_config && Object.keys(clipRes.data.hook_style_config).length > 0) {
         setHookStyleConfig({ ...DEFAULT_HOOK_STYLE, ...clipRes.data.hook_style_config } as HookStyle);
       }
@@ -614,7 +619,19 @@ export function ClipViewer() {
           {/* Caption (for posting) */}
           {clip.captions && Object.keys(clip.captions).length > 0 && (
             <Card className="p-3">
-              <h3 className="text-xs font-semibold text-zinc-300 mb-2">Caption</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold text-zinc-300">Caption</h3>
+                {(clip.hashtags?.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { const tags = (clip.hashtags || []).join(" "); navigator.clipboard?.writeText(tags).catch(() => undefined); }}
+                    className="text-[9px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                    title="Copy hashtags"
+                  >
+                    Copy hashtags
+                  </button>
+                )}
+              </div>
               <div className="space-y-2">
                 {clip.captions.tiktok && (
                   <div>
@@ -635,6 +652,41 @@ export function ClipViewer() {
                   </div>
                 )}
               </div>
+              {(clip.hook_alts?.length ?? 0) > 0 && (
+                <div className="mt-2.5 pt-2.5 border-t border-zinc-800">
+                  <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1.5">Caption Variants</p>
+                  <div className="flex flex-wrap gap-1">
+                    {(clip.hook_alts || []).map((alt, i) => {
+                      const selected = captionVariant === alt.text;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setCaptionVariant(selected ? null : alt.text)}
+                          title={alt.text}
+                          className={cn(
+                            "rounded-full border px-2 py-0.5 text-[9px] font-medium transition-colors max-w-[180px] truncate",
+                            selected
+                              ? "border-purple-500/50 bg-purple-500/15 text-purple-300"
+                              : "border-zinc-700/60 bg-zinc-900/60 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200",
+                          )}
+                        >
+                          {alt.text}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {captionVariant && (
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(captionVariant).catch(() => undefined)}
+                      className="mt-2 text-[9px] text-purple-400 hover:text-purple-300 transition-colors"
+                    >
+                      Copy selected variant
+                    </button>
+                  )}
+                </div>
+              )}
             </Card>
           )}
         </div>

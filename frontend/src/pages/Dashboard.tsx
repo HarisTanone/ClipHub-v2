@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { confirmDialog, alertDialog } from "@/components/ui/ConfirmDialog";
 import { jobs, system, type JobSummary } from "@/lib/api";
 import { formatTimeAgo, truncateUrl, formatDuration, cn } from "@/lib/utils";
 import { ModelStatusBadge, ModelStatusPanel } from "@/components/ModelStatusPanel";
@@ -133,9 +134,6 @@ export function Dashboard() {
               <p className="text-[10px] uppercase tracking-wider text-zinc-500">Live Queue</p>
               <p className="mt-1 text-sm font-semibold text-zinc-100">{stats.active} active job{stats.active === 1 ? "" : "s"}</p>
             </div>
-            <span className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-blue-300">
-              <Sparkles className="h-4 w-4" />
-            </span>
           </div>
           <div className="mt-3 space-y-2">
             {activeJobs.length ? activeJobs.map((job) => (
@@ -282,12 +280,12 @@ export function Dashboard() {
                           onClick={async (e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            if (!confirm(`Delete job "${job.video_title || job.job_id}"?\nThis will remove all clips and files.`)) return;
+                            if (!(await confirmDialog({ title: "Delete job?", message: `"${job.video_title || job.job_id}" will be permanently deleted.\nThis will remove all clips and files.`, confirmText: "Delete", danger: true }))) return;
                             try {
                               await jobs.delete(job.job_id);
                               loadData();
                             } catch (err) {
-                              alert("Failed to delete job");
+                              void alertDialog({ title: "Delete failed", message: "Failed to delete job. Please try again." });
                             }
                           }}
                           className="p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"

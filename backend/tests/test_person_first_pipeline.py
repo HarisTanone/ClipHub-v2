@@ -104,10 +104,13 @@ def test_duplicate_nested_person_detections_are_suppressed_before_tracking():
         (800.0, 230.0, 1200.0, 780.0, 0.80),
     ]
 
+    # The full-frame container box (100,80,1300,1000) swallows the real person
+    # box (800,230,1200,780) nested inside it. The deliberate fix keeps the
+    # tighter (smaller) real-person box and drops the container mega-box.
     # Shared helper (person-first PersonDetector path) and engine wrapper
     # (legacy podcast path) must agree.
-    assert filter_duplicate_person_boxes(detections) == [detections[0]]
-    assert engine._filter_duplicate_person_detections(detections) == [detections[0]]
+    assert filter_duplicate_person_boxes(detections) == [detections[1]]
+    assert engine._filter_duplicate_person_detections(detections) == [detections[1]]
 
 
 def test_separate_person_detections_are_preserved_before_tracking():

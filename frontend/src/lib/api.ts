@@ -407,6 +407,8 @@ export interface ClipDetailResponse {
     } | null;
     top_overlay_events?: Array<Record<string, any>>;
     captions?: { tiktok?: string; instagram?: string; youtube?: string; plain?: string };
+    hashtags?: string[];
+    hook_alts?: Array<{ text: string; style: string; chars?: number }>;
     file_status: { raw: boolean; final: boolean; thumbnail: boolean };
     urls: { raw: string | null; final: string | null; thumbnail: string | null };
   };

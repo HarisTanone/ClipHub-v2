@@ -82,7 +82,7 @@ class PodcastReframeEngine(IReframeEngine):
     MIN_FRAME_RATIO = 0.18              # Track must appear in ≥18% of sampled frames (ghost harden)
     GHOST_IOU_THRESHOLD = 0.22          # IoU overlap indicating same-person duplicate
     GHOST_CENTER_DIST_RATIO = 0.07      # Normalized center distance for ghost proximity
-    GHOST_CENTER_DIST_BROAD = 0.18      # Broader center distance for ghost with area similarity
+    GHOST_CENTER_DIST_BROAD = 0.20      # Broader center distance for ghost with area similarity
     MIN_PAIR_SIZE_RATIO = 0.18          # [FIX] Turunkan dari 0.30 -> Bisa pasangkan wajah besar & wajah kecil
     AUDIO_FILTER = "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS"
 

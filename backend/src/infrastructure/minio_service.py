@@ -157,6 +157,20 @@ class MinioService:
             logger.warning(f"[minio] Delete failed for {prefix}: {e}")
         return deleted
 
+    def clear_bucket(self) -> int:
+        """Delete ALL objects in the bucket (e.g. 'cliperhub'). Returns count deleted."""
+        deleted = 0
+        try:
+            objects = list(self.client.list_objects(self._bucket, recursive=True))
+            for obj in objects:
+                if obj.object_name:
+                    self.client.remove_object(self._bucket, obj.object_name)
+                    deleted += 1
+            logger.info(f"[minio] Cleared {deleted} objects from bucket {self._bucket}")
+        except S3Error as e:
+            logger.warning(f"[minio] Bucket clear failed: {e}")
+        return deleted
+
 
 # Singleton instance
 _minio_service: Optional[MinioService] = None

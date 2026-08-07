@@ -62,8 +62,13 @@ def test_offset_mapping_basic():
     print("  [PASS] Offset mapping: local → absolute timestamps")
 
 
-def test_offset_filters_before_highlight():
-    """Words in padding region BEFORE highlight are filtered out."""
+def test_offset_keeps_padding_words_for_vad_shift():
+    """Words in the padding region (padded_start..original_start) are KEPT.
+
+    Filtering to the final VAD-adjusted highlight range happens downstream in
+    _build_clips_with_words(), which is the single source of truth for bounds.
+    Only words outside the padded audio region are dropped here.
+    """
     mock_whisper = MagicMock()
     t = SelectiveWhisperTranscriber(mock_whisper)
     # Highlight: 50.0-110.0, Padded: 47.0-113.0
@@ -71,34 +76,43 @@ def test_offset_filters_before_highlight():
 
     raw_segments = [{
         "words": [
-            {"word": "padding", "start": 0.5, "end": 1.0},   # absolute: 47.5-48.0 → BEFORE highlight
-            {"word": "real", "start": 4.0, "end": 4.5},      # absolute: 51.0-51.5 → IN highlight
+            {"word": "padding", "start": 0.5, "end": 1.0},   # absolute: 47.5-48.0 → padding, KEPT
+            {"word": "real", "start": 4.0, "end": 4.5},      # absolute: 51.0-51.5 → in highlight, KEPT
+            {"word": "outside", "start": -1.0, "end": -0.5}, # absolute: 46.0-46.5 → before padded_start, DROPPED
         ]
     }]
 
     words = t._apply_offset_and_filter(raw_segments, audio_slice)
-    assert len(words) == 1
-    assert words[0].word == "real"
-    print("  [PASS] Filters words before highlight range")
+    assert len(words) == 2
+    assert words[0].word == "padding"
+    assert words[0].start == 47.5  # 0.5 + 47.0
+    assert words[1].word == "real"
+    print("  [PASS] Keeps padding words for VAD shift, drops only out-of-padded-region words")
 
 
-def test_offset_filters_after_highlight():
-    """Words in padding region AFTER highlight are filtered out."""
+def test_offset_keeps_words_until_padded_end():
+    """Words after original_end but inside padded_end are KEPT.
+
+    The padded region extends past original_end so VAD shifts the boundary later;
+    only words that start after padded_end are dropped here.
+    """
     mock_whisper = MagicMock()
     t = SelectiveWhisperTranscriber(mock_whisper)
     audio_slice = make_slice(padded_start=47.0, original_start=50.0, original_end=110.0)
 
     raw_segments = [{
         "words": [
-            {"word": "real", "start": 10.0, "end": 10.5},     # absolute: 57.0 → IN
-            {"word": "after", "start": 64.0, "end": 64.5},    # absolute: 111.0 → AFTER (>110+0.5)
+            {"word": "real", "start": 10.0, "end": 10.5},     # absolute: 57.0 → KEPT
+            {"word": "after", "start": 64.0, "end": 64.5},    # absolute: 111.0 → in padding, KEPT
+            {"word": "beyond", "start": 67.0, "end": 67.5},   # absolute: 114.0 → after padded_end, DROPPED
         ]
     }]
 
     words = t._apply_offset_and_filter(raw_segments, audio_slice)
-    assert len(words) == 1
+    assert len(words) == 2
     assert words[0].word == "real"
-    print("  [PASS] Filters words after highlight range")
+    assert words[1].word == "after"
+    print("  [PASS] Keeps words up to padded_end, drops only beyond it")
 
 
 def test_offset_boundary_tolerance():
@@ -259,7 +273,7 @@ def test_transcribe_all_clips():
 
     slices = [
         make_slice(rank=1, padded_start=47.0, original_start=50.0, original_end=110.0),
-        make_slice(rank=2, padded_start=197.0, original_start=200.0, original_end=260.0),
+        make_slice(rank=2, padded_start=197.0, padded_end=263.0, original_start=200.0, original_end=260.0),
     ]
 
     async def run():
@@ -290,7 +304,7 @@ def test_transcribe_all_clips_partial_failure():
 
     slices = [
         make_slice(rank=1, padded_start=47.0, original_start=50.0, original_end=110.0),
-        make_slice(rank=2, padded_start=197.0, original_start=200.0, original_end=260.0),
+        make_slice(rank=2, padded_start=197.0, padded_end=263.0, original_start=200.0, original_end=260.0),
     ]
 
     async def run():
@@ -339,8 +353,8 @@ if __name__ == "__main__":
     print("\n=== Task 5 Tests: SelectiveWhisperTranscriber ===\n")
     # Offset mapping
     test_offset_mapping_basic()
-    test_offset_filters_before_highlight()
-    test_offset_filters_after_highlight()
+    test_offset_keeps_padding_words_for_vad_shift()
+    test_offset_keeps_words_until_padded_end()
     test_offset_boundary_tolerance()
     test_offset_empty_words()
     test_offset_multiple_segments()

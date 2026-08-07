@@ -91,9 +91,10 @@ class TestDetectThenSwitch:
         # seats. Each frame still contains two physically distinct people, so
         # the frame-level evidence must activate grid instead of rejecting the
         # pair based on a historical shared ID.
+        # 12 frames (4s @ 3fps) so GRID_ENTER_SAMPLES=9 confirmation is met
         frames = []
-        for i in range(8):
-            if i < 4:
+        for i in range(12):
+            if i < 6:
                 frames.append([
                     make_det(10, 450, 400, 250, 290, i),
                     make_det(20, 1450, 410, 240, 280, i),

@@ -591,9 +591,20 @@ def build_share_pack(
     hashtags = hashtags[:12]
 
     alts = hook_roulette(hook_s, reason_s, n=6)
+    # Caption opener must DIFFER from the on-screen hook text while staying
+    # related. Pick the first hook-alt variant that isn't a verbatim copy of
+    # the hook (question / STOP / Wait… forms, etc.). Falls back to the hook
+    # only when no variant exists.
+    opener = hook_s or "Clip siap post"
+    for alt in alts:
+        t = (alt or {}).get("text", "").strip()
+        if t and t.lower() != (hook_s or "").lower():
+            opener = t
+            break
     caption_tt = "\n".join(
         x for x in [
-            hook_s or "Clip siap post",
+            opener,
+            reason_s[:140] if reason_s else "",
             "",
             (cta or {}).get("text") or "",
             "",
@@ -602,7 +613,7 @@ def build_share_pack(
     ).strip()
     caption_ig = "\n".join(
         x for x in [
-            hook_s,
+            opener,
             reason_s[:160] if reason_s else "",
             "",
             (cta or {}).get("text") or "Save biar gampang dicari 📌",
@@ -612,7 +623,7 @@ def build_share_pack(
     ).strip()
     caption_yt = "\n".join(
         x for x in [
-            hook_s,
+            opener,
             "",
             reason_s[:280] if reason_s else "",
             "",
@@ -632,12 +643,47 @@ def build_share_pack(
             "tiktok": caption_tt,
             "instagram": caption_ig,
             "youtube": caption_yt,
-            "plain": hook_s,
+            "plain": opener,
         },
         "virality": viral,
         "posting_tips": _posting_tips(duration, viral),
         "best_post_windows": ["07:00-09:00", "12:00-13:30", "19:00-22:00"],
     }
+
+
+def share_pack_for_clip(
+    *,
+    hook: str = "",
+    reason: str = "",
+    score: int | float = 0,
+    duration: float = 0.0,
+    words: list[dict] | None = None,
+    visual_entities: list[dict] | None = None,
+    cta: dict | None = None,
+    virality: dict | None = None,
+    rank: int = 1,
+) -> tuple[dict, list, list]:
+    """Build (captions, hashtags, hook_alts) for a clip. Never raises."""
+    try:
+        pack = build_share_pack(
+            hook=hook,
+            reason=reason,
+            score=score,
+            duration=duration,
+            words=words,
+            visual_entities=visual_entities,
+            cta=cta,
+            virality=virality,
+            rank=rank,
+        )
+        return (
+            pack.get("captions") or {},
+            pack.get("hashtags") or [],
+            pack.get("hook_alts") or [],
+        )
+    except Exception as exc:
+        logger.warning("share_pack_for_clip failed: %s", exc)
+        return {}, [], []
 
 
 def _posting_tips(duration: float, viral: dict) -> list[str]:

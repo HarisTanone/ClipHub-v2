@@ -392,7 +392,7 @@ class TestVideoSplicer:
             keyword="test", source_id="1", platform="youtube",
         )
 
-        async def extract(_source, start, end, output):
+        async def extract(_source, start, end, output, **kwargs):
             if end == pytest.approx(98.8):
                 return False
             open(output, "wb").close()

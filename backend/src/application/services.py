@@ -1810,6 +1810,19 @@ class JobService:
         assembled_clips = []
         for clip in clips:
             words = self._get_words_for_clip(clip, clips_with_words)
+            try:
+                from src.infrastructure.clip_quality_helpers import share_pack_for_clip
+                captions, hashtags, hook_alts = share_pack_for_clip(
+                    hook=clip.hook or "",
+                    reason=clip.reason or "",
+                    score=clip.score,
+                    duration=clip.end - clip.start,
+                    words=words,
+                    visual_entities=list(getattr(clip, "visual_entities", None) or []),
+                    rank=clip.rank,
+                )
+            except Exception:
+                captions, hashtags, hook_alts = {}, [], []
             assembled_clips.append({
                 "rank": clip.rank,
                 "score": clip.score,
@@ -1819,6 +1832,9 @@ class JobService:
                 "reason": clip.reason,
                 "duration": round(clip.end - clip.start, 2),
                 "words": words,
+                "captions": captions,
+                "hashtags": hashtags,
+                "hook_alts": hook_alts,
                 "text_emphasis_events": [
                     {
                         key: value

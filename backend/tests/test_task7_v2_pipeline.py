@@ -116,13 +116,13 @@ def test_prepare_clips_filters_short():
 
 
 def test_build_clips_with_words():
-    """Convert Word objects to relative-timestamp dicts."""
+    """Word-level transcription returns 0-based words → subtitle dicts."""
     svc = make_mock_service()
     clips = [Clip(rank=1, score=80, start=50.0, end=110.0, hook="X", reason="Y")]
     words_per_clip = {
         1: [
-            Word(word="hello", start=52.0, end=52.5, highlight=False),
-            Word(word="world", start=53.0, end=53.5, highlight=True),
+            Word(word="hello", start=2.0, end=2.5, highlight=False),
+            Word(word="world", start=3.0, end=3.5, highlight=True),
         ]
     }
 
@@ -131,10 +131,10 @@ def test_build_clips_with_words():
     assert 1 in result
     assert len(result[1]) == 2
     assert result[1][0]["word"] == "hello"
-    assert result[1][0]["start"] == 2.0    # 52.0 - 50.0 (relative)
+    assert result[1][0]["start"] == 2.0    # already relative to clip start
     assert result[1][0]["end"] == 2.5
     assert result[1][1]["highlight"] is True
-    print("  [PASS] _build_clips_with_words converts to relative")
+    print("  [PASS] _build_clips_with_words keeps 0-based words as subtitle dicts")
 
 
 def test_build_clips_with_words_empty():
@@ -242,11 +242,11 @@ def test_full_pipeline_happy_path():
                             with patch.object(svc, "_create_folder_structure", new_callable=AsyncMock):
                                 await svc.run_pipeline(job)
 
-        # Verify status progression
+        # Verify status progression (micro-slicing status was merged into the
+        # slicing step; word-level transcription now uses the word-level engine)
         status_calls = [c.args[1] for c in svc._repo.update_status.call_args_list]
         assert JobStatus.V2_TRANSCRIBING in status_calls
         assert JobStatus.V2_ANALYZING in status_calls
-        assert JobStatus.V2_MICRO_SLICING in status_calls
         assert JobStatus.V2_WORD_TRANSCRIBING in status_calls
         assert JobStatus.V2_VAD_REFINING in status_calls
         assert JobStatus.COMPLETED in status_calls
@@ -254,8 +254,9 @@ def test_full_pipeline_happy_path():
         # Verify transcript used YouTube API (not Gemini)
         svc._transcriber.transcribe.assert_called_once()
 
-        # Verify clips_data saved
-        svc._repo.update_clips_data.assert_called_once()
+        # Verify clips_data saved — the pipeline publishes clip slots
+        # progressively, so the final assembled payload is the LAST call.
+        assert svc._repo.update_clips_data.call_count >= 1
         saved_data = svc._repo.update_clips_data.call_args[0][1]
         assert saved_data["pipeline_version"] == "v2"
         assert saved_data["transcript_source"] == "youtube_api"
@@ -287,10 +288,10 @@ def test_pipeline_transcription_failure():
                     mock_cache.load_analysis.return_value = None
                     await svc.run_pipeline(job)
 
-        # Should be marked as FAILED
+        # Should be marked as FAILED with the user-friendly no-subtitle message
         last_status_call = svc._repo.update_status.call_args_list[-1]
         assert last_status_call.args[1] == JobStatus.FAILED
-        assert "Transcription gagal" in last_status_call.args[2]
+        assert "tidak memiliki subtitle/caption" in last_status_call.args[2]
 
     run_async(run())
     print("  [PASS] Transcription failure → job FAILED")

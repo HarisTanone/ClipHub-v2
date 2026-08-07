@@ -28,6 +28,7 @@ from src.infrastructure.groq_analyzer import GroqAnalyzer, GroqAnalyzerError
 from src.infrastructure.micro_slicer import MicroSlicer
 from src.infrastructure.selective_whisper import SelectiveWhisperTranscriber
 from src.infrastructure.silero_vad import SileroVADProcessor
+from src.config import settings
 from src.infrastructure.pipeline_router import PipelineRouter
 from src.presentation.schemas.jobs import JobResponse
 
@@ -61,9 +62,9 @@ def test_transcript_to_analyzer_data_flow():
 
     # GroqAnalyzer can chunk this transcript
     analyzer = GroqAnalyzer()
-    chunks = analyzer._chunk_transcript(transcript.segments)
+    chunks = analyzer._chunk_transcript_with_ids(transcript.segments)
     assert len(chunks) >= 1
-    assert all(isinstance(seg, TranscriptSegment) for seg in chunks[0])
+    assert all(isinstance(seg, TranscriptSegment) for seg in chunks[0][0])
     print("  [PASS] TranscriptResult → GroqAnalyzer data flow")
 
 
@@ -153,19 +154,19 @@ def test_whisper_output_to_subtitle_format():
     clips = [Clip(rank=1, score=85, start=50.0, end=110.0, hook="X", reason="Y")]
     words_per_clip = {
         1: [
-            Word(word="halo", start=52.0, end=52.5),
-            Word(word="dunia", start=53.0, end=53.5),
-            Word(word="ini", start=54.0, end=54.3),
+            Word(word="halo", start=2.0, end=2.5),
+            Word(word="dunia", start=3.0, end=3.5),
+            Word(word="ini", start=4.0, end=4.3),
         ]
     }
 
     result = svc._build_clips_with_words(clips, words_per_clip)
 
-    # Should be relative to clip start (50.0)
+    # Word-level transcription is already 0-based relative to clip start
     assert result[1][0]["word"] == "halo"
-    assert result[1][0]["start"] == 2.0   # 52.0 - 50.0
-    assert result[1][1]["start"] == 3.0   # 53.0 - 50.0
-    assert result[1][2]["start"] == 4.0   # 54.0 - 50.0
+    assert result[1][0]["start"] == 2.0
+    assert result[1][1]["start"] == 3.0
+    assert result[1][2]["start"] == 4.0
     print("  [PASS] Whisper words → subtitle renderer format")
 
 
@@ -283,8 +284,8 @@ def test_full_v2_pipeline_best_case():
         assert JobStatus.V2_TRANSCRIBING in status_calls
         assert JobStatus.V2_ANALYZING in status_calls
 
-        # Verify clips_data saved
-        svc._repo.update_clips_data.assert_called_once()
+        # Verify clips_data saved — pipeline publishes progressively, final payload is last call
+        assert svc._repo.update_clips_data.call_count >= 1
         clips_data = svc._repo.update_clips_data.call_args[0][1]
         assert clips_data["pipeline_version"] == "v2"
         assert clips_data["transcript_source"] == "youtube_api"
@@ -325,7 +326,7 @@ def test_worst_case_no_transcript():
                 await svc.run_pipeline(job)
         last_call = svc._repo.update_status.call_args_list[-1]
         assert last_call.args[1] == JobStatus.FAILED
-        assert "Transcription gagal" in last_call.args[2]
+        assert "Both YouTube and Groq failed" in last_call.args[2]
 
     run_async(run())
     print("  [PASS] Worst case: no transcript → FAILED")
@@ -384,6 +385,7 @@ def test_worst_case_partial_whisper_failure():
     svc._repo.update_status = AsyncMock()
     svc._repo.update_clips_count = AsyncMock()
     svc._repo.update_clips_data = AsyncMock()
+    svc._repo.get_by_job_id = AsyncMock(return_value=None)
     svc._downloader = AsyncMock()
     svc._downloader.validate_url = AsyncMock(return_value=(True, None, 300.0))
     svc._downloader.download_video = AsyncMock()
@@ -453,7 +455,9 @@ def test_worst_case_partial_whisper_failure():
 def test_routing_integration_non_premium():
     """End-to-end: non-premium user creates job → V2 pipeline assigned."""
     router = PipelineRouter()
-    with patch.object(router, "_check_user_premium", return_value=False):
+    with patch.object(router, "_check_user_premium", return_value=False), \
+         patch.object(settings, "FORCE_V2_PIPELINE", False), \
+         patch.object(settings, "V2_PIPELINE_ENABLED", True):
         version = router.get_pipeline_version(user_id=5, is_superadmin=False)
     assert version == "v2"
 
@@ -469,8 +473,12 @@ def test_routing_integration_non_premium():
 
 def test_routing_integration_premium():
     """End-to-end: premium user creates job → V1 pipeline assigned."""
+    # FORCE_V2_PIPELINE overrides everything — patch it off to exercise the
+    # premium → V1 routing logic deterministically.
     router = PipelineRouter()
-    with patch.object(router, "_check_user_premium", return_value=True):
+    with patch.object(router, "_check_user_premium", return_value=True), \
+         patch.object(settings, "FORCE_V2_PIPELINE", False), \
+         patch.object(settings, "V2_PIPELINE_ENABLED", True):
         version = router.get_pipeline_version(user_id=3, is_superadmin=False)
     assert version == "v1"
 
