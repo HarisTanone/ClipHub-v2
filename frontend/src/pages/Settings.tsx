@@ -357,6 +357,7 @@ export function Settings() {
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [testAllResults, setTestAllResults] = useState<any>(null);
   const [isTestingAll, setIsTestingAll] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
 
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
@@ -1052,9 +1053,20 @@ export function Settings() {
                     Refresh
                   </Button>
                 </div>
+                {availableModels.length > 0 && (
+                  <input
+                    type="text"
+                    placeholder="Cari model..."
+                    value={modelSearch}
+                    onChange={(e) => setModelSearch(e.target.value)}
+                    className="w-full mb-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none transition-colors"
+                  />
+                )}
                 {availableModels.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
-                    {availableModels.map((m) => (
+                    {availableModels
+                      .filter((m) => !modelSearch || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
+                      .map((m) => (
                       <button
                         key={m.id}
                         type="button"

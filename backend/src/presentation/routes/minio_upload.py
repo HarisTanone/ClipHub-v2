@@ -108,11 +108,6 @@ async def notify_telegram_upload(job_id: str, clip_rank: int, body: TelegramNoti
     try:
         import httpx
 
-        telegram_bot_url = getattr(settings, "TELEGRAM_BOT_NOTIFY_URL", "")
-        if not telegram_bot_url:
-            logger.info(f"[minio] Telegram notify skipped (no TELEGRAM_BOT_NOTIFY_URL): {body.filename}")
-            return {"success": False, "error": "TELEGRAM_BOT_NOTIFY_URL not configured"}
-
         caption_text = body.caption.strip() if body.caption else ""
         message = (
             f"<b>Clip Uploaded</b>\n\n"
@@ -124,20 +119,47 @@ async def notify_telegram_upload(job_id: str, clip_rank: int, body: TelegramNoti
             message += f"<b>Caption:</b>\n{caption_text}\n\n"
         message += f'<a href="{body.url}">Download Link</a> (7 hari)'
 
-        async with httpx.AsyncClient(timeout=10) as client:
-            res = await client.post(telegram_bot_url, json={
-                "job_id": job_id,
-                "clip_rank": clip_rank,
-                "message": message,
-                "url": body.url,
-                "filename": body.filename,
-                "caption": caption_text,
-            })
+        # Method 1: Direct Telegram Bot API (preferred)
+        bot_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+        chat_id = getattr(settings, "TELEGRAM_CHAT_ID", "")
 
-        if res.status_code == 200:
-            return {"success": True}
-        else:
-            return {"success": False, "error": f"Telegram returned {res.status_code}"}
+        if bot_token and chat_id:
+            async with httpx.AsyncClient(timeout=10) as client:
+                res = await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": message,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": False,
+                    },
+                )
+            if res.status_code == 200:
+                return {"success": True, "method": "telegram_api"}
+            else:
+                logger.warning(f"[minio] Telegram API failed: {res.status_code} {res.text[:200]}")
+                return {"success": False, "error": f"Telegram API {res.status_code}"}
+
+        # Method 2: Custom webhook URL (fallback)
+        telegram_bot_url = getattr(settings, "TELEGRAM_BOT_NOTIFY_URL", "")
+        if telegram_bot_url:
+            async with httpx.AsyncClient(timeout=10) as client:
+                res = await client.post(telegram_bot_url, json={
+                    "job_id": job_id,
+                    "clip_rank": clip_rank,
+                    "message": message,
+                    "url": body.url,
+                    "filename": body.filename,
+                    "caption": caption_text,
+                })
+            if res.status_code == 200:
+                return {"success": True, "method": "webhook"}
+            else:
+                return {"success": False, "error": f"Webhook returned {res.status_code}"}
+
+        # No method configured
+        logger.info(f"[minio] Telegram notify skipped (no token/url): {body.filename}")
+        return {"success": False, "error": "Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID or TELEGRAM_BOT_NOTIFY_URL"}
 
     except Exception as e:
         logger.warning(f"[minio] Telegram notify failed: {e}")

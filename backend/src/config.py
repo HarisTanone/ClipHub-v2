@@ -282,6 +282,8 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str = "cliperhub"
     MINIO_SECURE: bool = False
     TELEGRAM_BOT_NOTIFY_URL: str = ""  # URL to POST upload notifications to Telegram bot
+    TELEGRAM_BOT_TOKEN: str = ""  # Bot token for direct Telegram API (alternative to notify URL)
+    TELEGRAM_CHAT_ID: str = ""  # Chat/group ID to send notifications to
 
     # ─── Groq API (V2 Pipeline) ──────────────────────────────────────────
     GROQ_API_KEY: str = ""
