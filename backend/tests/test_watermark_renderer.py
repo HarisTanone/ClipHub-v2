@@ -109,21 +109,21 @@ def test_image_watermark_builds_overlay(mock_run, tmp_path):
     # Pre-create the output so the success check passes (subprocess is mocked).
     with open(out, "w", encoding="utf-8") as f:
         f.write("dummy")
-    with patch("src.infrastructure.watermark_renderer._probe_video_width", return_value=1080):
-        ok = apply_watermark("/in.mp4", {
-            "enabled": True,
-            "type": "image",
-            "imageDataUrl": "data:image/png;base64,iVBORw0KGgo=",
-            "sizePct": 20,
-            "opacity": 50,
-            "position": "top-center",
-            "marginPct": 3,
-        }, out)
+    ok = apply_watermark("/in.mp4", {
+        "enabled": True,
+        "type": "image",
+        "imageDataUrl": "data:image/png;base64,iVBORw0KGgo=",
+        "sizePct": 20,
+        "opacity": 50,
+        "position": "top-center",
+        "marginPct": 3,
+    }, out)
     assert ok is True
     cmd = mock_run.call_args.args[0]
     assert "-filter_complex" in cmd
     fc = cmd[cmd.index("-filter_complex") + 1]
-    assert "scale=216:-2" in fc
-    assert "colorchannelmixer=aa=0.50" in fc
+    assert "scale2ref=w='max(2,trunc(main_w*0.2000/2)*2)':h=-2" in fc
+    assert "lut=a='floor(val*0.50)'" in fc
     assert "x=(main_w-overlay_w)/2" in fc
     assert "y=main_h*0.0300" in fc
+    assert "colorchannelmixer" not in fc

@@ -163,24 +163,6 @@ def _resolve_font(fonts_dir: str, family: str) -> str:
     return ""
 
 
-def _probe_video_width(video_path: str) -> Optional[int]:
-    """Return the main video stream width, or None if probing fails."""
-    try:
-        out = subprocess.run(
-            [
-                "ffprobe", "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=width", "-of", "csv=p=0", video_path,
-            ],
-            capture_output=True, text=True, timeout=20,
-        )
-        text = (out.stdout or "").strip()
-        if text:
-            return int(text.splitlines()[0])
-    except Exception as e:  # noqa: BLE001
-        logger.warning("watermark: ffprobe width failed: %s", e)
-    return None
-
-
 def _decode_image_data_url(data_url: str):
     """Decode a data:image/*;base64 URL into (bytes, extension)."""
     match = re.match(r"^data:image/(png|jpe?g|webp);base64,(.+)$", data_url, re.DOTALL)
@@ -298,11 +280,6 @@ def _render_image_watermark(
         logger.warning("watermark: image data URL tidak valid")
         return False
 
-    width = _probe_video_width(video_path)
-    if not width:
-        logger.warning("watermark: tidak bisa probe video width, skip watermark")
-        return False
-
     image_path = ""
     fd, image_path = tempfile.mkstemp(suffix=f".{ext}")
     os.close(fd)
@@ -310,14 +287,22 @@ def _render_image_watermark(
         with open(image_path, "wb") as f:
             f.write(data)
 
-        target_w = max(2, int(width * cfg["sizePct"] / 100))
         x_expr = _overlay_x_expr(cfg["position"]).format(m=f"{margin:.4f}")
         y_expr = _overlay_y_expr(cfg["position"]).format(m=f"{margin:.4f}")
 
+        # scale2ref sizes the overlay relative to the main video width (no
+        # ffprobe needed) and lut=a applies the opacity — both work on every
+        # FFmpeg since 4.0. The previous approach probed the video width and
+        # used colorchannelmixer=aa= which requires FFmpeg >= 4.3 (Ubuntu
+        # 20.04 ships 4.2.x), silently dropping image watermarks there.
+        # max(2, ...) guards the scale-family magic value w=0 ("keep original
+        # width") for tiny clips / small sizePct, and keeps width even for
+        # yuv420p.
+        w_expr = f"max(2,trunc(main_w*{cfg['sizePct'] / 100.0:.4f}/2)*2)"
         filter_complex = (
-            f"[1:v]scale={target_w}:-2,format=rgba,"
-            f"colorchannelmixer=aa={opacity:.2f}[wm];"
-            f"[0:v][wm]overlay=x={x_expr}:y={y_expr}:format=auto,setsar=1[v]"
+            f"[1:v][0:v]scale2ref=w='{w_expr}':h=-2[wm][base];"
+            f"[wm]format=rgba,lut=a='floor(val*{opacity:.2f})'[wm2];"
+            f"[base][wm2]overlay=x={x_expr}:y={y_expr}:format=auto,setsar=1[v]"
         )
         cmd = [
             "ffmpeg", "-y",
