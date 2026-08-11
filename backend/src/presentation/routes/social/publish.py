@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from src.config import settings
 from src.presentation.routes.auth import get_current_user
 from src.infrastructure.gdrive_uploader import gdrive_uploader
+from src.infrastructure.clip_outputs import find_final_clip
 from src.presentation.routes.social.helpers import repliz_post
 
 logger = logging.getLogger(__name__)
@@ -45,34 +46,12 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             detail="Google Drive not configured. Set GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE in .env"
         )
 
-    # Locate video file
-    jobs_dir = os.path.join(settings.OUTPUT_DIR, body.jobId)
-    if not os.path.isdir(jobs_dir):
+    # Locate video file using same logic as the clip serving endpoint
+    output_dir = os.path.join(settings.OUTPUT_DIR, body.jobId)
+    if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Find final clip file
-    clip_final = None
-    possible_names = [
-        f"clip_{body.clipRank}_final.mp4",
-        f"clip_{body.clipRank}_final_assembled.mp4",
-        f"clip_{body.clipRank}.mp4",
-    ]
-    for name in possible_names:
-        path = os.path.join(jobs_dir, name)
-        if os.path.exists(path):
-            clip_final = path
-            break
-
-    # Also check clips subdirectory
-    if not clip_final:
-        clips_dir = os.path.join(jobs_dir, "clips")
-        if os.path.isdir(clips_dir):
-            for name in possible_names:
-                path = os.path.join(clips_dir, name)
-                if os.path.exists(path):
-                    clip_final = path
-                    break
-
+    clip_final = find_final_clip(output_dir, body.clipRank)
     if not clip_final:
         raise HTTPException(
             status_code=404,
