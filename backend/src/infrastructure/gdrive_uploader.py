@@ -85,7 +85,10 @@ class GoogleDriveUploader:
         # Upload
         media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
         file = service.files().create(
-            body=file_metadata, media_body=media, fields="id,webViewLink"
+            body=file_metadata,
+            media_body=media,
+            fields="id,webViewLink",
+            supportsAllDrives=True,
         ).execute()
 
         file_id = file.get("id")
@@ -95,6 +98,7 @@ class GoogleDriveUploader:
         service.permissions().create(
             fileId=file_id,
             body={"type": "anyone", "role": "reader"},
+            supportsAllDrives=True,
         ).execute()
 
         # Direct download link (usable by Repliz)
