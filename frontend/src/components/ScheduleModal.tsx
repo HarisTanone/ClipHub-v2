@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Calendar, Clock, Send, X, Facebook, RefreshCw } from "lucide-react";
+import { Calendar, Clock, Send, X, Facebook, RefreshCw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
@@ -19,17 +19,26 @@ async function fetchSocialAccounts(): Promise<any[]> {
   return data.docs || [];
 }
 
-async function createSchedule(payload: any): Promise<{ scheduleId: string }> {
+async function publishClip(payload: any): Promise<any> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/api/social/schedule`, {
+  const res = await fetch(`${API_BASE}/api/social/publish`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to create schedule");
+    throw new Error(err.detail || "Failed to publish");
   }
+  return res.json();
+}
+
+async function checkPublishStatus(): Promise<{ gdrive_configured: boolean; repliz_configured: boolean }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/publish/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return { gdrive_configured: false, repliz_configured: false };
   return res.json();
 }
 
@@ -38,10 +47,10 @@ async function createSchedule(payload: any): Promise<{ scheduleId: string }> {
 interface ScheduleModalProps {
   open: boolean;
   onClose: () => void;
-  /** Video URL (MinIO/local) to post */
-  videoUrl: string;
-  /** Thumbnail URL if available */
-  thumbnailUrl?: string | null;
+  /** Job ID */
+  jobId: string;
+  /** Clip rank number */
+  clipRank: number;
   /** Pre-filled caption from clip */
   defaultCaption?: string;
   /** Clip hook text */
@@ -50,7 +59,7 @@ interface ScheduleModalProps {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ScheduleModal({ open, onClose, videoUrl, thumbnailUrl, defaultCaption, hookText }: ScheduleModalProps) {
+export function ScheduleModal({ open, onClose, jobId, clipRank, defaultCaption, hookText }: ScheduleModalProps) {
   const toast = useToast();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("");
@@ -60,14 +69,15 @@ export function ScheduleModal({ open, onClose, videoUrl, thumbnailUrl, defaultCa
   const [scheduleTime, setScheduleTime] = useState("");
   const [posting, setPosting] = useState(false);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [status, setStatus] = useState<{ gdrive_configured: boolean; repliz_configured: boolean } | null>(null);
 
   useEffect(() => {
     if (open) {
       setCaption(defaultCaption || "");
       setLoadingAccounts(true);
-      fetchSocialAccounts().then((accs) => {
+      Promise.all([fetchSocialAccounts(), checkPublishStatus()]).then(([accs, st]) => {
         setAccounts(accs);
-        // Auto-select first connected account
+        setStatus(st);
         const connected = accs.filter((a: any) => a.isConnected);
         if (connected.length > 0 && !selectedAccount) {
           setSelectedAccount(connected[0]._id || connected[0].id);
@@ -100,48 +110,24 @@ export function ScheduleModal({ open, onClose, videoUrl, thumbnailUrl, defaultCa
       toast.error("Pilih tanggal dan waktu");
       return;
     }
-    if (!videoUrl) {
-      toast.error("Video URL tidak tersedia");
-      return;
-    }
 
     setPosting(true);
     try {
       const payload = {
-        title: hookText || "",
-        description: caption,
-        type: "video",
-        medias: [
-          {
-            alt: "",
-            customThumbnail: !!thumbnailUrl,
-            type: "video",
-            thumbnail: thumbnailUrl || "",
-            url: videoUrl,
-          },
-        ],
-        meta: { title: "", description: "", url: "" },
-        additionalInfo: {
-          isAiGenerated: false,
-          isDraft: false,
-          isAutoAddMusic: false,
-          collaborators: [],
-          mentions: [],
-          music: { id: "", artist: "", name: "", thumbnail: "" },
-          products: [],
-          tags: [],
-          targetCountries: [],
-        },
-        replies: [],
+        jobId,
+        clipRank,
         accountId: selectedAccount,
+        caption,
+        title: hookText || "",
         scheduleAt,
+        type: "video",
       };
 
-      const result = await createSchedule(payload);
-      toast.success(scheduleMode === "now" ? "Post dijadwalkan!" : `Dijadwalkan untuk ${scheduleDate} ${scheduleTime}`);
+      await publishClip(payload);
+      toast.success(scheduleMode === "now" ? "Video di-upload dan dijadwalkan!" : `Dijadwalkan untuk ${scheduleDate} ${scheduleTime}`);
       onClose();
     } catch (e: any) {
-      toast.error(e.message || "Gagal membuat schedule");
+      toast.error(e.message || "Gagal publish");
     } finally {
       setPosting(false);
     }
@@ -168,6 +154,18 @@ export function ScheduleModal({ open, onClose, videoUrl, thumbnailUrl, defaultCa
 
         {/* Body */}
         <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+          {/* Status warnings */}
+          {status && !status.gdrive_configured && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+              <p className="text-[11px] text-amber-400">Google Drive belum dikonfigurasi. Set GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE di .env backend.</p>
+            </div>
+          )}
+          {status && !status.repliz_configured && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+              <p className="text-[11px] text-amber-400">Repliz API belum dikonfigurasi. Set REPLIZ_ACCESS_KEY dan REPLIZ_SECRET_KEY di .env backend.</p>
+            </div>
+          )}
+
           {/* Account selector */}
           <div>
             <label className="text-xs font-medium text-zinc-400 mb-2 block">Pilih Akun</label>
@@ -278,21 +276,13 @@ export function ScheduleModal({ open, onClose, videoUrl, thumbnailUrl, defaultCa
             )}
           </div>
 
-          {/* Video preview */}
-          <div>
-            <label className="text-xs font-medium text-zinc-400 mb-2 block">Video</label>
-            <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2.5">
-              {thumbnailUrl ? (
-                <img src={thumbnailUrl} alt="" className="h-12 w-9 rounded object-cover" />
-              ) : (
-                <div className="h-12 w-9 rounded bg-zinc-800 flex items-center justify-center">
-                  <Calendar className="h-4 w-4 text-zinc-600" />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] text-zinc-300 truncate">{videoUrl.split("/").pop() || "video.mp4"}</p>
-                <p className="text-[10px] text-zinc-600">Video clip</p>
-              </div>
+          {/* Info */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <Upload className="h-3.5 w-3.5 text-blue-400" />
+              <p className="text-[11px] text-zinc-400">
+                Video akan di-upload ke Google Drive lalu diposting via Repliz.
+              </p>
             </div>
           </div>
         </div>
@@ -305,10 +295,10 @@ export function ScheduleModal({ open, onClose, videoUrl, thumbnailUrl, defaultCa
             size="sm"
             onClick={handlePost}
             loading={posting}
-            disabled={!selectedAccount || (scheduleMode === "later" && (!scheduleDate || !scheduleTime))}
+            disabled={!selectedAccount || (scheduleMode === "later" && (!scheduleDate || !scheduleTime)) || (status !== null && !status.gdrive_configured)}
             icon={scheduleMode === "now" ? <Send className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
           >
-            {scheduleMode === "now" ? "Post Sekarang" : "Jadwalkan"}
+            {posting ? "Uploading..." : scheduleMode === "now" ? "Post Sekarang" : "Jadwalkan"}
           </Button>
         </div>
       </div>

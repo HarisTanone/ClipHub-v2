@@ -290,6 +290,10 @@ class Settings(BaseSettings):
     REPLIZ_SECRET_KEY: str = ""
     REPLIZ_BASE_URL: str = "https://api.repliz.com"
 
+    # ─── Google Drive (social upload) ────────────────────────────────────
+    GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE: str = ""  # Path to service account JSON key
+    GOOGLE_DRIVE_FOLDER_ID: str = ""  # Shared folder ID for uploads
+
     # ─── Groq API (V2 Pipeline) ──────────────────────────────────────────
     GROQ_API_KEY: str = ""
     GROQ_WHISPER_MODEL: str = "whisper-large-v3-turbo"

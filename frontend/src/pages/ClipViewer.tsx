@@ -739,8 +739,8 @@ export function ClipViewer() {
       <ScheduleModal
         open={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}
-        videoUrl={uploadResult?.presigned_url || uploadResult?.url || (finalDownloadUrl ? `${window.location.origin}${finalDownloadUrl}` : "")}
-        thumbnailUrl={clip.urls.thumbnail ? `${API_BASE}${clip.urls.thumbnail}` : null}
+        jobId={jobId!}
+        clipRank={clipRank}
         defaultCaption={clip.captions?.tiktok || clip.captions?.instagram || clip.captions?.youtube || clip.hook || ""}
         hookText={clip.hook || ""}
       />
