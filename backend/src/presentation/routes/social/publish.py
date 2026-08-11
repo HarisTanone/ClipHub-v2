@@ -46,7 +46,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         )
 
     # Locate video file
-    jobs_dir = os.path.join(settings.JOBS_DIR, body.jobId)
+    jobs_dir = os.path.join(settings.OUTPUT_DIR, body.jobId)
     if not os.path.isdir(jobs_dir):
         raise HTTPException(status_code=404, detail="Job not found")
 
