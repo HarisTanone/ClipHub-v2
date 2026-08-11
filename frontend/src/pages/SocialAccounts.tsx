@@ -57,6 +57,26 @@ async function facebookExchange(code: string): Promise<{ token: string }> {
   return res.json();
 }
 
+async function tiktokAuthorize(redirect: string): Promise<{ url: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/tiktok/authorize?redirect=${encodeURIComponent(redirect)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to authorize");
+  return res.json();
+}
+
+async function tiktokConnect(code: string): Promise<{ accountId: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/tiktok/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Connect failed");
+  return res.json();
+}
+
 async function facebookPages(accessToken: string): Promise<{ docs: any[] }> {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/social/facebook/pages?token=${encodeURIComponent(accessToken)}`, {
@@ -230,6 +250,70 @@ function FacebookConnectFlow({ onConnected }: { onConnected: () => void }) {
   return null;
 }
 
+// ─── TikTok Connect Flow ──────────────────────────────────────────────────────
+
+type TtStep = "idle" | "authorizing" | "connecting";
+
+function TikTokConnectFlow({ onConnected }: { onConnected: () => void }) {
+  const toast = useToast();
+  const [step, setStep] = useState<TtStep>("idle");
+
+  // Listen for OAuth callback message
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type === "tiktok-oauth-callback" && event.data.code) {
+        handleConnect(event.data.code);
+      }
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  async function handleStart() {
+    setStep("authorizing");
+    try {
+      const redirectUrl = `${window.location.origin}/social/tiktok/callback`;
+      const data = await tiktokAuthorize(redirectUrl);
+      const popup = window.open(data.url, "tiktok_oauth", "width=600,height=700,scrollbars=yes");
+      if (!popup) {
+        toast.error("Popup blocked — allow popups for this site");
+        setStep("idle");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to start TikTok auth");
+      setStep("idle");
+    }
+  }
+
+  async function handleConnect(code: string) {
+    setStep("connecting");
+    try {
+      await tiktokConnect(code);
+      toast.success("TikTok account connected");
+      setStep("idle");
+      onConnected();
+    } catch (e: any) {
+      toast.error(e.message || "Connect failed");
+      setStep("idle");
+    }
+  }
+
+  if (step === "idle") {
+    return (
+      <Button size="sm" onClick={handleStart} icon={<PlatformIcon type="tiktok" className="h-3.5 w-3.5" />}>
+        Connect TikTok
+      </Button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-xs text-zinc-400">
+      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+      {step === "authorizing" ? "Waiting for TikTok authorization..." : "Connecting..."}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function SocialAccounts() {
@@ -275,8 +359,8 @@ export function SocialAccounts() {
 
   const platforms = [
     { key: "facebook", label: "Facebook", available: true },
+    { key: "tiktok", label: "TikTok", available: true },
     { key: "instagram", label: "Instagram", available: false },
-    { key: "tiktok", label: "TikTok", available: false },
     { key: "threads", label: "Threads", available: false },
     { key: "youtube", label: "YouTube", available: false },
     { key: "linkedin", label: "LinkedIn", available: false },
@@ -338,6 +422,18 @@ export function SocialAccounts() {
                 </div>
               </div>
               <FacebookConnectFlow onConnected={loadAccounts} />
+            </div>
+
+            {/* TikTok */}
+            <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <PlatformIcon type="tiktok" className="h-5 w-5" />
+                <div>
+                  <p className="text-xs font-medium text-zinc-200">TikTok</p>
+                  <p className="text-[10px] text-zinc-500">Connect your TikTok account</p>
+                </div>
+              </div>
+              <TikTokConnectFlow onConnected={loadAccounts} />
             </div>
 
             {/* Other platforms (coming soon) */}

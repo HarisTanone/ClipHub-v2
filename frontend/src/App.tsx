@@ -8,6 +8,7 @@ import { ClipViewer } from "@/pages/ClipViewer";
 import { Settings } from "@/pages/Settings";
 import { SocialAccounts } from "@/pages/SocialAccounts";
 import { FacebookCallback } from "@/pages/FacebookCallback";
+import { TikTokCallback } from "@/pages/TikTokCallback";
 import { Login } from "@/pages/Login";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
@@ -39,6 +40,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/social/facebook/callback" element={<FacebookCallback />} />
+        <Route path="/social/tiktok/callback" element={<TikTokCallback />} />
         <Route
           element={
             <ProtectedRoute>
