@@ -20,8 +20,8 @@ SCOPES = ["https://www.googleapis.com/auth/drive"]
 # Replace these with your OAuth2 client credentials
 CLIENT_CONFIG = {
     "installed": {
-        "client_id": "YOUR_CLIENT_ID_HERE",
-        "client_secret": "YOUR_CLIENT_SECRET_HERE",
+        "client_id": "285659127128-fr3c3encv8lavurk1ul5idlj57ls5lvm.apps.googleusercontent.com",
+        "client_secret": "GOCSPX-REPLACE_WITH_YOUR_FULL_SECRET_ENDING_50y2",
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
         "redirect_uris": ["http://localhost:8080"],
