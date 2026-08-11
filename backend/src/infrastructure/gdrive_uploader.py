@@ -1,12 +1,16 @@
 """Google Drive upload service.
 
-Uses a service account to upload video files and make them publicly accessible.
-All users share the same Drive storage (admin-managed service account).
+Supports two auth modes:
+1. OAuth2 refresh token (Gmail personal) — preferred
+2. Service account (Google Workspace with delegation)
+
+All users share the same Drive storage (admin-managed credentials).
 """
 import logging
 import os
 from typing import Optional
 
+from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -15,32 +19,61 @@ from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
 class GoogleDriveUploader:
-    """Upload files to Google Drive via service account."""
+    """Upload files to Google Drive."""
 
     def __init__(self):
         self._service = None
 
     @property
     def is_configured(self) -> bool:
-        """Check if Google Drive is configured."""
-        return bool(
+        """Check if Google Drive is configured (either OAuth2 or service account)."""
+        has_oauth = bool(
+            settings.GOOGLE_DRIVE_CLIENT_ID
+            and settings.GOOGLE_DRIVE_CLIENT_SECRET
+            and settings.GOOGLE_DRIVE_REFRESH_TOKEN
+        )
+        has_sa = bool(
             settings.GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE
             and os.path.exists(settings.GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE)
         )
+        return has_oauth or has_sa
 
     def _get_service(self):
         """Lazy-init Drive API service."""
-        if self._service is None:
-            if not self.is_configured:
-                raise RuntimeError("Google Drive service account not configured")
-            credentials = service_account.Credentials.from_service_account_file(
-                settings.GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE, scopes=SCOPES
+        if self._service is not None:
+            return self._service
+
+        if not self.is_configured:
+            raise RuntimeError("Google Drive not configured")
+
+        # Prefer OAuth2 refresh token (works with personal Gmail)
+        if (settings.GOOGLE_DRIVE_CLIENT_ID
+                and settings.GOOGLE_DRIVE_CLIENT_SECRET
+                and settings.GOOGLE_DRIVE_REFRESH_TOKEN):
+            credentials = Credentials(
+                token=None,
+                refresh_token=settings.GOOGLE_DRIVE_REFRESH_TOKEN,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=settings.GOOGLE_DRIVE_CLIENT_ID,
+                client_secret=settings.GOOGLE_DRIVE_CLIENT_SECRET,
+                scopes=SCOPES,
             )
             self._service = build("drive", "v3", credentials=credentials)
+            logger.info("Google Drive: using OAuth2 refresh token")
+            return self._service
+
+        # Fallback: service account (Workspace with delegation)
+        credentials = service_account.Credentials.from_service_account_file(
+            settings.GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE, scopes=SCOPES
+        )
+        if settings.GOOGLE_DRIVE_DELEGATE_EMAIL:
+            credentials = credentials.with_subject(settings.GOOGLE_DRIVE_DELEGATE_EMAIL)
+        self._service = build("drive", "v3", credentials=credentials)
+        logger.info("Google Drive: using service account")
         return self._service
 
     def upload_video(
@@ -117,7 +150,7 @@ class GoogleDriveUploader:
         """Delete a file from Google Drive."""
         try:
             service = self._get_service()
-            service.files().delete(fileId=file_id).execute()
+            service.files().delete(fileId=file_id, supportsAllDrives=True).execute()
             logger.info(f"Google Drive file deleted: {file_id}")
             return True
         except Exception as e:

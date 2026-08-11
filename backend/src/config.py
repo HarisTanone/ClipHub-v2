@@ -291,8 +291,13 @@ class Settings(BaseSettings):
     REPLIZ_BASE_URL: str = "https://api.repliz.com"
 
     # ─── Google Drive (social upload) ────────────────────────────────────
-    GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE: str = ""  # Path to service account JSON key
+    GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE: str = ""  # Path to service account JSON key (optional)
     GOOGLE_DRIVE_FOLDER_ID: str = ""  # Shared folder ID for uploads
+    GOOGLE_DRIVE_DELEGATE_EMAIL: str = ""  # Email to impersonate (Workspace only)
+    # OAuth2 flow (for Gmail personal accounts)
+    GOOGLE_DRIVE_CLIENT_ID: str = ""
+    GOOGLE_DRIVE_CLIENT_SECRET: str = ""
+    GOOGLE_DRIVE_REFRESH_TOKEN: str = ""  # Obtained via one-time OAuth consent
 
     # ─── Groq API (V2 Pipeline) ──────────────────────────────────────────
     GROQ_API_KEY: str = ""
