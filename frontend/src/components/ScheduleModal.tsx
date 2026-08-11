@@ -155,11 +155,6 @@ export function ScheduleModal({ open, onClose, jobId, clipRank, defaultCaption, 
         {/* Body */}
         <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
           {/* Status warnings */}
-          {status && !status.gdrive_configured && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
-              <p className="text-[11px] text-amber-400">Google Drive belum dikonfigurasi. Set GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE di .env backend.</p>
-            </div>
-          )}
           {status && !status.repliz_configured && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
               <p className="text-[11px] text-amber-400">Repliz API belum dikonfigurasi. Set REPLIZ_ACCESS_KEY dan REPLIZ_SECRET_KEY di .env backend.</p>
@@ -281,7 +276,7 @@ export function ScheduleModal({ open, onClose, jobId, clipRank, defaultCaption, 
             <div className="flex items-center gap-2">
               <Upload className="h-3.5 w-3.5 text-blue-400" />
               <p className="text-[11px] text-zinc-400">
-                Video akan di-upload ke Google Drive lalu diposting via Repliz.
+                Video akan di-upload ke Repliz Storage lalu diposting ke social media.
               </p>
             </div>
           </div>
@@ -295,7 +290,7 @@ export function ScheduleModal({ open, onClose, jobId, clipRank, defaultCaption, 
             size="sm"
             onClick={handlePost}
             loading={posting}
-            disabled={!selectedAccount || (scheduleMode === "later" && (!scheduleDate || !scheduleTime)) || (status !== null && !status.gdrive_configured)}
+            disabled={!selectedAccount || (scheduleMode === "later" && (!scheduleDate || !scheduleTime)) || (status !== null && !status.repliz_configured)}
             icon={scheduleMode === "now" ? <Send className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
           >
             {posting ? "Uploading..." : scheduleMode === "now" ? "Post Sekarang" : "Jadwalkan"}
