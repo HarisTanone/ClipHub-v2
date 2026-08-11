@@ -1,0 +1,444 @@
+import { useState, useEffect, useCallback } from "react";
+import { Share2, Facebook, Instagram, Youtube, RefreshCw, Trash2, Plus, ExternalLink, AlertTriangle } from "lucide-react";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { API_BASE, getToken } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+// ─── API helpers ──────────────────────────────────────────────────────────────
+
+async function fetchAccounts(page = 1, limit = 20): Promise<any> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/accounts?page=${page}&limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to fetch accounts");
+  return res.json();
+}
+
+async function fetchAccountCount(): Promise<any> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/accounts/count`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function removeAccount(accountId: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/accounts/${accountId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to remove");
+}
+
+async function facebookAuthorize(redirect: string): Promise<{ url: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/facebook/authorize?redirect=${encodeURIComponent(redirect)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to authorize");
+  return res.json();
+}
+
+async function facebookExchange(code: string): Promise<{ token: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/facebook/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Exchange failed");
+  return res.json();
+}
+
+async function facebookPages(accessToken: string): Promise<{ docs: any[] }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/facebook/pages?token=${encodeURIComponent(accessToken)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to fetch pages");
+  return res.json();
+}
+
+async function facebookConnect(pageId: string, accessToken: string): Promise<{ accountId: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/facebook/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ pageId, token: accessToken }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to connect");
+  return res.json();
+}
+
+// ─── Platform icon helper ─────────────────────────────────────────────────────
+
+function PlatformIcon({ type, className }: { type: string; className?: string }) {
+  const base = cn("h-4 w-4", className);
+  switch (type) {
+    case "facebook": return <Facebook className={cn(base, "text-blue-400")} />;
+    case "instagram": return <Instagram className={cn(base, "text-pink-400")} />;
+    case "youtube": return <Youtube className={cn(base, "text-red-400")} />;
+    case "tiktok": return <svg className={cn(base, "text-zinc-200")} viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.88 2.89 2.89 0 01-2.88-2.88 2.89 2.89 0 012.88-2.88c.28 0 .56.04.82.1v-3.5a6.37 6.37 0 00-.82-.05A6.34 6.34 0 003.15 15.7a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V9.44a8.16 8.16 0 003.76.92V6.69z"/></svg>;
+    case "threads": return <svg className={cn(base, "text-zinc-200")} viewBox="0 0 24 24" fill="currentColor"><path d="M12.186 24h-.007C5.461 23.956.057 18.529 0 11.8v-.318C.074 4.773 5.497-.023 12.207 0c3.268.012 6.162 1.262 8.137 3.518l-2.49 2.368C16.474 4.2 14.447 3.399 12.2 3.39c-4.732.017-8.556 3.862-8.556 8.588 0 4.737 3.84 8.594 8.568 8.594 3.718 0 6.562-1.96 7.604-5.17H12.2V12h11.544c.132.694.2 1.408.2 2.13 0 6.545-4.394 9.87-11.758 9.87z"/></svg>;
+    case "linkedin": return <svg className={cn(base, "text-blue-300")} viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>;
+    default: return <Share2 className={base} />;
+  }
+}
+
+// ─── Facebook Connect Flow ────────────────────────────────────────────────────
+
+type FbStep = "idle" | "authorizing" | "exchanging" | "selecting" | "connecting";
+
+function FacebookConnectFlow({ onConnected }: { onConnected: () => void }) {
+  const toast = useToast();
+  const [step, setStep] = useState<FbStep>("idle");
+  const [pages, setPages] = useState<any[]>([]);
+  const [fbToken, setFbToken] = useState("");
+  const [connecting, setConnecting] = useState<string | null>(null);
+
+  // Listen for OAuth callback message
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type === "facebook-oauth-callback" && event.data.code) {
+        handleExchange(event.data.code);
+      }
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  async function handleStart() {
+    setStep("authorizing");
+    try {
+      // Use current origin as redirect — works for both local and production
+      // Repliz requires a valid URL (not localhost). For local dev, use ngrok or nip.io.
+      const redirectUrl = `${window.location.origin}/social/facebook/callback`;
+      const data = await facebookAuthorize(redirectUrl);
+      // Open Facebook OAuth in popup
+      const popup = window.open(data.url, "facebook_oauth", "width=600,height=700,scrollbars=yes");
+      if (!popup) {
+        toast.error("Popup blocked — allow popups for this site");
+        setStep("idle");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to start Facebook auth");
+      setStep("idle");
+    }
+  }
+
+  async function handleExchange(code: string) {
+    setStep("exchanging");
+    try {
+      const data = await facebookExchange(code);
+      setFbToken(data.token);
+      // Fetch pages
+      const pagesData = await facebookPages(data.token);
+      setPages(pagesData.docs || []);
+      setStep("selecting");
+    } catch (e: any) {
+      toast.error(e.message || "Exchange failed");
+      setStep("idle");
+    }
+  }
+
+  async function handleConnectPage(pageId: string) {
+    setConnecting(pageId);
+    try {
+      // Use the page-specific token (not user token) — required by Facebook Graph API
+      const page = pages.find((p: any) => p.id === pageId);
+      const pageToken = page?.token || fbToken;
+      await facebookConnect(pageId, pageToken);
+      toast.success("Facebook page connected");
+      setStep("idle");
+      setPages([]);
+      setFbToken("");
+      onConnected();
+    } catch (e: any) {
+      toast.error(e.message || "Connect failed");
+    } finally {
+      setConnecting(null);
+    }
+  }
+
+  if (step === "idle") {
+    return (
+      <Button size="sm" onClick={handleStart} icon={<Facebook className="h-3.5 w-3.5" />}>
+        Connect Facebook
+      </Button>
+    );
+  }
+
+  if (step === "authorizing" || step === "exchanging") {
+    return (
+      <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        {step === "authorizing" ? "Waiting for Facebook authorization..." : "Exchanging token..."}
+      </div>
+    );
+  }
+
+  if (step === "selecting") {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-zinc-400 mb-2">Select a page to connect:</p>
+        {pages.length === 0 ? (
+          <p className="text-[11px] text-zinc-600">No pages found. Make sure you have admin access to at least one Facebook Page.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {pages.map((page) => (
+              <button
+                key={page.id}
+                onClick={() => handleConnectPage(page.id)}
+                disabled={connecting !== null}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  connecting === page.id
+                    ? "border-blue-500 bg-blue-500/10"
+                    : "border-zinc-800 hover:border-zinc-600 bg-zinc-950/60"
+                )}
+              >
+                {page.picture ? (
+                  <img src={page.picture} alt="" className="h-8 w-8 rounded-full object-cover" />
+                ) : (
+                  <div className="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center">
+                    <Facebook className="h-4 w-4 text-blue-400" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-zinc-200 font-medium truncate">{page.name}</p>
+                  {page.username && <p className="text-[10px] text-zinc-500 truncate">@{page.username}</p>}
+                </div>
+                {connecting === page.id && <RefreshCw className="h-3.5 w-3.5 text-blue-400 animate-spin shrink-0" />}
+              </button>
+            ))}
+          </div>
+        )}
+        <Button size="sm" variant="outline" onClick={() => { setStep("idle"); setPages([]); setFbToken(""); }}>
+          Cancel
+        </Button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export function SocialAccounts() {
+  const toast = useToast();
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [count, setCount] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  const loadAccounts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [data, countData] = await Promise.all([fetchAccounts(), fetchAccountCount()]);
+      setAccounts(data.docs || []);
+      setCount(countData);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load accounts");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadAccounts(); }, [loadAccounts]);
+
+  async function handleRemove(accountId: string, name: string) {
+    if (!(await confirmDialog({
+      title: "Disconnect account?",
+      message: `"${name}" will be disconnected. You can reconnect it later.`,
+      confirmText: "Disconnect",
+      danger: true,
+    }))) return;
+    setRemoving(accountId);
+    try {
+      await removeAccount(accountId);
+      toast.success("Account disconnected");
+      loadAccounts();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to remove");
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  const platforms = [
+    { key: "facebook", label: "Facebook", available: true },
+    { key: "instagram", label: "Instagram", available: false },
+    { key: "tiktok", label: "TikTok", available: false },
+    { key: "threads", label: "Threads", available: false },
+    { key: "youtube", label: "YouTube", available: false },
+    { key: "linkedin", label: "LinkedIn", available: false },
+  ];
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between shrink-0 mb-4">
+        <div className="flex items-center gap-3">
+          <Share2 className="h-5 w-5 text-emerald-400" />
+          <h1 className="text-lg font-semibold text-zinc-100">Social Accounts</h1>
+          {count && (
+            <Badge variant="default" size="sm">{count.total || 0} connected</Badge>
+          )}
+        </div>
+        <Button size="sm" variant="outline" onClick={loadAccounts} loading={loading} icon={<RefreshCw className="h-3.5 w-3.5" />}>
+          Refresh
+        </Button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto space-y-6">
+        {/* Platform overview */}
+        {count && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+            {platforms.map((p) => (
+              <div key={p.key} className={cn(
+                "flex items-center gap-2 rounded-lg border px-3 py-2",
+                p.available ? "border-zinc-800 bg-zinc-950/60" : "border-zinc-800/40 bg-zinc-950/30 opacity-50"
+              )}>
+                <PlatformIcon type={p.key} />
+                <div>
+                  <p className="text-[11px] text-zinc-400">{p.label}</p>
+                  <p className="text-sm font-semibold text-zinc-200">{(count as any)[p.key] || 0}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Connect new account */}
+        <Card className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Plus className="h-4 w-4 text-emerald-400" />
+            <h3 className="text-sm font-semibold text-zinc-100">Connect Account</h3>
+          </div>
+          <p className="text-[11px] text-zinc-500 mb-4">
+            Connect your social media accounts to manage comments, automate replies, and schedule posts.
+          </p>
+
+          <div className="space-y-3">
+            {/* Facebook */}
+            <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <Facebook className="h-5 w-5 text-blue-400" />
+                <div>
+                  <p className="text-xs font-medium text-zinc-200">Facebook Pages</p>
+                  <p className="text-[10px] text-zinc-500">Connect Facebook Pages you manage</p>
+                </div>
+              </div>
+              <FacebookConnectFlow onConnected={loadAccounts} />
+            </div>
+
+            {/* Other platforms (coming soon) */}
+            {platforms.filter(p => !p.available).map((p) => (
+              <div key={p.key} className="flex items-center justify-between rounded-lg border border-zinc-800/50 px-4 py-3 opacity-50">
+                <div className="flex items-center gap-3">
+                  <PlatformIcon type={p.key} className="h-5 w-5" />
+                  <div>
+                    <p className="text-xs font-medium text-zinc-400">{p.label}</p>
+                    <p className="text-[10px] text-zinc-600">Coming soon</p>
+                  </div>
+                </div>
+                <Badge variant="default" size="sm">Soon</Badge>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Connected accounts list */}
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-zinc-100">Connected Accounts</h3>
+            <span className="text-[10px] text-zinc-600">{accounts.length} account(s)</span>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="h-5 w-5 text-zinc-600 animate-spin" />
+              <span className="ml-2 text-xs text-zinc-500">Loading accounts...</span>
+            </div>
+          ) : accounts.length === 0 ? (
+            <div className="text-center py-8">
+              <Share2 className="h-8 w-8 text-zinc-700 mx-auto mb-2" />
+              <p className="text-xs text-zinc-500">No accounts connected yet</p>
+              <p className="text-[10px] text-zinc-600 mt-1">Connect a Facebook page above to get started</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {accounts.map((acc) => (
+                <div key={acc._id || acc.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 px-4 py-3 hover:border-zinc-700 transition-colors">
+                  {acc.picture ? (
+                    <img src={acc.picture} alt="" className="h-9 w-9 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <div className="h-9 w-9 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
+                      <PlatformIcon type={acc.type} />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-zinc-200 font-medium truncate">{acc.name}</p>
+                      <PlatformIcon type={acc.type} className="h-3 w-3" />
+                      {acc.isConnected ? (
+                        <Badge variant="success" size="sm">Connected</Badge>
+                      ) : (
+                        <Badge variant="error" size="sm">Disconnected</Badge>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-zinc-500 truncate">
+                      @{acc.username || acc.generatedId} · {acc.type}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(acc._id || acc.id, acc.name)}
+                    disabled={removing === (acc._id || acc.id)}
+                    className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors shrink-0"
+                    title="Disconnect"
+                  >
+                    {removing === (acc._id || acc.id) ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Info note */}
+        {!settings_configured() && (
+          <Card className="p-4 border-amber-500/20">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-medium text-zinc-200">Repliz API not configured</p>
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  Set REPLIZ_ACCESS_KEY and REPLIZ_SECRET_KEY in your backend .env file to enable social account management.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function settings_configured(): boolean {
+  // We can't check server env from frontend — assume configured if page loads
+  // The backend will return 503 if not configured
+  return true;
+}

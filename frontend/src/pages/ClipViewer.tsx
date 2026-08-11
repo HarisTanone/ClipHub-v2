@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
+import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw, Send } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +10,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
+import { ScheduleModal } from "@/components/ScheduleModal";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle } from "@/components/StyleEditorModal";
 import { jobs, API_BASE, getToken, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
@@ -51,6 +52,9 @@ export function ClipViewer() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadResult, setUploadResult] = useState<{ success: boolean; url?: string; presigned_url?: string; error?: string; telegram_sent?: boolean } | null>(null);
+
+  // Schedule modal
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
   // Style editor modal (same as NewJob) — load from localStorage
   const [styleModalOpen, setStyleModalOpen] = useState(false);
@@ -389,6 +393,16 @@ export function ClipViewer() {
                   {isUploading ? `${uploadProgress || 0}%` : uploadResult?.success ? "Uploaded" : "Upload"}
                 </Button>
               )}
+              {finalDownloadUrl && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setScheduleModalOpen(true)}
+                  icon={<Send className="h-3 w-3" />}
+                >
+                  Post
+                </Button>
+              )}
             </div>
           </div>
 
@@ -719,6 +733,16 @@ export function ClipViewer() {
           clipRank,
           frame: Math.round((((Number(clip.text_emphasis_events[0].start) || 0) + (Number(clip.text_emphasis_events[0].end) || 0)) / 2) * 30),
         } : undefined}
+      />
+
+      {/* Schedule / Post to Social Modal */}
+      <ScheduleModal
+        open={scheduleModalOpen}
+        onClose={() => setScheduleModalOpen(false)}
+        videoUrl={uploadResult?.presigned_url || uploadResult?.url || (finalDownloadUrl ? `${window.location.origin}${finalDownloadUrl}` : "")}
+        thumbnailUrl={clip.urls.thumbnail ? `${API_BASE}${clip.urls.thumbnail}` : null}
+        defaultCaption={clip.captions?.tiktok || clip.captions?.instagram || clip.captions?.youtube || clip.hook || ""}
+        hookText={clip.hook || ""}
       />
     </div>
   );

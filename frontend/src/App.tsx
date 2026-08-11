@@ -6,6 +6,8 @@ import { NewJob } from "@/pages/NewJob";
 import { JobDetail } from "@/pages/JobDetail";
 import { ClipViewer } from "@/pages/ClipViewer";
 import { Settings } from "@/pages/Settings";
+import { SocialAccounts } from "@/pages/SocialAccounts";
+import { FacebookCallback } from "@/pages/FacebookCallback";
 import { Login } from "@/pages/Login";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
@@ -36,6 +38,7 @@ export default function App() {
       <ConfirmDialog />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/social/facebook/callback" element={<FacebookCallback />} />
         <Route
           element={
             <ProtectedRoute>
@@ -47,6 +50,7 @@ export default function App() {
           <Route path="jobs/new" element={<NewJob />} />
           <Route path="jobs/:jobId" element={<JobDetail />} />
           <Route path="jobs/:jobId/clips/:rank" element={<ClipViewer />} />
+          <Route path="social" element={<SocialAccounts />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

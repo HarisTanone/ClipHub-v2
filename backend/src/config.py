@@ -285,6 +285,11 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""  # Bot token for direct Telegram API (alternative to notify URL)
     TELEGRAM_CHAT_ID: str = ""  # Chat/group ID to send notifications to
 
+    # ─── Repliz Social Media Management ─────────────────────────────────
+    REPLIZ_ACCESS_KEY: str = ""
+    REPLIZ_SECRET_KEY: str = ""
+    REPLIZ_BASE_URL: str = "https://api.repliz.com"
+
     # ─── Groq API (V2 Pipeline) ──────────────────────────────────────────
     GROQ_API_KEY: str = ""
     GROQ_WHISPER_MODEL: str = "whisper-large-v3-turbo"

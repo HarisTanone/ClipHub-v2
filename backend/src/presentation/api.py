@@ -27,6 +27,7 @@ from src.presentation.routes.transcript import router as transcript_router
 from src.presentation.routes.canvas_templates import router as canvas_templates_router
 from src.presentation.routes.model_settings import router as model_settings_router
 from src.presentation.routes.minio_upload import router as minio_router
+from src.presentation.routes.social import router as social_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -230,6 +231,10 @@ default_cors_origins = [
     "http://100.64.5.96:3000",
     "http://192.168.168.58:3001",
     "http://192.168.168.58:3000",
+    "http://127-0-0-1.nip.io:3000",
+    "http://127-0-0-1.nip.io:3001",
+    "http://100-64-5-96.nip.io:3001",
+    "http://100-64-5-96.nip.io:3000",
 ]
 env_cors_origins = [
     origin.strip()
@@ -266,6 +271,7 @@ app.include_router(features_router, prefix="/api")
 app.include_router(canvas_templates_router, prefix="/api")
 app.include_router(model_settings_router, prefix="/api")
 app.include_router(minio_router, prefix="/api")
+app.include_router(social_router, prefix="/api")
 
 
 @app.get("/health")
