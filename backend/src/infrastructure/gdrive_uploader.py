@@ -135,8 +135,9 @@ class GoogleDriveUploader:
         ).execute()
 
         # Direct download link (usable by Repliz)
-        # Use lh3 redirect which works better for large files without confirmation page
-        direct_link = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+        # For publicly shared files, use this format which serves the file directly
+        # without redirects or confirmation pages
+        direct_link = f"https://drive.usercontent.google.com/download?id={file_id}&export=download"
         web_view_link = file.get("webViewLink", f"https://drive.google.com/file/d/{file_id}/view")
 
         logger.info(f"Google Drive file shared publicly: {direct_link}")

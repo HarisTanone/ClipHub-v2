@@ -9,6 +9,7 @@ import { Settings } from "@/pages/Settings";
 import { SocialAccounts } from "@/pages/SocialAccounts";
 import { FacebookCallback } from "@/pages/FacebookCallback";
 import { TikTokCallback } from "@/pages/TikTokCallback";
+import { SocialCallback } from "@/pages/SocialCallback";
 import { Login } from "@/pages/Login";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
@@ -41,6 +42,10 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/social/facebook/callback" element={<FacebookCallback />} />
         <Route path="/social/tiktok/callback" element={<TikTokCallback />} />
+        <Route path="/social/instagram/callback" element={<SocialCallback />} />
+        <Route path="/social/threads/callback" element={<SocialCallback />} />
+        <Route path="/social/youtube/callback" element={<SocialCallback />} />
+        <Route path="/social/linkedin/callback" element={<SocialCallback />} />
         <Route
           element={
             <ProtectedRoute>

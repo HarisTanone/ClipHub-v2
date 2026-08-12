@@ -77,6 +77,132 @@ async function tiktokConnect(code: string): Promise<{ accountId: string }> {
   return res.json();
 }
 
+// Instagram
+async function instagramAuthorize(redirect: string): Promise<{ url: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/instagram/authorize?redirect=${encodeURIComponent(redirect)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to authorize");
+  return res.json();
+}
+
+async function instagramConnect(code: string): Promise<{ accountId: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/instagram/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Connect failed");
+  return res.json();
+}
+
+// Threads
+async function threadsAuthorize(redirect: string): Promise<{ url: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/threads/authorize?redirect=${encodeURIComponent(redirect)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to authorize");
+  return res.json();
+}
+
+async function threadsConnect(code: string): Promise<{ accountId: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/threads/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Connect failed");
+  return res.json();
+}
+
+// YouTube (multi-step)
+async function youtubeAuthorize(redirect: string): Promise<{ url: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/youtube/authorize?redirect=${encodeURIComponent(redirect)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to authorize");
+  return res.json();
+}
+
+async function youtubeExchange(code: string): Promise<{ token: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/youtube/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Exchange failed");
+  return res.json();
+}
+
+async function youtubeChannels(accessToken: string): Promise<any[]> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/youtube/channels?token=${encodeURIComponent(accessToken)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.docs || data || [];
+}
+
+async function youtubeConnect(channelId: string, accessToken: string): Promise<{ accountId: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/youtube/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ channelId, token: accessToken }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Connect failed");
+  return res.json();
+}
+
+// LinkedIn (multi-step)
+async function linkedinAuthorize(redirect: string): Promise<{ url: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/linkedin/authorize?redirect=${encodeURIComponent(redirect)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to authorize");
+  return res.json();
+}
+
+async function linkedinExchange(code: string): Promise<{ token: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/linkedin/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Exchange failed");
+  return res.json();
+}
+
+async function linkedinOrganizations(accessToken: string): Promise<any[]> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/linkedin/organizations?token=${encodeURIComponent(accessToken)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.docs || data || [];
+}
+
+async function linkedinConnect(organizationId: string, accessToken: string): Promise<{ accountId: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/linkedin/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ organizationId, token: accessToken }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Connect failed");
+  return res.json();
+}
+
 async function facebookPages(accessToken: string): Promise<{ docs: any[] }> {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/social/facebook/pages?token=${encodeURIComponent(accessToken)}`, {
@@ -314,6 +440,197 @@ function TikTokConnectFlow({ onConnected }: { onConnected: () => void }) {
   );
 }
 
+// ─── Simple Connect Flow (Instagram, Threads) ─────────────────────────────────
+
+function SimpleConnectFlow({ platform, authFn, connectFn, onConnected }: {
+  platform: string;
+  authFn: (redirect: string) => Promise<{ url: string }>;
+  connectFn: (code: string) => Promise<{ accountId: string }>;
+  onConnected: () => void;
+}) {
+  const toast = useToast();
+  const [step, setStep] = useState<"idle" | "authorizing" | "connecting">("idle");
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type === `${platform}-oauth-callback` && event.data.code) {
+        handleConnect(event.data.code);
+      }
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  async function handleStart() {
+    setStep("authorizing");
+    try {
+      const redirectUrl = `${window.location.origin}/social/${platform}/callback`;
+      const data = await authFn(redirectUrl);
+      const popup = window.open(data.url, `${platform}_oauth`, "width=600,height=700,scrollbars=yes");
+      if (!popup) { toast.error("Popup blocked"); setStep("idle"); }
+    } catch (e: any) {
+      toast.error(e.message || `Failed to start ${platform} auth`);
+      setStep("idle");
+    }
+  }
+
+  async function handleConnect(code: string) {
+    setStep("connecting");
+    try {
+      await connectFn(code);
+      toast.success(`${platform} account connected`);
+      setStep("idle");
+      onConnected();
+    } catch (e: any) {
+      toast.error(e.message || "Connect failed");
+      setStep("idle");
+    }
+  }
+
+  if (step === "idle") {
+    return (
+      <Button size="sm" onClick={handleStart} icon={<PlatformIcon type={platform} className="h-3.5 w-3.5" />}>
+        Connect
+      </Button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 text-xs text-zinc-400">
+      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+      {step === "authorizing" ? "Waiting..." : "Connecting..."}
+    </div>
+  );
+}
+
+// ─── Multi-step Connect Flow (YouTube, LinkedIn) ──────────────────────────────
+
+function MultiStepConnectFlow({ platform, authFn, exchangeFn, listFn, connectFn, entityLabel, entityIdField, onConnected }: {
+  platform: string;
+  authFn: (redirect: string) => Promise<{ url: string }>;
+  exchangeFn: (code: string) => Promise<{ token: string }>;
+  listFn: (token: string) => Promise<any[]>;
+  connectFn: (entityId: string, token: string) => Promise<{ accountId: string }>;
+  entityLabel: string;
+  entityIdField: string;
+  onConnected: () => void;
+}) {
+  const toast = useToast();
+  const [step, setStep] = useState<"idle" | "authorizing" | "exchanging" | "selecting" | "connecting">("idle");
+  const [entities, setEntities] = useState<any[]>([]);
+  const [accessToken, setAccessToken] = useState("");
+  const [connecting, setConnecting] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type === `${platform}-oauth-callback` && event.data.code) {
+        handleExchange(event.data.code);
+      }
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  async function handleStart() {
+    setStep("authorizing");
+    try {
+      const redirectUrl = `${window.location.origin}/social/${platform}/callback`;
+      const data = await authFn(redirectUrl);
+      const popup = window.open(data.url, `${platform}_oauth`, "width=600,height=700,scrollbars=yes");
+      if (!popup) { toast.error("Popup blocked"); setStep("idle"); }
+    } catch (e: any) {
+      toast.error(e.message || `Failed to start ${platform} auth`);
+      setStep("idle");
+    }
+  }
+
+  async function handleExchange(code: string) {
+    setStep("exchanging");
+    try {
+      const data = await exchangeFn(code);
+      setAccessToken(data.token);
+      const items = await listFn(data.token);
+      setEntities(Array.isArray(items) ? items : []);
+      setStep("selecting");
+    } catch (e: any) {
+      toast.error(e.message || "Exchange failed");
+      setStep("idle");
+    }
+  }
+
+  async function handleConnect(entityId: string) {
+    setConnecting(entityId);
+    try {
+      await connectFn(entityId, accessToken);
+      toast.success(`${platform} account connected`);
+      setStep("idle");
+      setEntities([]);
+      setAccessToken("");
+      onConnected();
+    } catch (e: any) {
+      toast.error(e.message || "Connect failed");
+    } finally {
+      setConnecting(null);
+    }
+  }
+
+  if (step === "idle") {
+    return (
+      <Button size="sm" onClick={handleStart} icon={<PlatformIcon type={platform} className="h-3.5 w-3.5" />}>
+        Connect
+      </Button>
+    );
+  }
+
+  if (step === "authorizing" || step === "exchanging") {
+    return (
+      <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        {step === "authorizing" ? "Waiting..." : "Exchanging..."}
+      </div>
+    );
+  }
+
+  if (step === "selecting") {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-zinc-400 mb-2">Select {entityLabel}:</p>
+        {entities.length === 0 ? (
+          <p className="text-[11px] text-zinc-600">No {entityLabel} found.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {entities.map((entity) => {
+              const id = entity[entityIdField] || entity.id || entity._id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => handleConnect(id)}
+                  disabled={connecting !== null}
+                  className={cn(
+                    "w-full flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
+                    connecting === id ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800 hover:border-zinc-600 bg-zinc-950/60"
+                  )}
+                >
+                  {entity.picture && <img src={entity.picture} alt="" className="h-7 w-7 rounded-full object-cover" />}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-zinc-200 font-medium truncate">{entity.name || entity.title || id}</p>
+                    {entity.username && <p className="text-[10px] text-zinc-500">@{entity.username}</p>}
+                  </div>
+                  {connecting === id && <RefreshCw className="h-3.5 w-3.5 animate-spin shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <Button size="sm" variant="outline" onClick={() => { setStep("idle"); setEntities([]); setAccessToken(""); }}>
+          Cancel
+        </Button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function SocialAccounts() {
@@ -360,10 +677,10 @@ export function SocialAccounts() {
   const platforms = [
     { key: "facebook", label: "Facebook", available: true },
     { key: "tiktok", label: "TikTok", available: true },
-    { key: "instagram", label: "Instagram", available: false },
-    { key: "threads", label: "Threads", available: false },
-    { key: "youtube", label: "YouTube", available: false },
-    { key: "linkedin", label: "LinkedIn", available: false },
+    { key: "instagram", label: "Instagram", available: true },
+    { key: "threads", label: "Threads", available: true },
+    { key: "youtube", label: "YouTube", available: true },
+    { key: "linkedin", label: "LinkedIn", available: true },
   ];
 
   return (
@@ -436,19 +753,71 @@ export function SocialAccounts() {
               <TikTokConnectFlow onConnected={loadAccounts} />
             </div>
 
-            {/* Other platforms (coming soon) */}
-            {platforms.filter(p => !p.available).map((p) => (
-              <div key={p.key} className="flex items-center justify-between rounded-lg border border-zinc-800/50 px-4 py-3 opacity-50">
-                <div className="flex items-center gap-3">
-                  <PlatformIcon type={p.key} className="h-5 w-5" />
-                  <div>
-                    <p className="text-xs font-medium text-zinc-400">{p.label}</p>
-                    <p className="text-[10px] text-zinc-600">Coming soon</p>
-                  </div>
+            {/* Instagram */}
+            <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <Instagram className="h-5 w-5 text-pink-400" />
+                <div>
+                  <p className="text-xs font-medium text-zinc-200">Instagram</p>
+                  <p className="text-[10px] text-zinc-500">Connect your Instagram account</p>
                 </div>
-                <Badge variant="default" size="sm">Soon</Badge>
               </div>
-            ))}
+              <SimpleConnectFlow platform="instagram" authFn={instagramAuthorize} connectFn={instagramConnect} onConnected={loadAccounts} />
+            </div>
+
+            {/* Threads */}
+            <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <PlatformIcon type="threads" className="h-5 w-5" />
+                <div>
+                  <p className="text-xs font-medium text-zinc-200">Threads</p>
+                  <p className="text-[10px] text-zinc-500">Connect your Threads account</p>
+                </div>
+              </div>
+              <SimpleConnectFlow platform="threads" authFn={threadsAuthorize} connectFn={threadsConnect} onConnected={loadAccounts} />
+            </div>
+
+            {/* YouTube */}
+            <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <Youtube className="h-5 w-5 text-red-400" />
+                <div>
+                  <p className="text-xs font-medium text-zinc-200">YouTube</p>
+                  <p className="text-[10px] text-zinc-500">Connect your YouTube channel</p>
+                </div>
+              </div>
+              <MultiStepConnectFlow
+                platform="youtube"
+                authFn={youtubeAuthorize}
+                exchangeFn={youtubeExchange}
+                listFn={youtubeChannels}
+                connectFn={youtubeConnect}
+                entityLabel="channel"
+                entityIdField="channelId"
+                onConnected={loadAccounts}
+              />
+            </div>
+
+            {/* LinkedIn */}
+            <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <PlatformIcon type="linkedin" className="h-5 w-5" />
+                <div>
+                  <p className="text-xs font-medium text-zinc-200">LinkedIn</p>
+                  <p className="text-[10px] text-zinc-500">Connect your LinkedIn organization</p>
+                </div>
+              </div>
+              <MultiStepConnectFlow
+                platform="linkedin"
+                authFn={linkedinAuthorize}
+                exchangeFn={linkedinExchange}
+                listFn={linkedinOrganizations}
+                connectFn={linkedinConnect}
+                entityLabel="organization"
+                entityIdField="organizationId"
+                onConnected={loadAccounts}
+              />
+            </div>
           </div>
         </Card>
 
