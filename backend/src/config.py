@@ -50,8 +50,24 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.5-flash"
     GEMINI_FALLBACK_MODEL: str = "gemini-2.5-flash"
 
-    # YouTube Data API v3 (for transcript/captions)
+    # YouTube Data API v3 (for transcript/captions + search)
     YOUTUBE_API_KEY: str = ""
+
+    # ─── Deepgram TTS ─────────────────────────────────────────────────────
+    DEEPGRAM_API_KEY: str = ""
+    DEEPGRAM_TTS_VOICE: str = "aura-2-thalia-en"
+    DEEPGRAM_TTS_SPEED: float = 1.0
+    DEEPGRAM_TTS_TIMEOUT: int = 30
+
+    # ─── AI Video Generator ───────────────────────────────────────────────
+    VIDEO_GEN_ENABLED: bool = True
+    VIDEO_GEN_TARGET_DURATION: int = 65       # target seconds
+    VIDEO_GEN_MIN_DURATION: int = 50
+    VIDEO_GEN_MAX_DURATION: int = 90
+    VIDEO_GEN_MAX_SCENES: int = 10
+    VIDEO_GEN_BGM_DIR: str = "assets/bgm"    # folder with royalty-free MP3s
+    VIDEO_GEN_BGM_VOLUME: float = 0.15       # background music volume (0-1)
+    VIDEO_GEN_OUTPUT_DIR: str = "tmp/video_gen"
 
     # ─── Auth / JWT ───────────────────────────────────────────────────────
     JWT_SECRET_KEY: str = "change-me-in-production"

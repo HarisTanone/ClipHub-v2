@@ -28,6 +28,7 @@ from src.presentation.routes.canvas_templates import router as canvas_templates_
 from src.presentation.routes.model_settings import router as model_settings_router
 from src.presentation.routes.minio_upload import router as minio_router
 from src.presentation.routes.social import router as social_router
+from src.presentation.routes.video_generator import router as video_gen_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -272,6 +273,7 @@ app.include_router(canvas_templates_router, prefix="/api")
 app.include_router(model_settings_router, prefix="/api")
 app.include_router(minio_router, prefix="/api")
 app.include_router(social_router, prefix="/api")
+app.include_router(video_gen_router, prefix="/api")
 
 
 @app.get("/health")

@@ -331,7 +331,14 @@ if [ -f ".env" ]; then
 fi
 
 # Create directories
-mkdir -p data data/asset_cache tmp/output tmp/downloads models
+mkdir -p data data/asset_cache tmp/output tmp/downloads tmp/video_gen models
+
+# Ensure yt-dlp is available (required for Video Generator + B-roll YouTube download)
+if ! command -v yt-dlp &>/dev/null && ! ./venv/bin/python -c "import yt_dlp" 2>/dev/null; then
+    echo "  Installing yt-dlp..."
+    ./venv/bin/pip install yt-dlp -q 2>/dev/null || sudo pip3 install yt-dlp -q 2>/dev/null || true
+fi
+echo "  yt-dlp: $(./venv/bin/python -c 'import yt_dlp; print(yt_dlp.version.__version__)' 2>/dev/null || yt-dlp --version 2>/dev/null || echo 'not found')"
 
 echo "  ✅ Backend ready"
 
@@ -498,10 +505,27 @@ if [ -f ".env" ]; then
     append_env_if_missing ".env" "OBJECT_OVERLAY_DURATION" "2.4"
     append_env_if_missing ".env" "OBJECT_OVERLAY_MIN_RELEVANCE" "0.35"
     append_env_if_missing ".env" "OBJECT_OVERLAY_SHOW_LABEL" "true"
+    # ─── Video Generator (AI topic→video pipeline) ────────────────────────
+    append_env_if_missing ".env" "DEEPGRAM_API_KEY" ""
+    append_env_if_missing ".env" "DEEPGRAM_TTS_VOICE" "aura-2-thalia-en"
+    append_env_if_missing ".env" "DEEPGRAM_TTS_SPEED" "1.0"
+    append_env_if_missing ".env" "DEEPGRAM_TTS_TIMEOUT" "30"
+    append_env_if_missing ".env" "VIDEO_GEN_ENABLED" "true"
+    append_env_if_missing ".env" "VIDEO_GEN_TARGET_DURATION" "65"
+    append_env_if_missing ".env" "VIDEO_GEN_MIN_DURATION" "50"
+    append_env_if_missing ".env" "VIDEO_GEN_MAX_DURATION" "90"
+    append_env_if_missing ".env" "VIDEO_GEN_MAX_SCENES" "10"
+    append_env_if_missing ".env" "VIDEO_GEN_BGM_DIR" "assets/bgm"
+    append_env_if_missing ".env" "VIDEO_GEN_BGM_VOLUME" "0.15"
+    append_env_if_missing ".env" "VIDEO_GEN_OUTPUT_DIR" "tmp/video_gen"
 fi
 
 # Ensure music assets dir exists (AudioMixer duck bed)
 mkdir -p "$BACKEND_DIR/assets/music"
+# Ensure BGM dir for Video Generator
+mkdir -p "$BACKEND_DIR/assets/bgm"
+# Ensure video generator output dir
+mkdir -p "$BACKEND_DIR/tmp/video_gen"
 if [ -z "$(ls -A "$BACKEND_DIR/assets/music" 2>/dev/null)" ]; then
     echo "  ⚠️  assets/music empty — music bed will skip until files added (non-fatal)"
 else

@@ -7,6 +7,7 @@ import { JobDetail } from "@/pages/JobDetail";
 import { ClipViewer } from "@/pages/ClipViewer";
 import { Settings } from "@/pages/Settings";
 import { SocialAccounts } from "@/pages/SocialAccounts";
+import { VideoGeneratorPage } from "@/pages/VideoGenerator";
 import { FacebookCallback } from "@/pages/FacebookCallback";
 import { TikTokCallback } from "@/pages/TikTokCallback";
 import { SocialCallback } from "@/pages/SocialCallback";
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="jobs/:jobId" element={<JobDetail />} />
           <Route path="jobs/:jobId/clips/:rank" element={<ClipViewer />} />
           <Route path="social" element={<SocialAccounts />} />
+          <Route path="video-generator" element={<VideoGeneratorPage />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

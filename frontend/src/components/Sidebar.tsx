@@ -1,10 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, PlusCircle, Settings, Zap, X, ChevronLeft, ChevronRight, Share2 } from "lucide-react";
+import { LayoutDashboard, PlusCircle, Settings, Zap, X, ChevronLeft, ChevronRight, Share2, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/jobs/new", icon: PlusCircle, label: "New Job" },
+  { to: "/video-generator", icon: Film, label: "Video Generator" },
   { to: "/social", icon: Share2, label: "Social Accounts" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
