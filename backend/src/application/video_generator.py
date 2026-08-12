@@ -574,19 +574,25 @@ class VideoGenerator:
             shutil.copy2(valid_clips[0], output_path)
             return
 
-        # Write concat list file
-        list_path = output_path + ".txt"
-        with open(list_path, "w") as f:
-            for clip in valid_clips:
-                f.write(f"file '{clip}'\n")
+        # Use filter_complex concat (tolerant of minor codec/param differences)
+        # Unlike concat demuxer, this re-encodes and normalizes all inputs
+        inputs = []
+        for clip in valid_clips:
+            inputs.extend(["-i", clip])
+
+        # Build filter: [0:v][1:v][2:v]...concat=n=N:v=1:a=0[outv]
+        filter_parts = "".join(f"[{i}:v]" for i in range(len(valid_clips)))
+        filter_str = f"{filter_parts}concat=n={len(valid_clips)}:v=1:a=0[outv]"
 
         cmd = [
             "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", list_path,
+            *inputs,
+            "-filter_complex", filter_str,
+            "-map", "[outv]",
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
             "-r", "30",
             "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
             output_path,
         ]
 
@@ -597,13 +603,9 @@ class VideoGenerator:
         )
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
 
-        # Cleanup list file
-        if os.path.exists(list_path):
-            os.remove(list_path)
-
         if not os.path.exists(output_path):
-            err_msg = stderr.decode(errors="replace")[:300] if stderr else "unknown"
-            logger.error(f"video_gen: concat failed: {err_msg}")
+            err_msg = stderr.decode(errors="replace")[:500] if stderr else "unknown"
+            logger.error(f"video_gen: filter_complex concat failed: {err_msg}")
             # Fallback: use first valid clip
             shutil.copy2(valid_clips[0], output_path)
 
