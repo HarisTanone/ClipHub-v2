@@ -675,22 +675,29 @@ export function SocialAccounts() {
   }
 
   const platforms = [
-    { key: "facebook", label: "Facebook", available: true },
-    { key: "tiktok", label: "TikTok", available: true },
-    { key: "instagram", label: "Instagram", available: true },
-    { key: "threads", label: "Threads", available: true },
-    { key: "youtube", label: "YouTube", available: true },
-    { key: "linkedin", label: "LinkedIn", available: true },
+    { key: "facebook", label: "Facebook", available: true, color: "blue", gradient: "from-blue-500/10 to-blue-500/5" },
+    { key: "tiktok", label: "TikTok", available: true, color: "zinc", gradient: "from-zinc-500/10 to-zinc-500/5" },
+    { key: "instagram", label: "Instagram", available: true, color: "pink", gradient: "from-pink-500/10 to-pink-500/5" },
+    { key: "threads", label: "Threads", available: true, color: "zinc", gradient: "from-zinc-400/10 to-zinc-400/5" },
+    { key: "youtube", label: "YouTube", available: true, color: "red", gradient: "from-red-500/10 to-red-500/5" },
+    { key: "linkedin", label: "LinkedIn", available: true, color: "sky", gradient: "from-sky-500/10 to-sky-500/5" },
   ];
+
+  const connectedAccounts = accounts.filter((a) => a.isConnected);
+  const disconnectedAccounts = accounts.filter((a) => !a.isConnected);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
       <div className="flex items-center justify-between shrink-0 mb-3">
         <div className="flex items-center gap-2">
-          <Share2 className="h-4 w-4 text-emerald-400" />
-          <h1 className="text-base font-semibold text-zinc-100">Social Accounts</h1>
-          {count && <Badge variant="default" size="sm">{count.total || 0} connected</Badge>}
+          <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 flex items-center justify-center">
+            <Share2 className="h-3.5 w-3.5 text-emerald-400" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-zinc-100">Social Accounts</h1>
+            <p className="text-[9px] text-zinc-500">Manage connected platforms</p>
+          </div>
         </div>
         <Button size="sm" variant="outline" onClick={loadAccounts} loading={loading} icon={<RefreshCw className="h-3 w-3" />}>
           Refresh
@@ -698,159 +705,178 @@ export function SocialAccounts() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto space-y-3">
-        {/* Platform counts — compact row */}
+        {/* Stats row */}
         {count && (
-          <div className="flex flex-wrap gap-1.5">
-            {platforms.map((p) => (
-              <div key={p.key} className="flex items-center gap-1.5 rounded-md border border-zinc-800/60 bg-zinc-950/40 px-2 py-1">
-                <PlatformIcon type={p.key} className="h-3 w-3" />
-                <span className="text-[10px] text-zinc-400">{p.label}</span>
-                <span className="text-[10px] font-bold text-zinc-200">{(count as any)[p.key] || 0}</span>
-              </div>
-            ))}
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+            {platforms.map((p) => {
+              const c = (count as any)[p.key] || 0;
+              return (
+                <div key={p.key} className={cn("relative overflow-hidden rounded-lg border border-zinc-800/50 px-2.5 py-2 bg-gradient-to-br", p.gradient)}>
+                  <div className="flex items-center gap-1.5">
+                    <PlatformIcon type={p.key} className="h-3.5 w-3.5" />
+                    <span className="text-[10px] font-medium text-zinc-300">{p.label}</span>
+                  </div>
+                  <p className={cn("text-lg font-bold mt-0.5", c > 0 ? "text-zinc-100" : "text-zinc-600")}>{c}</p>
+                  {c > 0 && <div className="absolute top-1 right-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {/* Connect new account — compact grid */}
-        <Card className="p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Plus className="h-3.5 w-3.5 text-emerald-400" />
-            <h3 className="text-xs font-semibold text-zinc-100">Connect Account</h3>
-          </div>
-
-          <div className="space-y-1.5">
-            {/* Facebook */}
-            <div className="flex items-center justify-between rounded-md border border-zinc-800 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <Facebook className="h-4 w-4 text-blue-400" />
-                <span className="text-[11px] font-medium text-zinc-200">Facebook Pages</span>
-              </div>
-              <FacebookConnectFlow onConnected={loadAccounts} />
+        {/* Two-column layout: Connect + Connected */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {/* Connect new account */}
+          <Card className="p-3">
+            <div className="flex items-center gap-2 mb-2.5">
+              <Plus className="h-3.5 w-3.5 text-emerald-400" />
+              <h3 className="text-xs font-semibold text-zinc-100">Connect Platform</h3>
             </div>
 
-            {/* TikTok */}
-            <div className="flex items-center justify-between rounded-md border border-zinc-800 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <PlatformIcon type="tiktok" className="h-4 w-4" />
-                <span className="text-[11px] font-medium text-zinc-200">TikTok</span>
-              </div>
-              <TikTokConnectFlow onConnected={loadAccounts} />
-            </div>
-
-            {/* Instagram */}
-            <div className="flex items-center justify-between rounded-md border border-zinc-800 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <Instagram className="h-4 w-4 text-pink-400" />
-                <span className="text-[11px] font-medium text-zinc-200">Instagram</span>
-              </div>
-              <SimpleConnectFlow platform="instagram" authFn={instagramAuthorize} connectFn={instagramConnect} onConnected={loadAccounts} />
-            </div>
-
-            {/* Threads */}
-            <div className="flex items-center justify-between rounded-md border border-zinc-800 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <PlatformIcon type="threads" className="h-4 w-4" />
-                <span className="text-[11px] font-medium text-zinc-200">Threads</span>
-              </div>
-              <SimpleConnectFlow platform="threads" authFn={threadsAuthorize} connectFn={threadsConnect} onConnected={loadAccounts} />
-            </div>
-
-            {/* YouTube */}
-            <div className="flex items-center justify-between rounded-md border border-zinc-800 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <Youtube className="h-4 w-4 text-red-400" />
-                <span className="text-[11px] font-medium text-zinc-200">YouTube</span>
-              </div>
-              <MultiStepConnectFlow
-                platform="youtube"
-                authFn={youtubeAuthorize}
-                exchangeFn={youtubeExchange}
-                listFn={youtubeChannels}
-                connectFn={youtubeConnect}
-                entityLabel="channel"
-                entityIdField="channelId"
-                onConnected={loadAccounts}
-              />
-            </div>
-
-            {/* LinkedIn */}
-            <div className="flex items-center justify-between rounded-md border border-zinc-800 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <PlatformIcon type="linkedin" className="h-4 w-4" />
-                <span className="text-[11px] font-medium text-zinc-200">LinkedIn</span>
-              </div>
-              <MultiStepConnectFlow
-                platform="linkedin"
-                authFn={linkedinAuthorize}
-                exchangeFn={linkedinExchange}
-                listFn={linkedinOrganizations}
-                connectFn={linkedinConnect}
-                entityLabel="organization"
-                entityIdField="organizationId"
-                onConnected={loadAccounts}
-              />
-            </div>
-          </div>
-        </Card>
-
-        {/* Connected accounts list */}
-        <Card className="p-3">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-semibold text-zinc-100">Connected Accounts</h3>
-            <span className="text-[9px] text-zinc-600">{accounts.length} account(s)</span>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-4">
-              <RefreshCw className="h-4 w-4 text-zinc-600 animate-spin" />
-              <span className="ml-2 text-[11px] text-zinc-500">Loading...</span>
-            </div>
-          ) : accounts.length === 0 ? (
-            <div className="text-center py-4">
-              <Share2 className="h-6 w-6 text-zinc-700 mx-auto mb-1" />
-              <p className="text-[11px] text-zinc-500">No accounts connected yet</p>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {accounts.map((acc) => (
-                <div key={acc._id || acc.id} className="flex items-center gap-2.5 rounded-md border border-zinc-800 px-3 py-2 hover:border-zinc-700 transition-colors">
-                  {acc.picture ? (
-                    <img src={acc.picture} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
-                  ) : (
-                    <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
-                      <PlatformIcon type={acc.type} className="h-3 w-3" />
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-[11px] text-zinc-200 font-medium truncate">{acc.name}</p>
-                      <PlatformIcon type={acc.type} className="h-2.5 w-2.5" />
-                      {acc.isConnected ? (
-                        <span className="text-[8px] bg-emerald-500/15 text-emerald-400 px-1 py-0.5 rounded font-medium">Active</span>
-                      ) : (
-                        <span className="text-[8px] bg-red-500/15 text-red-400 px-1 py-0.5 rounded font-medium">Offline</span>
-                      )}
-                    </div>
-                    <p className="text-[9px] text-zinc-500 truncate">@{acc.username || acc.generatedId} · {acc.type}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemove(acc._id || acc.id, acc.name)}
-                    disabled={removing === (acc._id || acc.id)}
-                    className="p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors shrink-0"
-                    title="Disconnect"
-                  >
-                    {removing === (acc._id || acc.id) ? (
-                      <RefreshCw className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3 w-3" />
-                    )}
-                  </button>
+            <div className="space-y-1">
+              {/* Facebook */}
+              <div className="flex items-center justify-between rounded-md border border-zinc-800/60 hover:border-zinc-700 px-2.5 py-1.5 transition-colors group">
+                <div className="flex items-center gap-2">
+                  <Facebook className="h-3.5 w-3.5 text-blue-400" />
+                  <span className="text-[11px] text-zinc-300 group-hover:text-zinc-100 transition-colors">Facebook</span>
                 </div>
-              ))}
+                <FacebookConnectFlow onConnected={loadAccounts} />
+              </div>
+
+              {/* TikTok */}
+              <div className="flex items-center justify-between rounded-md border border-zinc-800/60 hover:border-zinc-700 px-2.5 py-1.5 transition-colors group">
+                <div className="flex items-center gap-2">
+                  <PlatformIcon type="tiktok" className="h-3.5 w-3.5" />
+                  <span className="text-[11px] text-zinc-300 group-hover:text-zinc-100 transition-colors">TikTok</span>
+                </div>
+                <TikTokConnectFlow onConnected={loadAccounts} />
+              </div>
+
+              {/* Instagram */}
+              <div className="flex items-center justify-between rounded-md border border-zinc-800/60 hover:border-zinc-700 px-2.5 py-1.5 transition-colors group">
+                <div className="flex items-center gap-2">
+                  <Instagram className="h-3.5 w-3.5 text-pink-400" />
+                  <span className="text-[11px] text-zinc-300 group-hover:text-zinc-100 transition-colors">Instagram</span>
+                </div>
+                <SimpleConnectFlow platform="instagram" authFn={instagramAuthorize} connectFn={instagramConnect} onConnected={loadAccounts} />
+              </div>
+
+              {/* Threads */}
+              <div className="flex items-center justify-between rounded-md border border-zinc-800/60 hover:border-zinc-700 px-2.5 py-1.5 transition-colors group">
+                <div className="flex items-center gap-2">
+                  <PlatformIcon type="threads" className="h-3.5 w-3.5" />
+                  <span className="text-[11px] text-zinc-300 group-hover:text-zinc-100 transition-colors">Threads</span>
+                </div>
+                <SimpleConnectFlow platform="threads" authFn={threadsAuthorize} connectFn={threadsConnect} onConnected={loadAccounts} />
+              </div>
+
+              {/* YouTube */}
+              <div className="flex items-center justify-between rounded-md border border-zinc-800/60 hover:border-zinc-700 px-2.5 py-1.5 transition-colors group">
+                <div className="flex items-center gap-2">
+                  <Youtube className="h-3.5 w-3.5 text-red-400" />
+                  <span className="text-[11px] text-zinc-300 group-hover:text-zinc-100 transition-colors">YouTube</span>
+                </div>
+                <MultiStepConnectFlow
+                  platform="youtube"
+                  authFn={youtubeAuthorize}
+                  exchangeFn={youtubeExchange}
+                  listFn={youtubeChannels}
+                  connectFn={youtubeConnect}
+                  entityLabel="channel"
+                  entityIdField="channelId"
+                  onConnected={loadAccounts}
+                />
+              </div>
+
+              {/* LinkedIn */}
+              <div className="flex items-center justify-between rounded-md border border-zinc-800/60 hover:border-zinc-700 px-2.5 py-1.5 transition-colors group">
+                <div className="flex items-center gap-2">
+                  <PlatformIcon type="linkedin" className="h-3.5 w-3.5" />
+                  <span className="text-[11px] text-zinc-300 group-hover:text-zinc-100 transition-colors">LinkedIn</span>
+                </div>
+                <MultiStepConnectFlow
+                  platform="linkedin"
+                  authFn={linkedinAuthorize}
+                  exchangeFn={linkedinExchange}
+                  listFn={linkedinOrganizations}
+                  connectFn={linkedinConnect}
+                  entityLabel="organization"
+                  entityIdField="organizationId"
+                  onConnected={loadAccounts}
+                />
+              </div>
             </div>
-          )}
-        </Card>
+          </Card>
+
+          {/* Connected accounts */}
+          <Card className="p-3">
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                <h3 className="text-xs font-semibold text-zinc-100">Active Connections</h3>
+              </div>
+              <span className="text-[9px] text-zinc-500 bg-zinc-800/60 px-1.5 py-0.5 rounded">{accounts.length}</span>
+            </div>
+
+            {loading ? (
+              <div className="flex items-center justify-center py-6">
+                <RefreshCw className="h-4 w-4 text-zinc-600 animate-spin" />
+              </div>
+            ) : accounts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-6">
+                <div className="h-10 w-10 rounded-full bg-zinc-800/60 flex items-center justify-center mb-2">
+                  <Share2 className="h-4 w-4 text-zinc-600" />
+                </div>
+                <p className="text-[11px] text-zinc-500">No accounts connected</p>
+                <p className="text-[9px] text-zinc-600 mt-0.5">Connect a platform to get started</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {accounts.map((acc) => (
+                  <div key={acc._id || acc.id} className="flex items-center gap-2 rounded-md border border-zinc-800/50 hover:border-zinc-700 px-2.5 py-2 transition-all group">
+                    {acc.picture ? (
+                      <img src={acc.picture} alt="" className="h-7 w-7 rounded-full object-cover shrink-0 ring-1 ring-zinc-800" />
+                    ) : (
+                      <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
+                        <PlatformIcon type={acc.type} className="h-3 w-3" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-[11px] text-zinc-200 font-medium truncate">{acc.name}</p>
+                        {acc.isConnected ? (
+                          <span className="flex items-center gap-0.5 text-[8px] text-emerald-400">
+                            <span className="h-1 w-1 rounded-full bg-emerald-400" />
+                            Live
+                          </span>
+                        ) : (
+                          <span className="text-[8px] text-red-400">Offline</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <PlatformIcon type={acc.type} className="h-2.5 w-2.5" />
+                        <p className="text-[9px] text-zinc-500 truncate">@{acc.username || acc.generatedId}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(acc._id || acc.id, acc.name)}
+                      disabled={removing === (acc._id || acc.id)}
+                      className="p-1 rounded text-zinc-700 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+                      title="Disconnect"
+                    >
+                      {removing === (acc._id || acc.id) ? (
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3" />
+                      )}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
       </div>
     </div>
   );
