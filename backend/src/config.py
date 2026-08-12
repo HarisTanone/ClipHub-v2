@@ -69,6 +69,21 @@ class Settings(BaseSettings):
     VIDEO_GEN_BGM_VOLUME: float = 0.15       # background music volume (0-1)
     VIDEO_GEN_OUTPUT_DIR: str = "tmp/video_gen"
 
+    # ─── Video Generator Subtitle Style ───────────────────────────────────
+    VIDEO_GEN_SUB_FONT_SIZE: int = 24
+    VIDEO_GEN_SUB_FONT_NAME: str = "Arial"
+    VIDEO_GEN_SUB_PRIMARY_COLOR: str = "&H00FFFFFF"  # ASS color: white
+    VIDEO_GEN_SUB_OUTLINE_COLOR: str = "&H00000000"  # ASS color: black
+    VIDEO_GEN_SUB_BACK_COLOR: str = "&H80000000"     # ASS color: semi-transparent black bg
+    VIDEO_GEN_SUB_OUTLINE: int = 3
+    VIDEO_GEN_SUB_SHADOW: int = 1
+    VIDEO_GEN_SUB_MARGIN_V: int = 100               # vertical margin from bottom
+    VIDEO_GEN_SUB_MARGIN_L: int = 40
+    VIDEO_GEN_SUB_MARGIN_R: int = 40
+    VIDEO_GEN_SUB_ALIGNMENT: int = 2                # 2 = bottom center (ASS alignment)
+    VIDEO_GEN_SUB_BOLD: int = 1                     # 1 = bold, 0 = normal
+    VIDEO_GEN_SUB_BORDER_STYLE: int = 4             # 4 = opaque box background
+
     # ─── Auth / JWT ───────────────────────────────────────────────────────
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_REFRESH_SECRET_KEY: str = "change-me-refresh-in-production"

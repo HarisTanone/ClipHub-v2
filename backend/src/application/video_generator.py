@@ -396,42 +396,60 @@ class VideoGenerator:
         """Score and pick the best footage candidate for a scene.
 
         Scoring factors:
+        - Title/query relevance to visual description (highest weight)
         - View count (popularity signal)
         - Duration (prefer videos with enough content)
-        - Title relevance (simple keyword overlap)
         """
         if not candidates:
             return None
 
         target_duration = scene.get("duration_estimate", 7)
+
+        # Build search terms from visual description + queries for matching
         search_terms = set()
+        visual = scene.get("visual", "")
+        for word in visual.lower().split():
+            if len(word) > 3:  # Skip short words
+                search_terms.add(word)
         for q in scene.get("search_queries", []):
-            search_terms.update(q.lower().split())
+            for word in q.lower().split():
+                if len(word) > 3:
+                    search_terms.add(word)
 
         scored = []
         for c in candidates:
             score = 0.0
 
+            # Title keyword overlap (highest weight)
+            title_words = set(w.lower() for w in c.get("title", "").split() if len(w) > 3)
+            overlap = len(search_terms & title_words)
+            score += overlap * 2.0  # 2 points per matching word
+
             # View count bonus (log scale)
             views = c.get("view_count", 0)
             if views > 1000000:
-                score += 3.0
-            elif views > 100000:
                 score += 2.0
+            elif views > 100000:
+                score += 1.5
             elif views > 10000:
                 score += 1.0
+            elif views > 1000:
+                score += 0.5
 
-            # Duration: penalize too short
+            # Duration: prefer videos longer than needed (more to work with)
             dur = c.get("duration_seconds", 0)
             if dur >= target_duration:
-                score += 2.0
-            elif dur >= target_duration * 0.5:
-                score += 1.0
+                score += 1.5
+            elif dur >= target_duration * 0.7:
+                score += 0.8
 
-            # Title keyword overlap
-            title_words = set(c.get("title", "").lower().split())
-            overlap = len(search_terms & title_words)
-            score += overlap * 0.5
+            # Bonus for footage/cinematic/drone in title (stock-like content)
+            title_lower = c.get("title", "").lower()
+            stock_keywords = ["footage", "cinematic", "drone", "4k", "stock", "timelapse", "b-roll", "broll"]
+            for kw in stock_keywords:
+                if kw in title_lower:
+                    score += 1.0
+                    break
 
             scored.append((score, c))
 
@@ -760,16 +778,29 @@ class VideoGenerator:
         else:
             audio_map = ["-map", "0:v"]
 
-        # Subtitle filter (burn-in)
+        # Subtitle filter (burn-in) — configurable via settings
         sub_filter = ""
         if os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
             # Escape path for FFmpeg
             escaped_srt = srt_path.replace("'", "'\\''").replace(":", "\\:")
-            sub_filter = (
-                f"subtitles='{escaped_srt}':"
-                f"force_style='FontSize=18,FontName=Arial,PrimaryColour=&H00FFFFFF,"
-                f"OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=80'"
-            )
+            # Build ASS force_style from config
+            style_parts = [
+                f"FontSize={settings.VIDEO_GEN_SUB_FONT_SIZE}",
+                f"FontName={settings.VIDEO_GEN_SUB_FONT_NAME}",
+                f"PrimaryColour={settings.VIDEO_GEN_SUB_PRIMARY_COLOR}",
+                f"OutlineColour={settings.VIDEO_GEN_SUB_OUTLINE_COLOR}",
+                f"BackColour={settings.VIDEO_GEN_SUB_BACK_COLOR}",
+                f"Outline={settings.VIDEO_GEN_SUB_OUTLINE}",
+                f"Shadow={settings.VIDEO_GEN_SUB_SHADOW}",
+                f"MarginV={settings.VIDEO_GEN_SUB_MARGIN_V}",
+                f"MarginL={settings.VIDEO_GEN_SUB_MARGIN_L}",
+                f"MarginR={settings.VIDEO_GEN_SUB_MARGIN_R}",
+                f"Alignment={settings.VIDEO_GEN_SUB_ALIGNMENT}",
+                f"Bold={settings.VIDEO_GEN_SUB_BOLD}",
+                f"BorderStyle={settings.VIDEO_GEN_SUB_BORDER_STYLE}",
+            ]
+            force_style = ",".join(style_parts)
+            sub_filter = f"subtitles='{escaped_srt}':force_style='{force_style}'"
 
         # Build full command
         cmd = ["ffmpeg", "-y", *inputs]

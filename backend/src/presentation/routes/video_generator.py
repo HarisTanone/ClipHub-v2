@@ -36,6 +36,7 @@ class JobStatusResponse(BaseModel):
     topic: str
     status: str
     progress: int
+    step_label: str = ""
     target_duration: int
     voice: str
     title: Optional[str] = None
@@ -45,6 +46,7 @@ class JobStatusResponse(BaseModel):
     completed_at: Optional[float] = None
     scenes_count: int = 0
     estimated_duration: Optional[float] = None
+    thumbnail_url: Optional[str] = None
 
 
 class VoiceOption(BaseModel):
@@ -268,17 +270,42 @@ def _job_to_response(job) -> JobStatusResponse:
     scenes_count = 0
     estimated_duration = None
     title = None
+    thumbnail_url = None
 
     if job.story:
         scenes_count = len(job.story.get("scenes", []))
         estimated_duration = job.story.get("estimated_duration")
         title = job.story.get("title")
 
+    # Get thumbnail from first scene's footage source
+    if job.scenes_with_footage:
+        for scene in job.scenes_with_footage:
+            src = scene.get("footage_source", {})
+            if src and src.get("thumbnail_url"):
+                thumbnail_url = src["thumbnail_url"]
+                break
+
+    # Human-readable step label
+    status_val = job.status.value if hasattr(job.status, "value") else str(job.status)
+    step_labels = {
+        "queued": "Waiting in queue...",
+        "generating_story": "AI writing story...",
+        "searching_footage": "Searching YouTube footage...",
+        "downloading": "Downloading video clips...",
+        "generating_tts": "Generating narration audio...",
+        "assembling": "Assembling timeline...",
+        "rendering": "Rendering final video...",
+        "completed": "Done",
+        "failed": "Failed",
+    }
+    step_label = step_labels.get(status_val, status_val)
+
     return JobStatusResponse(
         job_id=job.job_id,
         topic=job.topic,
-        status=job.status.value if hasattr(job.status, "value") else str(job.status),
+        status=status_val,
         progress=job.progress,
+        step_label=step_label,
         target_duration=job.target_duration,
         voice=job.voice,
         title=title,
@@ -288,4 +315,5 @@ def _job_to_response(job) -> JobStatusResponse:
         completed_at=job.completed_at,
         scenes_count=scenes_count,
         estimated_duration=estimated_duration,
+        thumbnail_url=thumbnail_url,
     )

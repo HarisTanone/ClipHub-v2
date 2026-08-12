@@ -68,7 +68,13 @@ Output this exact JSON structure:
 Important:
 - Each scene's narration should be speakable in about duration_estimate seconds
 - Average speaking rate is ~2.5 words per second
-- search_queries should return relevant footage on YouTube
+- search_queries MUST be highly specific visual YouTube search terms that match the narration context:
+  * Use concrete visual nouns: "volcano erupting lava flow", NOT "volcano" alone
+  * Include action/motion: "tsunami wave crashing coastline drone footage"
+  * Add "footage", "cinematic", "drone", "timelapse", "4K" when appropriate
+  * Each query should describe EXACTLY what should appear on screen during that narration
+  * Avoid abstract concepts — always describe the VISUAL: "scientist in lab mixing chemicals" not "science experiment"
+  * Include 3 search queries per scene: 1 very specific, 1 slightly broader, 1 with "stock footage" suffix
 - First scene should be the HOOK
 - Last scene should be a conclusion/call-to-action"""
 
