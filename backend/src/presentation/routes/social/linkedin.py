@@ -3,7 +3,9 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from src.presentation.routes.auth import get_current_user
+from src.presentation.auth_deps import CurrentUser
 from src.presentation.routes.social.helpers import repliz_get, repliz_post
+from src.presentation.routes.social.accounts import register_account
 
 linkedin_router = APIRouter(prefix="/linkedin", tags=["social-linkedin"])
 
@@ -42,12 +44,15 @@ class LinkedInConnectRequest(BaseModel):
 
 
 @linkedin_router.post("/connect")
-async def linkedin_connect(body: LinkedInConnectRequest, _user=Depends(get_current_user)):
+async def linkedin_connect(body: LinkedInConnectRequest, user: CurrentUser = Depends(get_current_user)):
     """Connect a LinkedIn organization to workspace."""
-    return await repliz_post(
+    result = await repliz_post(
         "/public/account/linkedin/connect",
         json_body={"organizationId": body.organizationId, "token": body.token},
     )
+    if result and "accountId" in result:
+        await register_account(user.id, result["accountId"], "linkedin")
+    return result
 
 
 @linkedin_router.post("/reconnect/{account_id}")

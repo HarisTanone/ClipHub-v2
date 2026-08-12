@@ -3,7 +3,9 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from src.presentation.routes.auth import get_current_user
+from src.presentation.auth_deps import CurrentUser
 from src.presentation.routes.social.helpers import repliz_get, repliz_post
+from src.presentation.routes.social.accounts import register_account
 
 threads_router = APIRouter(prefix="/threads", tags=["social-threads"])
 
@@ -22,12 +24,15 @@ class ThreadsConnectRequest(BaseModel):
 
 
 @threads_router.post("/connect")
-async def threads_connect(body: ThreadsConnectRequest, _user=Depends(get_current_user)):
+async def threads_connect(body: ThreadsConnectRequest, user: CurrentUser = Depends(get_current_user)):
     """Connect a Threads account to workspace."""
-    return await repliz_post(
+    result = await repliz_post(
         "/public/account/threads/connect",
         json_body={"code": body.code},
     )
+    if result and "accountId" in result:
+        await register_account(user.id, result["accountId"], "threads")
+    return result
 
 
 @threads_router.post("/reconnect/{account_id}")

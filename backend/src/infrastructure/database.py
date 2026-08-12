@@ -135,6 +135,18 @@ class HookAnimationModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class SocialAccountModel(Base):
+    """Maps Repliz social accounts to local users for access control."""
+    __tablename__ = "social_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)  # Repliz account ID
+    platform: Mapped[str] = mapped_column(String(20), nullable=False)  # facebook, tiktok, instagram, etc.
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 async def init_db():
     """Create all tables if they don't exist (for SQLite auto-setup)."""
     async with engine.begin() as conn:

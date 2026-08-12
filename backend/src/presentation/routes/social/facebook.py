@@ -3,7 +3,9 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from src.presentation.routes.auth import get_current_user
+from src.presentation.auth_deps import CurrentUser
 from src.presentation.routes.social.helpers import repliz_get, repliz_post
+from src.presentation.routes.social.accounts import register_account
 
 facebook_router = APIRouter(prefix="/facebook", tags=["social-facebook"])
 
@@ -42,12 +44,15 @@ class FacebookConnectRequest(BaseModel):
 
 
 @facebook_router.post("/connect")
-async def facebook_connect(body: FacebookConnectRequest, _user=Depends(get_current_user)):
+async def facebook_connect(body: FacebookConnectRequest, user: CurrentUser = Depends(get_current_user)):
     """Connect a Facebook page to workspace."""
-    return await repliz_post(
+    result = await repliz_post(
         "/public/account/facebook/connect",
         json_body={"pageId": body.pageId, "token": body.token},
     )
+    if result and "accountId" in result:
+        await register_account(user.id, result["accountId"], "facebook")
+    return result
 
 
 @facebook_router.post("/reconnect/{account_id}")
