@@ -505,51 +505,80 @@ class VideoGenerator:
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-an",  # No audio from footage
                 "-r", "30",
+                "-pix_fmt", "yuv420p",
                 clip_path,
             ]
-        else:
-            # No footage — generate black frame with duration
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "lavfi",
-                "-i", f"color=c=black:s=1080x1920:d={duration}:r=30",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                clip_path,
-            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
 
+            if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
+                logger.debug(f"video_gen: scene {scene_id} clip from footage OK")
+                return clip_path
+            else:
+                err = stderr.decode(errors="replace")[:200] if stderr else ""
+                logger.warning(f"video_gen: scene {scene_id} footage encode failed: {err}")
+        else:
+            logger.info(f"video_gen: scene {scene_id} no footage, using black frame")
+
+        # Fallback: generate black frame with matching duration
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi",
+            "-i", f"color=c=black:s=1080x1920:d={duration}:r=30",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            clip_path,
+        ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await asyncio.wait_for(proc.communicate(), timeout=120)
+        await asyncio.wait_for(proc.communicate(), timeout=30)
 
         if not os.path.exists(clip_path):
-            # Fallback: black frame
-            fallback_cmd = [
-                "ffmpeg", "-y",
-                "-f", "lavfi",
-                "-i", f"color=c=black:s=1080x1920:d={duration}:r=30",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                clip_path,
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *fallback_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc.communicate(), timeout=30)
+            logger.error(f"video_gen: scene {scene_id} even black frame failed!")
 
         return clip_path
 
     async def _concat_clips(self, clips: list[str], output_path: str) -> None:
         """Concatenate video clips using FFmpeg concat demuxer."""
+        # Filter only existing clips
+        valid_clips = [c for c in clips if c and os.path.exists(c)]
+
+        if not valid_clips:
+            # No clips at all — generate a short black video as placeholder
+            logger.warning("video_gen: no valid clips to concat, generating placeholder")
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi",
+                "-i", "color=c=black:s=1080x1920:d=10:r=30",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                output_path,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=30)
+            return
+
+        if len(valid_clips) == 1:
+            # Single clip — just copy it
+            shutil.copy2(valid_clips[0], output_path)
+            return
+
         # Write concat list file
         list_path = output_path + ".txt"
         with open(list_path, "w") as f:
-            for clip in clips:
-                if clip and os.path.exists(clip):
-                    f.write(f"file '{clip}'\n")
+            for clip in valid_clips:
+                f.write(f"file '{clip}'\n")
 
         cmd = [
             "ffmpeg", "-y",
@@ -566,11 +595,17 @@ class VideoGenerator:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await asyncio.wait_for(proc.communicate(), timeout=300)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
 
         # Cleanup list file
         if os.path.exists(list_path):
             os.remove(list_path)
+
+        if not os.path.exists(output_path):
+            err_msg = stderr.decode(errors="replace")[:300] if stderr else "unknown"
+            logger.error(f"video_gen: concat failed: {err_msg}")
+            # Fallback: use first valid clip
+            shutil.copy2(valid_clips[0], output_path)
 
     async def _concat_audio(self, audio_paths: list[str], output_path: str) -> None:
         """Concatenate audio files using FFmpeg."""
@@ -653,7 +688,44 @@ class VideoGenerator:
     ) -> None:
         """Final render: video + narration + subtitles + optional BGM."""
         if not os.path.exists(video_path):
-            raise RuntimeError("Concat video missing")
+            logger.warning("video_gen: concat video missing, generating placeholder")
+            # Generate placeholder video matching audio duration
+            audio_duration = "10"
+            if os.path.exists(audio_path):
+                # Get audio duration via ffprobe
+                probe_cmd = [
+                    "ffprobe", "-v", "error", "-show_entries",
+                    "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
+                    audio_path,
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *probe_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                try:
+                    audio_duration = str(float(stdout.decode().strip()))
+                except (ValueError, AttributeError):
+                    pass
+
+            placeholder_cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi",
+                "-i", f"color=c=black:s=1080x1920:d={audio_duration}:r=30",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                video_path,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *placeholder_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=60)
+
+            if not os.path.exists(video_path):
+                raise RuntimeError("Concat video missing and placeholder generation failed")
 
         # Build FFmpeg command
         inputs = ["-i", video_path]
