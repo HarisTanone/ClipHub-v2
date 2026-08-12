@@ -8,7 +8,7 @@ GET  /video-generator/voices    — list available TTS voices
 """
 import os
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -142,6 +142,88 @@ async def download_video(
         path=job.output_path,
         media_type="video/mp4",
         filename=filename,
+    )
+
+
+@router.get("/jobs/{job_id}/stream")
+async def stream_video(
+    job_id: str,
+    token: Optional[str] = None,
+    range: Optional[str] = Header(None, alias="range"),
+):
+    """Stream the generated video with Range support (for HTML5 video player).
+
+    Auth via query param ?token=<jwt> since <video> element cannot send headers.
+    """
+    from src.application.video_generator import get_video_generator
+    from src.infrastructure.auth import decode_access_token, is_superadmin
+    from starlette.responses import StreamingResponse
+
+    # Auth via query param token (HTML5 video can't send Bearer header)
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required (?token=)")
+
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    if not is_superadmin(payload.get("role", "")):
+        raise HTTPException(status_code=403, detail="Superadmin access required")
+
+    vg = get_video_generator()
+    job = vg.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != VideoGenStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail=f"Job not completed (status: {job.status})")
+
+    if not job.output_path or not os.path.exists(job.output_path):
+        raise HTTPException(status_code=404, detail="Output file not found")
+
+    file_path = job.output_path
+    file_size = os.path.getsize(file_path)
+
+    # Parse Range header for seeking support
+    start = 0
+    end = file_size - 1
+
+    if range and range.startswith("bytes="):
+        range_spec = range.replace("bytes=", "")
+        parts = range_spec.split("-")
+        if parts[0]:
+            start = int(parts[0])
+        if len(parts) > 1 and parts[1]:
+            end = int(parts[1])
+
+    chunk_size = end - start + 1
+
+    def iter_file():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                read_size = min(remaining, 1024 * 1024)  # 1MB chunks
+                data = f.read(read_size)
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    headers = {
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(chunk_size),
+        "Content-Type": "video/mp4",
+    }
+
+    status_code = 206 if range else 200
+    return StreamingResponse(
+        iter_file(),
+        status_code=status_code,
+        headers=headers,
+        media_type="video/mp4",
     )
 
 

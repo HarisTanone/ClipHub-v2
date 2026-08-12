@@ -389,6 +389,21 @@ export function VideoGeneratorPage() {
                   </div>
                 </div>
 
+                {/* Video Player */}
+                {job.status === "completed" && (
+                  <div className="mt-3 flex justify-center">
+                    <div className="w-[270px] aspect-[9/16] rounded-lg overflow-hidden bg-black border border-zinc-800">
+                      <video
+                        src={`${API_BASE}/api/video-generator/jobs/${job.job_id}/stream?token=${getToken()}`}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Progress bar */}
                 {!["completed", "failed"].includes(job.status) && (
                   <div className="mt-3 h-1 rounded-full bg-zinc-800 overflow-hidden">
