@@ -11,7 +11,7 @@ import os
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Optional
 
 from src.config import settings
 from src.application.video_generator import VideoGenStatus
@@ -25,10 +25,15 @@ router = APIRouter(prefix="/video-generator", tags=["video-generator"])
 class GenerateVideoRequest(BaseModel):
     topic: str = Field(..., min_length=3, max_length=500, description="Video topic")
     target_duration: int = Field(default=0, ge=0, le=120, description="Target duration in seconds (0=default)")
-    voice: str = Field(default="", description="TTS voice model (empty=default)")
+    voice: str = Field(default="", max_length=100, description="TTS voice model (empty=default)")
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="TTS speed multiplier")
     instructions: str = Field(default="", max_length=1000, description="Additional instructions for AI")
     num_scenes: int = Field(default=0, ge=0, le=15, description="Number of scenes (0=auto)")
+    subtitles_enabled: bool = Field(default=True, description="Burn captions into the final video")
+    subtitle_style_config: dict[str, Any] = Field(default_factory=dict)
+    subtitle_style: Optional[dict[str, Any]] = Field(default=None, exclude=True)
+    include_bgm: bool = Field(default=True, description="Mix background music when available")
+    bgm_volume: float = Field(default=0.15, ge=0.0, le=0.5)
 
 
 class JobStatusResponse(BaseModel):
@@ -39,6 +44,12 @@ class JobStatusResponse(BaseModel):
     step_label: str = ""
     target_duration: int
     voice: str
+    speed: float = 1.0
+    num_scenes: int = 0
+    subtitles_enabled: bool = True
+    subtitle_style_config: dict[str, Any] = Field(default_factory=dict)
+    include_bgm: bool = True
+    bgm_volume: float = 0.15
     title: Optional[str] = None
     error: Optional[str] = None
     output_path: Optional[str] = None
@@ -70,16 +81,36 @@ async def generate_video(
     if not settings.VIDEO_GEN_ENABLED:
         raise HTTPException(status_code=503, detail="Video Generator is disabled")
 
+    target_duration = req.target_duration or settings.VIDEO_GEN_TARGET_DURATION
+    if not settings.VIDEO_GEN_MIN_DURATION <= target_duration <= settings.VIDEO_GEN_MAX_DURATION:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"target_duration must be between {settings.VIDEO_GEN_MIN_DURATION} "
+                f"and {settings.VIDEO_GEN_MAX_DURATION} seconds"
+            ),
+        )
+    if req.num_scenes > settings.VIDEO_GEN_MAX_SCENES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"num_scenes must not exceed {settings.VIDEO_GEN_MAX_SCENES}",
+        )
+
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
 
     job = vg.create_job(
         topic=req.topic,
-        target_duration=req.target_duration,
+        target_duration=target_duration,
         voice=req.voice,
         speed=req.speed,
         instructions=req.instructions,
+        num_scenes=req.num_scenes,
+        subtitles_enabled=req.subtitles_enabled,
+        subtitle_style=req.subtitle_style_config or req.subtitle_style,
+        include_bgm=req.include_bgm,
+        bgm_volume=req.bgm_volume,
         user_id=user.id,
     )
 
@@ -147,6 +178,39 @@ async def download_video(
     )
 
 
+@router.post("/jobs/{job_id}/retry", response_model=JobStatusResponse)
+async def retry_video(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser = Depends(require_superadmin()),
+):
+    """Retry a failed video generation job with the same settings."""
+    from src.application.video_generator import get_video_generator
+
+    vg = get_video_generator()
+    previous_job = vg.get_job(job_id)
+    if not previous_job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if previous_job.status != VideoGenStatus.FAILED:
+        raise HTTPException(status_code=400, detail="Only failed jobs can be retried")
+
+    job = vg.create_job(
+        topic=previous_job.topic,
+        target_duration=previous_job.target_duration,
+        voice=previous_job.voice,
+        speed=previous_job.speed,
+        instructions=previous_job.instructions,
+        num_scenes=previous_job.num_scenes,
+        subtitles_enabled=previous_job.subtitles_enabled,
+        subtitle_style=previous_job.subtitle_style,
+        include_bgm=previous_job.include_bgm,
+        bgm_volume=previous_job.bgm_volume,
+        user_id=user.id,
+    )
+    background_tasks.add_task(vg.run_pipeline, job.job_id)
+    return _job_to_response(job)
+
+
 @router.get("/jobs/{job_id}/stream")
 async def stream_video(
     job_id: str,
@@ -187,17 +251,7 @@ async def stream_video(
     file_path = job.output_path
     file_size = os.path.getsize(file_path)
 
-    # Parse Range header for seeking support
-    start = 0
-    end = file_size - 1
-
-    if range and range.startswith("bytes="):
-        range_spec = range.replace("bytes=", "")
-        parts = range_spec.split("-")
-        if parts[0]:
-            start = int(parts[0])
-        if len(parts) > 1 and parts[1]:
-            end = int(parts[1])
+    start, end = _parse_byte_range(range, file_size)
 
     chunk_size = end - start + 1
 
@@ -214,13 +268,14 @@ async def stream_video(
                 yield data
 
     headers = {
-        "Content-Range": f"bytes {start}-{end}/{file_size}",
         "Accept-Ranges": "bytes",
         "Content-Length": str(chunk_size),
         "Content-Type": "video/mp4",
     }
 
     status_code = 206 if range else 200
+    if range:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
     return StreamingResponse(
         iter_file(),
         status_code=status_code,
@@ -308,6 +363,12 @@ def _job_to_response(job) -> JobStatusResponse:
         step_label=step_label,
         target_duration=job.target_duration,
         voice=job.voice,
+        speed=job.speed,
+        num_scenes=job.num_scenes,
+        subtitles_enabled=job.subtitles_enabled,
+        subtitle_style_config=job.subtitle_style,
+        include_bgm=job.include_bgm,
+        bgm_volume=job.bgm_volume,
         title=title,
         error=job.error,
         output_path=job.output_path,
@@ -316,4 +377,43 @@ def _job_to_response(job) -> JobStatusResponse:
         scenes_count=scenes_count,
         estimated_duration=estimated_duration,
         thumbnail_url=thumbnail_url,
+    )
+
+
+def _parse_byte_range(range_header: Optional[str], file_size: int) -> tuple[int, int]:
+    """Parse one HTTP byte range or raise a standards-compliant 416 response."""
+    if file_size <= 0:
+        raise HTTPException(status_code=404, detail="Output file is empty")
+    if not range_header:
+        return 0, file_size - 1
+    if not range_header.startswith("bytes=") or "," in range_header:
+        _raise_invalid_range(file_size)
+
+    start_text, separator, end_text = range_header[6:].strip().partition("-")
+    if not separator or (not start_text and not end_text):
+        _raise_invalid_range(file_size)
+
+    try:
+        if start_text:
+            start = int(start_text)
+            end = int(end_text) if end_text else file_size - 1
+        else:
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                _raise_invalid_range(file_size)
+            start = max(file_size - suffix_length, 0)
+            end = file_size - 1
+    except ValueError:
+        _raise_invalid_range(file_size)
+
+    if start < 0 or start >= file_size or end < start:
+        _raise_invalid_range(file_size)
+    return start, min(end, file_size - 1)
+
+
+def _raise_invalid_range(file_size: int) -> None:
+    raise HTTPException(
+        status_code=416,
+        detail="Requested range not satisfiable",
+        headers={"Content-Range": f"bytes */{file_size}"},
     )

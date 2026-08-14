@@ -20,9 +20,14 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
+from src.application.video_gen_captions import (
+    ffmpeg_subtitle_filter,
+    normalize_subtitle_style,
+    write_ass_subtitles,
+)
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -51,6 +56,11 @@ class VideoGenJob:
     voice: str = ""
     speed: float = 1.0
     instructions: str = ""
+    num_scenes: int = 0
+    subtitles_enabled: bool = True
+    subtitle_style: dict[str, Any] = field(default_factory=dict)
+    include_bgm: bool = True
+    bgm_volume: float = field(default_factory=lambda: settings.VIDEO_GEN_BGM_VOLUME)
     # Results
     story: Optional[dict] = None
     scenes_with_footage: Optional[list] = None
@@ -87,6 +97,11 @@ class VideoGenerator:
         voice: str = "",
         speed: float = 1.0,
         instructions: str = "",
+        num_scenes: int = 0,
+        subtitles_enabled: bool = True,
+        subtitle_style: Optional[dict[str, Any]] = None,
+        include_bgm: bool = True,
+        bgm_volume: Optional[float] = None,
         user_id: Optional[int] = None,
     ) -> VideoGenJob:
         """Create a new video generation job."""
@@ -98,6 +113,15 @@ class VideoGenerator:
             voice=voice or settings.DEEPGRAM_TTS_VOICE,
             speed=speed or settings.DEEPGRAM_TTS_SPEED,
             instructions=instructions,
+            num_scenes=num_scenes,
+            subtitles_enabled=subtitles_enabled,
+            subtitle_style=normalize_subtitle_style(subtitle_style),
+            include_bgm=include_bgm,
+            bgm_volume=(
+                settings.VIDEO_GEN_BGM_VOLUME
+                if bgm_volume is None
+                else max(0.0, min(0.5, bgm_volume))
+            ),
             user_id=user_id,
         )
         self._jobs[job_id] = job
@@ -196,6 +220,7 @@ class VideoGenerator:
         story = await agent.generate_story(
             topic=job.topic,
             target_duration=job.target_duration,
+            num_scenes=job.num_scenes,
             instructions=job.instructions,
         )
 
@@ -299,6 +324,11 @@ class VideoGenerator:
             f"scenes, total narration: {total_tts_duration:.1f}s"
         )
 
+        if any(scene.get("narration", "").strip() for scene in scenes) and not tts_count:
+            raise RuntimeError(
+                "Narration generation failed for every scene. Check the Deepgram API configuration."
+            )
+
         return scenes
 
     def _step_assemble_timeline(self, scenes: list[dict]) -> list[dict]:
@@ -363,20 +393,22 @@ class VideoGenerator:
         concat_path = os.path.join(work_dir, "concat_video.mp4")
         await self._concat_clips(scene_clips, concat_path)
 
-        # Step 6c: Merge all TTS audio into one track
-        tts_paths = [e["tts_path"] for e in timeline if e.get("tts_path")]
+        # Step 6c: Merge TTS audio with timed silence for missing scene narration.
         merged_audio_path = os.path.join(work_dir, "narration_full.mp3")
-        await self._concat_audio(tts_paths, merged_audio_path)
+        await self._concat_audio(timeline, merged_audio_path)
 
-        # Step 6d: Generate subtitle file from timeline
-        srt_path = os.path.join(work_dir, "subtitles.srt")
-        self._generate_srt(timeline, srt_path)
+        # Step 6d: Generate styled ASS captions from the narration timeline.
+        subtitle_path = None
+        if job.subtitles_enabled:
+            candidate_path = os.path.join(work_dir, "captions.ass")
+            if write_ass_subtitles(timeline, candidate_path, job.subtitle_style):
+                subtitle_path = candidate_path
 
         # Step 6e: Final composite — video + narration + subtitle + optional BGM
         await self._final_composite(
             video_path=concat_path,
             audio_path=merged_audio_path,
-            srt_path=srt_path,
+            subtitle_path=subtitle_path,
             output_path=output_path,
             job=job,
             work_dir=work_dir,
@@ -513,6 +545,7 @@ class VideoGenerator:
             # Trim and scale footage to 1080x1920 (9:16)
             cmd = [
                 "ffmpeg", "-y",
+                "-stream_loop", "-1",
                 "-i", footage_path,
                 "-t", str(duration),
                 "-vf", (
@@ -627,56 +660,47 @@ class VideoGenerator:
             # Fallback: use first valid clip
             shutil.copy2(valid_clips[0], output_path)
 
-    async def _concat_audio(self, audio_paths: list[str], output_path: str) -> None:
-        """Concatenate audio files using FFmpeg."""
-        if not audio_paths:
-            # Generate silence
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
-                "-t", "5",
-                "-c:a", "libmp3lame",
-                output_path,
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+    async def _concat_audio(self, timeline: list[dict], output_path: str) -> None:
+        """Concatenate narration while preserving the duration of every scene."""
+        entries = [
+            entry for entry in timeline
+            if float(entry.get("duration") or 0) > 0
+        ]
+        if not entries:
+            raise RuntimeError("Cannot assemble narration without timeline entries")
+
+        inputs: list[str] = []
+        filters: list[str] = []
+        labels: list[str] = []
+
+        for index, entry in enumerate(entries):
+            duration = max(0.1, float(entry["duration"]))
+            audio_path = entry.get("tts_path")
+            if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                inputs.extend(["-i", audio_path])
+            else:
+                inputs.extend([
+                    "-f", "lavfi",
+                    "-t", f"{duration:.3f}",
+                    "-i", "anullsrc=r=48000:cl=stereo",
+                ])
+            label = f"a{index}"
+            filters.append(
+                f"[{index}:a]aresample=48000,apad,atrim=duration={duration:.3f}[{label}]"
             )
-            await asyncio.wait_for(proc.communicate(), timeout=30)
-            return
+            labels.append(f"[{label}]")
 
-        valid_paths = [p for p in audio_paths if p and os.path.exists(p)]
-        if not valid_paths:
-            return
-
-        if len(valid_paths) == 1:
-            shutil.copy2(valid_paths[0], output_path)
-            return
-
-        # Concat with filter_complex
-        inputs = []
-        for p in valid_paths:
-            inputs.extend(["-i", p])
-
-        filter_str = "".join(f"[{i}:a]" for i in range(len(valid_paths)))
-        filter_str += f"concat=n={len(valid_paths)}:v=0:a=1[out]"
-
+        filters.append(f"{''.join(labels)}concat=n={len(labels)}:v=0:a=1[aout]")
         cmd = [
-            "ffmpeg", "-y",
-            *inputs,
-            "-filter_complex", filter_str,
-            "-map", "[out]",
-            "-c:a", "libmp3lame", "-b:a", "192k",
+            "ffmpeg", "-y", *inputs,
+            "-filter_complex", ";".join(filters),
+            "-map", "[aout]",
+            "-c:a", "libmp3lame", "-b:a", "192k", "-ar", "48000",
             output_path,
         ]
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await asyncio.wait_for(proc.communicate(), timeout=120)
+        succeeded, error = await self._run_ffmpeg(cmd, timeout=180)
+        if not succeeded or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError(f"Narration assembly failed: {error}")
 
     def _generate_srt(self, timeline: list[dict], srt_path: str) -> None:
         """Generate SRT subtitle file from timeline narration."""
@@ -701,33 +725,17 @@ class VideoGenerator:
         self,
         video_path: str,
         audio_path: str,
-        srt_path: str,
+        subtitle_path: Optional[str],
         output_path: str,
         job: VideoGenJob,
         work_dir: str,
     ) -> None:
-        """Final render: video + narration + subtitles + optional BGM."""
+        """Render a delivery-ready MP4 with caption, narration, and optional BGM."""
         if not os.path.exists(video_path):
             logger.warning("video_gen: concat video missing, generating placeholder")
-            # Generate placeholder video matching audio duration
             audio_duration = "10"
             if os.path.exists(audio_path):
-                # Get audio duration via ffprobe
-                probe_cmd = [
-                    "ffprobe", "-v", "error", "-show_entries",
-                    "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
-                    audio_path,
-                ]
-                proc = await asyncio.create_subprocess_exec(
-                    *probe_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-                try:
-                    audio_duration = str(float(stdout.decode().strip()))
-                except (ValueError, AttributeError):
-                    pass
+                audio_duration = f"{await self._media_duration(audio_path, fallback=10):.3f}"
 
             placeholder_cmd = [
                 "ffmpeg", "-y",
@@ -737,136 +745,159 @@ class VideoGenerator:
                 "-pix_fmt", "yuv420p",
                 video_path,
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *placeholder_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc.communicate(), timeout=60)
-
-            if not os.path.exists(video_path):
+            succeeded, error = await self._run_ffmpeg(placeholder_cmd, timeout=60)
+            if not succeeded or not os.path.exists(video_path):
+                logger.error("video_gen: placeholder render failed: %s", error)
                 raise RuntimeError("Concat video missing and placeholder generation failed")
 
-        # Build FFmpeg command
-        inputs = ["-i", video_path]
-        filter_parts = []
-
-        # Add narration audio
-        has_audio = os.path.exists(audio_path) and os.path.getsize(audio_path) > 0
-        if has_audio:
-            inputs.extend(["-i", audio_path])
-
-        # Check for BGM
-        bgm_path = self._find_bgm()
-        has_bgm = bgm_path is not None
-        if has_bgm:
-            inputs.extend(["-i", bgm_path])
-
-        # Build audio mix
-        if has_audio and has_bgm:
-            # Mix narration (full volume) + BGM (low volume)
-            bgm_vol = settings.VIDEO_GEN_BGM_VOLUME
-            audio_filter = (
-                f"[1:a]volume=1.0[narr];"
-                f"[2:a]volume={bgm_vol}[bgm];"
-                f"[narr][bgm]amix=inputs=2:duration=first[aout]"
-            )
-            filter_parts.append(audio_filter)
-            audio_map = ["-map", "0:v", "-map", "[aout]"]
-        elif has_audio:
-            audio_map = ["-map", "0:v", "-map", "1:a"]
-        else:
-            audio_map = ["-map", "0:v"]
-
-        # Subtitle filter (burn-in) — configurable via settings
-        sub_filter = ""
-        if os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
-            # Escape path for FFmpeg
-            escaped_srt = srt_path.replace("'", "'\\''").replace(":", "\\:")
-            # Build ASS force_style from config
-            style_parts = [
-                f"FontSize={settings.VIDEO_GEN_SUB_FONT_SIZE}",
-                f"FontName={settings.VIDEO_GEN_SUB_FONT_NAME}",
-                f"PrimaryColour={settings.VIDEO_GEN_SUB_PRIMARY_COLOR}",
-                f"OutlineColour={settings.VIDEO_GEN_SUB_OUTLINE_COLOR}",
-                f"BackColour={settings.VIDEO_GEN_SUB_BACK_COLOR}",
-                f"Outline={settings.VIDEO_GEN_SUB_OUTLINE}",
-                f"Shadow={settings.VIDEO_GEN_SUB_SHADOW}",
-                f"MarginV={settings.VIDEO_GEN_SUB_MARGIN_V}",
-                f"MarginL={settings.VIDEO_GEN_SUB_MARGIN_L}",
-                f"MarginR={settings.VIDEO_GEN_SUB_MARGIN_R}",
-                f"Alignment={settings.VIDEO_GEN_SUB_ALIGNMENT}",
-                f"Bold={settings.VIDEO_GEN_SUB_BOLD}",
-                f"BorderStyle={settings.VIDEO_GEN_SUB_BORDER_STYLE}",
-            ]
-            force_style = ",".join(style_parts)
-            sub_filter = f"subtitles='{escaped_srt}':force_style='{force_style}'"
-
-        # Build full command
-        cmd = ["ffmpeg", "-y", *inputs]
-
-        if filter_parts and sub_filter:
-            # Complex filter with audio mix + subtitles on video
-            vf = sub_filter
-            cmd.extend(["-filter_complex", ";".join(filter_parts)])
-            cmd.extend(["-vf", vf])
-            cmd.extend(audio_map)
-        elif filter_parts:
-            cmd.extend(["-filter_complex", ";".join(filter_parts)])
-            cmd.extend(audio_map)
-        elif sub_filter:
-            cmd.extend(["-vf", sub_filter])
-            cmd.extend(audio_map)
-        else:
-            cmd.extend(audio_map)
-
-        # Output settings
-        cmd.extend([
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-            "-c:a", "aac", "-b:a", "192k",
-            "-r", "30",
-            "-pix_fmt", "yuv420p",
-            "-shortest",
-            output_path,
-        ])
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        rendered, error = await self._render_final_pass(
+            video_path=video_path,
+            audio_path=audio_path,
+            subtitle_path=subtitle_path,
+            output_path=output_path,
+            include_bgm=job.include_bgm,
+            bgm_volume=job.bgm_volume,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-
-        if proc.returncode != 0:
-            err = stderr.decode(errors="replace")[-500:] if stderr else "unknown"
-            logger.error(f"video_gen: final render failed: {err}")
-            # Retry without subtitles and BGM (simpler)
-            await self._fallback_render(video_path, audio_path, output_path)
+        if not rendered and subtitle_path:
+            logger.warning("video_gen: caption render failed, retrying without captions: %s", error)
+            rendered, error = await self._render_final_pass(
+                video_path=video_path,
+                audio_path=audio_path,
+                subtitle_path=None,
+                output_path=output_path,
+                include_bgm=job.include_bgm,
+                bgm_volume=job.bgm_volume,
+            )
+        if not rendered:
+            logger.warning("video_gen: enhanced composite failed, using fallback: %s", error)
+            rendered = await self._fallback_render(video_path, audio_path, output_path)
+        if not rendered or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError(f"Final video render failed: {error}")
 
     async def _fallback_render(
         self, video_path: str, audio_path: str, output_path: str
-    ) -> None:
-        """Simplified fallback render: video + audio only, no subs/BGM."""
-        cmd = ["ffmpeg", "-y", "-i", video_path]
+    ) -> bool:
+        """Last-resort video and narration render without captions or BGM."""
+        rendered, _ = await self._render_final_pass(
+            video_path=video_path,
+            audio_path=audio_path,
+            subtitle_path=None,
+            output_path=output_path,
+            include_bgm=False,
+            bgm_volume=0,
+        )
+        return rendered
+
+    async def _render_final_pass(
+        self,
+        video_path: str,
+        audio_path: str,
+        subtitle_path: Optional[str],
+        output_path: str,
+        include_bgm: bool,
+        bgm_volume: float,
+    ) -> tuple[bool, str]:
+        video_duration = await self._media_duration(video_path, fallback=10)
+        inputs = ["-i", video_path]
+        filters: list[str] = []
+        narration_input: Optional[int] = None
+        bgm_input: Optional[int] = None
 
         if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
-            cmd.extend(["-i", audio_path, "-map", "0:v", "-map", "1:a"])
+            narration_input = 1
+            inputs.extend(["-i", audio_path])
+
+        if include_bgm:
+            bgm_path = self._find_bgm()
+            if bgm_path:
+                bgm_input = len(inputs) // 2
+                inputs.extend(["-stream_loop", "-1", "-i", bgm_path])
+
+        if narration_input is None and bgm_input is None:
+            silence_input = len(inputs) // 2
+            inputs.extend([
+                "-f", "lavfi",
+                "-t", f"{video_duration:.3f}",
+                "-i", "anullsrc=r=48000:cl=stereo",
+            ])
+            filters.append(
+                f"[{silence_input}:a]aresample=48000,atrim=duration={video_duration:.3f}[aout]"
+            )
+        elif narration_input is not None and bgm_input is not None:
+            filters.extend([
+                f"[{narration_input}:a]aresample=48000,apad,atrim=duration={video_duration:.3f}[narr]",
+                f"[{bgm_input}:a]aresample=48000,volume={bgm_volume:.3f},atrim=duration={video_duration:.3f}[bgm]",
+                "[narr][bgm]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.97[aout]",
+            ])
+        elif narration_input is not None:
+            filters.append(
+                f"[{narration_input}:a]aresample=48000,apad,atrim=duration={video_duration:.3f}[aout]"
+            )
         else:
-            cmd.extend(["-map", "0:v"])
+            filters.append(
+                f"[{bgm_input}:a]aresample=48000,volume={bgm_volume:.3f},atrim=duration={video_duration:.3f}[aout]"
+            )
 
-        cmd.extend([
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k",
-            "-shortest",
+        if subtitle_path and os.path.exists(subtitle_path) and os.path.getsize(subtitle_path) > 0:
+            filters.insert(0, f"[0:v]{ffmpeg_subtitle_filter(subtitle_path)}[vout]")
+        else:
+            filters.insert(0, "[0:v]null[vout]")
+
+        cmd = [
+            "ffmpeg", "-y", *inputs,
+            "-filter_complex", ";".join(filters),
+            "-map", "[vout]", "-map", "[aout]",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-profile:v", "high", "-level:v", "4.1",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+            "-r", "30", "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
             output_path,
-        ])
+        ]
+        return await self._run_ffmpeg(cmd, timeout=300)
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await asyncio.wait_for(proc.communicate(), timeout=180)
+    async def _media_duration(self, path: str, fallback: float) -> float:
+        if not path or not os.path.exists(path):
+            return fallback
+        cmd = [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", path,
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+            if proc.returncode == 0:
+                duration = float(stdout.decode().strip())
+                if duration > 0:
+                    return duration
+        except (OSError, ValueError, asyncio.TimeoutError):
+            pass
+        return fallback
+
+    async def _run_ffmpeg(self, cmd: list[str], timeout: int) -> tuple[bool, str]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            return False, "FFmpeg is not installed or unavailable on PATH"
+
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            return False, f"FFmpeg timed out after {timeout}s"
+
+        if proc.returncode == 0:
+            return True, ""
+        return False, stderr.decode(errors="replace")[-800:] if stderr else "Unknown FFmpeg error"
 
     def _find_bgm(self) -> Optional[str]:
         """Find a background music file from the BGM directory."""
