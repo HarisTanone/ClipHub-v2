@@ -41,8 +41,14 @@ def migrate():
             voice TEXT NOT NULL DEFAULT '',
             speed REAL NOT NULL DEFAULT 1.0,
             instructions TEXT NOT NULL DEFAULT '',
+            num_scenes INTEGER NOT NULL DEFAULT 0,
+            subtitles_enabled INTEGER NOT NULL DEFAULT 1,
+            subtitle_style_json TEXT,
+            include_bgm INTEGER NOT NULL DEFAULT 1,
+            bgm_volume REAL NOT NULL DEFAULT 0.15,
             title TEXT,
             story_json TEXT,
+            scenes_json TEXT,
             timeline_json TEXT,
             output_path TEXT,
             error TEXT,
@@ -52,10 +58,34 @@ def migrate():
         )
     """)
 
+    # Ensure optional/new columns exist if table was already created
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(video_generator_jobs)")
+    existing_cols = {row[1] for row in cur.fetchall()}
+
+    columns_to_add = [
+        ("num_scenes", "INTEGER NOT NULL DEFAULT 0"),
+        ("subtitles_enabled", "INTEGER NOT NULL DEFAULT 1"),
+        ("subtitle_style_json", "TEXT"),
+        ("include_bgm", "INTEGER NOT NULL DEFAULT 1"),
+        ("bgm_volume", "REAL NOT NULL DEFAULT 0.15"),
+        ("scenes_json", "TEXT"),
+    ]
+
+    for col_name, col_def in columns_to_add:
+        if col_name not in existing_cols:
+            conn.execute(f"ALTER TABLE video_generator_jobs ADD COLUMN {col_name} {col_def}")
+
     # Index for listing by user
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_video_gen_jobs_user
         ON video_generator_jobs(user_id, created_at DESC)
+    """)
+
+    # Index for ordering all jobs created_at DESC
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_video_gen_jobs_created
+        ON video_generator_jobs(created_at DESC)
     """)
 
     # Index for status filtering

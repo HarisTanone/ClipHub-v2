@@ -2,6 +2,8 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   Film,
@@ -59,6 +61,14 @@ interface VideoJob {
 interface VoiceOption {
   key: string;
   model: string;
+}
+
+interface JobListResponse {
+  items: VideoJob[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
 }
 
 interface CaptionPreset {
@@ -390,6 +400,9 @@ export function VideoGeneratorPage() {
   const [bgmVolume, setBgmVolume] = useState(0.15);
   const [voices, setVoices] = useState<VoiceOption[]>([]);
   const [jobs, setJobs] = useState<VideoJob[]>([]);
+  const [totalJobs, setTotalJobs] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [activeJob, setActiveJob] = useState<VideoJob | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -398,17 +411,20 @@ export function VideoGeneratorPage() {
   const [showStyleEditor, setShowStyleEditor] = useState(false);
   const [editorHookStyle, setEditorHookStyle] = useState<HookStyle>(DEFAULT_HOOK_STYLE);
 
-  const loadJobs = useCallback(async () => {
+  const loadJobs = useCallback(async (targetPage = page) => {
     try {
-      const response = await fetchApi<VideoJob[]>("/api/video-generator/jobs");
-      setJobs(response);
+      const response = await fetchApi<JobListResponse>(`/api/video-generator/jobs?page=${targetPage}&limit=8`);
+      setJobs(response.items || []);
+      setTotalJobs(response.total || 0);
+      setPage(response.page || 1);
+      setTotalPages(response.total_pages || 1);
       setLoadError("");
     } catch (error) {
       setLoadError(errorMessage(error, "Unable to load generated videos."));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [page]);
 
   const loadVoices = useCallback(async () => {
     try {
@@ -463,7 +479,8 @@ export function VideoGeneratorPage() {
           bgm_volume: bgmVolume,
         }),
       });
-      setJobs((current) => [job, ...current.filter((currentJob) => currentJob.job_id !== job.job_id)]);
+      setPage(1);
+      void loadJobs(1);
       setTopic("");
       setInstructions("");
       toast.success("Video generation started. You can safely leave this page while it renders.");
@@ -502,8 +519,9 @@ export function VideoGeneratorPage() {
     if (isRetrying) return;
     setIsRetrying(jobId);
     try {
-      const job = await fetchApi<VideoJob>(`/api/video-generator/jobs/${jobId}/retry`, { method: "POST" });
-      setJobs((current) => [job, ...current]);
+      await fetchApi<VideoJob>(`/api/video-generator/jobs/${jobId}/retry`, { method: "POST" });
+      setPage(1);
+      void loadJobs(1);
       toast.success("A new generation attempt has started.");
     } catch (error) {
       toast.error(errorMessage(error, "Unable to retry this job."));
@@ -688,9 +706,41 @@ export function VideoGeneratorPage() {
               <p className="mt-1 text-xs text-zinc-600">Start with a specific topic and choose a caption style above.</p>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-              {jobs.map((job) => <VideoCard key={job.job_id} job={job} onPlay={setActiveJob} onDownload={handleDownload} onRetry={handleRetry} />)}
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                {jobs.map((job) => <VideoCard key={job.job_id} job={job} onPlay={setActiveJob} onDownload={handleDownload} onRetry={handleRetry} />)}
+              </div>
+              {totalPages > 1 && (
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <p className="text-xs tabular-nums text-zinc-500">
+                    Showing {(page - 1) * 8 + 1}&ndash;{Math.min(page * 8, totalJobs)} of {totalJobs}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={page <= 1}
+                      onClick={() => { setIsLoading(true); void loadJobs(page - 1); }}
+                      icon={<ChevronLeft className="h-3.5 w-3.5" />}
+                    >
+                      Prev
+                    </Button>
+                    <span className="text-xs tabular-nums text-zinc-400">Page {page} / {totalPages}</span>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={page >= totalPages}
+                      onClick={() => { setIsLoading(true); void loadJobs(page + 1); }}
+                    >
+                      Next
+                      <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </section>
       </div>

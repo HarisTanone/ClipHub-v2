@@ -60,6 +60,14 @@ class JobStatusResponse(BaseModel):
     thumbnail_url: Optional[str] = None
 
 
+class JobListResponse(BaseModel):
+    items: list[JobStatusResponse]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
 class VoiceOption(BaseModel):
     key: str
     model: str
@@ -120,17 +128,35 @@ async def generate_video(
     return _job_to_response(job)
 
 
-@router.get("/jobs", response_model=list[JobStatusResponse])
+@router.get("/jobs", response_model=JobListResponse)
 async def list_jobs(
+    page: int = 1,
+    limit: int = 8,
     user: CurrentUser = Depends(require_superadmin()),
 ):
-    """List all video generation jobs (superuser only)."""
+    """List all video generation jobs with pagination (superuser only).
+    
+    Default page=1, limit=8 (2 rows of 4 videos).
+    """
     from src.application.video_generator import get_video_generator
+    import math
+
+    safe_page = max(1, page)
+    safe_limit = max(1, min(100, limit))
+    offset = (safe_page - 1) * safe_limit
 
     vg = get_video_generator()
-    jobs = vg.list_jobs()
+    total = vg.count_jobs()
+    jobs = vg.list_jobs(limit=safe_limit, offset=offset)
+    total_pages = max(1, math.ceil(total / safe_limit)) if total > 0 else 1
 
-    return [_job_to_response(j) for j in jobs]
+    return JobListResponse(
+        items=[_job_to_response(j) for j in jobs],
+        total=total,
+        page=safe_page,
+        limit=safe_limit,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
@@ -245,10 +271,15 @@ async def stream_video(
     if job.status != VideoGenStatus.COMPLETED:
         raise HTTPException(status_code=400, detail=f"Job not completed (status: {job.status})")
 
-    if not job.output_path or not os.path.exists(job.output_path):
-        raise HTTPException(status_code=404, detail="Output file not found")
-
     file_path = job.output_path
+    if not file_path or not os.path.exists(file_path):
+        # Fallback check standard work dir
+        candidate = os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, f"final_{job_id}.mp4")
+        if os.path.exists(candidate):
+            file_path = candidate
+        else:
+            raise HTTPException(status_code=404, detail="Output file not found")
+
     file_size = os.path.getsize(file_path)
 
     start, end = _parse_byte_range(range, file_size)
@@ -324,13 +355,14 @@ def _job_to_response(job) -> JobStatusResponse:
     """Convert VideoGenJob to response model."""
     scenes_count = 0
     estimated_duration = None
-    title = None
+    title = job.title
     thumbnail_url = None
 
     if job.story:
         scenes_count = len(job.story.get("scenes", []))
         estimated_duration = job.story.get("estimated_duration")
-        title = job.story.get("title")
+        if not title:
+            title = job.story.get("title")
 
     # Get thumbnail from first scene's footage source
     if job.scenes_with_footage:

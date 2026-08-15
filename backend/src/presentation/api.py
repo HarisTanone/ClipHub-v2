@@ -163,6 +163,8 @@ async def lifespan(app: FastAPI):
         _ensure_reframe_tuning_table()
         _ensure_object_overlay_table()
         ensure_hyperframes_table()
+        from database.migrations.v6_video_generator import migrate as migrate_v6
+        migrate_v6()
     except Exception as e:
         logger.warning(f"settings side-tables ensure failed: {e}")
 

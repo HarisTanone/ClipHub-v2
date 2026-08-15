@@ -61,6 +61,7 @@ class VideoGenJob:
     subtitle_style: dict[str, Any] = field(default_factory=dict)
     include_bgm: bool = True
     bgm_volume: float = field(default_factory=lambda: settings.VIDEO_GEN_BGM_VOLUME)
+    title: Optional[str] = None
     # Results
     story: Optional[dict] = None
     scenes_with_footage: Optional[list] = None
@@ -89,6 +90,118 @@ class VideoGenerator:
         self._jobs: dict[str, VideoGenJob] = {}
         self._output_dir = settings.VIDEO_GEN_OUTPUT_DIR
         os.makedirs(self._output_dir, exist_ok=True)
+
+    def _persist_job(self, job: VideoGenJob) -> None:
+        """Persist job state to SQLite database."""
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            conn = get_dict_connection()
+            cur = conn.cursor()
+            status_val = job.status.value if hasattr(job.status, "value") else str(job.status)
+            title = job.title or (job.story.get("title") if job.story else None)
+            story_json = json.dumps(job.story) if job.story else None
+            scenes_json = json.dumps(job.scenes_with_footage) if job.scenes_with_footage else None
+            timeline_json = json.dumps(job.timeline) if job.timeline else None
+            subtitle_style_json = json.dumps(job.subtitle_style) if job.subtitle_style else None
+
+            cur.execute("""
+                INSERT INTO video_generator_jobs (
+                    job_id, user_id, topic, status, progress, target_duration,
+                    voice, speed, instructions, num_scenes, subtitles_enabled,
+                    subtitle_style_json, include_bgm, bgm_volume, title,
+                    story_json, scenes_json, timeline_json, output_path, error,
+                    created_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    user_id=excluded.user_id,
+                    topic=excluded.topic,
+                    status=excluded.status,
+                    progress=excluded.progress,
+                    target_duration=excluded.target_duration,
+                    voice=excluded.voice,
+                    speed=excluded.speed,
+                    instructions=excluded.instructions,
+                    num_scenes=excluded.num_scenes,
+                    subtitles_enabled=excluded.subtitles_enabled,
+                    subtitle_style_json=excluded.subtitle_style_json,
+                    include_bgm=excluded.include_bgm,
+                    bgm_volume=excluded.bgm_volume,
+                    title=excluded.title,
+                    story_json=excluded.story_json,
+                    scenes_json=excluded.scenes_json,
+                    timeline_json=excluded.timeline_json,
+                    output_path=excluded.output_path,
+                    error=excluded.error,
+                    completed_at=excluded.completed_at
+            """, (
+                job.job_id,
+                job.user_id,
+                job.topic,
+                status_val,
+                job.progress,
+                job.target_duration,
+                job.voice,
+                job.speed,
+                job.instructions,
+                job.num_scenes,
+                1 if job.subtitles_enabled else 0,
+                subtitle_style_json,
+                1 if job.include_bgm else 0,
+                job.bgm_volume,
+                title,
+                story_json,
+                scenes_json,
+                timeline_json,
+                job.output_path,
+                job.error,
+                job.created_at,
+                job.completed_at,
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            logger.warning(f"video_gen: failed to persist job {job.job_id} to DB: {exc}")
+
+    def _row_to_job(self, row) -> VideoGenJob:
+        """Convert a DB row into a VideoGenJob dataclass."""
+        try:
+            status_val = VideoGenStatus(row["status"])
+        except Exception:
+            status_val = VideoGenStatus.FAILED if row["status"] == "failed" else VideoGenStatus.QUEUED
+
+        story = json.loads(row["story_json"]) if row["story_json"] else None
+        scenes = json.loads(row["scenes_json"]) if ("scenes_json" in row.keys() and row["scenes_json"]) else None
+        timeline = json.loads(row["timeline_json"]) if row["timeline_json"] else None
+        subtitle_style = (
+            json.loads(row["subtitle_style_json"])
+            if ("subtitle_style_json" in row.keys() and row["subtitle_style_json"])
+            else {}
+        )
+
+        return VideoGenJob(
+            job_id=row["job_id"],
+            topic=row["topic"],
+            status=status_val,
+            progress=int(row["progress"] or 0),
+            target_duration=int(row["target_duration"] or 65),
+            voice=row["voice"] or "",
+            speed=float(row["speed"] or 1.0),
+            instructions=row["instructions"] or "",
+            num_scenes=int(row["num_scenes"]) if "num_scenes" in row.keys() and row["num_scenes"] is not None else 0,
+            subtitles_enabled=bool(row["subtitles_enabled"]) if "subtitles_enabled" in row.keys() and row["subtitles_enabled"] is not None else True,
+            subtitle_style=subtitle_style,
+            include_bgm=bool(row["include_bgm"]) if "include_bgm" in row.keys() and row["include_bgm"] is not None else True,
+            bgm_volume=float(row["bgm_volume"]) if "bgm_volume" in row.keys() and row["bgm_volume"] is not None else settings.VIDEO_GEN_BGM_VOLUME,
+            title=row["title"],
+            story=story,
+            scenes_with_footage=scenes,
+            timeline=timeline,
+            output_path=row["output_path"],
+            error=row["error"],
+            created_at=float(row["created_at"] or 0.0),
+            completed_at=float(row["completed_at"]) if row["completed_at"] is not None else None,
+            user_id=row["user_id"],
+        )
 
     def create_job(
         self,
@@ -125,16 +238,91 @@ class VideoGenerator:
             user_id=user_id,
         )
         self._jobs[job_id] = job
+        self._persist_job(job)
         return job
 
     def get_job(self, job_id: str) -> Optional[VideoGenJob]:
-        return self._jobs.get(job_id)
+        if job_id in self._jobs:
+            return self._jobs[job_id]
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            conn = get_dict_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM video_generator_jobs WHERE job_id = ?", (job_id,))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                job = self._row_to_job(row)
+                self._jobs[job_id] = job
+                return job
+        except Exception as exc:
+            logger.warning(f"video_gen: failed to read job {job_id} from DB: {exc}")
+        return None
 
-    def list_jobs(self, user_id: Optional[int] = None) -> list[VideoGenJob]:
-        jobs = list(self._jobs.values())
+    def list_jobs(
+        self,
+        user_id: Optional[int] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> list[VideoGenJob]:
+        db_jobs: list[VideoGenJob] = []
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            conn = get_dict_connection()
+            cur = conn.cursor()
+            query = "SELECT * FROM video_generator_jobs"
+            params: list[Any] = []
+            if user_id is not None:
+                query += " WHERE user_id = ?"
+                params.append(user_id)
+            query += " ORDER BY created_at DESC"
+            if limit is not None:
+                query += " LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+
+            cur.execute(query, tuple(params))
+            rows = cur.fetchall()
+            conn.close()
+            for r in rows:
+                j = self._row_to_job(r)
+                # Keep in memory cache or merge with ongoing in-memory status
+                if j.job_id in self._jobs:
+                    mem_job = self._jobs[j.job_id]
+                    if mem_job.status not in (VideoGenStatus.COMPLETED, VideoGenStatus.FAILED):
+                        db_jobs.append(mem_job)
+                        continue
+                db_jobs.append(j)
+            return db_jobs
+        except Exception as exc:
+            logger.warning(f"video_gen: failed to list jobs from DB, falling back to memory: {exc}")
+            jobs = list(self._jobs.values())
+            if user_id is not None:
+                jobs = [j for j in jobs if j.user_id == user_id]
+            sorted_jobs = sorted(jobs, key=lambda j: j.created_at, reverse=True)
+            if limit is not None:
+                return sorted_jobs[offset : offset + limit]
+            return sorted_jobs
+
+    def count_jobs(self, user_id: Optional[int] = None) -> int:
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            conn = get_dict_connection()
+            cur = conn.cursor()
+            query = "SELECT COUNT(*) as count FROM video_generator_jobs"
+            params: list[Any] = []
+            if user_id is not None:
+                query += " WHERE user_id = ?"
+                params.append(user_id)
+            cur.execute(query, tuple(params))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                return int(row["count"])
+        except Exception as exc:
+            logger.warning(f"video_gen: failed to count jobs from DB: {exc}")
         if user_id is not None:
-            jobs = [j for j in jobs if j.user_id == user_id]
-        return sorted(jobs, key=lambda j: j.created_at, reverse=True)
+            return len([j for j in self._jobs.values() if j.user_id == user_id])
+        return len(self._jobs)
 
     async def run_pipeline(self, job_id: str) -> VideoGenJob:
         """Execute the full video generation pipeline.
@@ -153,41 +341,52 @@ class VideoGenerator:
             # Step 1: Generate story
             job.status = VideoGenStatus.GENERATING_STORY
             job.progress = 5
+            self._persist_job(job)
             story = await self._step_generate_story(job)
             job.story = story
             job.progress = 15
+            self._persist_job(job)
 
             # Step 2: Search footage
             job.status = VideoGenStatus.SEARCHING_FOOTAGE
             job.progress = 20
+            self._persist_job(job)
             scenes = await self._step_search_footage(story, work_dir)
             job.scenes_with_footage = scenes
             job.progress = 35
+            self._persist_job(job)
 
             # Step 3: Download footage
             job.status = VideoGenStatus.DOWNLOADING
             job.progress = 40
+            self._persist_job(job)
             scenes = await self._step_download_footage(scenes, work_dir)
             job.scenes_with_footage = scenes
             job.progress = 55
+            self._persist_job(job)
 
             # Step 4: Generate TTS
             job.status = VideoGenStatus.GENERATING_TTS
             job.progress = 60
+            self._persist_job(job)
             scenes = await self._step_generate_tts(scenes, job, work_dir)
             job.scenes_with_footage = scenes
             job.progress = 70
+            self._persist_job(job)
 
             # Step 5: Assemble timeline
             job.status = VideoGenStatus.ASSEMBLING
             job.progress = 75
+            self._persist_job(job)
             timeline = self._step_assemble_timeline(scenes)
             job.timeline = timeline
             job.progress = 80
+            self._persist_job(job)
 
             # Step 6: Render final video
             job.status = VideoGenStatus.RENDERING
             job.progress = 85
+            self._persist_job(job)
             output_path = await self._step_render_video(timeline, job, work_dir)
             job.output_path = output_path
             job.progress = 100
@@ -195,6 +394,7 @@ class VideoGenerator:
             # Done
             job.status = VideoGenStatus.COMPLETED
             job.completed_at = time.time()
+            self._persist_job(job)
 
             total_time = job.completed_at - job.created_at
             logger.info(
@@ -205,6 +405,7 @@ class VideoGenerator:
             job.status = VideoGenStatus.FAILED
             job.error = str(exc)
             job.completed_at = time.time()
+            self._persist_job(job)
             logger.error(f"video_gen: job {job_id} failed: {exc}", exc_info=True)
 
         return job
