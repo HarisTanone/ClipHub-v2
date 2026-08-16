@@ -35,24 +35,7 @@ type OptionMeta = {
 
 const PAGINATION_PAGE_SIZE = 6;
 
-type SubtitleVisualPreset =
-  | "classic"
-  | "dual_pop"
-  | "neon_pulse"
-  | "meme_impact"
-  | "editorial_banner"
-  | "spotlight_keyword"
-  | "lower_third"
-  | "bubble_chat"
-  | "minimal_clean"
-  | "breaking_tape"
-  | "quote_box"
-  | "documentary"
-  | "caption_strip"
-  | "word_tiles"
-  | "gradient_glass"
-  | "comic_burst"
-  | "terminal_type";
+type SubtitleVisualPreset = string;
 
 function useGoogleFont(fontFamily: string) {
   useEffect(() => {
@@ -184,7 +167,13 @@ export interface SubtitleStyle {
   wordSpacing: number;
   animationStyle: "pop" | "fade" | "slide" | "none";
   animationSpeed: number;
-  lineTransition: "word_pop" | "emphasis" | "line_reveal";
+  lineTransition: "word_pop" | "emphasis" | "line_reveal" | "karaoke";
+  // Skia / Custom Shaders
+  glowEnabled?: boolean;
+  glowColor?: string;
+  gradientEnabled?: boolean;
+  gradientFrom?: string;
+  gradientTo?: string;
 }
 
 export interface TextEmphasisStyle {
@@ -497,6 +486,7 @@ const SUBTITLE_TRANSITION_META: Record<SubtitleStyle["lineTransition"], OptionMe
   word_pop: { label: "Word Pop", mood: "Readable", accent: "#34D399", preview: "word", desc: "Mode standar, highlight mengikuti kata aktif." },
   emphasis: { label: "Big Keyword", mood: "Keyword hero", accent: "#FACC15", preview: "BIG", desc: "Kata terkuat dibuat besar seperti punchline." },
   line_reveal: { label: "Line Reveal", mood: "Editorial", accent: "#A78BFA", preview: "LINE", desc: "Baris muncul rapi seperti caption editorial." },
+  karaoke: { label: "Karaoke", mood: "Smooth", accent: "#38BDF8", preview: "KARAOKE", desc: "Kata demi kata tersorot berurutan." },
 };
 
 const HIGHLIGHT_STYLE_META: Record<SubtitleStyle["highlightStyle"], OptionMeta> = {
@@ -4162,19 +4152,19 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
               </div>
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-                  <Checkbox label="Glow shader" checked={style.glowEnabled} onChange={(v) => update({ glowEnabled: v })} />
+                  <Checkbox label="Glow shader" checked={!!style.glowEnabled} onChange={(v) => update({ glowEnabled: v })} />
                   {style.glowEnabled && (
                     <div className="mt-2 space-y-2">
-                      <ColorPicker label="Glow Color" value={style.glowColor} onChange={(v) => update({ glowColor: v })} />
+                      <ColorPicker label="Glow Color" value={style.glowColor || "#00FFFF"} onChange={(v) => update({ glowColor: v })} />
                     </div>
                   )}
                 </div>
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-                  <Checkbox label="Gradient shader" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} />
+                  <Checkbox label="Gradient shader" checked={!!style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} />
                   {style.gradientEnabled && (
                     <div className="mt-2 space-y-2">
-                      <ColorPicker label="Grad From" value={style.gradientFrom} onChange={(v) => update({ gradientFrom: v })} />
-                      <ColorPicker label="Grad To" value={style.gradientTo} onChange={(v) => update({ gradientTo: v })} />
+                      <ColorPicker label="Grad From" value={style.gradientFrom || "#667EEA"} onChange={(v) => update({ gradientFrom: v })} />
+                      <ColorPicker label="Grad To" value={style.gradientTo || "#764BA2"} onChange={(v) => update({ gradientTo: v })} />
                     </div>
                   )}
                 </div>

@@ -116,5 +116,11 @@ htmlcov/
 .agents/
 skills-lock.json
 
-# ─── Graphify (generated knowledge graph) ─────────────────────────────────────
+# ─── Graphify (generated knowledge graph & backups) ───────────────────────────
 graphify-out/
+20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+
+# ─── Root & Build Temp ───────────────────────────────────────────────────────
+tmp/
+.vite/
+*.tsbuildinfo
