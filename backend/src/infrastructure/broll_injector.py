@@ -342,7 +342,7 @@ class BRollInjector(IBRollInjector):
 
         return ";".join(filters)
 
-    # ─── Asset Overlay Builders ───────────────────────────────────────────────
+    # ─── Asset Overlay Builders (Ken Burns Motion Engine) ────────────────────
 
     def _build_video_overlay(
         self,
@@ -351,26 +351,29 @@ class BRollInjector(IBRollInjector):
         base_label: str,
         out_label: str,
     ) -> str:
-        """Build FFmpeg filter for video asset overlay.
+        """Build FFmpeg filter for video asset overlay with dynamic Ken Burns motion.
 
-        Scales video to max 648px width (60% of 1080), maintains AR, applies fade,
-        enables between timestamps.
+        Scales video to max 720px width (66% of 1080), applies Ken Burns micro-zoom (1.00x -> 1.07x),
+        smooth alpha fade in/out, and enables between timestamps.
         """
         at_time = suggestion.at_time
-        duration = suggestion.duration
+        duration = max(0.5, suggestion.duration)
         end_time = at_time + duration
-        fade_dur = 0.3
+        fade_dur = min(0.3, duration / 3.0)
 
-        # Scale asset to max 648px width (60% of 1080), maintain AR, decrease only
         base = base_label.strip("[]")
         scaled_label = f"s{input_idx}"
+
+        # Ken Burns slow dynamic zoom: 1.00x -> 1.07x over duration
+        zoom_expr = f"min(1.08,1.0+0.07*(t-{at_time:.3f})/{duration:.3f})"
+        scale_w = f"trunc(720*{zoom_expr}/2)*2"
 
         filter_str = (
             f"[{input_idx}:v]trim=duration={duration:.3f},"
             f"setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
-            f"scale=648:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
-            f"fade=t=in:st={at_time:.3f}:d={fade_dur}:alpha=1,"
-            f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur}:alpha=1"
+            f"scale=w='{scale_w}':h=-2:eval=frame,format=yuva420p,"
+            f"fade=t=in:st={at_time:.3f}:d={fade_dur:.3f}:alpha=1,"
+            f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur:.3f}:alpha=1"
             f"[{scaled_label}];"
             f"[{base}][{scaled_label}]overlay=(W-w)/2:(H-h)/2"
             f":eof_action=pass:repeatlast=0"
@@ -386,24 +389,24 @@ class BRollInjector(IBRollInjector):
         base_label: str,
         out_label: str,
     ) -> str:
-        """Build FFmpeg filter for PNG/SVG image overlay.
-
-        Centers image with fade-in/out. Image scaled to max 432px width (40% of 1080).
-        """
+        """Build FFmpeg filter for PNG/SVG image overlay with Ken Burns motion."""
         at_time = suggestion.at_time
-        duration = suggestion.duration
+        duration = max(0.5, suggestion.duration)
         end_time = at_time + duration
-        fade_dur = 0.3
+        fade_dur = min(0.3, duration / 3.0)
 
         base = base_label.strip("[]")
         scaled_label = f"img{input_idx}"
 
+        zoom_expr = f"min(1.08,1.0+0.06*(t-{at_time:.3f})/{duration:.3f})"
+        scale_w = f"trunc(480*{zoom_expr}/2)*2"
+
         filter_str = (
             f"[{input_idx}:v]loop=loop=-1:size=1:start=0,"
             f"trim=duration={duration:.3f},setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
-            f"scale=432:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
-            f"fade=t=in:st={at_time:.3f}:d={fade_dur}:alpha=1,"
-            f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur}:alpha=1"
+            f"scale=w='{scale_w}':h=-2:eval=frame,format=yuva420p,"
+            f"fade=t=in:st={at_time:.3f}:d={fade_dur:.3f}:alpha=1,"
+            f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur:.3f}:alpha=1"
             f"[{scaled_label}];"
             f"[{base}][{scaled_label}]overlay=(W-w)/2:(H-h)/2"
             f":eof_action=pass:repeatlast=0"
@@ -419,14 +422,11 @@ class BRollInjector(IBRollInjector):
         base_label: str,
         out_label: str,
     ) -> str:
-        """Build FFmpeg filter for animated GIF overlay.
-
-        Preserves alpha channel, scales to max 432px width (40% of 1080), enables between timestamps.
-        """
+        """Build FFmpeg filter for animated GIF overlay with smooth alpha."""
         at_time = suggestion.at_time
-        duration = suggestion.duration
+        duration = max(0.5, suggestion.duration)
         end_time = at_time + duration
-        fade_dur = 0.3
+        fade_dur = min(0.3, duration / 3.0)
 
         base = base_label.strip("[]")
         scaled_label = f"gif{input_idx}"
@@ -434,9 +434,9 @@ class BRollInjector(IBRollInjector):
         filter_str = (
             f"[{input_idx}:v]trim=duration={duration:.3f},"
             f"setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
-            f"scale=432:-1:force_original_aspect_ratio=decrease,format=yuva420p,"
-            f"fade=t=in:st={at_time:.3f}:d={fade_dur}:alpha=1,"
-            f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur}:alpha=1"
+            f"scale=480:-2:force_original_aspect_ratio=decrease,format=yuva420p,"
+            f"fade=t=in:st={at_time:.3f}:d={fade_dur:.3f}:alpha=1,"
+            f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur:.3f}:alpha=1"
             f"[{scaled_label}];"
             f"[{base}][{scaled_label}]overlay=(W-w)/2:(H-h)/2"
             f":eof_action=pass:repeatlast=0"

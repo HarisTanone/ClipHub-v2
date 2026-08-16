@@ -14,6 +14,54 @@ from src.domain.interfaces import IAssetClient
 logger = logging.getLogger(__name__)
 
 
+ID_TO_EN_VISUAL_MAP = {
+    "bitcoin": "bitcoin crypto digital currency trading chart",
+    "kripto": "cryptocurrency trading investment screen",
+    "saham": "stock market trading chart financial economy",
+    "uang": "cash money wealth luxury finance counting",
+    "kaya": "wealth luxury lifestyle mansions sports car",
+    "bisnis": "business meeting modern office professional strategy",
+    "kantor": "modern startup office workspace computer working",
+    "mobil": "luxury sports car driving highway dynamic",
+    "motor": "motorcycle riding city speed road",
+    "robot": "artificial intelligence robot future cyborg humanoid tech",
+    "ai": "artificial intelligence technology neural network modern future",
+    "koding": "coding software developer programming computer screen",
+    "hacker": "cybersecurity programming code matrix dark terminal",
+    "kopi": "espresso coffee cup barista pouring aesthetic",
+    "makanan": "delicious gourmet food plating restaurant cooking",
+    "olahraga": "workout gym fitness training athletic motivation",
+    "lari": "running athlete marathon outdoor fitness",
+    "gunung": "mountain landscape aerial nature sunset majestic",
+    "pantai": "tropical beach ocean waves golden sunset drone",
+    "hutan": "lush green forest nature aerial trees sunlight",
+    "jalanan": "city traffic highway night neon lights time lapse",
+    "belajar": "study student reading books library focusing",
+    "sukses": "celebration victory success achievement motivation",
+    "pusing": "stressed person working headache frustration burnout",
+    "senang": "happy smiling energetic positive emotions lifestyle",
+}
+
+
+def expand_visual_queries(keyword: str) -> list[str]:
+    """Generates a prioritized list of cinematic English search queries from keyword."""
+    clean = keyword.lower().strip()
+    queries = []
+
+    for k, v in ID_TO_EN_VISUAL_MAP.items():
+        if k in clean:
+            queries.append(v)
+            break
+
+    if clean not in queries:
+        queries.append(clean)
+
+    if len(queries) == 1 and queries[0] == clean:
+        queries.insert(0, f"cinematic {clean}")
+
+    return queries[:3]
+
+
 class PexelsClient(IAssetClient):
     """Pexels Video API client — fetches short portrait footage for B-roll overlay."""
 
@@ -26,37 +74,38 @@ class PexelsClient(IAssetClient):
         self._timeout = settings.ASSET_FETCH_TIMEOUT
 
     async def search(self, keyword: str, **kwargs) -> Optional[AssetResult]:
-        """Search Pexels for portrait video matching keyword.
-
-        Returns AssetResult with local path to downloaded video, or None.
-        """
+        """Search Pexels for portrait video matching keyword with AI query expansion."""
         if not self._api_key:
             logger.warning("[PexelsClient] No API key configured, skipping.")
             return None
 
+        queries = expand_visual_queries(keyword)
+
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                # Search for videos
-                response = await client.get(
-                    self.BASE_URL,
-                    headers={"Authorization": self._api_key},
-                    params={
-                        "query": keyword,
-                        "orientation": "portrait",
-                        "per_page": 5,
-                    },
-                )
+                videos = []
+                for q in queries:
+                    response = await client.get(
+                        self.BASE_URL,
+                        headers={"Authorization": self._api_key},
+                        params={
+                            "query": q,
+                            "orientation": "portrait",
+                            "per_page": 5,
+                        },
+                    )
 
-                if response.status_code == 429:
-                    logger.warning("[PexelsClient] Rate limited (HTTP 429).")
-                    return None
+                    if response.status_code == 429:
+                        logger.warning("[PexelsClient] Rate limited (HTTP 429).")
+                        return None
 
-                if response.status_code != 200:
-                    logger.warning(f"[PexelsClient] API error: HTTP {response.status_code}")
-                    return None
+                    if response.status_code != 200:
+                        continue
 
-                data = response.json()
-                videos = data.get("videos", [])
+                    data = response.json()
+                    videos = data.get("videos", [])
+                    if videos:
+                        break
 
                 if not videos:
                     logger.debug(f"[PexelsClient] No results for '{keyword}'")

@@ -545,7 +545,7 @@ def build_overlay_card(
     font_scale: float = 0.55,
     show_label: bool = True,
 ) -> Optional[Any]:
-    """Build BGRA card: rounded image + optional text label below. Returns numpy array."""
+    """Build BGRA glassmorphism card: rounded thumbnail + pill badge + drop shadow."""
     try:
         import cv2
         import numpy as np
@@ -564,55 +564,88 @@ def build_overlay_card(
     crop = img[y0:y0 + side, x0:x0 + side]
     thumb = cv2.resize(crop, (box, box), interpolation=cv2.INTER_AREA)
 
-    label_h = int(box * 0.28) if show_label and label else 0
-    card_h = box + label_h
-    card_w = box
-    bg = _parse_rgb(bg_color, (20, 20, 24))
+    label_h = int(box * 0.26) if show_label and label else 0
+    shadow_margin = 12
+    card_h = box + label_h + shadow_margin
+    card_w = box + shadow_margin
+    bg = _parse_rgb(bg_color, (15, 23, 42))  # modern dark slate
     tc = _parse_rgb(text_color, (255, 255, 255))
-    bc = _parse_rgb(border_color, (255, 255, 255))
+    bc = _parse_rgb(border_color, (56, 189, 248))  # cyan/emerald neon accent
 
     card = np.zeros((card_h, card_w, 4), dtype=np.uint8)
-    # rounded mask for image area
+
+    # ── 1. Soft Blurred Drop Shadow ──
+    shadow_mask = np.zeros((card_h, card_w), dtype=np.uint8)
+    sx0, sy0 = shadow_margin // 2, shadow_margin // 2
+    cv2.rectangle(
+        shadow_mask,
+        (sx0 + 2, sy0 + 4),
+        (sx0 + box - 2, sy0 + box + label_h - 2),
+        160,
+        -1,
+    )
+    shadow_blur = cv2.GaussianBlur(shadow_mask, (15, 15), 0)
+    card[:, :, 3] = shadow_blur
+
+    # ── 2. Rounded Thumbnail Mask ──
     mask = np.zeros((box, box), dtype=np.uint8)
-    cv2.rectangle(mask, (0, 0), (box - 1, box - 1), 255, -1)
     if radius > 0:
-        mask = np.zeros((box, box), dtype=np.uint8)
         cv2.rectangle(mask, (radius, 0), (box - radius - 1, box - 1), 255, -1)
         cv2.rectangle(mask, (0, radius), (box - 1, box - radius - 1), 255, -1)
         cv2.circle(mask, (radius, radius), radius, 255, -1)
         cv2.circle(mask, (box - radius - 1, radius), radius, 255, -1)
         cv2.circle(mask, (radius, box - radius - 1), radius, 255, -1)
         cv2.circle(mask, (box - radius - 1, box - radius - 1), radius, 255, -1)
+    else:
+        cv2.rectangle(mask, (0, 0), (box - 1, box - 1), 255, -1)
 
+    # Copy image with rounded mask
     for c in range(3):
-        card[:box, :box, c] = thumb[:, :, c]
-    card[:box, :box, 3] = mask
+        card[sy0:sy0 + box, sx0:sx0 + box, c] = thumb[:, :, c]
+    card[sy0:sy0 + box, sx0:sx0 + box, 3] = np.maximum(
+        card[sy0:sy0 + box, sx0:sx0 + box, 3], mask
+    )
 
-    # border ring
-    if radius >= 0:
-        border = np.zeros((box, box), dtype=np.uint8)
-        cv2.rectangle(border, (1, 1), (box - 2, box - 2), 255, 2)
-        # only on opaque
-        edge = cv2.bitwise_and(border, mask)
-        for c, val in enumerate(bc):
-            card[:box, :box, c] = np.where(edge > 0, val, card[:box, :box, c])
+    # ── 3. Glowing Border Ring ──
+    border = np.zeros((box, box), dtype=np.uint8)
+    cv2.rectangle(border, (1, 1), (box - 2, box - 2), 255, 2)
+    edge = cv2.bitwise_and(border, mask)
+    for c, val in enumerate(bc):
+        img_region = card[sy0:sy0 + box, sx0:sx0 + box, c]
+        card[sy0:sy0 + box, sx0:sx0 + box, c] = np.where(edge > 0, val, img_region)
 
+    # ── 4. Glassmorphism Pill Label ──
     if label_h > 0:
-        # label strip with rounded bottom feel
-        card[box:, :, 0] = bg[0]
-        card[box:, :, 1] = bg[1]
-        card[box:, :, 2] = bg[2]
-        card[box:, :, 3] = 230
-        text = str(label)[:18]
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        scale = max(0.35, float(font_scale) * (box / 200.0))
-        thickness = max(1, int(round(scale * 2)))
-        (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
-        tx = max(4, (card_w - tw) // 2)
-        ty = box + (label_h + th) // 2 - 2
-        # draw on BGR then copy alpha
-        bgr = card[:, :, :3].copy()
-        cv2.putText(bgr, text, (tx, ty), font, scale, tc, thickness, cv2.LINE_AA)
+        lbl_y0 = sy0 + box - 4
+        lbl_y1 = lbl_y0 + label_h + 4
+        lbl_x0 = sx0 + 4
+        lbl_x1 = sx0 + box - 4
+
+        # Pill background
+        pill_mask = np.zeros((card_h, card_w), dtype=np.uint8)
+        cv2.rectangle(pill_mask, (lbl_x0, lbl_y0), (lbl_x1, lbl_y1), 235, -1)
+
+        for c, val in enumerate(bg):
+            card[lbl_y0:lbl_y1, lbl_x0:lbl_x1, c] = val
+        card[:, :, 3] = np.maximum(card[:, :, 3], pill_mask)
+
+        # Border for pill
+        bgr = np.ascontiguousarray(card[:, :, :3])
+        cv2.rectangle(bgr, (lbl_x0, lbl_y0), (lbl_x1, lbl_y1), bc, 1)
+
+        # High-contrast label text with badge indicator
+        clean_text = str(label).strip()[:16].upper()
+        badge_text = f"{clean_text}"
+        font = cv2.FONT_HERSHEY_DUPLEX
+        scale = max(0.32, float(font_scale) * (box / 210.0))
+        thickness = 1
+        (tw, th), _ = cv2.getTextSize(badge_text, font, scale, thickness)
+        tx = max(lbl_x0 + 6, (lbl_x0 + lbl_x1 - tw) // 2)
+        ty = lbl_y0 + (label_h + th) // 2 + 1
+
+        # Drop shadow for text
+        cv2.putText(bgr, badge_text, (tx + 1, ty + 1), font, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+        cv2.putText(bgr, badge_text, (tx, ty), font, scale, tc, thickness, cv2.LINE_AA)
         card[:, :, :3] = bgr
 
     return card
@@ -631,14 +664,15 @@ def _anchor_xy(
     if pos == "top_left":
         return m, m
     if pos == "bottom_left":
-        return m, frame_h - card_h - m
+        # Keep above standard subtitle bottom boundary (min 260px)
+        return m, max(m, frame_h - card_h - max(m, 260))
     if pos == "bottom_right":
-        return frame_w - card_w - m, frame_h - card_h - m
+        return frame_w - card_w - m, max(m, frame_h - card_h - max(m, 260))
     if pos == "center_left":
         return m, max(m, (frame_h - card_h) // 2)
     if pos == "center_right":
         return frame_w - card_w - m, max(m, (frame_h - card_h) // 2)
-    # top_right default
+    # top_right default (safe from subtitle collisions)
     return frame_w - card_w - m, m
 
 
@@ -648,8 +682,9 @@ def _anim_offset(
     animation: str,
     card_w: int,
     card_h: int,
-) -> tuple[int, int, float]:
-    """Return (dx, dy, alpha_mul) for entrance/exit."""
+    with_scale: bool = False,
+) -> tuple[int, int, float] | tuple[int, int, float, float]:
+    """Return (dx, dy, alpha_mul) or (dx, dy, alpha_mul, scale_mul) if with_scale=True."""
     anim = (animation or "slide_right").lower()
     fade_in = 0.25
     fade_out = 0.25
@@ -661,20 +696,28 @@ def _anim_offset(
 
     progress_in = min(1.0, t_local / fade_in) if fade_in > 0 else 1.0
     ease = 1.0 - (1.0 - progress_in) ** 2  # ease-out
+
+    # Ken Burns Micro-Zoom: smooth 1.00x -> 1.06x over life of card
+    t_norm = max(0.0, min(1.0, t_local / max(0.1, duration)))
+    scale_mul = 1.0 + 0.06 * t_norm
+
     dx = dy = 0
     if anim == "slide_right":
-        dx = int((1.0 - ease) * (card_w + 20))
+        dx = int((1.0 - ease) * (card_w + 30))
     elif anim == "slide_left":
-        dx = int(-(1.0 - ease) * (card_w + 20))
+        dx = int(-(1.0 - ease) * (card_w + 30))
     elif anim == "slide_down":
-        dy = int(-(1.0 - ease) * (card_h + 20))
+        dy = int(-(1.0 - ease) * (card_h + 30))
     elif anim == "slide_up":
-        dy = int((1.0 - ease) * (card_h + 20))
+        dy = int((1.0 - ease) * (card_h + 30))
     elif anim == "pop":
-        # scale simulated via alpha only at start
-        alpha *= 0.5 + 0.5 * ease
-    # fade: only alpha
-    return dx, dy, max(0.0, min(1.0, alpha))
+        alpha *= 0.4 + 0.6 * ease
+        scale_mul = (0.7 + 0.3 * ease) * scale_mul
+
+    alpha_clamped = max(0.0, min(1.0, alpha))
+    if with_scale:
+        return dx, dy, alpha_clamped, scale_mul
+    return dx, dy, alpha_clamped
 
 
 def _blit_bgra(frame, card, x: int, y: int, opacity: float = 1.0):
@@ -860,8 +903,19 @@ class ObjectImageOverlayRenderer:
                     continue
                 ch, cw = card.shape[:2]
                 ax, ay = _anchor_xy(fw, fh, cw, ch, position, margin)
-                dx, dy, amul = _anim_offset(t - t0, dur, animation, cw, ch)
-                _blit_bgra(frame, card, ax + dx, ay + dy, opacity=opacity_base * amul)
+                dx, dy, amul, smul = _anim_offset(t - t0, dur, animation, cw, ch, with_scale=True)
+
+                # Ken Burns Micro-Zoom: smooth scale expansion
+                if abs(smul - 1.0) > 0.005:
+                    new_w = max(16, int(round(cw * smul)))
+                    new_h = max(16, int(round(ch * smul)))
+                    zoomed_card = cv2.resize(card, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                    # Keep anchor centered on growth
+                    cx_offset = (new_w - cw) // 2
+                    cy_offset = (new_h - ch) // 2
+                    _blit_bgra(frame, zoomed_card, ax + dx - cx_offset, ay + dy - cy_offset, opacity=opacity_base * amul)
+                else:
+                    _blit_bgra(frame, card, ax + dx, ay + dy, opacity=opacity_base * amul)
             writer.write(frame)
             frame_i += 1
 
