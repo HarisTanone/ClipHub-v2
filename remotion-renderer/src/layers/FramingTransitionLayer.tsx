@@ -29,6 +29,7 @@ export const FramingTransitionLayer: React.FC<FramingTransitionLayerProps> = ({
   let opacity = 1;
   let translateX = 0;
   let scale = 1;
+  let filter = "none";
 
   if (entrance && style !== "cut" && frame <= durationFrames) {
     const progress = interpolate(frame, [0, durationFrames], [0, 1], {
@@ -41,6 +42,10 @@ export const FramingTransitionLayer: React.FC<FramingTransitionLayerProps> = ({
     if (style === "zoom") {
       scale = 1.08 - progress * 0.08;
       opacity = progress;
+    }
+    // 2-frame subtle optical flash on entrance
+    if (frame <= 2) {
+      filter = "brightness(1.25) saturate(1.1)";
     }
   }
 
@@ -61,7 +66,10 @@ export const FramingTransitionLayer: React.FC<FramingTransitionLayerProps> = ({
       });
       if (style === "fade") opacity = Math.min(opacity, 1 - phase * 0.45);
       // Speaker slide is already the actual bbox-aware crop interpolation in
-      // FFmpeg; adding a second CSS translation would expose a black edge.
+      // FFmpeg; adding subtle whip blur during the peak phase gives a professional pan feel
+      if (phase > 0.4) {
+        filter = `blur(${Math.round(phase * 4)}px)`;
+      }
       if (style === "zoom") scale = Math.max(scale, 1 + phase * 0.06);
       break;
     }
@@ -74,6 +82,7 @@ export const FramingTransitionLayer: React.FC<FramingTransitionLayerProps> = ({
         height: "100%",
         opacity,
         overflow: "hidden",
+        filter,
         transform: `translateX(${translateX}%) scale(${scale})`,
         transformOrigin: "center center",
       }}

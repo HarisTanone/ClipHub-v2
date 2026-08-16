@@ -71,6 +71,23 @@ def _tpl(
 # Rich theme templates — accents biased to top/bottom bands (letterbox zones)
 CANVAS_TEMPLATES: list[dict[str, Any]] = [
     _tpl(
+        "video-mirror",
+        "Blurred Video Mirror",
+        "Dynamic",
+        background={
+            "type": "video_mirror",
+            "blurAmount": 45,
+            "dimAmount": 0.55,
+            "vignette": 0.4,
+        },
+        accents=[
+            {"type": "soft-glow", "x": 0.5, "y": 0.35, "r": 0.5, "color": "rgba(255,255,255,0.06)"},
+            {"type": "soft-glow", "x": 0.5, "y": 0.65, "r": 0.5, "color": "rgba(255,255,255,0.06)"},
+        ],
+        layout_16_9={"videoX": 0.0, "videoY": 0.3418, "videoW": 1.0, "videoH": 0.3164, "borderRadius": 0, "ambientGlow": True},
+        layout_1_1={"videoX": 0.04, "videoY": 0.24, "videoW": 0.92, "videoH": 0.52, "borderRadius": 16, "ambientGlow": True},
+    ),
+    _tpl(
         "dark-studio",
         "Dark Studio",
         "Studio",

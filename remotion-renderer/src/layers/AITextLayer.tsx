@@ -103,7 +103,7 @@ export const AITextLayer: React.FC<{
   const endFrame = Math.max(startFrame + 1, Math.round(active.end * fps));
   const localFrame = frame - startFrame;
   const eventDuration = endFrame - startFrame;
-  const enter = spring({ frame: localFrame, fps, config: { damping: 14, stiffness: 210, mass: 0.65 } });
+  const enter = spring({ frame: localFrame, fps, config: { damping: 12, stiffness: 190, mass: 0.7 } });
   const exitOpacity = interpolate(localFrame, [Math.max(0, eventDuration - 8), eventDuration], [1, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
@@ -233,6 +233,12 @@ export const AITextLayer: React.FC<{
     effectiveTransform = `scale(${interpolate(enter, [0, 1], [1.35, 1])})`;
   }
 
+  // 2-frame Chromatic Aberration burst during impact entrance
+  const isImpactBurst = localFrame <= 3 && (animation === "impact" || animation === "static_glitch");
+  const chromaticTextShadow = isImpactBurst
+    ? `-4px 0 rgba(255, 0, 80, 0.85), 4px 0 rgba(0, 240, 255, 0.85), 0 10px 30px rgba(0,0,0,0.85)`
+    : undefined;
+
   const baseTextStyle: React.CSSProperties = {
     color,
     fontFamily: `'${style.fontFamily || "Bebas Neue"}', sans-serif`,
@@ -246,11 +252,12 @@ export const AITextLayer: React.FC<{
     WebkitTextStroke: style.strokeEnabled === false
       ? undefined
       : `${Number(style.strokeWidth ?? 3)}px ${style.strokeColor || "#0A0A0B"}`,
-    textShadow: animation === "glow"
-      ? `0 0 ${neonGlow}px ${accent}, 0 0 ${neonGlow * 2}px ${accent}, 0 6px ${Number(style.shadowBlur ?? 28)}px ${style.shadowColor || "#000000"}`
-      : style.shadowEnabled === false
-        ? undefined
-        : `0 10px ${Number(style.shadowBlur ?? 28)}px ${style.shadowColor || "#000000"}`,
+    textShadow: chromaticTextShadow
+      || (animation === "glow"
+        ? `0 0 ${neonGlow}px ${accent}, 0 0 ${neonGlow * 2}px ${accent}, 0 6px ${Number(style.shadowBlur ?? 28)}px ${style.shadowColor || "#000000"}`
+        : style.shadowEnabled === false
+          ? undefined
+          : `0 10px ${Number(style.shadowBlur ?? 28)}px ${style.shadowColor || "#000000"}`),
     filter: blurPx > 0.2 ? `blur(${blurPx}px)` : undefined,
   };
 

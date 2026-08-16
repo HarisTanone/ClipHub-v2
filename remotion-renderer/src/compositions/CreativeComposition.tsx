@@ -80,7 +80,7 @@ export const CreativeComposition: React.FC<ClipCompositionProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: hasCanvas ? "transparent" : "#000" }}>
-      {hasCanvas && canvas ? <CanvasBackgroundLayer config={canvas} /> : null}
+      {hasCanvas && canvas ? <CanvasBackgroundLayer config={canvas} videoPath={videoPath} /> : null}
       {/* Video: full-bleed 9:16 or contain in template slot */}
       {videoPath && (
         <AbsoluteFill style={hasCanvas ? videoSlotStyle(canvas?.layout) : undefined}>

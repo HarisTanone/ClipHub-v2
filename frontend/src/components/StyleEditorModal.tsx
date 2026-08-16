@@ -2638,7 +2638,7 @@ function EnginePicker({
     if (meta.superuserOnly && !isSuperadmin) return false;
     return true;
   });
-  // Map each engine to a specific icon for better visual distinction
+
   const getIcon = (id: string) => {
     switch (id) {
       case "remotion": return Clapperboard;
@@ -2649,9 +2649,49 @@ function EnginePicker({
     }
   };
 
+  const getTheme = (id: string, active: boolean) => {
+    if (!active) {
+      return "border-zinc-800/90 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/80 hover:text-zinc-200";
+    }
+    switch (id) {
+      case "remotion":
+        return "border-emerald-500/60 bg-emerald-500/10 text-emerald-100 ring-1 ring-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.15)]";
+      case "hyperframes":
+        return "border-cyan-500/60 bg-cyan-500/10 text-cyan-100 ring-1 ring-cyan-500/40 shadow-[0_0_15px_rgba(6,182,212,0.15)]";
+      case "ffmpeg":
+        return "border-purple-500/60 bg-purple-500/10 text-purple-100 ring-1 ring-purple-500/40 shadow-[0_0_15px_rgba(168,85,247,0.15)]";
+      case "skia":
+        return "border-amber-500/60 bg-amber-500/10 text-amber-100 ring-1 ring-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.15)]";
+      default:
+        return "border-emerald-500/60 bg-emerald-500/10 text-emerald-100";
+    }
+  };
+
+  const getBadgeStyle = (id: string, active: boolean) => {
+    if (!active) return "bg-zinc-800 text-zinc-500 border border-zinc-700/50";
+    switch (id) {
+      case "remotion": return "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40";
+      case "hyperframes": return "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40";
+      case "ffmpeg": return "bg-purple-500/20 text-purple-300 border border-purple-500/40";
+      case "skia": return "bg-amber-500/20 text-amber-300 border border-amber-500/40";
+      default: return "bg-white/10 text-white";
+    }
+  };
+
+  const getIconColor = (id: string, active: boolean) => {
+    if (!active) return "text-zinc-500";
+    switch (id) {
+      case "remotion": return "text-emerald-400";
+      case "hyperframes": return "text-cyan-400";
+      case "ffmpeg": return "text-purple-400";
+      case "skia": return "text-amber-400";
+      default: return "text-white";
+    }
+  };
+
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 overflow-hidden">
-      <div className={cn("grid gap-0.5 p-1", engineOptions.length <= 2 ? "grid-cols-2" : engineOptions.length === 3 ? "grid-cols-3" : "grid-cols-4")}>
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 space-y-3">
+      <div className={cn("grid gap-2.5", engineOptions.length <= 2 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 sm:grid-cols-2")}>
         {engineOptions.map((id) => {
           const meta = ENGINE_NOTES[id];
           const active = engine === id;
@@ -2662,36 +2702,35 @@ function EnginePicker({
               type="button"
               onClick={() => onChange(id)}
               className={cn(
-                "flex flex-col items-start gap-1 rounded-lg px-3 py-2.5 text-left transition-all",
-                active
-                  ? id === "remotion"
-                    ? "bg-emerald-500/15 ring-1 ring-emerald-500/40 text-emerald-100"
-                    : id === "hyperframes"
-                      ? "bg-cyan-500/15 ring-1 ring-cyan-500/40 text-cyan-100"
-                      : id === "skia"
-                        ? "bg-amber-500/15 ring-1 ring-amber-500/40 text-amber-100"
-                        : "bg-purple-500/15 ring-1 ring-purple-500/40 text-purple-100"
-                  : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+                "group relative flex flex-col justify-between gap-2 rounded-xl border p-3 text-left transition-all",
+                getTheme(id, active),
               )}
             >
-              <span className="flex items-center gap-1.5 text-[11px] font-semibold">
-                <Icon className="h-3.5 w-3.5" />
-                {meta.label}
+              <div className="flex items-center justify-between gap-2 w-full">
+                <span className="flex items-center gap-2 text-xs font-bold tracking-tight">
+                  <Icon className={cn("h-4 w-4 shrink-0 transition-colors", getIconColor(id, active))} />
+                  <span className={active ? "text-zinc-100" : "text-zinc-300 group-hover:text-zinc-100"}>{meta.label}</span>
+                </span>
                 <span className={cn(
-                  "ml-auto rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide",
-                  active ? "bg-white/10" : "bg-zinc-800 text-zinc-500",
-                )}>{meta.badge}</span>
-              </span>
-              <span className="text-[9px] leading-snug opacity-80">
-                {meta.speed} · {meta.quality}
-              </span>
+                  "rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider shrink-0 transition-colors",
+                  getBadgeStyle(id, active),
+                )}>
+                  {meta.badge}
+                </span>
+              </div>
+              <p className="text-[10px] leading-snug text-zinc-400 opacity-90">
+                <span className={cn("font-medium", active ? "text-zinc-300" : "text-zinc-400")}>{meta.speed}</span> · {meta.quality}
+              </p>
             </button>
           );
         })}
       </div>
-      <div className="border-t border-zinc-800/80 px-3 py-2">
+      <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/50 px-3 py-2.5 flex items-start gap-2">
+        <div className={cn("mt-0.5 shrink-0", getIconColor(engine, true))}>
+          <Sparkles className="w-3.5 h-3.5" />
+        </div>
         <p className="text-[10px] leading-relaxed text-zinc-400">
-          <span className="font-semibold text-zinc-300">Note · {kind}: </span>
+          <span className="font-semibold text-zinc-200">Note · {kind}: </span>
           {ENGINE_NOTES[engine].note}
         </p>
       </div>
@@ -2826,7 +2865,144 @@ function SkiaHookLivePreview({
         <div className="absolute inset-0 bg-black/40" />
 
         <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
-          {presetId.includes("glitch") ? (
+          {presetId === "skia_neon_cyberpunk" ? (
+            <div
+              style={{
+                position: "relative",
+                padding: "10px 18px",
+                background: "rgba(10, 15, 30, 0.85)",
+                borderRadius: "12px",
+                border: "1.5px solid #00F0FF",
+                boxShadow: "0 0 20px rgba(0,240,255,0.4), inset 0 0 15px rgba(255,0,127,0.25)",
+                backdropFilter: "blur(10px)",
+              }}
+            >
+              <div style={{ position: "absolute", top: -3, left: -3, width: 8, height: 8, borderTop: "2px solid #FF007F", borderLeft: "2px solid #FF007F" }} />
+              <div style={{ position: "absolute", bottom: -3, right: -3, width: 8, height: 8, borderBottom: "2px solid #FF007F", borderRight: "2px solid #FF007F" }} />
+              <p
+                style={{
+                  fontSize: Math.max(style.fontSize * 0.32, 14),
+                  fontWeight: 900,
+                  fontFamily: `'${style.fontFamily || "Montserrat"}', sans-serif`,
+                  background: "linear-gradient(135deg, #00F0FF, #FF007F)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  textAlign: "center",
+                }}
+              >
+                {sample}
+              </p>
+            </div>
+          ) : presetId === "skia_frosted_pill" ? (
+            <div
+              style={{
+                padding: "8px 18px",
+                background: "rgba(255, 255, 255, 0.15)",
+                borderRadius: "999px",
+                border: "1px solid rgba(255, 255, 255, 0.35)",
+                boxShadow: "0 10px 30px rgba(0, 0, 0, 0.4)",
+                backdropFilter: "blur(14px)",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: Math.max(style.fontSize * 0.3, 13),
+                  fontWeight: 800,
+                  fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
+                  color: "#FFFFFF",
+                  textAlign: "center",
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                {sample}
+              </p>
+            </div>
+          ) : presetId === "skia_aurora_gradient" ? (
+            <div
+              style={{
+                position: "relative",
+                padding: "6px 14px",
+                borderRadius: "10px",
+                background: "rgba(5, 15, 10, 0.75)",
+                boxShadow: "0 0 25px rgba(16, 185, 129, 0.35)",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: Math.max(style.fontSize * 0.34, 15),
+                  fontWeight: 900,
+                  fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif`,
+                  background: "linear-gradient(135deg, #10B981 0%, #38BDF8 50%, #8B5CF6 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  textAlign: "center",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {sample}
+              </p>
+            </div>
+          ) : presetId === "skia_impact_badge" ? (
+            <div
+              style={{
+                background: "linear-gradient(135deg, #FACC15, #EAB308)",
+                padding: "6px 16px",
+                borderRadius: "6px",
+                transform: "rotate(-1.5deg)",
+                boxShadow: "0 8px 0 #713F12, 0 14px 28px rgba(0,0,0,0.5)",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: Math.max(style.fontSize * 0.34, 15),
+                  fontWeight: 900,
+                  fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
+                  color: "#000000",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.03em",
+                  textAlign: "center",
+                }}
+              >
+                {sample}
+              </p>
+            </div>
+          ) : presetId === "skia_3d_chrome" ? (
+            <p
+              style={{
+                fontSize: Math.max(style.fontSize * 0.36, 16),
+                fontWeight: 900,
+                fontFamily: `'${style.fontFamily || "Bebas Neue"}', sans-serif`,
+                background: "linear-gradient(180deg, #FFFFFF 0%, #E2E8F0 30%, #FBBF24 50%, #78350F 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                textAlign: "center",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                filter: "drop-shadow(0 4px 12px rgba(0,0,0,0.85))",
+              }}
+            >
+              {sample}
+            </p>
+          ) : presetId === "skia_ruby_flame" ? (
+            <p
+              style={{
+                fontSize: Math.max(style.fontSize * 0.34, 15),
+                fontWeight: 900,
+                fontFamily: `'${style.fontFamily || "Bungee"}', sans-serif`,
+                background: "linear-gradient(135deg, #FF3366, #FF9900)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                textAlign: "center",
+                textTransform: "uppercase",
+                filter: "drop-shadow(0 0 15px rgba(255, 46, 46, 0.6))",
+              }}
+            >
+              {sample}
+            </p>
+          ) : presetId.includes("glitch") ? (
             <div className="relative text-center">
               <p style={{
                 position: "absolute",
@@ -2871,7 +3047,7 @@ function SkiaHookLivePreview({
             }}>
               {sample}
             </p>
-          ) : presetId.includes("cinematic") || style.gradientEnabled ? (
+          ) : presetId.includes("cinematic") || presetId.includes("gold") || style.gradientEnabled ? (
             <div className="w-full text-center">
               <div className="absolute top-0 left-0 right-0 h-4 bg-black/80" />
               <div className="absolute bottom-0 left-0 right-0 h-4 bg-black/80" />
@@ -2931,7 +3107,7 @@ function SkiaSubtitleLivePreview({
   activeWordIdx: number;
 }) {
   const outerAspect = "9/16";
-  const presetId = style.stylePreset || "gradient_fill";
+  const presetId = style.stylePreset || "clean_editorial";
   const preset = SKIA_SUBTITLE_PRESETS.find(p => p.id === presetId) || SKIA_SUBTITLE_PRESETS[0];
   const posTop = `${style.positionY ?? 78}%`;
   const words = ["ini", "kata", "penting", "banget"];
@@ -2953,7 +3129,159 @@ function SkiaSubtitleLivePreview({
         <div className="absolute inset-0 bg-black/40" />
 
         <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: posTop, transform: "translateY(-50%)" }}>
-          {presetId === "glassmorphism" ? (
+          {presetId === "clean_editorial" ? (
+            <div
+              style={{
+                backgroundColor: "rgba(15, 23, 42, 0.7)",
+                borderRadius: "12px",
+                border: "1px solid rgba(255, 255, 255, 0.15)",
+                padding: "6px 12px",
+                display: "flex",
+                gap: 5,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+              }}
+            >
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? "#38BDF8" : "#CBD5E1",
+                      fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontWeight: isActive ? 800 : 600,
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "nordic_minimal" ? (
+            <div className="flex flex-col items-center">
+              <div className="flex gap-1.5">
+                {words.map((w, i) => {
+                  const isActive = i === activeWordIdx;
+                  return (
+                    <span
+                      key={w}
+                      style={{
+                        color: isActive ? "#F8FAFC" : "#94A3B8",
+                        fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif`,
+                        fontSize: Math.max(style.fontSize * 0.32, 11),
+                        fontWeight: isActive ? 700 : 500,
+                      }}
+                    >
+                      {w}
+                    </span>
+                  );
+                })}
+              </div>
+              <div style={{ width: "60%", height: 2, backgroundColor: "#38BDF8", borderRadius: 99, marginTop: 4 }} />
+            </div>
+          ) : presetId === "podcast_pro" ? (
+            <div
+              style={{
+                backgroundColor: "rgba(24, 24, 27, 0.85)",
+                borderRadius: "999px",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                padding: "6px 14px",
+                display: "flex",
+                gap: 5,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+              }}
+            >
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? "#10B981" : "#E2E8F0",
+                      fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontWeight: isActive ? 900 : 600,
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "cinematic_slate" ? (
+            <div className="flex gap-2">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? "#FCD34D" : "#CBD5E1",
+                      fontFamily: `'${style.fontFamily || "Playfair Display"}', serif`,
+                      fontSize: Math.max(style.fontSize * 0.34, 12),
+                      fontWeight: isActive ? 800 : 600,
+                      letterSpacing: "0.02em",
+                      textShadow: isActive ? "0 2px 8px rgba(252, 211, 77, 0.5)" : "none",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "modern_mono" ? (
+            <div
+              style={{
+                backgroundColor: "rgba(9, 13, 22, 0.8)",
+                borderRadius: "8px",
+                border: "1px solid rgba(6, 182, 212, 0.3)",
+                padding: "6px 12px",
+                display: "flex",
+                gap: 5,
+              }}
+            >
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? "#06B6D4" : "#94A3B8",
+                      fontFamily: `'${style.fontFamily || "Space Grotesk"}', monospace`,
+                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "soft_shadow_lead" ? (
+            <div className="flex gap-1.5">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? "#FBBF24" : "#FFFFFF",
+                      fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.36, 13),
+                      fontWeight: 900,
+                      WebkitTextStroke: "0.8px #000",
+                      textShadow: "0 4px 14px rgba(0,0,0,0.85)",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "glassmorphism" ? (
             <div
               style={{
                 backdropFilter: "blur(12px)",
@@ -3112,7 +3440,7 @@ function SkiaSubtitleLivePreview({
                 );
               })}
             </div>
-          ) : presetId === "outline_stack" ? (
+          ) : (
             <div className="relative flex gap-2">
               <span className="absolute left-[-2px] top-[-2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #FF0000", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
                 {words.join(" ")}
@@ -3120,24 +3448,19 @@ function SkiaSubtitleLivePreview({
               <span className="absolute left-[2px] top-[2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #0000FF", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
                 {words.join(" ")}
               </span>
-              <span className="relative flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #00FF00", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
-                {words.join(" ")}
-              </span>
-            </div>
-          ) : (
-            <div className="flex gap-1.5">
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
                   <span
                     key={w}
                     style={{
-                      color: isActive ? style.highlightColor : style.color,
-                      fontSize: Math.max(style.fontSize * 0.35, 10),
-                      fontFamily: `'${style.fontFamily}', sans-serif`,
-                      fontWeight: isActive ? 900 : Number(style.fontWeight),
-                      textTransform: style.uppercase ? "uppercase" : "none",
-                      textShadow: "0 2px 8px rgba(0,0,0,0.6)",
+                      position: "relative",
+                      color: isActive ? "#FFFFFF" : "#00FF00",
+                      WebkitTextStroke: "1px #000000",
+                      fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontWeight: 900,
+                      textTransform: "uppercase",
                     }}
                   >
                     {w}
@@ -4167,6 +4490,35 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                       <ColorPicker label="Grad To" value={style.gradientTo || "#764BA2"} onChange={(v) => update({ gradientTo: v })} />
                     </div>
                   )}
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Backdrop & Card Capsule">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Enable Card/Pill Capsule" checked={style.bgEnabled} onChange={(v) => update({ bgEnabled: v })} />
+                  {style.bgEnabled && (
+                    <div className="mt-3 space-y-3">
+                      <ColorPicker label="Capsule Color" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
+                      <RangeInput label={`Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={10} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
+                      <RangeInput label={`Radius: ${style.bgRadius}px`} min={0} max={40} value={style.bgRadius} onChange={(v) => update({ bgRadius: v })} />
+                      <RangeInput label={`Padding: ${style.bgPadding}px`} min={4} max={32} value={style.bgPadding} onChange={(v) => update({ bgPadding: v })} />
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Active Word Scale" checked={style.highlightBold} onChange={(v) => update({ highlightBold: v })} />
+                  <div className="mt-3 space-y-3">
+                    <RangeInput label={`Highlight Scale: ${style.highlightScale}x`} min={10} max={16} value={Math.round(style.highlightScale * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
+                    <Checkbox label="Text Outline / Stroke" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} />
+                    {style.strokeEnabled && (
+                      <div className="mt-2 space-y-2">
+                        <ColorPicker label="Outline Color" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
+                        <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={8} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </Section>

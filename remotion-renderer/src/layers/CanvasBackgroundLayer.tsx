@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Img } from "remotion";
+import { AbsoluteFill, Img, OffthreadVideo, interpolate, useCurrentFrame } from "remotion";
 
 export type CanvasAccent =
   | { type: "soft-glow"; x: number; y: number; r: number; color: string }
@@ -16,6 +16,8 @@ export interface CanvasLayout {
   videoH: number;
   borderRadius?: number;
   shadow?: string;
+  ambientGlow?: boolean;
+  ambientGlowColor?: string;
 }
 
 export interface CanvasConfig {
@@ -23,26 +25,30 @@ export interface CanvasConfig {
   contentAspect?: string; // main video framing 16:9 / 1:1
   width?: number;
   height?: number;
-  mode?: "template" | "upload";
+  mode?: "template" | "upload" | "mirror";
   templateId?: string | null;
   templateName?: string;
   background?: {
-    type?: string;
+    type?: string; // "gradient" | "solid" | "image" | "video_mirror" | "mesh"
     stops?: Array<{ offset: number; color: string }>;
     angle?: number;
     vignette?: number;
     color?: string;
     imageUrl?: string | null;
+    blurAmount?: number;
+    dimAmount?: number;
   };
   accents?: CanvasAccent[];
   layout?: CanvasLayout;
   backgroundImageUrl?: string | null;
+  videoPath?: string;
 }
 
 function gradientCss(bg: CanvasConfig["background"]): string {
   if (!bg) return "#0a0a0a";
   if (bg.type === "solid" || (!bg.stops && bg.color)) return bg.color || "#0a0a0a";
   if (bg.type === "image" && bg.imageUrl) return "transparent";
+  if (bg.type === "video_mirror") return "#050505";
   const stops = bg.stops || [
     { offset: 0, color: "#111" },
     { offset: 1, color: "#000" },
@@ -54,15 +60,51 @@ function gradientCss(bg: CanvasConfig["background"]): string {
 }
 
 /** Full-canvas designed background + accents (behind footage). */
-export const CanvasBackgroundLayer: React.FC<{ config: CanvasConfig }> = ({ config }) => {
+export const CanvasBackgroundLayer: React.FC<{ config: CanvasConfig; videoPath?: string }> = ({
+  config,
+  videoPath,
+}) => {
+  const frame = useCurrentFrame();
   const bg = config.background || {};
   const accents = config.accents || [];
   const imageUrl = config.backgroundImageUrl || bg.imageUrl || null;
-  const vignette = bg.vignette ?? 0;
+  const vignette = bg.vignette ?? 0.35;
+  const isVideoMirror = bg.type === "video_mirror" || config.mode === "mirror" || config.templateId === "video-mirror";
+  const activeVideoSrc = config.videoPath || videoPath;
+
+  // Gentle breathing motion for video mirror
+  const mirrorScale = interpolate(Math.sin(frame / 45), [-1, 1], [1.35, 1.42]);
 
   return (
     <AbsoluteFill style={{ background: gradientCss(bg), overflow: "hidden" }}>
-      {imageUrl ? (
+      {/* ── Dynamic Blurred Video Mirror ── */}
+      {isVideoMirror && activeVideoSrc ? (
+        <AbsoluteFill style={{ overflow: "hidden" }}>
+          <div
+            style={{
+              position: "absolute",
+              inset: "-15%",
+              width: "130%",
+              height: "130%",
+              transform: `scale(${mirrorScale})`,
+              filter: `blur(${bg.blurAmount ?? 45}px) brightness(${bg.dimAmount ?? 0.6}) saturate(1.2)`,
+              transformOrigin: "center center",
+            }}
+          >
+            <OffthreadVideo
+              src={activeVideoSrc}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+              }}
+            />
+          </div>
+        </AbsoluteFill>
+      ) : null}
+
+      {/* ── Background Image ── */}
+      {imageUrl && !isVideoMirror ? (
         <Img
           src={imageUrl}
           style={{
@@ -75,6 +117,7 @@ export const CanvasBackgroundLayer: React.FC<{ config: CanvasConfig }> = ({ conf
         />
       ) : null}
 
+      {/* ── Background Decorative Accents ── */}
       {accents.map((a, i) => {
         if (a.type === "soft-glow" || a.type === "blob") {
           return (
@@ -170,12 +213,13 @@ export const CanvasBackgroundLayer: React.FC<{ config: CanvasConfig }> = ({ conf
         return null;
       })}
 
+      {/* ── Ambient Radial Vignette ── */}
       {vignette > 0 ? (
         <div
           style={{
             position: "absolute",
             inset: 0,
-            background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${vignette}) 100%)`,
+            background: `radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,${vignette}) 100%)`,
             pointerEvents: "none",
           }}
         />
@@ -192,6 +236,12 @@ export function videoSlotStyle(layout?: CanvasLayout): React.CSSProperties {
   if (!layout) {
     return { width: "100%", height: "100%", objectFit: "cover" };
   }
+
+  const glowColor = layout.ambientGlowColor || "rgba(0, 0, 0, 0.55)";
+  const ambientShadow = layout.ambientGlow
+    ? `0 0 50px ${glowColor}, ${layout.shadow || "0 16px 48px rgba(0,0,0,0.5)"}`
+    : (layout.shadow || "0 12px 40px rgba(0,0,0,0.45)");
+
   return {
     position: "absolute",
     left: `${layout.videoX * 100}%`,
@@ -200,7 +250,7 @@ export function videoSlotStyle(layout?: CanvasLayout): React.CSSProperties {
     height: `${layout.videoH * 100}%`,
     borderRadius: layout.borderRadius ?? 0,
     overflow: "hidden",
-    boxShadow: layout.shadow || "0 12px 40px rgba(0,0,0,0.45)",
+    boxShadow: ambientShadow,
   };
 }
 
