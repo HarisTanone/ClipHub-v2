@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -3866,7 +3866,9 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                         </span>
                       </span>
                       {style.animation === preset.id && (
-                        <span className="absolute top-1.5 right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-[9px] font-bold text-white shadow">✓</span>
+                        <span className="absolute top-1.5 right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-white shadow">
+                          <Check className="h-2.5 w-2.5 stroke-[3]" />
+                        </span>
                       )}
                     </span>
                     <span className="block px-2.5 py-1.5">
@@ -4038,7 +4040,9 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                         </span>
                       </span>
                       {(style.animation === preset.id || style.animation === preset.id.replace("skia_", "")) && (
-                        <span className="absolute top-1.5 right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-black shadow">✓</span>
+                        <span className="absolute top-1.5 right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-black shadow">
+                          <Check className="h-2.5 w-2.5 stroke-[3]" />
+                        </span>
                       )}
                     </span>
                     <span className="block px-2.5 py-1.5">

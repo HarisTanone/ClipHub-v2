@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot, Send, Key, Eye, EyeOff, Radio, Bell, Video, Copy, Check, MessageSquare } from "lucide-react";
+import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot, Send, Key, Eye, EyeOff, Radio, Bell, Video, Copy, Check, MessageSquare, Palette } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -1265,25 +1265,27 @@ export function Settings() {
                       type="button"
                       onClick={() => handleHfChange("mode", "auto")}
                       className={cn(
-                        "py-1.5 px-2 text-xs font-medium rounded-md transition-all text-center",
+                        "py-1.5 px-2 text-xs font-medium rounded-md transition-all text-center flex items-center justify-center gap-1.5",
                         hfConfig.mode === "auto"
                           ? "bg-violet-600 text-white font-bold shadow-md shadow-violet-600/30"
                           : "text-zinc-400 hover:text-zinc-200"
                       )}
                     >
-                      🤖 AI Auto
+                      <Bot className="w-3.5 h-3.5" />
+                      AI Auto
                     </button>
                     <button
                       type="button"
                       onClick={() => handleHfChange("mode", "manual")}
                       className={cn(
-                        "py-1.5 px-2 text-xs font-medium rounded-md transition-all text-center",
+                        "py-1.5 px-2 text-xs font-medium rounded-md transition-all text-center flex items-center justify-center gap-1.5",
                         hfConfig.mode === "manual"
                           ? "bg-violet-600 text-white font-bold shadow-md shadow-violet-600/30"
                           : "text-zinc-400 hover:text-zinc-200"
                       )}
                     >
-                      🎨 Spesifik
+                      <Palette className="w-3.5 h-3.5" />
+                      Spesifik
                     </button>
                   </div>
                   <p className="text-[10px] text-zinc-500 mt-0.5">

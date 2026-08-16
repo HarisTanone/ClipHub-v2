@@ -225,7 +225,7 @@ export const HF_HOOK_STYLES: HfStylePreset[] = [
     mood: "Scrapbook",
     accent: "#EC4899",
     desc: "Tilted cutout sticker · pinned tape badge",
-    preview: "RAHASIA BESAR 🔥",
+    preview: "RAHASIA BESAR",
   },
   {
     id: "hook_cinematic_minimal",
@@ -243,7 +243,7 @@ export const HF_HOOK_STYLES: HfStylePreset[] = [
     mood: "Electric",
     accent: "#818CF8",
     desc: "Plasma shockwave · high-voltage spark",
-    preview: "FAKTA MENGEJUTKAN ⚡",
+    preview: "FAKTA MENGEJUTKAN",
   },
 ];
 

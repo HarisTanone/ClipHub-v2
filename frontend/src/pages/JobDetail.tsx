@@ -385,7 +385,7 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
   const handleCopyCaption = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const text = `${clip.hook || `Clip #${clip.rank}`}\n\n👉 Simak pembahasan lengkapnya!\n\n#fyp #viral #trending #reels #shorts #podcast #cliphub`;
+    const text = `${clip.hook || `Clip #${clip.rank}`}\n\nSimak pembahasan lengkapnya!\n\n#fyp #viral #trending #reels #shorts #podcast #cliphub`;
     navigator.clipboard?.writeText(text);
     setCopied(true);
     toast.success(`Caption Clip #${clip.rank} disalin!`);

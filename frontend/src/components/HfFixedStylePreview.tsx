@@ -1,3 +1,5 @@
+import { AlertTriangle, Zap } from "lucide-react";
+
 type Props = {
   id: string;
   label: string;
@@ -178,7 +180,10 @@ export function HfFixedStylePreview({ id, label, accent }: Props) {
   if (id === "hook_warning_hazard") return (
     <div className="absolute inset-x-2 top-[34%] rounded-xl border-3 border-amber-500 bg-zinc-950 p-2 text-white shadow-[0_0_25px_rgba(245,158,11,0.35)]">
       <div className="flex items-center justify-between rounded bg-amber-500 px-1.5 py-0.5 text-[6px] font-mono font-black text-black">
-        <span>⚠️ CRITICAL NOTICE</span>
+        <span className="flex items-center gap-1">
+          <AlertTriangle className="h-2.5 w-2.5 text-black fill-black" />
+          CRITICAL NOTICE
+        </span>
         <span>! ! !</span>
       </div>
       <div className="my-1.5 border-l-3 border-amber-500 pl-2">
@@ -208,7 +213,8 @@ export function HfFixedStylePreview({ id, label, accent }: Props) {
   if (id === "hook_electric_surge") return (
     <div className="absolute inset-x-3 top-[35%] rounded-xl border-2 border-indigo-400 bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-950 p-2.5 text-white shadow-[0_0_25px_rgba(129,140,248,0.5),inset_0_0_10px_rgba(99,102,241,0.3)]">
       <div className="flex items-center gap-1 text-[6px] font-black text-indigo-300 tracking-wider">
-        <span className="text-yellow-400">⚡</span> VOLTAGE SURGE
+        <Zap className="h-2.5 w-2.5 text-yellow-400 fill-yellow-400" />
+        VOLTAGE SURGE
       </div>
       <strong className="mt-0.5 block text-[10px] font-black italic uppercase leading-tight text-transparent bg-clip-text bg-gradient-to-r from-indigo-200 via-white to-cyan-300">{label}</strong>
     </div>

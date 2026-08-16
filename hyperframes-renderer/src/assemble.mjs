@@ -139,13 +139,13 @@ function cardBody(meta, ev, i) {
     case 'neon-matrix':
       return `<div class="matrix-header"><span>[SYS_ALERT::ROOT]</span><span class="matrix-status">ONLINE</span></div><div class="matrix-copy">&gt; ${label}<span class="matrix-cursor">_</span></div>`;
     case 'warning-hazard':
-      return `<div class="hazard-badge"><span>⚠️ CRITICAL NOTICE</span><span>! ! !</span></div><div class="hazard-content">${label}</div><div class="hazard-bar"></div>`;
+      return `<div class="hazard-badge"><span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;margin-right:4px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>CRITICAL NOTICE</span><span>! ! !</span></div><div class="hazard-content">${label}</div><div class="hazard-bar"></div>`;
     case 'sticker-scrapbook':
       return `<div class="scrapbook-tape">TAPE</div><div class="scrapbook-body">${label}</div>`;
     case 'cinematic-minimal':
       return `<div class="cine-kicker">ESSENTIAL DOSSIER</div><div class="cine-body">${label}</div>`;
     case 'electric-surge':
-      return `<div class="surge-header"><span>⚡ VOLTAGE SURGE</span></div><div class="surge-content">${label}</div>`;
+      return `<div class="surge-header"><span><svg width="12" height="12" viewBox="0 0 24 24" fill="#facc15" stroke="#facc15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;margin-right:4px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>VOLTAGE SURGE</span></div><div class="surge-content">${label}</div>`;
     case 'speech-capsule':
       return `<div class="capsule-dot"></div>${label}<div class="capsule-tail"></div>`;
     case 'signal-rail':

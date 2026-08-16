@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw, Send, Shield, Copy, Check } from "lucide-react";
+import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw, Send, Shield, Copy, Check, Heart, MessageSquare, Share2, Music } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -373,10 +373,10 @@ export function ClipViewer() {
                         </div>
                         <div className="flex justify-end pr-1">
                           <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-red-500/40 bg-red-500/10 p-2 text-[9px] text-red-200 backdrop-blur-[2px]">
-                            <span>❤️</span>
-                            <span>💬</span>
-                            <span>↗️</span>
-                            <span>🎵</span>
+                            <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+                            <MessageSquare className="w-3.5 h-3.5 text-zinc-300" />
+                            <Share2 className="w-3.5 h-3.5 text-zinc-300" />
+                            <Music className="w-3.5 h-3.5 text-zinc-300" />
                           </div>
                         </div>
                         <div className="rounded-md border border-dashed border-red-500/40 bg-red-500/10 p-2 text-center text-[10px] text-red-200 backdrop-blur-[2px]">
