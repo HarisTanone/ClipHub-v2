@@ -218,34 +218,3 @@ async def list_ffmpeg_hook_styles():
     styles = get_all_ffmpeg_hook_styles()
     return {"success": True, "data": styles, "total": len(styles)}
 
-
-# ─── Subtitle Styles (FFmpeg + Skia) ─────────────────────────────────────────
-
-@router.get("/subtitle-styles")
-async def list_subtitle_styles():
-    """List all available subtitle styles for FFmpeg and Skia engines."""
-    from src.infrastructure.subtitle_styles import list_ffmpeg_styles, list_skia_styles
-    ffmpeg = list_ffmpeg_styles()
-    skia_list = list_skia_styles()
-    return {
-        "success": True,
-        "ffmpeg": ffmpeg,
-        "skia": skia_list,
-        "total_ffmpeg": len(ffmpeg),
-        "total_skia": len(skia_list),
-    }
-
-
-@router.get("/subtitle-styles/{engine}/{style_id}")
-async def get_subtitle_style(engine: str, style_id: str):
-    """Get full subtitle style config by engine and ID."""
-    from src.infrastructure.subtitle_styles import get_ffmpeg_style, get_skia_style
-    if engine == "ffmpeg":
-        style = get_ffmpeg_style(style_id)
-    elif engine == "skia":
-        style = get_skia_style(style_id)
-    else:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail=f"Unknown engine: {engine}")
-    return {"success": True, "data": style}
-
