@@ -320,6 +320,7 @@ async def create_job(
         is_superadmin=user.is_superadmin,
         # User-adjusted clip timestamps from analyze-review
         custom_clips=request.custom_clips,
+        source_job_id=request.source_job_id,
     )
 
     # Quick YouTube title fetch via oEmbed (non-blocking, best-effort)

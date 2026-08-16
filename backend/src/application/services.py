@@ -221,6 +221,7 @@ class JobService:
         custom_hook: Optional[str] = None,
         # User-adjusted clip timestamps from analyze-review
         custom_clips: Optional[list] = None,
+        source_job_id: Optional[str] = None,
     ) -> tuple[Job, bool]:
         """Create job and start pipeline in background."""
         is_upload_source = source_type == "upload"
@@ -305,6 +306,8 @@ class JobService:
         # User-adjusted clip timestamps from analyze-review step
         if custom_clips:
             initial_clips_data["custom_clips"] = custom_clips
+        if source_job_id:
+            initial_clips_data["source_job_id"] = source_job_id
 
         job = Job(
             job_id=job_id,
@@ -408,9 +411,23 @@ class JobService:
                     pass
             self._emit(job_id, 1, "validate", "complete", time.time() - pipeline_start)
 
-            # ═══ Step 2: Download (SKIP if cached) ═══
+            # ═══ Step 2: Download (SKIP if cached or from analyze session) ═══
+            source_job_id = (job.clips_data or {}).get("source_job_id")
+            source_video_path = os.path.join(settings.DOWNLOAD_DIR, f"{source_job_id}.mp4") if source_job_id else None
             cached_video = cache.get_video_path(video_id) if video_id else None
-            if cached_video:
+
+            if source_video_path and os.path.exists(source_video_path):
+                import shutil
+                if not os.path.exists(video_path):
+                    try:
+                        os.link(source_video_path, video_path)
+                    except OSError:
+                        shutil.copy2(source_video_path, video_path)
+                if video_id and not cache.get_video_path(video_id):
+                    cache.save_video(video_id, video_path)
+                logger.info(f"[{job_id}] Download SKIPPED (reused from analyze session: {source_job_id})")
+                self._emit(job_id, 2, "download", "complete")
+            elif cached_video:
                 import shutil
                 if not os.path.exists(video_path):
                     try:
@@ -427,12 +444,12 @@ class JobService:
                     cache.save_video(video_id, video_path)
                 self._emit(job_id, 2, "download", "complete")
 
-            # ═══ Step 3: Gemini Analysis (SKIP if cached or custom_clips provided) ═══
+            # ═══ Step 3: Gemini Analysis (SKIP if custom_clips or cached) ═══
             user_custom_clips = (job.clips_data or {}).get("custom_clips")
             if user_custom_clips:
-                # User provided adjusted timestamps from analyze-review step — skip Gemini
+                # User reviewed/edited clips in the preview step — use them directly!
                 gemini_result = {"clips": user_custom_clips}
-                logger.info(f"[{job_id}] Gemini analysis SKIPPED (custom_clips from user: {len(user_custom_clips)} clips)")
+                logger.info(f"[{job_id}] Gemini analysis SKIPPED (using {len(user_custom_clips)} custom clips from preview)")
                 self._emit(job_id, 3, "gemini_analysis", "complete")
             elif cached_analysis := (cache.load_analysis(video_id, "v1") if video_id else None):
                 gemini_result = cached_analysis
@@ -490,13 +507,13 @@ class JobService:
             self._emit(job_id, 4, "prepare_clips", "start")
             await self._repo.update_status(job_id, JobStatus.PREPARING)
             clips = self._prepare_clips(raw_clips, duration, broll_suggestions_map)
-            if self._overlap_detector and clips:
+            if not user_custom_clips and self._overlap_detector and clips:
                 try:
                     clips = self._overlap_detector.resolve_overlaps(clips)
                 except Exception:
                     pass
             limit = settings.VIDEO_FINAL_RESULT
-            if limit and limit > 0 and clips:
+            if not user_custom_clips and limit and limit > 0 and clips:
                 clips = clips[:limit]
             if not clips:
                 await self._repo.update_status(job_id, JobStatus.FAILED, "Tidak ada clip valid")
@@ -506,19 +523,20 @@ class JobService:
             self._emit(job_id, 4, "prepare_clips", "complete")
 
             # ═══ Step 4.5: Hook Optimizer (AI rewrite for viral hooks) ═══
-            try:
-                from src.infrastructure.hook_optimizer import HookOptimizer
-                optimizer = HookOptimizer()
-                optimized = optimizer.optimize_hooks(clips)
-                if optimized:
-                    for clip in clips:
-                        if clip.rank in optimized:
-                            original = clip.hook
-                            clip.hook = optimized[clip.rank]
-                            logger.info(f"[{job_id}] Hook optimized clip {clip.rank}: '{original}' → '{clip.hook}'")
-                    logger.info(f"[{job_id}] Hook optimizer: {len(optimized)}/{clips_count} hooks rewritten")
-            except Exception as e:
-                logger.warning(f"[{job_id}] Hook optimizer failed (non-critical): {e}")
+            if not user_custom_clips:
+                try:
+                    from src.infrastructure.hook_optimizer import HookOptimizer
+                    optimizer = HookOptimizer()
+                    optimized = optimizer.optimize_hooks(clips)
+                    if optimized:
+                        for clip in clips:
+                            if clip.rank in optimized:
+                                original = clip.hook
+                                clip.hook = optimized[clip.rank]
+                                logger.info(f"[{job_id}] Hook optimized clip {clip.rank}: '{original}' → '{clip.hook}'")
+                        logger.info(f"[{job_id}] Hook optimizer: {len(optimized)}/{clips_count} hooks rewritten")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Hook optimizer failed (non-critical): {e}")
 
             # Persist the AI recommendations before any rendering starts. This
             # lets the job page show all clip slots immediately as processing.

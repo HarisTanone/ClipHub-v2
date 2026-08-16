@@ -197,11 +197,12 @@ export function NewJob() {
     e.preventDefault();
     if (sourceMode === "youtube" && !validateUrl(url)) return;
     if (sourceMode === "upload" && !validateUpload(uploadFile)) return;
-    setIsSubmitting(true);
+    const isFromReview = analyzeStep === "review" && editableClips.length > 0;
     const jobOptions = {
       target_aspect_ratio: aspectRatio,
       hook_style: hookStyleConfig.animation || undefined,
-      force_reprocess: sourceMode === "youtube" ? forceReprocess : true,
+      force_reprocess: isFromReview ? false : (sourceMode === "youtube" ? forceReprocess : true),
+      source_job_id: isFromReview ? analyzeResult?.job_id : undefined,
       use_remotion: true,
       ai_layer_enabled: true,
       threejs_enabled: false,
@@ -229,7 +230,7 @@ export function NewJob() {
       custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
         ? directHook.trim() || undefined
         : undefined,
-      // Custom clips from analyze-review step (user-adjusted timestamps)
+      // Custom clips from analyze-review step (user-adjusted timestamps & hooks)
       ...(editableClips.length > 0 ? {
         custom_clips: editableClips.map((c) => ({
           rank: c.rank,

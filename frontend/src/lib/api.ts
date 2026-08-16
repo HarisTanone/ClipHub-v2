@@ -244,6 +244,15 @@ export interface CreateJobPayload {
   background_mode?: "template" | "upload" | null;
   background_template_id?: string | null;
   background_image_data_url?: string | null;
+  // Custom clips and source job from analyze-review preview step
+  custom_clips?: Array<{
+    rank: number;
+    start: number;
+    end: number;
+    hook?: string | null;
+    score?: number | null;
+  }>;
+  source_job_id?: string;
 }
 
 export type UploadJobPayload = Omit<CreateJobPayload, "youtube_url">;
