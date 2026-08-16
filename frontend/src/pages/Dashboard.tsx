@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle, FileVideo, Type, Layers, Scan, Frame, Clapperboard, Zap, Palette, Wand2 } from "lucide-react";
+import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle, FileVideo, Type, Layers, Scan, Frame, Clapperboard, Zap, Palette, Wand2, Download } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -274,6 +274,20 @@ export function Dashboard() {
                       {/* Restyle operation indicator */}
                       {job.active_operations ? <span className="inline-flex items-center gap-1 rounded bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-medium text-violet-300"><span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />restyling</span> : null}
                       <Badge variant="status" status={job.status} size="sm" dot>{job.status}</Badge>
+                      {job.clips_success > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.open(jobs.getDownloadAllUrl(job.job_id), "_blank");
+                          }}
+                          className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                          title="Download All Clips (.ZIP)"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                       {(job.status === "completed" || job.status === "failed" || job.status === "timeout") && (
                         <button
                           type="button"

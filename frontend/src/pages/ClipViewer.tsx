@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw, Send } from "lucide-react";
+import { ArrowLeft, Play, Type, Layers, Edit3, Download, Save, X, Palette, Eye, Wand2, ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, RefreshCw, Send, Shield, Copy, Check } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -73,11 +73,49 @@ export function ClipViewer() {
   const [isRestyling, setIsRestyling] = useState(false);
   const [restyleProgress, setRestyleProgress] = useState<{ stage: string; percentage: number } | null>(null);
   const [videoRevision, setVideoRevision] = useState(0);
+  const [showSafeZone, setShowSafeZone] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const [copiedFull, setCopiedFull] = useState(false);
 
   // Other clips from same job
   const [otherClips, setOtherClips] = useState<any[]>([]);
 
   const clipRank = rank ? parseInt(rank) : 0;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (videoRef.current) {
+          if (videoRef.current.paused) videoRef.current.play();
+          else videoRef.current.pause();
+        }
+      } else if (e.code === "ArrowLeft" || e.code === "KeyJ") {
+        e.preventDefault();
+        if (videoRef.current) {
+          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 5);
+        }
+      } else if (e.code === "ArrowRight" || e.code === "KeyL") {
+        e.preventDefault();
+        if (videoRef.current) {
+          videoRef.current.currentTime = Math.min(videoRef.current.duration || 0, videoRef.current.currentTime + 5);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const handleSpeedChange = (speed: number) => {
+    setPlaybackSpeed(speed);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = speed;
+    }
+  };
 
   async function loadClip() {
     if (!jobId || !rank) return;
@@ -328,6 +366,24 @@ export function ClipViewer() {
                         />
                       </div>
                     )}
+                    {showSafeZone && (
+                      <div className="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between p-3 select-none">
+                        <div className="rounded-md border border-dashed border-red-500/40 bg-red-500/10 p-2 text-center text-[10px] text-red-200 backdrop-blur-[2px]">
+                          Top Safe Zone (Avoid Headers & Search Bar)
+                        </div>
+                        <div className="flex justify-end pr-1">
+                          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-red-500/40 bg-red-500/10 p-2 text-[9px] text-red-200 backdrop-blur-[2px]">
+                            <span>❤️</span>
+                            <span>💬</span>
+                            <span>↗️</span>
+                            <span>🎵</span>
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-dashed border-red-500/40 bg-red-500/10 p-2 text-center text-[10px] text-red-200 backdrop-blur-[2px]">
+                          Bottom Safe Zone (Avoid Caption, Audio & Profile UI)
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -374,6 +430,22 @@ export function ClipViewer() {
             <ToggleBtn label="Preview" active={previewMode} onClick={() => setPreviewMode(!previewMode)} icon={<Eye className="h-3 w-3" />} />
             <ToggleBtn label="Hook" active={showHook} onClick={() => setShowHook(!showHook)} icon={<Type className="h-3 w-3" />} />
             <ToggleBtn label="Sub" active={showSubtitles} onClick={() => setShowSubtitles(!showSubtitles)} icon={<Layers className="h-3 w-3" />} />
+            <ToggleBtn label="Safe Zone" active={showSafeZone} onClick={() => setShowSafeZone(!showSafeZone)} icon={<Shield className="h-3 w-3" />} />
+            <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[10px]">
+              {[0.75, 1, 1.25, 1.5, 2].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => handleSpeedChange(s)}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors",
+                    playbackSpeed === s ? "bg-zinc-700 font-bold text-white" : "text-zinc-400 hover:text-zinc-200"
+                  )}
+                >
+                  {s}x
+                </button>
+              ))}
+            </div>
             <QualitySelect
               value={previewQuality}
               onChange={handlePreviewQualityChange}
@@ -638,17 +710,35 @@ export function ClipViewer() {
           {clip.captions && Object.keys(clip.captions).length > 0 && (
             <Card className="p-3">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold text-zinc-300">Caption</h3>
-                {(clip.hashtags?.length ?? 0) > 0 && (
+                <h3 className="text-xs font-semibold text-zinc-300">Caption & Hashtags</h3>
+                <div className="flex items-center gap-2">
+                  {(clip.hashtags?.length ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => { const tags = (clip.hashtags || []).join(" "); navigator.clipboard?.writeText(tags).catch(() => undefined); toast.success("Hashtags copied!"); }}
+                      className="text-[9px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                      title="Copy hashtags only"
+                    >
+                      Tags only
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => { const tags = (clip.hashtags || []).join(" "); navigator.clipboard?.writeText(tags).catch(() => undefined); }}
-                    className="text-[9px] text-zinc-500 hover:text-zinc-300 transition-colors"
-                    title="Copy hashtags"
+                    onClick={() => {
+                      const mainCaption = clip.captions?.tiktok || clip.captions?.instagram || clip.captions?.youtube || clip.hook || "";
+                      const tags = (clip.hashtags || []).length > 0 ? `\n\n${(clip.hashtags || []).join(" ")}` : "";
+                      navigator.clipboard?.writeText(`${mainCaption}${tags}`).catch(() => undefined);
+                      setCopiedFull(true);
+                      toast.success("Full post (Caption + Tags) copied!");
+                      setTimeout(() => setCopiedFull(false), 2000);
+                    }}
+                    className="inline-flex items-center gap-1 rounded bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[9px] font-medium text-purple-300 hover:bg-purple-500/25 transition-colors"
+                    title="Copy full post content"
                   >
-                    Copy hashtags
+                    {copiedFull ? <Check className="h-2.5 w-2.5 text-emerald-400" /> : <Copy className="h-2.5 w-2.5" />}
+                    Copy Full Post
                   </button>
-                )}
+                </div>
               </div>
               <div className="space-y-2">
                 {clip.captions.tiktok && (
