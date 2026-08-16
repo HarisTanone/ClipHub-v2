@@ -1,30 +1,42 @@
 """HyperFrames style catalog — mirrors hyperframes-renderer/templates.
 
-Hook/subtitle can opt into HF (fast fixed templates) instead of Remotion.
-Polish lower-thirds remain optional post-pass.
+Hook/subtitle/polish can opt into HF (fast fixed templates) or Remotion.
+Supports auto mode (AI contextual selection) or specific user selection.
 """
 from __future__ import annotations
 
+import random
 from typing import Any
 
 HOOK_STYLES = (
-    {"id": "hook_chromatic_gate_v2", "name": "Chromatic Gate", "design": "chromatic-gate", "accent": "#FF2E88"},
-    {"id": "hook_orbit_stamp_v2", "name": "Orbit Stamp", "design": "orbit-stamp", "accent": "#8B5CF6"},
-    {"id": "hook_pixel_ticker_v2", "name": "Pixel Ticker", "design": "pixel-ticker", "accent": "#F7FF58"},
-    {"id": "hook_blueprint_v2", "name": "Blueprint Reveal", "design": "blueprint-reveal", "accent": "#52C7FF"},
+    {"id": "hook_cyber_hud", "name": "Cyberpunk Tech HUD", "design": "cyber-hud", "accent": "#00F0FF", "description": "Tech HUD digital box dengan aksen neon cyan & bracket cyberpunk"},
+    {"id": "hook_glass_minimal", "name": "Frosted Glassmorphism", "design": "glass-minimal", "accent": "#A78BFA", "description": "Kartu transparan frosted glass dengan efek blur & glow halus"},
+    {"id": "hook_breaking_news", "name": "Breaking News Live", "design": "breaking-news", "accent": "#EF4444", "description": "Banner merah bold dengan badge LIVE UPDATE berkedip"},
+    {"id": "hook_retro_synth", "name": "80s Retro Synthwave", "design": "retro-synth", "accent": "#F43F5E", "description": "Estetika synthwave retro 80-an dengan tabung neon ungu-pink"},
+    {"id": "hook_comic_pop", "name": "Comic Pop Burst", "design": "comic-pop", "accent": "#FACC15", "description": "Badge komik miring bold kuning dengan aksen halftone pop-art"},
+    {"id": "hook_editorial_pill", "name": "Editorial Minimal Pill", "design": "editorial-pill", "accent": "#E2E8F0", "description": "Kapsul hitam matte minimalis dengan dot emas & tipografi editorial"},
+    {"id": "hook_gradient_aura", "name": "Gradient Aura Glow", "design": "gradient-aura", "accent": "#38BDF8", "description": "Cahaya aura mesh gradasi multi-warna halus di sekitar teks"},
+    {"id": "hook_cinema_tape", "name": "Caution Stencil Tape", "design": "cinema-tape", "accent": "#EAB308", "description": "Pita peringatan diagonal kuning-hitam dengan font stencil industrial"},
+    {"id": "hook_hologram_scan", "name": "Sci-Fi Hologram Scanner", "design": "hologram-scan", "accent": "#06B6D4", "description": "Data feed holographic sci-fi dengan scanline vertikal"},
+    {"id": "hook_luxury_noir", "name": "Luxury Obsidian & Gold", "design": "luxury-noir", "accent": "#D4AF37", "description": "Kartu hitam obsidian pekat dengan list emas sampanye mewah"},
+    {"id": "hook_floating_badge", "name": "Top Floating Badge", "design": "floating-badge", "accent": "#10B981", "description": "Badge ringkas melayang di sudut atas dengan indikator live dot"},
+    {"id": "hook_kinetic_split", "name": "Kinetic Duotone Split", "design": "kinetic-split", "accent": "#F97316", "description": "Panel terbelah oranye-hitam dinamis dengan nomor indeks kinetik"},
+    {"id": "hook_chromatic_gate_v2", "name": "Chromatic Gate", "design": "chromatic-gate", "accent": "#FF2E88", "description": "Gerbang chromatic tajam dengan kode glitch"},
+    {"id": "hook_orbit_stamp_v2", "name": "Orbit Stamp", "design": "orbit-stamp", "accent": "#8B5CF6", "description": "Cap lingkaran orbit berputar futuristik"},
+    {"id": "hook_pixel_ticker_v2", "name": "Pixel Ticker", "design": "pixel-ticker", "accent": "#F7FF58", "description": "Pixel ticker kuning retro dengan grid dot"},
+    {"id": "hook_blueprint_v2", "name": "Blueprint Reveal", "design": "blueprint-reveal", "accent": "#52C7FF", "description": "Sketsa blueprint biru arsitektural"},
 )
 
 SUBTITLE_STYLES = (
-    {"id": "sub_speech_capsule_v2", "name": "Speech Capsule", "design": "speech-capsule", "accent": "#FFFFFF"},
-    {"id": "sub_signal_rail_v2", "name": "Signal Rail", "design": "signal-rail", "accent": "#B7FF00"},
-    {"id": "sub_vertical_caption_v2", "name": "Vertical Caption", "design": "vertical-caption", "accent": "#00D9FF"},
-    {"id": "sub_notch_transcript_v2", "name": "Notch Transcript", "design": "notch-transcript", "accent": "#FFB000"},
+    {"id": "sub_speech_capsule_v2", "name": "Speech Capsule", "design": "speech-capsule", "accent": "#FFFFFF", "description": "Kapsul balon dialog putih bersih"},
+    {"id": "sub_signal_rail_v2", "name": "Signal Rail", "design": "signal-rail", "accent": "#B7FF00", "description": "Jalur sinyal radio audio dengan bar indikator hijau"},
+    {"id": "sub_vertical_caption_v2", "name": "Vertical Caption", "design": "vertical-caption", "accent": "#00D9FF", "description": "Keterangan vertikal modern di sisi kiri"},
+    {"id": "sub_notch_transcript_v2", "name": "Notch Transcript", "design": "notch-transcript", "accent": "#FFB000", "description": "Notch perekam suara dengan kursor aktif"},
 )
 
 HF_HOOK_TEMPLATES = tuple(style["id"] for style in HOOK_STYLES)
 HF_SUBTITLE_TEMPLATES = tuple(style["id"] for style in SUBTITLE_STYLES)
 
-# Old jobs stay renderable. Legacy IDs are hidden from the new catalogue.
 HF_LEGACY_HOOK_TEMPLATES = (
     "hook_banner_v1",
     "hook_neon_v1",
@@ -41,6 +53,11 @@ HF_LEGACY_SUBTITLE_TEMPLATES = (
 HF_POLISH_TEMPLATES = (
     "lower_third_v1",
     "lower_third",
+    "hook_cyber_hud",
+    "hook_glass_minimal",
+    "hook_editorial_pill",
+    "hook_floating_badge",
+    "hook_luxury_noir",
 )
 
 ENGINE_NOTES = {
@@ -86,24 +103,34 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     return "remotion"
 
 
-def resolve_hf_template(cfg: dict | None, *, kind: str) -> str:
+def resolve_hf_template(cfg: dict | None, *, kind: str, clip_index: int = 0) -> str:
     if not isinstance(cfg, dict):
         cfg = {}
-    raw = (
+    
+    # Check mode
+    mode = str(cfg.get("mode") or "").strip().lower()
+    raw = str(
         cfg.get("hf_template")
         or cfg.get("hyperframes_template")
+        or cfg.get("default_template")
         or cfg.get("template")
         or ""
-    )
-    raw = str(raw).strip()
+    ).strip()
+
     allowed = {
         "hook": (*HF_HOOK_TEMPLATES, *HF_LEGACY_HOOK_TEMPLATES),
         "subtitle": (*HF_SUBTITLE_TEMPLATES, *HF_LEGACY_SUBTITLE_TEMPLATES),
-        "polish": HF_POLISH_TEMPLATES,
+        "polish": (*HF_POLISH_TEMPLATES, *HF_HOOK_TEMPLATES),
     }.get(kind, ())
+
+    if mode == "auto" or raw in ("auto", "random", "ai"):
+        # Select from top 12 primary templates based on clip_index
+        candidates = HF_HOOK_TEMPLATES if kind in ("hook", "polish") else HF_SUBTITLE_TEMPLATES
+        return candidates[clip_index % len(candidates)]
+
     if raw in allowed:
         return raw
-    return allowed[0] if allowed else "lower_third_v1"
+    return allowed[0] if allowed else "hook_cyber_hud"
 
 
 def hook_events_from_text(text: str, duration: float = 3.0) -> list[dict]:

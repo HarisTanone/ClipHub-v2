@@ -259,6 +259,12 @@ class SpeakerDiarizer:
                     os.unlink(audio_path)
                 except OSError:
                     pass
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
 
     # ─── Internal Methods ─────────────────────────────────────────────────────
 

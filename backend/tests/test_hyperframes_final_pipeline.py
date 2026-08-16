@@ -76,8 +76,8 @@ def test_hyperframes_catalog_uses_distinct_v2_styles():
 
     data = catalogue()
     styles = (*data["hook"], *data["subtitle"])
-    assert all(item["id"].endswith("_v2") for item in styles)
-    assert len({item["design"] for item in styles}) == 8
+    assert len(data["hook"]) >= 12
+    assert len({item["design"] for item in styles}) >= 12
 
 
 def test_pure_hyperframes_without_events_copies_source_instead_of_moving_it(tmp_path):

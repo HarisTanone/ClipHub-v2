@@ -771,7 +771,7 @@ Environment=PATH=$BACKEND_DIR/venv/bin:/usr/local/bin:/usr/bin
 # Kill any stale process on port before starting (prevents EADDRINUSE)
 ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $BACKEND_PORT/tcp 2>/dev/null || true'
 ExecStartPre=/bin/sleep 1
-ExecStart=$BACKEND_DIR/venv/bin/python -m uvicorn src.presentation.api:app --host 0.0.0.0 --port $BACKEND_PORT --workers 4
+ExecStart=$BACKEND_DIR/venv/bin/python -m uvicorn src.presentation.api:app --host 0.0.0.0 --port $BACKEND_PORT --workers ${BACKEND_WORKERS:-2}
 Restart=always
 RestartSec=5
 TimeoutStopSec=10

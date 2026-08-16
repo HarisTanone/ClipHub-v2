@@ -938,3 +938,134 @@ async def reset_object_overlay_endpoint(user: CurrentUser = Depends(get_current_
         }
     finally:
         conn.close()
+
+
+# ─── HyperFrames Hook & Polish Config Endpoints ──────────────────────────────
+
+@router.get("/hyperframes")
+async def get_hyperframes_endpoint(user: CurrentUser = Depends(get_current_user)):
+    """Get hyperframes hook & polish settings (DB-backed)."""
+    from src.infrastructure.hyperframes_config import get_hyperframes_config
+    from src.infrastructure.hf_style_catalog import catalogue
+
+    target = None if user.is_superadmin else user.id
+    cfg = get_hyperframes_config(target)
+    cat = catalogue()
+    return {
+        "success": True,
+        "data": cfg,
+        "catalogue": cat,
+        "is_global": target is None,
+    }
+
+
+class HyperFramesUpdateRequest(BaseModel):
+    enabled: Optional[bool] = None
+    mode: Optional[str] = None  # "auto" or "manual"
+    default_template: Optional[str] = None
+    position: Optional[str] = None
+
+
+@router.put("/hyperframes")
+async def update_hyperframes_endpoint(
+    req: HyperFramesUpdateRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Update hyperframes settings (DB-backed)."""
+    from src.infrastructure.hyperframes_config import (
+        ensure_hyperframes_table,
+        get_hyperframes_config,
+        HYPERFRAMES_COLUMNS,
+        HYPERFRAMES_DEFAULTS,
+    )
+
+    if not user.is_superadmin and not getattr(user, "is_premium", False):
+        raise HTTPException(status_code=403, detail="Premium required to customize HyperFrames")
+
+    ensure_hyperframes_table()
+    target_user_id = None if user.is_superadmin else user.id
+    current = get_hyperframes_config(target_user_id)
+    updates = req.model_dump(exclude_unset=True)
+
+    for k, v in updates.items():
+        if k in HYPERFRAMES_COLUMNS:
+            current[k] = v
+
+    if "enabled" in current:
+        current["enabled"] = 1 if current["enabled"] else 0
+
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        if target_user_id is None:
+            cur.execute("SELECT id FROM hyperframes_configs WHERE user_id IS NULL LIMIT 1")
+        else:
+            cur.execute("SELECT id FROM hyperframes_configs WHERE user_id = ? LIMIT 1", (target_user_id,))
+        row = cur.fetchone()
+
+        update_set = ", ".join([f"{c} = ?" for c in HYPERFRAMES_COLUMNS])
+        vals = [current.get(c, HYPERFRAMES_DEFAULTS.get(c)) for c in HYPERFRAMES_COLUMNS]
+
+        if row:
+            if target_user_id is None:
+                cur.execute(
+                    f"UPDATE hyperframes_configs SET {update_set}, updated_at = datetime('now') WHERE user_id IS NULL",
+                    vals,
+                )
+            else:
+                cur.execute(
+                    f"UPDATE hyperframes_configs SET {update_set}, updated_at = datetime('now') WHERE user_id = ?",
+                    vals + [target_user_id],
+                )
+        else:
+            cols = ", ".join(HYPERFRAMES_COLUMNS)
+            placeholders = ", ".join(["?"] * len(HYPERFRAMES_COLUMNS))
+            cur.execute(
+                f"INSERT INTO hyperframes_configs (user_id, {cols}) VALUES (?, {placeholders})",
+                [target_user_id] + vals,
+            )
+        conn.commit()
+        return {
+            "success": True,
+            "message": "HyperFrames settings updated",
+            "data": get_hyperframes_config(target_user_id),
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/hyperframes/reset")
+async def reset_hyperframes_endpoint(user: CurrentUser = Depends(get_current_user)):
+    """Reset hyperframes settings to defaults."""
+    from src.infrastructure.hyperframes_config import (
+        ensure_hyperframes_table,
+        get_hyperframes_config,
+        HYPERFRAMES_COLUMNS,
+        HYPERFRAMES_DEFAULTS,
+    )
+
+    if not user.is_superadmin and not getattr(user, "is_premium", False):
+        raise HTTPException(status_code=403, detail="Premium required to reset HyperFrames")
+
+    ensure_hyperframes_table()
+    target_user_id = None if user.is_superadmin else user.id
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM hyperframes_configs WHERE user_id IS ?", (target_user_id,))
+        cols = ", ".join(HYPERFRAMES_COLUMNS)
+        placeholders = ", ".join(["?"] * len(HYPERFRAMES_COLUMNS))
+        values = [HYPERFRAMES_DEFAULTS[c] for c in HYPERFRAMES_COLUMNS]
+        cur.execute(
+            f"INSERT INTO hyperframes_configs (user_id, {cols}) VALUES (?, {placeholders})",
+            [target_user_id] + values,
+        )
+        conn.commit()
+        return {
+            "success": True,
+            "message": "HyperFrames settings reset",
+            "data": get_hyperframes_config(target_user_id),
+        }
+    finally:
+        conn.close()
+

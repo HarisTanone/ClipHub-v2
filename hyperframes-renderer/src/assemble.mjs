@@ -15,7 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const TEMPLATES = path.join(ROOT, 'templates');
 
-const ACCENTS = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399'];
+const ACCENTS = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#facc15', '#00f0ff', '#ef4444', '#10b981'];
 
 export function listTemplates() {
   const disk = fs.existsSync(TEMPLATES)
@@ -36,25 +36,46 @@ function escAttr(s) {
   return String(s ?? '').replace(/"/g, '&quot;').replace(/</g, '');
 }
 
-/** HyperFrames-native styles. Legacy v1 IDs remain for existing saved jobs. */
+/** 
+ * HyperFrames-native styles (12 distinct hook/polish designs + legacy).
+ * Portrait coordinates (1080x1920):
+ *  - bottom: 1480-1650px lands in the upper third (safe from karaoke subtitles at bottom).
+ */
 const TPL = {
-  lower_third_v1: { kind: 'polish', design: 'entity-card', accent: '#22d3ee', y: 220 },
-  lower_third: { kind: 'polish', design: 'entity-card', accent: '#a78bfa', y: 240 },
+  // ─── 12 Distinct Hook & Polish Styles ──────────────────────────────────
+  hook_cyber_hud: { kind: 'hook', design: 'cyber-hud', accent: '#00f0ff', y: 1540 },
+  hook_glass_minimal: { kind: 'hook', design: 'glass-minimal', accent: '#a78bfa', y: 1560 },
+  hook_breaking_news: { kind: 'hook', design: 'breaking-news', accent: '#ef4444', y: 1620 },
+  hook_retro_synth: { kind: 'hook', design: 'retro-synth', accent: '#f43f5e', y: 1520 },
+  hook_comic_pop: { kind: 'hook', design: 'comic-pop', accent: '#facc15', y: 1550 },
+  hook_editorial_pill: { kind: 'hook', design: 'editorial-pill', accent: '#e2e8f0', y: 1600 },
+  hook_gradient_aura: { kind: 'hook', design: 'gradient-aura', accent: '#38bdf8', y: 1540 },
+  hook_cinema_tape: { kind: 'hook', design: 'cinema-tape', accent: '#eab308', y: 1640 },
+  hook_hologram_scan: { kind: 'hook', design: 'hologram-scan', accent: '#06b6d4', y: 1540 },
+  hook_luxury_noir: { kind: 'hook', design: 'luxury-noir', accent: '#d4af37', y: 1560 },
+  hook_floating_badge: { kind: 'hook', design: 'floating-badge', accent: '#10b981', y: 1650 },
+  hook_kinetic_split: { kind: 'hook', design: 'kinetic-split', accent: '#f97316', y: 1530 },
 
-  hook_chromatic_gate_v2: { kind: 'hook', design: 'chromatic-gate', accent: '#ff2e88', y: 760 },
-  hook_orbit_stamp_v2: { kind: 'hook', design: 'orbit-stamp', accent: '#8b5cf6', y: 650 },
-  hook_pixel_ticker_v2: { kind: 'hook', design: 'pixel-ticker', accent: '#f7ff58', y: 1320 },
-  hook_blueprint_v2: { kind: 'hook', design: 'blueprint-reveal', accent: '#52c7ff', y: 720 },
+  // Polish lower-third templates (safe upper placement)
+  lower_third_v1: { kind: 'polish', design: 'entity-card', accent: '#22d3ee', y: 1520 },
+  lower_third: { kind: 'polish', design: 'glass-minimal', accent: '#a78bfa', y: 1540 },
+
+  // Additional v2 Hook & Subtitle Templates
+  hook_chromatic_gate_v2: { kind: 'hook', design: 'chromatic-gate', accent: '#ff2e88', y: 1480 },
+  hook_orbit_stamp_v2: { kind: 'hook', design: 'orbit-stamp', accent: '#8b5cf6', y: 1460 },
+  hook_pixel_ticker_v2: { kind: 'hook', design: 'pixel-ticker', accent: '#f7ff58', y: 1540 },
+  hook_blueprint_v2: { kind: 'hook', design: 'blueprint-reveal', accent: '#52c7ff', y: 1480 },
 
   sub_speech_capsule_v2: { kind: 'sub', design: 'speech-capsule', accent: '#ffffff', y: 330 },
   sub_signal_rail_v2: { kind: 'sub', design: 'signal-rail', accent: '#b7ff00', y: 280 },
   sub_vertical_caption_v2: { kind: 'sub', design: 'vertical-caption', accent: '#00d9ff', y: 520 },
   sub_notch_transcript_v2: { kind: 'sub', design: 'notch-transcript', accent: '#ffb000', y: 260 },
 
-  hook_banner_v1: { kind: 'hook', design: 'legacy-banner', accent: '#f97316', y: 160 },
-  hook_neon_v1: { kind: 'hook', design: 'legacy-neon', accent: '#22d3ee', y: 820 },
-  hook_tape_v1: { kind: 'hook', design: 'legacy-tape', accent: '#facc15', y: 200 },
-  hook_lower_v1: { kind: 'hook', design: 'legacy-lower', accent: '#34d399', y: 280 },
+  // Legacy fallback styles
+  hook_banner_v1: { kind: 'hook', design: 'legacy-banner', accent: '#f97316', y: 1560 },
+  hook_neon_v1: { kind: 'hook', design: 'legacy-neon', accent: '#22d3ee', y: 1520 },
+  hook_tape_v1: { kind: 'hook', design: 'cinema-tape', accent: '#facc15', y: 1600 },
+  hook_lower_v1: { kind: 'hook', design: 'entity-card', accent: '#34d399', y: 1540 },
   sub_caption_v1: { kind: 'sub', design: 'legacy-caption', accent: '#f8fafc', y: 980 },
   sub_neon_v1: { kind: 'sub', design: 'legacy-neon-sub', accent: '#a78bfa', y: 1000 },
   sub_box_v1: { kind: 'sub', design: 'legacy-box', accent: '#38bdf8', y: 260 },
@@ -63,7 +84,45 @@ const TPL = {
 
 function cardBody(meta, ev, i) {
   const label = `<div class="label">${esc(ev.label)}</div>`;
+  const subText = ev.sub ? `<div class="sub-text">${esc(ev.sub)}</div>` : '';
+  
   switch (meta.design) {
+    case 'cyber-hud':
+      return `<div class="hud-tag"><span>SYS//HOOK</span><i></i><b>#0${i + 1}</b></div><div class="hud-content">${label}${subText}</div><div class="hud-corners"><s></s><s></s></div>`;
+    
+    case 'glass-minimal':
+      return `<div class="glass-pill"><span class="glass-dot"></span><div class="glass-content">${label}${subText}</div></div>`;
+    
+    case 'breaking-news':
+      return `<div class="news-badge"><span>● LIVE</span><b>UPDATE</b></div><div class="news-content">${label}</div>`;
+    
+    case 'retro-synth':
+      return `<div class="synth-tubes"><i></i></div><div class="synth-content"><span class="synth-tag">TOPIC // REVEAL</span>${label}${subText}</div><div class="synth-glow"></div>`;
+    
+    case 'comic-pop':
+      return `<div class="comic-burst"><span class="comic-tag">HEY!</span>${label}</div>`;
+    
+    case 'editorial-pill':
+      return `<div class="edit-dot"></div><div class="edit-content"><span class="edit-kicker">FOCUS</span>${label}</div>`;
+    
+    case 'gradient-aura':
+      return `<div class="aura-mesh"></div><div class="aura-content">${label}${subText}</div>`;
+    
+    case 'cinema-tape':
+      return `<div class="tape-stripes"></div><div class="tape-text">${label}</div><div class="tape-stripes"></div>`;
+    
+    case 'hologram-scan':
+      return `<div class="holo-scanline"></div><div class="holo-header"><span class="holo-dot"></span><b>DATA_FEED // 0${i + 1}</b></div>${label}${subText}`;
+    
+    case 'luxury-noir':
+      return `<div class="noir-border"></div><div class="noir-content"><span class="noir-tag">INSIGHT</span>${label}${subText}</div>`;
+    
+    case 'floating-badge':
+      return `<div class="float-dot"></div><div class="float-text"><span class="float-tag">TOPIC</span>${label}</div>`;
+    
+    case 'kinetic-split':
+      return `<div class="split-side"><b>0${i + 1}</b></div><div class="split-main">${label}${subText}</div>`;
+
     case 'chromatic-gate':
       return `<div class="gate-code">HF//${String(i + 1).padStart(2, '0')}</div><div class="gate-copy">${label}</div><div class="gate-bars"><i></i><i></i><i></i></div>`;
     case 'orbit-stamp':
@@ -93,25 +152,25 @@ function cardBody(meta, ev, i) {
  * baseRel = relative path inside work dir (usually "base.mp4").
  */
 export function assembleHtml({
-  template = 'lower_third_v1',
+  template = 'hook_cyber_hud',
   baseSrc = 'base.mp4',
   events = [],
   duration = 0,
 } = {}) {
-  const tplKey = String(template || 'lower_third_v1');
-  const meta = TPL[tplKey] || TPL.lower_third_v1;
+  const tplKey = String(template || 'hook_cyber_hud');
+  const meta = TPL[tplKey] || TPL.hook_cyber_hud;
   const isHook = meta.kind === 'hook';
   const isSub = meta.kind === 'sub';
   const maxEv = isHook ? 1 : isSub ? 48 : 6;
 
   const safeEvents = (Array.isArray(events) ? events : [])
     .map((e) => ({
-      label: String(e.label || e.word || e.name || '').slice(0, isSub ? 42 : 48),
+      label: String(e.label || e.word || e.name || '').slice(0, isSub ? 42 : 56),
       sub: String(e.sub || e.query_en || e.query_id || '').slice(0, 80),
       start: Math.max(0, Number(e.start ?? e.t0 ?? 0) || 0),
       end: Math.max(
         0.5,
-        Number(e.end ?? e.t1 ?? ((Number(e.start) || 0) + 2.4)) || 2.4,
+        Number(e.end ?? e.t1 ?? ((Number(e.start) || 0) + 2.8)) || 2.8,
       ),
       thumb: e.thumb || e.image_url || e.image || '',
     }))
@@ -139,7 +198,7 @@ export function assembleHtml({
       const start = ev.start;
       const cardDur = Math.max(0.5, ev.end - ev.start);
       const accent = meta.accent || ACCENTS[i % ACCENTS.length];
-      const bottom = isHook || isSub ? (meta.y || 260) : [220, 360, 500, 640][Math.min(i, 3)];
+      const bottom = isHook || isSub ? (meta.y || 1540) : [1560, 1420, 1280, 1140][Math.min(i, 3)];
       const showThumb = !isHook && !isSub && ev.thumb && !String(ev.thumb).startsWith('file://');
       const thumbHtml = showThumb
         ? `<img class="thumb" src="${escAttr(ev.thumb)}" alt="" width="88" height="88"/>`
@@ -161,19 +220,27 @@ export function assembleHtml({
       const start = safeEvents[i].start;
       const end = safeEvents[i].end;
       const entrances = {
+        'cyber-hud': `{ opacity: 0, scale: 0.9, y: -20, duration: 0.32, ease: "back.out(1.7)" }`,
+        'glass-minimal': `{ opacity: 0, y: -30, backdropFilter: "blur(0px)", duration: 0.36, ease: "power2.out" }`,
+        'breaking-news': `{ opacity: 0, x: -100, duration: 0.28, ease: "power3.out" }`,
+        'retro-synth': `{ opacity: 0, scale: 0.85, duration: 0.34, ease: "elastic.out(1, 0.75)" }`,
+        'comic-pop': `{ opacity: 0, scale: 0.4, rotation: -12, duration: 0.3, ease: "back.out(2)" }`,
+        'editorial-pill': `{ opacity: 0, y: -25, duration: 0.3, ease: "power2.out" }`,
+        'gradient-aura': `{ opacity: 0, scale: 0.92, duration: 0.4, ease: "power2.out" }`,
+        'cinema-tape': `{ opacity: 0, x: 120, duration: 0.26, ease: "power2.out" }`,
+        'hologram-scan': `{ opacity: 0, scaleY: 0.2, duration: 0.32, ease: "expo.out" }`,
+        'luxury-noir': `{ opacity: 0, y: -20, duration: 0.38, ease: "power3.out" }`,
+        'floating-badge': `{ opacity: 0, x: -50, scale: 0.8, duration: 0.28, ease: "back.out(1.5)" }`,
+        'kinetic-split': `{ opacity: 0, x: -80, duration: 0.32, ease: "power2.out" }`,
         'chromatic-gate': `{ opacity: 0, x: -150, skewX: -12, duration: 0.34 }`,
         'orbit-stamp': `{ opacity: 0, rotation: -18, scale: 0.55, duration: 0.42 }`,
         'pixel-ticker': `{ opacity: 0, x: 180, duration: 0.24 }`,
         'blueprint-reveal': `{ opacity: 0, scaleX: 0.12, transformOrigin: "left center", duration: 0.38 }`,
-        'speech-capsule': `{ opacity: 0, y: 42, scale: 0.88, duration: 0.24 }`,
-        'signal-rail': `{ opacity: 0, x: -70, duration: 0.22 }`,
-        'vertical-caption': `{ opacity: 0, x: -120, duration: 0.3 }`,
-        'notch-transcript': `{ opacity: 0, y: 70, duration: 0.28 }`,
       };
-      const entrance = entrances[meta.design] || `{ opacity: 0, y: 28, scale: 0.96, duration: 0.28 }`;
+      const entrance = entrances[meta.design] || `{ opacity: 0, y: -20, scale: 0.96, duration: 0.28 }`;
       return [
         `tl.from("${id}", ${entrance}, ${start});`,
-        `tl.to("${id}", { opacity: 0, y: 10, duration: 0.18 }, ${Math.max(start, end - 0.2)});`,
+        `tl.to("${id}", { opacity: 0, y: -15, duration: 0.22 }, ${Math.max(start, end - 0.25)});`,
       ].join('\n      ');
     })
     .join('\n      ');
@@ -184,6 +251,9 @@ export function assembleHtml({
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=1080, height=1920" />
   <title>AutoCliper HF · ${esc(tplKey)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Inter:wght@400;600;800;900&family=Space+Grotesk:wght@700;900&family=Syne:wght@800;900&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -193,20 +263,148 @@ export function assembleHtml({
       font-family: Inter, system-ui, -apple-system, sans-serif;
     }
     .hf-card {
-      position: absolute; left: 64px; right: 64px; color: #fff;
-      font-family: Inter, Arial, sans-serif;
+      position: absolute; left: 56px; right: 56px; color: #fff;
+      z-index: 20;
     }
     .hf-card .label { overflow-wrap: anywhere; }
+    .hf-card .sub-text { font-size: 20px; opacity: 0.8; margin-top: 4px; font-weight: 500; }
     .hf-card .thumb {
       width: 88px; height: 88px; border-radius: 14px;
       object-fit: cover; background: #1e293b; flex-shrink: 0;
     }
-    .design-entity-card, [class*="design-legacy-"] {
-      display: flex; align-items: center; gap: 18px; padding: 22px 26px;
-      border-radius: 20px; background: rgba(8,10,16,.88); border-left: 7px solid var(--accent);
+
+    /* ─── 1. Cyberpunk Tech HUD ────────────────────────────────────────── */
+    .design-cyber-hud {
+      background: rgba(10, 14, 23, 0.92); border: 2px solid var(--accent);
+      border-radius: 16px; padding: 22px 28px;
+      box-shadow: 0 0 30px rgba(0,240,255,0.25), inset 0 0 15px rgba(0,240,255,0.1);
+      position: relative;
+    }
+    .design-cyber-hud .hud-tag {
+      display: flex; align-items: center; justify-content: space-between;
+      color: var(--accent); font: 800 15px monospace; letter-spacing: 0.15em; margin-bottom: 8px;
+    }
+    .design-cyber-hud .hud-tag i { flex: 1; height: 1px; background: rgba(0,240,255,0.3); margin: 0 12px; }
+    .design-cyber-hud .label { font-family: 'Space Grotesk', Inter, sans-serif; font-size: 46px; font-weight: 900; line-height: 1.15; color: #fff; text-shadow: 0 0 12px rgba(0,240,255,0.5); }
+    .design-cyber-hud .hud-corners s { position: absolute; width: 10px; height: 10px; border: 2px solid #fff; }
+    .design-cyber-hud .hud-corners s:nth-child(1) { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
+    .design-cyber-hud .hud-corners s:nth-child(2) { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
+
+    /* ─── 2. Frosted Glassmorphism ─────────────────────────────────────── */
+    .design-glass-minimal {
+      display: flex; align-items: center; gap: 16px;
+      background: rgba(255, 255, 255, 0.12); backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
+      border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 28px; padding: 24px 34px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.35);
+    }
+    .design-glass-minimal .glass-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 16px var(--accent); flex-shrink: 0; }
+    .design-glass-minimal .label { font-size: 44px; font-weight: 850; line-height: 1.15; color: #ffffff; letter-spacing: -0.02em; }
+
+    /* ─── 3. Breaking News Live Banner ─────────────────────────────────── */
+    .design-breaking-news {
+      display: grid; grid-template-columns: 160px 1fr;
+      background: #0d0d12; border: 3px solid #ef4444; border-radius: 14px; overflow: hidden;
+      box-shadow: 0 16px 40px rgba(239,68,68,0.3);
+    }
+    .design-breaking-news .news-badge {
+      background: #ef4444; color: #fff; padding: 18px 20px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
+    }
+    .design-breaking-news .news-badge span { font: 900 13px monospace; letter-spacing: 0.12em; color: #fef08a; }
+    .design-breaking-news .news-badge b { font: 950 20px/1 Inter, sans-serif; letter-spacing: -0.02em; text-transform: uppercase; margin-top: 3px; }
+    .design-breaking-news .news-content { padding: 22px 28px; display: flex; align-items: center; }
+    .design-breaking-news .label { font-size: 42px; font-weight: 900; line-height: 1.15; text-transform: uppercase; letter-spacing: -0.02em; color: #fff; }
+
+    /* ─── 4. Retro 80s Synthwave ───────────────────────────────────────── */
+    .design-retro-synth {
+      background: linear-gradient(135deg, rgba(20,8,35,0.94), rgba(40,10,60,0.92));
+      border: 3px solid #f43f5e; border-radius: 20px; padding: 26px 32px;
+      box-shadow: 0 0 35px rgba(244,63,94,0.4), inset 0 0 20px rgba(0,240,255,0.2);
+    }
+    .design-retro-synth .synth-tag { display: block; font: 900 14px monospace; color: #00f0ff; letter-spacing: 0.22em; text-shadow: 0 0 8px #00f0ff; margin-bottom: 6px; }
+    .design-retro-synth .label { font-family: 'Syne', sans-serif; font-size: 48px; font-weight: 900; line-height: 1.15; font-style: italic; background: linear-gradient(to right, #fff, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+    /* ─── 5. Comic Pop Burst ───────────────────────────────────────────── */
+    .design-comic-pop {
+      background: #facc15; border: 5px solid #000; border-radius: 22px; padding: 24px 32px;
+      color: #000; transform: rotate(-2.5deg);
+      box-shadow: 12px 12px 0 #000;
+    }
+    .design-comic-pop .comic-tag { display: inline-block; background: #ef4444; color: #fff; font: 950 16px Inter; padding: 4px 10px; border-radius: 8px; border: 2px solid #000; margin-bottom: 6px; }
+    .design-comic-pop .label { font-size: 48px; font-weight: 950; line-height: 1.1; letter-spacing: -0.03em; text-transform: uppercase; color: #000; }
+
+    /* ─── 6. Editorial Minimal Pill ────────────────────────────────────── */
+    .design-editorial-pill {
+      display: flex; align-items: center; gap: 20px;
+      background: rgba(12, 12, 14, 0.94); border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 50px; padding: 20px 36px;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+    }
+    .design-editorial-pill .edit-dot { width: 14px; height: 14px; border-radius: 50%; background: #d4af37; box-shadow: 0 0 14px #d4af37; flex-shrink: 0; }
+    .design-editorial-pill .edit-kicker { display: block; font: 700 12px monospace; color: #d4af37; letter-spacing: 0.25em; text-transform: uppercase; margin-bottom: 2px; }
+    .design-editorial-pill .label { font-size: 40px; font-weight: 800; line-height: 1.15; color: #f8fafc; }
+
+    /* ─── 7. Gradient Aura Glow ────────────────────────────────────────── */
+    .design-gradient-aura {
+      background: rgba(14, 16, 26, 0.92); border-radius: 24px; padding: 26px 36px;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      box-shadow: 0 0 50px rgba(56, 189, 248, 0.3), inset 0 0 25px rgba(167, 139, 250, 0.2);
+    }
+    .design-gradient-aura .label { font-family: 'Space Grotesk', sans-serif; font-size: 46px; font-weight: 900; line-height: 1.15; background: linear-gradient(135deg, #38bdf8, #c084fc, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+    /* ─── 8. Caution Stencil Tape ──────────────────────────────────────── */
+    .design-cinema-tape {
+      background: #000; border-top: 6px solid #eab308; border-bottom: 6px solid #eab308;
+      padding: 24px 32px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.7);
+    }
+    .design-cinema-tape .tape-text .label { font: 900 46px/1.15 monospace; letter-spacing: 0.05em; color: #eab308; text-transform: uppercase; }
+
+    /* ─── 9. Sci-Fi Hologram Scanner ───────────────────────────────────── */
+    .design-hologram-scan {
+      background: rgba(6, 25, 45, 0.9); border: 2px solid #06b6d4; border-radius: 18px; padding: 24px 30px;
+      box-shadow: 0 0 35px rgba(6,182,212,0.3); position: relative; overflow: hidden;
+    }
+    .design-hologram-scan .holo-header { display: flex; align-items: center; gap: 8px; color: #06b6d4; font: 800 14px monospace; letter-spacing: 0.16em; margin-bottom: 6px; }
+    .design-hologram-scan .holo-dot { width: 8px; height: 8px; border-radius: 50%; background: #06b6d4; }
+    .design-hologram-scan .label { font-size: 44px; font-weight: 850; line-height: 1.15; color: #e0f2fe; }
+
+    /* ─── 10. Luxury Obsidian & Gold ───────────────────────────────────── */
+    .design-luxury-noir {
+      background: linear-gradient(145deg, #09090b, #18181b); border: 2px solid #d4af37;
+      border-radius: 20px; padding: 28px 36px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.7), inset 0 0 15px rgba(212,175,55,0.15);
+    }
+    .design-luxury-noir .noir-tag { display: block; font: 700 13px 'Cinzel', serif; letter-spacing: 0.3em; color: #d4af37; margin-bottom: 6px; }
+    .design-luxury-noir .label { font-family: 'Cinzel', serif; font-size: 44px; font-weight: 900; line-height: 1.18; color: #fef08a; letter-spacing: 0.02em; }
+
+    /* ─── 11. Top Floating Badge ───────────────────────────────────────── */
+    .design-floating-badge {
+      left: 56px; right: auto; max-width: 800px;
+      display: flex; align-items: center; gap: 16px;
+      background: rgba(10, 14, 18, 0.94); border: 2px solid #10b981; border-radius: 40px; padding: 16px 28px;
+      box-shadow: 0 12px 35px rgba(0,0,0,0.5), 0 0 20px rgba(16,185,129,0.25);
+    }
+    .design-floating-badge .float-dot { width: 12px; height: 12px; border-radius: 50%; background: #10b981; box-shadow: 0 0 12px #10b981; }
+    .design-floating-badge .float-tag { font: 800 13px monospace; color: #10b981; letter-spacing: 0.15em; margin-right: 8px; }
+    .design-floating-badge .label { font-size: 36px; font-weight: 850; line-height: 1.15; color: #fff; }
+
+    /* ─── 12. Kinetic Duotone Split ────────────────────────────────────── */
+    .design-kinetic-split {
+      display: grid; grid-template-columns: 88px 1fr;
+      background: #121316; border-radius: 18px; overflow: hidden;
+      box-shadow: 0 18px 45px rgba(0,0,0,0.6);
+    }
+    .design-kinetic-split .split-side { background: #f97316; color: #fff; display: grid; place-items: center; font: 950 32px/1 monospace; }
+    .design-kinetic-split .split-main { padding: 22px 28px; display: flex; flex-direction: column; justify-content: center; }
+    .design-kinetic-split .label { font-size: 42px; font-weight: 900; line-height: 1.15; color: #fff; letter-spacing: -0.02em; }
+
+    /* ─── Shared Base Polish / Legacy ──────────────────────────────────── */
+    .design-entity-card {
+      display: flex; align-items: center; gap: 18px; padding: 22px 28px;
+      border-radius: 20px; background: rgba(8,10,16,.92); border-left: 7px solid var(--accent);
       box-shadow: 0 18px 50px rgba(0,0,0,.5);
     }
-    .design-entity-card .label, [class*="design-legacy-"] .label { font-size: 42px; font-weight: 850; line-height: 1.2; }
+    .design-entity-card .label { font-size: 42px; font-weight: 850; line-height: 1.2; }
     .legacy-kicker, .legacy-sub { font-size: 20px; opacity: .7; letter-spacing: .12em; }
 
     .design-chromatic-gate {
@@ -327,7 +525,7 @@ export function writeComposition(outDir, opts) {
     path.join(outDir, 'meta.json'),
     JSON.stringify(
       {
-        template: opts.template || 'lower_third_v1',
+        template: opts.template || 'hook_cyber_hud',
         duration: opts.duration,
         events: opts.events || [],
         baseSrc: opts.baseSrc,

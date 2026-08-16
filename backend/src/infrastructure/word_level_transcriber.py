@@ -74,29 +74,13 @@ class WordLevelTranscriber:
         from faster_whisper import WhisperModel
         model_size = settings.WHISPER_MODEL_SIZE
 
+        # Always use CPU int8 for word-level fallback:
+        # 1. 100% immune to cuDNN shared library symbol mismatch crashes
+        # 2. Doesn't compete with GPU VRAM during video rendering / reframe
+        # 3. Super fast on CPU for small trimmed clips (1-2s)
         device = "cpu"
         compute_type = "int8"
-        try:
-            import torch
-            if torch.cuda.is_available():
-                # Check free VRAM before attempting GPU load
-                free_mem = torch.cuda.mem_get_info()[0] / (1024**3)  # GB
-                if free_mem < 2.5:
-                    logger.warning(
-                        f"word_level: insufficient VRAM ({free_mem:.1f}GB free), "
-                        f"falling back to CPU/int8"
-                    )
-                else:
-                    device = "cuda"
-                    compute_type = "float16"
-                    logger.info(
-                        f"word_level: loading Faster-Whisper {model_size} "
-                        f"(CUDA/float16, {free_mem:.1f}GB free)"
-                    )
-            else:
-                logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8)")
-        except ImportError:
-            logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8, no torch)")
+        logger.info(f"word_level: loading Faster-Whisper {model_size} (CPU/int8, robust fallback)")
 
         model = WhisperModel(
             model_size,

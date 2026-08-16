@@ -53,6 +53,18 @@ from src.infrastructure.subtitle_words import sanitize_subtitle_words
 from src.infrastructure.text_emphasis import normalise_text_emphasis_style
 from src.infrastructure.video_splicer import VideoSplicer
 from src.infrastructure.person_first_reframe_engine import PersonFirstReframeEngine
+from src.pipeline import (
+    assemble_clips_data,
+    best_clip_path,
+    build_broll_events,
+    build_clips_with_words,
+    build_direct_edit_analysis,
+    create_folder_structure,
+    parse_broll_suggestions,
+    pick_hook,
+    prepare_clips_from_v2,
+    write_early_json_analisa,
+)
 
 if TYPE_CHECKING:
     from src.infrastructure.sse_progress_emitter import SSEProgressEmitter
@@ -1006,26 +1018,9 @@ class V2PipelineService:
 
     # ─── V2-Specific Helpers ──────────────────────────────────────────────────
 
-    @staticmethod
-    def _build_direct_edit_analysis(video_duration: float, custom_hook: object = None):
-        """Build the direct-edit result without invoking the AI analyzer."""
-        from src.domain.entities import HighlightAnalysisResult, HighlightCandidate
-
-        hook = str(custom_hook or "").strip()
-        return HighlightAnalysisResult(
-            clips=[HighlightCandidate(
-                rank=1,
-                start=0.0,
-                end=video_duration,
-                score=100,
-                hook=hook,
-                reason="Direct full-video edit",
-            )],
-            creative_direction={},
-            broll_suggestions={},
-            model_used="direct",
-            chunks_processed=0,
-        )
+    _build_direct_edit_analysis = staticmethod(build_direct_edit_analysis)
+    _pick_hook = staticmethod(pick_hook)
+    _parse_broll_suggestions = staticmethod(parse_broll_suggestions)
 
     def _build_clips_with_words(
         self,
@@ -1033,175 +1028,12 @@ class V2PipelineService:
         words_per_clip: dict[int, list],
         hook_duration: float = 0.0,
     ) -> dict[int, list[dict]]:
-        """Build subtitle word dicts per clip from word-level transcription output.
-
-        Word-level transcription returns 0-based words (relative to each clip's
-        start) — no timestamp shifting happens here. This method sanitizes them
-        (clamp to clip duration, dedupe, mark highlights) and suppresses words
-        that fall under the hook window when the clip has a hook text (the hook
-        owns 0–hook_duration seconds).
-
-        Returns {clip_rank: [{"word", "start", "end", "highlight"}]}.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        from src.infrastructure.subtitle_words import sanitize_subtitle_words
-        clips_with_words: dict[int, list[dict]] = {}
-        for clip in clips:
-            raw_words = words_per_clip.get(clip.rank, [])
-            clip_duration = round(clip.end - clip.start, 3)
-            # Only suppress subtitles under the hook when a hook text exists.
-            sub_min = hook_duration if (clip.hook and hook_duration > 0) else 0.0
-            valid_words = sanitize_subtitle_words(
-                raw_words,
-                clip_duration,
-                subtitle_min_start=sub_min,
-            )
-            clips_with_words[clip.rank] = valid_words
-            if valid_words:
-                logger.info(
-                    f"v2_words clip {clip.rank}: {len(valid_words)} words, "
-                    f"first={valid_words[0]['start']:.2f}s (min={sub_min:.1f}), "
-                    f"last='{valid_words[-1]['word']}' @ {valid_words[-1]['start']:.1f}s, "
-                    f"clip_duration={clip_duration:.1f}s"
-                )
-        return clips_with_words
+        return build_clips_with_words(clips, words_per_clip, hook_duration)
 
     def _prepare_clips_from_v2(
         self, highlights: list, broll_map: dict, video_duration: float
     ) -> list[Clip]:
-        """Convert V2 HighlightCandidate list → Clip entities."""
-        clips = []
-        for h in highlights:
-            start = max(0, h.start - 0.5)
-            end = min(video_duration, h.end + 1.0)
-            if end - start < settings.MIN_CLIP_DURATION:
-                continue
-
-            broll_suggestions = self._parse_broll_suggestions(
-                h.rank,
-                broll_map,
-                end - start,
-            )
-
-            clips.append(Clip(
-                rank=h.rank,
-                score=h.score,
-                start=start,
-                end=end,
-                hook=self._pick_hook(h),
-                reason=h.reason,
-                broll_suggestions=broll_suggestions,
-            ))
-        return clips
-
-    @staticmethod
-    def _pick_hook(h) -> str:
-        """A/B: primary hook vs hook_alt (cheap heuristic; 9router rewrite optional later)."""
-        primary = getattr(h, "hook", "") or ""
-        alt = getattr(h, "hook_alt", "") or ""
-        try:
-            from src.infrastructure.hook_optimizer import HookOptimizer
-            return HookOptimizer.pick_hook_ab(primary, alt)
-        except Exception:
-            return primary or alt
-
-    @staticmethod
-    def _parse_broll_suggestions(
-        clip_rank: int,
-        broll_map: dict,
-        clip_duration: float,
-    ) -> list[BRollSuggestion]:
-        """Convert and constrain AI B-roll output to a clip-safe timeline."""
-        if not isinstance(broll_map, dict) or clip_duration <= 1.0:
-            return []
-
-        raw_suggestions = broll_map.get(str(clip_rank), [])
-        if not isinstance(raw_suggestions, list):
-            return []
-
-        allowed_templates = {
-            "word_pop_typography",
-            "line_reveal_typography",
-            "particle_text_burst",
-        }
-        # Up to 4: e.g. 2 full_frame + 2 behind_person on different times
-        parsed: list[BRollSuggestion] = []
-        for raw in raw_suggestions[:4]:
-            if not isinstance(raw, dict):
-                continue
-            keyword = " ".join(str(raw.get("keyword") or "").split())[:80]
-            if not keyword:
-                continue
-            try:
-                at_time = float(raw.get("at_time", 0))
-                duration = float(raw.get("duration", 2.0))
-            except (TypeError, ValueError):
-                continue
-
-            safe_start = 3.0 if clip_duration > 4.0 else 0.0
-            at_time = max(safe_start, at_time)
-            if at_time >= clip_duration - 1.0:
-                continue
-            duration = min(3.0, max(1.5, duration), clip_duration - at_time)
-            if duration < 1.0:
-                continue
-
-            try:
-                visual_cat = VisualCategory(raw.get("visual_category", "footage"))
-            except (ValueError, TypeError):
-                visual_cat = VisualCategory.FOOTAGE
-            template = str(raw.get("template") or "word_pop_typography")
-            if template not in allowed_templates:
-                template = "word_pop_typography"
-
-            # v3.1: resolve Remotion motion style. Accept either an explicit
-            # "motion_style" field (new) or fall back to the legacy template id
-            # mapping. This keeps older analysis outputs rendering correctly.
-            motion_style: Optional[BrollMotionStyle] = None
-            raw_motion = raw.get("motion_style")
-            if raw_motion:
-                try:
-                    motion_style = BrollMotionStyle(raw_motion)
-                except (ValueError, TypeError):
-                    motion_style = None
-            if motion_style is None:
-                motion_style = LEGACY_TEMPLATE_TO_MOTION.get(template)
-
-            placement = str(raw.get("placement") or "").strip().lower()
-            if placement in {"fullframe", "splice", "replace"}:
-                placement = "full_frame"
-            elif placement in {"behind", "top_overlay", "overlay", "top"}:
-                placement = "behind_person"
-            elif placement not in {"full_frame", "behind_person"}:
-                # Infer: footage video → full_frame; icon/image → behind_person
-                if visual_cat in (VisualCategory.ICON, VisualCategory.MOTION_GRAPHIC):
-                    placement = "behind_person"
-                else:
-                    placement = "full_frame"
-
-            reason = " ".join(str(raw.get("reason") or "").split())[:200]
-            parsed.append(BRollSuggestion(
-                at_time=round(at_time, 3),
-                keyword=keyword,
-                template=template,
-                duration=round(duration, 3),
-                reason=reason,
-                visual_category=visual_cat,
-                motion_style=motion_style,
-                placement=placement,
-            ))
-
-        # Ensure dual tracks when AI only emits one placement type.
-        # Need different times so full_frame splice + behind_person can coexist.
-        full = [s for s in parsed if s.placement == "full_frame"]
-        behind = [s for s in parsed if s.placement == "behind_person"]
-        if full and not behind and len(full) >= 2:
-            for s in full[1:]:
-                s.placement = "behind_person"
-        elif behind and not full and len(behind) >= 2:
-            behind[0].placement = "full_frame"
-        return parsed
+        return prepare_clips_from_v2(highlights, broll_map, video_duration, self._parse_broll_suggestions)
 
 
     async def _trim_all_clips(
@@ -1752,54 +1584,7 @@ class V2PipelineService:
         clips_with_words: dict[int, list[dict]],
         output_dir: str,
     ) -> None:
-        """Draft per-clip analisa BEFORE asset fetch — seeds ID+EN footage search."""
-        from src.infrastructure.clip_quality_helpers import build_clip_analisa, write_split_job_meta
-        from src.domain.entities import VisualCategory
-
-        payloads = []
-        for c in clips:
-            words = clips_with_words.get(c.rank, []) if isinstance(clips_with_words, dict) else []
-            broll_dicts = []
-            for s in (c.broll_suggestions or []):
-                vc = s.visual_category
-                broll_dicts.append({
-                    "at_time": s.at_time,
-                    "keyword": s.keyword,
-                    "template": s.template,
-                    "duration": s.duration,
-                    "reason": getattr(s, "reason", "") or "",
-                    "placement": getattr(s, "placement", "") or "",
-                    "visual_category": (
-                        vc.value if isinstance(vc, VisualCategory) else str(vc or "")
-                    ),
-                })
-            payloads.append(build_clip_analisa(
-                no=c.rank,
-                rank=c.rank,
-                start=c.start,
-                end=c.end,
-                hook=c.hook or "",
-                reason=c.reason or "",
-                score=c.score,
-                words=words,
-                broll_suggestions=broll_dicts,
-                text_emphasis_events=list(getattr(c, "text_emphasis_events", None) or [])[:2],
-                top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
-                object_overlay_events=list(getattr(c, "object_overlay_events", None) or []),
-                visual_entities=list(getattr(c, "visual_entities", None) or []),
-                extra={"hyperframes_polish": getattr(c, "hyperframes_polish", None)},
-            ))
-        write_split_job_meta(
-            output_dir,
-            job_id=job_id,
-            youtube_url=job.youtube_url,
-            aspect_ratio=job.target_aspect_ratio,
-            created_at=str(job.created_at) if job.created_at else None,
-            clip_payloads=payloads,
-            clips_total=len(clips),
-            clips_success=len(clips),
-        )
-        logger.info(f"[{job_id}] Early json_analisa written for footage search")
+        write_early_json_analisa(job, job_id, clips, clips_with_words, output_dir)
 
     async def _ensure_broll_suggestions(
         self,
@@ -2019,27 +1804,7 @@ class V2PipelineService:
             f"across {len(clips)} clips (max 2/clip)"
         )
 
-    @staticmethod
-    def _build_broll_events(
-        clip: Clip,
-        job_motion_style: Optional[str] = None,
-    ) -> list[dict]:
-        """Convert a clip's BRollSuggestion list into Remotion BrollEvent dicts.
-        B-Roll is inserted by the video splicer as a replacement segment. Do not
-        emit Remotion overlay events: an overlay would make preview/final differ
-        from the required Clip → B-roll → Clip timeline.
-        intentionally excluded here.
-
-        Args:
-            clip: Clip whose broll_suggestions to convert.
-            job_motion_style: Optional per-job default motion style id.
-
-        Returns:
-            List of BrollEvent dicts ready for the Remotion render payload.
-        """
-        # B-roll is a replacement-track concern. Returning no Remotion events
-        # prevents preview/final from silently reintroducing an overlay layer.
-        return []
+    _build_broll_events = staticmethod(build_broll_events)
 
     async def _render_clips(
         self,
@@ -2798,12 +2563,14 @@ class V2PipelineService:
             if not events:
                 continue
             out_tmp = f"{output_dir}/clip_{clip.rank:02d}_hf_polish.mp4"
+            from src.infrastructure.hf_style_catalog import resolve_hf_template
+            chosen_template = resolve_hf_template(cfg, kind="polish", clip_index=clip.rank)
             try:
                 result = await hf.render_polish(
                     base_video=final,
                     events=events,
                     output_path=out_tmp,
-                    template=cfg.get("default_template") or "lower_third_v1",
+                    template=chosen_template,
                     duration=clip_dur,
                     job_id=job_id,
                     clip_id=clip.rank,
@@ -2893,16 +2660,10 @@ class V2PipelineService:
             "Use Remotion so rendered output matches the preview."
         )
 
-    def _best_clip_path(self, output_dir: str, rank: int, reframe_data: dict) -> str:
+    def _best_clip_path(self, output_dir: str, rank: int, reframe_data: dict = None) -> str:
         """Get best available clip path."""
-        candidates = [
-            f"{output_dir}/clip_{rank:02d}_reframed.mp4",
-            f"{output_dir}/clip_{rank:02d}.mp4",
-        ]
-        for path in candidates:
-            if os.path.exists(path):
-                return path
-        return f"{output_dir}/clip_{rank:02d}.mp4"
+        from src.pipeline.assembly import best_clip_path
+        return best_clip_path(output_dir, rank, reframe_data)
 
     def _assemble_clips_data(
         self,
@@ -2913,222 +2674,12 @@ class V2PipelineService:
         transcript_source: str = "",
     ) -> dict:
         """Build final clips_data JSON for storage."""
-        clips_output = []
-        for clip in clips:
-            final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
-            if not os.path.exists(final_path):
-                for suffix in ["_subtitled", "_hooked", "_reframed", ""]:
-                    alt = f"{output_dir}/clip_{clip.rank:02d}{suffix}.mp4"
-                    if os.path.exists(alt):
-                        final_path = alt
-                        break
-
-            words = words_per_clip.get(clip.rank, [])
-            broll_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
-            broll_n = len(clip.broll_suggestions or [])
-            try:
-                from src.infrastructure.clip_quality_helpers import (
-                    virality_breakdown,
-                    suggest_cta,
-                    retention_trim_hints,
-                )
-                viral = virality_breakdown(
-                    clip.score,
-                    hook=clip.hook or "",
-                    reason=clip.reason or "",
-                    duration=clip.end - clip.start,
-                    words=words,
-                    broll_count=broll_n,
-                )
-                cta = suggest_cta(clip.hook or "", clip.reason or "", clip.rank)
-                retention = retention_trim_hints(words, clip.end - clip.start)
-            except Exception:
-                viral, cta, retention = {}, {}, {}
-            try:
-                from src.infrastructure.clip_quality_helpers import share_pack_for_clip
-                captions, hashtags, hook_alts = share_pack_for_clip(
-                    hook=clip.hook or "",
-                    reason=clip.reason or "",
-                    score=clip.score,
-                    duration=clip.end - clip.start,
-                    words=words,
-                    visual_entities=list(getattr(clip, "visual_entities", None) or []),
-                    cta=cta,
-                    virality=viral,
-                    rank=clip.rank,
-                )
-            except Exception:
-                captions, hashtags, hook_alts = {}, [], []
-            clips_output.append({
-                "rank": clip.rank,
-                "score": clip.score,
-                "start": clip.start,
-                "end": clip.end,
-                "duration": round(clip.end - clip.start, 2),
-                "hook": clip.hook,
-                "reason": clip.reason,
-                "output_path": final_path,
-                "words": words,
-                "word_count": len(words),
-                "has_subtitles": len(words) > 0,
-                "broll_applied": os.path.exists(broll_path),
-                "broll_suggestions": [
-                    {
-                        "at_time": suggestion.at_time,
-                        "keyword": suggestion.keyword,
-                        "template": suggestion.template,
-                        "duration": suggestion.duration,
-                        "placement": getattr(suggestion, "placement", "") or "",
-                        "visual_category": (
-                            suggestion.visual_category.value
-                            if isinstance(suggestion.visual_category, VisualCategory)
-                            else str(suggestion.visual_category)
-                        ),
-                        "asset_source": (
-                            suggestion.asset_result.source_api
-                            if suggestion.asset_result else ""
-                        ),
-                    }
-                    for suggestion in clip.broll_suggestions
-                ],
-
-                "text_emphasis_events": [
-                    {
-                        key: value
-                        for key, value in event.items()
-                        if key != "foreground_frames"
-                    }
-                    for event in clip.text_emphasis_events[:2]
-                ],
-                "top_overlay_events": list(getattr(clip, "top_overlay_events", None) or []),
-                "object_overlay_events": list(getattr(clip, "object_overlay_events", None) or []),
-                "visual_entities": list(getattr(clip, "visual_entities", None) or []),
-                "hyperframes_polish": getattr(clip, "hyperframes_polish", None),
-                "virality": viral,
-                "cta": cta,
-                "retention_hints": retention,
-                "captions": captions,
-                "hashtags": hashtags,
-                "hook_alts": hook_alts,
-            })
-
-        return {
-            "pipeline_version": "v2",
-            "transcript_source": transcript_source,
-            "creative_direction": asdict(creative_direction),
-            "clips": clips_output,
-        }
+        from src.pipeline.assembly import assemble_clips_data
+        return assemble_clips_data(clips, words_per_clip, creative_direction, output_dir, transcript_source)
 
     async def _create_folder_structure(
         self, job_id, job, clips, clips_with_words, creative_direction, output_dir, trim_results,
     ) -> None:
         """Create raw/, final/, thumbnail/, json_analisa/ + slim meta index."""
-        import subprocess
-        import shutil
+        await create_folder_structure(job_id, job, clips, clips_with_words, creative_direction, output_dir, trim_results)
 
-        thumb_dir = f"{output_dir}/thumbnail"
-        raw_dir = f"{output_dir}/raw"
-        final_dir = f"{output_dir}/final"
-        os.makedirs(thumb_dir, exist_ok=True)
-        os.makedirs(raw_dir, exist_ok=True)
-        os.makedirs(final_dir, exist_ok=True)
-
-        for clip in clips:
-            if not trim_results.get(clip.rank):
-                continue
-            rank = clip.rank
-
-            final_path = f"{output_dir}/clip_{rank:02d}_final.mp4"
-            thumb_path = f"{thumb_dir}/clip_{rank:02d}.jpg"
-            if os.path.exists(final_path):
-                try:
-                    from src.infrastructure.clip_quality_helpers import (
-                        smart_thumbnail_seek,
-                        generate_smart_thumbnail,
-                    )
-                    words = clips_with_words.get(rank, []) if isinstance(clips_with_words, dict) else []
-                    dur = max(0.5, float(clip.end) - float(clip.start))
-                    seek = smart_thumbnail_seek(words, dur, hook=clip.hook or "")
-                    ok = generate_smart_thumbnail(final_path, thumb_path, seek=seek)
-                    if not ok:
-                        raise RuntimeError("smart thumb failed")
-                except Exception:
-                    thumb_cmd = [
-                        "ffmpeg", "-y", "-i", final_path,
-                        "-ss", "1", "-frames:v", "1",
-                        "-vf", "scale=360:-1", "-q:v", "3",
-                        thumb_path,
-                    ]
-                    try:
-                        await asyncio.to_thread(
-                            subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15
-                        )
-                    except Exception:
-                        pass
-
-            raw_src = f"{output_dir}/clip_{rank:02d}.mp4"
-            if os.path.exists(raw_src):
-                shutil.copy2(raw_src, f"{raw_dir}/clip_{rank:02d}.mp4")
-
-            if os.path.exists(final_path):
-                shutil.copy2(final_path, f"{final_dir}/clip_{rank:02d}.mp4")
-
-        from src.infrastructure.clip_quality_helpers import (
-            build_clip_analisa,
-            write_split_job_meta,
-        )
-
-        payloads = []
-        for c in clips:
-            words = clips_with_words.get(c.rank, []) if isinstance(clips_with_words, dict) else []
-            broll_dicts = []
-            for s in (c.broll_suggestions or []):
-                vc = s.visual_category
-                broll_dicts.append({
-                    "at_time": s.at_time,
-                    "keyword": s.keyword,
-                    "template": s.template,
-                    "duration": s.duration,
-                    "reason": getattr(s, "reason", "") or "",
-                    "placement": getattr(s, "placement", "") or "",
-                    "visual_category": (
-                        vc.value if isinstance(vc, VisualCategory) else str(vc or "")
-                    ),
-                    "asset_source": (
-                        s.asset_result.source_api if s.asset_result else ""
-                    ),
-                })
-            te = [
-                {k: v for k, v in ev.items() if k != "foreground_frames"}
-                for ev in (c.text_emphasis_events or [])[:2]
-            ]
-            payloads.append(build_clip_analisa(
-                no=c.rank,
-                rank=c.rank,
-                start=c.start,
-                end=c.end,
-                hook=c.hook or "",
-                reason=c.reason or "",
-                score=c.score,
-                words=words,
-                broll_suggestions=broll_dicts,
-                text_emphasis_events=te,
-                top_overlay_events=list(getattr(c, "top_overlay_events", None) or []),
-                object_overlay_events=list(getattr(c, "object_overlay_events", None) or []),
-                visual_entities=list(getattr(c, "visual_entities", None) or []),
-                extra={
-                    "hyperframes_polish": getattr(c, "hyperframes_polish", None),
-                },
-            ))
-
-        write_split_job_meta(
-            output_dir,
-            job_id=job_id,
-            youtube_url=job.youtube_url,
-            aspect_ratio=job.target_aspect_ratio,
-            created_at=str(job.created_at) if job.created_at else None,
-            clip_payloads=payloads,
-            clips_total=len(clips),
-            clips_success=sum(1 for c in clips if trim_results.get(c.rank)),
-        )
-        logger.info(f"[{job_id}] Folder structure created (json_analisa split)")

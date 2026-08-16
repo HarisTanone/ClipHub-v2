@@ -5,14 +5,18 @@ from src.infrastructure.db_connection import get_dict_connection
 
 HYPERFRAMES_COLUMNS = (
     "enabled",
+    "mode",
     "default_template",
+    "position",
     "server_url",
     "timeout_sec",
 )
 
 HYPERFRAMES_DEFAULTS = {
-    "enabled": 1,  # AI lower-third polish; Remotion still owns hook/subtitle
-    "default_template": "lower_third_v1",
+    "enabled": 1,  # 1 = ON, 0 = OFF
+    "mode": "auto",  # "auto" (AI picks/rotates style) or "manual" (specific style)
+    "default_template": "hook_cyber_hud",
+    "position": "safe_upper",  # "safe_upper", "top", "floating_badge"
     "server_url": "http://127.0.0.1:3003",
     "timeout_sec": 180,
 }
@@ -27,7 +31,9 @@ def ensure_hyperframes_table() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER DEFAULT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
-                default_template TEXT NOT NULL DEFAULT 'lower_third_v1',
+                mode TEXT NOT NULL DEFAULT 'auto',
+                default_template TEXT NOT NULL DEFAULT 'hook_cyber_hud',
+                position TEXT NOT NULL DEFAULT 'safe_upper',
                 server_url TEXT NOT NULL DEFAULT 'http://127.0.0.1:3003',
                 timeout_sec INTEGER NOT NULL DEFAULT 180,
                 created_at TEXT DEFAULT (datetime('now')),
@@ -35,30 +41,26 @@ def ensure_hyperframes_table() -> None:
             )
             """
         )
+        # Migrate missing columns if table already exists from older version
+        cur = conn.execute("PRAGMA table_info(hyperframes_configs)")
+        cols = {row["name"] for row in cur.fetchall()}
+        if "mode" not in cols:
+            conn.execute("ALTER TABLE hyperframes_configs ADD COLUMN mode TEXT NOT NULL DEFAULT 'auto'")
+        if "position" not in cols:
+            conn.execute("ALTER TABLE hyperframes_configs ADD COLUMN position TEXT NOT NULL DEFAULT 'safe_upper'")
+
         cur = conn.execute(
             "SELECT id, enabled FROM hyperframes_configs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1"
         )
         row = cur.fetchone()
         if not row:
-            cols = ", ".join(HYPERFRAMES_COLUMNS)
+            col_names = ", ".join(HYPERFRAMES_COLUMNS)
             placeholders = ", ".join(["?"] * len(HYPERFRAMES_COLUMNS))
             values = [HYPERFRAMES_DEFAULTS[c] for c in HYPERFRAMES_COLUMNS]
             conn.execute(
-                f"INSERT INTO hyperframes_configs (user_id, {cols}) VALUES (NULL, {placeholders})",
+                f"INSERT INTO hyperframes_configs (user_id, {col_names}) VALUES (NULL, {placeholders})",
                 values,
             )
-        else:
-            # Migrate stale off-rows when defaults/env want polish ON
-            try:
-                from src.config import settings
-                want = 1 if bool(getattr(settings, "HYPERFRAMES_ENABLED", True)) else 0
-            except Exception:
-                want = int(HYPERFRAMES_DEFAULTS.get("enabled") or 1)
-            if want and int(row["enabled"] or 0) == 0:
-                conn.execute(
-                    "UPDATE hyperframes_configs SET enabled=1, updated_at=datetime('now') WHERE id=?",
-                    (row["id"],),
-                )
         conn.execute(
             """
             DELETE FROM hyperframes_configs

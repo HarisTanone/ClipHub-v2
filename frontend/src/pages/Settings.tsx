@@ -363,6 +363,52 @@ async function resetObjectOverlay(): Promise<ObjectOverlayConfig | null> {
   return data.data || null;
 }
 
+export interface HyperFramesConfig {
+  enabled: boolean;
+  mode: "auto" | "manual";
+  default_template: string;
+  position: "safe_upper" | "top" | "floating_badge";
+  server_url?: string;
+  timeout_sec?: number;
+}
+
+const HYPERFRAMES_DEFAULTS: HyperFramesConfig = {
+  enabled: true,
+  mode: "auto",
+  default_template: "hook_cyber_hud",
+  position: "safe_upper",
+};
+
+async function fetchHyperFrames(): Promise<{ data: HyperFramesConfig; catalogue: any } | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/hyperframes`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function saveHyperFrames(payload: Partial<HyperFramesConfig>): Promise<boolean> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/hyperframes`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  return res.ok;
+}
+
+async function resetHyperFrames(): Promise<HyperFramesConfig | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/settings/hyperframes/reset`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.data || null;
+}
+
 interface TestRunStatus {
   status: "idle" | "running" | "deploying" | "passed" | "failed";
   stage: string;
@@ -407,7 +453,7 @@ export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "testing" | "models" | "telegram">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -442,6 +488,14 @@ export function Settings() {
   const [objectBaseline, setObjectBaseline] = useState<ObjectOverlayConfig>(OBJECT_OVERLAY_DEFAULTS);
   const [isSavingObject, setIsSavingObject] = useState(false);
   const [isResettingObject, setIsResettingObject] = useState(false);
+
+  // HyperFrames Hook & Polish Config
+  const [hfConfig, setHfConfig] = useState<HyperFramesConfig>(HYPERFRAMES_DEFAULTS);
+  const [hfBaseline, setHfBaseline] = useState<HyperFramesConfig>(HYPERFRAMES_DEFAULTS);
+  const [hfCatalogue, setHfCatalogue] = useState<any[]>([]);
+  const [isSavingHf, setIsSavingHf] = useState(false);
+  const [isResettingHf, setIsResettingHf] = useState(false);
+
   const [testStatus, setTestStatus] = useState<TestRunStatus | null>(null);
   const [testLog, setTestLog] = useState("");
   const [isStartingTest, setIsStartingTest] = useState(false);
@@ -487,6 +541,15 @@ export function Settings() {
         const normalized = normalizeObjectOverlay(d);
         setObjectOverlay(normalized);
         setObjectBaseline(normalized);
+      }
+    });
+    fetchHyperFrames().then((res) => {
+      if (res?.data) {
+        setHfConfig(res.data);
+        setHfBaseline(res.data);
+      }
+      if (res?.catalogue?.hook) {
+        setHfCatalogue(res.catalogue.hook);
       }
     });
   }, []);
@@ -658,6 +721,44 @@ export function Settings() {
       toast.error("Failed to restore defaults");
     }
     setIsResettingObject(false);
+  }
+
+  const hfDirty = JSON.stringify(hfConfig) !== JSON.stringify(hfBaseline);
+
+  function handleHfChange(key: keyof HyperFramesConfig, value: any) {
+    setHfConfig((p) => ({ ...p, [key]: value }));
+  }
+
+  async function handleSaveHf() {
+    setIsSavingHf(true);
+    const ok = await saveHyperFrames(hfConfig);
+    if (ok) {
+      setHfBaseline(hfConfig);
+      toast.success("HyperFrames settings saved");
+    } else {
+      toast.error("Failed to save HyperFrames settings");
+    }
+    setIsSavingHf(false);
+  }
+
+  function handleResetHf() {
+    if (!hfDirty) return;
+    setHfConfig(hfBaseline);
+    toast.success("Reverted unsaved changes");
+  }
+
+  async function handleRestoreHfDefaults() {
+    if (!(await confirmDialog({ title: "Restore HyperFrames settings?", message: "HyperFrames hook & polish settings will be reset to defaults.", confirmText: "Restore" }))) return;
+    setIsResettingHf(true);
+    const data = await resetHyperFrames();
+    if (data) {
+      setHfConfig(data);
+      setHfBaseline(data);
+      toast.success("HyperFrames restored to defaults");
+    } else {
+      toast.error("Failed to restore defaults");
+    }
+    setIsResettingHf(false);
   }
 
   async function handleStartTest() {
@@ -886,8 +987,9 @@ export function Settings() {
 
   const tabs = [
     { id: "general" as const, label: "General" },
-    { id: "reframe" as const, label: "Reframe Tuning" },
+    { id: "hyperframes" as const, label: "HyperFrames Hook" },
     { id: "object" as const, label: "Object Overlay" },
+    { id: "reframe" as const, label: "Reframe Tuning" },
     ...(isSuperadmin ? [{ id: "models" as const, label: "AI Models" }] : []),
     ...(isSuperadmin ? [{ id: "telegram" as const, label: "Telegram Bot" }] : []),
     ...(isSuperadmin ? [{ id: "render" as const, label: "Render Engine" }] : []),
@@ -910,7 +1012,14 @@ export function Settings() {
             ))}
           </div>
         </div>
-        {tab === "users" || tab === "testing" ? null : tab === "reframe" ? (
+        {tab === "users" || tab === "testing" ? null : tab === "hyperframes" ? (
+          <div className="flex items-center gap-2">
+            {hfDirty && <span className="text-[10px] text-amber-400 font-medium mr-1">Unsaved changes</span>}
+            <Button onClick={handleRestoreHfDefaults} loading={isResettingHf} size="sm" variant="outline">Restore Defaults</Button>
+            <Button onClick={handleResetHf} disabled={!hfDirty} size="sm" variant="outline">Reset</Button>
+            <Button onClick={handleSaveHf} disabled={!hfDirty} loading={isSavingHf} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+          </div>
+        ) : tab === "reframe" ? (
           <div className="flex items-center gap-2">
             {reframeDirty && <span className="text-[10px] text-amber-400 font-medium mr-1">Unsaved changes</span>}
             <Button onClick={handleRestoreReframeDefaults} loading={isResettingReframe} size="sm" variant="outline">Restore Defaults</Button>
@@ -1116,6 +1225,172 @@ export function Settings() {
                 onAspectRatioChange={setAspectRatio}
               />
             </div>
+          </div>
+        )}
+
+        {tab === "hyperframes" && (
+          <div className="max-w-4xl space-y-5">
+            {/* Master Controls Card */}
+            <Card className="p-5 space-y-4 border-violet-500/20 bg-zinc-950/70">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-violet-400" />
+                    HyperFrames Hook &amp; Polish Layer
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Render kartu topik/hook dinamis berbasis HTML5/CSS headless di posisi aman atas (tidak menabrak subtitle).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={cn("text-xs font-bold px-2 py-0.5 rounded", hfConfig.enabled ? "bg-emerald-500/20 text-emerald-300" : "bg-zinc-800 text-zinc-500")}>
+                    {hfConfig.enabled ? "ACTIVE" : "DISABLED"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-zinc-800/60 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FeatureToggle
+                  icon={<Zap className="h-3.5 w-3.5" />}
+                  label="Enable HyperFrames"
+                  desc="Aktifkan layer hook & topic polish"
+                  active={hfConfig.enabled}
+                  onToggle={() => handleHfChange("enabled", !hfConfig.enabled)}
+                />
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-zinc-300">Selection Mode</label>
+                  <div className="grid grid-cols-2 gap-1.5 bg-zinc-900/80 p-1 rounded-lg border border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => handleHfChange("mode", "auto")}
+                      className={cn(
+                        "py-1.5 px-2 text-xs font-medium rounded-md transition-all text-center",
+                        hfConfig.mode === "auto"
+                          ? "bg-violet-600 text-white font-bold shadow-md shadow-violet-600/30"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      )}
+                    >
+                      🤖 AI Auto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleHfChange("mode", "manual")}
+                      className={cn(
+                        "py-1.5 px-2 text-xs font-medium rounded-md transition-all text-center",
+                        hfConfig.mode === "manual"
+                          ? "bg-violet-600 text-white font-bold shadow-md shadow-violet-600/30"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      )}
+                    >
+                      🎨 Spesifik
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 mt-0.5">
+                    {hfConfig.mode === "auto"
+                      ? "AI otomatis merotasi 12+ style per klip agar bervariasi."
+                      : "Gunakan 1 template yang Anda pilih di bawah untuk semua klip."}
+                  </p>
+                </div>
+
+                <Select
+                  label="Safe Zone Placement"
+                  value={hfConfig.position || "safe_upper"}
+                  onChange={(e) => handleHfChange("position", e.target.value)}
+                  options={[
+                    { value: "safe_upper", label: "Safe Upper Area (Recommended)" },
+                    { value: "top", label: "Top Screen Banner" },
+                    { value: "floating_badge", label: "Top-Left Floating Badge" },
+                  ]}
+                />
+              </div>
+            </Card>
+
+            {/* Style Catalogue Grid */}
+            <Card className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
+                    Koleksi Visual Styles (12+ Hook &amp; Polish Designs)
+                  </h3>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">
+                    Klik salah satu kartu untuk memilih template spesifik atau melihat estetika desainnya.
+                  </p>
+                </div>
+                {hfConfig.mode === "auto" && (
+                  <span className="text-[10px] bg-violet-500/20 text-violet-300 font-semibold px-2.5 py-1 rounded-full border border-violet-500/30">
+                    Mode Auto Aktif: Semua style akan dirotasi otomatis
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(hfCatalogue.length > 0 ? hfCatalogue : [
+                  { id: "hook_cyber_hud", name: "Cyberpunk Tech HUD", design: "cyber-hud", accent: "#00F0FF", description: "Tech HUD digital box dengan aksen neon cyan & bracket cyberpunk" },
+                  { id: "hook_glass_minimal", name: "Frosted Glassmorphism", design: "glass-minimal", accent: "#A78BFA", description: "Kartu transparan frosted glass dengan efek blur & glow halus" },
+                  { id: "hook_breaking_news", name: "Breaking News Live", design: "breaking-news", accent: "#EF4444", description: "Banner merah bold dengan badge LIVE UPDATE berkedip" },
+                  { id: "hook_retro_synth", name: "80s Retro Synthwave", design: "retro-synth", accent: "#F43F5E", description: "Estetika synthwave retro 80-an dengan tabung neon ungu-pink" },
+                  { id: "hook_comic_pop", name: "Comic Pop Burst", design: "comic-pop", accent: "#FACC15", description: "Badge komik miring bold kuning dengan aksen halftone pop-art" },
+                  { id: "hook_editorial_pill", name: "Editorial Minimal Pill", design: "editorial-pill", accent: "#E2E8F0", description: "Kapsul hitam matte minimalis dengan dot emas & tipografi editorial" },
+                  { id: "hook_gradient_aura", name: "Gradient Aura Glow", design: "gradient-aura", accent: "#38BDF8", description: "Cahaya aura mesh gradasi multi-warna halus di sekitar teks" },
+                  { id: "hook_cinema_tape", name: "Caution Stencil Tape", design: "cinema-tape", accent: "#EAB308", description: "Pita peringatan diagonal kuning-hitam dengan font stencil industrial" },
+                  { id: "hook_hologram_scan", name: "Sci-Fi Hologram Scanner", design: "hologram-scan", accent: "#06B6D4", description: "Data feed holographic sci-fi dengan scanline vertikal" },
+                  { id: "hook_luxury_noir", name: "Luxury Obsidian & Gold", design: "luxury-noir", accent: "#D4AF37", description: "Kartu hitam obsidian pekat dengan list emas sampanye mewah" },
+                  { id: "hook_floating_badge", name: "Top Floating Badge", design: "floating-badge", accent: "#10B981", description: "Badge ringkas melayang di sudut atas dengan indikator live dot" },
+                  { id: "hook_kinetic_split", name: "Kinetic Duotone Split", design: "kinetic-split", accent: "#F97316", description: "Panel terbelah oranye-hitam dinamis dengan nomor indeks kinetik" },
+                ]).map((item: any) => {
+                  const isSelected = hfConfig.default_template === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        handleHfChange("default_template", item.id);
+                        handleHfChange("mode", "manual");
+                        toast.success(`Template set to "${item.name}"`);
+                      }}
+                      className={cn(
+                        "group relative cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between gap-3 text-left",
+                        isSelected
+                          ? "border-violet-500 bg-violet-950/30 shadow-lg shadow-violet-500/10 ring-1 ring-violet-500/50"
+                          : "border-zinc-800/80 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-900/60"
+                      )}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-3 h-3 rounded-full shrink-0 shadow-sm"
+                              style={{ backgroundColor: item.accent || "#a78bfa" }}
+                            />
+                            <span className="font-bold text-xs text-zinc-100 group-hover:text-white transition-colors">
+                              {item.name}
+                            </span>
+                          </div>
+                          {isSelected && (
+                            <span className="flex items-center gap-1 text-[9px] font-bold bg-violet-600 text-white px-1.5 py-0.5 rounded uppercase">
+                              <Check className="h-2.5 w-2.5" /> Selected
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed">
+                          {item.description || "Gaya animasi hook visual profesional."}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50 text-[10px] text-zinc-500">
+                        <span className="font-mono text-zinc-500">{item.design}</span>
+                        <span
+                          className="font-mono font-semibold"
+                          style={{ color: item.accent || "#a78bfa" }}
+                        >
+                          {item.accent}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
           </div>
         )}
 
