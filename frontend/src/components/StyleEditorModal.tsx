@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -305,7 +305,7 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   stylePreset: "classic",
-  engine: "remotion",
+  engine: "ffmpeg",
   hf_template: defaultHfSubtitleId(),
   fontFamily: "Poppins",
   fontSize: 34,
@@ -1136,7 +1136,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <style>{animationStyles}</style>
         <div className="min-h-0 flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} watermarkStyle={watermarkStyle} onWatermarkChange={onWatermarkChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} isSuperadmin={isSuperadmin} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} watermarkStyle={watermarkStyle} onWatermarkChange={onWatermarkChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
         </div>
       </div>
     );
@@ -1172,7 +1172,7 @@ export function StyleEditorModal({ open, onClose, hookStyle, subtitleStyle, text
           </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} watermarkStyle={watermarkStyle} onWatermarkChange={onWatermarkChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
+          {tab === "presets" ? <PresetsTab hookStyle={hookStyle} subtitleStyle={subtitleStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onSubtitleChange={onSubtitleChange} onTextEmphasisChange={onTextEmphasisChange} externalActiveId={externalActivePresetId} onPresetSelect={onPresetSelect} /> : tab === "hook" ? <HookEditor style={hookStyle} onChange={onHookChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} canvasBackground={canvasBackground} isSuperadmin={isSuperadmin} /> : tab === "other" ? <OtherTab hookStyle={hookStyle} textEmphasisStyle={textEmphasisStyle} onHookChange={onHookChange} onTextEmphasisChange={onTextEmphasisChange} watermarkStyle={watermarkStyle} onWatermarkChange={onWatermarkChange} thumbnailUrl={thumbnailUrl} aiTextPreviewContext={aiTextPreviewContext} aiTextEnabled={aiTextEnabled} aspectRatio={aspectRatio} canvasBackground={canvasBackground} /> : <SubtitleEditor style={subtitleStyle} onChange={onSubtitleChange} aspectRatio={aspectRatio} thumbnailUrl={thumbnailUrl} isSuperadmin={isSuperadmin} isPremium={isPremium} userFeatures={userFeatures} canvasBackground={canvasBackground} />}
         </div>
       </div>
     </div>
@@ -2627,25 +2627,34 @@ function EnginePicker({
   engine,
   onChange,
   kind,
+  isSuperadmin = false,
 }: {
   engine: RenderEngine;
   onChange: (e: RenderEngine) => void;
   kind: "hook" | "subtitle";
+  isSuperadmin?: boolean;
 }) {
-  const engineOptions = ["remotion", "hyperframes", "ffmpeg"] as RenderEngine[];
+  const allEngines = ["remotion", "hyperframes", "ffmpeg", "skia"] as RenderEngine[];
+  // Filter: remotion/hyperframes only for superadmin
+  const engineOptions = allEngines.filter((id) => {
+    const meta = ENGINE_NOTES[id];
+    if (meta.superuserOnly && !isSuperadmin) return false;
+    return true;
+  });
   // Map each engine to a specific icon for better visual distinction
   const getIcon = (id: string) => {
     switch (id) {
       case "remotion": return Clapperboard;
       case "hyperframes": return Zap;
-      case "ffmpeg": return Download; // Using Download icon for FFmpeg to differentiate it
+      case "ffmpeg": return Download;
+      case "skia": return Palette;
       default: return Clapperboard;
     }
   };
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 overflow-hidden">
-      <div className="grid grid-cols-3 gap-0.5 p-1">
+      <div className={cn("grid gap-0.5 p-1", engineOptions.length <= 2 ? "grid-cols-2" : engineOptions.length === 3 ? "grid-cols-3" : "grid-cols-4")}>
         {engineOptions.map((id) => {
           const meta = ENGINE_NOTES[id];
           const active = engine === id;
@@ -2662,7 +2671,9 @@ function EnginePicker({
                     ? "bg-emerald-500/15 ring-1 ring-emerald-500/40 text-emerald-100"
                     : id === "hyperframes"
                       ? "bg-cyan-500/15 ring-1 ring-cyan-500/40 text-cyan-100"
-                      : "bg-purple-500/15 ring-1 ring-purple-500/40 text-purple-100" // FFmpeg specific styling
+                      : id === "skia"
+                        ? "bg-amber-500/15 ring-1 ring-amber-500/40 text-amber-100"
+                        : "bg-purple-500/15 ring-1 ring-purple-500/40 text-purple-100"
                   : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
               )}
             >
@@ -2786,7 +2797,7 @@ function HfLivePreview({
 
 // ─── Hook Editor ─────────────────────────────────────────────────────────────
 
-function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackground }: { style: HookStyle; onChange: (s: HookStyle) => void; aspectRatio: string; thumbnailUrl?: string; canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null }) {
+function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackground, isSuperadmin }: { style: HookStyle; onChange: (s: HookStyle) => void; aspectRatio: string; thumbnailUrl?: string; canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null; isSuperadmin?: boolean }) {
   const update = (patch: Partial<HookStyle>) => onChange({ ...style, ...patch });
   const engine = resolveEngine(style.engine);
   const hfId = style.hf_template || defaultHfHookId();
@@ -2828,6 +2839,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
           <EnginePicker
             engine={engine}
             kind="hook"
+            isSuperadmin={isSuperadmin}
             onChange={(e) => update({
               engine: e,
               hf_template: style.hf_template || defaultHfHookId(),
@@ -3358,6 +3370,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           <EnginePicker
             engine={engine}
             kind="subtitle"
+            isSuperadmin={isSuperadmin}
             onChange={(e) => update({
               engine: e,
               hf_template: style.hf_template || defaultHfSubtitleId(),

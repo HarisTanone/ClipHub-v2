@@ -65,3 +65,6 @@ minio>=7.2.0,<8.0
 # Google Drive (social media upload)
 google-api-python-client>=2.100.0
 google-auth>=2.23.0
+
+# Skia subtitle rendering (optional — falls back to FFmpeg if not installed)
+# skia-python>=87.0

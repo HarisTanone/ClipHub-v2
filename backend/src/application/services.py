@@ -219,6 +219,8 @@ class JobService:
         source_size_bytes: Optional[int] = None,
         processing_mode: str = "analyze",
         custom_hook: Optional[str] = None,
+        # User-adjusted clip timestamps from analyze-review
+        custom_clips: Optional[list] = None,
     ) -> tuple[Job, bool]:
         """Create job and start pipeline in background."""
         is_upload_source = source_type == "upload"
@@ -299,6 +301,10 @@ class JobService:
             normalized_custom_hook = str(custom_hook or "").strip()
             if processing_mode == "direct" and normalized_custom_hook:
                 initial_clips_data["custom_hook"] = normalized_custom_hook
+
+        # User-adjusted clip timestamps from analyze-review step
+        if custom_clips:
+            initial_clips_data["custom_clips"] = custom_clips
 
         job = Job(
             job_id=job_id,
@@ -421,9 +427,14 @@ class JobService:
                     cache.save_video(video_id, video_path)
                 self._emit(job_id, 2, "download", "complete")
 
-            # ═══ Step 3: Gemini Analysis (SKIP if cached) ═══
-            cached_analysis = cache.load_analysis(video_id, "v1") if video_id else None
-            if cached_analysis:
+            # ═══ Step 3: Gemini Analysis (SKIP if cached or custom_clips provided) ═══
+            user_custom_clips = (job.clips_data or {}).get("custom_clips")
+            if user_custom_clips:
+                # User provided adjusted timestamps from analyze-review step — skip Gemini
+                gemini_result = {"clips": user_custom_clips}
+                logger.info(f"[{job_id}] Gemini analysis SKIPPED (custom_clips from user: {len(user_custom_clips)} clips)")
+                self._emit(job_id, 3, "gemini_analysis", "complete")
+            elif cached_analysis := (cache.load_analysis(video_id, "v1") if video_id else None):
                 gemini_result = cached_analysis
                 logger.info(f"[{job_id}] Gemini analysis SKIPPED (cached: {len(gemini_result.get('clips', []))} clips)")
                 self._emit(job_id, 3, "gemini_analysis", "complete")

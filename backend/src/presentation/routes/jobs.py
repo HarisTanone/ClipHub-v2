@@ -318,6 +318,8 @@ async def create_job(
         user_id=user.id,
         # V2 pipeline routing
         is_superadmin=user.is_superadmin,
+        # User-adjusted clip timestamps from analyze-review
+        custom_clips=request.custom_clips,
     )
 
     # Quick YouTube title fetch via oEmbed (non-blocking, best-effort)

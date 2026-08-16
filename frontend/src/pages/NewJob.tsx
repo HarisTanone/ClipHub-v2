@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight, Layers, Zap, Check, FileText } from "lucide-react";
+import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight, Layers, Zap, Check, FileText, Loader2, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -10,9 +10,10 @@ import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle } from "@/components/StyleEditorModal";
 import { FeatureLock } from "@/components/ui/FeatureLock";
-import { jobs, preview, presets as presetsApi, type VideoPreview, type Preset, API_BASE } from "@/lib/api";
+import { jobs, preview, presets as presetsApi, analyze, type VideoPreview, type Preset, type AnalyzeResponse, API_BASE } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
 import { BackgroundTemplateSection, type BackgroundMode } from "@/components/BackgroundTemplateSection";
+import { ClipTimelineEditor, type EditableClip } from "@/components/ClipTimelineEditor";
 
 export function NewJob() {
   const navigate = useNavigate();
@@ -38,6 +39,12 @@ export function NewJob() {
   const [textEmphasisEnabled, setTextEmphasisEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [urlError, setUrlError] = useState("");
+
+  // ─── Analyze-only flow state ─────────────────────────────────────
+  const [analyzeStep, setAnalyzeStep] = useState<"input" | "analyzing" | "review">("input");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzeResult, setAnalyzeResult] = useState<AnalyzeResponse | null>(null);
+  const [editableClips, setEditableClips] = useState<EditableClip[]>([]);
 
   // Style editor inline (not modal)
   const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "other">("hook");
@@ -150,6 +157,42 @@ export function NewJob() {
     }
   }
 
+  async function handleAnalyze() {
+    if (!validateUrl(url)) return;
+    setIsAnalyzing(true);
+    setAnalyzeStep("analyzing");
+    try {
+      let submitUrl = url.trim();
+      if (!submitUrl.startsWith("http")) {
+        submitUrl = "https://www." + submitUrl;
+      } else if (submitUrl.startsWith("http://")) {
+        submitUrl = submitUrl.replace("http://", "https://");
+      }
+      const result = await analyze.analyzeOnly(submitUrl);
+      setAnalyzeResult(result);
+      setEditableClips(
+        result.clips.map((c) => ({
+          ...c,
+          ai_start: c.start,
+          ai_end: c.end,
+          modified: false,
+        }))
+      );
+      setAnalyzeStep("review");
+    } catch (e: any) {
+      toast.error(e.message || "Analysis failed");
+      setAnalyzeStep("input");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  function handleBackToInput() {
+    setAnalyzeStep("input");
+    setAnalyzeResult(null);
+    setEditableClips([]);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (sourceMode === "youtube" && !validateUrl(url)) return;
@@ -186,6 +229,16 @@ export function NewJob() {
       custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
         ? directHook.trim() || undefined
         : undefined,
+      // Custom clips from analyze-review step (user-adjusted timestamps)
+      ...(editableClips.length > 0 ? {
+        custom_clips: editableClips.map((c) => ({
+          rank: c.rank,
+          start: c.start,
+          end: c.end,
+          hook: c.hook,
+          score: c.score,
+        })),
+      } : {}),
       ...(aspectRatio === "16:9" || aspectRatio === "1:1"
         ? {
           background_mode: backgroundMode,
@@ -222,17 +275,62 @@ export function NewJob() {
       {/* Header */}
       <div className="flex items-center justify-between shrink-0 mb-3">
         <div className="flex items-center gap-3">
-          <Link to="/" className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <h1 className="text-base font-semibold text-zinc-100">New Job</h1>
+          {analyzeStep === "review" ? (
+            <button type="button" onClick={handleBackToInput} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+          ) : (
+            <Link to="/" className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          )}
+          <h1 className="text-base font-semibold text-zinc-100">
+            {analyzeStep === "review" ? "Review Clips" : "New Job"}
+          </h1>
+          {analyzeStep === "review" && analyzeResult && (
+            <span className="text-[10px] text-zinc-500 font-medium">
+              {analyzeResult.video_title}
+            </span>
+          )}
         </div>
-        <Button type="button" size="sm" loading={isSubmitting} onClick={handleSubmit} icon={<Send className="h-3.5 w-3.5" />}>
-          Start Processing
-        </Button>
+        {analyzeStep === "review" ? (
+          <Button type="button" size="sm" loading={isSubmitting} onClick={handleSubmit} icon={<Send className="h-3.5 w-3.5" />}>
+            Start Processing
+          </Button>
+        ) : (
+          <Button type="button" size="sm" loading={isSubmitting} onClick={handleSubmit} icon={<Send className="h-3.5 w-3.5" />}>
+            Start Processing
+          </Button>
+        )}
       </div>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
+      {/* ─── ANALYZING STATE ──────────────────────────────────────────── */}
+      {analyzeStep === "analyzing" && (
+        <div className="flex-1 flex items-center justify-center">
+          <Card className="p-8 text-center max-w-sm">
+            <Loader2 className="h-10 w-10 animate-spin text-emerald-400 mx-auto mb-4" />
+            <p className="text-sm font-medium text-zinc-200">Downloading & Analyzing</p>
+            <p className="mt-1 text-xs text-zinc-500">AI sedang menganalisis video untuk menemukan momen terbaik...</p>
+            <p className="mt-3 text-[10px] text-zinc-600">Ini mungkin memakan waktu 30-120 detik tergantung durasi video.</p>
+          </Card>
+        </div>
+      )}
+
+      {/* ─── REVIEW STATE (split-view: clips + video) ─────────────────── */}
+      {analyzeStep === "review" && analyzeResult && (
+        <div className="flex-1 min-h-0 overflow-y-auto pb-4">
+          <ClipTimelineEditor
+            clips={editableClips}
+            videoDuration={analyzeResult.video_duration}
+            videoSrc={analyze.getSourceVideoUrl(analyzeResult.job_id)}
+            onClipsChange={setEditableClips}
+          />
+        </div>
+      )}
+
+      {/* ─── INPUT STATE (normal form) ────────────────────────────────── */}
+      {analyzeStep === "input" && (
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Left: URL + Config (col-4) */}
         <div className="lg:col-span-4 min-h-0 space-y-3 overflow-y-auto pb-4 lg:pb-0">
           {/* Source */}
@@ -282,6 +380,18 @@ export function NewJob() {
                       </div>
                     ) : null}
                   </div>
+                )}
+                {videoMeta && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-2 w-full"
+                    loading={isAnalyzing}
+                    onClick={handleAnalyze}
+                    icon={<Search className="h-3.5 w-3.5" />}
+                  >
+                    {isAnalyzing ? "Analyzing..." : "Analyze & Preview Clips"}
+                  </Button>
                 )}
               </>
             ) : (
@@ -585,6 +695,7 @@ export function NewJob() {
           </Card>
         </div>
       </div>
+      )}
     </div>
   );
 }

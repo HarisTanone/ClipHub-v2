@@ -665,7 +665,64 @@ export const storage = {
   },
 };
 
+// ─── Analyze-Only API ─────────────────────────────────────────────────────────
+
+export interface AnalyzeClipCandidate {
+  rank: number;
+  start: number;
+  end: number;
+  duration: number;
+  score: number | null;
+  hook: string | null;
+  reason: string | null;
+  content_type: string | null;
+  speaker_energy: string | null;
+}
+
+export interface AnalyzeResponse {
+  success: boolean;
+  job_id: string;
+  video_duration: number;
+  video_title: string;
+  thumbnail: string;
+  clips: AnalyzeClipCandidate[];
+  creative_direction: Record<string, any> | null;
+}
+
+export const analyze = {
+  async analyzeOnly(youtubeUrl: string): Promise<AnalyzeResponse> {
+    return request<AnalyzeResponse>("/api/jobs/analyze-only", {
+      method: "POST",
+      body: JSON.stringify({ youtube_url: youtubeUrl }),
+    });
+  },
+
+  getSourceVideoUrl(jobId: string): string {
+    const token = getToken();
+    const base = `${API_BASE}/api/jobs/${jobId}/source-video`;
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  },
+};
+
 export { getToken, setTokens, clearTokens, API_BASE };
+
+// ─── Subtitle Styles API ─────────────────────────────────────────────────────
+
+export interface SubtitleStyleMeta {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+}
+
+export const subtitleStyles = {
+  async list(): Promise<{ ffmpeg: SubtitleStyleMeta[]; skia: SubtitleStyleMeta[] }> {
+    return request("/api/style-presets/subtitle-styles");
+  },
+  async get(engine: string, styleId: string): Promise<{ data: Record<string, any> }> {
+    return request(`/api/style-presets/subtitle-styles/${engine}/${styleId}`);
+  },
+};
 
 // ─── Models Status API ───────────────────────────────────────────────────────
 

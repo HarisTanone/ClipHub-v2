@@ -4,7 +4,7 @@
  * FFmpeg = server-side drawtext (fastest, no browser needed).
  */
 
-export type RenderEngine = "remotion" | "hyperframes" | "ffmpeg";
+export type RenderEngine = "remotion" | "hyperframes" | "ffmpeg" | "skia";
 
 export const ENGINE_NOTES = {
   remotion: {
@@ -13,6 +13,7 @@ export const ENGINE_NOTES = {
     speed: "Lebih lama",
     quality: "Hasil bagus · custom penuh",
     note: "Render lebih lama, tapi style bebas (font, animasi, glow, preset editor). Preview ≡ final bake.",
+    superuserOnly: true,
   },
   hyperframes: {
     label: "HyperFrames",
@@ -20,13 +21,23 @@ export const ENGINE_NOTES = {
     speed: "Lebih cepat",
     quality: "Style HF-native fixed",
     note: "Render cepat. Visual HyperFrames khusus, berbeda dari preset Remotion, siap untuk bulk.",
+    superuserOnly: true,
   },
   ffmpeg: {
     label: "FFmpeg",
     badge: "Fastest",
     speed: "Paling cepat",
-    quality: "Drawtext server-side · fixed look",
-    note: "Render tercepat. Tidak memakai browser/Remotion. Text-only overlay via FFmpeg drawtext filter.",
+    quality: "Drawtext server-side · full custom",
+    note: "Render tercepat. Text overlay via FFmpeg drawtext. 10 styles berbeda, full customizable.",
+    superuserOnly: false,
+  },
+  skia: {
+    label: "Skia",
+    badge: "GPU",
+    speed: "Cepat",
+    quality: "Canvas GPU · gradient & effects",
+    note: "Render GPU-accelerated via Skia/CanvasKit. Gradient, rounded bg, glow, blur. Lebih ringan dari Remotion.",
+    superuserOnly: false,
   },
 } as const;
 
@@ -153,5 +164,6 @@ export function defaultHfSubtitleId(): string {
 export function resolveEngine(raw: unknown): RenderEngine {
   if (raw === "hyperframes") return "hyperframes";
   if (raw === "ffmpeg") return "ffmpeg";
+  if (raw === "skia") return "skia";
   return "remotion";
 }

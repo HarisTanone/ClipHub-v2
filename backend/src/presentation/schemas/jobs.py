@@ -97,6 +97,7 @@ class JobOptionsBase(BaseModel):
 
 class CreateJobRequest(JobOptionsBase):
     youtube_url: str
+    custom_clips: list[dict] | None = None  # User-adjusted clip timestamps from analyze-review
 
     @field_validator("youtube_url")
     @classmethod
