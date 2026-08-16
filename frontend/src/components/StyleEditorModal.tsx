@@ -2635,8 +2635,10 @@ function EnginePicker({
   isSuperadmin?: boolean;
 }) {
   const allEngines = ["remotion", "hyperframes", "ffmpeg", "skia"] as RenderEngine[];
-  // Filter: remotion/hyperframes only for superadmin
+  // Gate: remotion/hyperframes hidden only for SUBTITLE when non-superadmin
+  // Hook always shows all engines
   const engineOptions = allEngines.filter((id) => {
+    if (kind === "hook") return true; // Hook: semua engine tersedia untuk semua user
     const meta = ENGINE_NOTES[id];
     if (meta.superuserOnly && !isSuperadmin) return false;
     return true;

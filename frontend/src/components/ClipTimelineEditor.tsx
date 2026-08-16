@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock, Film, GripHorizontal, Play, Pause, RotateCcw, Scissors } from "lucide-react";
+import { Clock, Film, GripHorizontal, Play, Pause, RotateCcw, Scissors, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,8 @@ export interface EditableClip extends AnalyzeClipCandidate {
   ai_end: number;
   /** Whether user has modified this clip */
   modified: boolean;
+  /** Whether this clip was manually added (not from AI) */
+  manual?: boolean;
 }
 
 interface ClipTimelineEditorProps {
@@ -123,6 +125,45 @@ export function ClipTimelineEditor({
     onClipsChange(updated);
   }, [clips, onClipsChange]);
 
+  // Add new clip at current playhead position
+  const addClip = useCallback(() => {
+    const start = Math.max(0, currentTime);
+    const defaultDuration = 15; // 15 seconds default
+    const end = Math.min(videoDuration, start + defaultDuration);
+    if (end - start < 5) return; // can't add clip shorter than 5s
+
+    const maxRank = clips.length > 0 ? Math.max(...clips.map((c) => c.rank)) : 0;
+    const newClip: EditableClip = {
+      rank: maxRank + 1,
+      start,
+      end,
+      duration: Math.round((end - start) * 100) / 100,
+      score: null,
+      hook: null,
+      reason: null,
+      content_type: null,
+      speaker_energy: null,
+      ai_start: start,
+      ai_end: end,
+      modified: false,
+      manual: true,
+    };
+
+    const updated = [...clips, newClip];
+    onClipsChange(updated);
+    setActiveClipIndex(updated.length - 1);
+  }, [clips, currentTime, videoDuration, onClipsChange]);
+
+  // Delete clip
+  const deleteClip = useCallback((index: number) => {
+    if (clips.length <= 1) return; // keep at least 1 clip
+    const updated = clips.filter((_, i) => i !== index);
+    // Re-rank
+    updated.forEach((c, i) => { c.rank = i + 1; });
+    onClipsChange(updated);
+    setActiveClipIndex(Math.min(activeClipIndex, updated.length - 1));
+  }, [clips, activeClipIndex, onClipsChange]);
+
   // Timeline drag handler
   const handleTimelineMouseDown = useCallback(
     (e: React.MouseEvent, clipIndex: number, handle: "start" | "end") => {
@@ -179,30 +220,41 @@ export function ClipTimelineEditor({
 
   return (
     <div className="flex flex-col lg:flex-row gap-3 min-h-0">
-      {/* Left: AI Analysis Results */}
+      {/* Left: AI Analysis Results + Add/Delete */}
       <div className="lg:w-[340px] shrink-0 space-y-2 overflow-y-auto max-h-[calc(100vh-280px)]">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-1.5">
             <Scissors className="h-3.5 w-3.5 text-emerald-400" />
             <h3 className="text-xs font-semibold text-zinc-200">
-              AI Clip Candidates ({clips.length})
+              Clips ({clips.length})
             </h3>
           </div>
-          {hasAnyModified && (
+          <div className="flex items-center gap-2">
+            {hasAnyModified && (
+              <button
+                type="button"
+                onClick={resetAll}
+                className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 font-medium"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset All
+              </button>
+            )}
             <button
               type="button"
-              onClick={resetAll}
-              className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 font-medium"
+              onClick={addClip}
+              className="flex items-center gap-1 rounded-md bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 text-[10px] text-emerald-300 hover:bg-emerald-500/20 font-medium transition-colors"
+              title="Add clip at current position"
             >
-              <RotateCcw className="h-3 w-3" />
-              Reset All
+              <Plus className="h-3 w-3" />
+              Add Clip
             </button>
-          )}
+          </div>
         </div>
 
         {clips.map((clip, idx) => (
           <Card
-            key={clip.rank}
+            key={`${clip.rank}-${idx}`}
             className={cn(
               "p-2.5 cursor-pointer transition-all border",
               activeClipIndex === idx
@@ -222,7 +274,12 @@ export function ClipTimelineEditor({
                       {clip.score}
                     </span>
                   )}
-                  {clip.modified && (
+                  {clip.manual && (
+                    <span className="shrink-0 rounded bg-blue-500/20 px-1 py-0.5 text-[8px] font-medium text-blue-300">
+                      Manual
+                    </span>
+                  )}
+                  {clip.modified && !clip.manual && (
                     <span className="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[8px] font-medium text-amber-300">
                       Edited
                     </span>
@@ -253,7 +310,7 @@ export function ClipTimelineEditor({
                 >
                   <Play className="h-3 w-3" />
                 </button>
-                {clip.modified && (
+                {clip.modified && !clip.manual && (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); resetClip(idx); }}
@@ -261,6 +318,16 @@ export function ClipTimelineEditor({
                     title="Reset to AI"
                   >
                     <RotateCcw className="h-3 w-3" />
+                  </button>
+                )}
+                {clips.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); deleteClip(idx); }}
+                    className="rounded p-1 text-zinc-500 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                    title="Delete clip"
+                  >
+                    <Trash2 className="h-3 w-3" />
                   </button>
                 )}
               </div>
@@ -310,54 +377,59 @@ export function ClipTimelineEditor({
               <span className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">Timeline</span>
             </div>
             <span className="text-[10px] text-zinc-600">
-              Drag handles to adjust clip boundaries
+              Drag handles to adjust · Click timeline to seek
             </span>
           </div>
 
           {/* Timeline bar */}
           <div
             ref={timelineRef}
-            className="relative h-12 rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden cursor-crosshair"
+            className="relative h-14 rounded-lg bg-zinc-900 border border-zinc-800 overflow-visible cursor-crosshair"
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const ratio = (e.clientX - rect.left) / rect.width;
-              const time = ratio * videoDuration;
+              const time = Math.max(0, Math.min(videoDuration, ratio * videoDuration));
               if (videoRef.current) {
                 videoRef.current.currentTime = time;
                 setCurrentTime(time);
               }
             }}
           >
-            {/* Clip regions */}
+            {/* Clip regions — clamp to valid range */}
             {clips.map((clip, idx) => {
-              const left = (clip.start / videoDuration) * 100;
-              const width = ((clip.end - clip.start) / videoDuration) * 100;
+              const clampedStart = Math.max(0, Math.min(clip.start, videoDuration));
+              const clampedEnd = Math.max(0, Math.min(clip.end, videoDuration));
+              if (clampedEnd <= clampedStart) return null; // skip invalid
+              const left = (clampedStart / videoDuration) * 100;
+              const width = ((clampedEnd - clampedStart) / videoDuration) * 100;
               const isActive = idx === activeClipIndex;
 
               return (
                 <div
-                  key={clip.rank}
+                  key={`${clip.rank}-${idx}`}
                   className={cn(
                     "absolute top-1 bottom-1 rounded-md border transition-colors",
                     isActive
-                      ? "bg-emerald-500/20 border-emerald-500/60"
-                      : "bg-violet-500/10 border-violet-500/30",
-                    clip.modified && "border-amber-500/50"
+                      ? "bg-emerald-500/25 border-emerald-500/70 z-[5]"
+                      : clip.manual
+                        ? "bg-blue-500/15 border-blue-500/40"
+                        : "bg-violet-500/15 border-violet-500/40",
+                    clip.modified && !clip.manual && "border-amber-500/50"
                   )}
-                  style={{ left: `${left}%`, width: `${width}%` }}
+                  style={{ left: `${left}%`, width: `${Math.max(width, 0.5)}%` }}
                   onClick={(e) => { e.stopPropagation(); seekToClip(idx); }}
                 >
                   {/* Clip label */}
                   <span className={cn(
                     "absolute top-0.5 left-1 text-[8px] font-bold",
-                    isActive ? "text-emerald-300" : "text-violet-300"
+                    isActive ? "text-emerald-300" : clip.manual ? "text-blue-300" : "text-violet-300"
                   )}>
                     {clip.rank}
                   </span>
 
                   {/* Start handle */}
                   <div
-                    className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-white/10 rounded-l-md"
+                    className="absolute left-0 top-0 bottom-0 w-2.5 cursor-col-resize flex items-center justify-center hover:bg-white/10 rounded-l-md"
                     onMouseDown={(e) => handleTimelineMouseDown(e, idx, "start")}
                   >
                     <GripHorizontal className="h-2.5 w-2.5 text-zinc-400 rotate-90" />
@@ -365,7 +437,7 @@ export function ClipTimelineEditor({
 
                   {/* End handle */}
                   <div
-                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-white/10 rounded-r-md"
+                    className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize flex items-center justify-center hover:bg-white/10 rounded-r-md"
                     onMouseDown={(e) => handleTimelineMouseDown(e, idx, "end")}
                   >
                     <GripHorizontal className="h-2.5 w-2.5 text-zinc-400 rotate-90" />
@@ -379,12 +451,12 @@ export function ClipTimelineEditor({
               className="absolute top-0 bottom-0 w-0.5 bg-white/80 pointer-events-none z-10"
               style={{ left: `${(currentTime / videoDuration) * 100}%` }}
             >
-              <div className="absolute -top-0.5 -left-1 w-2.5 h-2.5 rounded-full bg-white shadow" />
+              <div className="absolute -top-1 -left-1.5 w-3 h-3 rounded-full bg-white shadow-lg border border-zinc-400" />
             </div>
           </div>
 
           {/* Time scale */}
-          <div className="flex justify-between mt-1 text-[9px] text-zinc-600 font-mono">
+          <div className="flex justify-between mt-1.5 text-[9px] text-zinc-600 font-mono">
             <span>0:00</span>
             <span>{formatTime(videoDuration * 0.25)}</span>
             <span>{formatTime(videoDuration * 0.5)}</span>
@@ -399,17 +471,32 @@ export function ClipTimelineEditor({
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
                 Clip #{clips[activeClipIndex].rank} — Timing
+                {clips[activeClipIndex].manual && (
+                  <span className="ml-1.5 text-blue-400 normal-case">(Manual)</span>
+                )}
               </span>
-              {clips[activeClipIndex].modified && (
-                <button
-                  type="button"
-                  onClick={() => resetClip(activeClipIndex)}
-                  className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 font-medium"
-                >
-                  <RotateCcw className="h-2.5 w-2.5" />
-                  Reset to AI
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {clips[activeClipIndex].modified && !clips[activeClipIndex].manual && (
+                  <button
+                    type="button"
+                    onClick={() => resetClip(activeClipIndex)}
+                    className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 font-medium"
+                  >
+                    <RotateCcw className="h-2.5 w-2.5" />
+                    Reset to AI
+                  </button>
+                )}
+                {clips.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => deleteClip(activeClipIndex)}
+                    className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 font-medium"
+                  >
+                    <Trash2 className="h-2.5 w-2.5" />
+                    Delete
+                  </button>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>

@@ -304,18 +304,6 @@ export function NewJob() {
         )}
       </div>
 
-      {/* ─── ANALYZING STATE ──────────────────────────────────────────── */}
-      {analyzeStep === "analyzing" && (
-        <div className="flex-1 flex items-center justify-center">
-          <Card className="p-8 text-center max-w-sm">
-            <Loader2 className="h-10 w-10 animate-spin text-emerald-400 mx-auto mb-4" />
-            <p className="text-sm font-medium text-zinc-200">Downloading & Analyzing</p>
-            <p className="mt-1 text-xs text-zinc-500">AI sedang menganalisis video untuk menemukan momen terbaik...</p>
-            <p className="mt-3 text-[10px] text-zinc-600">Ini mungkin memakan waktu 30-120 detik tergantung durasi video.</p>
-          </Card>
-        </div>
-      )}
-
       {/* ─── REVIEW STATE (split-view: clips + video) ─────────────────── */}
       {analyzeStep === "review" && analyzeResult && (
         <div className="flex-1 min-h-0 overflow-y-auto pb-4">
@@ -328,8 +316,8 @@ export function NewJob() {
         </div>
       )}
 
-      {/* ─── INPUT STATE (normal form) ────────────────────────────────── */}
-      {analyzeStep === "input" && (
+      {/* ─── INPUT STATE (normal form — also shows during analyzing) ──── */}
+      {(analyzeStep === "input" || analyzeStep === "analyzing") && (
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Left: URL + Config (col-4) */}
         <div className="lg:col-span-4 min-h-0 space-y-3 overflow-y-auto pb-4 lg:pb-0">
@@ -382,16 +370,29 @@ export function NewJob() {
                   </div>
                 )}
                 {videoMeta && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="mt-2 w-full"
-                    loading={isAnalyzing}
-                    onClick={handleAnalyze}
-                    icon={<Search className="h-3.5 w-3.5" />}
-                  >
-                    {isAnalyzing ? "Analyzing..." : "Analyze & Preview Clips"}
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="mt-2 w-full"
+                      loading={isAnalyzing}
+                      onClick={handleAnalyze}
+                      icon={<Search className="h-3.5 w-3.5" />}
+                    >
+                      {isAnalyzing ? "Analyzing..." : "Analyze & Preview Clips"}
+                    </Button>
+                    {isAnalyzing && (
+                      <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-2.5">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400 shrink-0" />
+                          <div>
+                            <p className="text-[11px] font-medium text-zinc-200">Downloading & Analyzing</p>
+                            <p className="text-[9px] text-zinc-500 mt-0.5">AI sedang menganalisis video untuk menemukan momen terbaik. Mungkin 30-120 detik.</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             ) : (
