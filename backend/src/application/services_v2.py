@@ -2186,6 +2186,34 @@ class V2PipelineService:
 
             clip_dur = max(0.0, float(clip.end) - float(clip.start))
 
+            # ── 1-Pass FFmpeg Compositor Optimization ──
+            # When both hook and subtitle (or hook-only / sub-only) use FFmpeg drawtext,
+            # combine Hook + Subtitle + Watermark into 1 single encode pass!
+            if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
+                from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
+                compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
+                words_raw = clips_with_words.get(clip.rank) or []
+                sub_min = hook_dur if clip.hook else 0.0
+                words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
+                watermark_cfg = (job.clips_data or {}).get("watermark_config") or {}
+
+                success = await compositor.render_single_pass(
+                    input_video=base_path,
+                    output_video=final_path,
+                    hook_text=clip.hook or "",
+                    hook_style_config=hook_style_config,
+                    words=words,
+                    subtitle_style_config=subtitle_style_config,
+                    watermark_config=watermark_cfg,
+                )
+                if success:
+                    logger.info(f"[{job_id}] 1-pass FFmpeg composite rendered clip {clip.rank}")
+                    mark_clip_ready(output_dir, clip.rank)
+                    continue
+                else:
+                    logger.warning(f"[{job_id}] 1-pass FFmpeg composite failed clip {clip.rank}; falling back to multi-step")
+
+            # ── Fallback / Skia Multi-Step Pipeline ──
             # ── Hook render (FFmpeg drawtext / Skia kinetic) ──
             hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
             if clip.hook:
@@ -2297,6 +2325,33 @@ class V2PipelineService:
             tmp_sub = f"{output_dir}/clip_{clip.rank:02d}_direct_sub.mp4"
 
             try:
+                # ── 1-Pass Optimization when both hook and subtitle are FFmpeg direct ──
+                if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
+                    from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
+                    compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
+                    words_raw = clips_with_words.get(clip.rank) or []
+                    sub_min = hook_dur if clip.hook else 0.0
+                    words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
+                    tmp_composite = f"{output_dir}/clip_{clip.rank:02d}_direct_composite.mp4"
+
+                    success = await compositor.render_single_pass(
+                        input_video=final,
+                        output_video=tmp_composite,
+                        hook_text=clip.hook or "",
+                        hook_style_config=hook_style_config,
+                        words=words,
+                        subtitle_style_config=subtitle_style_config,
+                    )
+                    if success and os.path.exists(tmp_composite):
+                        os.replace(tmp_composite, final)
+                        continue
+                    elif os.path.exists(tmp_composite):
+                        try:
+                            os.remove(tmp_composite)
+                        except OSError:
+                            pass
+
+                # ── Multi-Step Direct Pass (Fallback or Skia Subtitle) ──
                 # Direct hook pass (if hook_engine is ffmpeg or skia)
                 if hook_engine in ("ffmpeg", "skia") and clip.hook:
                     from src.application.services import AutoClipService

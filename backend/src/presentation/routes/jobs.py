@@ -1845,79 +1845,111 @@ async def restyle_clip(
                 "mode": "hyperframes",
             }
 
-        # Direct (FFmpeg / Skia) Hook Pass
-        if hook_render_engine in ("ffmpeg", "skia") and hook_text:
-            tmp_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-hook.mp4"
-            try:
-                from src.application.services import AutoClipService
-                svc = AutoClipService.__new__(AutoClipService)
-                svc._fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
-                await svc._render_hook_ffmpeg(
-                    staged_final_path,
-                    hook_text,
-                    tmp_hook_path,
-                    hook_style=hook_style,
-                    style_config=hook_config,
-                )
-                if os.path.exists(tmp_hook_path):
-                    os.replace(tmp_hook_path, staged_final_path)
-                    current_path = staged_final_path
-                    logger.info(f"[restyle] {hook_render_engine} hook applied clip {clip_rank}")
-            except Exception as e:
-                logger.warning(f"[restyle] {hook_render_engine} hook failed clip {clip_rank}: {e}")
-
-        # Direct (FFmpeg / Skia) Subtitle Pass
-        if subtitle_render_engine in ("ffmpeg", "skia") and render_words:
-            tmp_sub_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-sub.mp4"
-            fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
-            try:
-                if subtitle_render_engine == "skia":
-                    from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
-                    renderer = SkiaSubtitleRenderer(font_dir=fonts_dir)
-                    renderer.render_subtitles(
-                        staged_final_path,
-                        render_words,
-                        subtitle_config or {},
-                        tmp_sub_path,
-                    )
-                    logger.info(f"[restyle] Skia subtitle applied clip {clip_rank}")
-                else:
-                    from src.infrastructure.subtitle_renderer import SubtitleRenderer
-                    from src.domain.entities import SubtitleStyleConfig
-                    renderer = SubtitleRenderer(font_dir=fonts_dir)
-                    style_cfg = SubtitleStyleConfig(**(subtitle_config or {}))
-                    renderer.render_subtitles(
-                        staged_final_path,
-                        render_words,
-                        style_cfg,
-                        tmp_sub_path,
-                    )
-                    logger.info(f"[restyle] FFmpeg subtitle applied clip {clip_rank}")
-
-                if os.path.exists(tmp_sub_path):
-                    os.replace(tmp_sub_path, staged_final_path)
-                    current_path = staged_final_path
-            except Exception as e:
-                logger.warning(f"[restyle] {subtitle_render_engine} subtitle failed clip {clip_rank}: {e}")
-
-        # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything.
+        # Watermark config
         watermark_config = (
             body.watermark_config if body and body.watermark_config is not None
             else root_style_data.get("watermark_config")
             or {}
         )
-        try:
-            from src.infrastructure.watermark_renderer import apply_watermark_if_configured
-            await apply_watermark_if_configured(
-                watermark_config,
-                output_dir,
-                clip_rank,
-                staged_final_path,
-                fonts_dir=getattr(service, "_fonts_dir", "assets/fonts"),
-                job_id=job_id,
+
+        # ── 1-Pass Optimization when both hook and subtitle use direct FFmpeg ──
+        if hook_render_engine == "ffmpeg" and subtitle_render_engine == "ffmpeg":
+            from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
+            fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
+            compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
+            tmp_1pass = f"{output_dir}/final/clip_{clip_rank}_final.restyle.1pass.mp4"
+
+            success = await compositor.render_single_pass(
+                input_video=staged_final_path,
+                output_video=tmp_1pass,
+                hook_text=hook_text or "",
+                hook_style_config=hook_config,
+                words=render_words,
+                subtitle_style_config=subtitle_config,
+                watermark_config=watermark_config,
             )
-        except Exception as e:
-            logger.warning(f"[restyle] watermark failed clip {clip_rank}: {e}")
+            if success and os.path.exists(tmp_1pass):
+                os.replace(tmp_1pass, staged_final_path)
+                current_path = staged_final_path
+                logger.info(f"[restyle] 1-pass FFmpeg composite applied clip {clip_rank}")
+            else:
+                logger.warning(f"[restyle] 1-pass FFmpeg composite failed clip {clip_rank}; falling back to multi-step")
+                if os.path.exists(tmp_1pass):
+                    try:
+                        os.remove(tmp_1pass)
+                    except OSError:
+                        pass
+
+        # ── Direct (FFmpeg / Skia) Multi-Step Passes (Fallback / Skia) ──
+        if not (hook_render_engine == "ffmpeg" and subtitle_render_engine == "ffmpeg" and os.path.exists(staged_final_path)):
+            # Direct Hook Pass
+            if hook_render_engine in ("ffmpeg", "skia") and hook_text:
+                tmp_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-hook.mp4"
+                try:
+                    from src.application.services import AutoClipService
+                    svc = AutoClipService.__new__(AutoClipService)
+                    svc._fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
+                    await svc._render_hook_ffmpeg(
+                        staged_final_path,
+                        hook_text,
+                        tmp_hook_path,
+                        hook_style=hook_style,
+                        style_config=hook_config,
+                    )
+                    if os.path.exists(tmp_hook_path):
+                        os.replace(tmp_hook_path, staged_final_path)
+                        current_path = staged_final_path
+                        logger.info(f"[restyle] {hook_render_engine} hook applied clip {clip_rank}")
+                except Exception as e:
+                    logger.warning(f"[restyle] {hook_render_engine} hook failed clip {clip_rank}: {e}")
+
+            # Direct Subtitle Pass
+            if subtitle_render_engine in ("ffmpeg", "skia") and render_words:
+                tmp_sub_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-sub.mp4"
+                fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
+                try:
+                    if subtitle_render_engine == "skia":
+                        from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+                        renderer = SkiaSubtitleRenderer(font_dir=fonts_dir)
+                        renderer.render_subtitles(
+                            staged_final_path,
+                            render_words,
+                            subtitle_config or {},
+                            tmp_sub_path,
+                        )
+                        logger.info(f"[restyle] Skia subtitle applied clip {clip_rank}")
+                    else:
+                        from src.infrastructure.subtitle_renderer import SubtitleRenderer
+                        from src.domain.entities import SubtitleStyleConfig
+                        renderer = SubtitleRenderer(font_dir=fonts_dir)
+                        style_cfg = SubtitleStyleConfig(**(subtitle_config or {}))
+                        renderer.render_subtitles(
+                            staged_final_path,
+                            render_words,
+                            style_cfg,
+                            tmp_sub_path,
+                        )
+                        logger.info(f"[restyle] FFmpeg subtitle applied clip {clip_rank}")
+
+                    if os.path.exists(tmp_sub_path):
+                        os.replace(tmp_sub_path, staged_final_path)
+                        current_path = staged_final_path
+                except Exception as e:
+                    logger.warning(f"[restyle] {subtitle_render_engine} subtitle failed clip {clip_rank}: {e}")
+
+            # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything.
+            try:
+                from src.infrastructure.watermark_renderer import apply_watermark_if_configured
+                await apply_watermark_if_configured(
+                    watermark_config,
+                    output_dir,
+                    clip_rank,
+                    staged_final_path,
+                    fonts_dir=getattr(service, "_fonts_dir", "assets/fonts"),
+                    job_id=job_id,
+                )
+            except Exception as e:
+                logger.warning(f"[restyle] watermark failed clip {clip_rank}: {e}")
 
         if not os.path.exists(staged_final_path):
             raise HTTPException(status_code=503, detail="Restyle did not produce a final video")
