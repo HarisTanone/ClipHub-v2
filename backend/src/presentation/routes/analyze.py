@@ -73,9 +73,6 @@ async def analyze_only(
     can review and adjust timeframes before submitting for full processing.
     The downloaded video is kept at {DOWNLOAD_DIR}/{job_id}.mp4 for streaming.
     """
-    if not user.is_superadmin:
-        raise HTTPException(status_code=403, detail="Superadmin access required")
-
     url = body.youtube_url
 
     # ─── Step 1: Validate ───────────────────────────────────────────
@@ -226,8 +223,6 @@ async def stream_source_video(
             )
     if resolved_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if not resolved_user.is_superadmin:
-        raise HTTPException(status_code=403, detail="Superadmin access required")
 
     # Try analyze session path first, then regular job path
     video_path = os.path.join(settings.DOWNLOAD_DIR, f"{job_id}.mp4")

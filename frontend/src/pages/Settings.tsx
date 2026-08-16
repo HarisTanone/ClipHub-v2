@@ -698,7 +698,12 @@ export function Settings() {
   }
 
   useEffect(() => {
-    if (isSuperadmin && tab === "models") fetchModelSettings();
+    if (isSuperadmin && tab === "models") {
+      fetchModelSettings();
+      if (availableModels.length === 0) {
+        handleFetchAvailableModels();
+      }
+    }
   }, [isSuperadmin, tab]);
 
 
@@ -1117,54 +1122,115 @@ export function Settings() {
                         </span>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
-                        {filtered.map((m) => (
-                          <div
-                            key={m.id}
-                            className={cn(
-                              "group flex items-center gap-1 rounded-lg border px-3 py-2 text-xs transition-colors",
-                              modelEdits["NINE_ROUTER_MODEL"] === m.id
-                                ? "border-violet-500 bg-violet-500/10"
-                                : "border-zinc-800 bg-zinc-950/60 hover:border-zinc-600"
-                            )}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setModelEdits((p) => ({ ...p, NINE_ROUTER_MODEL: m.id }));
-                                toast.success(`Model "${m.id}" selected as default`);
-                              }}
+                        {filtered.map((m) => {
+                          const isDefault = modelEdits["NINE_ROUTER_MODEL"] === m.id;
+                          const isPass1 = modelEdits["NINE_ROUTER_PASS1_MODEL"] === m.id || modelEdits["NINE_ROUTER_MODEL_PASS1"] === m.id;
+                          const isPass2 = modelEdits["NINE_ROUTER_PASS2_MODEL"] === m.id || modelEdits["NINE_ROUTER_MODEL_PASS2"] === m.id;
+                          const isAiLayer = modelEdits["NINE_ROUTER_AI_LAYER_MODEL"] === m.id || modelEdits["NINE_ROUTER_MODEL_AI_LAYER"] === m.id;
+                          const isAssigned = isDefault || isPass1 || isPass2 || isAiLayer;
+
+                          return (
+                            <div
+                              key={m.id}
                               className={cn(
-                                "flex-1 min-w-0 text-left transition-colors",
-                                modelEdits["NINE_ROUTER_MODEL"] === m.id
-                                  ? "text-violet-300"
-                                  : "text-zinc-400 group-hover:text-zinc-200"
+                                "group flex flex-col gap-1.5 rounded-lg border p-2.5 text-xs transition-all",
+                                isAssigned
+                                  ? "border-violet-500/60 bg-violet-500/[0.08]"
+                                  : "border-zinc-800 bg-zinc-950/60 hover:border-zinc-700"
                               )}
                             >
-                              <span className="font-medium truncate block">{m.id}</span>
-                              {m.owned_by && <span className="text-zinc-600 text-[10px] truncate block">{m.owned_by}</span>}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleTestAvailableModel(m.id)}
-                              disabled={testingModelId !== null}
-                              title={`Test model ${m.id}`}
-                              className={cn(
-                                "shrink-0 flex items-center gap-1 rounded-md border px-1.5 py-1 text-[9px] font-medium transition-colors",
-                                testingModelId === m.id
-                                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                                  : "border-zinc-700/60 text-zinc-500 hover:border-emerald-500/50 hover:text-emerald-400",
-                                testingModelId !== null && testingModelId !== m.id && "opacity-40 cursor-not-allowed"
-                              )}
-                            >
-                              {testingModelId === m.id ? (
-                                <RefreshCw className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <Zap className="h-3 w-3" />
-                              )}
-                              Test
-                            </button>
-                          </div>
-                        ))}
+                              <div className="flex items-start justify-between gap-1.5">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-semibold text-zinc-100 truncate block">{m.id}</span>
+                                    {isDefault && <span className="rounded bg-violet-500/20 px-1.5 py-0.2 text-[8px] font-bold text-violet-300 uppercase">Default</span>}
+                                    {isPass1 && <span className="rounded bg-blue-500/20 px-1.5 py-0.2 text-[8px] font-bold text-blue-300 uppercase">Pass 1</span>}
+                                    {isPass2 && <span className="rounded bg-emerald-500/20 px-1.5 py-0.2 text-[8px] font-bold text-emerald-300 uppercase">Pass 2</span>}
+                                    {isAiLayer && <span className="rounded bg-amber-500/20 px-1.5 py-0.2 text-[8px] font-bold text-amber-300 uppercase">AI Layer</span>}
+                                  </div>
+                                  {m.owned_by && <span className="text-zinc-500 text-[10px] truncate block mt-0.5">{m.owned_by}</span>}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTestAvailableModel(m.id)}
+                                  disabled={testingModelId !== null}
+                                  title={`Test model ${m.id}`}
+                                  className={cn(
+                                    "shrink-0 flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium transition-colors",
+                                    testingModelId === m.id
+                                      ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                                      : "border-zinc-700/60 text-zinc-400 hover:border-emerald-500/50 hover:text-emerald-300",
+                                    testingModelId !== null && testingModelId !== m.id && "opacity-40 cursor-not-allowed"
+                                  )}
+                                >
+                                  {testingModelId === m.id ? (
+                                    <RefreshCw className="h-3 w-3 animate-spin text-amber-400" />
+                                  ) : (
+                                    <Zap className="h-3 w-3 text-amber-400" />
+                                  )}
+                                  Test
+                                </button>
+                              </div>
+
+                              {/* Quick Role Assignment Buttons */}
+                              <div className="flex items-center gap-1 pt-1 border-t border-zinc-800/60 flex-wrap">
+                                <span className="text-[9px] text-zinc-500 mr-1">Set as:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModelEdits((p) => ({ ...p, NINE_ROUTER_MODEL: m.id }));
+                                    toast.success(`"${m.id}" set as Default model`);
+                                  }}
+                                  className={cn(
+                                    "px-1.5 py-0.5 text-[9px] rounded font-medium transition-colors",
+                                    isDefault ? "bg-violet-600 text-white font-bold" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                                  )}
+                                >
+                                  Default
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModelEdits((p) => ({ ...p, NINE_ROUTER_PASS1_MODEL: m.id, NINE_ROUTER_MODEL_PASS1: m.id }));
+                                    toast.success(`"${m.id}" set as Pass 1 model`);
+                                  }}
+                                  className={cn(
+                                    "px-1.5 py-0.5 text-[9px] rounded font-medium transition-colors",
+                                    isPass1 ? "bg-blue-600 text-white font-bold" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                                  )}
+                                >
+                                  Pass 1
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModelEdits((p) => ({ ...p, NINE_ROUTER_PASS2_MODEL: m.id, NINE_ROUTER_MODEL_PASS2: m.id }));
+                                    toast.success(`"${m.id}" set as Pass 2 model`);
+                                  }}
+                                  className={cn(
+                                    "px-1.5 py-0.5 text-[9px] rounded font-medium transition-colors",
+                                    isPass2 ? "bg-emerald-600 text-white font-bold" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                                  )}
+                                >
+                                  Pass 2
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModelEdits((p) => ({ ...p, NINE_ROUTER_AI_LAYER_MODEL: m.id, NINE_ROUTER_MODEL_AI_LAYER: m.id }));
+                                    toast.success(`"${m.id}" set as AI Layer model`);
+                                  }}
+                                  className={cn(
+                                    "px-1.5 py-0.5 text-[9px] rounded font-medium transition-colors",
+                                    isAiLayer ? "bg-amber-600 text-white font-bold" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                                  )}
+                                >
+                                  AI Layer
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                       {filtered.length === 0 && (
                         <p className="text-[11px] text-zinc-600">Tidak ada model yang cocok dengan "{modelSearch}".</p>
