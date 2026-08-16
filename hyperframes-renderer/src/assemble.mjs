@@ -65,6 +65,11 @@ const TPL = {
   hook_orbit_stamp_v2: { kind: 'hook', design: 'orbit-stamp', accent: '#8b5cf6', y: 1460 },
   hook_pixel_ticker_v2: { kind: 'hook', design: 'pixel-ticker', accent: '#f7ff58', y: 1540 },
   hook_blueprint_v2: { kind: 'hook', design: 'blueprint-reveal', accent: '#52c7ff', y: 1480 },
+  hook_neon_matrix: { kind: 'hook', design: 'neon-matrix', accent: '#10b981', y: 1540 },
+  hook_warning_hazard: { kind: 'hook', design: 'warning-hazard', accent: '#f59e0b', y: 1550 },
+  hook_sticker_scrapbook: { kind: 'hook', design: 'sticker-scrapbook', accent: '#ec4899', y: 1530 },
+  hook_cinematic_minimal: { kind: 'hook', design: 'cinematic-minimal', accent: '#f8fafc', y: 1560 },
+  hook_electric_surge: { kind: 'hook', design: 'electric-surge', accent: '#818cf8', y: 1540 },
 
   sub_speech_capsule_v2: { kind: 'sub', design: 'speech-capsule', accent: '#ffffff', y: 330 },
   sub_signal_rail_v2: { kind: 'sub', design: 'signal-rail', accent: '#b7ff00', y: 280 },
@@ -131,6 +136,16 @@ function cardBody(meta, ev, i) {
       return `<div class="pixel-count">0${i + 1}</div><div class="pixel-copy"><span>HF_BREAKPOINT</span>${label}</div><div class="pixel-grid">${'<i></i>'.repeat(8)}</div>`;
     case 'blueprint-reveal':
       return `<div class="blueprint-grid"></div><div class="blueprint-index">FIG. ${String(i + 1).padStart(2, '0')}</div><div class="blueprint-copy">${label}<span>1080 / 1920 · LOCKED</span></div><div class="blueprint-cross">+</div>`;
+    case 'neon-matrix':
+      return `<div class="matrix-header"><span>[SYS_ALERT::ROOT]</span><span class="matrix-status">ONLINE</span></div><div class="matrix-copy">&gt; ${label}<span class="matrix-cursor">_</span></div>`;
+    case 'warning-hazard':
+      return `<div class="hazard-badge"><span>⚠️ CRITICAL NOTICE</span><span>! ! !</span></div><div class="hazard-content">${label}</div><div class="hazard-bar"></div>`;
+    case 'sticker-scrapbook':
+      return `<div class="scrapbook-tape">TAPE</div><div class="scrapbook-body">${label}</div>`;
+    case 'cinematic-minimal':
+      return `<div class="cine-kicker">ESSENTIAL DOSSIER</div><div class="cine-body">${label}</div>`;
+    case 'electric-surge':
+      return `<div class="surge-header"><span>⚡ VOLTAGE SURGE</span></div><div class="surge-content">${label}</div>`;
     case 'speech-capsule':
       return `<div class="capsule-dot"></div>${label}<div class="capsule-tail"></div>`;
     case 'signal-rail':
@@ -236,6 +251,11 @@ export function assembleHtml({
         'orbit-stamp': `{ opacity: 0, rotation: -18, scale: 0.55, duration: 0.42 }`,
         'pixel-ticker': `{ opacity: 0, x: 180, duration: 0.24 }`,
         'blueprint-reveal': `{ opacity: 0, scaleX: 0.12, transformOrigin: "left center", duration: 0.38 }`,
+        'neon-matrix': `{ opacity: 0, scaleY: 0.1, duration: 0.28, ease: "steps(6)" }`,
+        'warning-hazard': `{ opacity: 0, scale: 1.25, y: -40, duration: 0.3, ease: "bounce.out" }`,
+        'sticker-scrapbook': `{ opacity: 0, rotation: 14, scale: 0.5, duration: 0.35, ease: "back.out(2)" }`,
+        'cinematic-minimal': `{ opacity: 0, letterSpacing: "0.2em", duration: 0.45, ease: "power2.out" }`,
+        'electric-surge': `{ opacity: 0, scale: 0.8, x: -30, duration: 0.25, ease: "rough({strength: 2, points: 10})" }`,
       };
       const entrance = entrances[meta.design] || `{ opacity: 0, y: -20, scale: 0.96, duration: 0.28 }`;
       return [
@@ -464,6 +484,93 @@ export function assembleHtml({
     .notch-status i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ff385c; }
     .design-notch-transcript .label { font: 750 38px/1.22 monospace; }
     .notch-cursor { width: 5px; height: 48px; background: #ffb000; box-shadow: 0 0 16px #ffb000; }
+
+    /* ─── 17. Matrix Rain Cyber Term ───────────────────────────────────── */
+    .design-neon-matrix {
+      background: rgba(0, 0, 0, 0.95); border: 2px solid #10b981;
+      border-radius: 14px; padding: 22px 28px;
+      box-shadow: 0 0 30px rgba(16,185,129,0.4), inset 0 0 15px rgba(16,185,129,0.2);
+    }
+    .design-neon-matrix .matrix-header {
+      display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 1px solid rgba(16,185,129,0.3); padding-bottom: 8px; margin-bottom: 10px;
+      color: #10b981; font: 800 16px monospace; letter-spacing: 0.12em;
+    }
+    .design-neon-matrix .matrix-status { color: #6ee7b7; font-weight: 900; }
+    .design-neon-matrix .matrix-copy .label {
+      font: 900 44px/1.2 monospace; color: #6ee7b7; text-transform: uppercase;
+      text-shadow: 0 0 12px #10b981;
+    }
+    .design-neon-matrix .matrix-cursor { display: inline-block; color: #10b981; }
+
+    /* ─── 18. Warning Industrial Hazard ────────────────────────────────── */
+    .design-warning-hazard {
+      background: #09090b; border: 4px solid #f59e0b; border-radius: 20px; padding: 22px 28px;
+      box-shadow: 0 0 35px rgba(245,158,11,0.35);
+    }
+    .design-warning-hazard .hazard-badge {
+      display: flex; justify-content: space-between; align-items: center;
+      background: #f59e0b; color: #000; padding: 6px 14px; border-radius: 6px;
+      font: 900 16px monospace; margin-bottom: 12px;
+    }
+    .design-warning-hazard .label {
+      font-size: 46px; font-weight: 950; line-height: 1.15; text-transform: uppercase;
+      color: #fde68a; border-left: 6px solid #f59e0b; padding-left: 14px; margin-bottom: 12px;
+    }
+    .design-warning-hazard .hazard-bar {
+      height: 10px; width: 100%; border-radius: 4px;
+      background: repeating-linear-gradient(45deg, #f59e0b, #f59e0b 12px, #000 12px, #000 24px);
+    }
+
+    /* ─── 19. Y2K Scrapbook Sticker ────────────────────────────────────── */
+    .design-sticker-scrapbook {
+      background: linear-gradient(135deg, #db2777, #be185d);
+      border: 4px dashed #fff; border-radius: 26px; padding: 24px 34px;
+      transform: rotate(2.5deg);
+      box-shadow: 0 16px 0 rgba(0,0,0,0.6), 0 0 35px rgba(236,72,153,0.5);
+    }
+    .design-sticker-scrapbook .scrapbook-tape {
+      position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+      background: rgba(255,255,255,0.7); color: #000; font: 900 12px monospace;
+      padding: 4px 16px; border-radius: 4px; backdrop-filter: blur(4px);
+    }
+    .design-sticker-scrapbook .label {
+      font-size: 48px; font-weight: 950; line-height: 1.15; text-align: center;
+      text-transform: uppercase; color: #fef08a; text-shadow: 0 4px 12px rgba(0,0,0,0.8);
+    }
+
+    /* ─── 20. Ultra Modern Serif Slate ─────────────────────────────────── */
+    .design-cinematic-minimal {
+      background: rgba(0,0,0,0.88); border-top: 2px solid rgba(255,255,255,0.4);
+      border-bottom: 2px solid rgba(255,255,255,0.4); padding: 26px 36px;
+      text-align: center; backdrop-filter: blur(20px);
+      box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+    }
+    .design-cinematic-minimal .cine-kicker {
+      font: 700 14px 'Cinzel', serif; letter-spacing: 0.35em; color: #a1a1aa;
+      text-transform: uppercase; margin-bottom: 8px;
+    }
+    .design-cinematic-minimal .label {
+      font-family: 'Cinzel', serif; font-size: 46px; font-weight: 700;
+      line-height: 1.2; letter-spacing: 0.04em; color: #f4f4f5;
+    }
+
+    /* ─── 21. Electric Plasma Shockwave ────────────────────────────────── */
+    .design-electric-surge {
+      background: linear-gradient(135deg, #0f172a, #1e1b4b);
+      border: 3px solid #818cf8; border-radius: 20px; padding: 24px 32px;
+      box-shadow: 0 0 40px rgba(129,140,248,0.5), inset 0 0 20px rgba(99,102,241,0.3);
+    }
+    .design-electric-surge .surge-header {
+      color: #a5b4fc; font: 900 15px monospace; letter-spacing: 0.18em; margin-bottom: 6px;
+    }
+    .design-electric-surge .label {
+      font-family: 'Space Grotesk', sans-serif; font-size: 48px; font-weight: 950;
+      font-style: italic; text-transform: uppercase; line-height: 1.15;
+      background: linear-gradient(to right, #c7d2fe, #fff, #67e8f9);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 12px rgba(129,140,248,0.6));
+    }
   </style>
 </head>
 <body>

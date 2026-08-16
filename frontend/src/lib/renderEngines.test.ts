@@ -30,11 +30,11 @@ describe("Render engines catalogue & permissions", () => {
     expect(resolveEngine("unknown")).toBe("remotion");
   });
 
-  it("HyperFrames catalogue has 8 v2 presets", () => {
+  it("HyperFrames catalogue has comprehensive, distinct hook and subtitle presets", () => {
     const styles = [...HF_HOOK_STYLES, ...HF_SUBTITLE_STYLES];
-    expect(styles).toHaveLength(8);
-    expect(new Set(styles.map((style) => style.id)).size).toBe(8);
-    expect(styles.every((style) => style.id.endsWith("_v2"))).toBe(true);
+    expect(HF_HOOK_STYLES.length).toBeGreaterThanOrEqual(21);
+    expect(HF_SUBTITLE_STYLES.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(styles.map((style) => style.id)).size).toBe(styles.length);
   });
 
   it("FFmpeg presets catalogue is complete", () => {

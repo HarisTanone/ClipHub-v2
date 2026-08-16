@@ -194,7 +194,6 @@ class YouTubeSearch:
                 data = resp.json()
                 results = []
                 for v in data.get("videos", []):
-                    # Pick portrait or best video link
                     files = v.get("video_files", [])
                     best_file = None
                     for f in files:
@@ -221,13 +220,60 @@ class YouTubeSearch:
             logger.debug(f"pexels_search: failed for query '{query}': {exc}")
             return []
 
+    async def search_pixabay(
+        self,
+        query: str,
+        max_results: int = 4,
+    ) -> list[dict]:
+        """Search Pixabay video API if configured."""
+        api_key = settings.PIXABAY_API_KEY
+        if not api_key:
+            return []
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    "https://pixabay.com/api/videos/",
+                    params={
+                        "key": api_key,
+                        "q": query,
+                        "video_type": "film",
+                        "min_width": 720,
+                        "per_page": min(max_results, 10),
+                    },
+                )
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                results = []
+                for v in data.get("hits", []):
+                    videos = v.get("videos", {})
+                    chosen = videos.get("medium") or videos.get("large") or videos.get("small") or {}
+                    link = chosen.get("url")
+                    if link:
+                        results.append({
+                            "video_id": f"pixabay_{v['id']}",
+                            "title": f"Pixabay Stock: {v.get('tags', query).title()}",
+                            "url": link,
+                            "thumbnail_url": v.get("userImageURL") or chosen.get("thumbnail") or "",
+                            "duration_seconds": v.get("duration", 0),
+                            "view_count": v.get("views", 10000),
+                            "channel": v.get("user", "Pixabay Creator"),
+                            "query": query,
+                            "platform": "pixabay",
+                        })
+                return results
+        except Exception as exc:
+            logger.debug(f"pixabay_search: failed for query '{query}': {exc}")
+            return []
+
     async def search_for_single_scene(
         self,
         scene: dict,
         custom_query: Optional[str] = None,
         results_per_query: int = 5,
     ) -> list[dict]:
-        """Search footage candidates for a single scene with multiple queries."""
+        """Search footage candidates for a single scene with multi-source parallel queries."""
         queries = [custom_query] if custom_query else scene.get("search_queries", [])
         if not queries and scene.get("visual"):
             queries = [scene["visual"][:80]]
@@ -235,42 +281,42 @@ class YouTubeSearch:
         all_candidates = []
         seen_ids = set()
 
-        # Search Pexels first if available
+        tasks = []
+        # Parallel tasks: Pexels, Pixabay, YouTube
         for q in queries[:2]:
-            pexels_results = await self.search_pexels(q, max_results=3)
-            for r in pexels_results:
-                if r["video_id"] not in seen_ids:
-                    seen_ids.add(r["video_id"])
-                    all_candidates.append(r)
+            tasks.append(self.search_pexels(q, max_results=3))
+            tasks.append(self.search_pixabay(q, max_results=3))
+        for q in queries[:3]:
+            tasks.append(self.search(query=q, max_results=results_per_query, shorts_only=False))
 
-        # Search YouTube
-        for query in queries[:3]:
-            result = await self.search(
-                query=query,
-                max_results=results_per_query,
-                shorts_only=False,
-            )
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-            if result.error:
-                logger.warning(f"youtube_search: query '{query}' error: {result.error}")
+        for resp in responses:
+            if isinstance(resp, Exception) or not resp:
                 continue
-
-            for r in result.results:
-                if r.video_id not in seen_ids:
-                    seen_ids.add(r.video_id)
-                    all_candidates.append({
-                        "video_id": r.video_id,
-                        "title": r.title,
-                        "url": r.url,
-                        "thumbnail_url": r.thumbnail_url,
-                        "duration_seconds": r.duration_seconds,
-                        "view_count": r.view_count,
-                        "channel": r.channel,
-                        "query": query,
-                        "platform": "youtube",
-                    })
-
-            await asyncio.sleep(0.15)
+            if isinstance(resp, list):
+                # Pexels or Pixabay list of dicts
+                for r in resp:
+                    if r.get("video_id") not in seen_ids:
+                        seen_ids.add(r["video_id"])
+                        all_candidates.append(r)
+            elif isinstance(resp, YouTubeSearchResult):
+                if resp.error:
+                    continue
+                for r in resp.results:
+                    if r.video_id not in seen_ids:
+                        seen_ids.add(r.video_id)
+                        all_candidates.append({
+                            "video_id": r.video_id,
+                            "title": r.title,
+                            "url": r.url,
+                            "thumbnail_url": r.thumbnail_url,
+                            "duration_seconds": r.duration_seconds,
+                            "view_count": r.view_count,
+                            "channel": r.channel,
+                            "query": resp.query,
+                            "platform": "youtube",
+                        })
 
         return all_candidates
 

@@ -6,7 +6,7 @@ import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { jobs, presets as presetsApi, type Preset } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RangeSlider } from "@/components/ui/RangeSlider";
-import { buildCanvasConfig, gradientCss } from "@/lib/canvasTemplates";
+import { buildCanvasConfig, gradientCss, type CanvasConfig } from "@/lib/canvasTemplates";
 import { CanvasAccents } from "@/components/BackgroundTemplateSection";
 import type { BackgroundMode } from "@/components/BackgroundTemplateSection";
 import { HfFixedStylePreview } from "@/components/HfFixedStylePreview";
@@ -1229,9 +1229,32 @@ function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisCh
           {subTab === "watermark" ? "Dirender server-side via FFmpeg" : aiTextEnabled ? "Applied to preview & final render" : "Aktifkan AI Cinematic Text untuk mengatur AI Text"}
         </span>
       </div>
-      <div className="flex-1 overflow-hidden">
-        {subTab === "transition" ? <TransitionEditor style={hookStyle} onChange={onHookChange} thumbnailUrl={thumbnailUrl} /> : subTab === "ai_text" ? <TextEmphasisEditor style={textEmphasisStyle} onChange={onTextEmphasisChange} thumbnailUrl={thumbnailUrl} previewContext={aiTextPreviewContext} /> : <WatermarkEditor style={watermarkStyle} onChange={onWatermarkChange} thumbnailUrl={thumbnailUrl} aspectRatio={aspectRatio} canvasBackground={canvasBackground} />}
-      </div>
+        {subTab === "transition" ? (
+          <TransitionEditor
+            style={hookStyle}
+            onChange={onHookChange}
+            thumbnailUrl={thumbnailUrl}
+            aspectRatio={aspectRatio}
+            canvasBackground={canvasBackground}
+          />
+        ) : subTab === "ai_text" ? (
+          <TextEmphasisEditor
+            style={textEmphasisStyle}
+            onChange={onTextEmphasisChange}
+            thumbnailUrl={thumbnailUrl}
+            previewContext={aiTextPreviewContext}
+            aspectRatio={aspectRatio}
+            canvasBackground={canvasBackground}
+          />
+        ) : (
+          <WatermarkEditor
+            style={watermarkStyle}
+            onChange={onWatermarkChange}
+            thumbnailUrl={thumbnailUrl}
+            aspectRatio={aspectRatio}
+            canvasBackground={canvasBackground}
+          />
+        )}
     </div>
   );
 }
@@ -1497,12 +1520,31 @@ const TRANSITION_META: Record<string, { label: string; desc: string; icon: strin
   zoom: { label: "Zoom", desc: "Zoom in/out transisi. Dramatis.", icon: "⊙" },
 };
 
-function TransitionEditor({ style, onChange, thumbnailUrl }: { style: HookStyle; onChange: (style: HookStyle) => void; thumbnailUrl?: string }) {
+function TransitionEditor({
+  style,
+  onChange,
+  thumbnailUrl,
+  aspectRatio,
+  canvasBackground,
+}: {
+  style: HookStyle;
+  onChange: (style: HookStyle) => void;
+  thumbnailUrl?: string;
+  aspectRatio?: string;
+  canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null;
+}) {
   const active = style.transitionStyle || "cut";
   const duration = style.transitionDuration ?? 0.35;
   const durationInt = Math.round(duration * 100);
   const previewDur = Math.max(0.8, duration * 2);
   const update = (patch: Partial<HookStyle>) => onChange({ ...style, ...patch });
+  const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
+    ? buildCanvasConfig(aspectRatio, {
+        backgroundMode: canvasBackground?.mode || "template",
+        templateId: canvasBackground?.templateId || "dark-studio",
+        backgroundImageUrl: canvasBackground?.imageDataUrl || null,
+      })
+    : null;
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 h-full">
@@ -1510,13 +1552,7 @@ function TransitionEditor({ style, onChange, thumbnailUrl }: { style: HookStyle;
       <div className="xl:col-span-5 p-4 overflow-y-auto space-y-4 border-r border-zinc-800">
         <Section title="Live Preview">
           <div className="flex justify-center">
-            <div className="relative aspect-[9/16] w-full max-w-[200px] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
-              {/* Real video thumbnail as base layer — same as Live Preview in Hook/Subtitle tabs */}
-              {thumbnailUrl ? (
-                <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-              ) : (
-                <div className="absolute inset-0 bg-gradient-to-br from-zinc-700 to-zinc-950" />
-              )}
+            <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl} className="max-w-[200px] rounded-xl border-zinc-700 shadow-2xl">
               <div className="absolute inset-0 flex items-center justify-center" style={{ animation: `${active === "cut" ? "transCut" : active === "fade" ? "transFade" : active === "slide" ? "transSlide" : "transZoom"} ${previewDur}s ease-in-out infinite` }}>
                 <div className="h-full w-full bg-gradient-to-br from-emerald-500/60 to-blue-500/50" />
               </div>
@@ -1524,7 +1560,7 @@ function TransitionEditor({ style, onChange, thumbnailUrl }: { style: HookStyle;
                 <span className="rounded-full bg-black/60 px-2.5 py-0.5 text-[9px] font-medium text-white backdrop-blur-sm">{active} · {duration.toFixed(2)}s</span>
               </div>
               <div className="absolute bottom-2 left-2 z-30 rounded-md bg-black/60 px-2 py-0.5 text-[8px] text-zinc-400">Preview transition</div>
-            </div>
+            </CanvasPreviewFrame>
           </div>
         </Section>
 
@@ -1575,10 +1611,32 @@ function TransitionEditor({ style, onChange, thumbnailUrl }: { style: HookStyle;
   );
 }
 
-function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: { style: TextEmphasisStyle; onChange: (style: TextEmphasisStyle) => void; thumbnailUrl?: string; previewContext?: { jobId: string; clipRank: number; frame: number } }) {
+function TextEmphasisEditor({
+  style,
+  onChange,
+  thumbnailUrl,
+  previewContext,
+  aspectRatio,
+  canvasBackground,
+}: {
+  style: TextEmphasisStyle;
+  onChange: (style: TextEmphasisStyle) => void;
+  thumbnailUrl?: string;
+  previewContext?: { jobId: string; clipRank: number; frame: number };
+  aspectRatio?: string;
+  canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null;
+}) {
   useGoogleFont(style.fontFamily);
   const [exactPreview, setExactPreview] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
+    ? buildCanvasConfig(aspectRatio, {
+        backgroundMode: canvasBackground?.mode || "template",
+        templateId: canvasBackground?.templateId || "dark-studio",
+        backgroundImageUrl: canvasBackground?.imageDataUrl || null,
+      })
+    : null;
+
   useEffect(() => {
     if (!previewContext) return;
     let active = true;
@@ -1631,62 +1689,67 @@ function TextEmphasisEditor({ style, onChange, thumbnailUrl, previewContext }: {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.85fr)_minmax(360px,1.15fr)]">
         <div>
-          <div className="sticky top-0 aspect-[9/16] max-h-[520px] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl">
-            {exactPreview && <img src={exactPreview} alt="Exact final-render AI Text preview" className="absolute inset-0 z-40 h-full w-full object-cover" />}
-            {thumbnailUrl ? <img src={thumbnailUrl} alt="Video preview" className="absolute inset-0 h-full w-full object-cover opacity-70" /> : <div className="absolute inset-0 bg-gradient-to-b from-zinc-700 via-zinc-900 to-black" />}
-            {previewEffect === "hero_punch" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.75)_100%)]" />}
-            {previewEffect === "z_parallax" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,transparent_0%,rgba(0,0,0,.5)_100%)]" />}
-            {previewEffect === "split_impact" && <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-rose-500/20" />}
-            {previewEffect === "sticker_pop" && <div className="absolute inset-0 bg-black/25" />}
-            {previewEffect === "orbit_halo" && (
-              <div className="absolute left-1/2 top-[20%] z-20 h-12 w-12 -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
-            )}
-            {(previewEffect === "float_track" || previewEffect === "smart_gap") && (
-              <div className="absolute bottom-[12%] left-1/2 z-5 h-[55%] w-[42%] -translate-x-1/2 opacity-60">
-                <div className="absolute left-1/2 top-[8%] h-[20%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-xl" />
-                <div className="absolute bottom-0 left-1/2 h-[78%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-800 via-zinc-500 to-zinc-800 shadow-2xl" />
+          <div className="sticky top-0">
+            <CanvasPreviewFrame
+              canvas={canvas}
+              thumbnailUrl={thumbnailUrl}
+              className="max-h-[520px] max-w-none w-full shadow-2xl rounded-2xl border-zinc-700"
+            >
+              {exactPreview && <img src={exactPreview} alt="Exact final-render AI Text preview" className="absolute inset-0 z-40 h-full w-full object-cover" />}
+              {previewEffect === "hero_punch" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,.75)_100%)]" />}
+              {previewEffect === "z_parallax" && <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,transparent_0%,rgba(0,0,0,.5)_100%)]" />}
+              {previewEffect === "split_impact" && <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-rose-500/20" />}
+              {previewEffect === "sticker_pop" && <div className="absolute inset-0 bg-black/25" />}
+              {previewEffect === "orbit_halo" && (
+                <div className="absolute left-1/2 top-[20%] z-20 h-12 w-12 -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
+              )}
+              {(previewEffect === "float_track" || previewEffect === "smart_gap") && (
+                <div className="absolute bottom-[12%] left-1/2 z-5 h-[55%] w-[42%] -translate-x-1/2 opacity-60">
+                  <div className="absolute left-1/2 top-[8%] h-[20%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-xl" />
+                  <div className="absolute bottom-0 left-1/2 h-[78%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-800 via-zinc-500 to-zinc-800 shadow-2xl" />
+                </div>
+              )}
+              {previewEffect === "z_parallax" && (
+                <div className="absolute bottom-[15%] left-1/2 z-5 h-[60%] w-[46%] -translate-x-1/2 opacity-70" style={{ filter: "blur(0.5px)" }}>
+                  <div className="absolute left-1/2 top-[6%] h-[18%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-xl" />
+                  <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-800 via-zinc-500 to-zinc-800 shadow-2xl" />
+                </div>
+              )}
+              <div className={cn("absolute inset-x-[7%] z-10 flex", previewAlign)} style={{ top: previewTop, transform: "translateY(-50%)" }}>
+                <div style={{ ...textStyle, maxWidth: `${style.maxWidthPct}%` }}>
+                  {previewEffect === "side_rail" && <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: style.accentColor }} />}
+                  {previewEffect === "word_cascade" ? (
+                    <span>
+                      {kineticPreviewWords.map((word, idx) => (
+                        <span key={idx} style={{ display: "inline-block", marginRight: "0.25em", opacity: 0.6 + (idx % 3) * 0.2, transform: `translateY(${(2 - (idx % 3)) * 4}px)` }}>{word}</span>
+                      ))}
+                    </span>
+                  ) : previewEffect === "split_impact" ? (
+                    <span><span style={{ color: style.color }}>Ide Besar </span><span style={{ color: style.accentColor }}>yang Perlu</span></span>
+                  ) : previewEffect === "type_pulse" ? (
+                    <span>Ide Besar|</span>
+                  ) : previewEffect === "sticker_pop" ? (
+                    <span style={{ display: "inline-block", padding: "6px 10px", border: `2px solid ${style.accentColor}`, borderRadius: 8, transform: `rotate(${style.stickerAngle ?? -6}deg)`, background: `${style.accentColor}33` }}>Ide Besar</span>
+                  ) : previewEffect === "mirror_echo" ? (
+                    <span style={{ position: "relative", display: "inline-block" }}>
+                      <span style={{ position: "absolute", left: -4, top: 2, opacity: 0.35, color: style.accentColor }}>Ide Besar</span>
+                      <span style={{ position: "relative" }}>Ide Besar</span>
+                    </span>
+                  ) : (
+                    "Ide Besar yang Perlu Diingat"
+                  )}
+                  {previewEffect === "hero_punch" && <div className="mx-auto mt-2 h-1 w-16 rounded-full" style={{ backgroundColor: style.accentColor, boxShadow: `0 0 10px ${style.accentColor}` }} />}
+                  {previewEffect === "float_track" && <div className="mx-auto mt-2 h-1 w-12 rounded-full opacity-70" style={{ backgroundColor: style.accentColor }} />}
+                </div>
               </div>
-            )}
-            {previewEffect === "z_parallax" && (
-              <div className="absolute bottom-[15%] left-1/2 z-5 h-[60%] w-[46%] -translate-x-1/2 opacity-70" style={{ filter: "blur(0.5px)" }}>
-                <div className="absolute left-1/2 top-[6%] h-[18%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-xl" />
-                <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-800 via-zinc-500 to-zinc-800 shadow-2xl" />
-              </div>
-            )}
-            <div className={cn("absolute inset-x-[7%] z-10 flex", previewAlign)} style={{ top: previewTop, transform: "translateY(-50%)" }}>
-              <div style={{ ...textStyle, maxWidth: `${style.maxWidthPct}%` }}>
-                {previewEffect === "side_rail" && <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: style.accentColor }} />}
-                {previewEffect === "word_cascade" ? (
-                  <span>
-                    {kineticPreviewWords.map((word, idx) => (
-                      <span key={idx} style={{ display: "inline-block", marginRight: "0.25em", opacity: 0.6 + (idx % 3) * 0.2, transform: `translateY(${(2 - (idx % 3)) * 4}px)` }}>{word}</span>
-                    ))}
-                  </span>
-                ) : previewEffect === "split_impact" ? (
-                  <span><span style={{ color: style.color }}>Ide Besar </span><span style={{ color: style.accentColor }}>yang Perlu</span></span>
-                ) : previewEffect === "type_pulse" ? (
-                  <span>Ide Besar|</span>
-                ) : previewEffect === "sticker_pop" ? (
-                  <span style={{ display: "inline-block", padding: "6px 10px", border: `2px solid ${style.accentColor}`, borderRadius: 8, transform: `rotate(${style.stickerAngle ?? -6}deg)`, background: `${style.accentColor}33` }}>Ide Besar</span>
-                ) : previewEffect === "mirror_echo" ? (
-                  <span style={{ position: "relative", display: "inline-block" }}>
-                    <span style={{ position: "absolute", left: -4, top: 2, opacity: 0.35, color: style.accentColor }}>Ide Besar</span>
-                    <span style={{ position: "relative" }}>Ide Besar</span>
-                  </span>
-                ) : (
-                  "Ide Besar yang Perlu Diingat"
-                )}
-                {previewEffect === "hero_punch" && <div className="mx-auto mt-2 h-1 w-16 rounded-full" style={{ backgroundColor: style.accentColor, boxShadow: `0 0 10px ${style.accentColor}` }} />}
-                {previewEffect === "float_track" && <div className="mx-auto mt-2 h-1 w-12 rounded-full opacity-70" style={{ backgroundColor: style.accentColor }} />}
-              </div>
-            </div>
-            {previewEffect === "depth_cutout" && (
-              <div className="absolute bottom-0 left-1/2 z-20 h-[72%] w-[58%] -translate-x-1/2">
-                <div className="absolute left-1/2 top-[2%] h-[22%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
-                <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-700 via-zinc-300 to-zinc-700 shadow-2xl" />
-              </div>
-            )}
-            <div className="absolute bottom-3 left-3 z-50 rounded-md bg-black/60 px-2 py-1 text-[9px] text-zinc-400">{previewLoading ? "Rendering Remotion…" : exactPreview ? "Exact Remotion frame" : "Style simulation • proses clip untuk preview 1:1"}</div>
+              {previewEffect === "depth_cutout" && (
+                <div className="absolute bottom-0 left-1/2 z-20 h-[72%] w-[58%] -translate-x-1/2">
+                  <div className="absolute left-1/2 top-[2%] h-[22%] aspect-square -translate-x-1/2 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-xl" />
+                  <div className="absolute bottom-0 left-1/2 h-[80%] w-full -translate-x-1/2 rounded-t-[48%] bg-gradient-to-r from-zinc-700 via-zinc-300 to-zinc-700 shadow-2xl" />
+                </div>
+              )}
+              <div className="absolute bottom-3 left-3 z-50 rounded-md bg-black/60 px-2 py-1 text-[9px] text-zinc-400">{previewLoading ? "Rendering Remotion…" : exactPreview ? "Exact Remotion frame" : "Style simulation • proses clip untuk preview 1:1"}</div>
+            </CanvasPreviewFrame>
           </div>
         </div>
 
@@ -2790,18 +2853,91 @@ function HfStyleGrid({
   );
 }
 
+function CanvasPreviewFrame({
+  canvas,
+  thumbnailUrl,
+  children,
+  className,
+  aspectRatio = "9/16",
+  dimOverlay = false,
+}: {
+  canvas?: CanvasConfig | null;
+  thumbnailUrl?: string;
+  children?: React.ReactNode;
+  className?: string;
+  aspectRatio?: string;
+  dimOverlay?: boolean;
+}) {
+  return (
+    <div
+      className={cn("relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0", className)}
+      style={{ aspectRatio }}
+    >
+      {canvas ? (
+        <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
+          {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
+            <img
+              src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          )}
+          <CanvasAccents accents={canvas.accents || []} />
+          {(canvas.background.vignette || 0) > 0 && (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)`,
+              }}
+            />
+          )}
+          <div
+            className="absolute overflow-hidden bg-zinc-800"
+            style={{
+              left: `${canvas.layout.videoX * 100}%`,
+              top: `${canvas.layout.videoY * 100}%`,
+              width: `${canvas.layout.videoW * 100}%`,
+              height: `${canvas.layout.videoH * 100}%`,
+              borderRadius: canvas.layout.borderRadius || 0,
+              boxShadow: canvas.layout.shadow,
+            }}
+          >
+            {thumbnailUrl && (
+              <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />
+            )}
+            {dimOverlay && <div className="absolute inset-0 bg-black/40" />}
+          </div>
+          {children}
+        </div>
+      ) : (
+        <>
+          {thumbnailUrl ? (
+            <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-br from-zinc-700 to-zinc-950" />
+          )}
+          {dimOverlay && <div className="absolute inset-0 bg-black/40" />}
+          {children}
+        </>
+      )}
+    </div>
+  );
+}
+
 function HfLivePreview({
   preset,
   sample,
   kind,
   aspectRatio,
   thumbnailUrl,
+  canvas,
 }: {
   preset: HfStylePreset | undefined;
   sample: string;
   kind: "hook" | "subtitle";
   aspectRatio: string;
   thumbnailUrl?: string;
+  canvas?: CanvasConfig | null;
 }) {
   const accent = preset?.accent || "#22d3ee";
   const label = sample || preset?.preview || (kind === "hook" ? "HOOK TEXT" : "subtitle words");
@@ -2810,20 +2946,16 @@ function HfLivePreview({
       <p className="mb-2 text-center text-[10px] font-medium uppercase tracking-wider text-zinc-500">
         Live Preview · HyperFrames
       </p>
-      <div
-        className="relative mx-auto overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-xl"
-        style={{ aspectRatio: "9/16", width: "100%" }}
+      <CanvasPreviewFrame
+        canvas={canvas || null}
+        thumbnailUrl={thumbnailUrl}
+        className="mx-auto shadow-xl rounded-xl"
       >
-        {thumbnailUrl ? (
-          <img src={thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-70" />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 to-zinc-950" />
-        )}
         <HfFixedStylePreview id={preset?.id || ""} label={label} accent={accent} />
         <div className="absolute left-2 top-2 rounded bg-cyan-500/20 px-1.5 py-0.5 text-[8px] font-bold uppercase text-cyan-300">
           HF · {preset?.name || "template"}
         </div>
-      </div>
+      </CanvasPreviewFrame>
       <p className="mt-2 text-center text-[9px] text-zinc-500">
         Fast template · style fixed · {aspectRatio} content → 9:16 out
       </p>
@@ -2837,12 +2969,13 @@ function SkiaHookLivePreview({
   style,
   thumbnailUrl,
   aspectRatio = "9:16",
+  canvas,
 }: {
   style: HookStyle;
   thumbnailUrl?: string;
   aspectRatio?: string;
+  canvas?: CanvasConfig | null;
 }) {
-  const outerAspect = "9/16";
   const presetId = style.animation || "skia_zoom_punch";
   const preset = SKIA_HOOK_PRESETS.find(p => p.id === presetId || p.id === `skia_${presetId}`) || SKIA_HOOK_PRESETS[0];
   const sample = style.text || getHookPreviewSample(presetId);
@@ -2856,14 +2989,7 @@ function SkiaHookLivePreview({
           <Palette className="inline w-3 h-3 mr-1" />Skia Canvas GPU
         </span>
       </div>
-      <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
-        {thumbnailUrl ? (
-          <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 to-zinc-950" />
-        )}
-        <div className="absolute inset-0 bg-black/40" />
-
+      <CanvasPreviewFrame canvas={canvas || null} thumbnailUrl={thumbnailUrl} dimOverlay>
         <div className="absolute left-0 right-0 flex items-center justify-center px-3 pointer-events-none" style={{ top: posTop, transform: "translateY(-50%)" }}>
           {presetId === "skia_neon_cyberpunk" ? (
             <div
@@ -3162,7 +3288,7 @@ function SkiaHookLivePreview({
         <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-500 z-10">
           skia gpu · {preset.name} | {style.duration}s
         </p>
-      </div>
+      </CanvasPreviewFrame>
       <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Preset</span><p className="truncate text-amber-400">{preset.name}</p></div>
@@ -3175,12 +3301,13 @@ function SkiaSubtitleLivePreview({
   style,
   thumbnailUrl,
   activeWordIdx,
+  canvas,
 }: {
   style: SubtitleStyle;
   thumbnailUrl?: string;
   activeWordIdx: number;
+  canvas?: CanvasConfig | null;
 }) {
-  const outerAspect = "9/16";
   const presetId = style.stylePreset || "clean_editorial";
   const preset = SKIA_SUBTITLE_PRESETS.find(p => p.id === presetId) || SKIA_SUBTITLE_PRESETS[0];
   const posTop = `${style.positionY ?? 78}%`;
@@ -3207,14 +3334,7 @@ function SkiaSubtitleLivePreview({
           <Palette className="inline w-3 h-3 mr-1" />Skia Canvas GPU
         </span>
       </div>
-      <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
-        {thumbnailUrl ? (
-          <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 to-zinc-950" />
-        )}
-        <div className="absolute inset-0 bg-black/40" />
-
+      <CanvasPreviewFrame canvas={canvas || null} thumbnailUrl={thumbnailUrl} dimOverlay>
         <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: posTop, transform: "translateY(-50%)" }}>
           {presetId === "glassmorphism" ? (
             /* 1. Glassmorphism: Bright Frosted Glass Card with Glossy Border */
@@ -3603,7 +3723,7 @@ function SkiaSubtitleLivePreview({
         <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-500 z-10">
           skia gpu · {preset.name}
         </p>
-      </div>
+      </CanvasPreviewFrame>
       <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Preset</span><p className="truncate text-amber-400">{preset.name}</p></div>
@@ -4263,6 +4383,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             kind="hook"
             aspectRatio={aspectRatio}
             thumbnailUrl={thumbnailUrl}
+            canvas={canvas}
           />
         ) : engine === "ffmpeg" ? (
           <>
@@ -4270,63 +4391,32 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
               <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
               <span className="rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[9px] text-purple-300">FFmpeg Drawtext</span>
             </div>
-            <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
-              {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+            <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
               <div className="absolute left-0 right-0 flex items-center justify-center px-3 pointer-events-none" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
                 <p style={{ fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16), fontWeight: Number(style.fontWeight), fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`, color: style.color, textTransform: style.uppercase ? "uppercase" as const : "none" as const, textAlign: "center" as const, maxWidth: "92%", whiteSpace: "pre-line" as const, wordBreak: "break-word" as const, padding: "4px 8px", backgroundColor: style.bgOpacity > 0 ? `${style.bgColor || "black"}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", paintOrder: style.strokeEnabled ? "stroke" as const : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.25, 0.6)}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `2px 2px 0px ${style.shadowColor}` : undefined }}>
                   {style.text || getHookPreviewSample(style.animation || "zoom_punch")}
                 </p>
               </div>
               <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">ffmpeg {style.animation || "zoom_punch"} | {style.duration}s</p>
-            </div>
+            </CanvasPreviewFrame>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.color }}>{style.color}</p></div>
             </div>
           </>
         ) : engine === "skia" ? (
-          <SkiaHookLivePreview style={style} thumbnailUrl={thumbnailUrl} aspectRatio={aspectRatio} />
+          <SkiaHookLivePreview style={style} thumbnailUrl={thumbnailUrl} aspectRatio={aspectRatio} canvas={canvas} />
         ) : (
           <>
             <div className="mb-3 flex w-full items-center justify-between gap-2">
               <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
               <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{activeAnimation.label}</span>
             </div>
-            <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
-              {canvas ? (
-                <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
-                  {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
-                    <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                  )}
-                  <CanvasAccents accents={canvas.accents || []} />
-                  {(canvas.background.vignette || 0) > 0 && (
-                    <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
-                  )}
-                  <div
-                    className="absolute overflow-hidden bg-zinc-800"
-                    style={{
-                      left: `${canvas.layout.videoX * 100}%`,
-                      top: `${canvas.layout.videoY * 100}%`,
-                      width: `${canvas.layout.videoW * 100}%`,
-                      height: `${canvas.layout.videoH * 100}%`,
-                      borderRadius: canvas.layout.borderRadius || 0,
-                      boxShadow: canvas.layout.shadow,
-                    }}
-                  >
-                    {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
-                  </div>
-                  <HookPreviewRenderer style={style} />
-                  {style.lineEnabled && <AccentLinePreview style={style} />}
-                </div>
-              ) : (
-                <>
-                  {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-                  <HookPreviewRenderer style={style} />
-                  {style.lineEnabled && <AccentLinePreview style={style} />}
-                </>
-              )}
+            <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
+              <HookPreviewRenderer style={style} />
+              {style.lineEnabled && <AccentLinePreview style={style} />}
               <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">{style.animation.replace(/_/g, " ")} | {style.duration}s</p>
-            </div>
+            </CanvasPreviewFrame>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Style</span><p className="truncate text-zinc-300">{activeAnimation.label}</p></div>
@@ -5030,6 +5120,7 @@ export function SubtitleEditor({
             kind="subtitle"
             aspectRatio={aspectRatio}
             thumbnailUrl={thumbnailUrl}
+            canvas={canvas}
           />
         ) : engine === "ffmpeg" ? (
           <>
@@ -5037,8 +5128,7 @@ export function SubtitleEditor({
               <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
               <span className="rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[9px] text-purple-300">FFmpeg Drawtext</span>
             </div>
-            <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
-              {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+            <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
               <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
                 <div className="flex flex-wrap justify-center" style={{ gap: 3, maxWidth: "92%", backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgEnabled ? "4px 8px" : 0, borderRadius: style.bgRadius ? Math.min(style.bgRadius, 12) : 4 }}>
                   {["ini", "kata", "penting", "banget"].map((w, i) => {
@@ -5050,149 +5140,72 @@ export function SubtitleEditor({
                 </div>
               </div>
               <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">ffmpeg {style.lineTransition || "word_pop"}</p>
-            </div>
+            </CanvasPreviewFrame>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Preset</span><p className="truncate text-purple-300">{style.stylePreset || "classic"}</p></div>
             </div>
           </>
         ) : engine === "skia" ? (
-          <SkiaSubtitleLivePreview style={style} thumbnailUrl={thumbnailUrl} activeWordIdx={activeWordIdx} />
+          <SkiaSubtitleLivePreview style={style} thumbnailUrl={thumbnailUrl} activeWordIdx={activeWordIdx} canvas={canvas} />
         ) : (
           <>
             <div className="mb-3 flex w-full items-center justify-between gap-2">
               <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
               <span className={cn("rounded-md border px-2 py-1 text-[9px]", "border-zinc-800 bg-zinc-900 text-zinc-400")}>{SUBTITLE_TRANSITION_META[style.lineTransition].label}</span>
             </div>
-            <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
-              {canvas ? (
-                <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
-                  {(canvas.backgroundImageUrl || canvas.background?.imageUrl) && (
-                    <img src={(canvas.backgroundImageUrl || canvas.background.imageUrl) as string} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                  )}
-                  <CanvasAccents accents={canvas.accents || []} />
-                  {(canvas.background.vignette || 0) > 0 && (
-                    <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
-                  )}
-                  <div
-                    className="absolute overflow-hidden bg-zinc-800"
-                    style={{
-                      left: `${canvas.layout.videoX * 100}%`,
-                      top: `${canvas.layout.videoY * 100}%`,
-                      width: `${canvas.layout.videoW * 100}%`,
-                      height: `${canvas.layout.videoH * 100}%`,
-                      borderRadius: canvas.layout.borderRadius || 0,
-                      boxShadow: canvas.layout.shadow,
-                    }}
-                  >
-                    {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
+            <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
+              <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/10 to-transparent pointer-events-none" />
+              <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+                {style.lineTransition === "emphasis" ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
+                    <span style={{ color: style.highlightColor, fontSize: Math.max(style.fontSize * 0.85, 20), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: 900, textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined }}>Animasi</span>
                   </div>
-                  <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/10 to-transparent pointer-events-none" />
-                  <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                    {style.lineTransition === "emphasis" ? (
-                      <div className="flex flex-col items-center gap-1">
-                        <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
-                        <span style={{ color: style.highlightColor, fontSize: Math.max(style.fontSize * 0.85, 20), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: 900, textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined }}>Animasi</span>
-                      </div>
-                    ) : style.lineTransition === "line_reveal" ? (
-                      <div className={cn("overflow-hidden", getSubAnimationClass(style.animationStyle))} style={{ backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.42, borderRadius: style.bgRadius, borderLeft: `3px solid ${style.highlightColor}` }}>
-                        <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
-                        <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
-                          {["ini", "kata", "penting", "banget"].map((w, i) => {
-                            const isHighlight = i === activeWordIdx;
-                            return (
-                              <span key={w} style={{ color: isHighlight ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isHighlight ? 900 : Number(style.fontWeight), letterSpacing: style.letterSpacing, textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined }}>{w}</span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
-                        {["ini", "kata", "penting", "banget"].map((w, i) => {
-                          const isHighlight = i === activeWordIdx;
-                          const isKeyword = style.highlightWords.includes(w);
-                          const shouldHighlight = isHighlight || isKeyword;
-                          const useDual = shouldHighlight && style.dualStyleEnabled;
-                          const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
-                          const hlStyle = style.highlightStyle || "scale";
-                          const wordStyles: React.CSSProperties = {
-                            color: shouldHighlight ? style.highlightColor : style.color,
-                            fontSize: fs,
-                            fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
-                            fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
-                            fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
-                            letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
-                            textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none"),
-                            textShadow: [(useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "", shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : ""].filter(Boolean).join(", ") || undefined,
-                            WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
-                            transition: "all 0.2s ease",
-                            display: "inline-block",
-                            ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
-                            ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
-                            ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
-                          };
-                          return <span key={i} style={wordStyles}>{w}</span>;
-                        })}
-                      </div>
-                    )}
+                ) : style.lineTransition === "line_reveal" ? (
+                  <div className={cn("overflow-hidden", getSubAnimationClass(style.animationStyle))} style={{ backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.42, borderRadius: style.bgRadius, borderLeft: `3px solid ${style.highlightColor}` }}>
+                    <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
+                    <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
+                      {["ini", "kata", "penting", "banget"].map((w, i) => {
+                        const isHighlight = i === activeWordIdx;
+                        return (
+                          <span key={w} style={{ color: isHighlight ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isHighlight ? 900 : Number(style.fontWeight), letterSpacing: style.letterSpacing, textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined }}>{w}</span>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <>
-                  {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-                  <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/30 to-zinc-900/50" />
-                  <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                    {style.lineTransition === "emphasis" ? (
-                      <div className="flex flex-col items-center gap-1">
-                        <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
-                        <span style={{ color: style.highlightColor, fontSize: Math.max(style.fontSize * 0.85, 20), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: 900, textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined }}>Animasi</span>
-                      </div>
-                    ) : style.lineTransition === "line_reveal" ? (
-                      <div className={cn("overflow-hidden", getSubAnimationClass(style.animationStyle))} style={{ backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.42, borderRadius: style.bgRadius, borderLeft: `3px solid ${style.highlightColor}` }}>
-                        <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
-                        <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
-                          {["ini", "kata", "penting", "banget"].map((w, i) => {
-                            const isHighlight = i === activeWordIdx;
-                            return (
-                              <span key={w} style={{ color: isHighlight ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isHighlight ? 900 : Number(style.fontWeight), letterSpacing: style.letterSpacing, textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined }}>{w}</span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
-                        {["ini", "kata", "penting", "banget"].map((w, i) => {
-                          const isHighlight = i === activeWordIdx;
-                          const isKeyword = style.highlightWords.includes(w);
-                          const shouldHighlight = isHighlight || isKeyword;
-                          const useDual = shouldHighlight && style.dualStyleEnabled;
-                          const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
-                          const hlStyle = style.highlightStyle || "scale";
-                          const wordStyles: React.CSSProperties = {
-                            color: shouldHighlight ? style.highlightColor : style.color,
-                            fontSize: fs,
-                            fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
-                            fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
-                            fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
-                            letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
-                            textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none"),
-                            textShadow: [(useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "", shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : ""].filter(Boolean).join(", ") || undefined,
-                            WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
-                            transition: "all 0.2s ease",
-                            display: "inline-block",
-                            ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
-                            ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
-                            ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
-                          };
-                          return <span key={i} style={wordStyles}>{w}</span>;
-                        })}
-                      </div>
-                    )}
+                ) : (
+                  <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
+                    {["ini", "kata", "penting", "banget"].map((w, i) => {
+                      const isHighlight = i === activeWordIdx;
+                      const isKeyword = style.highlightWords.includes(w);
+                      const shouldHighlight = isHighlight || isKeyword;
+                      const useDual = shouldHighlight && style.dualStyleEnabled;
+                      const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
+                      const hlStyle = style.highlightStyle || "scale";
+                      const wordStyles: React.CSSProperties = {
+                        color: shouldHighlight ? style.highlightColor : style.color,
+                        fontSize: fs,
+                        fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
+                        fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
+                        fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
+                        letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
+                        textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none"),
+                        textShadow: [(useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "", shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : ""].filter(Boolean).join(", ") || undefined,
+                        WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
+                        transition: "all 0.2s ease",
+                        display: "inline-block",
+                        ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
+                        ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
+                        ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
+                      };
+                      return <span key={i} style={wordStyles}>{w}</span>;
+                    })}
                   </div>
-                </>
-              )}
+                )}
+              </div>
               <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">{style.lineTransition === "emphasis" ? "emphasis" : style.animationStyle} | {style.position}</p>
-            </div>
+            </CanvasPreviewFrame>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Highlight</span><p className="truncate" style={{ color: style.highlightColor }}>{style.highlightColor}</p></div>

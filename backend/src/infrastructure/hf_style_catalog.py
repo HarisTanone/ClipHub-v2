@@ -25,6 +25,11 @@ HOOK_STYLES = (
     {"id": "hook_orbit_stamp_v2", "name": "Orbit Stamp", "design": "orbit-stamp", "accent": "#8B5CF6", "description": "Cap lingkaran orbit berputar futuristik"},
     {"id": "hook_pixel_ticker_v2", "name": "Pixel Ticker", "design": "pixel-ticker", "accent": "#F7FF58", "description": "Pixel ticker kuning retro dengan grid dot"},
     {"id": "hook_blueprint_v2", "name": "Blueprint Reveal", "design": "blueprint-reveal", "accent": "#52C7FF", "description": "Sketsa blueprint biru arsitektural"},
+    {"id": "hook_neon_matrix", "name": "Matrix Rain Cyber Term", "design": "neon-matrix", "accent": "#10B981", "description": "Terminal green phosphor box dengan cursor prompt cyber"},
+    {"id": "hook_warning_hazard", "name": "Warning Industrial Hazard", "design": "warning-hazard", "accent": "#F59E0B", "description": "Pita hazard striping dengan badge critical notice"},
+    {"id": "hook_sticker_scrapbook", "name": "Y2K Scrapbook Sticker", "design": "sticker-scrapbook", "accent": "#EC4899", "description": "Sticker miring warna pink-putih dengan border dashed & tape"},
+    {"id": "hook_cinematic_minimal", "name": "Ultra Modern Serif Slate", "design": "cinematic-minimal", "accent": "#F8FAFC", "description": "Typography slate serif titanium mewah dengan garis pemisah emas"},
+    {"id": "hook_electric_surge", "name": "Electric Plasma Shockwave", "design": "electric-surge", "accent": "#818CF8", "description": "Shockwave plasma elektrik dengan aksen petir & glow biru-indigo"},
 )
 
 SUBTITLE_STYLES = (

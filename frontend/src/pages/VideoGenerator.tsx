@@ -388,7 +388,17 @@ function SceneFootageStudioModal({
 
   const handleSelectFootage = (sceneId: number, candidate: FootageCandidate) => {
     setScenes((prev) =>
-      prev.map((s) => (s.id === sceneId ? { ...s, selected_footage: candidate } : s))
+      prev.map((s) => {
+        if (s.id !== sceneId) return s;
+        // Toggle selection if clicking the already selected candidate
+        const isCurrent =
+          s.selected_footage?.video_id === candidate.video_id ||
+          s.selected_footage?.url === candidate.url;
+        return {
+          ...s,
+          selected_footage: isCurrent ? null : candidate,
+        };
+      })
     );
   };
 
@@ -402,10 +412,20 @@ function SceneFootageStudioModal({
     setScenes((prev) =>
       prev.map((s) => ({
         ...s,
-        selected_footage: s.selected_footage || s.footage_candidates?.[0] || null,
+        selected_footage: s.footage_candidates?.[0] || null,
       }))
     );
     toast.success("Auto-selected best footage candidates for all scenes");
+  };
+
+  const handleClearAll = () => {
+    setScenes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        selected_footage: null,
+      }))
+    );
+    toast.info("Cleared footage selections (will use auto fallback)");
   };
 
   const handleSearchCustomForScene = async (sceneId: number) => {
@@ -484,6 +504,9 @@ function SceneFootageStudioModal({
             </span>
             <Button size="xs" variant="ghost" onClick={handleAutoSelectAll}>
               Auto-Select Top
+            </Button>
+            <Button size="xs" variant="ghost" onClick={handleClearAll} className="text-zinc-500 hover:text-zinc-300">
+              Clear All
             </Button>
             <button
               type="button"
@@ -602,6 +625,20 @@ function SceneFootageStudioModal({
                             scene.selected_footage?.video_id === cand.video_id ||
                             scene.selected_footage?.url === cand.url;
 
+                          const platformLabel =
+                            cand.platform === "pexels"
+                              ? "Pexels"
+                              : cand.platform === "pixabay"
+                              ? "Pixabay"
+                              : "YouTube";
+
+                          const platformColor =
+                            cand.platform === "pexels"
+                              ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/30"
+                              : cand.platform === "pixabay"
+                              ? "bg-sky-950/80 text-sky-300 border-sky-500/30"
+                              : "bg-red-950/80 text-red-300 border-red-500/30";
+
                           return (
                             <div
                               key={cand.video_id}
@@ -635,8 +672,13 @@ function SceneFootageStudioModal({
                                 )}
 
                                 {/* Platform badge */}
-                                <span className="absolute bottom-1 left-1 px-1.5 py-0.2 rounded text-[9px] font-semibold bg-black/75 text-zinc-300 backdrop-blur-xs">
-                                  {cand.platform === "pexels" ? "Pexels" : "YouTube"}
+                                <span
+                                  className={cn(
+                                    "absolute bottom-1 left-1 px-1.5 py-0.2 rounded text-[9px] font-semibold border backdrop-blur-xs",
+                                    platformColor
+                                  )}
+                                >
+                                  {platformLabel}
                                 </span>
 
                                 {cand.duration_seconds > 0 && (
