@@ -3129,7 +3129,39 @@ function SkiaSubtitleLivePreview({
         <div className="absolute inset-0 bg-black/40" />
 
         <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: posTop, transform: "translateY(-50%)" }}>
-          {presetId === "clean_editorial" ? (
+          {presetId === "glassmorphism" ? (
+            <div
+              style={{
+                backdropFilter: "blur(12px)",
+                WebkitBackdropFilter: "blur(12px)",
+                backgroundColor: "rgba(30, 41, 59, 0.45)",
+                border: "1px solid rgba(255, 255, 255, 0.25)",
+                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
+                borderRadius: "14px",
+                padding: "8px 14px",
+                display: "flex",
+                gap: 5,
+              }}
+            >
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? (style.highlightColor || "#38BDF8") : "#FFFFFF",
+                      fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontWeight: isActive ? 900 : Number(style.fontWeight || 600),
+                      textShadow: isActive ? "0 0 10px rgba(56, 189, 248, 0.6)" : "none",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "clean_editorial" ? (
             <div
               style={{
                 backgroundColor: "rgba(15, 23, 42, 0.7)",
@@ -3159,28 +3191,6 @@ function SkiaSubtitleLivePreview({
                 );
               })}
             </div>
-          ) : presetId === "nordic_minimal" ? (
-            <div className="flex flex-col items-center">
-              <div className="flex gap-1.5">
-                {words.map((w, i) => {
-                  const isActive = i === activeWordIdx;
-                  return (
-                    <span
-                      key={w}
-                      style={{
-                        color: isActive ? "#F8FAFC" : "#94A3B8",
-                        fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif`,
-                        fontSize: Math.max(style.fontSize * 0.32, 11),
-                        fontWeight: isActive ? 700 : 500,
-                      }}
-                    >
-                      {w}
-                    </span>
-                  );
-                })}
-              </div>
-              <div style={{ width: "60%", height: 2, backgroundColor: "#38BDF8", borderRadius: 99, marginTop: 4 }} />
-            </div>
           ) : presetId === "podcast_pro" ? (
             <div
               style={{
@@ -3203,6 +3213,81 @@ function SkiaSubtitleLivePreview({
                       fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
                       fontSize: Math.max(style.fontSize * 0.32, 11),
                       fontWeight: isActive ? 900 : 600,
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "kinetic_word_box" ? (
+            <div className="flex items-center gap-1.5">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      backgroundColor: isActive ? "#FF0055" : "transparent",
+                      color: isActive ? "#FFFFFF" : "#E2E8F0",
+                      fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontWeight: isActive ? 900 : 700,
+                      borderRadius: isActive ? "6px" : "0px",
+                      padding: isActive ? "3px 7px" : "0px",
+                      boxShadow: isActive ? "0 4px 14px rgba(255,0,85,0.55)" : "none",
+                      transform: isActive ? "scale(1.08)" : "scale(1.0)",
+                      transition: "all 0.12s ease",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "neon_tube" ? (
+            <div className="flex gap-2">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                const neonHl = style.highlightColor || "#FF007F";
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? neonHl : "transparent",
+                      WebkitTextStroke: isActive ? `1.5px ${neonHl}` : "1.5px #00FFFF",
+                      fontFamily: `'${style.fontFamily || "Montserrat"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontWeight: 900,
+                      textTransform: "uppercase",
+                      textShadow: isActive
+                        ? `0 0 6px ${neonHl}, 0 0 16px ${neonHl}`
+                        : "0 0 4px #00FFFF, 0 0 12px #00FFFF",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "gradient_fill" ? (
+            <div className="flex gap-1.5">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                const grad = isActive
+                  ? "linear-gradient(45deg, #F5576C, #FF9A76)"
+                  : "linear-gradient(135deg, #6366F1, #8B5CF6, #EC4899)";
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      background: grad,
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontWeight: 800,
+                      filter: isActive ? "drop-shadow(0 2px 8px rgba(245, 87, 108, 0.4))" : "none",
                     }}
                   >
                     {w}
@@ -3260,7 +3345,7 @@ function SkiaSubtitleLivePreview({
                 );
               })}
             </div>
-          ) : presetId === "soft_shadow_lead" ? (
+          ) : presetId === "bold_impact_stroke" ? (
             <div className="flex gap-1.5">
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
@@ -3268,121 +3353,13 @@ function SkiaSubtitleLivePreview({
                   <span
                     key={w}
                     style={{
-                      color: isActive ? "#FBBF24" : "#FFFFFF",
-                      fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.36, 13),
-                      fontWeight: 900,
-                      WebkitTextStroke: "0.8px #000",
-                      textShadow: "0 4px 14px rgba(0,0,0,0.85)",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "glassmorphism" ? (
-            <div
-              style={{
-                backdropFilter: "blur(12px)",
-                WebkitBackdropFilter: "blur(12px)",
-                backgroundColor: "rgba(30, 41, 59, 0.45)",
-                border: "1px solid rgba(255, 255, 255, 0.25)",
-                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
-                borderRadius: "14px",
-                padding: "8px 12px",
-                display: "flex",
-                gap: 5,
-              }}
-            >
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? (style.highlightColor || "#38BDF8") : "#FFFFFF",
-                      fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.32, 11),
-                      fontWeight: isActive ? 900 : Number(style.fontWeight || 600),
-                      textShadow: isActive ? "0 0 10px rgba(56, 189, 248, 0.6)" : "none",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "neon_tube" ? (
-            <div className="flex gap-2">
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                const neonHl = style.highlightColor || "#FF00FF";
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? neonHl : "transparent",
-                      WebkitTextStroke: isActive ? `1.5px ${neonHl}` : "1.5px #00FFFF",
-                      fontFamily: `'${style.fontFamily || "Montserrat"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      color: isActive ? "#FACC15" : "#FFFFFF",
+                      fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.38, 14),
                       fontWeight: 900,
                       textTransform: "uppercase",
-                      textShadow: isActive
-                        ? `0 0 6px ${neonHl}, 0 0 16px ${neonHl}`
-                        : "0 0 4px #00FFFF, 0 0 12px #00FFFF",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "per_word_badge" ? (
-            <div className="flex flex-wrap justify-center gap-1.5">
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                const palette = ["#FF6B6B", "#FFA502", "#7BED9F", "#70A1FF", "#A855F7", "#F472B6"];
-                const bg = isActive ? "#FF0844" : palette[i % palette.length];
-                const rotate = (i % 2 === 0 ? -1.5 : 1.5);
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      backgroundColor: bg,
-                      color: "#FFFFFF",
-                      fontFamily: `'${style.fontFamily || "Nunito"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.28, 10),
-                      fontWeight: 800,
-                      borderRadius: 99,
-                      padding: "2px 8px",
-                      transform: `rotate(${rotate}deg) ${isActive ? "scale(1.08)" : ""}`,
-                      boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "gradient_fill" ? (
-            <div className="flex gap-1.5">
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                const grad = isActive
-                  ? "linear-gradient(45deg, #F5576C, #FF9A76)"
-                  : "linear-gradient(135deg, #667EEA, #764BA2, #F093FB)";
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      background: grad,
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.35, 12),
-                      fontWeight: 800,
-                      filter: isActive ? "drop-shadow(0 2px 8px rgba(245, 87, 108, 0.4))" : "none",
+                      WebkitTextStroke: "1px #000000",
+                      textShadow: "0 4px 14px rgba(0,0,0,0.85)",
                     }}
                   >
                     {w}
@@ -3445,7 +3422,7 @@ function SkiaSubtitleLivePreview({
               <span className="absolute left-[-2px] top-[-2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #FF0000", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
                 {words.join(" ")}
               </span>
-              <span className="absolute left-[2px] top-[2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #0000FF", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
+              <span className="absolute left-[2px] top-[2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #00FFFF", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
                 {words.join(" ")}
               </span>
               {words.map((w, i) => {
@@ -3455,7 +3432,7 @@ function SkiaSubtitleLivePreview({
                     key={w}
                     style={{
                       position: "relative",
-                      color: isActive ? "#FFFFFF" : "#00FF00",
+                      color: isActive ? "#FFFFFF" : "transparent",
                       WebkitTextStroke: "1px #000000",
                       fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`,
                       fontSize: Math.max(style.fontSize * 0.35, 12),
@@ -3492,6 +3469,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [presetPage, setPresetPage] = useState(1);
   const [animationPage, setAnimationPage] = useState(() => getPageForIndex(HOOK_ANIMATIONS.indexOf(style.animation)));
+  const [ffmpegHookPage, setFfmpegHookPage] = useState(1);
+  const [skiaHookPage, setSkiaHookPage] = useState(1);
   useGoogleFont(style.fontFamily);
   const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
     ? buildCanvasConfig(aspectRatio, {
@@ -3507,6 +3486,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
   const isModernHookStyle = Boolean(HOOK_CAPABILITIES[style.animation]);
   const visibleHookPresets = getPageItems(HOOK_PRESETS, presetPage);
   const visibleHookAnimations = getPageItems(HOOK_ANIMATIONS, animationPage);
+  const visibleFfmpegHooks = getPageItems(FFMPEG_HOOK_PRESETS, ffmpegHookPage);
+  const visibleSkiaHooks = getPageItems(SKIA_HOOK_PRESETS, skiaHookPage);
 
   useEffect(() => {
     setAnimationPage(getPageForIndex(HOOK_ANIMATIONS.indexOf(style.animation)));
@@ -3560,8 +3541,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             </Section>
 
             <Section title="Hook Style Preset">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {FFMPEG_HOOK_PRESETS.map(preset => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {visibleFfmpegHooks.map(preset => (
                   <button
                     key={preset.id}
                     type="button"
@@ -3626,6 +3607,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                   </button>
                 ))}
               </div>
+              <PaginationControls page={ffmpegHookPage} totalItems={FFMPEG_HOOK_PRESETS.length} onPageChange={setFfmpegHookPage} label="presets" />
             </Section>
 
             <Section title="Hook Text">
@@ -3697,13 +3679,13 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             <Section title="Skia Render Engine">
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
                 <p className="text-[10px] text-amber-400 mb-1"><Palette className="inline w-3 h-3 mr-1" />Canvas GPU Rendering</p>
-                <p className="text-[9px] text-zinc-500">Hook animation dirender cepat via GPU Skia Canvas. 8 Preset dengan efek shader khusus.</p>
+                <p className="text-[9px] text-zinc-500">Hook animation dirender cepat via GPU Skia Canvas. 12 Preset dengan efek shader khusus.</p>
               </div>
             </Section>
 
             <Section title="Skia Hook Presets">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {SKIA_HOOK_PRESETS.map(preset => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {visibleSkiaHooks.map(preset => (
                   <button
                     key={preset.id}
                     type="button"
@@ -3774,6 +3756,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                   </button>
                 ))}
               </div>
+              <PaginationControls page={skiaHookPage} totalItems={SKIA_HOOK_PRESETS.length} onPageChange={setSkiaHookPage} label="presets" />
             </Section>
 
             <Section title="Hook Text">
@@ -4169,8 +4152,12 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
       { kind: "animation", id: "slide", meta: SUBTITLE_ANIMATION_META.slide },
       { kind: "animation", id: "none", meta: SUBTITLE_ANIMATION_META.none },
     ];
+  const [ffmpegSubPage, setFfmpegSubPage] = useState(1);
+  const [skiaSubPage, setSkiaSubPage] = useState(1);
   const visibleSubtitlePresets = getPageItems(SUBTITLE_PRESETS, presetPage);
   const visibleSubtitleTiming = getPageItems(subtitleTimingOptions, timingPage);
+  const visibleFfmpegSubs = getPageItems(FFMPEG_SUBTITLE_PRESETS, ffmpegSubPage);
+  const visibleSkiaSubs = getPageItems(SKIA_SUBTITLE_PRESETS, skiaSubPage);
   const activeTimingMeta = SUBTITLE_TRANSITION_META[style.lineTransition] || SUBTITLE_ANIMATION_META[style.animationStyle];
 
   // Auto fallback for non-superadmin users if engine is superuserOnly
@@ -4224,13 +4211,13 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             <Section title="FFmpeg Drawtext">
               <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
                 <p className="text-[10px] text-purple-300 mb-1"><Zap className="inline w-3 h-3 mr-1" />Server-side render · no browser needed</p>
-                <p className="text-[9px] text-zinc-500">FFmpeg drawtext subtitle. 10 Preset gaya subtitle dengan performa instan.</p>
+                <p className="text-[9px] text-zinc-500">FFmpeg drawtext subtitle. 12 Preset gaya subtitle dengan performa instan.</p>
               </div>
             </Section>
 
             <Section title="FFmpeg Subtitle Presets">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {FFMPEG_SUBTITLE_PRESETS.map(p => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {visibleFfmpegSubs.map(p => (
                   <button
                     key={p.id}
                     type="button"
@@ -4274,6 +4261,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                   </button>
                 ))}
               </div>
+              <PaginationControls page={ffmpegSubPage} totalItems={FFMPEG_SUBTITLE_PRESETS.length} onPageChange={setFfmpegSubPage} label="presets" />
             </Section>
 
             <Section title="Line Transition">
@@ -4375,13 +4363,13 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             <Section title="Skia Render Engine">
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
                 <p className="text-[10px] text-amber-400 mb-1"><Palette className="inline w-3 h-3 mr-1" />Canvas GPU Rendering</p>
-                <p className="text-[9px] text-zinc-500">Subtitle dengan 10 preset visual advanced (Glassmorphism, Gradient Fill, Neon Tube, Per-Word Badges, dll).</p>
+                <p className="text-[9px] text-zinc-500">Subtitle dengan 12 preset visual modern & clean (Glassmorphism, Clean Editorial, Podcast Pro, Kinetic Word Box, dll).</p>
               </div>
             </Section>
 
             <Section title="Skia Subtitle Presets">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {SKIA_SUBTITLE_PRESETS.map(p => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {visibleSkiaSubs.map(p => (
                   <button
                     key={p.id}
                     type="button"
@@ -4423,6 +4411,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                   </button>
                 ))}
               </div>
+              <PaginationControls page={skiaSubPage} totalItems={SKIA_SUBTITLE_PRESETS.length} onPageChange={setSkiaSubPage} label="presets" />
             </Section>
 
             <Section title="Line Transition">
