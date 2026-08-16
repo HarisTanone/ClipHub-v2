@@ -19,6 +19,10 @@ import {
   defaultHfHookId,
   defaultHfSubtitleId,
   type HfStylePreset,
+  FFMPEG_HOOK_PRESETS,
+  FFMPEG_SUBTITLE_PRESETS,
+  SKIA_HOOK_PRESETS,
+  SKIA_SUBTITLE_PRESETS,
 } from "@/lib/renderEngines";
 
 type OptionMeta = {
@@ -959,6 +963,7 @@ const SUBTITLE_PRESETS: { id: string; name: string; style: Partial<SubtitleStyle
     },
   },
 ];
+
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
@@ -2797,6 +2802,373 @@ function HfLivePreview({
   );
 }
 
+// ─── Skia Live Previews ──────────────────────────────────────────────────────
+
+function SkiaHookLivePreview({
+  style,
+  thumbnailUrl,
+  aspectRatio = "9:16",
+}: {
+  style: HookStyle;
+  thumbnailUrl?: string;
+  aspectRatio?: string;
+}) {
+  const outerAspect = "9/16";
+  const presetId = style.animation || "skia_zoom_punch";
+  const preset = SKIA_HOOK_PRESETS.find(p => p.id === presetId || p.id === `skia_${presetId}`) || SKIA_HOOK_PRESETS[0];
+  const sample = style.text || getHookPreviewSample(presetId);
+  const posTop = `${style.positionY ?? 40}%`;
+
+  return (
+    <>
+      <div className="mb-3 flex w-full items-center justify-between gap-2">
+        <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+        <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[9px] text-amber-300">
+          <Palette className="inline w-3 h-3 mr-1" />Skia Canvas GPU
+        </span>
+      </div>
+      <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
+        {thumbnailUrl ? (
+          <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 to-zinc-950" />
+        )}
+        <div className="absolute inset-0 bg-black/40" />
+
+        <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+          {presetId.includes("glitch") ? (
+            <div className="relative text-center">
+              <p style={{
+                position: "absolute",
+                inset: 0,
+                color: "#FF0000",
+                opacity: 0.7,
+                transform: "translate(-3px, 0)",
+                fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
+                fontSize: Math.max(style.fontSize * 0.32, 14),
+                fontWeight: Number(style.fontWeight || 700),
+                textTransform: "uppercase",
+              }}>{sample}</p>
+              <p style={{
+                position: "absolute",
+                inset: 0,
+                color: "#00FFFF",
+                opacity: 0.7,
+                transform: "translate(3px, 0)",
+                fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
+                fontSize: Math.max(style.fontSize * 0.32, 14),
+                fontWeight: Number(style.fontWeight || 700),
+                textTransform: "uppercase",
+              }}>{sample}</p>
+              <p style={{
+                position: "relative",
+                color: style.color || "#FFFFFF",
+                fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
+                fontSize: Math.max(style.fontSize * 0.32, 14),
+                fontWeight: Number(style.fontWeight || 700),
+                textTransform: "uppercase",
+              }}>{sample}</p>
+            </div>
+          ) : presetId.includes("shake") || presetId.includes("neon") || style.glowEnabled ? (
+            <p style={{
+              fontSize: Math.max(style.fontSize * 0.32, 14),
+              fontWeight: Number(style.fontWeight || 700),
+              fontFamily: `'${style.fontFamily || "Bungee"}', sans-serif`,
+              color: style.color || "#00FFCC",
+              textTransform: "uppercase",
+              textAlign: "center",
+              textShadow: `0 0 10px ${style.glowColor || "#00FFCC"}, 0 0 20px ${style.glowColor || "#00FFCC"}, 0 0 40px ${style.glowColor || "#00FFCC"}`,
+            }}>
+              {sample}
+            </p>
+          ) : presetId.includes("cinematic") || style.gradientEnabled ? (
+            <div className="w-full text-center">
+              <div className="absolute top-0 left-0 right-0 h-4 bg-black/80" />
+              <div className="absolute bottom-0 left-0 right-0 h-4 bg-black/80" />
+              <p style={{
+                fontSize: Math.max(style.fontSize * 0.32, 14),
+                fontWeight: Number(style.fontWeight || 700),
+                fontFamily: `'${style.fontFamily || "Playfair Display"}', serif`,
+                background: `linear-gradient(135deg, ${style.gradientFrom || "#FFE066"}, ${style.gradientTo || "#FF9900"})`,
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                textAlign: "center",
+                letterSpacing: "0.05em",
+              }}>
+                {sample}
+              </p>
+            </div>
+          ) : (
+            <p style={{
+              fontSize: Math.max(style.fontSize * 0.32, 14),
+              fontWeight: Number(style.fontWeight || 700),
+              fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily || "Anton"}', sans-serif`,
+              color: style.color || "#FFFFFF",
+              textTransform: style.uppercase ? "uppercase" : "none",
+              textAlign: "center",
+              maxWidth: "90%",
+              whiteSpace: "pre-line",
+              wordBreak: "break-word",
+              padding: "4px 8px",
+              backgroundColor: style.bgOpacity > 0 ? `${style.bgColor || "black"}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent",
+              paintOrder: style.strokeEnabled ? "stroke" : undefined,
+              WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor || "#000"}` : undefined,
+              textShadow: style.shadowEnabled ? `2px 2px 0px ${style.shadowColor || "#000"}` : undefined,
+            }}>
+              {sample}
+            </p>
+          )}
+        </div>
+        <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-500 z-10">
+          skia gpu · {preset.name} | {style.duration}s
+        </p>
+      </div>
+      <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Preset</span><p className="truncate text-amber-400">{preset.name}</p></div>
+      </div>
+    </>
+  );
+}
+
+function SkiaSubtitleLivePreview({
+  style,
+  thumbnailUrl,
+  activeWordIdx,
+}: {
+  style: SubtitleStyle;
+  thumbnailUrl?: string;
+  activeWordIdx: number;
+}) {
+  const outerAspect = "9/16";
+  const presetId = style.stylePreset || "gradient_fill";
+  const preset = SKIA_SUBTITLE_PRESETS.find(p => p.id === presetId) || SKIA_SUBTITLE_PRESETS[0];
+  const posTop = `${style.positionY ?? 78}%`;
+  const words = ["ini", "kata", "penting", "banget"];
+
+  return (
+    <>
+      <div className="mb-3 flex w-full items-center justify-between gap-2">
+        <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+        <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[9px] text-amber-300">
+          <Palette className="inline w-3 h-3 mr-1" />Skia Canvas GPU
+        </span>
+      </div>
+      <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
+        {thumbnailUrl ? (
+          <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 to-zinc-950" />
+        )}
+        <div className="absolute inset-0 bg-black/40" />
+
+        <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: posTop, transform: "translateY(-50%)" }}>
+          {presetId === "glassmorphism" ? (
+            <div
+              style={{
+                backdropFilter: "blur(12px)",
+                WebkitBackdropFilter: "blur(12px)",
+                backgroundColor: "rgba(30, 41, 59, 0.45)",
+                border: "1px solid rgba(255, 255, 255, 0.25)",
+                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
+                borderRadius: "14px",
+                padding: "8px 12px",
+                display: "flex",
+                gap: 5,
+              }}
+            >
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? (style.highlightColor || "#38BDF8") : "#FFFFFF",
+                      fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontWeight: isActive ? 900 : Number(style.fontWeight || 600),
+                      textShadow: isActive ? "0 0 10px rgba(56, 189, 248, 0.6)" : "none",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "neon_tube" ? (
+            <div className="flex gap-2">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                const neonHl = style.highlightColor || "#FF00FF";
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? neonHl : "transparent",
+                      WebkitTextStroke: isActive ? `1.5px ${neonHl}` : "1.5px #00FFFF",
+                      fontFamily: `'${style.fontFamily || "Montserrat"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontWeight: 900,
+                      textTransform: "uppercase",
+                      textShadow: isActive
+                        ? `0 0 6px ${neonHl}, 0 0 16px ${neonHl}`
+                        : "0 0 4px #00FFFF, 0 0 12px #00FFFF",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "per_word_badge" ? (
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                const palette = ["#FF6B6B", "#FFA502", "#7BED9F", "#70A1FF", "#A855F7", "#F472B6"];
+                const bg = isActive ? "#FF0844" : palette[i % palette.length];
+                const rotate = (i % 2 === 0 ? -1.5 : 1.5);
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      backgroundColor: bg,
+                      color: "#FFFFFF",
+                      fontFamily: `'${style.fontFamily || "Nunito"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.28, 10),
+                      fontWeight: 800,
+                      borderRadius: 99,
+                      padding: "2px 8px",
+                      transform: `rotate(${rotate}deg) ${isActive ? "scale(1.08)" : ""}`,
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "gradient_fill" ? (
+            <div className="flex gap-1.5">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                const grad = isActive
+                  ? "linear-gradient(45deg, #F5576C, #FF9A76)"
+                  : "linear-gradient(135deg, #667EEA, #764BA2, #F093FB)";
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      background: grad,
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontWeight: 800,
+                      filter: isActive ? "drop-shadow(0 2px 8px rgba(245, 87, 108, 0.4))" : "none",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "dual_layer" ? (
+            <div className="relative flex gap-1.5">
+              <div className="absolute inset-0 flex gap-1.5 filter blur-[3px] opacity-70 transform translate-y-1">
+                {words.map((w) => (
+                  <span key={`blur-${w}`} style={{ color: "#7C3AED", fontSize: Math.max(style.fontSize * 0.35, 12), fontWeight: 900, fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif` }}>{w}</span>
+                ))}
+              </div>
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      position: "relative",
+                      color: isActive ? "#FBBF24" : "#FFFFFF",
+                      fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontWeight: 800,
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "retro_chrome" ? (
+            <div className="flex gap-2">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      background: isActive
+                        ? "linear-gradient(180deg, #FFD700 0%, #FFFFFF 50%, #FF8C00 100%)"
+                        : "linear-gradient(180deg, #2D2D2D 0%, #E8E8E8 30%, #FFFFFF 50%, #C0C0C0 70%, #4A4A4A 100%)",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      fontFamily: `'${style.fontFamily || "Bebas Neue"}', sans-serif`,
+                      fontSize: Math.max(style.fontSize * 0.38, 14),
+                      fontWeight: 900,
+                      textTransform: "uppercase",
+                      filter: "drop-shadow(2px 2px 0px rgba(0,0,0,0.8))",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          ) : presetId === "outline_stack" ? (
+            <div className="relative flex gap-2">
+              <span className="absolute left-[-2px] top-[-2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #FF0000", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
+                {words.join(" ")}
+              </span>
+              <span className="absolute left-[2px] top-[2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #0000FF", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
+                {words.join(" ")}
+              </span>
+              <span className="relative flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #00FF00", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
+                {words.join(" ")}
+              </span>
+            </div>
+          ) : (
+            <div className="flex gap-1.5">
+              {words.map((w, i) => {
+                const isActive = i === activeWordIdx;
+                return (
+                  <span
+                    key={w}
+                    style={{
+                      color: isActive ? style.highlightColor : style.color,
+                      fontSize: Math.max(style.fontSize * 0.35, 10),
+                      fontFamily: `'${style.fontFamily}', sans-serif`,
+                      fontWeight: isActive ? 900 : Number(style.fontWeight),
+                      textTransform: style.uppercase ? "uppercase" : "none",
+                      textShadow: "0 2px 8px rgba(0,0,0,0.6)",
+                    }}
+                  >
+                    {w}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-500 z-10">
+          skia gpu · {preset.name}
+        </p>
+      </div>
+      <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Preset</span><p className="truncate text-amber-400">{preset.name}</p></div>
+      </div>
+    </>
+  );
+}
+
 // ─── Hook Editor ─────────────────────────────────────────────────────────────
 
 function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackground, isSuperadmin }: { style: HookStyle; onChange: (s: HookStyle) => void; aspectRatio: string; thumbnailUrl?: string; canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null; isSuperadmin?: boolean }) {
@@ -2870,26 +3242,13 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             <Section title="FFmpeg Drawtext">
               <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
                 <p className="text-[10px] text-purple-300 mb-1"><Zap className="inline w-3 h-3 mr-1" />Server-side render · no browser needed</p>
-                <p className="text-[9px] text-zinc-500">FFmpeg drawtext filter. Pilih style preset di bawah atau kustomisasi manual.</p>
+                <p className="text-[9px] text-zinc-500">FFmpeg drawtext filter. 12 Preset unik dengan server-side overlay cepat.</p>
               </div>
             </Section>
 
             <Section title="Hook Style Preset">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {([
-                  { id: "zoom_punch", name: "Zoom Punch", desc: "Bold white + quick scale-in", color: "white", fontSize: 56, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 4, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
-                  { id: "fade_scale", name: "Fade Scale", desc: "Smooth fade + slight grow", color: "white", fontSize: 48, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 3, strokeColor: "black", bgOpacity: 0.5, positionY: 42 },
-                  { id: "slide_punch_framer", name: "Slide Punch", desc: "Slide from left with punch", color: "white", fontSize: 52, fontFamily: "Poppins", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "black", bgOpacity: 0.65, positionY: 38 },
-                  { id: "typewriter", name: "Typewriter", desc: "Character-by-character", color: "#00FF88", fontSize: 44, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 2, strokeColor: "black", bgOpacity: 0.7, positionY: 45 },
-                  { id: "glitch_rgb", name: "Glitch RGB", desc: "RGB split chromatic aberr.", color: "white", fontSize: 58, fontFamily: "Anton", fontWeight: "700", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.7, positionY: 40 },
-                  { id: "shake_neon", name: "Shake Neon", desc: "Neon glow + random shake", color: "#00FFCC", fontSize: 54, fontFamily: "Bungee", fontWeight: "400", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.65, positionY: 40 },
-                  { id: "cinematic_reveal", name: "Cinematic", desc: "Letterbox + elegant fade", color: "#FFD700", fontSize: 62, fontFamily: "Playfair Display", fontWeight: "700", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.8, positionY: 42 },
-                  { id: "danger_bold", name: "Danger Bold", desc: "Bold red pulsing border", color: "#FF2D2D", fontSize: 70, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 6, strokeColor: "black", bgOpacity: 0.75, positionY: 38 },
-                  { id: "minimal_white", name: "Minimal", desc: "Clean minimal white", color: "white", fontSize: 42, fontFamily: "Inter", fontWeight: "700", strokeEnabled: true, strokeWidth: 2, strokeColor: "rgba(0,0,0,0.5)", bgOpacity: 0.3, positionY: 50 },
-                  { id: "bold_yellow", name: "Bold Yellow", desc: "Bold yellow heavy stroke", color: "#FFD700", fontSize: 64, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "black", bgOpacity: 0.6, positionY: 40 },
-                  { id: "electric_blue", name: "Electric Blue", desc: "Bright blue neon look", color: "#00BFFF", fontSize: 54, fontFamily: "Bungee", fontWeight: "400", strokeEnabled: false, strokeWidth: 0, strokeColor: "black", bgOpacity: 0.65, positionY: 40 },
-                  { id: "fire_red", name: "Fire Red", desc: "Aggressive red dramatic", color: "#FF4444", fontSize: 66, fontFamily: "Anton", fontWeight: "700", strokeEnabled: true, strokeWidth: 5, strokeColor: "#220000", bgOpacity: 0.7, positionY: 38 },
-                ] as const).map(preset => (
+                {FFMPEG_HOOK_PRESETS.map(preset => (
                   <button
                     key={preset.id}
                     type="button"
@@ -2912,7 +3271,6 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                         : "border-zinc-700/80 bg-zinc-900/40 hover:border-zinc-500 hover:bg-zinc-900"
                     )}
                   >
-                    {/* Mini preview replicating the FFmpeg drawtext style */}
                     <span
                       className="block relative w-full overflow-hidden bg-zinc-950"
                       style={{ aspectRatio: "16/9" }}
@@ -2939,12 +3297,10 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                           HOOK
                         </span>
                       </span>
-                      {/* active check overlay */}
                       {style.animation === preset.id && (
                         <span className="absolute top-1.5 right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-[9px] font-bold text-white shadow">✓</span>
                       )}
                     </span>
-                    {/* Name + description */}
                     <span className="block px-2.5 py-1.5">
                       <span className="flex items-center gap-1.5">
                         <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: preset.color }} />
@@ -3023,9 +3379,164 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
               </div>
             </Section>
           </>
+        ) : engine === "skia" ? (
+          <>
+            <Section title="Skia Render Engine">
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                <p className="text-[10px] text-amber-400 mb-1"><Palette className="inline w-3 h-3 mr-1" />Canvas GPU Rendering</p>
+                <p className="text-[9px] text-zinc-500">Hook animation dirender cepat via GPU Skia Canvas. 8 Preset dengan efek shader khusus.</p>
+              </div>
+            </Section>
+
+            <Section title="Skia Hook Presets">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {SKIA_HOOK_PRESETS.map(preset => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => update({
+                      animation: preset.id,
+                      color: preset.color,
+                      fontSize: preset.fontSize,
+                      fontFamily: preset.fontFamily,
+                      fontWeight: preset.fontWeight,
+                      strokeEnabled: preset.strokeEnabled,
+                      strokeWidth: preset.strokeWidth,
+                      strokeColor: preset.strokeColor,
+                      gradientEnabled: preset.gradientEnabled,
+                      gradientFrom: preset.gradientFrom,
+                      gradientTo: preset.gradientTo,
+                      glowEnabled: preset.glowEnabled,
+                      glowColor: preset.glowColor,
+                      glowSize: preset.glowSize,
+                      bgOpacity: preset.bgOpacity,
+                      positionY: preset.positionY,
+                    })}
+                    className={cn(
+                      "group overflow-hidden rounded-xl border text-left transition-all",
+                      style.animation === preset.id || style.animation === preset.id.replace("skia_", "")
+                        ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40"
+                        : "border-zinc-700/80 bg-zinc-900/40 hover:border-zinc-500 hover:bg-zinc-900"
+                    )}
+                  >
+                    <span
+                      className="block relative w-full overflow-hidden bg-zinc-950"
+                      style={{ aspectRatio: "16/9" }}
+                    >
+                      <span
+                        className="absolute left-0 right-0 flex justify-center px-2"
+                        style={{ top: `${preset.positionY}%`, transform: "translateY(-50%)" }}
+                      >
+                        <span
+                          className="truncate whitespace-nowrap font-semibold"
+                          style={{
+                            fontSize: Math.max(preset.fontSize * 0.24, 12),
+                            fontWeight: Number(preset.fontWeight),
+                            fontFamily: `'${preset.fontFamily}', sans-serif`,
+                            color: preset.color,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.02em",
+                            padding: "2px 6px",
+                            backgroundColor: preset.bgOpacity > 0 ? `#000${Math.round(Math.min(1, preset.bgOpacity) * 255).toString(16).padStart(2, "0")}` : "transparent",
+                            paintOrder: preset.strokeEnabled ? "stroke" : undefined,
+                            WebkitTextStroke: preset.strokeEnabled ? `${Math.max(preset.strokeWidth * 0.18, 0.6)}px ${preset.strokeColor}` : undefined,
+                          }}
+                        >
+                          SKIA
+                        </span>
+                      </span>
+                      {(style.animation === preset.id || style.animation === preset.id.replace("skia_", "")) && (
+                        <span className="absolute top-1.5 right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-black shadow">✓</span>
+                      )}
+                    </span>
+                    <span className="block px-2.5 py-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: preset.color }} />
+                        <span className={cn("truncate text-[10px] font-semibold", (style.animation === preset.id || style.animation === preset.id.replace("skia_", "")) ? "text-amber-300" : "text-zinc-300 group-hover:text-zinc-100")}>
+                          {preset.name}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 block truncate text-[8px] text-zinc-600">{preset.desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Hook Text">
+              <textarea value={style.text} onChange={(e) => update({ text: e.target.value })} placeholder="Leave empty for AI-generated hook..." rows={2} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-zinc-500" />
+            </Section>
+
+            <Section title="Typography">
+              <FontChips fonts={HOOK_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS} />
+                <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                <RangeInput label={`Size: ${style.fontSize}px`} min={24} max={96} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+              </div>
+              <div className="flex gap-4 mt-3">
+                <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v })} />
+                <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
+              </div>
+            </Section>
+
+            <Section title="Colors & GPU Effects">
+              <div className="grid grid-cols-2 gap-3">
+                <ColorPicker label="Text Color" value={style.color} onChange={(v) => update({ color: v })} />
+                <ColorPicker label="Background" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
+              </div>
+              <RangeInput label={`BG Opacity: ${Math.round(style.bgOpacity * 100)}%`} min={0} max={100} value={Math.round(style.bgOpacity * 100)} onChange={(v) => update({ bgOpacity: v / 100 })} />
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text gradient" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} />
+                  {style.gradientEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="From" value={style.gradientFrom} onChange={(v) => update({ gradientFrom: v })} />
+                      <ColorPicker label="To" value={style.gradientTo} onChange={(v) => update({ gradientTo: v })} />
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text glow" checked={style.glowEnabled} onChange={(v) => update({ glowEnabled: v })} />
+                  {style.glowEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Glow Color" value={style.glowColor} onChange={(v) => update({ glowColor: v })} />
+                      <RangeInput label={`Glow Size: ${style.glowSize}px`} min={5} max={70} value={style.glowSize} onChange={(v) => update({ glowSize: v })} />
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Text outline" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} />
+                  {style.strokeEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Outline" value={style.strokeColor} onChange={(v) => update({ strokeColor: v })} />
+                      <RangeInput label={`Width: ${style.strokeWidth}px`} min={1} max={10} value={style.strokeWidth} onChange={(v) => update({ strokeWidth: v })} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Position">
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(["top", "center", "bottom"] as const).map(p => (
+                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
+                ))}
+              </div>
+              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+            </Section>
+
+            <Section title="Timing">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 border border-zinc-800 rounded-lg bg-zinc-950/50">
+                <RangeInput label={`Duration: ${style.duration}s`} min={15} max={60} value={Math.round(style.duration * 10)} onChange={(v) => update({ duration: v / 10 })} />
+                <RangeInput label={`Fade In: ${style.fadeIn}s`} min={1} max={15} value={Math.round(style.fadeIn * 10)} onChange={(v) => update({ fadeIn: v / 10 })} />
+                <RangeInput label={`Fade Out: ${style.fadeOut}s`} min={1} max={15} value={Math.round(style.fadeOut * 10)} onChange={(v) => update({ fadeOut: v / 10 })} />
+              </div>
+            </Section>
+          </>
         ) : (
           <>
-            {/* Presets */}
+            {/* Remotion Quick Presets */}
             <Section title="Quick Presets">
               <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
                 {visibleHookPresets.map(p => (
@@ -3034,7 +3545,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                     preset={p}
                     active={activePreset === p.id}
                     onClick={() => {
-                      onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text, engine: style.engine || "remotion" } as HookStyle);
+                      onChange({ ...DEFAULT_HOOK_STYLE, ...p.style, text: style.text, engine: "remotion" } as HookStyle);
                       setActivePreset(p.id);
                     }}
                   />
@@ -3257,6 +3768,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.color }}>{style.color}</p></div>
             </div>
           </>
+        ) : engine === "skia" ? (
+          <SkiaHookLivePreview style={style} thumbnailUrl={thumbnailUrl} aspectRatio={aspectRatio} />
         ) : (
           <>
             <div className="mb-3 flex w-full items-center justify-between gap-2">
@@ -3273,7 +3786,6 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                   {(canvas.background.vignette || 0) > 0 && (
                     <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${canvas.background.vignette}) 100%)` }} />
                   )}
-                  {/* Content slot — 16:9/1:1 band; template fills top/bottom (TikTok 9:16) */}
                   <div
                     className="absolute overflow-hidden bg-zinc-800"
                     style={{
@@ -3287,7 +3799,6 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                   >
                     {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
                   </div>
-                  {/* Overlays span full 9:16 safe area — matches Remotion bake */}
                   <HookPreviewRenderer style={style} />
                   {style.lineEnabled && <AccentLinePreview style={style} />}
                 </div>
@@ -3349,6 +3860,13 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
   const visibleSubtitleTiming = getPageItems(subtitleTimingOptions, timingPage);
   const activeTimingMeta = SUBTITLE_TRANSITION_META[style.lineTransition] || SUBTITLE_ANIMATION_META[style.animationStyle];
 
+  // Auto fallback for non-superadmin users if engine is superuserOnly
+  useEffect(() => {
+    if (!isSuperadmin && (engine === "remotion" || engine === "hyperframes")) {
+      update({ engine: "ffmpeg" });
+    }
+  }, [engine, isSuperadmin]);
+
   // Cycle through words for animated preview
   useEffect(() => {
     const interval = setInterval(() => {
@@ -3393,7 +3911,55 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
             <Section title="FFmpeg Drawtext">
               <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
                 <p className="text-[10px] text-purple-300 mb-1"><Zap className="inline w-3 h-3 mr-1" />Server-side render · no browser needed</p>
-                <p className="text-[9px] text-zinc-500">FFmpeg drawtext subtitle. Pilih mode transisi dan kustomisasi style.</p>
+                <p className="text-[9px] text-zinc-500">FFmpeg drawtext subtitle. 10 Preset gaya subtitle dengan performa instan.</p>
+              </div>
+            </Section>
+
+            <Section title="FFmpeg Subtitle Presets">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {FFMPEG_SUBTITLE_PRESETS.map(p => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      update({
+                        stylePreset: p.id,
+                        color: p.color,
+                        highlightColor: p.highlightColor,
+                        fontFamily: p.fontFamily,
+                        fontSize: p.fontSize,
+                        fontWeight: p.fontWeight,
+                        lineTransition: p.lineTransition,
+                        strokeEnabled: p.strokeEnabled,
+                        strokeWidth: p.strokeWidth,
+                        strokeColor: p.strokeColor,
+                        bgEnabled: p.bgEnabled,
+                        bgColor: p.bgColor,
+                        bgOpacity: p.bgOpacity,
+                        bgRadius: p.bgRadius,
+                        positionY: p.positionY,
+                        uppercase: p.uppercase,
+                        maxWordsPerLine: p.maxWordsPerLine,
+                        engine: "ffmpeg",
+                      });
+                      setActivePreset(p.id);
+                    }}
+                    className={cn(
+                      "group overflow-hidden rounded-xl border text-left transition-all p-3",
+                      activePreset === p.id || style.stylePreset === p.id
+                        ? "border-purple-500 bg-purple-500/10 ring-1 ring-purple-500/40"
+                        : "border-zinc-700/80 bg-zinc-900/40 hover:border-zinc-500 hover:bg-zinc-900"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold text-zinc-200">{p.name}</p>
+                      <span className="rounded px-1.5 py-0.5 text-[8px] font-bold uppercase text-purple-400 bg-purple-500/10 border border-purple-500/30">
+                        {p.category}
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-zinc-500 mt-1 line-clamp-2">{p.desc}</p>
+                  </button>
+                ))}
               </div>
             </Section>
 
@@ -3491,8 +4057,149 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
               </div>
             </Section>
           </>
+        ) : engine === "skia" ? (
+          <>
+            <Section title="Skia Render Engine">
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                <p className="text-[10px] text-amber-400 mb-1"><Palette className="inline w-3 h-3 mr-1" />Canvas GPU Rendering</p>
+                <p className="text-[9px] text-zinc-500">Subtitle dengan 10 preset visual advanced (Glassmorphism, Gradient Fill, Neon Tube, Per-Word Badges, dll).</p>
+              </div>
+            </Section>
+
+            <Section title="Skia Subtitle Presets">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {SKIA_SUBTITLE_PRESETS.map(p => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      update({
+                        stylePreset: p.id,
+                        color: p.color,
+                        highlightColor: p.highlightColor,
+                        fontFamily: p.fontFamily,
+                        fontSize: p.fontSize,
+                        fontWeight: p.fontWeight,
+                        uppercase: p.uppercase,
+                        lineTransition: p.lineTransition,
+                        gradientEnabled: p.gradientEnabled,
+                        gradientFrom: p.gradientFrom,
+                        gradientTo: p.gradientTo,
+                        glowEnabled: p.glowEnabled,
+                        glowColor: p.glowColor,
+                        positionY: p.positionY,
+                        maxWordsPerLine: p.maxWordsPerLine,
+                        engine: "skia",
+                      });
+                      setActivePreset(p.id);
+                    }}
+                    className={cn(
+                      "group overflow-hidden rounded-xl border text-left transition-all p-3",
+                      activePreset === p.id || style.stylePreset === p.id
+                        ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40"
+                        : "border-zinc-700/80 bg-zinc-900/40 hover:border-zinc-500 hover:bg-zinc-900"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold text-zinc-200">{p.name}</p>
+                      <span className="rounded px-1.5 py-0.5 text-[8px] font-bold uppercase text-amber-400 bg-amber-500/10 border border-amber-500/30">
+                        {p.category}
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-zinc-500 mt-1 line-clamp-2">{p.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Line Transition">
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { id: "karaoke", name: "Karaoke", desc: "Per-word highlight" },
+                  { id: "word_pop", name: "Word Pop", desc: "Satu kata per frame" },
+                  { id: "line_reveal", name: "Line Reveal", desc: "Full line reveal" },
+                ] as const).map(mode => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => update({ lineTransition: mode.id })}
+                    className={cn(
+                      "py-2 px-2 rounded-lg border text-center transition-colors",
+                      style.lineTransition === mode.id
+                        ? "border-amber-500 bg-amber-500/10"
+                        : "border-zinc-700 hover:border-zinc-600"
+                    )}
+                  >
+                    <p className="text-[10px] font-medium text-zinc-200">{mode.name}</p>
+                    <p className="text-[8px] text-zinc-500 mt-0.5">{mode.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Typography">
+              <FontChips fonts={SUBTITLE_FONT_SUGGESTIONS} active={style.fontFamily} onSelect={(fontFamily) => update({ fontFamily })} />
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <SelectSmall label="Font" value={style.fontFamily} onChange={(v) => update({ fontFamily: v })} options={FONT_OPTIONS.filter((font) => font !== "monospace")} />
+                <SelectSmall label="Weight" value={style.fontWeight} onChange={(v) => update({ fontWeight: v })} options={["400", "500", "600", "700", "800", "900"]} />
+                <RangeInput label={`Size: ${style.fontSize}px`} min={20} max={60} value={style.fontSize} onChange={(v) => update({ fontSize: v })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={8} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
+                <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
+              </div>
+              <div className="flex gap-4 mt-3">
+                <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v, capitalize: v ? false : style.capitalize })} />
+                <Checkbox label="Italic" checked={style.italic} onChange={(v) => update({ italic: v })} />
+              </div>
+            </Section>
+
+            <Section title="Colors & GPU Effects">
+              <div className="grid grid-cols-3 gap-3">
+                <ColorPicker label="Text" value={style.color} onChange={(v) => update({ color: v })} />
+                <ColorPicker label="Highlight" value={style.highlightColor} onChange={(v) => update({ highlightColor: v })} />
+                <ColorPicker label="BG" value={style.bgColor} onChange={(v) => update({ bgColor: v })} />
+              </div>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Glow shader" checked={style.glowEnabled} onChange={(v) => update({ glowEnabled: v })} />
+                  {style.glowEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Glow Color" value={style.glowColor} onChange={(v) => update({ glowColor: v })} />
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+                  <Checkbox label="Gradient shader" checked={style.gradientEnabled} onChange={(v) => update({ gradientEnabled: v })} />
+                  {style.gradientEnabled && (
+                    <div className="mt-2 space-y-2">
+                      <ColorPicker label="Grad From" value={style.gradientFrom} onChange={(v) => update({ gradientFrom: v })} />
+                      <ColorPicker label="Grad To" value={style.gradientTo} onChange={(v) => update({ gradientTo: v })} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Position">
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(["top", "center", "bottom"] as const).map(p => (
+                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
+                ))}
+              </div>
+              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+            </Section>
+
+            <Section title="Line Settings">
+              <div className="grid grid-cols-2 gap-3">
+                <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
+                <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
+              </div>
+            </Section>
+          </>
         ) : (
           <>
+            {/* Remotion Subtitle Editor */}
             <Section title="Quick Presets">
               <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
                 {visibleSubtitlePresets.map(p => (
@@ -3501,7 +4208,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                     preset={p}
                     active={activePreset === p.id}
                     onClick={() => {
-                      onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords, engine: style.engine || "remotion" } as SubtitleStyle);
+                      onChange({ ...DEFAULT_SUBTITLE_STYLE, ...p.style, highlightWords: style.highlightWords, engine: "remotion" } as SubtitleStyle);
                       setActivePreset(p.id);
                     }}
                   />
@@ -3615,7 +4322,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                     {style.highlightShadowEnabled && (
                       <div className="grid grid-cols-2 gap-3">
                         <ColorPicker label="Shadow Color" value={style.highlightShadowColor} onChange={(v) => update({ highlightShadowColor: v })} />
-                        <RangeInput label={`Blur: ${style.highlightShadowBlur}px`} min={0} max={24} value={style.highlightShadowBlur} onChange={(v) => update({ highlightShadowBlur: v })} />
+                        <RangeInput label={`Blur: ${style.highlightShadowBlur}px`} min={0} max={20} value={style.highlightShadowBlur} onChange={(v) => update({ highlightShadowBlur: v })} />
                       </div>
                     )}
                   </div>
@@ -3714,6 +4421,8 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Mode</span><p className="truncate text-zinc-300">{style.lineTransition || "word_pop"}</p></div>
             </div>
           </>
+        ) : engine === "skia" ? (
+          <SkiaSubtitleLivePreview style={style} thumbnailUrl={thumbnailUrl} activeWordIdx={activeWordIdx} />
         ) : (
           <>
             <div className="mb-3 flex w-full items-center justify-between gap-2">
@@ -3743,7 +4452,6 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                   >
                     {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-contain" />}
                   </div>
-                  {/* Subtitle overlays full 9:16 — matches Remotion bake */}
                   <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/10 to-transparent pointer-events-none" />
                   <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
                     {style.lineTransition === "emphasis" ? (

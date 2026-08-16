@@ -81,6 +81,8 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
         return "hyperframes"
     if eng in ("ffmpeg", "drawtext"):
         return "ffmpeg"
+    if eng in ("skia", "canvaskit", "skia-python", "skia_python"):
+        return "skia"
     return "remotion"
 
 

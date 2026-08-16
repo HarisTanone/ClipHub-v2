@@ -2056,16 +2056,16 @@ class V2PipelineService:
             and not need_ai_text
         )
 
-        # Pure FFmpeg path: both hook + sub use ffmpeg → no Remotion/HF needed
-        pure_ffmpeg = (
-            hook_engine == "ffmpeg"
-            and sub_engine == "ffmpeg"
+        # Pure direct path: both hook + sub use ffmpeg or skia → no Remotion/HF browser needed
+        pure_direct = (
+            hook_engine in ("ffmpeg", "skia")
+            and sub_engine in ("ffmpeg", "skia")
             and not need_canvas
             and not need_ai_text
         )
 
         use_remotion = False
-        if not pure_hf and not pure_ffmpeg and self._remotion_adapter:
+        if not pure_hf and not pure_direct and self._remotion_adapter:
             try:
                 if await self._remotion_adapter.health_check():
                     use_remotion = True
@@ -2084,11 +2084,12 @@ class V2PipelineService:
             )
             return
 
-        if pure_ffmpeg:
-            await self._render_via_ffmpeg_engines(
+        if pure_direct:
+            await self._render_via_direct_engines(
                 job, job_id, clips, clips_with_words,
                 output_dir, trim_results,
                 hook_style_config, subtitle_style_config,
+                hook_engine=hook_engine, sub_engine=sub_engine,
             )
             return
 
@@ -2099,6 +2100,15 @@ class V2PipelineService:
                     job, job_id, clips, clips_with_words,
                     output_dir, trim_results,
                     hook_style_config, subtitle_style_config,
+                )
+                return
+            # Fallback: if Remotion down but direct engines selected for both, try direct path
+            if hook_engine in ("ffmpeg", "skia") and sub_engine in ("ffmpeg", "skia"):
+                await self._render_via_direct_engines(
+                    job, job_id, clips, clips_with_words,
+                    output_dir, trim_results,
+                    hook_style_config, subtitle_style_config,
+                    hook_engine=hook_engine, sub_engine=sub_engine,
                 )
                 return
             raise RuntimeError(
@@ -2127,6 +2137,16 @@ class V2PipelineService:
                     "HyperFrames hook/subtitle render failed: "
                     + "; ".join(errors[:5])
                 )
+        # Post-Remotion FFmpeg / Skia overlays when user picked FFmpeg or Skia for hook and/or subtitle
+        if hook_engine in ("ffmpeg", "skia") or sub_engine in ("ffmpeg", "skia"):
+            direct_errors = await self._apply_direct_hook_subtitle_pass(
+                job, job_id, clips, clips_with_words,
+                output_dir, trim_results,
+                hook_style_config, subtitle_style_config,
+                hook_engine=hook_engine, sub_engine=sub_engine,
+            )
+            if direct_errors:
+                logger.warning(f"[{job_id}] Post-Remotion direct pass warnings: {direct_errors}")
 
     async def _render_via_remotion(
         self, job, job_id, clips, clips_with_words, creative_direction,
@@ -2194,9 +2214,9 @@ class V2PipelineService:
                 from src.infrastructure.hf_style_catalog import resolve_engine as _resolve_eng
                 hook_eng = _resolve_eng(hook_style_config)
                 sub_eng = _resolve_eng(subtitle_style_config)
-                # When HF owns hook/sub, blank Remotion overlays so HF pass paints them.
-                remotion_hook_text = "" if hook_eng == "hyperframes" else clip_hook
-                remotion_words = [] if sub_eng == "hyperframes" else clip_words
+                # Remotion only renders hook/sub when Remotion engine is specifically selected.
+                remotion_hook_text = clip_hook if hook_eng == "remotion" else ""
+                remotion_words = clip_words if sub_eng == "remotion" else []
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")
@@ -2329,7 +2349,7 @@ class V2PipelineService:
             job_id=job_id,
         )
 
-    async def _render_via_ffmpeg_engines(
+    async def _render_via_direct_engines(
         self,
         job,
         job_id: str,
@@ -2339,17 +2359,23 @@ class V2PipelineService:
         trim_results: dict[int, bool],
         hook_style_config: dict,
         subtitle_style_config: dict,
+        hook_engine: str = "ffmpeg",
+        sub_engine: str = "ffmpeg",
     ) -> None:
-        """Pure FFmpeg path: both hook+subtitle use FFmpeg drawtext (no browser)."""
-        self._emit(job_id, 13, "ffmpeg_render", "start")
+        """Pure direct rendering (FFmpeg drawtext / Skia GPU canvas) without Remotion browser."""
+        engine_label = f"{hook_engine}+{sub_engine}"
+        self._emit(job_id, 13, f"{hook_engine}_render", "start")
         await self._repo.update_status(job_id, JobStatus.HOOK_RENDERING)
         initialize_clip_readiness(output_dir)
 
         from src.infrastructure.subtitle_renderer import SubtitleRenderer
         from src.domain.entities import SubtitleStyleConfig
+        from src.infrastructure.subtitle_words import sanitize_subtitle_words
 
         errors: list[str] = []
         hook_style = hook_style_config.get("animation", "zoom_punch") if hook_style_config else "zoom_punch"
+        hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0) if hook_style_config else 3.0
+        fonts_dir = getattr(self, "_fonts_dir", "assets/fonts")
 
         for clip in clips:
             if not trim_results.get(clip.rank):
@@ -2360,7 +2386,9 @@ class V2PipelineService:
             if not base_path or not os.path.exists(base_path):
                 continue
 
-            # ── Hook render (FFmpeg drawtext) ──
+            clip_dur = max(0.0, float(clip.end) - float(clip.start))
+
+            # ── Hook render (FFmpeg drawtext / Skia kinetic) ──
             hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
             if clip.hook:
                 try:
@@ -2372,26 +2400,34 @@ class V2PipelineService:
                         hook_style=hook_style,
                         style_config=hook_style_config,
                     )
-                    logger.info(f"[{job_id}] FFmpeg hook rendered clip {clip.rank}")
+                    logger.info(f"[{job_id}] {hook_engine} hook rendered clip {clip.rank}")
                 except Exception as e:
-                    logger.warning(f"[{job_id}] FFmpeg hook failed clip {clip.rank}: {e}")
+                    logger.warning(f"[{job_id}] {hook_engine} hook failed clip {clip.rank}: {e}")
                     errors.append(f"hook clip {clip.rank}: {e}")
                     hooked_path = base_path
             else:
                 hooked_path = base_path
 
-            # ── Subtitle render (FFmpeg drawtext) ──
+            # ── Subtitle render (FFmpeg drawtext or Skia GPU canvas) ──
             final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
-            words = clips_with_words.get(clip.rank)
+            words_raw = clips_with_words.get(clip.rank) or []
+            sub_min = hook_dur if clip.hook else 0.0
+            words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
+
             if words:
                 try:
-                    font_dir = getattr(self, "_fonts_dir", "assets/fonts")
-                    renderer = SubtitleRenderer(font_dir=font_dir)
-                    style_cfg = SubtitleStyleConfig(**(subtitle_style_config or {}))
-                    renderer.render_subtitles(hooked_path, words, style_cfg, final_path)
-                    logger.info(f"[{job_id}] FFmpeg subtitle rendered clip {clip.rank}")
+                    if sub_engine == "skia":
+                        from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+                        renderer = SkiaSubtitleRenderer(font_dir=fonts_dir)
+                        renderer.render_subtitles(hooked_path, words, subtitle_style_config or {}, final_path)
+                        logger.info(f"[{job_id}] Skia subtitle rendered clip {clip.rank}")
+                    else:
+                        renderer = SubtitleRenderer(font_dir=fonts_dir)
+                        style_cfg = SubtitleStyleConfig(**(subtitle_style_config or {}))
+                        renderer.render_subtitles(hooked_path, words, style_cfg, final_path)
+                        logger.info(f"[{job_id}] FFmpeg subtitle rendered clip {clip.rank}")
                 except Exception as e:
-                    logger.warning(f"[{job_id}] FFmpeg subtitle failed clip {clip.rank}: {e}")
+                    logger.warning(f"[{job_id}] {sub_engine} subtitle failed clip {clip.rank}: {e}")
                     errors.append(f"subtitle clip {clip.rank}: {e}")
                     import shutil
                     shutil.copy2(hooked_path, final_path)
@@ -2404,9 +2440,115 @@ class V2PipelineService:
             mark_clip_ready(output_dir, clip.rank)
 
         if errors:
-            logger.warning(f"[{job_id}] FFmpeg render had {len(errors)} errors (non-fatal)")
+            logger.warning(f"[{job_id}] {engine_label} render had {len(errors)} errors (non-fatal)")
 
-        self._emit(job_id, 14, "ffmpeg_render", "complete")
+        self._emit(job_id, 14, f"{hook_engine}_render", "complete")
+
+    async def _render_via_ffmpeg_engines(
+        self,
+        job,
+        job_id: str,
+        clips: list,
+        clips_with_words: dict,
+        output_dir: str,
+        trim_results: dict[int, bool],
+        hook_style_config: dict,
+        subtitle_style_config: dict,
+    ) -> None:
+        """Alias for backward compatibility."""
+        await self._render_via_direct_engines(
+            job, job_id, clips, clips_with_words,
+            output_dir, trim_results,
+            hook_style_config, subtitle_style_config,
+            hook_engine="ffmpeg", sub_engine="ffmpeg",
+        )
+
+    async def _apply_direct_hook_subtitle_pass(
+        self,
+        job,
+        job_id: str,
+        clips: list,
+        clips_with_words: dict,
+        output_dir: str,
+        trim_results: dict[int, bool],
+        hook_style_config: dict,
+        subtitle_style_config: dict,
+        *,
+        hook_engine: str,
+        sub_engine: str,
+    ) -> list[str]:
+        """Apply FFmpeg/Skia hook and/or subtitle on top of existing Remotion final output."""
+        import shutil
+        from src.infrastructure.subtitle_words import sanitize_subtitle_words
+
+        errors: list[str] = []
+        fonts_dir = getattr(self, "_fonts_dir", "assets/fonts")
+        hook_style = hook_style_config.get("animation", "zoom_punch") if hook_style_config else "zoom_punch"
+        hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0) if hook_style_config else 3.0
+
+        for clip in clips:
+            if not trim_results.get(clip.rank):
+                continue
+            final = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
+            if not os.path.exists(final):
+                continue
+
+            clip_dur = max(0.0, float(clip.end) - float(clip.start))
+            current = final
+            tmp_hook = f"{output_dir}/clip_{clip.rank:02d}_direct_hook.mp4"
+            tmp_sub = f"{output_dir}/clip_{clip.rank:02d}_direct_sub.mp4"
+
+            try:
+                # Direct hook pass (if hook_engine is ffmpeg or skia)
+                if hook_engine in ("ffmpeg", "skia") and clip.hook:
+                    from src.application.services import AutoClipService
+                    svc = AutoClipService.__new__(AutoClipService)
+                    svc._fonts_dir = getattr(self, "_fonts_dir", "/usr/share/fonts/truetype")
+                    await svc._render_hook_ffmpeg(
+                        current, clip.hook, tmp_hook,
+                        hook_style=hook_style,
+                        style_config=hook_style_config,
+                    )
+                    if os.path.exists(tmp_hook):
+                        current = tmp_hook
+
+                # Direct subtitle pass (if sub_engine is ffmpeg or skia)
+                if sub_engine in ("ffmpeg", "skia"):
+                    words_raw = clips_with_words.get(clip.rank) or []
+                    sub_min = hook_dur if (clip.hook and hook_engine in ("ffmpeg", "skia", "hyperframes", "remotion")) else 0.0
+                    words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
+                    if words:
+                        if sub_engine == "skia":
+                            from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+                            renderer = SkiaSubtitleRenderer(font_dir=fonts_dir)
+                            renderer.render_subtitles(current, words, subtitle_style_config or {}, tmp_sub)
+                        else:
+                            from src.infrastructure.subtitle_renderer import SubtitleRenderer
+                            from src.domain.entities import SubtitleStyleConfig
+                            renderer = SubtitleRenderer(font_dir=fonts_dir)
+                            style_cfg = SubtitleStyleConfig(**(subtitle_style_config or {}))
+                            renderer.render_subtitles(current, words, style_cfg, tmp_sub)
+
+                        if os.path.exists(tmp_sub):
+                            current = tmp_sub
+
+                if current != final:
+                    try:
+                        os.replace(current, final)
+                    except OSError:
+                        shutil.move(current, final)
+
+                for p in (tmp_hook, tmp_sub):
+                    if p != final and os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except OSError:
+                            pass
+            except Exception as exc:
+                errors.append(f"clip {clip.rank}: {exc}")
+                logger.warning(f"[{job_id}] Direct hook/sub pass clip {clip.rank}: {exc}")
+
+        return errors
 
     async def _apply_hf_hook_subtitle_pass(
         self,
