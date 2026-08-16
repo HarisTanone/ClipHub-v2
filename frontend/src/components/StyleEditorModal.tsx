@@ -3186,6 +3186,19 @@ function SkiaSubtitleLivePreview({
   const posTop = `${style.positionY ?? 78}%`;
   const words = ["ini", "kata", "penting", "banget"];
 
+  // Ensure all preset Google Fonts are available in the DOM
+  useGoogleFont(style.fontFamily || "Inter");
+  useGoogleFont("Inter");
+  useGoogleFont("Plus Jakarta Sans");
+  useGoogleFont("Montserrat");
+  useGoogleFont("Poppins");
+  useGoogleFont("Playfair Display");
+  useGoogleFont("Space Grotesk");
+  useGoogleFont("Anton");
+  useGoogleFont("Outfit");
+  useGoogleFont("Bebas Neue");
+  useGoogleFont("Archivo Black");
+
   return (
     <>
       <div className="mb-3 flex w-full items-center justify-between gap-2">
@@ -3204,21 +3217,22 @@ function SkiaSubtitleLivePreview({
 
         <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: posTop, transform: "translateY(-50%)" }}>
           {presetId === "glassmorphism" ? (
+            /* 1. Glassmorphism: Bright Frosted Glass Card with Glossy Border */
             <div
               style={{
-                backdropFilter: "blur(10px)",
-                WebkitBackdropFilter: "blur(10px)",
-                backgroundColor: "rgba(30, 41, 59, 0.45)",
-                border: "1px solid rgba(255, 255, 255, 0.25)",
-                boxShadow: "0 6px 24px rgba(0, 0, 0, 0.4)",
-                borderRadius: "12px",
-                padding: "6px 12px",
+                backdropFilter: "blur(14px)",
+                WebkitBackdropFilter: "blur(14px)",
+                background: "linear-gradient(135deg, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.07) 100%)",
+                border: "1.5px solid rgba(255, 255, 255, 0.55)",
+                boxShadow: "0 8px 32px 0 rgba(0, 0, 0, 0.45), inset 0 0 12px rgba(255, 255, 255, 0.25)",
+                borderRadius: "16px",
+                padding: "7px 14px",
                 display: "flex",
                 flexWrap: "wrap",
                 justifyContent: "center",
                 maxWidth: "92%",
                 boxSizing: "border-box",
-                gap: 4,
+                gap: 5,
               }}
             >
               {words.map((w, i) => {
@@ -3231,7 +3245,9 @@ function SkiaSubtitleLivePreview({
                       fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 900 : Number(style.fontWeight || 600),
-                      textShadow: isActive ? "0 0 8px rgba(56, 189, 248, 0.6)" : "none",
+                      textShadow: isActive ? "0 0 10px #38BDF8, 0 0 20px rgba(56, 189, 248, 0.7)" : "none",
+                      transform: isActive ? "scale(1.08)" : "scale(1)",
+                      transition: "transform 0.15s ease",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3241,31 +3257,22 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "clean_editorial" ? (
-            <div
-              style={{
-                backgroundColor: "rgba(15, 23, 42, 0.7)",
-                borderRadius: "10px",
-                border: "1px solid rgba(255, 255, 255, 0.15)",
-                padding: "5px 10px",
-                display: "flex",
-                flexWrap: "wrap",
-                justifyContent: "center",
-                maxWidth: "92%",
-                boxSizing: "border-box",
-                gap: 4,
-                boxShadow: "0 6px 18px rgba(0,0,0,0.5)",
-              }}
-            >
+            /* 2. Clean Editorial: Minimalist Swiss Floating Text with Underline Tracking */
+            <div className="flex flex-wrap justify-center items-center gap-2" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
                   <span
                     key={w}
                     style={{
-                      color: isActive ? "#38BDF8" : "#CBD5E1",
+                      color: isActive ? "#38BDF8" : "#FFFFFF",
                       fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 800 : 600,
+                      letterSpacing: "0.04em",
+                      borderBottom: isActive ? "2.5px solid #38BDF8" : "2.5px solid transparent",
+                      paddingBottom: 2,
+                      textShadow: "0 2px 8px rgba(0,0,0,0.8)",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3275,21 +3282,27 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "podcast_pro" ? (
+            /* 3. Podcast Pro: Dark Capsule with Emerald Pulsing Mic Dot */
             <div
               style={{
-                backgroundColor: "rgba(24, 24, 27, 0.85)",
-                borderRadius: "999px",
-                border: "1px solid rgba(255, 255, 255, 0.12)",
-                padding: "5px 12px",
+                backgroundColor: "rgba(18, 18, 22, 0.92)",
+                borderRadius: "9999px",
+                border: "1.5px solid rgba(16, 185, 129, 0.5)",
+                boxShadow: "0 0 16px rgba(16, 185, 129, 0.35)",
+                padding: "6px 14px",
                 display: "flex",
                 flexWrap: "wrap",
+                alignItems: "center",
                 justifyContent: "center",
                 maxWidth: "92%",
                 boxSizing: "border-box",
-                gap: 4,
-                boxShadow: "0 6px 18px rgba(0,0,0,0.6)",
+                gap: 5,
               }}
             >
+              <div className="flex items-center gap-1 shrink-0 mr-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10B981]" />
+                <span className="text-[7px] font-bold text-emerald-400 tracking-wider">MIC</span>
+              </div>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
@@ -3300,6 +3313,7 @@ function SkiaSubtitleLivePreview({
                       fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 900 : 600,
+                      textShadow: isActive ? "0 0 10px rgba(16, 185, 129, 0.9)" : "none",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3309,7 +3323,8 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "kinetic_word_box" ? (
-            <div className="flex flex-wrap justify-center items-center gap-1" style={{ maxWidth: "92%" }}>
+            /* 4. Kinetic Word Box: Hot Pink Solid Badge on Active Word */
+            <div className="flex flex-wrap justify-center items-center gap-1.5" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
@@ -3321,10 +3336,11 @@ function SkiaSubtitleLivePreview({
                       fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 900 : 700,
-                      borderRadius: isActive ? "5px" : "0px",
-                      padding: isActive ? "2px 6px" : "0px",
-                      boxShadow: isActive ? "0 2px 10px rgba(255,0,85,0.5)" : "none",
-                      transform: isActive ? "scale(1.06)" : "scale(1.0)",
+                      borderRadius: isActive ? "6px" : "0px",
+                      padding: isActive ? "3px 8px" : "0px",
+                      boxShadow: isActive ? "0 4px 14px rgba(255,0,85,0.7)" : "none",
+                      transform: isActive ? "scale(1.12)" : "scale(1.0)",
+                      textShadow: isActive ? "none" : "0 2px 8px rgba(0,0,0,0.8)",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3334,23 +3350,24 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "neon_tube" ? (
+            /* 5. Neon Tube: Hollow Glowing Gas Tubes in Cyan & Hot Pink */
             <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
-                const neonHl = style.highlightColor || "#FF007F";
                 return (
                   <span
                     key={w}
                     style={{
-                      color: isActive ? neonHl : "transparent",
-                      WebkitTextStroke: isActive ? `1.2px ${neonHl}` : "1.2px #00FFFF",
+                      color: isActive ? "#FF007F" : "transparent",
+                      WebkitTextStroke: isActive ? "1.2px #FF007F" : "1.2px #00FFFF",
                       fontFamily: `'${style.fontFamily || "Montserrat"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: 900,
                       textTransform: "uppercase",
                       textShadow: isActive
-                        ? `0 0 4px ${neonHl}, 0 0 12px ${neonHl}`
-                        : "0 0 3px #00FFFF, 0 0 8px #00FFFF",
+                        ? "0 0 8px #FF007F, 0 0 20px #FF007F, 0 0 30px rgba(255,0,127,0.9)"
+                        : "0 0 6px #00FFFF, 0 0 14px rgba(0,255,255,0.7)",
+                      transform: isActive ? "scale(1.15)" : "scale(1)",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3360,12 +3377,13 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "gradient_fill" ? (
-            <div className="flex flex-wrap justify-center gap-1" style={{ maxWidth: "92%" }}>
+            /* 6. Gradient Fill: Iridescent Purple to Pink / Fire Gradient */
+            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 const grad = isActive
-                  ? "linear-gradient(45deg, #F5576C, #FF9A76)"
-                  : "linear-gradient(135deg, #6366F1, #8B5CF6, #EC4899)";
+                  ? "linear-gradient(135deg, #FF0844 0%, #FFB199 100%)"
+                  : "linear-gradient(135deg, #818CF8, #C084FC)";
                 return (
                   <span
                     key={w}
@@ -3375,8 +3393,9 @@ function SkiaSubtitleLivePreview({
                       WebkitTextFillColor: "transparent",
                       fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: 800,
-                      filter: isActive ? "drop-shadow(0 2px 6px rgba(245, 87, 108, 0.4))" : "none",
+                      fontWeight: isActive ? 900 : 700,
+                      filter: isActive ? "drop-shadow(0 2px 10px rgba(255, 8, 68, 0.7))" : "none",
+                      transform: isActive ? "scale(1.14)" : "scale(1)",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3386,19 +3405,31 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "cinematic_slate" ? (
-            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
+            /* 7. Cinematic Slate: Hollywood Serif Framed by Gold Rules */
+            <div
+              style={{
+                borderTop: "1.5px solid rgba(252, 211, 77, 0.6)",
+                borderBottom: "1.5px solid rgba(252, 211, 77, 0.6)",
+                padding: "6px 14px",
+                display: "flex",
+                flexWrap: "wrap",
+                justifyContent: "center",
+                maxWidth: "92%",
+                gap: 5,
+              }}
+            >
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
                   <span
                     key={w}
                     style={{
-                      color: isActive ? "#FCD34D" : "#CBD5E1",
+                      color: isActive ? "#FCD34D" : "#E2E8F0",
                       fontFamily: `'${style.fontFamily || "Playfair Display"}', serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: isActive ? 800 : 600,
-                      letterSpacing: "0.02em",
-                      textShadow: isActive ? "0 2px 6px rgba(252, 211, 77, 0.5)" : "none",
+                      fontWeight: isActive ? 800 : 500,
+                      letterSpacing: "0.08em",
+                      textShadow: isActive ? "0 0 12px rgba(252, 211, 77, 0.8)" : "none",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3408,41 +3439,54 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "modern_mono" ? (
+            /* 8. Modern Mono: Cyber Tech Code Terminal with Mini Window Header */
             <div
               style={{
-                backgroundColor: "rgba(9, 13, 22, 0.8)",
-                borderRadius: "6px",
-                border: "1px solid rgba(6, 182, 212, 0.3)",
-                padding: "5px 10px",
+                backgroundColor: "rgba(8, 12, 20, 0.95)",
+                borderRadius: "8px",
+                border: "1.5px solid #06B6D4",
+                boxShadow: "0 0 16px rgba(6, 182, 212, 0.35)",
+                padding: "6px 10px",
                 display: "flex",
-                flexWrap: "wrap",
-                justifyContent: "center",
+                flexDirection: "column",
+                alignItems: "center",
                 maxWidth: "92%",
                 boxSizing: "border-box",
-                gap: 4,
               }}
             >
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? "#06B6D4" : "#94A3B8",
-                      fontFamily: `'${style.fontFamily || "Space Grotesk"}', monospace`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 13),
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
+              <div className="flex items-center gap-1 w-full border-b border-cyan-500/30 pb-1 mb-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                <span className="text-[7px] text-cyan-400 font-mono ml-1 font-bold">TERMINAL v2.0</span>
+              </div>
+              <div className="flex flex-wrap justify-center gap-1.5">
+                <span className="text-cyan-400 font-mono text-[11px] font-bold">&gt;</span>
+                {words.map((w, i) => {
+                  const isActive = i === activeWordIdx;
+                  return (
+                    <span
+                      key={w}
+                      style={{
+                        color: isActive ? "#06B6D4" : "#94A3B8",
+                        fontFamily: `'${style.fontFamily || "Space Grotesk"}', monospace`,
+                        fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 13),
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        textShadow: isActive ? "0 0 8px #06B6D4" : "none",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {w}
+                      {isActive && <span className="animate-pulse text-cyan-400 ml-0.5">_</span>}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           ) : presetId === "bold_impact_stroke" ? (
-            <div className="flex flex-wrap justify-center gap-1" style={{ maxWidth: "92%" }}>
+            /* 9. Bold Impact Stroke: MrBeast / Hormozi Viral Yellow on Heavy Black Stroke */
+            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
@@ -3454,8 +3498,10 @@ function SkiaSubtitleLivePreview({
                       fontSize: Math.min(Math.max(style.fontSize * 0.24, 11), 16),
                       fontWeight: 900,
                       textTransform: "uppercase",
-                      WebkitTextStroke: "0.8px #000000",
-                      textShadow: "0 3px 10px rgba(0,0,0,0.85)",
+                      WebkitTextStroke: "1.2px #000000",
+                      paintOrder: "stroke fill",
+                      textShadow: "0 4px 14px rgba(0,0,0,0.95)",
+                      transform: isActive ? "scale(1.18) rotate(-2deg)" : "scale(1)",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3465,10 +3511,11 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "dual_layer" ? (
-            <div className="relative flex flex-wrap justify-center gap-1" style={{ maxWidth: "92%" }}>
-              <div className="absolute inset-0 flex flex-wrap justify-center gap-1 filter blur-[2px] opacity-70 transform translate-y-0.5">
+            /* 10. Dual Layer 3D: Holographic Spatial Layer with Purple Ambient Depth */
+            <div className="relative flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
+              <div className="absolute inset-0 flex flex-wrap justify-center gap-1.5 filter blur-[3px] opacity-80 transform translate-y-1">
                 {words.map((w) => (
-                  <span key={`blur-${w}`} style={{ color: "#7C3AED", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontWeight: 900, fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif` }}>{w}</span>
+                  <span key={`blur-${w}`} style={{ color: "#8B5CF6", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontWeight: 900, fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif` }}>{w}</span>
                 ))}
               </div>
               {words.map((w, i) => {
@@ -3482,6 +3529,8 @@ function SkiaSubtitleLivePreview({
                       fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: 800,
+                      textShadow: isActive ? "0 0 10px rgba(251, 191, 36, 0.8)" : "0 2px 6px rgba(0,0,0,0.8)",
+                      transform: isActive ? "scale(1.1)" : "scale(1)",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3491,6 +3540,7 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "retro_chrome" ? (
+            /* 11. Retro Chrome: 80s Metallic Steel & 24K Gold Chrome Text */
             <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
@@ -3499,15 +3549,16 @@ function SkiaSubtitleLivePreview({
                     key={w}
                     style={{
                       background: isActive
-                        ? "linear-gradient(180deg, #FFD700 0%, #FFFFFF 50%, #FF8C00 100%)"
-                        : "linear-gradient(180deg, #2D2D2D 0%, #E8E8E8 30%, #FFFFFF 50%, #C0C0C0 70%, #4A4A4A 100%)",
+                        ? "linear-gradient(180deg, #FFF9C4 0%, #FFFFFF 35%, #F57F17 50%, #FFD54F 60%, #E65100 100%)"
+                        : "linear-gradient(180deg, #E0E0E0 0%, #FFFFFF 40%, #757575 50%, #BDBDBD 60%, #424242 100%)",
                       WebkitBackgroundClip: "text",
                       WebkitTextFillColor: "transparent",
                       fontFamily: `'${style.fontFamily || "Bebas Neue"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.24, 11), 16),
                       fontWeight: 900,
                       textTransform: "uppercase",
-                      filter: "drop-shadow(1.5px 1.5px 0px rgba(0,0,0,0.8))",
+                      filter: "drop-shadow(2px 2px 0px rgba(0,0,0,0.9))",
+                      transform: isActive ? "scale(1.12)" : "scale(1)",
                       wordBreak: "break-word",
                     }}
                   >
@@ -3517,11 +3568,12 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : (
+            /* 12. Glitch Offset: Anaglyph 3D Chromatic Split Channel */
             <div className="relative flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
-              <span className="absolute left-[-1px] top-[-1px] flex flex-wrap justify-center gap-1.5 text-transparent" style={{ WebkitTextStroke: "0.8px #FF0000", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
+              <span className="absolute left-[-2px] top-[-1px] flex flex-wrap justify-center gap-1.5 text-transparent" style={{ WebkitTextStroke: "1px #FF0000", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
                 {words.join(" ")}
               </span>
-              <span className="absolute left-[1px] top-[1px] flex flex-wrap justify-center gap-1.5 text-transparent" style={{ WebkitTextStroke: "0.8px #00FFFF", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
+              <span className="absolute left-[2px] top-[1px] flex flex-wrap justify-center gap-1.5 text-transparent" style={{ WebkitTextStroke: "1px #00FFFF", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
                 {words.join(" ")}
               </span>
               {words.map((w, i) => {
@@ -3531,12 +3583,13 @@ function SkiaSubtitleLivePreview({
                     key={w}
                     style={{
                       position: "relative",
-                      color: isActive ? "#FFFFFF" : "transparent",
+                      color: isActive ? "#FFFFFF" : "#E2E8F0",
                       WebkitTextStroke: "0.8px #000000",
                       fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`,
                       fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: 900,
                       textTransform: "uppercase",
+                      textShadow: isActive ? "0 0 10px #FFFFFF" : "none",
                       wordBreak: "break-word",
                     }}
                   >
@@ -4986,12 +5039,12 @@ export function SubtitleEditor({
             </div>
             <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
               {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-              <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                <div className="flex flex-wrap justify-center" style={{ gap: 3, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgEnabled ? "4px 8px" : 0, borderRadius: 2 }}>
+              <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+                <div className="flex flex-wrap justify-center" style={{ gap: 3, maxWidth: "92%", backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgEnabled ? "4px 8px" : 0, borderRadius: style.bgRadius ? Math.min(style.bgRadius, 12) : 4 }}>
                   {["ini", "kata", "penting", "banget"].map((w, i) => {
                     const isActive = i === activeWordIdx;
                     return (
-                      <span key={w} style={{ color: isActive ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isActive ? 900 : Number(style.fontWeight), textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", paintOrder: style.strokeEnabled ? "stroke" : undefined, WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `1px 1px 0px ${style.shadowColor}` : undefined }}>{w}</span>
+                      <span key={w} style={{ color: isActive ? style.highlightColor : style.color, fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isActive ? 900 : Number(style.fontWeight), textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", paintOrder: style.strokeEnabled ? "stroke" : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.25, 0.6)}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `1px 1px 0px ${style.shadowColor}` : undefined, wordBreak: "break-word" }}>{w}</span>
                     );
                   })}
                 </div>
@@ -5000,7 +5053,7 @@ export function SubtitleEditor({
             </div>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Mode</span><p className="truncate text-zinc-300">{style.lineTransition || "word_pop"}</p></div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Preset</span><p className="truncate text-purple-300">{style.stylePreset || "classic"}</p></div>
             </div>
           </>
         ) : engine === "skia" ? (
