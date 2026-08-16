@@ -150,14 +150,24 @@ class CacheManager:
 
     # ─── Invalidate ───────────────────────────────────────────────────────────
 
-    def invalidate(self, video_id: str) -> None:
-        """Remove all cached data for a video_id (used by force_reprocess)."""
-        for path in [
-            self._video_path(video_id),
-            self._transcript_path(video_id),
-            self._analysis_path(video_id, "v1"),
-            self._analysis_path(video_id, "v2"),
-        ]:
-            if os.path.exists(path):
-                os.remove(path)
-                logger.info(f"cache: invalidated {os.path.basename(path)}")
+    def cleanup_expired_analyze_sessions(self, max_age_seconds: int = 86400) -> int:
+        """Clean up temporary analyze session video files older than max_age_seconds."""
+        import time
+        downloads_dir = settings.DOWNLOAD_DIR
+        if not os.path.exists(downloads_dir):
+            return 0
+
+        removed_count = 0
+        now = time.time()
+        for filename in os.listdir(downloads_dir):
+            if filename.startswith("analyze_") and filename.endswith(".mp4"):
+                filepath = os.path.join(downloads_dir, filename)
+                try:
+                    mtime = os.path.getmtime(filepath)
+                    if now - mtime > max_age_seconds:
+                        os.remove(filepath)
+                        removed_count += 1
+                        logger.info(f"cache: pruned expired analyze session video {filename}")
+                except Exception as e:
+                    logger.warning(f"cache: failed to prune {filename}: {e}")
+        return removed_count

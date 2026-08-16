@@ -96,6 +96,10 @@ async def analyze_only(
     # Check cache first
     from src.infrastructure.cache_manager import CacheManager
     cache = CacheManager()
+    try:
+        cache.cleanup_expired_analyze_sessions(86400)
+    except Exception:
+        pass
     video_id = cache.extract_video_id(url)
 
     cached_video = cache.get_video_path(video_id) if video_id else None

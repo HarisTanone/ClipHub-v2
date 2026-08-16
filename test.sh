@@ -129,7 +129,7 @@ write_status "running" "${CURRENT_STAGE}" "Rendering clip_01.mp4"
 printf '\n%s\n[TEST] %s\n%s\n' '======================================================================' "${CURRENT_STAGE}" '======================================================================'
 rm -f "${TMP_OUTPUT_VIDEO}"
 ffmpeg -hide_banner -y -i "${INPUT_VIDEO}" -t 10 \
-  -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=h-150:w=w:h=150:color=black@0.55:t=fill,drawtext=text='CLIPHUB TEST PASS':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=h-95" \
+  -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=ih-150:w=iw:h=150:color=black@0.55:t=fill,drawtext=text='CLIPHUB TEST PASS':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=h-95" \
   -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${TMP_OUTPUT_VIDEO}"
 ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height \
   -show_entries format=duration -of json "${TMP_OUTPUT_VIDEO}"

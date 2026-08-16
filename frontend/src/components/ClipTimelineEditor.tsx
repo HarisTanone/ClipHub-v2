@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock, Film, GripHorizontal, Play, Pause, RotateCcw, Scissors, Plus, Trash2, Edit3, FastForward, Rewind, Sparkles } from "lucide-react";
+import { Clock, Film, GripHorizontal, Play, Pause, RotateCcw, Scissors, Plus, Trash2, Edit3, FastForward, Rewind, Sparkles, HelpCircle, Shield, Gauge, Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
@@ -60,6 +60,9 @@ export function ClipTimelineEditor({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const [showSafeZone, setShowSafeZone] = useState<boolean>(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [activeClipIndex, setActiveClipIndex] = useState(0);
   const [startInputText, setStartInputText] = useState("");
   const [endInputText, setEndInputText] = useState("");
@@ -98,6 +101,23 @@ export function ClipTimelineEditor({
       video.pause();
       setIsPlaying(false);
     }
+  }, []);
+
+  // Seek relative
+  const seekRelative = useCallback((delta: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const target = Math.max(0, Math.min(videoDuration, video.currentTime + delta));
+    video.currentTime = target;
+    setCurrentTime(target);
+  }, [videoDuration]);
+
+  // Change playback speed
+  const changeSpeed = useCallback((speed: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.playbackRate = speed;
+    setPlaybackSpeed(speed);
   }, []);
 
   // Seek to clip start
@@ -156,9 +176,9 @@ export function ClipTimelineEditor({
   // Add new clip at current playhead position
   const addClip = useCallback(() => {
     const start = Math.max(0, currentTime);
-    const defaultDuration = 20; // 20 seconds default
+    const defaultDuration = 20;
     const end = Math.min(videoDuration, start + defaultDuration);
-    if (end - start < 5) return; // can't add clip shorter than 5s
+    if (end - start < 5) return;
 
     const maxRank = clips.length > 0 ? Math.max(...clips.map((c) => c.rank)) : 0;
     const newClip: EditableClip = {
@@ -184,9 +204,8 @@ export function ClipTimelineEditor({
 
   // Delete clip
   const deleteClip = useCallback((index: number) => {
-    if (clips.length <= 1) return; // keep at least 1 clip
+    if (clips.length <= 1) return;
     const updated = clips.filter((_, i) => i !== index);
-    // Re-rank
     updated.forEach((c, i) => { c.rank = i + 1; });
     onClipsChange(updated);
     setActiveClipIndex(Math.min(activeClipIndex, updated.length - 1));
@@ -253,6 +272,46 @@ export function ClipTimelineEditor({
     onClipsChange(updated);
   }, [activeClip, activeClipIndex, clips, onClipsChange]);
 
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in an input or textarea
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === "ArrowLeft" || e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        seekRelative(-5);
+      } else if (e.key === "ArrowRight" || e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        seekRelative(5);
+      } else if (e.key === "[") {
+        e.preventDefault();
+        setStartToPlayhead();
+      } else if (e.key === "]") {
+        e.preventDefault();
+        setEndToPlayhead();
+      } else if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        addClip();
+      } else if (e.key === "p" || e.key === "P") {
+        e.preventDefault();
+        previewClip(activeClipIndex);
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setShowShortcutsModal((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [togglePlay, seekRelative, setStartToPlayhead, setEndToPlayhead, addClip, previewClip, activeClipIndex]);
+
   // Timeline drag handler
   const handleTimelineMouseDown = useCallback(
     (e: React.MouseEvent, clipIndex: number, handle: "start" | "end") => {
@@ -275,7 +334,7 @@ export function ClipTimelineEditor({
 
       const updated = [...clips];
       const clip = updated[dragging.clipIndex];
-      const minDuration = 5; // minimum 5 seconds per clip
+      const minDuration = 5;
 
       if (dragging.handle === "start") {
         const maxStart = clip.end - minDuration;
@@ -288,7 +347,6 @@ export function ClipTimelineEditor({
       clip.modified = clip.start !== clip.ai_start || clip.end !== clip.ai_end;
       onClipsChange(updated);
 
-      // Sync video to dragged position
       const video = videoRef.current;
       if (video) {
         video.currentTime = dragging.handle === "start" ? clip.start : clip.end;
@@ -308,7 +366,7 @@ export function ClipTimelineEditor({
   const hasAnyModified = clips.some((c) => c.modified);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-3 min-h-0">
+    <div className="flex flex-col lg:flex-row gap-3 min-h-0 relative">
       {/* Left: AI Analysis Results + Add/Delete */}
       <div className="lg:w-[360px] shrink-0 space-y-2 overflow-y-auto max-h-[calc(100vh-250px)] pr-1">
         <div className="flex items-center justify-between mb-1 sticky top-0 bg-[var(--color-surface)] py-1 z-10">
@@ -333,7 +391,7 @@ export function ClipTimelineEditor({
               type="button"
               onClick={addClip}
               className="flex items-center gap-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-[10px] text-emerald-300 hover:bg-emerald-500/25 font-medium transition-colors"
-              title="Add clip at current position"
+              title="Add clip at current position (Shortcut: N)"
             >
               <Plus className="h-3 w-3" />
               Add Clip
@@ -401,7 +459,7 @@ export function ClipTimelineEditor({
                     type="button"
                     onClick={(e) => { e.stopPropagation(); previewClip(idx); }}
                     className="rounded-lg p-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
-                    title="Preview clip audio/video"
+                    title="Preview clip audio/video (P)"
                   >
                     <Play className="h-3.5 w-3.5 fill-current" />
                   </button>
@@ -432,9 +490,9 @@ export function ClipTimelineEditor({
         })}
       </div>
 
-      {/* Right: Video Player + Timeline + Detailed Time Tuning */}
+      {/* Right: Video Player + Safe Zones + Controls + Timeline */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
-        {/* Video Player */}
+        {/* Video Player Container with Safe-Zone overlay support */}
         <div className="relative rounded-xl overflow-hidden border border-zinc-800 bg-black shadow-lg">
           <video
             ref={videoRef}
@@ -444,7 +502,35 @@ export function ClipTimelineEditor({
             playsInline
             onEnded={() => setIsPlaying(false)}
           />
-          {/* Play overlay */}
+
+          {/* Social Safe Zone Mockup Overlay (9:16 TikTok / Reels simulator) */}
+          {showSafeZone && (
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              {/* 9:16 bounding box in video */}
+              <div className="h-full aspect-[9/16] border-2 border-dashed border-sky-400/70 bg-sky-500/[0.04] relative flex flex-col justify-between p-3 select-none">
+                {/* Top Safe Area (Header / Search / Live tabs) */}
+                <div className="rounded border border-sky-400/30 bg-sky-500/20 px-2 py-1 text-[8px] font-bold text-sky-200 text-center tracking-wider uppercase">
+                  Top UI Zone (Search / Tabs)
+                </div>
+
+                {/* Right Action Icons Zone */}
+                <div className="absolute right-2 bottom-16 flex flex-col items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-black/60 border border-sky-400/40 flex items-center justify-center text-[7px] text-white">❤️</div>
+                  <div className="w-6 h-6 rounded-full bg-black/60 border border-sky-400/40 flex items-center justify-center text-[7px] text-white">💬</div>
+                  <div className="w-6 h-6 rounded-full bg-black/60 border border-sky-400/40 flex items-center justify-center text-[7px] text-white">↗️</div>
+                  <div className="w-6 h-6 rounded-full bg-black/60 border border-sky-400/40 flex items-center justify-center text-[7px] text-white">🎵</div>
+                </div>
+
+                {/* Bottom Safe Area (Username & Caption Zone) */}
+                <div className="rounded border border-sky-400/30 bg-sky-500/20 p-1.5 text-[8px] font-bold text-sky-200 text-left w-3/4 space-y-0.5">
+                  <p className="font-bold">@creator · TikTok / Reels UI</p>
+                  <p className="text-[7px] text-sky-300 font-normal truncate">Caption & audio title safe area...</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Center Play overlay */}
           <button
             type="button"
             onClick={togglePlay}
@@ -456,16 +542,89 @@ export function ClipTimelineEditor({
               </span>
             )}
           </button>
-          {/* Time display */}
-          <div className="absolute bottom-2.5 left-2.5 flex items-center gap-2.5 rounded-lg bg-black/80 px-3 py-1.5 text-xs font-mono text-white backdrop-blur-md border border-zinc-800">
-            <button type="button" onClick={togglePlay} className="hover:text-emerald-400 transition-colors">
-              {isPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5 fill-current" />}
-            </button>
-            <span className="font-semibold text-emerald-300">{formatTimePrecise(currentTime)}</span>
-            <span className="text-zinc-500">/</span>
-            <span className="text-zinc-400">{formatTimePrecise(videoDuration)}</span>
+
+          {/* Control bar */}
+          <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 rounded-lg bg-black/80 px-3 py-1.5 text-xs font-mono text-white backdrop-blur-md border border-zinc-800">
+            {/* Left: Play/Pause & Time */}
+            <div className="flex items-center gap-2.5">
+              <button type="button" onClick={togglePlay} className="hover:text-emerald-400 transition-colors">
+                {isPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5 fill-current" />}
+              </button>
+              <span className="font-semibold text-emerald-300">{formatTimePrecise(currentTime)}</span>
+              <span className="text-zinc-500">/</span>
+              <span className="text-zinc-400">{formatTimePrecise(videoDuration)}</span>
+            </div>
+
+            {/* Right: Playback Speed, Safe Zone & Shortcut Help */}
+            <div className="flex items-center gap-2">
+              {/* Speed buttons */}
+              <div className="flex items-center bg-zinc-900/90 rounded-md border border-zinc-800 p-0.5">
+                {[0.75, 1, 1.25, 1.5, 2].map((spd) => (
+                  <button
+                    key={spd}
+                    type="button"
+                    onClick={() => changeSpeed(spd)}
+                    className={cn(
+                      "px-1.5 py-0.5 text-[9px] rounded font-mono font-medium transition-colors",
+                      playbackSpeed === spd
+                        ? "bg-emerald-500 text-zinc-950 font-bold"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    )}
+                  >
+                    {spd}x
+                  </button>
+                ))}
+              </div>
+
+              {/* Safe Zone Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowSafeZone(!showSafeZone)}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-sans font-medium transition-colors border",
+                  showSafeZone
+                    ? "border-sky-500/50 bg-sky-500/20 text-sky-300"
+                    : "border-zinc-700/60 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
+                )}
+                title="Toggle 9:16 Social Safe-Zone Overlay"
+              >
+                <Shield className="h-3 w-3" />
+                Safe Zone
+              </button>
+
+              {/* Shortcut Help Button */}
+              <button
+                type="button"
+                onClick={() => setShowShortcutsModal(!showShortcutsModal)}
+                className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                title="Keyboard Shortcuts (?)"
+              >
+                <HelpCircle className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Shortcuts popover */}
+        {showShortcutsModal && (
+          <div className="p-3 rounded-lg border border-zinc-700/80 bg-zinc-900/95 text-xs space-y-2 shadow-xl">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
+              <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
+                <HelpCircle className="h-3.5 w-3.5 text-emerald-400" />
+                Keyboard Shortcuts Pro
+              </span>
+              <button type="button" onClick={() => setShowShortcutsModal(false)} className="text-zinc-500 hover:text-zinc-300">✕</button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">Space</kbd> Play / Pause</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">J</kbd> / <kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">L</kbd> Seek -5s / +5s</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">[</kbd> Set Start here</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">]</kbd> Set End here</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">N</kbd> Add Clip at Playhead</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">P</kbd> Preview Active Clip</div>
+            </div>
+          </div>
+        )}
 
         {/* Timeline with clip markers */}
         <Card className="p-3">
@@ -493,11 +652,11 @@ export function ClipTimelineEditor({
               }
             }}
           >
-            {/* Clip regions — clamp to valid range */}
+            {/* Clip regions */}
             {clips.map((clip, idx) => {
               const clampedStart = Math.max(0, Math.min(clip.start, videoDuration));
               const clampedEnd = Math.max(0, Math.min(clip.end, videoDuration));
-              if (clampedEnd <= clampedStart) return null; // skip invalid
+              if (clampedEnd <= clampedStart) return null;
               const left = (clampedStart / videoDuration) * 100;
               const width = ((clampedEnd - clampedStart) / videoDuration) * 100;
               const isActive = idx === activeClipIndex;
@@ -654,7 +813,7 @@ export function ClipTimelineEditor({
                   onClick={setStartToPlayhead}
                   className="w-full text-center py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 hover:bg-emerald-500/20 font-medium transition-colors"
                 >
-                  Set to Playhead ({formatTime(currentTime)})
+                  Set to Playhead ({formatTime(currentTime)}) [Key: []
                 </button>
               </div>
 
@@ -694,7 +853,7 @@ export function ClipTimelineEditor({
                   onClick={setEndToPlayhead}
                   className="w-full text-center py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 hover:bg-emerald-500/20 font-medium transition-colors"
                 >
-                  Set to Playhead ({formatTime(currentTime)})
+                  Set to Playhead ({formatTime(currentTime)}) [Key: ]]
                 </button>
               </div>
 
@@ -717,7 +876,7 @@ export function ClipTimelineEditor({
                   icon={<Play className="h-3.5 w-3.5 fill-current" />}
                   className="w-full mt-2"
                 >
-                  Play Active Clip
+                  Play Active Clip (P)
                 </Button>
               </div>
             </div>

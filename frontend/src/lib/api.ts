@@ -518,8 +518,12 @@ export const jobs = {
   },
 
   getClipFinalUrl(jobId: string, rank: number, quality?: "original" | "720" | "480" | "360" | "320"): string {
-    const base = `${API_BASE}/api/jobs/${jobId}/clips/${rank}/final`;
-    return quality && quality !== "original" ? `${base}?quality=${quality}` : base;
+    const q = quality && quality !== "original" ? `?quality=${quality}` : "";
+    return `${API_BASE}/api/jobs/${jobId}/clips/${rank}/final${q}`;
+  },
+
+  getDownloadAllUrl(jobId: string): string {
+    return `${API_BASE}/api/jobs/${jobId}/download-all`;
   },
 
   getClipThumbUrl(jobId: string, rank: number): string {

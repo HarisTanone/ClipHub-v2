@@ -651,6 +651,73 @@ async def get_clip_final(
     return _stream_video(final_path, request, f"clip_{clip_rank}_final{filename_suffix}.mp4")
 
 
+@router.get("/{job_id}/download-all")
+async def download_all_clips(
+    job_id: str,
+    service: JobService = Depends(get_job_service),
+):
+    """Download all rendered final clips for a job as a single ZIP archive."""
+    import io
+    import zipfile
+    from fastapi.responses import StreamingResponse
+
+    job = await service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+
+    output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
+    if not os.path.exists(output_dir):
+        raise HTTPException(status_code=404, detail="Direktori hasil clip tidak ditemukan")
+
+    # Find all final clips
+    clips_files = []
+    for rank in range(1, 100):
+        final_path = find_final_clip(output_dir, rank)
+        if final_path and os.path.exists(final_path):
+            clips_files.append((rank, final_path))
+
+    if not clips_files:
+        raise HTTPException(status_code=404, detail="Belum ada clip final yang selesai diproses")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for rank, file_path in clips_files:
+            ext = os.path.splitext(file_path)[1] or ".mp4"
+            arcname = f"clip_{rank:02d}{ext}"
+            zip_file.write(file_path, arcname=arcname)
+
+        # Add summary metadata
+        summary_lines = [
+            f"ClipHub — Video Clips Export",
+            f"Job ID: {job_id}",
+            f"Video Title: {job.video_title or 'Untitled'}",
+            f"Source URL: {job.youtube_url or 'Direct Upload'}",
+            f"Total Completed Clips: {len(clips_files)}",
+            "=" * 50,
+            "",
+        ]
+        if job.clips_data and "clips" in job.clips_data:
+            for c in job.clips_data.get("clips", []):
+                summary_lines.append(f"Clip #{c.get('rank', '?')}: {c.get('hook', 'Untitled')}")
+                summary_lines.append(f"Time: {c.get('start', 0)}s - {c.get('end', 0)}s (Duration: {c.get('duration', 0)}s)")
+                if c.get("reason"):
+                    summary_lines.append(f"Highlight Reason: {c.get('reason')}")
+                summary_lines.append("-" * 30)
+        zip_file.writestr("clips_summary.txt", "\n".join(summary_lines))
+
+    zip_buffer.seek(0)
+    raw_title = job.video_title or job_id
+    safe_title = "".join(c for c in raw_title if c.isalnum() or c in (" ", "-", "_")).strip()
+    safe_title = safe_title.replace(" ", "_")[:35] or job_id
+    filename = f"{safe_title}_all_clips.zip"
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{job_id}/clips/{clip_rank}/thumb")
 async def get_clip_thumb(
     job_id: str,

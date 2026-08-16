@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo, Lock, LoaderCircle } from "lucide-react";
+import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo, Lock, LoaderCircle, Download, Copy, Check } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -164,6 +164,17 @@ export function JobDetail() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {readyClips > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(jobs.getDownloadAllUrl(data.job_id), "_blank")}
+                icon={<Download className="h-3.5 w-3.5 text-emerald-400" />}
+                className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+              >
+                Download All ZIP ({readyClips})
+              </Button>
+            )}
             <Button variant="ghost" size="xs" onClick={loadDetail} icon={<RefreshCw className="h-3 w-3" />}>Refresh</Button>
             {!isTerminal && (
               <Button variant="danger" size="sm" onClick={handleCancel}>Cancel</Button>
@@ -359,6 +370,8 @@ function FeaturePill({ icon, label, value, active }: { icon: React.ReactNode; la
 }
 
 function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo; aspectRatio: string }) {
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
   const finalUrl = clip.has_final ? jobs.getClipFinalUrl(jobId, clip.rank) : null;
   const thumbUrl = clip.has_thumbnail ? jobs.getClipThumbUrl(jobId, clip.rank) : null;
 
@@ -368,6 +381,24 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
   const timeline = `${formatDuration(clip.start)} - ${formatDuration(clip.end)}`;
   const renderStatus = clip.has_final ? "ready" : (clip.render_status || "processing");
   const isProcessing = renderStatus === "processing";
+
+  const handleCopyCaption = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const text = `${clip.hook || `Clip #${clip.rank}`}\n\n👉 Simak pembahasan lengkapnya!\n\n#fyp #viral #trending #reels #shorts #podcast #cliphub`;
+    navigator.clipboard?.writeText(text);
+    setCopied(true);
+    toast.success(`Caption Clip #${clip.rank} disalin!`);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownload = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (finalUrl) {
+      window.open(finalUrl, "_blank");
+    }
+  };
 
   const card = (
     <Card className={cn(
@@ -423,9 +454,28 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
           <p className="text-[10px] text-zinc-100 font-medium line-clamp-2 leading-snug">
             {clip.hook || `Clip ${clip.rank}`}
           </p>
-          <div className="mt-auto flex items-center gap-1 text-[8px] text-zinc-500 truncate">
-            {clip.duration > 0 ? <span className="font-mono truncate">{timeline}</span> : <span className="truncate">…</span>}
-            {!clip.has_final && <span className={cn("shrink-0", isProcessing ? "text-amber-400" : "text-zinc-600")}>{isProcessing ? "…" : "n/a"}</span>}
+          <div className="mt-auto flex items-center justify-between gap-1 text-[8px] text-zinc-500 pt-1">
+            <span className="font-mono truncate">{timeline}</span>
+            {clip.has_final && (
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleCopyCaption}
+                  className="rounded p-0.5 hover:bg-zinc-800 text-zinc-400 hover:text-emerald-300 transition-colors"
+                  title="Copy caption & hashtags"
+                >
+                  {copied ? <Check className="h-2.5 w-2.5 text-emerald-400" /> : <Copy className="h-2.5 w-2.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  className="rounded p-0.5 hover:bg-zinc-800 text-zinc-400 hover:text-emerald-300 transition-colors"
+                  title="Download MP4"
+                >
+                  <Download className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </Card>

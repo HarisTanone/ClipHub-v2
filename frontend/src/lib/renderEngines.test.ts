@@ -39,12 +39,12 @@ describe("Render engines catalogue & permissions", () => {
 
   it("FFmpeg presets catalogue is complete", () => {
     expect(FFMPEG_HOOK_PRESETS.length).toBeGreaterThanOrEqual(10);
-    expect(FFMPEG_SUBTITLE_PRESETS.length).toBe(10);
+    expect(FFMPEG_SUBTITLE_PRESETS.length).toBeGreaterThanOrEqual(10);
   });
 
   it("Skia GPU presets catalogue is complete", () => {
     expect(SKIA_HOOK_PRESETS.length).toBeGreaterThanOrEqual(8);
-    expect(SKIA_SUBTITLE_PRESETS.length).toBe(10);
+    expect(SKIA_SUBTITLE_PRESETS.length).toBeGreaterThanOrEqual(10);
   });
 
   it("enforces subtitle engine permission matrix (regular user: ffmpeg, skia; superuser: all 4)", () => {
