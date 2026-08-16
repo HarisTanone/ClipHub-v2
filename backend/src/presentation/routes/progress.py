@@ -204,6 +204,9 @@ async def poll_job_progress(
     output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
     available_clips = discover_ready_clip_ranks(output_dir)
 
+    active_clip = (latest_state or {}).get("active_clip") or (job.clips_data or {}).get("active_clip")
+    clips_progress = (latest_state or {}).get("clips_progress") or (job.clips_data or {}).get("clips_progress") or {}
+
     return {
         "success": True,
         "data": {
@@ -223,6 +226,8 @@ async def poll_job_progress(
                 "failed": job.clips_failed,
                 "available": available_clips,
             },
+            "active_clip": active_clip,
+            "clips_progress": clips_progress,
             "error": job.error_message if is_terminal and job.status.value != "completed" else None,
             "timestamps": {
                 "created_at": job.created_at.isoformat() if job.created_at else None,

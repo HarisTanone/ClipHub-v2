@@ -168,6 +168,27 @@ class V2PipelineService:
         except Exception:
             pass
 
+    def _emit_clip_progress(
+        self,
+        job_id: str,
+        clip_rank: int,
+        total_clips: int,
+        stage: str,
+        eta_seconds: Optional[int] = None,
+    ) -> None:
+        if not self._sse:
+            return
+        try:
+            self._sse.emit_clip_progress(
+                job_id=job_id,
+                clip_rank=clip_rank,
+                total_clips=total_clips,
+                stage=stage,
+                eta_seconds=eta_seconds,
+            )
+        except Exception:
+            pass
+
     def _calc_max_clips(self, duration: float) -> int:
         if duration < 180:
             n = 2
@@ -627,13 +648,59 @@ class V2PipelineService:
             self._emit(job_id, 8, "yolo_reframe", "start")
             await self._repo.update_status(job_id, JobStatus.SEGMENTING)
             reframe_data = {}
+
+            # Execute Global Audio Diarization ONCE for entire source video
+            global_diarization = None
+            if flags.yolo_enabled and getattr(settings, "HF_TOKEN", ""):
+                try:
+                    from src.infrastructure.speaker_diarizer import (
+                        SpeakerDiarizer,
+                        get_cached_global_diarization,
+                        set_cached_global_diarization,
+                    )
+                    cache_key = f"diarization_{video_path}"
+                    global_diarization = get_cached_global_diarization(cache_key)
+                    if global_diarization:
+                        logger.info(f"[{job_id}] Global diarization CACHE HIT for {video_path}")
+                    else:
+                        diarizer = SpeakerDiarizer(
+                            hf_token=settings.HF_TOKEN,
+                            model_name=getattr(settings, "DIARIZATION_MODEL", "pyannote/speaker-diarization-3.1"),
+                            timeout_sec=getattr(settings, "DIARIZATION_TIMEOUT_SEC", 120),
+                        )
+                        if diarizer.is_available:
+                            logger.info(f"[{job_id}] Running GLOBAL audio diarization on source video ({duration:.1f}s)...")
+                            t_dia = time.time()
+                            global_diarization = await diarizer.diarize(video_path)
+                            if global_diarization:
+                                set_cached_global_diarization(cache_key, global_diarization)
+                                logger.info(
+                                    f"[{job_id}] Global diarization complete in {time.time() - t_dia:.1f}s: "
+                                    f"{global_diarization.speaker_count} speakers, {len(global_diarization.segments)} segments"
+                                )
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Global diarization skipped (fallback to per-clip): {e}")
+
             if flags.yolo_enabled and self._yolo_reframe:
                 reframe_style = (job.clips_data or {}).get("hook_style_config", {})
+                valid_clips = [c for c in clips if trim_results.get(c.rank)]
+                total_valid = len(valid_clips)
+
                 for clip in clips:
                     if not trim_results.get(clip.rank):
                         continue
                     in_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
                     out_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
+                    clip_dur = max(1.0, float(clip.end - clip.start))
+                    est_reframe_sec = max(5, round(clip_dur * 1.1))
+
+                    self._emit_clip_progress(
+                        job_id=job_id,
+                        clip_rank=clip.rank,
+                        total_clips=total_valid,
+                        stage="Reframing 9:16",
+                        eta_seconds=est_reframe_sec,
+                    )
                     try:
                         result = await self._yolo_reframe.process(
                             in_path,
@@ -643,6 +710,9 @@ class V2PipelineService:
                             content_profile=(job.clips_data or {}).get("content_profile", {}),
                             transition_style=reframe_style.get("transitionStyle", "cut"),
                             transition_duration=reframe_style.get("transitionDuration", 0.35),
+                            global_diarization=global_diarization,
+                            clip_start=clip.start,
+                            clip_end=clip.end,
                         )
                         reframe_data[clip.rank] = result
                     except Exception as e:
@@ -674,6 +744,9 @@ class V2PipelineService:
                                 content_profile=(job.clips_data or {}).get("content_profile", {}),
                                 transition_style=reframe_style.get("transitionStyle", "cut"),
                                 transition_duration=reframe_style.get("transitionDuration", 0.35),
+                                global_diarization=global_diarization,
+                                clip_start=clip.start,
+                                clip_end=clip.end,
                             )
                             shadow_results[clip.rank] = shadow_result
                         except Exception as e:
@@ -724,6 +797,9 @@ class V2PipelineService:
                             content_profile=(job.clips_data or {}).get("content_profile", {}),
                             transition_style=reframe_style.get("transitionStyle", "cut"),
                             transition_duration=reframe_style.get("transitionDuration", 0.35),
+                            global_diarization=global_diarization,
+                            clip_start=clip.start,
+                            clip_end=clip.end,
                         )
                         reframe_data[clip.rank] = result
                     except Exception as e:
@@ -1983,6 +2059,16 @@ class V2PipelineService:
                 if not trim_results.get(clip.rank):
                     return
 
+                clip_duration = max(0.0, clip.end - clip.start)
+                est_render_sec = max(5, round(clip_duration * 0.8))
+                self._emit_clip_progress(
+                    job_id=job_id,
+                    clip_rank=clip.rank,
+                    total_clips=len(clips),
+                    stage="Rendering Karaoke & Hook",
+                    eta_seconds=est_render_sec,
+                )
+
                 brolled_path = f"{output_dir}/clip_{clip.rank:02d}_brolled.mp4"
                 reframed_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
                 base_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
@@ -1995,7 +2081,6 @@ class V2PipelineService:
 
                 clip_words_raw = clips_with_words.get(clip.rank, [])
                 clip_hook = clip.hook or ""
-                clip_duration = max(0.0, clip.end - clip.start)
                 # words already filtered at Step 10; re-sanitize with hook window
                 # so any re-entry path still keeps subtitles off during hook.
                 hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0)
@@ -2089,6 +2174,13 @@ class V2PipelineService:
                             # Watermark (FFmpeg overlay/drawtext) — final pass
                             await self._apply_watermark(job, clip.rank, output_dir, out_path, job_id)
                             mark_clip_ready(output_dir, clip.rank)
+                            self._emit_clip_progress(
+                                job_id=job_id,
+                                clip_rank=clip.rank,
+                                total_clips=len(clips),
+                                stage="Ready",
+                                eta_seconds=0,
+                            )
                         logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
                     else:
                         message = f"clip {clip.rank}: {result.error_message or 'unknown Remotion error'}"
@@ -2209,6 +2301,13 @@ class V2PipelineService:
                 if success:
                     logger.info(f"[{job_id}] 1-pass FFmpeg composite rendered clip {clip.rank}")
                     mark_clip_ready(output_dir, clip.rank)
+                    self._emit_clip_progress(
+                        job_id=job_id,
+                        clip_rank=clip.rank,
+                        total_clips=len(clips),
+                        stage="Ready",
+                        eta_seconds=0,
+                    )
                     continue
                 else:
                     logger.warning(f"[{job_id}] 1-pass FFmpeg composite failed clip {clip.rank}; falling back to multi-step")
@@ -2264,6 +2363,13 @@ class V2PipelineService:
             # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
             await self._apply_watermark(job, clip.rank, output_dir, final_path, job_id)
             mark_clip_ready(output_dir, clip.rank)
+            self._emit_clip_progress(
+                job_id=job_id,
+                clip_rank=clip.rank,
+                total_clips=len(clips),
+                stage="Ready",
+                eta_seconds=0,
+            )
 
         if errors:
             logger.warning(f"[{job_id}] {engine_label} render had {len(errors)} errors (non-fatal)")
@@ -2553,6 +2659,13 @@ class V2PipelineService:
                 # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
                 await self._apply_watermark(job, clip.rank, output_dir, final, job_id)
                 mark_clip_ready(output_dir, clip.rank)
+                self._emit_clip_progress(
+                    job_id=job_id,
+                    clip_rank=clip.rank,
+                    total_clips=len(clips),
+                    stage="Ready",
+                    eta_seconds=0,
+                )
                 applied += 1
                 try:
                     clip.hyperframes_polish = {

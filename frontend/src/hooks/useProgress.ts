@@ -12,6 +12,8 @@ interface ProgressState {
   clipsAvailable: number[];
   clipsTotal: number;
   eta: ProgressResponse["data"]["eta"];
+  activeClip?: ProgressResponse["data"]["active_clip"];
+  clipsProgress?: ProgressResponse["data"]["clips_progress"];
 }
 
 export function useProgress(jobId: string | undefined, enabled = true) {
@@ -27,7 +29,15 @@ export function useProgress(jobId: string | undefined, enabled = true) {
         const newPercentage = d.progress.percentage;
         // Never go backwards unless terminal
         if (prev && !d.is_terminal && newPercentage < prev.percentage && prev.percentage > 10) {
-          return prev;
+          return {
+            ...prev,
+            status: d.status,
+            activeClip: d.active_clip,
+            clipsProgress: d.clips_progress,
+            clipsAvailable: d.clips.available,
+            clipsTotal: d.clips.total,
+            eta: d.eta,
+          };
         }
         return {
           status: d.status,
@@ -40,6 +50,8 @@ export function useProgress(jobId: string | undefined, enabled = true) {
           clipsAvailable: d.clips.available,
           clipsTotal: d.clips.total,
           eta: d.eta,
+          activeClip: d.active_clip,
+          clipsProgress: d.clips_progress,
         };
       });
 

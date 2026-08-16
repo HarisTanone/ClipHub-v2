@@ -358,6 +358,10 @@ class PodcastReframeEngine(IReframeEngine):
             transition_duration = 0.35
         transition_duration = max(0.0, min(1.0, transition_duration))
 
+        global_diarization = kwargs.get("global_diarization")
+        clip_start = float(kwargs.get("clip_start") or 0.0)
+        clip_end = float(kwargs.get("clip_end") or 0.0)
+
         try:
             result = await asyncio.to_thread(
                 self._pipeline,
@@ -367,6 +371,9 @@ class PodcastReframeEngine(IReframeEngine):
                 content_profile,
                 transition_style,
                 transition_duration,
+                global_diarization=global_diarization,
+                clip_start=clip_start,
+                clip_end=clip_end,
             )
             if result:
                 return result
@@ -386,6 +393,9 @@ class PodcastReframeEngine(IReframeEngine):
         content_profile: Optional[dict] = None,
         transition_style: str = "cut",
         transition_duration: float = 0.35,
+        global_diarization: Optional[Any] = None,
+        clip_start: float = 0.0,
+        clip_end: float = 0.0,
     ) -> Optional[dict]:
         import cv2
         cv2.setNumThreads(0)
@@ -452,7 +462,13 @@ class PodcastReframeEngine(IReframeEngine):
         if person_count > 1:
             # 2a. Try PyAnnote diarization FIRST (more accurate for speaker identity)
             speaker_result = self._try_diarization(
-                video_path, tracked_data, fps, total_frames
+                video_path,
+                tracked_data,
+                fps,
+                total_frames,
+                global_diarization=global_diarization,
+                clip_start=clip_start,
+                clip_end=clip_end,
             )
 
             # 2b. Fallback: lip+head+VAD (existing method)
@@ -638,43 +654,61 @@ class PodcastReframeEngine(IReframeEngine):
         tracked_data: dict,
         fps: float,
         total_frames: int,
+        global_diarization: Optional[Any] = None,
+        clip_start: float = 0.0,
+        clip_end: float = 0.0,
     ) -> Optional[ActiveSpeakerResult]:
         """Attempt PyAnnote diarization + face mapping.
 
+        If global_diarization is supplied, slices the pre-computed timeline in <1ms.
+        Otherwise falls back to local on-demand diarization.
         Returns ActiveSpeakerResult if successful, None to trigger fallback.
         Reuses existing per_frame_tracked data — no additional video processing.
         """
-        diarizer = self._init_diarizer()
-        if diarizer is None or not diarizer.is_available:
-            return None
+        from src.infrastructure.speaker_diarizer import slice_diarization
 
         try:
-            # Run diarization synchronously (already in thread via _pipeline)
-            import asyncio
+            diarization_result = None
+            if global_diarization is not None and clip_end > clip_start:
+                try:
+                    sliced = slice_diarization(global_diarization, clip_start, clip_end)
+                    if sliced and sliced.segments:
+                        diarization_result = sliced
+                        logger.info(
+                            f"podcast_reframe: ✓ using GLOBAL diarization cache sliced for [{clip_start:.2f}s - {clip_end:.2f}s] "
+                            f"({diarization_result.speaker_count} speakers, {len(diarization_result.segments)} segments)"
+                        )
+                except Exception as e:
+                    logger.warning(f"podcast_reframe: global diarization slicing failed, falling back: {e}")
 
-            # Create new event loop since we're in a thread
-            loop = asyncio.new_event_loop()
-            try:
-                visual_person_count = int(tracked_data.get("person_count") or 0)
-                dynamic_min_speakers = None
-                dynamic_max_speakers = (
-                    visual_person_count if visual_person_count > 1 else None
-                )
-                logger.info(
-                    "podcast_reframe: diarization speaker bounds "
-                    f"min={dynamic_min_speakers or 'auto'}, "
-                    f"max={dynamic_max_speakers or 'auto'} "
-                    f"(visible_people={visual_person_count})"
-                )
-                diarization_result = loop.run_until_complete(
-                    diarizer.diarize(
-                        video_path,
-                        min_speakers=dynamic_min_speakers,
-                        max_speakers=dynamic_max_speakers,
+            if diarization_result is None:
+                diarizer = self._init_diarizer()
+                if diarizer is None or not diarizer.is_available:
+                    return None
+
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    visual_person_count = int(tracked_data.get("person_count") or 0)
+                    dynamic_min_speakers = None
+                    dynamic_max_speakers = (
+                        visual_person_count if visual_person_count > 1 else None
                     )
-                )
-            finally:
-                loop.close()
+                    logger.info(
+                        "podcast_reframe: diarization speaker bounds "
+                        f"min={dynamic_min_speakers or 'auto'}, "
+                        f"max={dynamic_max_speakers or 'auto'} "
+                        f"(visible_people={visual_person_count})"
+                    )
+                    diarization_result = loop.run_until_complete(
+                        diarizer.diarize(
+                            video_path,
+                            min_speakers=dynamic_min_speakers,
+                            max_speakers=dynamic_max_speakers,
+                        )
+                    )
+                finally:
+                    loop.close()
 
             if diarization_result is None:
                 logger.info("podcast_reframe: diarization returned None → fallback to lip+head")

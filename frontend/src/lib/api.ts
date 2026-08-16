@@ -450,6 +450,18 @@ export interface ProgressResponse {
       failed: number;
       available: number[];
     };
+    active_clip?: {
+      rank: number;
+      total: number;
+      stage: string;
+      eta_seconds: number | null;
+      timestamp?: string;
+    } | null;
+    clips_progress?: Record<string, {
+      status: string;
+      stage: string;
+      eta_seconds: number | null;
+    }>;
     error: string | null;
     timestamps: { created_at: string | null; updated_at: string | null };
     eta?: null | { remaining_seconds: number; estimated_total_seconds: number; elapsed_seconds: number; sample_count: number; basis: string };

@@ -310,7 +310,14 @@ export function JobDetail() {
           <div className="flex items-center justify-between gap-3 border-b border-zinc-800/60 px-4 py-3">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-zinc-100">Clips</h2>
-              <p className="text-[10px] text-zinc-500">{data.clips_total} clips · {readyClips} ready · {remainingClips} {remainingLabel}</p>
+              <p className="text-[10px] text-zinc-500">
+                {data.clips_total} clips · {readyClips} ready · {remainingClips} {remainingLabel}
+                {progress?.activeClip && (
+                  <span className="ml-1.5 inline-flex items-center gap-1 text-amber-400 font-medium">
+                    · Sedang memproses Klip #{progress.activeClip.rank} ({progress.activeClip.stage}{progress.activeClip.eta_seconds ? ` · ~${progress.activeClip.eta_seconds}s` : ""})
+                  </span>
+                )}
+              </p>
             </div>
             <Badge variant="default" size="sm">{data.target_aspect_ratio || "9:16"}</Badge>
           </div>
@@ -318,7 +325,14 @@ export function JobDetail() {
           <div className="flex gap-2 overflow-x-auto p-2.5 snap-x mobile-h-scroll">
             {data.clips.map((clip) => (
               <div key={clip.rank} className="shrink-0 w-[min(50vw,160px)] sm:w-[144px] md:w-[160px] snap-start">
-                <ClipCard jobId={data.job_id} clip={clip} aspectRatio="9:16" />
+                <ClipCard
+                  jobId={data.job_id}
+                  clip={clip}
+                  aspectRatio="9:16"
+                  activeClip={progress?.activeClip}
+                  clipProgress={progress?.clipsProgress?.[String(clip.rank)]}
+                  isJobTerminal={isTerminal}
+                />
               </div>
             ))}
           </div>
@@ -369,7 +383,21 @@ function FeaturePill({ icon, label, value, active }: { icon: React.ReactNode; la
   );
 }
 
-function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo; aspectRatio: string }) {
+function ClipCard({
+  jobId,
+  clip,
+  aspectRatio,
+  activeClip,
+  clipProgress,
+  isJobTerminal,
+}: {
+  jobId: string;
+  clip: ClipInfo;
+  aspectRatio: string;
+  activeClip?: { rank: number; total: number; stage: string; eta_seconds: number | null } | null;
+  clipProgress?: { status: string; stage: string; eta_seconds: number | null };
+  isJobTerminal?: boolean;
+}) {
   const toast = useToast();
   const [copied, setCopied] = useState(false);
   const finalUrl = clip.has_final ? jobs.getClipFinalUrl(jobId, clip.rank) : null;
@@ -379,8 +407,11 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
   const hasScore = clip.score !== null && clip.score !== undefined;
   const score = hasScore ? (clip.score! <= 1 ? Math.round(clip.score! * 100) : Math.round(clip.score!)) : null;
   const timeline = `${formatDuration(clip.start)} - ${formatDuration(clip.end)}`;
-  const renderStatus = clip.has_final ? "ready" : (clip.render_status || "processing");
-  const isProcessing = renderStatus === "processing";
+
+  const isCurrentActive = activeClip?.rank === clip.rank;
+  const isClipProcessing = isCurrentActive || clipProgress?.status === "processing";
+  const activeStage = isCurrentActive ? activeClip?.stage : clipProgress?.stage || "Rendering…";
+  const activeEta = isCurrentActive ? activeClip?.eta_seconds : clipProgress?.eta_seconds ?? null;
 
   const handleCopyCaption = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -405,6 +436,8 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
         "p-0 overflow-hidden h-full flex flex-col rounded-md transition-colors",
         clip.has_final
           ? "hover:border-emerald-500/30 hover:bg-zinc-900/80 cursor-pointer"
+          : isClipProcessing
+          ? "border-amber-500/40 bg-zinc-950/60 shadow-[0_0_12px_rgba(245,158,11,0.08)]"
           : "border-zinc-800/70 bg-zinc-950/45 cursor-not-allowed"
       )}>
         <div className="bg-zinc-950 relative overflow-hidden aspect-[9/16]">
@@ -426,9 +459,18 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
             {score !== null && <span className="rounded bg-emerald-500/90 px-1 py-0.5 text-[8px] font-bold text-white">{score}</span>}
           </div>
           <div className="absolute right-1 top-1">
-            {clip.has_final
-              ? <span className="rounded bg-emerald-500/90 px-1 py-0.5 text-[8px] font-semibold text-white">Ready</span>
-              : <span className="inline-flex items-center gap-0.5 rounded border border-amber-500/20 bg-black/75 px-1 py-0.5 text-[8px] font-medium text-amber-300"><Lock className="h-2 w-2" /></span>}
+            {clip.has_final ? (
+              <span className="rounded bg-emerald-500/90 px-1 py-0.5 text-[8px] font-semibold text-white">Ready</span>
+            ) : isClipProcessing ? (
+              <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/20 px-1.5 py-0.5 text-[8px] font-medium text-amber-300 animate-pulse">
+                <LoaderCircle className="h-2 w-2 animate-spin text-amber-300" />
+                {activeEta !== null && activeEta > 0 ? `~${activeEta}s` : "Active"}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-0.5 rounded border border-zinc-700 bg-black/75 px-1 py-0.5 text-[8px] font-medium text-zinc-400">
+                {isJobTerminal ? <Lock className="h-2 w-2" /> : `Queue #${clip.rank}`}
+              </span>
+            )}
           </div>
           {clip.has_final ? (
             <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
@@ -436,12 +478,24 @@ function ClipCard({ jobId, clip, aspectRatio }: { jobId: string; clip: ClipInfo;
                 <Play className="h-3 w-3 fill-current" />
               </span>
             </div>
+          ) : isClipProcessing ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 text-center">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-500/40 bg-amber-950/60 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.2)]">
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin text-amber-300" />
+              </span>
+              <p className="text-[9px] font-semibold text-amber-200 leading-tight line-clamp-1">{activeStage}</p>
+              {activeEta !== null && activeEta > 0 && (
+                <p className="text-[8px] font-mono text-amber-400/90 font-medium">Selesai dlm ~{activeEta}s</p>
+              )}
+            </div>
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 text-center">
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-700/70 bg-zinc-900/85 text-zinc-400">
-                {isProcessing ? <LoaderCircle className="h-3 w-3 animate-spin text-amber-300" /> : <Lock className="h-3 w-3" />}
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900/80 text-zinc-500">
+                {isJobTerminal ? <Lock className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
               </span>
-              <p className="text-[8px] font-medium text-zinc-400 leading-tight">{isProcessing ? "Rendering…" : "Unavailable"}</p>
+              <p className="text-[8px] font-medium text-zinc-500 leading-tight">
+                {isJobTerminal ? "Unavailable" : "Menunggu giliran…"}
+              </p>
             </div>
           )}
           {clip.duration ? (

@@ -53,6 +53,71 @@ class DiarizationResult:
     audio_duration: float = 0.0
 
 
+# ─── Global Diarization In-Memory Cache ───────────────────────────────────────
+_GLOBAL_DIARIZATION_CACHE: dict[str, DiarizationResult] = {}
+
+
+def get_cached_global_diarization(cache_key: str) -> Optional[DiarizationResult]:
+    """Retrieve global diarization result from in-memory cache if exists."""
+    return _GLOBAL_DIARIZATION_CACHE.get(cache_key)
+
+
+def set_cached_global_diarization(cache_key: str, result: DiarizationResult) -> None:
+    """Store global diarization result in in-memory cache."""
+    # Keep cache size bounded (max 20 source videos)
+    if len(_GLOBAL_DIARIZATION_CACHE) >= 20:
+        oldest_key = next(iter(_GLOBAL_DIARIZATION_CACHE))
+        _GLOBAL_DIARIZATION_CACHE.pop(oldest_key, None)
+    _GLOBAL_DIARIZATION_CACHE[cache_key] = result
+
+
+def slice_diarization(
+    global_result: DiarizationResult,
+    clip_start: float,
+    clip_end: float,
+) -> DiarizationResult:
+    """Slice a full-source DiarizationResult to match a clip's [clip_start, clip_end] window.
+
+    All timestamps in the output are re-zeroed relative to clip_start (0.0 to clip_duration).
+    """
+    if not global_result or not global_result.segments:
+        return DiarizationResult(audio_duration=max(0.0, clip_end - clip_start))
+
+    clip_duration = max(0.0, clip_end - clip_start)
+    sliced_segments: List[DiarizationSegment] = []
+    speakers_set: set[str] = set()
+    total_speech: float = 0.0
+
+    for seg in global_result.segments:
+        # Check overlap with [clip_start, clip_end]
+        if seg.end <= clip_start or seg.start >= clip_end:
+            continue
+
+        # Clamp segment bounds to clip boundaries and re-zero clock
+        rel_start = max(0.0, seg.start - clip_start)
+        rel_end = min(clip_duration, seg.end - clip_start)
+
+        if rel_end > rel_start + 0.05:  # at least 50ms of speech
+            sliced_segments.append(
+                DiarizationSegment(
+                    start=round(rel_start, 3),
+                    end=round(rel_end, 3),
+                    speaker=seg.speaker,
+                )
+            )
+            speakers_set.add(seg.speaker)
+            total_speech += rel_end - rel_start
+
+    speakers = sorted(speakers_set)
+    return DiarizationResult(
+        segments=sliced_segments,
+        speaker_count=len(speakers),
+        speakers=speakers,
+        total_speech_duration=round(total_speech, 3),
+        audio_duration=round(clip_duration, 3),
+    )
+
+
 # ─── Speaker Diarizer ─────────────────────────────────────────────────────────
 
 

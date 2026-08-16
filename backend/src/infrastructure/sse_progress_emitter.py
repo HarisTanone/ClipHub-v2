@@ -102,7 +102,7 @@ class SSEProgressEmitter:
         if event_type == "job_done":
             self._final_states[job_id] = data
             self._current_states[job_id] = data
-        elif event_type in ("step_start", "step_complete"):
+        elif event_type in ("step_start", "step_complete", "clip_progress"):
             self._current_states[job_id] = data
 
         # Broadcast to all connected queues
@@ -148,6 +148,34 @@ class SSEProgressEmitter:
             "duration_seconds": round(duration_seconds, 2),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
+
+    def emit_clip_progress(
+        self,
+        job_id: str,
+        clip_rank: int,
+        total_clips: int,
+        stage: str,
+        eta_seconds: Optional[int] = None,
+    ) -> None:
+        """Emit clip_progress event for real-time per-clip tracking."""
+        current = dict(self._current_states.get(job_id, {}))
+        clips_prog = dict(current.get("clips_progress", {}))
+        active_clip_data = {
+            "rank": clip_rank,
+            "total": total_clips,
+            "stage": stage,
+            "eta_seconds": eta_seconds,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        clips_prog[str(clip_rank)] = {
+            "status": "processing",
+            "stage": stage,
+            "eta_seconds": eta_seconds,
+        }
+        current["job_id"] = job_id
+        current["active_clip"] = active_clip_data
+        current["clips_progress"] = clips_prog
+        self.emit(job_id, "clip_progress", current)
 
     def emit_job_done(self, job_id: str, final_status: str, total_duration_seconds: float, clips_count: int) -> None:
         """Emit job_done event."""

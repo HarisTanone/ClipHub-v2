@@ -137,6 +137,10 @@ class PersonFirstReframeEngine(IReframeEngine):
             transition_duration = 0.35
         transition_duration = max(0.0, min(1.0, transition_duration))
 
+        global_diarization = kwargs.get("global_diarization")
+        clip_start = float(kwargs.get("clip_start") or 0.0)
+        clip_end = float(kwargs.get("clip_end") or 0.0)
+
         try:
             result = await asyncio.to_thread(
                 self._pipeline,
@@ -145,6 +149,9 @@ class PersonFirstReframeEngine(IReframeEngine):
                 autogrid_enabled,
                 transition_style,
                 transition_duration,
+                global_diarization=global_diarization,
+                clip_start=clip_start,
+                clip_end=clip_end,
             )
             if result:
                 return result
@@ -168,6 +175,9 @@ class PersonFirstReframeEngine(IReframeEngine):
         autogrid: bool,
         transition_style: str,
         transition_duration: float,
+        global_diarization: Optional[Any] = None,
+        clip_start: float = 0.0,
+        clip_end: float = 0.0,
     ) -> Optional[dict]:
         """Person-first pipeline: detect persons → track → face-on-crop → speaker → render."""
         import cv2
@@ -209,7 +219,13 @@ class PersonFirstReframeEngine(IReframeEngine):
         speaker_result: Optional[ActiveSpeakerResult] = None
         if person_count > 1:
             speaker_result = self._try_diarization(
-                video_path, tracked_data, fps, total_frames
+                video_path,
+                tracked_data,
+                fps,
+                total_frames,
+                global_diarization=global_diarization,
+                clip_start=clip_start,
+                clip_end=clip_end,
             )
             if speaker_result is None:
                 speaker_result = self._try_lip_head_detection(
@@ -387,29 +403,48 @@ class PersonFirstReframeEngine(IReframeEngine):
         tracked_data: dict,
         fps: float,
         total_frames: int,
+        global_diarization: Optional[Any] = None,
+        clip_start: float = 0.0,
+        clip_end: float = 0.0,
     ) -> Optional[ActiveSpeakerResult]:
         """Try PyAnnote diarization + face mapping (same as legacy)."""
-        diarizer = self._init_diarizer()
-        if diarizer is None or not diarizer.is_available:
-            return None
+        from src.infrastructure.speaker_diarizer import slice_diarization
 
         try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            try:
-                visual_person_count = int(tracked_data.get("person_count") or 0)
-                dynamic_max_speakers = (
-                    visual_person_count if visual_person_count > 1 else None
-                )
-                diarization_result = loop.run_until_complete(
-                    diarizer.diarize(
-                        video_path,
-                        min_speakers=None,
-                        max_speakers=dynamic_max_speakers,
+            diarization_result = None
+            if global_diarization is not None and clip_end > clip_start:
+                try:
+                    sliced = slice_diarization(global_diarization, clip_start, clip_end)
+                    if sliced and sliced.segments:
+                        diarization_result = sliced
+                        logger.info(
+                            f"person_first_reframe: ✓ using GLOBAL diarization cache sliced for [{clip_start:.2f}s - {clip_end:.2f}s] "
+                            f"({diarization_result.speaker_count} speakers, {len(diarization_result.segments)} segments)"
+                        )
+                except Exception as e:
+                    logger.warning(f"person_first_reframe: global diarization slicing failed: {e}")
+
+            if diarization_result is None:
+                diarizer = self._init_diarizer()
+                if diarizer is None or not diarizer.is_available:
+                    return None
+
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    visual_person_count = int(tracked_data.get("person_count") or 0)
+                    dynamic_max_speakers = (
+                        visual_person_count if visual_person_count > 1 else None
                     )
-                )
-            finally:
-                loop.close()
+                    diarization_result = loop.run_until_complete(
+                        diarizer.diarize(
+                            video_path,
+                            min_speakers=None,
+                            max_speakers=dynamic_max_speakers,
+                        )
+                    )
+                finally:
+                    loop.close()
 
             if diarization_result is None:
                 return None
