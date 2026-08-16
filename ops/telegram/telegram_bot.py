@@ -509,13 +509,51 @@ class KB:
                 InlineKeyboardButton(f"{E['chart']} Cek Status",    callback_data="menu_status"),
             ],
             [
+                InlineKeyboardButton(f"🚀 Auto-Post Sosmed",         callback_data="menu_autopost"),
                 InlineKeyboardButton(f"{E['robot']} Model LLM",     callback_data="menu_model"),
-                InlineKeyboardButton(f"{E['id']} My ID",            callback_data="act_myid"),
             ],
             [
+                InlineKeyboardButton(f"{E['id']} My ID",            callback_data="act_myid"),
                 InlineKeyboardButton(f"{E['help']} Bantuan",        callback_data="act_help"),
             ],
         ])
+
+    @staticmethod
+    def autopost_menu(is_enabled: bool, selected_platforms: list[str], mode: str = "ai") -> InlineKeyboardMarkup:
+        """Interactive keyboard to configure auto-post and select social platforms."""
+        plat_set = {p.lower() for p in selected_platforms}
+        all_platforms = [
+            ("tiktok", "TikTok"),
+            ("instagram", "Instagram"),
+            ("youtube", "YouTube Shorts"),
+            ("facebook", "Facebook"),
+            ("threads", "Threads"),
+            ("linkedin", "LinkedIn"),
+        ]
+
+        rows: list[list[InlineKeyboardButton]] = [
+            [
+                InlineKeyboardButton(
+                    f"{'✅ Auto-Post: AKTIF' if is_enabled else '❌ Auto-Post: NONAKTIF'}",
+                    callback_data="act_autopost_toggle"
+                )
+            ]
+        ]
+
+        # 2 platforms per row
+        for i in range(0, len(all_platforms), 2):
+            row = []
+            for code, name in all_platforms[i:i + 2]:
+                checked = code in plat_set
+                prefix = "✅" if checked else "⬜"
+                row.append(InlineKeyboardButton(f"{prefix} {name}", callback_data=f"act_autopost_plat_{code}"))
+            rows.append(row)
+
+        rows.append([
+            InlineKeyboardButton(f"🤖 Mode: {mode.upper()} Peak Hours", callback_data="act_autopost_mode"),
+        ])
+        rows.append([InlineKeyboardButton(f"{E['home']} Menu Utama", callback_data="act_back")])
+        return InlineKeyboardMarkup(rows)
 
     @staticmethod
     def back() -> InlineKeyboardMarkup:
@@ -1097,6 +1135,8 @@ async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     style = "default"
     ratio = "9:16"
     force = False
+    auto_post = False
+    platforms = ""
 
     i = 1
     while i < len(ctx.args):
@@ -1109,6 +1149,16 @@ async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif ctx.args[i] == "--force":
             force = True
             i += 1
+        elif ctx.args[i] in ("--auto-post", "--autopost"):
+            auto_post = True
+            if i + 1 < len(ctx.args) and not ctx.args[i + 1].startswith("--"):
+                auto_post = ctx.args[i + 1].lower() in ("true", "1", "yes", "on")
+                i += 2
+            else:
+                i += 1
+        elif ctx.args[i] in ("--platforms", "--platform") and i + 1 < len(ctx.args):
+            platforms = ctx.args[i + 1]
+            i += 2
         else:
             i += 1
 
@@ -1139,10 +1189,10 @@ async def cmd_submit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await _do_submit(update.message, url, style, ratio, force)
+    await _do_submit(update.message, url, style, ratio, force, auto_post, platforms)
 
 
-async def _do_submit(message, url: str, style: str, ratio: str, force: bool):
+async def _do_submit(message, url: str, style: str, ratio: str, force: bool, auto_post: bool = False, platforms: str = ""):
     """Execute the submit operation."""
     await message.chat.send_action(ChatAction.TYPING)
 
@@ -1150,6 +1200,12 @@ async def _do_submit(message, url: str, style: str, ratio: str, force: bool):
     if force:
         args.append("--force")
         args.append("true")
+    if auto_post:
+        args.append("--auto-post")
+        args.append("true")
+    if platforms:
+        args.append("--platforms")
+        args.append(platforms)
 
     try:
         result = await run_with_progress(
@@ -1351,6 +1407,68 @@ async def _do_switch_model(message, alias: str):
     )
 
 
+# ─── /autopost & /social ───────────────────────────────────────────────────────
+
+async def _show_autopost_menu(target, toast: str = ""):
+    """Render the interactive auto-post social media menu."""
+    from src.infrastructure.telegram_service import telegram_service
+    from src.infrastructure.social_auto_post_service import social_auto_post_service
+    
+    cfg = telegram_service.get_settings()
+    is_enabled = cfg.get("auto_post_social", False)
+    plat_str = cfg.get("auto_post_platforms", "")
+    platforms = [p.strip().lower() for p in plat_str.split(",") if p.strip()]
+    mode = cfg.get("auto_post_schedule_mode", "ai")
+    peak_hours = cfg.get("auto_post_peak_hours", "11:30, 15:00, 18:30, 20:30")
+
+    accounts = await social_auto_post_service.get_connected_accounts()
+    acc_count = len(accounts)
+
+    text = (
+        f"🚀 <b>Auto-Post ke Media Sosial (AI Scheduled)</b>\n\n"
+        f"Status: <b>{'✅ AKTIF' if is_enabled else '❌ NONAKTIF'}</b>\n"
+        f"Akun Terhubung: <b>{acc_count} akun</b>\n"
+        f"Platform Target: <code>{', '.join(platforms) if platforms else 'Semua Akun'}</code>\n"
+        f"Mode Jadwal: <b>{mode.upper()} Smart Peak Hours</b>\n"
+        f"Jam Tayang AI: <code>{peak_hours}</code>\n\n"
+        f"💡 <i>Klip video yang selesai dirender akan otomatis diunggah dan dijadwalkan posting dengan caption & hashtag optimal dari metadata AI.</i>"
+    )
+    if toast:
+        text = f"✨ <i>{toast}</i>\n\n" + text
+
+    kb = KB.autopost_menu(is_enabled, platforms, mode)
+    if hasattr(target, "edit_message_text"):
+        await edit_or_reply(target, text, kb)
+    elif hasattr(target, "reply_text"):
+        await target.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    elif hasattr(target, "message") and hasattr(target.message, "reply_text"):
+        await target.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def cmd_autopost(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Command handler for /autopost or /social."""
+    if not is_allowed(update.effective_user.id if update.effective_user else None):
+        return await deny_access(update)
+
+    if ctx.args:
+        arg = ctx.args[0].lower()
+        from src.infrastructure.telegram_service import telegram_service
+        if arg in ("on", "enable", "true", "1"):
+            telegram_service.update_settings({"auto_post_social": True})
+            await update.message.reply_text(
+                "✅ <b>Auto-Post ke media sosial telah diaktifkan!</b>",
+                parse_mode=ParseMode.HTML,
+            )
+        elif arg in ("off", "disable", "false", "0"):
+            telegram_service.update_settings({"auto_post_social": False})
+            await update.message.reply_text(
+                "❌ <b>Auto-Post ke media sosial telah dinonaktifkan.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+
+    await _show_autopost_menu(update.message)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CALLBACK QUERY HANDLER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1384,6 +1502,37 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ── Help ───────────────────────────────────────────────────────────────────
     elif data == "act_help":
         await edit_or_reply(query, Msg.help_short(), KB.back())
+
+    # ── Auto-Post Sosmed Menu ──────────────────────────────────────────────────
+    elif data == "menu_autopost":
+        await _show_autopost_menu(query)
+
+    elif data == "act_autopost_toggle":
+        from src.infrastructure.telegram_service import telegram_service
+        cfg = telegram_service.get_settings()
+        new_val = not cfg.get("auto_post_social", False)
+        telegram_service.update_settings({"auto_post_social": new_val})
+        await _show_autopost_menu(query, toast=f"Auto-Post di{'aktifkan' if new_val else 'nonaktifkan'}!")
+
+    elif data.startswith("act_autopost_plat_"):
+        plat = data.replace("act_autopost_plat_", "").lower()
+        from src.infrastructure.telegram_service import telegram_service
+        cfg = telegram_service.get_settings()
+        current_list = [p.strip().lower() for p in cfg.get("auto_post_platforms", "").split(",") if p.strip()]
+        if plat in current_list:
+            current_list.remove(plat)
+        else:
+            current_list.append(plat)
+        telegram_service.update_settings({"auto_post_platforms": ",".join(current_list)})
+        await _show_autopost_menu(query, toast=f"Platform {plat.upper()} diperbarui!")
+
+    elif data == "act_autopost_mode":
+        from src.infrastructure.telegram_service import telegram_service
+        cfg = telegram_service.get_settings()
+        current_mode = cfg.get("auto_post_schedule_mode", "ai")
+        new_mode = "instant" if current_mode == "ai" else "ai"
+        telegram_service.update_settings({"auto_post_schedule_mode": new_mode})
+        await _show_autopost_menu(query, toast=f"Mode jadwal: {new_mode.upper()}")
 
     # ── My ID ──────────────────────────────────────────────────────────────────
     elif data == "act_myid":
@@ -1777,16 +1926,18 @@ def main():
     )
 
     # ── Command handlers ───────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("start",  cmd_start))
-    app.add_handler(CommandHandler("help",   cmd_help))
-    app.add_handler(CommandHandler("id",     cmd_id))
-    app.add_handler(CommandHandler("viral",  cmd_viral))
-    app.add_handler(CommandHandler("submit", cmd_submit))
-    app.add_handler(CommandHandler("presets", cmd_presets))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("jobs",   cmd_jobs))
-    app.add_handler(CommandHandler("model",  cmd_model))
-    app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CommandHandler("start",    cmd_start))
+    app.add_handler(CommandHandler("help",     cmd_help))
+    app.add_handler(CommandHandler("id",       cmd_id))
+    app.add_handler(CommandHandler("viral",    cmd_viral))
+    app.add_handler(CommandHandler("submit",   cmd_submit))
+    app.add_handler(CommandHandler("presets",  cmd_presets))
+    app.add_handler(CommandHandler("status",   cmd_status))
+    app.add_handler(CommandHandler("jobs",     cmd_jobs))
+    app.add_handler(CommandHandler("model",    cmd_model))
+    app.add_handler(CommandHandler("autopost", cmd_autopost))
+    app.add_handler(CommandHandler("social",   cmd_autopost))
+    app.add_handler(CommandHandler("cancel",   cmd_cancel))
 
     # ── Callback query handler ────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_callback))

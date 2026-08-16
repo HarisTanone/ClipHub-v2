@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit } from "lucide-react";
+import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot, Send, Key, Eye, EyeOff, Radio, Bell, Video, Copy, Check, MessageSquare } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -74,6 +74,106 @@ async function revokeFeatureApi(userId: number, featureCode: string): Promise<bo
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/features/revoke`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ user_id: userId, feature_code: featureCode }) });
   return res.ok;
+}
+
+// ─── Telegram Settings API ───────────────────────────────────────────────────
+
+interface TelegramSettings {
+  is_enabled: boolean;
+  bot_token: string;
+  bot_username: string;
+  chat_id: string;
+  group_id: string;
+  channel_id: string;
+  topic_id: string;
+  allowed_users: string;
+  notify_on_job_start: boolean;
+  notify_on_job_complete: boolean;
+  notify_on_job_failed: boolean;
+  send_video_files: boolean;
+  include_caption: boolean;
+  include_hashtags: boolean;
+  include_virality_score: boolean;
+  notify_target: string;
+  auto_post_social: boolean;
+  auto_post_platforms: string;
+  auto_post_schedule_mode: string;
+  auto_post_interval_hours: number;
+  auto_post_peak_hours: string;
+}
+
+const TELEGRAM_SETTINGS_DEFAULTS: TelegramSettings = {
+  is_enabled: false,
+  bot_token: "",
+  bot_username: "",
+  chat_id: "",
+  group_id: "",
+  channel_id: "",
+  topic_id: "",
+  allowed_users: "",
+  notify_on_job_start: true,
+  notify_on_job_complete: true,
+  notify_on_job_failed: true,
+  send_video_files: true,
+  include_caption: true,
+  include_hashtags: true,
+  include_virality_score: true,
+  notify_target: "all",
+  auto_post_social: false,
+  auto_post_platforms: "tiktok,instagram,youtube",
+  auto_post_schedule_mode: "ai",
+  auto_post_interval_hours: 4,
+  auto_post_peak_hours: "11:30, 15:00, 18:30, 20:30",
+};
+
+async function fetchTelegramSettings(): Promise<TelegramSettings | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/telegram/settings`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.data || null;
+}
+
+async function saveTelegramSettingsApi(payload: TelegramSettings): Promise<boolean> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/telegram/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  return res.ok;
+}
+
+async function testTelegramConnectionApi(bot_token?: string, target_id?: string): Promise<any> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/telegram/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ bot_token, target_id }),
+  });
+  return res.json();
+}
+
+async function testTelegramVideoApi(target_id?: string): Promise<any> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/telegram/test-video`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ target_id }),
+  });
+  return res.json();
+}
+
+async function fetchTelegramSocialAccounts(): Promise<any[]> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/telegram/social-accounts`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.accounts || [];
 }
 
 // ─── Reframe Tuning API ───────────────────────────────────────────────────────
@@ -307,7 +407,7 @@ export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "testing" | "models">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "testing" | "models" | "telegram">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -360,6 +460,16 @@ export function Settings() {
   const [isTestingAll, setIsTestingAll] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
+
+  // Telegram settings (superadmin)
+  const [telegramSettings, setTelegramSettings] = useState<TelegramSettings>(TELEGRAM_SETTINGS_DEFAULTS);
+  const [showBotToken, setShowBotToken] = useState(false);
+  const [isSavingTelegram, setIsSavingTelegram] = useState(false);
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
+  const [isTestingTelegramVideo, setIsTestingTelegramVideo] = useState(false);
+  const [telegramTestResult, setTelegramTestResult] = useState<any>(null);
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [telegramSocialAccounts, setTelegramSocialAccounts] = useState<any[]>([]);
 
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
@@ -704,7 +814,74 @@ export function Settings() {
         handleFetchAvailableModels();
       }
     }
+    if (isSuperadmin && tab === "telegram") {
+      fetchTelegramSettings().then((d) => {
+        if (d) setTelegramSettings(d);
+      });
+      fetchTelegramSocialAccounts().then(setTelegramSocialAccounts);
+    }
   }, [isSuperadmin, tab]);
+
+  async function handleSaveTelegram() {
+    setIsSavingTelegram(true);
+    const ok = await saveTelegramSettingsApi(telegramSettings);
+    if (ok) {
+      toast.success("Pengaturan Telegram berhasil disimpan");
+      fetchTelegramSettings().then((d) => { if (d) setTelegramSettings(d); });
+    } else {
+      toast.error("Gagal menyimpan pengaturan Telegram");
+    }
+    setIsSavingTelegram(false);
+  }
+
+  async function handleTestTelegram() {
+    setIsTestingTelegram(true);
+    setTelegramTestResult(null);
+    try {
+      const res = await testTelegramConnectionApi(
+        telegramSettings.bot_token,
+        telegramSettings.chat_id || telegramSettings.group_id || telegramSettings.channel_id
+      );
+      setTelegramTestResult(res);
+      if (res.success) {
+        toast.success(`Koneksi bot berhasil! ${res.bot_username ? `(@${res.bot_username})` : ""}`);
+        if (res.bot_username && res.bot_username !== telegramSettings.bot_username) {
+          setTelegramSettings((p) => ({ ...p, bot_username: res.bot_username }));
+        }
+      } else {
+        toast.error(res.error || "Tes koneksi bot gagal");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Tes koneksi gagal");
+    } finally {
+      setIsTestingTelegram(false);
+    }
+  }
+
+  async function handleTestTelegramVideo() {
+    setIsTestingTelegramVideo(true);
+    try {
+      const res = await testTelegramVideoApi(
+        telegramSettings.chat_id || telegramSettings.group_id || telegramSettings.channel_id
+      );
+      if (res.success) {
+        toast.success(`Video tes berhasil dikirim ke Telegram (${res.sent_count || 1} target)!`);
+      } else {
+        toast.error(res.error || "Gagal mengirim video tes ke Telegram");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Gagal mengirim video tes");
+    } finally {
+      setIsTestingTelegramVideo(false);
+    }
+  }
+
+  function handleCopyCommand(cmd: string) {
+    navigator.clipboard.writeText(cmd);
+    setCopiedCmd(cmd);
+    setTimeout(() => setCopiedCmd(null), 2000);
+    toast.success("Perintah disalin ke clipboard");
+  }
 
 
   const tabs = [
@@ -712,6 +889,7 @@ export function Settings() {
     { id: "reframe" as const, label: "Reframe Tuning" },
     { id: "object" as const, label: "Object Overlay" },
     ...(isSuperadmin ? [{ id: "models" as const, label: "AI Models" }] : []),
+    ...(isSuperadmin ? [{ id: "telegram" as const, label: "Telegram Bot" }] : []),
     ...(isSuperadmin ? [{ id: "render" as const, label: "Render Engine" }] : []),
     ...(isSuperadmin ? [{ id: "testing" as const, label: "Test & Deploy" }] : []),
     ...(isSuperadmin ? [{ id: "users" as const, label: "Users" }] : []),
@@ -751,6 +929,12 @@ export function Settings() {
             <Button onClick={handleTestAllModels} loading={isTestingAll} size="sm" variant="outline" icon={<RefreshCw className="h-3.5 w-3.5" />}>Test All</Button>
             <Button onClick={() => handleTestModel()} loading={isTestingModel} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Model</Button>
             <Button onClick={handleSaveModels} loading={isSavingModels} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+          </div>
+        ) : tab === "telegram" ? (
+          <div className="flex items-center gap-2">
+            <Button onClick={handleTestTelegram} loading={isTestingTelegram} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Ping</Button>
+            <Button onClick={handleTestTelegramVideo} loading={isTestingTelegramVideo} size="sm" variant="outline" icon={<Play className="h-3.5 w-3.5" />}>Test Video</Button>
+            <Button onClick={handleSaveTelegram} loading={isSavingTelegram} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
           </div>
         ) : (
 
@@ -1342,6 +1526,473 @@ export function Settings() {
                 ) : (
                   <p className="text-[11px] text-zinc-600">Klik "Test All" untuk cek semua model sekaligus.</p>
                 )}
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {tab === "telegram" && isSuperadmin && (
+          <div className="max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Left Column: Configuration & Triggers */}
+            <div className="space-y-4">
+              {/* Integration Status & Master Switch */}
+              <Card className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "h-9 w-9 rounded-lg flex items-center justify-center transition-colors",
+                      telegramSettings.is_enabled ? "bg-emerald-500/10 text-emerald-400" : "bg-zinc-800 text-zinc-500"
+                    )}>
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-zinc-100">Telegram Bot Integration</h3>
+                        <Badge variant={telegramSettings.is_enabled ? "success" : "default"} size="sm">
+                          {telegramSettings.is_enabled ? "Active" : "Disabled"}
+                        </Badge>
+                        {telegramSettings.bot_username && (
+                          <Badge variant="default" size="sm">
+                            @{telegramSettings.bot_username}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        Kirim notifikasi rendering video, klip MP4, dan kendalikan bot via Hermes agent.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTelegramSettings((p) => ({ ...p, is_enabled: !p.is_enabled }))}
+                    className={cn(
+                      "shrink-0 w-11 h-6 rounded-full relative transition-colors cursor-pointer",
+                      telegramSettings.is_enabled ? "bg-emerald-600" : "bg-zinc-700"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform",
+                        telegramSettings.is_enabled && "translate-x-5"
+                      )}
+                    />
+                  </button>
+                </div>
+              </Card>
+
+              {/* Bot Credentials & Target IDs */}
+              <Card className="p-4 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Key className="h-4 w-4 text-emerald-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Bot Credentials &amp; Targets</h3>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 block mb-1">Bot Token (dari @BotFather)</label>
+                  <div className="relative">
+                    <input
+                      type={showBotToken ? "text" : "password"}
+                      value={telegramSettings.bot_token}
+                      onChange={(e) => setTelegramSettings((p) => ({ ...p, bot_token: e.target.value }))}
+                      placeholder="1234567890:ABCdefGHIjklMNO..."
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none pr-9"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowBotToken(!showBotToken)}
+                      className="absolute right-2.5 top-2.5 text-zinc-500 hover:text-zinc-300"
+                    >
+                      {showBotToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Personal Chat ID</label>
+                    <input
+                      type="text"
+                      value={telegramSettings.chat_id}
+                      onChange={(e) => setTelegramSettings((p) => ({ ...p, chat_id: e.target.value }))}
+                      placeholder="123456789"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Group ID (diawali -100)</label>
+                    <input
+                      type="text"
+                      value={telegramSettings.group_id}
+                      onChange={(e) => setTelegramSettings((p) => ({ ...p, group_id: e.target.value }))}
+                      placeholder="-1001234567890"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Channel ID (diawali -100)</label>
+                    <input
+                      type="text"
+                      value={telegramSettings.channel_id}
+                      onChange={(e) => setTelegramSettings((p) => ({ ...p, channel_id: e.target.value }))}
+                      placeholder="-1009876543210"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Topic / Thread ID (Opsional)</label>
+                    <input
+                      type="text"
+                      value={telegramSettings.topic_id}
+                      onChange={(e) => setTelegramSettings((p) => ({ ...p, topic_id: e.target.value }))}
+                      placeholder="123 (untuk supergroup topic)"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 block mb-1">Broadcast Target</label>
+                  <Select
+                    value={telegramSettings.notify_target}
+                    onChange={(e) => setTelegramSettings((p) => ({ ...p, notify_target: e.target.value }))}
+                    options={[
+                      { value: "all", label: "Kirim ke Semua Target yang Dikonfigurasi" },
+                      { value: "chat", label: "Hanya Chat ID Personal" },
+                      { value: "group", label: "Hanya Group ID" },
+                      { value: "channel", label: "Hanya Channel ID" },
+                    ]}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 block mb-1">Allowed User IDs (Hermes Bot Access)</label>
+                  <input
+                    type="text"
+                    value={telegramSettings.allowed_users}
+                    onChange={(e) => setTelegramSettings((p) => ({ ...p, allowed_users: e.target.value }))}
+                    placeholder="123456789, 987654321 (pisah koma)"
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-zinc-600 mt-1">Kosongkan jika bot boleh diakses oleh siapa saja yang memiliki akses bot.</p>
+                </div>
+              </Card>
+
+              {/* Notification & Media Delivery Settings */}
+              <Card className="p-4 space-y-2">
+                <div className="flex items-center gap-2 mb-2">
+                  <Bell className="h-4 w-4 text-emerald-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Notification &amp; Delivery Triggers</h3>
+                </div>
+
+                <FeatureToggle
+                  icon={<Zap className="h-3.5 w-3.5" />}
+                  label="Notifikasi Job Dimulai"
+                  desc="Kirim pesan status saat video mulai diproses"
+                  active={telegramSettings.notify_on_job_start}
+                  onToggle={() => setTelegramSettings((p) => ({ ...p, notify_on_job_start: !p.notify_on_job_start }))}
+                />
+
+                <FeatureToggle
+                  icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                  label="Notifikasi Job Selesai"
+                  desc="Kirim rangkuman klip dan skor viralitas saat rendering selesai"
+                  active={telegramSettings.notify_on_job_complete}
+                  onToggle={() => setTelegramSettings((p) => ({ ...p, notify_on_job_complete: !p.notify_on_job_complete }))}
+                />
+
+                <FeatureToggle
+                  icon={<AlertTriangle className="h-3.5 w-3.5" />}
+                  label="Notifikasi Job Gagal"
+                  desc="Kirim peringatan error jika proses clipping/render mengalami kegagalan"
+                  active={telegramSettings.notify_on_job_failed}
+                  onToggle={() => setTelegramSettings((p) => ({ ...p, notify_on_job_failed: !p.notify_on_job_failed }))}
+                />
+
+                <FeatureToggle
+                  icon={<Video className="h-3.5 w-3.5" />}
+                  label="Kirim File Video MP4 Langsung"
+                  desc="Upload video klip 9:16 langsung ke Telegram (maks 50MB per video)"
+                  active={telegramSettings.send_video_files}
+                  onToggle={() => setTelegramSettings((p) => ({ ...p, send_video_files: !p.send_video_files }))}
+                />
+
+                <FeatureToggle
+                  icon={<Film className="h-3.5 w-3.5" />}
+                  label="Sertakan Hashtag &amp; Caption AI"
+                  desc="Tambahkan tag #fyp #viral dan hook title pada caption video"
+                  active={telegramSettings.include_hashtags}
+                  onToggle={() => setTelegramSettings((p) => ({ ...p, include_hashtags: !p.include_hashtags }))}
+                />
+              </Card>
+
+              {/* AI Auto-Post to Social Media */}
+              <Card className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Send className="h-4 w-4 text-emerald-400" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-semibold text-zinc-200">AI Auto-Post ke Media Sosial</h3>
+                        <Badge variant={telegramSettings.auto_post_social ? "success" : "default"} size="sm">
+                          {telegramSettings.auto_post_social ? "Aktif" : "Nonaktif"}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTelegramSettings((p) => ({ ...p, auto_post_social: !p.auto_post_social }))}
+                    className={cn(
+                      "shrink-0 w-8 h-4 rounded-full relative transition-colors cursor-pointer",
+                      telegramSettings.auto_post_social ? "bg-emerald-600" : "bg-zinc-700"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform",
+                        telegramSettings.auto_post_social && "translate-x-4"
+                      )}
+                    />
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-zinc-500">
+                  Secara otomatis menjadwalkan dan memposting setiap klip video ke akun sosial media terpilih menggunakan jam tayang cerdas (AI Peak-Hour Scheduling).
+                </p>
+
+                {/* Target Platforms Selector */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-medium text-zinc-400">Platform Target:</label>
+                    <span className="text-[10px] text-zinc-500">
+                      {telegramSocialAccounts.length} akun terhubung
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {[
+                      { code: "tiktok", name: "TikTok" },
+                      { code: "instagram", name: "Instagram" },
+                      { code: "youtube", name: "YouTube Shorts" },
+                      { code: "facebook", name: "Facebook" },
+                      { code: "threads", name: "Threads" },
+                      { code: "linkedin", name: "LinkedIn" },
+                    ].map((plat) => {
+                      const currentList = telegramSettings.auto_post_platforms
+                        ? telegramSettings.auto_post_platforms.split(",").map((p) => p.trim().toLowerCase())
+                        : [];
+                      const isSelected = currentList.includes(plat.code);
+
+                      return (
+                        <button
+                          key={plat.code}
+                          type="button"
+                          onClick={() => {
+                            let updated: string[];
+                            if (isSelected) {
+                              updated = currentList.filter((p) => p !== plat.code);
+                            } else {
+                              updated = [...currentList, plat.code];
+                            }
+                            setTelegramSettings((p) => ({ ...p, auto_post_platforms: updated.join(",") }));
+                          }}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all text-left",
+                            isSelected
+                              ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
+                              : "border-zinc-800 bg-zinc-950/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-3 h-3 rounded flex items-center justify-center border text-[9px]",
+                            isSelected ? "border-emerald-400 bg-emerald-500 text-white" : "border-zinc-600"
+                          )}>
+                            {isSelected && <Check className="w-2.5 h-2.5" />}
+                          </div>
+                          <span className="truncate">{plat.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Mode Jadwal Posting</label>
+                    <Select
+                      value={telegramSettings.auto_post_schedule_mode}
+                      onChange={(e) => setTelegramSettings((p) => ({ ...p, auto_post_schedule_mode: e.target.value }))}
+                      options={[
+                        { value: "ai", label: "AI Smart Peak Hours (Disarankan)" },
+                        { value: "instant", label: "Instant (1-2 Menit ke Depan)" },
+                      ]}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Interval Antar Klip (Jam)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={24}
+                      value={telegramSettings.auto_post_interval_hours}
+                      onChange={(e) => setTelegramSettings((p) => ({ ...p, auto_post_interval_hours: parseInt(e.target.value) || 4 }))}
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-200 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-medium text-zinc-400 block mb-1">Jam Tayang Utama (Peak Hours)</label>
+                  <input
+                    type="text"
+                    value={telegramSettings.auto_post_peak_hours}
+                    onChange={(e) => setTelegramSettings((p) => ({ ...p, auto_post_peak_hours: e.target.value }))}
+                    placeholder="11:30, 15:00, 18:30, 20:30"
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-zinc-600 mt-1">
+                    Caption, judul hook, dan hashtag otomatis diekstrak dari JSON metadata video klip.
+                  </p>
+                </div>
+              </Card>
+            </div>
+
+            {/* Right Column: Live Testing, Diagnostics & Bot Commands */}
+            <div className="space-y-4">
+              {/* Test & Diagnostics Card */}
+              <Card className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Radio className="h-4 w-4 text-emerald-400" />
+                    <h3 className="text-xs font-semibold text-zinc-200">Bot Diagnostics &amp; Live Test</h3>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={handleTestTelegram}
+                      loading={isTestingTelegram}
+                      icon={<Zap className="h-3 w-3" />}
+                    >
+                      Ping Test
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={handleTestTelegramVideo}
+                      loading={isTestingTelegramVideo}
+                      icon={<Video className="h-3 w-3" />}
+                    >
+                      Send Sample MP4
+                    </Button>
+                  </div>
+                </div>
+
+                {telegramTestResult ? (
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-300 font-medium">Status Koneksi:</span>
+                      <Badge variant={telegramTestResult.success ? "success" : "error"} size="sm">
+                        {telegramTestResult.success ? "Bot Valid" : "Gagal"}
+                      </Badge>
+                    </div>
+                    {telegramTestResult.bot_name && (
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-zinc-500">Nama Bot:</span>
+                        <span className="text-zinc-200 font-medium">{telegramTestResult.bot_name} (@{telegramTestResult.bot_username})</span>
+                      </div>
+                    )}
+                    {telegramTestResult.latency_ms !== undefined && (
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-zinc-500">Latency API:</span>
+                        <span className="text-emerald-400 font-mono">{telegramTestResult.latency_ms}ms</span>
+                      </div>
+                    )}
+                    {telegramTestResult.destination && (
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-zinc-500">Target Chat/Group:</span>
+                        <span className="text-zinc-300 font-mono">{telegramTestResult.destination}</span>
+                      </div>
+                    )}
+                    {telegramTestResult.message_sent && (
+                      <div className="text-[10px] text-emerald-400 flex items-center gap-1 mt-1">
+                        <Check className="h-3 w-3" /> Pesan uji coba berhasil dikirim ke target
+                      </div>
+                    )}
+                    {telegramTestResult.send_error && (
+                      <div className="text-[10px] text-amber-400 mt-1">
+                        Peringatan pengiriman: {telegramTestResult.send_error}
+                      </div>
+                    )}
+                    {telegramTestResult.error && (
+                      <div className="text-[10px] text-red-400 mt-1">
+                        Error: {telegramTestResult.error}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-zinc-500">
+                    Gunakan tombol Ping Test untuk memverifikasi bot token Telegram dan target chat ID sebelum menyimpan.
+                  </p>
+                )}
+              </Card>
+
+              {/* Bot Commands Quick Reference */}
+              <Card className="p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-emerald-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Perintah Bot Telegram (@AutoCliperBot)</h3>
+                </div>
+                <p className="text-[11px] text-zinc-500">
+                  Bot Telegram terhubung dengan Hermes AI agent untuk mengontrol AutoCliper secara interaktif:
+                </p>
+
+                <div className="space-y-1.5">
+                  {[
+                    { cmd: "/start", desc: "Mulai dan buka menu interaktif" },
+                    { cmd: "/viral gym motivation", desc: "Cari video YouTube viral berdasar topik" },
+                    { cmd: "/submit https://youtu.be/xxx", desc: "Submit video URL ke pipeline render" },
+                    { cmd: "/presets", desc: "Lihat daftar style subtitle & template" },
+                    { cmd: "/status <job_id>", desc: "Cek progress real-time per klip" },
+                    { cmd: "/jobs", desc: "Daftar job terbaru dengan paginasi" },
+                    { cmd: "/model grok", desc: "Ganti model AI LLM yang aktif" },
+                    { cmd: "/id", desc: "Lihat User ID Telegram Anda" },
+                  ].map((item) => (
+                    <div
+                      key={item.cmd}
+                      onClick={() => handleCopyCommand(item.cmd)}
+                      className="group flex items-center justify-between rounded-lg border border-zinc-800/60 bg-zinc-950/40 px-2.5 py-1.5 hover:border-zinc-700 hover:bg-zinc-900/50 cursor-pointer transition-colors"
+                    >
+                      <div className="min-w-0 flex items-center gap-2">
+                        <code className="text-[11px] text-emerald-400 font-mono font-medium">{item.cmd}</code>
+                        <span className="text-[10px] text-zinc-500 truncate">{item.desc}</span>
+                      </div>
+                      <span className="text-[9px] text-zinc-600 group-hover:text-zinc-400 shrink-0 ml-2">
+                        {copiedCmd === item.cmd ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Service Deployment Guide */}
+              <Card className="p-4 space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <Terminal className="h-4 w-4 text-zinc-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Systemd Daemon Service</h3>
+                </div>
+                <p className="text-[11px] text-zinc-500">
+                  Untuk menjalankan bot Telegram sebagai background service di server VPS/Linux:
+                </p>
+                <div className="rounded-lg bg-zinc-950 p-2.5 border border-zinc-800 text-[10px] font-mono text-zinc-300 space-y-1">
+                  <p className="text-zinc-500"># Deploy service</p>
+                  <p className="text-emerald-400">bash scripts/setup-telegram-bot.sh</p>
+                  <p className="text-zinc-500 mt-2"># Cek status &amp; logs</p>
+                  <p>systemctl status autocliper-telegram-bot</p>
+                  <p>journalctl -u autocliper-telegram-bot -f</p>
+                </div>
               </Card>
             </div>
           </div>

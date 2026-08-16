@@ -33,12 +33,13 @@ The video will be rendered as a vertical (9:16) short-form video with:
 
 Rules:
 1. The HOOK (first 3 seconds) must be extremely attention-grabbing
-2. Each scene narration should be 1-3 sentences, natural spoken English
+2. Each scene narration should be 1-3 sentences, natural spoken language
 3. Search queries should be specific and visual (not abstract concepts)
 4. Total narration when spoken should fit within the target duration
 5. Scenes should flow logically as a narrative
 6. Visual descriptions should be concrete and searchable
-7. Generate 6-10 scenes depending on target duration"""
+7. Generate 6-10 scenes depending on target duration
+8. STRICT RULE: NEVER include any generic subscribe, like, follow, share, or channel CTA (e.g. "Jangan lupa subscribe", "Don't forget to subscribe", "Like and subscribe"). The final scene MUST be a strong, punchy takeaway or conclusion related directly to the topic."""
 
 STORY_USER_PROMPT = """Create a video script about: "{topic}"
 
@@ -58,7 +59,7 @@ Output this exact JSON structure:
       "id": 1,
       "narration": "The spoken narration for this scene",
       "visual": "Description of what should be shown visually",
-      "search_queries": ["youtube search query 1", "youtube search query 2"],
+      "search_queries": ["youtube search query 1", "youtube search query 2", "stock footage query 3"],
       "duration_estimate": 7,
       "transition": "cut|fade|zoom"
     }}
@@ -76,7 +77,7 @@ Important:
   * Avoid abstract concepts — always describe the VISUAL: "scientist in lab mixing chemicals" not "science experiment"
   * Include 3 search queries per scene: 1 very specific, 1 slightly broader, 1 with "stock footage" suffix
 - First scene should be the HOOK
-- Last scene should be a conclusion/call-to-action"""
+- The final scene must be an insightful, memorable takeaway or punchy conclusion related to the topic. STRICTLY DO NOT mention subscribe, follow, or like buttons."""
 
 
 class StoryAgent:
@@ -306,13 +307,30 @@ class StoryAgent:
         story.setdefault("target_duration", target_duration)
 
         # Validate scenes
+        import re
+
+        cta_patterns = [
+            r"(?i)\b(jangan\s+lupa\s+(untuk\s+)?(subscribe|like|follow|share|dukung\s+channel\s+ini)[^.!?]*[.!?]?)",
+            r"(?i)\b(don'?t\s+forget\s+to\s+(subscribe|like|follow|share)[^.!?]*[.!?]?)",
+            r"(?i)\b(subscribe\s+(to\s+(our\s+)?channel|for\s+more|now)[^.!?]*[.!?]?)",
+            r"(?i)\b(like\s+and\s+subscribe[^.!?]*[.!?]?)",
+            r"(?i)\b(follow\s+for\s+more[^.!?]*[.!?]?)",
+            r"(?i)\b(klik\s+tombol\s+subscribe[^.!?]*[.!?]?)",
+        ]
+
         valid_scenes = []
         for i, scene in enumerate(story["scenes"]):
             if not isinstance(scene, dict):
                 continue
 
             scene.setdefault("id", i + 1)
-            scene.setdefault("narration", "")
+            raw_narration = str(scene.get("narration") or "").strip()
+
+            # Sanitize subscribe / CTA phrases
+            for pat in cta_patterns:
+                raw_narration = re.sub(pat, "", raw_narration).strip()
+
+            scene["narration"] = raw_narration
             scene.setdefault("visual", "")
             scene.setdefault("search_queries", [])
             scene.setdefault("duration_estimate", 7)

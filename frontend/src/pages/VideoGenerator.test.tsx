@@ -131,4 +131,91 @@ describe("VideoGeneratorPage", () => {
 
     expect(toast.success).toHaveBeenCalled();
   });
+
+  it("triggers Studio Plan and opens the interactive footage studio", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation((input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/video-generator/voices")) {
+        return Promise.resolve(new Response(JSON.stringify([{ key: "orion", model: "aura-2-orion-en" }]), { status: 200 }));
+      }
+      if (url.includes("/api/video-generator/jobs")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          items: [],
+          total: 0,
+          page: 1,
+          limit: 8,
+          total_pages: 1,
+        }), { status: 200 }));
+      }
+      if (url.endsWith("/api/video-generator/plan") && init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({
+          job_id: "plan-job-1",
+          topic: "Ocean Giants",
+          status: "awaiting_selection",
+          progress: 100,
+          step_label: "Ready for footage selection",
+          target_duration: 65,
+          voice: "aura-2-orion-en",
+          speed: 1.0,
+          num_scenes: 2,
+          subtitles_enabled: true,
+          subtitle_style_config: {},
+          include_bgm: true,
+          bgm_volume: 0.15,
+          title: "Giants of the Deep Ocean",
+          error: null,
+          output_path: null,
+          created_at: 0,
+          completed_at: null,
+          scenes_count: 2,
+          estimated_duration: 60,
+          thumbnail_url: null,
+          scenes: [
+            {
+              id: 1,
+              narration: "Deep under the waves, colossal creatures thrive.",
+              visual: "Giant blue whale swimming in sunlit ocean",
+              search_queries: ["blue whale underwater 4k"],
+              duration_estimate: 7,
+              footage_candidates: [
+                {
+                  video_id: "cand_1",
+                  title: "Blue Whale Ocean 4K",
+                  url: "https://youtube.com/watch?v=whale1",
+                  thumbnail_url: "https://img.youtube.com/vi/whale1/hqdefault.jpg",
+                  duration_seconds: 15,
+                  view_count: 120000,
+                  channel: "Ocean Planet",
+                  platform: "youtube",
+                },
+                {
+                  video_id: "cand_2",
+                  title: "Underwater Drone Whale",
+                  url: "https://youtube.com/watch?v=whale2",
+                  thumbnail_url: "https://img.youtube.com/vi/whale2/hqdefault.jpg",
+                  duration_seconds: 22,
+                  view_count: 85000,
+                  channel: "Deep Sea Docs",
+                  platform: "youtube",
+                },
+              ],
+            },
+          ],
+        }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ detail: "Not found" }), { status: 404 }));
+    });
+
+    const { VideoGeneratorPage } = await import("@/pages/VideoGenerator");
+    render(<VideoGeneratorPage />);
+
+    fireEvent.change(screen.getByLabelText("Topic"), { target: { value: "Ocean Giants" } });
+    fireEvent.click(screen.getByRole("button", { name: "Studio Plan & Select Footage" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Scene & Footage Studio" })).toBeInTheDocument();
+      expect(screen.getByText(/Footage Studio: Giants of the Deep Ocean/i)).toBeInTheDocument();
+      expect(screen.getByText("Blue Whale Ocean 4K")).toBeInTheDocument();
+    });
+  });
 });

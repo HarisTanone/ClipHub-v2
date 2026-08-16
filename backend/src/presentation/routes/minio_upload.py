@@ -119,26 +119,41 @@ async def notify_telegram_upload(job_id: str, clip_rank: int, body: TelegramNoti
             message += f"<b>Caption:</b>\n{caption_text}\n\n"
         message += f'<a href="{body.url}">Download Link</a> (7 hari)'
 
-        # Method 1: Direct Telegram Bot API (preferred)
-        bot_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
-        chat_id = getattr(settings, "TELEGRAM_CHAT_ID", "")
+        # Method 1: TelegramService / Direct Telegram Bot API
+        from src.infrastructure.telegram_service import telegram_service
+        tg_cfg = telegram_service.get_settings()
+        bot_token = tg_cfg.get("bot_token") or getattr(settings, "TELEGRAM_BOT_TOKEN", "") or os.getenv("ALERT_TELEGRAM_TOKEN", "")
+        chat_id = tg_cfg.get("chat_id") or tg_cfg.get("group_id") or tg_cfg.get("channel_id") or getattr(settings, "TELEGRAM_CHAT_ID", "") or os.getenv("ALERT_TELEGRAM_CHAT_ID", "")
 
         if bot_token and chat_id:
             async with httpx.AsyncClient(timeout=10) as client:
-                res = await client.post(
-                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                    json={
-                        "chat_id": chat_id,
+                destinations = telegram_service._get_target_destinations(tg_cfg, explicit_target=None) if tg_cfg.get("bot_token") else [chat_id]
+                if not destinations:
+                    destinations = [chat_id]
+                sent = False
+                for cid in destinations:
+                    payload = {
+                        "chat_id": cid,
                         "text": message,
                         "parse_mode": "HTML",
                         "disable_web_page_preview": False,
-                    },
-                )
-            if res.status_code == 200:
-                return {"success": True, "method": "telegram_api"}
-            else:
-                logger.warning(f"[minio] Telegram API failed: {res.status_code} {res.text[:200]}")
-                return {"success": False, "error": f"Telegram API {res.status_code}"}
+                    }
+                    if tg_cfg.get("topic_id"):
+                        try:
+                            payload["message_thread_id"] = int(tg_cfg["topic_id"])
+                        except ValueError:
+                            pass
+                    res = await client.post(
+                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                        json=payload,
+                    )
+                    if res.status_code == 200:
+                        sent = True
+                if sent:
+                    return {"success": True, "method": "telegram_api"}
+                else:
+                    logger.warning(f"[minio] Telegram API failed: {res.status_code} {res.text[:200]}")
+                    return {"success": False, "error": f"Telegram API {res.status_code}"}
 
         # Method 2: Custom webhook URL (fallback)
         telegram_bot_url = getattr(settings, "TELEGRAM_BOT_NOTIFY_URL", "")

@@ -11,6 +11,7 @@ from src.presentation.routes.auth import get_current_user
 from src.presentation.auth_deps import CurrentUser
 from src.presentation.routes.social.helpers import repliz_get, repliz_delete
 from src.infrastructure.database import async_session, SocialAccountModel
+from src.infrastructure.db_connection import get_dict_connection
 
 accounts_router = APIRouter(tags=["social-accounts"])
 
@@ -67,12 +68,35 @@ async def unregister_account(account_id: str) -> None:
         await session.commit()
 
 
+@accounts_router.get("/accounts/users")
+async def list_account_users(user: CurrentUser = Depends(get_current_user)):
+    """List users that have connected social accounts (superadmin only)."""
+    if not user.is_superadmin:
+        return []
+    try:
+        conn = get_dict_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT u.id, u.email, u.full_name, COUNT(sa.id) as accounts_count
+            FROM users u
+            INNER JOIN social_accounts sa ON u.id = sa.user_id
+            GROUP BY u.id
+            ORDER BY u.full_name ASC, u.email ASC
+        """)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
 @accounts_router.get("/accounts")
 async def list_accounts(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     types: Optional[str] = Query(None, description="Comma-separated: facebook,instagram,tiktok,threads,youtube,linkedin"),
     search: Optional[str] = None,
+    user_id: Optional[int] = Query(None, description="Filter by local user ID (superadmin only)"),
     user: CurrentUser = Depends(get_current_user),
 ):
     """List connected social accounts (filtered by user ownership)."""
@@ -84,12 +108,43 @@ async def list_accounts(
         params["search"] = search
     data = await repliz_get("/public/account", params=params)
 
+    # Load account ownership mappings
+    owner_map = {}
+    try:
+        conn = get_dict_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT sa.account_id, sa.user_id, sa.platform, sa.name, u.email, u.full_name
+            FROM social_accounts sa
+            LEFT JOIN users u ON sa.user_id = u.id
+        """)
+        for row in cur.fetchall():
+            owner_map[row["account_id"]] = {
+                "user_id": row["user_id"],
+                "email": row["email"] or "",
+                "full_name": row["full_name"] or "",
+            }
+        conn.close()
+    except Exception:
+        owner_map = {}
+
+    docs = data.get("docs") or []
+
+    # Attach owner metadata to each doc
+    for acc in docs:
+        acc_id = acc.get("_id") or acc.get("id") or ""
+        acc["owner"] = owner_map.get(acc_id)
+
     # Filter by ownership unless superadmin
     if not user.is_superadmin:
         owned_ids = await _get_user_account_ids(user)
-        if data.get("docs"):
-            data["docs"] = [acc for acc in data["docs"] if (acc.get("_id") or acc.get("id")) in owned_ids]
-            data["totalDocs"] = len(data["docs"])
+        docs = [acc for acc in docs if (acc.get("_id") or acc.get("id")) in owned_ids]
+    elif user_id is not None:
+        # Superadmin filtering by specific user
+        docs = [acc for acc in docs if acc.get("owner") and acc["owner"].get("user_id") == user_id]
+
+    data["docs"] = docs
+    data["totalDocs"] = len(docs)
     return data
 
 

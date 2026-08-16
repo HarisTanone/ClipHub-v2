@@ -35,8 +35,10 @@ logger = logging.getLogger(__name__)
 
 class VideoGenStatus(str, Enum):
     QUEUED = "queued"
+    PLANNING = "planning"
     GENERATING_STORY = "generating_story"
     SEARCHING_FOOTAGE = "searching_footage"
+    AWAITING_SELECTION = "awaiting_selection"
     DOWNLOADING = "downloading"
     GENERATING_TTS = "generating_tts"
     ASSEMBLING = "assembling"
@@ -325,11 +327,7 @@ class VideoGenerator:
         return len(self._jobs)
 
     async def run_pipeline(self, job_id: str) -> VideoGenJob:
-        """Execute the full video generation pipeline.
-
-        This is the main entry point — runs all steps sequentially.
-        Should be called as a background task.
-        """
+        """Execute the full video generation pipeline (one-click auto mode)."""
         job = self._jobs.get(job_id)
         if not job:
             raise ValueError(f"Job {job_id} not found")
@@ -344,6 +342,7 @@ class VideoGenerator:
             self._persist_job(job)
             story = await self._step_generate_story(job)
             job.story = story
+            job.title = story.get("title")
             job.progress = 15
             self._persist_job(job)
 
@@ -410,6 +409,145 @@ class VideoGenerator:
 
         return job
 
+    async def plan_scenes_and_footage(self, job_id: str) -> VideoGenJob:
+        """Plan story and search footage candidates without rendering (interactive mode)."""
+        job = self.get_job(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        work_dir = os.path.join(self._output_dir, job_id)
+        os.makedirs(work_dir, exist_ok=True)
+
+        try:
+            # Step 1: Generate story
+            job.status = VideoGenStatus.GENERATING_STORY
+            job.progress = 15
+            self._persist_job(job)
+            story = await self._step_generate_story(job)
+            job.story = story
+            job.title = story.get("title")
+            job.progress = 40
+            self._persist_job(job)
+
+            # Step 2: Search footage candidates
+            job.status = VideoGenStatus.SEARCHING_FOOTAGE
+            job.progress = 50
+            self._persist_job(job)
+            scenes = await self._step_search_footage(story, work_dir)
+
+            # Pre-select top candidate for each scene
+            for scene in scenes:
+                candidates = scene.get("footage_candidates", [])
+                if candidates and not scene.get("selected_footage"):
+                    best = self._pick_best_candidate(candidates, scene) or candidates[0]
+                    scene["selected_footage"] = best
+
+            job.scenes_with_footage = scenes
+            job.status = VideoGenStatus.AWAITING_SELECTION
+            job.progress = 100
+            self._persist_job(job)
+
+        except Exception as exc:
+            job.status = VideoGenStatus.FAILED
+            job.error = str(exc)
+            job.completed_at = time.time()
+            self._persist_job(job)
+            logger.error(f"video_gen [{job_id}] planning failed: {exc}", exc_info=True)
+
+        return job
+
+    async def search_scene_footage(self, job_id: str, scene_id: int, query: str) -> list[dict]:
+        """Re-search footage candidates for a specific scene with custom keywords."""
+        job = self.get_job(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        scenes = job.scenes_with_footage or (job.story.get("scenes", []) if job.story else [])
+        target_scene = None
+        for s in scenes:
+            if s.get("id") == scene_id:
+                target_scene = s
+                break
+
+        if not target_scene:
+            raise ValueError(f"Scene {scene_id} not found in job {job_id}")
+
+        from src.infrastructure.youtube_search import YouTubeSearch
+
+        yt = YouTubeSearch()
+        candidates = await yt.search_for_single_scene(target_scene, custom_query=query, results_per_query=6)
+        target_scene["footage_candidates"] = candidates
+        job.scenes_with_footage = scenes
+        self._persist_job(job)
+        return candidates
+
+    async def render_with_selected_scenes(self, job_id: str, selected_scenes: list[dict]) -> VideoGenJob:
+        """Render final video using user-curated footage selections."""
+        job = self.get_job(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        if selected_scenes:
+            job.scenes_with_footage = selected_scenes
+            if job.story:
+                job.story["scenes"] = selected_scenes
+
+        work_dir = os.path.join(self._output_dir, job_id)
+        os.makedirs(work_dir, exist_ok=True)
+
+        try:
+            # Step 3: Download chosen footage
+            job.status = VideoGenStatus.DOWNLOADING
+            job.progress = 20
+            self._persist_job(job)
+            scenes = await self._step_download_footage(job.scenes_with_footage or [], work_dir)
+            job.scenes_with_footage = scenes
+            job.progress = 50
+            self._persist_job(job)
+
+            # Step 4: Generate TTS
+            job.status = VideoGenStatus.GENERATING_TTS
+            job.progress = 60
+            self._persist_job(job)
+            scenes = await self._step_generate_tts(scenes, job, work_dir)
+            job.scenes_with_footage = scenes
+            job.progress = 75
+            self._persist_job(job)
+
+            # Step 5: Assemble timeline
+            job.status = VideoGenStatus.ASSEMBLING
+            job.progress = 80
+            self._persist_job(job)
+            timeline = self._step_assemble_timeline(scenes)
+            job.timeline = timeline
+            job.progress = 85
+            self._persist_job(job)
+
+            # Step 6: Render final video
+            job.status = VideoGenStatus.RENDERING
+            job.progress = 90
+            self._persist_job(job)
+            output_path = await self._step_render_video(timeline, job, work_dir)
+            job.output_path = output_path
+            job.progress = 100
+            job.status = VideoGenStatus.COMPLETED
+            job.completed_at = time.time()
+            self._persist_job(job)
+
+            total_time = job.completed_at - job.created_at
+            logger.info(
+                f"video_gen [{job_id}] rendered with custom footage in {total_time:.1f}s → {output_path}"
+            )
+
+        except Exception as exc:
+            job.status = VideoGenStatus.FAILED
+            job.error = str(exc)
+            job.completed_at = time.time()
+            self._persist_job(job)
+            logger.error(f"video_gen [{job_id}] render failed: {exc}", exc_info=True)
+
+        return job
+
     # ─── Pipeline Steps ────────────────────────────────────────────────────────
 
     async def _step_generate_story(self, job: VideoGenJob) -> dict:
@@ -432,7 +570,7 @@ class VideoGenerator:
         return story
 
     async def _step_search_footage(self, story: dict, work_dir: str) -> list[dict]:
-        """Step 2: Search YouTube for footage per scene."""
+        """Step 2: Search YouTube and Pexels for footage per scene."""
         from src.infrastructure.youtube_search import YouTubeSearch
 
         yt = YouTubeSearch()
@@ -441,10 +579,9 @@ class VideoGenerator:
         scenes = await yt.search_for_scenes(
             scenes=scenes,
             results_per_scene=5,
-            shorts_only=False,  # Allow both shorts and regular videos
+            shorts_only=False,
         )
 
-        # Log results
         total_candidates = sum(
             len(s.get("footage_candidates", [])) for s in scenes
         )
@@ -458,30 +595,46 @@ class VideoGenerator:
     async def _step_download_footage(
         self, scenes: list[dict], work_dir: str
     ) -> list[dict]:
-        """Step 3: Download best footage candidate for each scene."""
+        """Step 3: Download chosen/best footage candidate for each scene."""
         footage_dir = os.path.join(work_dir, "footage")
         os.makedirs(footage_dir, exist_ok=True)
 
         for i, scene in enumerate(scenes):
-            candidates = scene.get("footage_candidates", [])
-            if not candidates:
-                scene["footage_path"] = None
-                continue
+            best = scene.get("selected_footage") or scene.get("footage_source")
+            if not best:
+                candidates = scene.get("footage_candidates", [])
+                if candidates:
+                    best = self._pick_best_candidate(candidates, scene)
 
-            # Pick best candidate: prefer higher views, reasonable duration
-            best = self._pick_best_candidate(candidates, scene)
             if not best:
                 scene["footage_path"] = None
                 continue
 
-            # Download via yt-dlp
             duration_needed = scene.get("duration_estimate", 10) + 3  # buffer
-            path = await self._download_youtube_segment(
-                url=best["url"],
-                duration_needed=duration_needed,
-                output_dir=footage_dir,
-                scene_id=scene.get("id", i),
-            )
+            url = best.get("url") or ""
+            platform = best.get("platform", "youtube")
+
+            path = None
+            if platform == "pexels" or (url.startswith("http") and ".mp4" in url):
+                from src.infrastructure.footage_downloader import FootageDownloader
+                from src.domain.entities import VideoCandidate
+                candidate_obj = VideoCandidate(
+                    id=best.get("video_id", f"scene_{i}"),
+                    platform="pexels",
+                    embed_url=url,
+                    preview_url=best.get("thumbnail_url", ""),
+                    source_url=url,
+                    title=best.get("title", ""),
+                )
+                dl = FootageDownloader(output_dir=footage_dir)
+                path = await dl.download(candidate_obj, duration_needed)
+            else:
+                path = await self._download_youtube_segment(
+                    url=url,
+                    duration_needed=duration_needed,
+                    output_dir=footage_dir,
+                    scene_id=scene.get("id", i),
+                )
 
             scene["footage_path"] = path
             scene["footage_source"] = best
@@ -492,8 +645,7 @@ class VideoGenerator:
                     f"from '{best.get('title', '')[:40]}'"
                 )
 
-            # Rate limit
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
         downloaded = sum(1 for s in scenes if s.get("footage_path"))
         logger.info(f"video_gen: downloaded footage for {downloaded}/{len(scenes)} scenes")

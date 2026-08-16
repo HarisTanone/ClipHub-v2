@@ -938,9 +938,33 @@ class JobService:
             self._emit(job_id, success_count, JobStatus.COMPLETED.value, "done", total_duration)
             logger.info(f"[{job_id}] Pipeline completed in {total_duration:.1f}s — {success_count}/{clips_count} clips")
 
+            # Telegram notification on job completion
+            try:
+                from src.infrastructure.telegram_service import telegram_service
+                clips_list = [asdict(c) if hasattr(c, "__dataclass_fields__") else (c if isinstance(c, dict) else c.__dict__) for c in clips]
+                asyncio.create_task(telegram_service.notify_job_completed(
+                    job_id=job_id,
+                    title=job.title or job.youtube_url or "Video",
+                    clips_count=len(clips_list),
+                    clips=clips_list,
+                    output_dir=output_dir,
+                ))
+            except Exception:
+                pass
+
         except Exception as e:
             logger.exception(f"[{job_id}] Pipeline failed: {e}")
             await self._repo.update_status(job_id, JobStatus.FAILED, str(e)[:512])
+            # Telegram notification on job failure
+            try:
+                from src.infrastructure.telegram_service import telegram_service
+                asyncio.create_task(telegram_service.notify_job_failed(
+                    job_id=job_id,
+                    error=str(e),
+                    title=job.title or ""
+                ))
+            except Exception:
+                pass
         finally:
             # Cleanup temp files
             if self._cleanup:

@@ -271,6 +271,15 @@ class V2PipelineService:
             # ═══ Step 1: Validate ═══
             self._emit(job_id, 1, "validate", "start")
             await self._repo.update_status(job_id, JobStatus.VALIDATING)
+            try:
+                from src.infrastructure.telegram_service import telegram_service
+                asyncio.create_task(telegram_service.notify_job_started(
+                    job_id=job_id,
+                    title=job.title or url or "Video",
+                    source_url=url or "Direct Upload"
+                ))
+            except Exception:
+                pass
             if is_upload_source:
                 try:
                     video_title, duration = await self._prepare_uploaded_video(job, video_path)
@@ -964,12 +973,36 @@ class V2PipelineService:
                 f"{success_count}/{clips_count} clips"
             )
 
+            # Telegram notification on job completion
+            try:
+                from src.infrastructure.telegram_service import telegram_service
+                clips_list = [asdict(c) if hasattr(c, "__dataclass_fields__") else (c if isinstance(c, dict) else c.__dict__) for c in (valid_clips or clips)]
+                asyncio.create_task(telegram_service.notify_job_completed(
+                    job_id=job_id,
+                    title=video_title or job.title or job.youtube_url or "Video",
+                    clips_count=len(clips_list),
+                    clips=clips_list,
+                    output_dir=output_dir,
+                ))
+            except Exception:
+                pass
+
         except Exception as e:
             logger.exception(f"[{job_id}] V2 pipeline FAILED: {e}")
             await self._repo.update_status(
                 job_id, JobStatus.FAILED,
                 f"V2 pipeline error: {str(e)[:500]}"
             )
+            # Telegram notification on job failure
+            try:
+                from src.infrastructure.telegram_service import telegram_service
+                asyncio.create_task(telegram_service.notify_job_failed(
+                    job_id=job_id,
+                    error=str(e),
+                    title=video_title or job.title or ""
+                ))
+            except Exception:
+                pass
 
     # ─── V2-Specific Helpers ──────────────────────────────────────────────────
 

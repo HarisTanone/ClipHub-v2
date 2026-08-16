@@ -36,6 +36,16 @@ class GenerateVideoRequest(BaseModel):
     bgm_volume: float = Field(default=0.15, ge=0.0, le=0.5)
 
 
+class SearchSceneRequest(BaseModel):
+    scene_id: int
+    query: str = Field(..., min_length=2, max_length=200)
+
+
+class RenderSelectedRequest(BaseModel):
+    job_id: str
+    selected_scenes: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class JobStatusResponse(BaseModel):
     job_id: str
     topic: str
@@ -58,6 +68,7 @@ class JobStatusResponse(BaseModel):
     scenes_count: int = 0
     estimated_duration: Optional[float] = None
     thumbnail_url: Optional[str] = None
+    scenes: Optional[list[dict[str, Any]]] = None
 
 
 class JobListResponse(BaseModel):
@@ -81,11 +92,7 @@ async def generate_video(
     background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(require_superadmin()),
 ):
-    """Start a video generation job (superuser only).
-
-    Creates an AI-generated short video from a topic.
-    Returns immediately with job_id — processing happens in background.
-    """
+    """Start a video generation job in one-click auto mode (superuser only)."""
     if not settings.VIDEO_GEN_ENABLED:
         raise HTTPException(status_code=503, detail="Video Generator is disabled")
 
@@ -122,9 +129,82 @@ async def generate_video(
         user_id=user.id,
     )
 
-    # Run pipeline in background
     background_tasks.add_task(vg.run_pipeline, job.job_id)
+    return _job_to_response(job)
 
+
+@router.post("/plan", response_model=JobStatusResponse)
+async def plan_video(
+    req: GenerateVideoRequest,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser = Depends(require_superadmin()),
+):
+    """Start interactive planning: generates script & searches footage candidates (superuser only)."""
+    if not settings.VIDEO_GEN_ENABLED:
+        raise HTTPException(status_code=503, detail="Video Generator is disabled")
+
+    target_duration = req.target_duration or settings.VIDEO_GEN_TARGET_DURATION
+    if not settings.VIDEO_GEN_MIN_DURATION <= target_duration <= settings.VIDEO_GEN_MAX_DURATION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"target_duration must be between {settings.VIDEO_GEN_MIN_DURATION} and {settings.VIDEO_GEN_MAX_DURATION} seconds",
+        )
+
+    from src.application.video_generator import get_video_generator
+
+    vg = get_video_generator()
+
+    job = vg.create_job(
+        topic=req.topic,
+        target_duration=target_duration,
+        voice=req.voice,
+        speed=req.speed,
+        instructions=req.instructions,
+        num_scenes=req.num_scenes,
+        subtitles_enabled=req.subtitles_enabled,
+        subtitle_style=req.subtitle_style_config or req.subtitle_style,
+        include_bgm=req.include_bgm,
+        bgm_volume=req.bgm_volume,
+        user_id=user.id,
+    )
+    job.status = VideoGenStatus.PLANNING
+
+    background_tasks.add_task(vg.plan_scenes_and_footage, job.job_id)
+    return _job_to_response(job)
+
+
+@router.post("/jobs/{job_id}/search-scene")
+async def search_scene(
+    job_id: str,
+    req: SearchSceneRequest,
+    user: CurrentUser = Depends(require_superadmin()),
+):
+    """Search alternative footage candidates for a specific scene (superuser only)."""
+    from src.application.video_generator import get_video_generator
+
+    vg = get_video_generator()
+    try:
+        candidates = await vg.search_scene_footage(job_id, req.scene_id, req.query)
+        return {"scene_id": req.scene_id, "candidates": candidates}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/render-selected", response_model=JobStatusResponse)
+async def render_selected(
+    req: RenderSelectedRequest,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser = Depends(require_superadmin()),
+):
+    """Start rendering with user-selected footage candidates for each scene (superuser only)."""
+    from src.application.video_generator import get_video_generator
+
+    vg = get_video_generator()
+    job = vg.get_job(req.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    background_tasks.add_task(vg.render_with_selected_scenes, req.job_id, req.selected_scenes)
     return _job_to_response(job)
 
 
@@ -376,8 +456,10 @@ def _job_to_response(job) -> JobStatusResponse:
     status_val = job.status.value if hasattr(job.status, "value") else str(job.status)
     step_labels = {
         "queued": "Waiting in queue...",
-        "generating_story": "AI writing story...",
-        "searching_footage": "Searching YouTube footage...",
+        "planning": "Planning scenes...",
+        "generating_story": "AI writing story & scenes...",
+        "searching_footage": "Searching candidate footage...",
+        "awaiting_selection": "Ready for footage selection",
         "downloading": "Downloading video clips...",
         "generating_tts": "Generating narration audio...",
         "assembling": "Assembling timeline...",
@@ -409,6 +491,7 @@ def _job_to_response(job) -> JobStatusResponse:
         scenes_count=scenes_count,
         estimated_duration=estimated_duration,
         thumbnail_url=thumbnail_url,
+        scenes=job.scenes_with_footage,
     )
 
 

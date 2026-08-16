@@ -30,6 +30,7 @@ from src.presentation.routes.minio_upload import router as minio_router
 from src.presentation.routes.social import router as social_router
 from src.presentation.routes.video_generator import router as video_gen_router
 from src.presentation.routes.analyze import router as analyze_router
+from src.presentation.routes.telegram import router as telegram_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -278,6 +279,7 @@ app.include_router(minio_router, prefix="/api")
 app.include_router(social_router, prefix="/api")
 app.include_router(video_gen_router, prefix="/api")
 app.include_router(analyze_router, prefix="/api")
+app.include_router(telegram_router, prefix="/api")
 
 
 @app.get("/health")

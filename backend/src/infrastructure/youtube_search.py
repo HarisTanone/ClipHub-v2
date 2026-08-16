@@ -172,62 +172,122 @@ class YouTubeSearch:
             logger.error(f"youtube_search: unexpected error: {exc}")
             return YouTubeSearchResult(query=query, error=str(exc))
 
+    async def search_pexels(
+        self,
+        query: str,
+        max_results: int = 4,
+    ) -> list[dict]:
+        """Search Pexels video API if configured."""
+        api_key = settings.PEXELS_API_KEY
+        if not api_key:
+            return []
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    "https://api.pexels.com/videos/search",
+                    headers={"Authorization": api_key},
+                    params={"query": query, "orientation": "portrait", "per_page": min(max_results, 10)},
+                )
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                results = []
+                for v in data.get("videos", []):
+                    # Pick portrait or best video link
+                    files = v.get("video_files", [])
+                    best_file = None
+                    for f in files:
+                        if f.get("quality") == "hd" or (f.get("width", 0) >= 720 and f.get("height", 0) >= 1280):
+                            best_file = f
+                            break
+                    if not best_file and files:
+                        best_file = files[0]
+
+                    if best_file and best_file.get("link"):
+                        results.append({
+                            "video_id": f"pexels_{v['id']}",
+                            "title": f"Pexels Stock: {query.title()}",
+                            "url": best_file["link"],
+                            "thumbnail_url": v.get("image", ""),
+                            "duration_seconds": v.get("duration", 0),
+                            "view_count": 50000,
+                            "channel": v.get("user", {}).get("name", "Pexels Creator"),
+                            "query": query,
+                            "platform": "pexels",
+                        })
+                return results
+        except Exception as exc:
+            logger.debug(f"pexels_search: failed for query '{query}': {exc}")
+            return []
+
+    async def search_for_single_scene(
+        self,
+        scene: dict,
+        custom_query: Optional[str] = None,
+        results_per_query: int = 5,
+    ) -> list[dict]:
+        """Search footage candidates for a single scene with multiple queries."""
+        queries = [custom_query] if custom_query else scene.get("search_queries", [])
+        if not queries and scene.get("visual"):
+            queries = [scene["visual"][:80]]
+
+        all_candidates = []
+        seen_ids = set()
+
+        # Search Pexels first if available
+        for q in queries[:2]:
+            pexels_results = await self.search_pexels(q, max_results=3)
+            for r in pexels_results:
+                if r["video_id"] not in seen_ids:
+                    seen_ids.add(r["video_id"])
+                    all_candidates.append(r)
+
+        # Search YouTube
+        for query in queries[:3]:
+            result = await self.search(
+                query=query,
+                max_results=results_per_query,
+                shorts_only=False,
+            )
+
+            if result.error:
+                logger.warning(f"youtube_search: query '{query}' error: {result.error}")
+                continue
+
+            for r in result.results:
+                if r.video_id not in seen_ids:
+                    seen_ids.add(r.video_id)
+                    all_candidates.append({
+                        "video_id": r.video_id,
+                        "title": r.title,
+                        "url": r.url,
+                        "thumbnail_url": r.thumbnail_url,
+                        "duration_seconds": r.duration_seconds,
+                        "view_count": r.view_count,
+                        "channel": r.channel,
+                        "query": query,
+                        "platform": "youtube",
+                    })
+
+            await asyncio.sleep(0.15)
+
+        return all_candidates
+
     async def search_for_scenes(
         self,
         scenes: list[dict],
         results_per_scene: int = 5,
         shorts_only: bool = False,
     ) -> list[dict]:
-        """Search YouTube for footage for each scene.
-
-        Args:
-            scenes: List of scene dicts with 'search_queries' field.
-            results_per_scene: Max results per query.
-            shorts_only: Filter for Shorts only.
-
-        Returns:
-            Scenes enriched with 'footage_candidates' field.
-        """
+        """Search YouTube and Pexels for footage for each scene."""
         for i, scene in enumerate(scenes):
-            queries = scene.get("search_queries", [])
-            if not queries:
-                scene["footage_candidates"] = []
-                continue
-
-            all_candidates = []
-            seen_ids = set()
-
-            for query in queries[:3]:  # Max 3 queries per scene
-                result = await self.search(
-                    query=query,
-                    max_results=results_per_scene,
-                    shorts_only=shorts_only,
-                )
-
-                if result.error:
-                    logger.warning(
-                        f"youtube_search: scene {i} query '{query}' error: {result.error}"
-                    )
-                    continue
-
-                for r in result.results:
-                    if r.video_id not in seen_ids:
-                        seen_ids.add(r.video_id)
-                        all_candidates.append({
-                            "video_id": r.video_id,
-                            "title": r.title,
-                            "url": r.url,
-                            "thumbnail_url": r.thumbnail_url,
-                            "duration_seconds": r.duration_seconds,
-                            "view_count": r.view_count,
-                            "channel": r.channel,
-                            "query": query,
-                        })
-
-                # Rate limit between queries
-                await asyncio.sleep(0.2)
-
-            scene["footage_candidates"] = all_candidates
+            candidates = await self.search_for_single_scene(
+                scene=scene,
+                results_per_query=results_per_scene,
+            )
+            scene["footage_candidates"] = candidates
+            await asyncio.sleep(0.1)
 
         return scenes
 

@@ -69,22 +69,26 @@ Contoh penggunaan:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Submit YouTube URL ke AutoCliper",
-        add_help=False
+        description="Submit YouTube URL ke AutoCliper"
     )
     parser.add_argument("--url", required=True, help="YouTube URL")
     parser.add_argument("--style", default="", help="Style preset ID or name")
     parser.add_argument("--ratio", default="9:16", help="Aspect ratio")
     parser.add_argument("--force", default="false", help="Force reprocess (true/false)")
+    parser.add_argument("--auto-post", default="false", help="Auto post to social media upon completion (true/false)")
+    parser.add_argument("--platforms", default="", help="Target social media platforms (comma-separated, e.g. tiktok,instagram,youtube)")
     parser.add_argument("--help-extended", action="store_true", help="Show extended help with preset IDs")
     
-    args = parser.parse_args()
-
-    if args.help_extended:
+    # If user asks for extended help
+    if "--help-extended" in sys.argv:
         print_usage()
         return
 
+    args = parser.parse_args()
+
     force = args.force.lower() in ("true", "1", "yes")
+    auto_post = getattr(args, "auto_post", "false").lower() in ("true", "1", "yes")
+    platforms = [p.strip() for p in getattr(args, "platforms", "").split(",") if p.strip()]
 
     # Lookup preset ID jika yang diberikan adalah nama
     preset_id = args.style
@@ -101,6 +105,8 @@ def main():
         "force_reprocess": force,
         "broll_enabled": True,
         "use_remotion": True,
+        "auto_post_social": auto_post,
+        "auto_post_platforms": ",".join(platforms),
     }
 
     print(f"Submitting: {args.url}")
