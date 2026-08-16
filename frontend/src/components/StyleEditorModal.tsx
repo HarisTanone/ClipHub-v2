@@ -2864,32 +2864,35 @@ function SkiaHookLivePreview({
         )}
         <div className="absolute inset-0 bg-black/40" />
 
-        <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+        <div className="absolute left-0 right-0 flex items-center justify-center px-3 pointer-events-none" style={{ top: posTop, transform: "translateY(-50%)" }}>
           {presetId === "skia_neon_cyberpunk" ? (
             <div
               style={{
                 position: "relative",
-                padding: "10px 18px",
+                padding: "8px 14px",
+                maxWidth: "92%",
                 background: "rgba(10, 15, 30, 0.85)",
-                borderRadius: "12px",
+                borderRadius: "10px",
                 border: "1.5px solid #00F0FF",
-                boxShadow: "0 0 20px rgba(0,240,255,0.4), inset 0 0 15px rgba(255,0,127,0.25)",
-                backdropFilter: "blur(10px)",
+                boxShadow: "0 0 16px rgba(0,240,255,0.4), inset 0 0 12px rgba(255,0,127,0.25)",
+                backdropFilter: "blur(8px)",
+                boxSizing: "border-box",
               }}
             >
-              <div style={{ position: "absolute", top: -3, left: -3, width: 8, height: 8, borderTop: "2px solid #FF007F", borderLeft: "2px solid #FF007F" }} />
-              <div style={{ position: "absolute", bottom: -3, right: -3, width: 8, height: 8, borderBottom: "2px solid #FF007F", borderRight: "2px solid #FF007F" }} />
+              <div style={{ position: "absolute", top: -2, left: -2, width: 6, height: 6, borderTop: "2px solid #FF007F", borderLeft: "2px solid #FF007F" }} />
+              <div style={{ position: "absolute", bottom: -2, right: -2, width: 6, height: 6, borderBottom: "2px solid #FF007F", borderRight: "2px solid #FF007F" }} />
               <p
                 style={{
-                  fontSize: Math.max(style.fontSize * 0.32, 14),
+                  fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
                   fontWeight: 900,
                   fontFamily: `'${style.fontFamily || "Montserrat"}', sans-serif`,
                   background: "linear-gradient(135deg, #00F0FF, #FF007F)",
                   WebkitBackgroundClip: "text",
                   WebkitTextFillColor: "transparent",
                   textTransform: "uppercase",
-                  letterSpacing: "0.05em",
+                  letterSpacing: "0.03em",
                   textAlign: "center",
+                  wordBreak: "break-word",
                 }}
               >
                 {sample}
@@ -2898,22 +2901,25 @@ function SkiaHookLivePreview({
           ) : presetId === "skia_frosted_pill" ? (
             <div
               style={{
-                padding: "8px 18px",
+                padding: "6px 14px",
+                maxWidth: "92%",
                 background: "rgba(255, 255, 255, 0.15)",
                 borderRadius: "999px",
                 border: "1px solid rgba(255, 255, 255, 0.35)",
-                boxShadow: "0 10px 30px rgba(0, 0, 0, 0.4)",
-                backdropFilter: "blur(14px)",
+                boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
+                backdropFilter: "blur(12px)",
+                boxSizing: "border-box",
               }}
             >
               <p
                 style={{
-                  fontSize: Math.max(style.fontSize * 0.3, 13),
+                  fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 15),
                   fontWeight: 800,
                   fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
                   color: "#FFFFFF",
                   textAlign: "center",
                   letterSpacing: "-0.01em",
+                  wordBreak: "break-word",
                 }}
               >
                 {sample}
@@ -2924,14 +2930,16 @@ function SkiaHookLivePreview({
               style={{
                 position: "relative",
                 padding: "6px 14px",
-                borderRadius: "10px",
-                background: "rgba(5, 15, 10, 0.75)",
-                boxShadow: "0 0 25px rgba(16, 185, 129, 0.35)",
+                maxWidth: "92%",
+                borderRadius: "8px",
+                background: "rgba(5, 15, 10, 0.8)",
+                boxShadow: "0 0 20px rgba(16, 185, 129, 0.35)",
+                boxSizing: "border-box",
               }}
             >
               <p
                 style={{
-                  fontSize: Math.max(style.fontSize * 0.34, 15),
+                  fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
                   fontWeight: 900,
                   fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif`,
                   background: "linear-gradient(135deg, #10B981 0%, #38BDF8 50%, #8B5CF6 100%)",
@@ -2939,7 +2947,8 @@ function SkiaHookLivePreview({
                   WebkitTextFillColor: "transparent",
                   textAlign: "center",
                   textTransform: "uppercase",
-                  letterSpacing: "0.04em",
+                  letterSpacing: "0.03em",
+                  wordBreak: "break-word",
                 }}
               >
                 {sample}
@@ -2949,21 +2958,24 @@ function SkiaHookLivePreview({
             <div
               style={{
                 background: "linear-gradient(135deg, #FACC15, #EAB308)",
-                padding: "6px 16px",
-                borderRadius: "6px",
+                padding: "5px 12px",
+                maxWidth: "92%",
+                borderRadius: "5px",
                 transform: "rotate(-1.5deg)",
-                boxShadow: "0 8px 0 #713F12, 0 14px 28px rgba(0,0,0,0.5)",
+                boxShadow: "0 4px 0 #713F12, 0 8px 18px rgba(0,0,0,0.5)",
+                boxSizing: "border-box",
               }}
             >
               <p
                 style={{
-                  fontSize: Math.max(style.fontSize * 0.34, 15),
+                  fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
                   fontWeight: 900,
                   fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
                   color: "#000000",
                   textTransform: "uppercase",
-                  letterSpacing: "0.03em",
+                  letterSpacing: "0.02em",
                   textAlign: "center",
+                  wordBreak: "break-word",
                 }}
               >
                 {sample}
@@ -2972,16 +2984,18 @@ function SkiaHookLivePreview({
           ) : presetId === "skia_3d_chrome" ? (
             <p
               style={{
-                fontSize: Math.max(style.fontSize * 0.36, 16),
+                fontSize: Math.min(Math.max(style.fontSize * 0.24, 12), 17),
                 fontWeight: 900,
+                maxWidth: "92%",
                 fontFamily: `'${style.fontFamily || "Bebas Neue"}', sans-serif`,
                 background: "linear-gradient(180deg, #FFFFFF 0%, #E2E8F0 30%, #FBBF24 50%, #78350F 100%)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
                 textAlign: "center",
                 textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                filter: "drop-shadow(0 4px 12px rgba(0,0,0,0.85))",
+                letterSpacing: "0.04em",
+                filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.85))",
+                wordBreak: "break-word",
               }}
             >
               {sample}
@@ -2989,96 +3003,156 @@ function SkiaHookLivePreview({
           ) : presetId === "skia_ruby_flame" ? (
             <p
               style={{
-                fontSize: Math.max(style.fontSize * 0.34, 15),
+                fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
                 fontWeight: 900,
+                maxWidth: "92%",
                 fontFamily: `'${style.fontFamily || "Bungee"}', sans-serif`,
                 background: "linear-gradient(135deg, #FF3366, #FF9900)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
                 textAlign: "center",
                 textTransform: "uppercase",
-                filter: "drop-shadow(0 0 15px rgba(255, 46, 46, 0.6))",
+                filter: "drop-shadow(0 0 12px rgba(255, 46, 46, 0.6))",
+                wordBreak: "break-word",
               }}
             >
               {sample}
             </p>
-          ) : presetId.includes("glitch") ? (
-            <div className="relative text-center">
+          ) : presetId === "skia_gold_prestige" ? (
+            <div className="w-full text-center px-2" style={{ maxWidth: "92%" }}>
+              <p style={{
+                fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
+                fontWeight: 800,
+                fontFamily: `'${style.fontFamily || "Playfair Display"}', serif`,
+                background: "linear-gradient(135deg, #FEF08A, #CA8A04)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                textAlign: "center",
+                letterSpacing: "0.03em",
+                filter: "drop-shadow(0 2px 6px rgba(202, 138, 4, 0.4))",
+                wordBreak: "break-word",
+              }}>
+                {sample}
+              </p>
+            </div>
+          ) : presetId === "skia_minimal_editorial" ? (
+            <div
+              style={{
+                backgroundColor: "rgba(15, 23, 42, 0.75)",
+                borderRadius: "8px",
+                border: "1px solid rgba(255, 255, 255, 0.2)",
+                padding: "5px 12px",
+                maxWidth: "92%",
+                boxSizing: "border-box",
+              }}
+            >
+              <p
+                style={{
+                  color: "#FFFFFF",
+                  fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
+                  fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 15),
+                  fontWeight: 800,
+                  textAlign: "center",
+                  wordBreak: "break-word",
+                }}
+              >
+                {sample}
+              </p>
+            </div>
+          ) : presetId === "skia_glitch_rgb" ? (
+            <div className="relative text-center px-2" style={{ maxWidth: "92%" }}>
               <p style={{
                 position: "absolute",
                 inset: 0,
                 color: "#FF0000",
                 opacity: 0.7,
-                transform: "translate(-3px, 0)",
+                transform: "translate(-2px, 0)",
                 fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
-                fontSize: Math.max(style.fontSize * 0.32, 14),
-                fontWeight: Number(style.fontWeight || 700),
+                fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
+                fontWeight: 900,
                 textTransform: "uppercase",
+                wordBreak: "break-word",
               }}>{sample}</p>
               <p style={{
                 position: "absolute",
                 inset: 0,
                 color: "#00FFFF",
                 opacity: 0.7,
-                transform: "translate(3px, 0)",
+                transform: "translate(2px, 0)",
                 fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
-                fontSize: Math.max(style.fontSize * 0.32, 14),
-                fontWeight: Number(style.fontWeight || 700),
+                fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
+                fontWeight: 900,
                 textTransform: "uppercase",
+                wordBreak: "break-word",
               }}>{sample}</p>
               <p style={{
                 position: "relative",
                 color: style.color || "#FFFFFF",
                 fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
-                fontSize: Math.max(style.fontSize * 0.32, 14),
-                fontWeight: Number(style.fontWeight || 700),
+                fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
+                fontWeight: 900,
                 textTransform: "uppercase",
+                wordBreak: "break-word",
               }}>{sample}</p>
             </div>
-          ) : presetId.includes("shake") || presetId.includes("neon") || style.glowEnabled ? (
-            <p style={{
-              fontSize: Math.max(style.fontSize * 0.32, 14),
-              fontWeight: Number(style.fontWeight || 700),
-              fontFamily: `'${style.fontFamily || "Bungee"}', sans-serif`,
-              color: style.color || "#00FFCC",
-              textTransform: "uppercase",
-              textAlign: "center",
-              textShadow: `0 0 10px ${style.glowColor || "#00FFCC"}, 0 0 20px ${style.glowColor || "#00FFCC"}, 0 0 40px ${style.glowColor || "#00FFCC"}`,
-            }}>
-              {sample}
-            </p>
-          ) : presetId.includes("cinematic") || presetId.includes("gold") || style.gradientEnabled ? (
-            <div className="w-full text-center">
-              <div className="absolute top-0 left-0 right-0 h-4 bg-black/80" />
-              <div className="absolute bottom-0 left-0 right-0 h-4 bg-black/80" />
-              <p style={{
-                fontSize: Math.max(style.fontSize * 0.32, 14),
-                fontWeight: Number(style.fontWeight || 700),
-                fontFamily: `'${style.fontFamily || "Playfair Display"}', serif`,
-                background: `linear-gradient(135deg, ${style.gradientFrom || "#FFE066"}, ${style.gradientTo || "#FF9900"})`,
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                textAlign: "center",
-                letterSpacing: "0.05em",
-              }}>
+          ) : presetId === "skia_typewriter" ? (
+            <div
+              style={{
+                backgroundColor: "rgba(9, 13, 22, 0.85)",
+                borderRadius: "6px",
+                border: "1px solid rgba(34, 197, 94, 0.4)",
+                padding: "5px 10px",
+                maxWidth: "92%",
+                boxSizing: "border-box",
+                boxShadow: "0 0 12px rgba(34, 197, 94, 0.25)",
+              }}
+            >
+              <p
+                style={{
+                  color: "#22C55E",
+                  fontFamily: `'${style.fontFamily || "Space Grotesk"}', monospace`,
+                  fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 14),
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  textAlign: "center",
+                  wordBreak: "break-word",
+                }}
+              >
                 {sample}
               </p>
             </div>
+          ) : presetId === "skia_fade_scale" ? (
+            <p
+              style={{
+                fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16),
+                fontWeight: 800,
+                maxWidth: "92%",
+                fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
+                color: style.color || "#FFFFFF",
+                textAlign: "center",
+                paintOrder: style.strokeEnabled ? "stroke" : undefined,
+                WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.25, 0.6)}px ${style.strokeColor || "#000"}` : undefined,
+                textShadow: "0 4px 12px rgba(0,0,0,0.6)",
+                wordBreak: "break-word",
+              }}
+            >
+              {sample}
+            </p>
           ) : (
             <p style={{
-              fontSize: Math.max(style.fontSize * 0.32, 14),
-              fontWeight: Number(style.fontWeight || 700),
+              fontSize: Math.min(Math.max(style.fontSize * 0.24, 12), 17),
+              fontWeight: 900,
               fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily || "Anton"}', sans-serif`,
               color: style.color || "#FFFFFF",
               textTransform: style.uppercase ? "uppercase" : "none",
               textAlign: "center",
-              maxWidth: "90%",
+              maxWidth: "92%",
               whiteSpace: "pre-line",
               wordBreak: "break-word",
               padding: "4px 8px",
               backgroundColor: style.bgOpacity > 0 ? `${style.bgColor || "black"}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent",
               paintOrder: style.strokeEnabled ? "stroke" : undefined,
-              WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor || "#000"}` : undefined,
+              WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.25, 0.6)}px ${style.strokeColor || "#000"}` : undefined,
               textShadow: style.shadowEnabled ? `2px 2px 0px ${style.shadowColor || "#000"}` : undefined,
             }}>
               {sample}
@@ -3128,19 +3202,23 @@ function SkiaSubtitleLivePreview({
         )}
         <div className="absolute inset-0 bg-black/40" />
 
-        <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: posTop, transform: "translateY(-50%)" }}>
+        <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: posTop, transform: "translateY(-50%)" }}>
           {presetId === "glassmorphism" ? (
             <div
               style={{
-                backdropFilter: "blur(12px)",
-                WebkitBackdropFilter: "blur(12px)",
+                backdropFilter: "blur(10px)",
+                WebkitBackdropFilter: "blur(10px)",
                 backgroundColor: "rgba(30, 41, 59, 0.45)",
                 border: "1px solid rgba(255, 255, 255, 0.25)",
-                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
-                borderRadius: "14px",
-                padding: "8px 14px",
+                boxShadow: "0 6px 24px rgba(0, 0, 0, 0.4)",
+                borderRadius: "12px",
+                padding: "6px 12px",
                 display: "flex",
-                gap: 5,
+                flexWrap: "wrap",
+                justifyContent: "center",
+                maxWidth: "92%",
+                boxSizing: "border-box",
+                gap: 4,
               }}
             >
               {words.map((w, i) => {
@@ -3151,9 +3229,10 @@ function SkiaSubtitleLivePreview({
                     style={{
                       color: isActive ? (style.highlightColor || "#38BDF8") : "#FFFFFF",
                       fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 900 : Number(style.fontWeight || 600),
-                      textShadow: isActive ? "0 0 10px rgba(56, 189, 248, 0.6)" : "none",
+                      textShadow: isActive ? "0 0 8px rgba(56, 189, 248, 0.6)" : "none",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3165,12 +3244,16 @@ function SkiaSubtitleLivePreview({
             <div
               style={{
                 backgroundColor: "rgba(15, 23, 42, 0.7)",
-                borderRadius: "12px",
+                borderRadius: "10px",
                 border: "1px solid rgba(255, 255, 255, 0.15)",
-                padding: "6px 12px",
+                padding: "5px 10px",
                 display: "flex",
-                gap: 5,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+                flexWrap: "wrap",
+                justifyContent: "center",
+                maxWidth: "92%",
+                boxSizing: "border-box",
+                gap: 4,
+                boxShadow: "0 6px 18px rgba(0,0,0,0.5)",
               }}
             >
               {words.map((w, i) => {
@@ -3181,9 +3264,9 @@ function SkiaSubtitleLivePreview({
                     style={{
                       color: isActive ? "#38BDF8" : "#CBD5E1",
                       fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 800 : 600,
-                      transition: "all 0.15s ease",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3197,10 +3280,14 @@ function SkiaSubtitleLivePreview({
                 backgroundColor: "rgba(24, 24, 27, 0.85)",
                 borderRadius: "999px",
                 border: "1px solid rgba(255, 255, 255, 0.12)",
-                padding: "6px 14px",
+                padding: "5px 12px",
                 display: "flex",
-                gap: 5,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+                flexWrap: "wrap",
+                justifyContent: "center",
+                maxWidth: "92%",
+                boxSizing: "border-box",
+                gap: 4,
+                boxShadow: "0 6px 18px rgba(0,0,0,0.6)",
               }}
             >
               {words.map((w, i) => {
@@ -3211,8 +3298,9 @@ function SkiaSubtitleLivePreview({
                     style={{
                       color: isActive ? "#10B981" : "#E2E8F0",
                       fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 900 : 600,
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3221,7 +3309,7 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "kinetic_word_box" ? (
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap justify-center items-center gap-1" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
@@ -3231,13 +3319,13 @@ function SkiaSubtitleLivePreview({
                       backgroundColor: isActive ? "#FF0055" : "transparent",
                       color: isActive ? "#FFFFFF" : "#E2E8F0",
                       fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 900 : 700,
-                      borderRadius: isActive ? "6px" : "0px",
-                      padding: isActive ? "3px 7px" : "0px",
-                      boxShadow: isActive ? "0 4px 14px rgba(255,0,85,0.55)" : "none",
-                      transform: isActive ? "scale(1.08)" : "scale(1.0)",
-                      transition: "all 0.12s ease",
+                      borderRadius: isActive ? "5px" : "0px",
+                      padding: isActive ? "2px 6px" : "0px",
+                      boxShadow: isActive ? "0 2px 10px rgba(255,0,85,0.5)" : "none",
+                      transform: isActive ? "scale(1.06)" : "scale(1.0)",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3246,7 +3334,7 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "neon_tube" ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 const neonHl = style.highlightColor || "#FF007F";
@@ -3255,14 +3343,15 @@ function SkiaSubtitleLivePreview({
                     key={w}
                     style={{
                       color: isActive ? neonHl : "transparent",
-                      WebkitTextStroke: isActive ? `1.5px ${neonHl}` : "1.5px #00FFFF",
+                      WebkitTextStroke: isActive ? `1.2px ${neonHl}` : "1.2px #00FFFF",
                       fontFamily: `'${style.fontFamily || "Montserrat"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: 900,
                       textTransform: "uppercase",
                       textShadow: isActive
-                        ? `0 0 6px ${neonHl}, 0 0 16px ${neonHl}`
-                        : "0 0 4px #00FFFF, 0 0 12px #00FFFF",
+                        ? `0 0 4px ${neonHl}, 0 0 12px ${neonHl}`
+                        : "0 0 3px #00FFFF, 0 0 8px #00FFFF",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3271,7 +3360,7 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "gradient_fill" ? (
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap justify-center gap-1" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 const grad = isActive
@@ -3285,9 +3374,10 @@ function SkiaSubtitleLivePreview({
                       WebkitBackgroundClip: "text",
                       WebkitTextFillColor: "transparent",
                       fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: 800,
-                      filter: isActive ? "drop-shadow(0 2px 8px rgba(245, 87, 108, 0.4))" : "none",
+                      filter: isActive ? "drop-shadow(0 2px 6px rgba(245, 87, 108, 0.4))" : "none",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3296,7 +3386,7 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "cinematic_slate" ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
@@ -3305,10 +3395,11 @@ function SkiaSubtitleLivePreview({
                     style={{
                       color: isActive ? "#FCD34D" : "#CBD5E1",
                       fontFamily: `'${style.fontFamily || "Playfair Display"}', serif`,
-                      fontSize: Math.max(style.fontSize * 0.34, 12),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: isActive ? 800 : 600,
                       letterSpacing: "0.02em",
-                      textShadow: isActive ? "0 2px 8px rgba(252, 211, 77, 0.5)" : "none",
+                      textShadow: isActive ? "0 2px 6px rgba(252, 211, 77, 0.5)" : "none",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3320,11 +3411,15 @@ function SkiaSubtitleLivePreview({
             <div
               style={{
                 backgroundColor: "rgba(9, 13, 22, 0.8)",
-                borderRadius: "8px",
+                borderRadius: "6px",
                 border: "1px solid rgba(6, 182, 212, 0.3)",
-                padding: "6px 12px",
+                padding: "5px 10px",
                 display: "flex",
-                gap: 5,
+                flexWrap: "wrap",
+                justifyContent: "center",
+                maxWidth: "92%",
+                boxSizing: "border-box",
+                gap: 4,
               }}
             >
               {words.map((w, i) => {
@@ -3335,9 +3430,10 @@ function SkiaSubtitleLivePreview({
                     style={{
                       color: isActive ? "#06B6D4" : "#94A3B8",
                       fontFamily: `'${style.fontFamily || "Space Grotesk"}', monospace`,
-                      fontSize: Math.max(style.fontSize * 0.32, 11),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 13),
                       fontWeight: 700,
                       textTransform: "uppercase",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3346,7 +3442,7 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "bold_impact_stroke" ? (
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap justify-center gap-1" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
@@ -3355,11 +3451,12 @@ function SkiaSubtitleLivePreview({
                     style={{
                       color: isActive ? "#FACC15" : "#FFFFFF",
                       fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.38, 14),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.24, 11), 16),
                       fontWeight: 900,
                       textTransform: "uppercase",
-                      WebkitTextStroke: "1px #000000",
-                      textShadow: "0 4px 14px rgba(0,0,0,0.85)",
+                      WebkitTextStroke: "0.8px #000000",
+                      textShadow: "0 3px 10px rgba(0,0,0,0.85)",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3368,10 +3465,10 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "dual_layer" ? (
-            <div className="relative flex gap-1.5">
-              <div className="absolute inset-0 flex gap-1.5 filter blur-[3px] opacity-70 transform translate-y-1">
+            <div className="relative flex flex-wrap justify-center gap-1" style={{ maxWidth: "92%" }}>
+              <div className="absolute inset-0 flex flex-wrap justify-center gap-1 filter blur-[2px] opacity-70 transform translate-y-0.5">
                 {words.map((w) => (
-                  <span key={`blur-${w}`} style={{ color: "#7C3AED", fontSize: Math.max(style.fontSize * 0.35, 12), fontWeight: 900, fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif` }}>{w}</span>
+                  <span key={`blur-${w}`} style={{ color: "#7C3AED", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontWeight: 900, fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif` }}>{w}</span>
                 ))}
               </div>
               {words.map((w, i) => {
@@ -3383,8 +3480,9 @@ function SkiaSubtitleLivePreview({
                       position: "relative",
                       color: isActive ? "#FBBF24" : "#FFFFFF",
                       fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: 800,
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3393,7 +3491,7 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : presetId === "retro_chrome" ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
               {words.map((w, i) => {
                 const isActive = i === activeWordIdx;
                 return (
@@ -3406,10 +3504,11 @@ function SkiaSubtitleLivePreview({
                       WebkitBackgroundClip: "text",
                       WebkitTextFillColor: "transparent",
                       fontFamily: `'${style.fontFamily || "Bebas Neue"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.38, 14),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.24, 11), 16),
                       fontWeight: 900,
                       textTransform: "uppercase",
-                      filter: "drop-shadow(2px 2px 0px rgba(0,0,0,0.8))",
+                      filter: "drop-shadow(1.5px 1.5px 0px rgba(0,0,0,0.8))",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3418,11 +3517,11 @@ function SkiaSubtitleLivePreview({
               })}
             </div>
           ) : (
-            <div className="relative flex gap-2">
-              <span className="absolute left-[-2px] top-[-2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #FF0000", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
+            <div className="relative flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
+              <span className="absolute left-[-1px] top-[-1px] flex flex-wrap justify-center gap-1.5 text-transparent" style={{ WebkitTextStroke: "0.8px #FF0000", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
                 {words.join(" ")}
               </span>
-              <span className="absolute left-[2px] top-[2px] flex gap-2 text-transparent" style={{ WebkitTextStroke: "1px #00FFFF", fontSize: Math.max(style.fontSize * 0.35, 12), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
+              <span className="absolute left-[1px] top-[1px] flex flex-wrap justify-center gap-1.5 text-transparent" style={{ WebkitTextStroke: "0.8px #00FFFF", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
                 {words.join(" ")}
               </span>
               {words.map((w, i) => {
@@ -3433,11 +3532,12 @@ function SkiaSubtitleLivePreview({
                     style={{
                       position: "relative",
                       color: isActive ? "#FFFFFF" : "transparent",
-                      WebkitTextStroke: "1px #000000",
+                      WebkitTextStroke: "0.8px #000000",
                       fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`,
-                      fontSize: Math.max(style.fontSize * 0.35, 12),
+                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
                       fontWeight: 900,
                       textTransform: "uppercase",
+                      wordBreak: "break-word",
                     }}
                   >
                     {w}
@@ -3556,6 +3656,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                       strokeWidth: preset.strokeWidth,
                       strokeColor: preset.strokeColor,
                       bgOpacity: preset.bgOpacity,
+                      position: preset.positionY <= 35 ? "top" : preset.positionY >= 65 ? "bottom" : "center",
                       positionY: preset.positionY,
                     })}
                     className={cn(
@@ -3659,11 +3760,33 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
 
             <Section title="Position">
               <div className="grid grid-cols-3 gap-2 mb-3">
-                {(["top", "center", "bottom"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
-                ))}
+                {(["top", "center", "bottom"] as const).map(p => {
+                  const isSelected = (style.positionY != null ? (style.positionY <= 35 ? "top" : style.positionY >= 65 ? "bottom" : "center") : style.position) === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })}
+                      className={cn(
+                        "py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors",
+                        isSelected ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
               </div>
-              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+              <RangeInput
+                label={`Vertical: ${style.positionY}%`}
+                min={5}
+                max={95}
+                value={style.positionY}
+                onChange={(v) => update({
+                  positionY: v,
+                  position: v <= 35 ? "top" : v >= 65 ? "bottom" : "center",
+                })}
+              />
             </Section>
 
             <Section title="Duration">
@@ -3705,6 +3828,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                       glowColor: preset.glowColor,
                       glowSize: preset.glowSize,
                       bgOpacity: preset.bgOpacity,
+                      position: preset.positionY <= 35 ? "top" : preset.positionY >= 65 ? "bottom" : "center",
                       positionY: preset.positionY,
                     })}
                     className={cn(
@@ -3815,11 +3939,33 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
 
             <Section title="Position">
               <div className="grid grid-cols-3 gap-2 mb-3">
-                {(["top", "center", "bottom"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
-                ))}
+                {(["top", "center", "bottom"] as const).map(p => {
+                  const isSelected = (style.positionY != null ? (style.positionY <= 35 ? "top" : style.positionY >= 65 ? "bottom" : "center") : style.position) === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })}
+                      className={cn(
+                        "py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors",
+                        isSelected ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
               </div>
-              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+              <RangeInput
+                label={`Vertical: ${style.positionY}%`}
+                min={5}
+                max={95}
+                value={style.positionY}
+                onChange={(v) => update({
+                  positionY: v,
+                  position: v <= 35 ? "top" : v >= 65 ? "bottom" : "center",
+                })}
+              />
             </Section>
 
             <Section title="Timing">
@@ -3966,11 +4112,33 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
 
             <Section title="Position">
               <div className="grid grid-cols-3 gap-2 mb-3">
-                {(["top", "center", "bottom"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
-                ))}
+                {(["top", "center", "bottom"] as const).map(p => {
+                  const isSelected = (style.positionY != null ? (style.positionY <= 35 ? "top" : style.positionY >= 65 ? "bottom" : "center") : style.position) === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => update({ position: p, positionY: p === "top" ? 20 : p === "bottom" ? 80 : 50 })}
+                      className={cn(
+                        "py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors",
+                        isSelected ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
               </div>
-              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+              <RangeInput
+                label={`Vertical: ${style.positionY}%`}
+                min={5}
+                max={95}
+                value={style.positionY}
+                onChange={(v) => update({
+                  positionY: v,
+                  position: v <= 35 ? "top" : v >= 65 ? "bottom" : "center",
+                })}
+              />
             </Section>
 
             <Section title="Accent Line">
@@ -4034,7 +4202,6 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
         )}
       </div>
 
-      {/* Preview — fixed col, vertically centered while left controls scroll */}
       <div className="lg:col-span-4 flex min-h-0 flex-col items-center justify-center overflow-hidden bg-zinc-950 p-4">
         {engine === "hyperframes" ? (
           <HfLivePreview
@@ -4052,8 +4219,8 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             </div>
             <div className="relative w-full max-w-[220px] bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shrink-0" style={{ aspectRatio: outerAspect }}>
               {thumbnailUrl && <img src={thumbnailUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-              <div className="absolute inset-0 flex items-center justify-center px-4" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                <p style={{ fontSize: Math.max(style.fontSize * 0.32, 12), fontWeight: Number(style.fontWeight), fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`, color: style.color, textTransform: style.uppercase ? "uppercase" as const : "none" as const, textAlign: "center" as const, maxWidth: "90%", whiteSpace: "pre-line" as const, wordBreak: "break-word" as const, padding: "4px 8px", backgroundColor: style.bgOpacity > 0 ? `${style.bgColor || "black"}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", paintOrder: style.strokeEnabled ? "stroke" as const : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `2px 2px 0px ${style.shadowColor}` : undefined }}>
+              <div className="absolute left-0 right-0 flex items-center justify-center px-3 pointer-events-none" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
+                <p style={{ fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16), fontWeight: Number(style.fontWeight), fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`, color: style.color, textTransform: style.uppercase ? "uppercase" as const : "none" as const, textAlign: "center" as const, maxWidth: "92%", whiteSpace: "pre-line" as const, wordBreak: "break-word" as const, padding: "4px 8px", backgroundColor: style.bgOpacity > 0 ? `${style.bgColor || "black"}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", paintOrder: style.strokeEnabled ? "stroke" as const : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.25, 0.6)}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `2px 2px 0px ${style.shadowColor}` : undefined }}>
                   {style.text || getHookPreviewSample(style.animation || "zoom_punch")}
                 </p>
               </div>
@@ -4109,7 +4276,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             </div>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.gradientEnabled ? style.gradientTo : style.color }}>{style.gradientEnabled ? "Gradient" : style.color}</p></div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Style</span><p className="truncate text-zinc-300">{activeAnimation.label}</p></div>
             </div>
           </>
         )}
@@ -4120,18 +4287,38 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
 
 // ─── Subtitle Editor ─────────────────────────────────────────────────────────
 
-function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadmin, isPremium, userFeatures, canvasBackground }: { style: SubtitleStyle; onChange: (s: SubtitleStyle) => void; aspectRatio: string; thumbnailUrl?: string; isSuperadmin?: boolean; isPremium?: boolean; userFeatures?: string[]; canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null }) {
-  const update = (patch: Partial<SubtitleStyle>) => onChange({ ...style, ...patch });
-  const engine = resolveEngine(style.engine);
-  const hfId = style.hf_template || defaultHfSubtitleId();
-  const hfPreset = HF_SUBTITLE_STYLES.find((s) => s.id === hfId) || HF_SUBTITLE_STYLES[0];
-  const [newWord, setNewWord] = useState("");
+export function SubtitleEditor({
+  style,
+  onChange,
+  isSuperadmin = false,
+  isPremium = false,
+  userFeatures = [],
+  aspectRatio = "9:16",
+  thumbnailUrl,
+  canvasBackground,
+}: {
+  style: SubtitleStyle;
+  onChange: (style: SubtitleStyle) => void;
+  isSuperadmin?: boolean;
+  isPremium?: boolean;
+  userFeatures?: string[];
+  aspectRatio?: string;
+  thumbnailUrl?: string;
+  canvasBackground?: any;
+}) {
+  const engine = style.engine || "remotion";
   const [activeWordIdx, setActiveWordIdx] = useState(0);
   const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [newWord, setNewWord] = useState("");
   const [presetPage, setPresetPage] = useState(1);
   const [timingPage, setTimingPage] = useState(1);
+  const hfId = style.hf_template || defaultHfSubtitleId();
+  const hfPreset = HF_SUBTITLE_STYLES.find((h) => h.id === hfId) || HF_SUBTITLE_STYLES[0];
   useGoogleFont(style.fontFamily);
-  useGoogleFont(style.dualStyleEnabled ? style.highlightFontFamily : "");
+  if (style.dualStyleEnabled && style.highlightFontFamily) {
+    useGoogleFont(style.highlightFontFamily);
+  }
+  const update = (patch: Partial<SubtitleStyle>) => onChange({ ...style, ...patch });
   const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
     ? buildCanvasConfig(aspectRatio, {
       backgroundMode: canvasBackground?.mode || "template",
@@ -4160,14 +4347,12 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
   const visibleSkiaSubs = getPageItems(SKIA_SUBTITLE_PRESETS, skiaSubPage);
   const activeTimingMeta = SUBTITLE_TRANSITION_META[style.lineTransition] || SUBTITLE_ANIMATION_META[style.animationStyle];
 
-  // Auto fallback for non-superadmin users if engine is superuserOnly
   useEffect(() => {
     if (!isSuperadmin && (engine === "remotion" || engine === "hyperframes")) {
       update({ engine: "ffmpeg" });
     }
   }, [engine, isSuperadmin]);
 
-  // Cycle through words for animated preview
   useEffect(() => {
     const interval = setInterval(() => {
       setActiveWordIdx((prev) => (prev + 1) % 4);
@@ -4184,7 +4369,6 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 h-full min-h-0 overflow-hidden">
-      {/* Left scrolls; right Live Preview stays put */}
       <div className="lg:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800 min-h-0">
         <Section title="Render Engine">
           <EnginePicker
@@ -4237,6 +4421,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                         bgColor: p.bgColor,
                         bgOpacity: p.bgOpacity,
                         bgRadius: p.bgRadius,
+                        position: p.positionY <= 35 ? "top" : p.positionY >= 65 ? "bottom" : "center",
                         positionY: p.positionY,
                         uppercase: p.uppercase,
                         maxWordsPerLine: p.maxWordsPerLine,
@@ -4344,11 +4529,33 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
 
             <Section title="Position">
               <div className="grid grid-cols-3 gap-2 mb-3">
-                {(["top", "center", "bottom"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
-                ))}
+                {(["top", "center", "bottom"] as const).map(p => {
+                  const isSelected = (style.positionY != null ? (style.positionY <= 35 ? "top" : style.positionY >= 65 ? "bottom" : "center") : style.position) === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })}
+                      className={cn(
+                        "py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors",
+                        isSelected ? "border-purple-500 bg-purple-500/10 text-purple-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
               </div>
-              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+              <RangeInput
+                label={`Vertical: ${style.positionY}%`}
+                min={5}
+                max={95}
+                value={style.positionY}
+                onChange={(v) => update({
+                  positionY: v,
+                  position: v <= 35 ? "top" : v >= 65 ? "bottom" : "center",
+                })}
+              />
             </Section>
 
             <Section title="Line Settings">
@@ -4388,6 +4595,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                         gradientTo: p.gradientTo,
                         glowEnabled: p.glowEnabled,
                         glowColor: p.glowColor,
+                        position: p.positionY <= 35 ? "top" : p.positionY >= 65 ? "bottom" : "center",
                         positionY: p.positionY,
                         maxWordsPerLine: p.maxWordsPerLine,
                         engine: "skia",
@@ -4499,7 +4707,7 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
                   <Checkbox label="Active Word Scale" checked={style.highlightBold} onChange={(v) => update({ highlightBold: v })} />
                   <div className="mt-3 space-y-3">
-                    <RangeInput label={`Highlight Scale: ${style.highlightScale}x`} min={10} max={16} value={Math.round(style.highlightScale * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
+                    <RangeInput label={`Highlight Scale: ${style.highlightScale.toFixed(1)}x`} min={10} max={16} value={Math.round(style.highlightScale * 10)} onChange={(v) => update({ highlightScale: v / 10 })} />
                     <Checkbox label="Text Outline / Stroke" checked={style.strokeEnabled} onChange={(v) => update({ strokeEnabled: v })} />
                     {style.strokeEnabled && (
                       <div className="mt-2 space-y-2">
@@ -4514,11 +4722,33 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
 
             <Section title="Position">
               <div className="grid grid-cols-3 gap-2 mb-3">
-                {(["top", "center", "bottom"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
-                ))}
+                {(["top", "center", "bottom"] as const).map(p => {
+                  const isSelected = (style.positionY != null ? (style.positionY <= 35 ? "top" : style.positionY >= 65 ? "bottom" : "center") : style.position) === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })}
+                      className={cn(
+                        "py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors",
+                        isSelected ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
               </div>
-              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+              <RangeInput
+                label={`Vertical: ${style.positionY}%`}
+                min={5}
+                max={95}
+                value={style.positionY}
+                onChange={(v) => update({
+                  positionY: v,
+                  position: v <= 35 ? "top" : v >= 65 ? "bottom" : "center",
+                })}
+              />
             </Section>
 
             <Section title="Line Settings">
@@ -4530,7 +4760,6 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
           </>
         ) : (
           <>
-            {/* Remotion Subtitle Editor */}
             <Section title="Quick Presets">
               <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2">
                 {visibleSubtitlePresets.map(p => (
@@ -4690,11 +4919,33 @@ function SubtitleEditor({ style, onChange, aspectRatio, thumbnailUrl, isSuperadm
 
             <Section title="Position">
               <div className="grid grid-cols-3 gap-2 mb-3">
-                {(["top", "center", "bottom"] as const).map(p => (
-                  <button key={p} type="button" onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })} className={cn("py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors", style.position === p ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600")}>{p}</button>
-                ))}
+                {(["top", "center", "bottom"] as const).map(p => {
+                  const isSelected = (style.positionY != null ? (style.positionY <= 35 ? "top" : style.positionY >= 65 ? "bottom" : "center") : style.position) === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => update({ position: p, positionY: p === "top" ? 15 : p === "bottom" ? 85 : 50 })}
+                      className={cn(
+                        "py-2 rounded-lg border text-[11px] font-medium capitalize transition-colors",
+                        isSelected ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
               </div>
-              <RangeInput label={`Vertical: ${style.positionY}%`} min={5} max={95} value={style.positionY} onChange={(v) => update({ positionY: v })} />
+              <RangeInput
+                label={`Vertical: ${style.positionY}%`}
+                min={5}
+                max={95}
+                value={style.positionY}
+                onChange={(v) => update({
+                  positionY: v,
+                  position: v <= 35 ? "top" : v >= 65 ? "bottom" : "center",
+                })}
+              />
             </Section>
 
             <Section title="Highlight Words (kata penting)">
