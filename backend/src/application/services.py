@@ -1091,7 +1091,8 @@ class JobService:
                 self._best_clip_path(output_dir, clip.rank, reframe_data)
             )
             out_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
-            if words and self._subtitle_renderer:
+            sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
+            if words and self._subtitle_renderer and sub_enabled:
                 try:
                     # Build style from subtitle_style_config
                     from src.domain.entities import SubtitleStyleConfig
@@ -1103,6 +1104,7 @@ class JobService:
                     position = subtitle_style_config.get("position", creative_direction.subtitle_position)
                     
                     sub_style = SubtitleStyleConfig(
+                        enabled=sub_enabled,
                         color=color,
                         highlight_color=highlight_color,
                         uppercase=uppercase,

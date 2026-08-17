@@ -526,6 +526,7 @@ class ConcurrencyConfig:
 @dataclass
 class SubtitleStyleConfig:
     """Configuration for subtitle word-by-word rendering (FFmpeg drawtext)."""
+    enabled: bool = True
     font_family: str = "Poppins"
     font_size: int = 34
     font_weight: str = "Bold"

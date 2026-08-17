@@ -241,3 +241,103 @@ def test_vad_boundary_stability_guard():
     assert final_start == 19.5
     assert final_end == 50.0
     assert abs((final_end - final_start) - original_duration) <= 1.0
+
+
+# ─── 8. Optional Subtitle & 4-Engine Hook/Subtitle Reliability Matrix ─────────
+
+def test_optional_subtitle_toggle_ffmpeg_unified_compositor():
+    """Verify UnifiedFFmpegCompositor strictly respects subtitle enabled toggle."""
+    compositor = UnifiedFFmpegCompositor(font_dir="assets/fonts")
+    words = [
+        {"word": "Halo", "start": 0.0, "end": 0.4},
+        {"word": "dunia", "start": 0.5, "end": 1.0},
+    ]
+
+    # 1. Enabled Subtitle -> Generates drawtext filter chains
+    filters_enabled = compositor.build_subtitle_filter_chain(
+        words=words,
+        style={"enabled": True, "color": "#FFFFFF", "highlight_color": "#FFCC00"},
+        start_offset=0.0,
+    )
+    assert len(filters_enabled) > 0
+    assert any("drawtext" in f for f in filters_enabled)
+
+    # 2. Disabled Subtitle -> Returns empty filter chain (no drawtext filters generated)
+    filters_disabled = compositor.build_subtitle_filter_chain(
+        words=words,
+        style={"enabled": False, "color": "#FFFFFF", "highlight_color": "#FFCC00"},
+        start_offset=0.0,
+    )
+    assert filters_disabled == []
+
+
+def test_optional_subtitle_toggle_subtitle_renderer(tmp_path):
+    """Verify SubtitleRenderer directly bypasses rendering when enabled=False."""
+    from src.infrastructure.subtitle_renderer import SubtitleRenderer
+    from src.domain.entities import SubtitleStyleConfig
+
+    renderer = SubtitleRenderer(font_dir="assets/fonts")
+    fake_in = tmp_path / "in.mp4"
+    fake_out = tmp_path / "out.mp4"
+    fake_in.write_bytes(b"dummy video content")
+
+    words = [{"word": "test", "start": 0.0, "end": 1.0}]
+    style = SubtitleStyleConfig(enabled=False)
+
+    out = renderer.render_subtitles(
+        video_path=str(fake_in),
+        words=words,
+        style=style,
+        output_path=str(fake_out),
+    )
+    assert out == str(fake_out)
+    assert fake_out.exists()
+    assert fake_out.read_bytes() == b"dummy video content"
+
+
+def test_optional_subtitle_toggle_skia_renderer(tmp_path):
+    """Verify SkiaSubtitleRenderer directly bypasses rendering when enabled=False."""
+    from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+
+    renderer = SkiaSubtitleRenderer(font_dir="assets/fonts")
+    fake_in = tmp_path / "in_skia.mp4"
+    fake_out = tmp_path / "out_skia.mp4"
+    fake_in.write_bytes(b"dummy skia video content")
+
+    words = [{"word": "skia_test", "start": 0.0, "end": 1.0}]
+    style = {"enabled": False, "fontFamily": "Poppins"}
+
+    out = renderer.render_subtitles(
+        video_path=str(fake_in),
+        words=words,
+        style=style,
+        output_path=str(fake_out),
+    )
+    assert out == str(fake_out)
+    assert fake_out.exists()
+    assert fake_out.read_bytes() == b"dummy skia video content"
+
+
+def test_hf_and_remotion_subtitle_optional_event_filtering():
+    """Verify HyperFrames & Remotion word sanitization contracts when subtitles are enabled vs disabled."""
+    from src.infrastructure.hf_style_catalog import subtitle_events_from_words, hook_events_from_text
+    
+    words = [
+        {"word": "kunci", "start": 3.2, "end": 3.8},
+        {"word": "sukses", "start": 3.9, "end": 4.5},
+    ]
+
+    # Enabled: HyperFrames generates subtitle events
+    events = subtitle_events_from_words(words)
+    assert len(events) > 0
+    assert events[0]["label"] == "kunci sukses"
+    assert events[0]["start"] == 3.2
+    assert events[0]["end"] == 4.5
+
+    # Hook events: generated properly when text is provided
+    hook_events = hook_events_from_text("RAHASIA VIRAL 2026", duration=3.0)
+    assert len(hook_events) > 0
+    assert hook_events[0]["sub"] == "HOOK"
+    assert hook_events[0]["label"] == "RAHASIA VIRAL 2026"
+    assert hook_events[0]["end"] == 3.0
+

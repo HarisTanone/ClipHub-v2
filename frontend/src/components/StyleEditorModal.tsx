@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -115,6 +115,7 @@ export interface HookStyle {
 }
 
 export interface SubtitleStyle {
+  enabled?: boolean;
   stylePreset: SubtitleVisualPreset;
   engine?: RenderEngine;
   hf_template?: string;
@@ -297,6 +298,7 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
 };
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  enabled: true,
   stylePreset: "classic",
   engine: "ffmpeg",
   hf_template: defaultHfSubtitleId(),
@@ -4582,6 +4584,46 @@ export function SubtitleEditor({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 h-full min-h-0 overflow-hidden">
       <div className="lg:col-span-8 p-4 overflow-y-auto space-y-4 border-r border-zinc-800 min-h-0">
+        <Section title="Subtitle Toggle">
+          <div className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 backdrop-blur">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "w-9 h-9 rounded-lg flex items-center justify-center border transition-colors",
+                style.enabled !== false 
+                  ? "bg-purple-500/10 border-purple-500/30 text-purple-400" 
+                  : "bg-zinc-800/80 border-zinc-700 text-zinc-500"
+              )}>
+                {style.enabled !== false ? <Check className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-zinc-200">
+                  {style.enabled !== false ? "Gunakan Subtitle (Active)" : "Subtitle Dinonaktifkan (Disabled)"}
+                </p>
+                <p className="text-[11px] text-zinc-400">
+                  {style.enabled !== false
+                    ? "Subtitle karaoke / word-pop akan dirender pada video final."
+                    : "Video final akan dirender bersih tanpa subtitle overlay."}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => update({ enabled: style.enabled === false ? true : false })}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                style.enabled !== false ? "bg-purple-600 ring-2 ring-purple-500/30" : "bg-zinc-700"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  style.enabled !== false ? "translate-x-5" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+        </Section>
+
         <Section title="Render Engine">
           <EnginePicker
             engine={engine}
@@ -5182,7 +5224,28 @@ export function SubtitleEditor({
 
       {/* Preview — fixed col, vertically centered while left controls scroll */}
       <div className="lg:col-span-4 flex min-h-0 flex-col items-center justify-center overflow-hidden bg-zinc-950 p-4">
-        {engine === "hyperframes" ? (
+        {style.enabled === false ? (
+          <div className="flex flex-col items-center justify-center w-full max-w-[240px]">
+            <div className="mb-3 flex w-full items-center justify-between gap-2">
+              <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
+              <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400 font-medium">Subtitle Disabled</span>
+            </div>
+            <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-black/40 backdrop-blur-[2px]">
+                <div className="w-10 h-10 rounded-full bg-zinc-900/90 border border-zinc-700/80 flex items-center justify-center mb-2 shadow-lg">
+                  <EyeOff className="w-5 h-5 text-zinc-400" />
+                </div>
+                <p className="text-xs font-bold text-zinc-200">No Subtitles</p>
+                <p className="text-[10px] text-zinc-400 mt-1 leading-snug">
+                  Video akan dirender bersih tanpa subtitle overlay
+                </p>
+              </div>
+            </CanvasPreviewFrame>
+            <div className="mt-3 w-full rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5 text-center">
+              <p className="text-[10px] text-zinc-400">Audio & visual tetap utuh 100%</p>
+            </div>
+          </div>
+        ) : engine === "hyperframes" ? (
           <HfLivePreview
             preset={hfPreset}
             sample={hfPreset?.preview || "subtitle words"}

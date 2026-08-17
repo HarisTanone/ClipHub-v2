@@ -2095,9 +2095,10 @@ class V2PipelineService:
                 from src.infrastructure.hf_style_catalog import resolve_engine as _resolve_eng
                 hook_eng = _resolve_eng(hook_style_config)
                 sub_eng = _resolve_eng(subtitle_style_config)
-                # Remotion only renders hook/sub when Remotion engine is specifically selected.
+                sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
+                # Remotion only renders hook/sub when Remotion engine is specifically selected and enabled.
                 remotion_hook_text = clip_hook if hook_eng == "remotion" else ""
-                remotion_words = clip_words if sub_eng == "remotion" else []
+                remotion_words = (clip_words if sub_eng == "remotion" else []) if sub_enabled else []
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")
@@ -2297,12 +2298,13 @@ class V2PipelineService:
             # ── 1-Pass FFmpeg Compositor Optimization ──
             # When both hook and subtitle (or hook-only / sub-only) use FFmpeg drawtext,
             # combine Hook + Subtitle + Watermark into 1 single encode pass!
+            sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
             if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
                 from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
                 compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
                 words_raw = clips_with_words.get(clip.rank) or []
                 sub_min = hook_dur if clip.hook else 0.0
-                words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
+                words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min) if sub_enabled else []
                 watermark_cfg = (job.clips_data or {}).get("watermark_config") or {}
 
                 success = await compositor.render_single_pass(
@@ -2352,9 +2354,9 @@ class V2PipelineService:
             # ── Subtitle render (FFmpeg drawtext or Skia GPU canvas) ──
             words_raw = clips_with_words.get(clip.rank) or []
             sub_min = hook_dur if clip.hook else 0.0
-            words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
+            words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min) if sub_enabled else []
 
-            if words:
+            if words and sub_enabled:
                 try:
                     if sub_engine == "skia":
                         from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
@@ -2487,7 +2489,8 @@ class V2PipelineService:
                         current = tmp_hook
 
                 # Direct subtitle pass (if sub_engine is ffmpeg or skia)
-                if sub_engine in ("ffmpeg", "skia"):
+                sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
+                if sub_engine in ("ffmpeg", "skia") and sub_enabled:
                     words_raw = clips_with_words.get(clip.rank) or []
                     sub_min = hook_dur if (clip.hook and hook_engine in ("ffmpeg", "skia", "hyperframes", "remotion")) else 0.0
                     words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
@@ -2628,7 +2631,8 @@ class V2PipelineService:
                             errors.append(f"clip {clip.rank} hook: {r}")
                             continue
 
-                if sub_engine == "hyperframes":
+                sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
+                if sub_engine == "hyperframes" and sub_enabled:
                     words = clips_with_words.get(clip.rank, []) or []
                     # Skip words during hook window when remotion/HF hook already on
                     sub_words = []

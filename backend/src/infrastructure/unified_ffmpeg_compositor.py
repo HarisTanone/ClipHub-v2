@@ -284,6 +284,9 @@ class UnifiedFFmpegCompositor:
         else:
             config = SubtitleStyleConfig()
 
+        if getattr(config, "enabled", True) is False:
+            return []
+
         offset = start_offset if start_offset > 0 else config.start_offset
         timing_adj = config.timing_offset
         font_path = self._resolve_font(config.font_family, config.font_weight)

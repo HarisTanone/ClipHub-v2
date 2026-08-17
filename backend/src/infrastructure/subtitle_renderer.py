@@ -69,6 +69,13 @@ class SubtitleRenderer(ISubtitleRenderer):
             return video_path
 
         config = self._normalize_style(style)
+        if getattr(config, "enabled", True) is False:
+            logger.info("subtitle_render: subtitles disabled via config, bypassing render")
+            if video_path != output_path and os.path.exists(video_path):
+                import shutil
+                shutil.copy2(video_path, output_path)
+            return output_path
+
         offset = start_offset if start_offset > 0 else config.start_offset
         timing_adj = config.timing_offset
 

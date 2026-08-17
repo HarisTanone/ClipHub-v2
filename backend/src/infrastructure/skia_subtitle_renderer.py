@@ -62,6 +62,13 @@ class SkiaSubtitleRenderer:
             logger.info("skia_subtitle: no words, skipping")
             return video_path
 
+        if isinstance(style, dict) and style.get("enabled", True) is False:
+            logger.info("skia_subtitle: subtitles disabled via config, bypassing render")
+            if video_path != output_path and os.path.exists(video_path):
+                import shutil
+                shutil.copy2(video_path, output_path)
+            return output_path
+
         if not SKIA_AVAILABLE:
             logger.warning("skia_subtitle: skia-python not available, falling back to FFmpeg")
             return self._ffmpeg_fallback(video_path, words, style, output_path, start_offset)
