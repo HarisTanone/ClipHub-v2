@@ -100,13 +100,31 @@ def catalogue() -> dict[str, Any]:
 def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     if not isinstance(cfg, dict):
         return "remotion"
-    eng = str(cfg.get(key) or cfg.get("render_engine") or "remotion").lower().strip()
+    eng = str(cfg.get(key) or cfg.get("render_engine") or "").lower().strip()
     if eng in ("hyperframes", "hf", "hyperframe"):
         return "hyperframes"
     if eng in ("ffmpeg", "drawtext"):
         return "ffmpeg"
     if eng in ("skia", "canvaskit", "skia-python", "skia_python"):
         return "skia"
+
+    # Auto-detect from animation, style, style_id, id, template, etc.
+    anim = str(
+        cfg.get("animation")
+        or cfg.get("preset")
+        or cfg.get("style")
+        or cfg.get("style_id")
+        or cfg.get("id")
+        or cfg.get("hf_template")
+        or ""
+    ).lower().strip()
+
+    if anim.startswith("skia_") or anim.startswith("skia-") or "skia" in anim:
+        return "skia"
+    if anim in ("glassmorphism", "neon_glow", "gradient_pill", "comic_pop", "cyberpunk", "minimal_clean", "split_duotone", "impact_yellow"):
+        return "skia"
+    if anim.startswith("hook_") or anim.startswith("sub_") or anim.startswith("hf_"):
+        return "hyperframes"
     return "remotion"
 
 

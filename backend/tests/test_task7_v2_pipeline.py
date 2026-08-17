@@ -405,6 +405,36 @@ def test_pipeline_validation_failure():
     print("  [PASS] Invalid URL → FAILED at validation")
 
 
+def test_slice_words_from_transcript_fallback():
+    """Verify that when per-clip Whisper yields 0 words, global transcript segments are sliced into 0-based words."""
+    svc = make_mock_service()
+    clip = Clip(rank=1, score=90, start=10.0, end=20.0, hook="Test Hook", reason="Test Reason")
+    segments = [
+        TranscriptSegment(text="halo semua selamat pagi", start=10.0, end=14.0),
+        TranscriptSegment(text="hari ini kita belajar coding", start=15.0, end=19.0),
+        TranscriptSegment(text="di luar jangkauan clip", start=25.0, end=30.0),
+    ]
+    recovered = svc._slice_words_from_transcript(clip, segments)
+    assert len(recovered) == 9
+    assert recovered[0]["word"] == "halo"
+    assert recovered[0]["start"] == 0.0
+    assert recovered[-1]["word"] == "coding"
+    assert recovered[-1]["end"] <= 10.0
+
+
+def test_resolve_engine_skia_detection():
+    """Verify that Skia styles/animations correctly resolve to 'skia' engine."""
+    from src.infrastructure.hf_style_catalog import resolve_engine
+
+    assert resolve_engine({"animation": "skia_impact_badge"}) == "skia"
+    assert resolve_engine({"animation": "skia_neon_cyberpunk"}) == "skia"
+    assert resolve_engine({"id": "glassmorphism"}) == "skia"
+    assert resolve_engine({"id": "neon_glow"}) == "skia"
+    assert resolve_engine({"engine": "remotion", "animation": "skia_impact_badge"}) == "skia"
+    assert resolve_engine({"engine": "remotion", "animation": "slide_punch_framer"}) == "remotion"
+    assert resolve_engine({"animation": "hook_cyber_hud"}) == "hyperframes"
+
+
 if __name__ == "__main__":
     print("\n=== Task 7 Tests: V2PipelineOrchestrator ===\n")
     # Unit tests
@@ -414,10 +444,12 @@ if __name__ == "__main__":
     test_build_clips_with_words()
     test_build_clips_with_words_empty()
     test_assemble_clips_data()
+    test_slice_words_from_transcript_fallback()
+    test_resolve_engine_skia_detection()
     # Pipeline integration
     test_full_pipeline_happy_path()
     test_pipeline_transcription_failure()
     test_pipeline_analysis_failure()
     test_pipeline_no_clips_found()
     test_pipeline_validation_failure()
-    print("\n=== ALL TASK 7 TESTS PASSED (11/11) ===\n")
+    print("\n=== ALL TASK 7 TESTS PASSED (13/13) ===\n")

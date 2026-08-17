@@ -121,6 +121,12 @@ class WordLevelTranscriber:
         tasks = []
         for rank in clip_ranks:
             clip_path = os.path.join(clips_dir, f"clip_{rank:02d}.mp4")
+            if not os.path.exists(clip_path):
+                for alt_name in [f"clip_{rank:02d}_reframed.mp4", f"clip_{rank:02d}_brolled.mp4", f"clip_{rank}.mp4"]:
+                    alt_path = os.path.join(clips_dir, alt_name)
+                    if os.path.exists(alt_path):
+                        clip_path = alt_path
+                        break
             tasks.append(self._transcribe_one(rank, clip_path, language))
 
         results_list = await asyncio.gather(*tasks, return_exceptions=True)

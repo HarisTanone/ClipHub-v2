@@ -860,6 +860,19 @@ class V2PipelineService:
                 clip_ranks=trimmed_ranks,
                 language=transcript_result.language or "id",
             )
+            # Resilient fallback: If any trimmed clip has 0 words (e.g. rate limit / network / audio lock),
+            # slice timestamps from global transcript segments so subtitles NEVER fail to render!
+            for clip in clips:
+                if not trim_results.get(clip.rank):
+                    continue
+                if not words_per_clip.get(clip.rank) and transcript_result and getattr(transcript_result, "segments", None):
+                    fallback_words = self._slice_words_from_transcript(clip, transcript_result.segments)
+                    if fallback_words:
+                        words_per_clip[clip.rank] = fallback_words
+                        logger.info(
+                            f"[{job_id}] Word-level fallback from global transcript: "
+                            f"{len(fallback_words)} words recovered for clip {clip.rank}"
+                        )
             logger.info(
                 f"[{job_id}] Word-level: "
                 f"{sum(1 for w in words_per_clip.values() if w)}/{len(trimmed_ranks)} clips with words, "
@@ -1112,6 +1125,37 @@ class V2PipelineService:
         hook_duration: float = 0.0,
     ) -> dict[int, list[dict]]:
         return build_clips_with_words(clips, words_per_clip, hook_duration)
+
+    def _slice_words_from_transcript(self, clip: Clip, segments: list) -> list[dict]:
+        """Recover word timestamps by slicing global transcript segments for a clip's time range."""
+        clip_words = []
+        clip_dur = max(0.0, float(clip.end) - float(clip.start))
+        for seg in segments or []:
+            s_start = float(getattr(seg, "start", 0.0))
+            s_end = float(getattr(seg, "end", 0.0))
+            # Check overlap with clip range
+            if s_end <= clip.start or s_start >= clip.end:
+                continue
+            seg_rel_start = max(0.0, s_start - float(clip.start))
+            seg_rel_end = min(clip_dur, s_end - float(clip.start))
+            if seg_rel_end <= seg_rel_start:
+                continue
+            text = str(getattr(seg, "text", "") or "").strip()
+            if not text:
+                continue
+            tokens = text.split()
+            if not tokens:
+                continue
+            token_dur = (seg_rel_end - seg_rel_start) / len(tokens)
+            for idx, token in enumerate(tokens):
+                w_s = seg_rel_start + idx * token_dur
+                w_e = min(clip_dur, w_s + token_dur)
+                clip_words.append({
+                    "word": token,
+                    "start": round(w_s, 3),
+                    "end": round(w_e, 3),
+                })
+        return clip_words
 
     def _prepare_clips_from_v2(
         self, highlights: list, broll_map: dict, video_duration: float
@@ -1938,15 +1982,16 @@ class V2PipelineService:
         )
 
         # Pure direct path: both hook + sub use ffmpeg or skia → no Remotion/HF browser needed
+        has_text_emphasis_events = any(bool(getattr(c, "text_emphasis_events", None)) for c in clips)
         pure_direct = (
             hook_engine in ("ffmpeg", "skia")
             and sub_engine in ("ffmpeg", "skia")
             and not need_canvas
-            and not need_ai_text
+            and not (need_ai_text and has_text_emphasis_events)
         )
 
         use_remotion = False
-        if not pure_hf and not pure_direct and self._remotion_adapter:
+        if getattr(job, "use_remotion", True) is not False and not pure_hf and not pure_direct and self._remotion_adapter:
             try:
                 if await self._remotion_adapter.health_check():
                     use_remotion = True
@@ -2405,6 +2450,13 @@ class V2PipelineService:
 
             # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
             await self._apply_watermark(job, clip.rank, output_dir, final_path, job_id)
+            final_dir_clip = f"{output_dir}/final/clip_{clip.rank:02d}.mp4"
+            if os.path.isdir(f"{output_dir}/final"):
+                try:
+                    import shutil
+                    shutil.copy2(final_path, final_dir_clip)
+                except Exception:
+                    pass
             mark_clip_ready(output_dir, clip.rank)
             self._emit_clip_progress(
                 job_id=job_id,
@@ -2559,6 +2611,12 @@ class V2PipelineService:
 
                 # Watermark (FFmpeg overlay/drawtext) — final pass
                 await self._apply_watermark(job, clip.rank, output_dir, final, job_id)
+                final_dir_clip = f"{output_dir}/final/clip_{clip.rank:02d}.mp4"
+                if os.path.isdir(f"{output_dir}/final"):
+                    try:
+                        shutil.copy2(final, final_dir_clip)
+                    except Exception:
+                        pass
                 mark_clip_ready(output_dir, clip.rank)
                 self._emit_clip_progress(
                     job_id=job_id,

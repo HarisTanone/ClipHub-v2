@@ -29,14 +29,25 @@ def build_direct_edit_analysis(video_duration: float, custom_hook: object = None
 
 
 def pick_hook(h: Any) -> str:
-    """A/B: primary hook vs hook_alt."""
-    primary = getattr(h, "hook", "") or ""
-    alt = getattr(h, "hook_alt", "") or ""
+    """A/B: primary hook vs hook_alt with resilient fallbacks."""
+    primary = str(getattr(h, "hook", "") or "").strip()
+    alt = str(getattr(h, "hook_alt", "") or "").strip()
+    reason = str(getattr(h, "reason", "") or "").strip()
+    rank = getattr(h, "rank", 1) or 1
     try:
         from src.infrastructure.hook_optimizer import HookOptimizer
-        return HookOptimizer.pick_hook_ab(primary, alt)
+        chosen = HookOptimizer.pick_hook_ab(primary, alt)
+        if chosen and chosen.strip():
+            return chosen.strip()
     except Exception:
-        return primary or alt or "Highlight"
+        pass
+    if primary:
+        return primary
+    if alt:
+        return alt
+    if reason:
+        return reason[:60] if len(reason) > 60 else reason
+    return f"Highlight #{rank}"
 
 
 def build_clips_with_words(

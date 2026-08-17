@@ -15,11 +15,13 @@ logger = logging.getLogger(__name__)
 def best_clip_path(output_dir: str, rank: int, reframe_data: Optional[dict] = None) -> str:
     """Get best available clip path."""
     candidates = [
+        f"{output_dir}/clip_{rank:02d}_brolled.mp4",
         f"{output_dir}/clip_{rank:02d}_reframed.mp4",
         f"{output_dir}/clip_{rank:02d}.mp4",
+        f"{output_dir}/clip_{rank}.mp4",
     ]
     for path in candidates:
-        if os.path.exists(path):
+        if os.path.exists(path) and os.path.getsize(path) > 0:
             return path
     return f"{output_dir}/clip_{rank:02d}.mp4"
 
