@@ -41,9 +41,12 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         """Switch to next fallback model after repeated 503/overload errors."""
         cascade = [
             settings.GEMINI_MODEL or "gemini-3.7-flash",
+            "gemini-3.5-flash",
+            "gemini-3.1-flash",
             settings.GEMINI_FALLBACK_MODEL or "gemini-2.5-flash",
             "gemini-2.0-flash",
             "gemini-1.5-flash",
+            "gemini-1.5-flash-8b",
         ]
         models = [m for i, m in enumerate(cascade) if m and m not in cascade[:i]]
         try:
