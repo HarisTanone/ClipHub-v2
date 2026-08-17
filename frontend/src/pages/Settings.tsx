@@ -493,6 +493,7 @@ export function Settings() {
   const [hfConfig, setHfConfig] = useState<HyperFramesConfig>(HYPERFRAMES_DEFAULTS);
   const [hfBaseline, setHfBaseline] = useState<HyperFramesConfig>(HYPERFRAMES_DEFAULTS);
   const [hfCatalogue, setHfCatalogue] = useState<any[]>([]);
+  const [hfCataloguePage, setHfCataloguePage] = useState(1);
   const [isSavingHf, setIsSavingHf] = useState(false);
   const [isResettingHf, setIsResettingHf] = useState(false);
 
@@ -1326,72 +1327,140 @@ export function Settings() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {(hfCatalogue.length > 0 ? hfCatalogue : [
+              {(() => {
+                const catalogueItems = hfCatalogue.length > 0 ? hfCatalogue : [
+                  // ── Page 1: Premier Hero Styles (User Top 6) ──
                   { id: "hook_cyber_hud", name: "Cyberpunk Tech HUD", design: "cyber-hud", accent: "#00F0FF", description: "Tech HUD digital box dengan aksen neon cyan & bracket cyberpunk" },
-                  { id: "hook_glass_minimal", name: "Frosted Glassmorphism", design: "glass-minimal", accent: "#A78BFA", description: "Kartu transparan frosted glass dengan efek blur & glow halus" },
-                  { id: "hook_breaking_news", name: "Breaking News Live", design: "breaking-news", accent: "#EF4444", description: "Banner merah bold dengan badge LIVE UPDATE berkedip" },
-                  { id: "hook_retro_synth", name: "80s Retro Synthwave", design: "retro-synth", accent: "#F43F5E", description: "Estetika synthwave retro 80-an dengan tabung neon ungu-pink" },
-                  { id: "hook_comic_pop", name: "Comic Pop Burst", design: "comic-pop", accent: "#FACC15", description: "Badge komik miring bold kuning dengan aksen halftone pop-art" },
-                  { id: "hook_editorial_pill", name: "Editorial Minimal Pill", design: "editorial-pill", accent: "#E2E8F0", description: "Kapsul hitam matte minimalis dengan dot emas & tipografi editorial" },
-                  { id: "hook_gradient_aura", name: "Gradient Aura Glow", design: "gradient-aura", accent: "#38BDF8", description: "Cahaya aura mesh gradasi multi-warna halus di sekitar teks" },
-                  { id: "hook_cinema_tape", name: "Caution Stencil Tape", design: "cinema-tape", accent: "#EAB308", description: "Pita peringatan diagonal kuning-hitam dengan font stencil industrial" },
-                  { id: "hook_hologram_scan", name: "Sci-Fi Hologram Scanner", design: "hologram-scan", accent: "#06B6D4", description: "Data feed holographic sci-fi dengan scanline vertikal" },
-                  { id: "hook_luxury_noir", name: "Luxury Obsidian & Gold", design: "luxury-noir", accent: "#D4AF37", description: "Kartu hitam obsidian pekat dengan list emas sampanye mewah" },
-                  { id: "hook_floating_badge", name: "Top Floating Badge", design: "floating-badge", accent: "#10B981", description: "Badge ringkas melayang di sudut atas dengan indikator live dot" },
-                  { id: "hook_kinetic_split", name: "Kinetic Duotone Split", design: "kinetic-split", accent: "#F97316", description: "Panel terbelah oranye-hitam dinamis dengan nomor indeks kinetik" },
-                ]).map((item: any) => {
-                  const isSelected = hfConfig.default_template === item.id;
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => {
-                        handleHfChange("default_template", item.id);
-                        handleHfChange("mode", "manual");
-                        toast.success(`Template set to "${item.name}"`);
-                      }}
-                      className={cn(
-                        "group relative cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between gap-3 text-left",
-                        isSelected
-                          ? "border-violet-500 bg-violet-950/30 shadow-lg shadow-violet-500/10 ring-1 ring-violet-500/50"
-                          : "border-zinc-800/80 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-900/60"
-                      )}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="w-3 h-3 rounded-full shrink-0 shadow-sm"
-                              style={{ backgroundColor: item.accent || "#a78bfa" }}
-                            />
-                            <span className="font-bold text-xs text-zinc-100 group-hover:text-white transition-colors">
-                              {item.name}
-                            </span>
-                          </div>
-                          {isSelected && (
-                            <span className="flex items-center gap-1 text-[9px] font-bold bg-violet-600 text-white px-1.5 py-0.5 rounded uppercase">
-                              <Check className="h-2.5 w-2.5" /> Selected
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed">
-                          {item.description || "Gaya animasi hook visual profesional."}
-                        </p>
-                      </div>
+                  { id: "hook_floating_badge", name: "Top Floating Badge", design: "floating-badge", accent: "#10B981", description: "Badge melayang di sudut atas dengan beacon live pulse & list neon" },
+                  { id: "hook_kinetic_split", name: "Kinetic Duotone Split", design: "kinetic-split", accent: "#FF6B00", description: "Panel terbelah oranye-hitam dinamis dengan nomor indeks kinetik" },
+                  { id: "hook_electric_surge", name: "Electric Plasma Shockwave", design: "electric-surge", accent: "#818CF8", description: "Shockwave plasma nebula elektrik dengan aksen petir & laser glow" },
+                  { id: "hook_glass_minimal", name: "Frosted Glassmorphism", design: "glass-minimal", accent: "#A78BFA", description: "Kartu transparan frosted glass Apple-grade dengan efek blur & glow halus" },
+                  { id: "hook_editorial_pill", name: "Editorial Minimal Pill", design: "editorial-pill", accent: "#E2E8F0", description: "Kapsul obsidian hitam matte dengan dot emas & tipografi editorial" },
 
-                      <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50 text-[10px] text-zinc-500">
-                        <span className="font-mono text-zinc-500">{item.design}</span>
-                        <span
-                          className="font-mono font-semibold"
-                          style={{ color: item.accent || "#a78bfa" }}
-                        >
-                          {item.accent}
-                        </span>
-                      </div>
+                  // ── Page 2: High-Converting & Cinematic ──
+                  { id: "hook_breaking_news", name: "Breaking News Live", design: "breaking-news", accent: "#EF4444", description: "Banner merah bold dengan badge LIVE UPDATE berkedip" },
+                  { id: "hook_luxury_noir", name: "Luxury Obsidian & Gold", design: "luxury-noir", accent: "#D4AF37", description: "Kartu hitam obsidian pekat dengan list emas sampanye mewah" },
+                  { id: "hook_retro_synth", name: "80s Retro Synthwave", design: "retro-synth", accent: "#F43F5E", description: "Estetika synthwave retro 80-an dengan tabung neon ungu-pink" },
+                  { id: "hook_chromatic_gate_v2", name: "Chromatic Gate Y2K", design: "chromatic-gate", accent: "#FF2E88", description: "Gerbang chromatic tajam dengan glitch RGB & sudut brutalist" },
+                  { id: "hook_gradient_aura", name: "Gradient Aura Mesh", design: "gradient-aura", accent: "#38BDF8", description: "Cahaya aura mesh gradasi multi-warna halus di sekitar teks" },
+                  { id: "hook_warning_hazard", name: "Warning Industrial Hazard", design: "warning-hazard", accent: "#F59E0B", description: "Pita hazard striping dengan badge critical notice" },
+
+                  // ── Page 3: Creative Technical & Sci-Fi ──
+                  { id: "hook_orbit_stamp_v2", name: "Orbit Stamp Seal", design: "orbit-stamp", accent: "#8B5CF6", description: "Cap lingkaran orbit berputar futuristik tanda autentik" },
+                  { id: "hook_pixel_ticker_v2", name: "Arcade Pixel Ticker", design: "pixel-ticker", accent: "#F7FF58", description: "Pixel ticker kuning retro dengan grid dot arcade" },
+                  { id: "hook_blueprint_v2", name: "Blueprint Arch Reveal", design: "blueprint-reveal", accent: "#52C7FF", description: "Sketsa blueprint biru arsitektural terukur" },
+                  { id: "hook_comic_pop", name: "Comic Pop Burst", design: "comic-pop", accent: "#FACC15", description: "Badge komik miring bold kuning dengan aksen halftone pop-art" },
+                  { id: "hook_hologram_scan", name: "Sci-Fi Hologram Scanner", design: "hologram-scan", accent: "#06B6D4", description: "Data feed holographic sci-fi dengan scanline vertikal" },
+                  { id: "hook_cinema_tape", name: "Caution Stencil Tape", design: "cinema-tape", accent: "#EAB308", description: "Pita peringatan diagonal kuning-hitam dengan font stencil industrial" },
+                ];
+
+                const PAGE_SIZE = 6;
+                const totalPages = Math.ceil(catalogueItems.length / PAGE_SIZE) || 1;
+                const currentPage = Math.min(Math.max(1, hfCataloguePage), totalPages);
+                const startIndex = (currentPage - 1) * PAGE_SIZE;
+                const visibleCatalogue = catalogueItems.slice(startIndex, startIndex + PAGE_SIZE);
+
+                return (
+                  <div className="space-y-4">
+                    {/* 2 lines x 3 grid items = 6 items */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {visibleCatalogue.map((item: any) => {
+                        const isSelected = hfConfig.default_template === item.id;
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => {
+                              handleHfChange("default_template", item.id);
+                              handleHfChange("mode", "manual");
+                              toast.success(`Template set to "${item.name}"`);
+                            }}
+                            className={cn(
+                              "group relative cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between gap-3 text-left overflow-hidden",
+                              isSelected
+                                ? "border-violet-500 bg-violet-950/30 shadow-lg shadow-violet-500/10 ring-1 ring-violet-500/50"
+                                : "border-zinc-800/80 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-900/60"
+                            )}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span
+                                    className="w-3 h-3 rounded-full shrink-0 shadow-sm"
+                                    style={{ backgroundColor: item.accent || "#a78bfa" }}
+                                  />
+                                  <span className="font-bold text-xs text-zinc-100 group-hover:text-white transition-colors truncate">
+                                    {item.name}
+                                  </span>
+                                </div>
+                                {isSelected && (
+                                  <span className="flex items-center gap-1 text-[9px] font-bold bg-violet-600 text-white px-1.5 py-0.5 rounded uppercase shrink-0">
+                                    <Check className="h-2.5 w-2.5" /> Selected
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed">
+                                {item.description || "Gaya animasi hook visual profesional."}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50 text-[10px] text-zinc-500">
+                              <span className="font-mono text-zinc-500">{item.design}</span>
+                              <span
+                                className="font-mono font-semibold"
+                                style={{ color: item.accent || "#a78bfa" }}
+                              >
+                                {item.accent}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* Pagination Controls */}
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-between pt-3 mt-2 border-t border-zinc-800/70">
+                        <span className="text-xs text-zinc-400">
+                          Halaman <strong className="text-zinc-200">{currentPage}</strong> dari <strong className="text-zinc-200">{totalPages}</strong> ({catalogueItems.length} styles total)
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={currentPage === 1}
+                            onClick={() => setHfCataloguePage(Math.max(1, currentPage - 1))}
+                            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 transition-colors"
+                          >
+                            Prev
+                          </button>
+                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => setHfCataloguePage(p)}
+                              className={cn(
+                                "w-7 h-7 text-xs font-bold rounded-lg transition-colors",
+                                currentPage === p
+                                  ? "bg-violet-600 text-white shadow-sm"
+                                  : "border border-zinc-800 bg-zinc-900/70 text-zinc-400 hover:text-white hover:bg-zinc-800"
+                              )}
+                            >
+                              {p}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            disabled={currentPage === totalPages}
+                            onClick={() => setHfCataloguePage(Math.min(totalPages, currentPage + 1))}
+                            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 transition-colors"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </Card>
           </div>
         )}

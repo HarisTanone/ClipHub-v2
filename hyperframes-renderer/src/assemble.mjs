@@ -295,30 +295,33 @@ export function assembleHtml({
 
     /* ─── 1. Cyberpunk Tech HUD ────────────────────────────────────────── */
     .design-cyber-hud {
-      background: rgba(10, 14, 23, 0.92); border: 2px solid var(--accent);
-      border-radius: 16px; padding: 22px 28px;
-      box-shadow: 0 0 30px rgba(0,240,255,0.25), inset 0 0 15px rgba(0,240,255,0.1);
+      background: rgba(6, 10, 20, 0.95); border: 2px solid var(--accent);
+      border-radius: 18px; padding: 24px 32px;
+      box-shadow: 0 0 35px rgba(0,240,255,0.4), inset 0 0 18px rgba(0,240,255,0.18);
       position: relative;
     }
     .design-cyber-hud .hud-tag {
       display: flex; align-items: center; justify-content: space-between;
-      color: var(--accent); font: 800 15px monospace; letter-spacing: 0.15em; margin-bottom: 8px;
+      color: var(--accent); font: 900 16px monospace; letter-spacing: 0.18em; margin-bottom: 10px;
+      border-bottom: 1px solid rgba(0,240,255,0.3); padding-bottom: 6px;
     }
-    .design-cyber-hud .hud-tag i { flex: 1; height: 1px; background: rgba(0,240,255,0.3); margin: 0 12px; }
-    .design-cyber-hud .label { font-family: 'Space Grotesk', Inter, sans-serif; font-size: 46px; font-weight: 900; line-height: 1.15; color: #fff; text-shadow: 0 0 12px rgba(0,240,255,0.5); }
-    .design-cyber-hud .hud-corners s { position: absolute; width: 10px; height: 10px; border: 2px solid #fff; }
-    .design-cyber-hud .hud-corners s:nth-child(1) { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
-    .design-cyber-hud .hud-corners s:nth-child(2) { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
+    .design-cyber-hud .hud-tag span { display: flex; align-items: center; gap: 8px; }
+    .design-cyber-hud .hud-tag i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00f0ff; box-shadow: 0 0 10px #00f0ff; }
+    .design-cyber-hud .hud-tag b { background: rgba(0,240,255,0.2); padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(0,240,255,0.4); font-size: 13px; }
+    .design-cyber-hud .label { font-family: 'Space Grotesk', Inter, sans-serif; font-size: 48px; font-weight: 950; line-height: 1.15; color: #fff; text-shadow: 0 0 16px rgba(0,240,255,0.7); }
+    .design-cyber-hud .hud-corners s { position: absolute; width: 14px; height: 14px; border: 3px solid #00f0ff; filter: drop-shadow(0 0 4px #00f0ff); }
+    .design-cyber-hud .hud-corners s:nth-child(1) { top: -3px; left: -3px; border-right: 0; border-bottom: 0; }
+    .design-cyber-hud .hud-corners s:nth-child(2) { bottom: -3px; right: -3px; border-left: 0; border-top: 0; }
 
     /* ─── 2. Frosted Glassmorphism ─────────────────────────────────────── */
     .design-glass-minimal {
-      display: flex; align-items: center; gap: 16px;
-      background: rgba(255, 255, 255, 0.12); backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
-      border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 28px; padding: 24px 34px;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.35);
+      display: flex; align-items: center; gap: 20px;
+      background: rgba(255, 255, 255, 0.14); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
+      border: 1.5px solid rgba(255, 255, 255, 0.38); border-radius: 32px; padding: 26px 38px;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.45);
     }
-    .design-glass-minimal .glass-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 16px var(--accent); flex-shrink: 0; }
-    .design-glass-minimal .label { font-size: 44px; font-weight: 850; line-height: 1.15; color: #ffffff; letter-spacing: -0.02em; }
+    .design-glass-minimal .glass-dot { width: 16px; height: 16px; border-radius: 50%; background: #a78bfa; box-shadow: 0 0 20px #a78bfa; flex-shrink: 0; }
+    .design-glass-minimal .label { font-size: 46px; font-weight: 900; line-height: 1.15; color: #ffffff; letter-spacing: -0.02em; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
 
     /* ─── 3. Breaking News Live Banner ─────────────────────────────────── */
     .design-breaking-news {
@@ -354,14 +357,14 @@ export function assembleHtml({
 
     /* ─── 6. Editorial Minimal Pill ────────────────────────────────────── */
     .design-editorial-pill {
-      display: flex; align-items: center; gap: 20px;
-      background: rgba(12, 12, 14, 0.94); border: 1px solid rgba(255,255,255,0.18);
-      border-radius: 50px; padding: 20px 36px;
-      box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+      display: flex; align-items: center; gap: 22px;
+      background: rgba(10, 10, 12, 0.96); border: 1.5px solid rgba(212,175,55,0.45);
+      border-radius: 60px; padding: 22px 40px;
+      box-shadow: 0 18px 45px rgba(0,0,0,0.75), 0 0 20px rgba(212,175,55,0.15);
     }
-    .design-editorial-pill .edit-dot { width: 14px; height: 14px; border-radius: 50%; background: #d4af37; box-shadow: 0 0 14px #d4af37; flex-shrink: 0; }
-    .design-editorial-pill .edit-kicker { display: block; font: 700 12px monospace; color: #d4af37; letter-spacing: 0.25em; text-transform: uppercase; margin-bottom: 2px; }
-    .design-editorial-pill .label { font-size: 40px; font-weight: 800; line-height: 1.15; color: #f8fafc; }
+    .design-editorial-pill .edit-dot { width: 16px; height: 16px; border-radius: 50%; background: #d4af37; box-shadow: 0 0 16px #d4af37; flex-shrink: 0; }
+    .design-editorial-pill .edit-kicker { display: block; font: 800 13px monospace; color: #d4af37; letter-spacing: 0.28em; text-transform: uppercase; margin-bottom: 2px; }
+    .design-editorial-pill .label { font-size: 42px; font-weight: 850; line-height: 1.15; color: #f8fafc; }
 
     /* ─── 7. Gradient Aura Glow ────────────────────────────────────────── */
     .design-gradient-aura {
@@ -399,24 +402,24 @@ export function assembleHtml({
 
     /* ─── 11. Top Floating Badge ───────────────────────────────────────── */
     .design-floating-badge {
-      left: 56px; right: auto; max-width: 800px;
-      display: flex; align-items: center; gap: 16px;
-      background: rgba(10, 14, 18, 0.94); border: 2px solid #10b981; border-radius: 40px; padding: 16px 28px;
-      box-shadow: 0 12px 35px rgba(0,0,0,0.5), 0 0 20px rgba(16,185,129,0.25);
+      left: 56px; right: auto; max-width: 880px;
+      display: flex; align-items: center; gap: 18px;
+      background: rgba(6, 22, 16, 0.95); border: 2px solid #10b981; border-radius: 50px; padding: 18px 32px;
+      box-shadow: 0 16px 45px rgba(0,0,0,0.7), 0 0 30px rgba(16,185,129,0.35);
     }
-    .design-floating-badge .float-dot { width: 12px; height: 12px; border-radius: 50%; background: #10b981; box-shadow: 0 0 12px #10b981; }
-    .design-floating-badge .float-tag { font: 800 13px monospace; color: #10b981; letter-spacing: 0.15em; margin-right: 8px; }
-    .design-floating-badge .label { font-size: 36px; font-weight: 850; line-height: 1.15; color: #fff; }
+    .design-floating-badge .float-dot { width: 14px; height: 14px; border-radius: 50%; background: #10b981; box-shadow: 0 0 16px #10b981; flex-shrink: 0; }
+    .design-floating-badge .float-tag { font: 900 15px monospace; color: #10b981; letter-spacing: 0.18em; margin-right: 8px; text-transform: uppercase; }
+    .design-floating-badge .label { font-size: 40px; font-weight: 900; line-height: 1.15; color: #fff; }
 
     /* ─── 12. Kinetic Duotone Split ────────────────────────────────────── */
     .design-kinetic-split {
-      display: grid; grid-template-columns: 88px 1fr;
-      background: #121316; border-radius: 18px; overflow: hidden;
-      box-shadow: 0 18px 45px rgba(0,0,0,0.6);
+      display: grid; grid-template-columns: 96px 1fr;
+      background: #0f1013; border-radius: 20px; overflow: hidden; border: 2px solid rgba(255,107,0,0.4);
+      box-shadow: 0 20px 50px rgba(0,0,0,0.8);
     }
-    .design-kinetic-split .split-side { background: #f97316; color: #fff; display: grid; place-items: center; font: 950 32px/1 monospace; }
-    .design-kinetic-split .split-main { padding: 22px 28px; display: flex; flex-direction: column; justify-content: center; }
-    .design-kinetic-split .label { font-size: 42px; font-weight: 900; line-height: 1.15; color: #fff; letter-spacing: -0.02em; }
+    .design-kinetic-split .split-side { background: linear-gradient(180deg, #ff6b00, #ea580c); color: #fff; display: grid; place-items: center; font: 950 36px/1 monospace; text-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+    .design-kinetic-split .split-main { padding: 24px 32px; display: flex; flex-direction: column; justify-content: center; background: rgba(18, 19, 24, 0.95); }
+    .design-kinetic-split .label { font-size: 44px; font-weight: 950; line-height: 1.15; color: #fff; letter-spacing: -0.02em; }
 
     /* ─── Shared Base Polish / Legacy ──────────────────────────────────── */
     .design-entity-card {

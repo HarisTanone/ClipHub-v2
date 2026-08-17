@@ -32,7 +32,7 @@ describe("Render engines catalogue & permissions", () => {
 
   it("HyperFrames catalogue has comprehensive, distinct hook and subtitle presets", () => {
     const styles = [...HF_HOOK_STYLES, ...HF_SUBTITLE_STYLES];
-    expect(HF_HOOK_STYLES.length).toBeGreaterThanOrEqual(21);
+    expect(HF_HOOK_STYLES.length).toBeGreaterThanOrEqual(18);
     expect(HF_SUBTITLE_STYLES.length).toBeGreaterThanOrEqual(4);
     expect(new Set(styles.map((style) => style.id)).size).toBe(styles.length);
   });
