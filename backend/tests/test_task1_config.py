@@ -24,7 +24,7 @@ def test_config_groq_settings():
 def test_config_nine_router_settings():
     assert settings.use_nine_router is True
     assert settings.FORCE_V2_PIPELINE is True
-    assert settings.ALLOW_DIRECT_PROVIDER_FALLBACKS is False
+    assert settings.ALLOW_DIRECT_PROVIDER_FALLBACKS is True
     assert settings.TRANSCRIPTION_PROVIDER == "local"
     assert settings.NINE_ROUTER_WHISPER_ENABLED is True
     assert settings.NINE_ROUTER_WHISPER_MODEL == "groq/whisper-large-v3-turbo"

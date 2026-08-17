@@ -1,11 +1,11 @@
-"""Groq Whisper transcription through 9router's OpenAI-compatible endpoint.
+"""Groq Whisper transcription (direct Groq API first, 9router fallback, then local machine).
 
 Flow:
 1. Send already prepared, small audio files without re-encoding
 2. Compress other media to FLAC 16kHz mono (minimizes file size)
 3. If file > 25MB: chunk into segments
-4. Send to 9router ``/v1/audio/transcriptions`` with word timestamps
-5. Return unified word-level JSON
+4. Send to direct Groq API / OpenAI-compatible endpoint with word timestamps
+5. Return unified word-level JSON; on complete failure return [] for local machine Whisper fallback
 """
 import asyncio
 import json
@@ -32,15 +32,11 @@ SUPPORTED_UPLOAD_EXTENSIONS = {
 
 
 class NineRouterWhisperError(RuntimeError):
-    """Raised when 9router cannot provide a usable transcription response."""
+    """Raised when Groq/9router cannot provide a usable transcription response."""
 
 
 class GroqWhisperTranscriber:
-    """Transcribe audio with Groq Whisper routed through local 9router.
-
-    The historical class name is retained so callers do not need to change
-    their output handling. No direct Groq credential is used here.
-    """
+    """Transcribe audio with Groq Whisper (direct Groq API primary, 9router fallback, then local machine)."""
 
     def __init__(
         self,
@@ -50,28 +46,39 @@ class GroqWhisperTranscriber:
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
     ):
-        self._base_url = (base_url or settings.NINE_ROUTER_BASE_URL).rstrip("/")
-        self._api_key = (
+        self._custom_base_url = base_url
+        self._custom_api_key = api_key
+        self._groq_api_key = settings.GROQ_API_KEY
+        self._groq_model = (
+            model or settings.GROQ_WHISPER_MODEL or "whisper-large-v3-turbo"
+        ).replace("groq/", "")
+
+        self._router_base_url = (base_url or settings.NINE_ROUTER_BASE_URL or "").rstrip("/")
+        self._router_api_key = (
             settings.NINE_ROUTER_API_KEY if api_key is None else api_key
         )
-        self._model = (
+        self._router_model = (
             model or settings.NINE_ROUTER_WHISPER_MODEL
             or "groq/whisper-large-v3-turbo"
         )
-        self._timeout = timeout or settings.NINE_ROUTER_WHISPER_TIMEOUT
+        self._timeout = timeout or settings.GROQ_TIMEOUT or settings.NINE_ROUTER_WHISPER_TIMEOUT or 120
         self._max_retries = max(
             1,
-            max_retries or settings.NINE_ROUTER_WHISPER_MAX_RETRIES,
+            max_retries or settings.GROQ_MAX_RETRIES or 3,
         )
 
     @property
     def is_available(self) -> bool:
-        """Return whether the 9router Whisper route is enabled/configured."""
-        return bool(settings.NINE_ROUTER_WHISPER_ENABLED and self._base_url)
+        """Return whether direct Groq API or 9router Whisper route is configured."""
+        return bool(self._groq_api_key) or bool(self._custom_base_url) or bool(
+            settings.NINE_ROUTER_WHISPER_ENABLED and self._router_base_url
+        )
 
     def _transcriptions_url(self) -> str:
         """Resolve a base, chat, or full audio URL to the transcription route."""
-        base_url = self._base_url
+        base_url = self._custom_base_url or self._router_base_url
+        if not base_url:
+            return "https://api.groq.com/openai/v1/audio/transcriptions"
         if base_url.endswith("/audio/transcriptions"):
             return base_url
         if base_url.endswith("/chat/completions"):
@@ -87,14 +94,14 @@ class GroqWhisperTranscriber:
 
         Returns:
             List of segment dicts: [{start, end, text, words: [{word, start, end}]}]
-            Empty list on failure.
+            Empty list on failure (triggering local Whisper fallback).
         """
         if not self.is_available:
-            logger.info("nine_router_whisper: route is not configured; using local fallback")
+            logger.info("groq_whisper: neither direct Groq nor 9router configured; using local fallback")
             return []
 
         if not os.path.exists(video_path) or os.path.getsize(video_path) <= 0:
-            logger.warning("nine_router_whisper: input file is missing or empty")
+            logger.warning("groq_whisper: input file is missing or empty")
             return []
 
         # Already prepared audio (including the WAV generated for word-level
@@ -108,7 +115,7 @@ class GroqWhisperTranscriber:
             if extension not in SUPPORTED_UPLOAD_EXTENSIONS:
                 await self._compress_to_flac(video_path, flac_path)
                 if not os.path.exists(flac_path) or os.path.getsize(flac_path) <= 0:
-                    logger.error("nine_router_whisper: FLAC compression failed")
+                    logger.error("groq_whisper: FLAC compression failed")
                     return []
                 upload_path = flac_path
                 cleanup_upload = True
@@ -116,7 +123,7 @@ class GroqWhisperTranscriber:
             file_size = os.path.getsize(upload_path)
             file_size_mb = file_size / (1024 * 1024)
             logger.info(
-                "nine_router_whisper: prepared %s (%.1fMB)",
+                "groq_whisper: prepared %s (%.1fMB)",
                 os.path.basename(upload_path),
                 file_size_mb,
             )
@@ -126,7 +133,7 @@ class GroqWhisperTranscriber:
                 segments = await self._transcribe_single(upload_path, language)
             else:
                 logger.info(
-                    "nine_router_whisper: file %.1fMB > 25MB, chunking",
+                    "groq_whisper: file %.1fMB > 25MB, chunking",
                     file_size_mb,
                 )
                 segments = await self._transcribe_chunked(video_path, language)
@@ -134,20 +141,18 @@ class GroqWhisperTranscriber:
             if segments:
                 total_words = sum(len(s.get("words", [])) for s in segments)
                 logger.info(
-                    f"nine_router_whisper: {len(segments)} segments, {total_words} words, "
-                    f"model={self._model}"
+                    f"groq_whisper: {len(segments)} segments, {total_words} words"
                 )
                 # Track usage
                 try:
                     from src.infrastructure.model_status import ModelStatusTracker
-                    # Preserve the existing status key consumed by the UI.
                     ModelStatusTracker().mark_success("groq_whisper")
                 except Exception:
                     pass
             return segments
 
         except Exception as e:
-            logger.warning(f"nine_router_whisper: failed, using local fallback: {e}")
+            logger.warning(f"groq_whisper: failed, using local fallback: {e}")
             return []
         finally:
             if cleanup_upload and os.path.exists(flac_path):
@@ -173,13 +178,11 @@ class GroqWhisperTranscriber:
             None, lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         )
         if result.returncode != 0:
-            logger.error(f"nine_router_whisper: ffmpeg flac failed: {result.stderr[:200]}")
+            logger.error(f"groq_whisper: ffmpeg flac failed: {result.stderr[:200]}")
 
     async def _transcribe_single(self, flac_path: str, language: str) -> list[dict]:
         """Send single file to Groq API and get word-level transcription."""
         loop = asyncio.get_running_loop()
-        # Dynamic timeout preserves the configured floor while allowing uploads
-        # a little extra time for larger payloads.
         file_size_mb = os.path.getsize(flac_path) / (1024 * 1024)
         timeout = max(self._timeout, int(self._timeout + file_size_mb * 2))
         try:
@@ -188,24 +191,69 @@ class GroqWhisperTranscriber:
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
-            logger.warning(f"nine_router_whisper: request timeout ({timeout}s)")
+            logger.warning(f"groq_whisper: request timeout ({timeout}s)")
             return []
 
     def _call_groq_api(self, audio_path: str, language: str) -> list[dict]:
-        """Post multipart audio to 9router and normalize its JSON response."""
+        """Post multipart audio directly to Groq API (or 9router fallback) and normalize JSON response."""
+        # Case A: If custom base_url is explicitly provided (e.g. mock unit tests), prioritize it
+        if self._custom_base_url:
+            headers = {}
+            if self._custom_api_key or self._router_api_key:
+                headers["Authorization"] = f"Bearer {self._custom_api_key or self._router_api_key}"
+            target_url = self._transcriptions_url()
+            target_model = self._router_model
+            return self._execute_http_transcription(
+                audio_path, language, target_url, headers, target_model, "custom_router"
+            )
+
+        # Case B: Primary — Direct Groq API
+        if self._groq_api_key:
+            headers = {"Authorization": f"Bearer {self._groq_api_key}"}
+            target_url = "https://api.groq.com/openai/v1/audio/transcriptions"
+            target_model = self._groq_model
+            segments = self._execute_http_transcription(
+                audio_path, language, target_url, headers, target_model, "groq_direct"
+            )
+            if segments:
+                return segments
+            logger.warning("groq_whisper (direct) produced no usable segments, checking fallbacks")
+
+        # Case C: Secondary Fallback — 9router proxy if configured
+        if settings.NINE_ROUTER_WHISPER_ENABLED and self._router_base_url:
+            headers = {}
+            if self._router_api_key:
+                headers["Authorization"] = f"Bearer {self._router_api_key}"
+            target_url = self._transcriptions_url()
+            target_model = self._router_model
+            segments = self._execute_http_transcription(
+                audio_path, language, target_url, headers, target_model, "9router"
+            )
+            if segments:
+                return segments
+
+        logger.warning("groq_whisper: all cloud API attempts failed; returning empty for local machine Whisper fallback")
+        return []
+
+    def _execute_http_transcription(
+        self,
+        audio_path: str,
+        language: str,
+        url: str,
+        headers: dict,
+        model: str,
+        provider_label: str,
+    ) -> list[dict]:
+        """Send multipart request to specified endpoint with retries."""
         last_error = "unknown error"
         for attempt in range(self._max_retries):
             try:
                 start_time = time.monotonic()
-                headers = {}
-                if self._api_key:
-                    headers["Authorization"] = f"Bearer {self._api_key}"
-
                 with open(audio_path, "rb") as f:
                     mime_type = mimetypes.guess_type(audio_path)[0] or "application/octet-stream"
                     multipart = [
                         ("file", (os.path.basename(audio_path), f, mime_type)),
-                        ("model", (None, self._model)),
+                        ("model", (None, model)),
                         ("language", (None, language)),
                         ("response_format", (None, "verbose_json")),
                         ("temperature", (None, "0")),
@@ -216,7 +264,7 @@ class GroqWhisperTranscriber:
                     ]
                     with httpx.Client(timeout=self._timeout) as client:
                         response = client.post(
-                            self._transcriptions_url(),
+                            url,
                             headers=headers,
                             files=multipart,
                         )
@@ -238,7 +286,7 @@ class GroqWhisperTranscriber:
                     raise NineRouterWhisperError("response JSON is not an object")
 
                 elapsed = time.monotonic() - start_time
-                logger.info(f"nine_router_whisper: API response in {elapsed:.1f}s")
+                logger.info(f"groq_whisper ({provider_label}): API response in {elapsed:.1f}s")
                 segments = self._parse_response(transcription)
                 if not segments:
                     raise NineRouterWhisperError("response has no usable segments")
@@ -247,15 +295,16 @@ class GroqWhisperTranscriber:
             except Exception as e:
                 last_error = f"{type(e).__name__}: {e}"
                 logger.warning(
-                    "nine_router_whisper: attempt %s/%s failed: %s",
+                    "groq_whisper (%s): attempt %s/%s failed: %s",
+                    provider_label,
                     attempt + 1,
                     self._max_retries,
                     last_error,
                 )
                 if attempt < self._max_retries - 1:
-                    time.sleep(min(2 ** attempt, 5))
+                    time.sleep(min(2 ** attempt, 3))
 
-        logger.warning(f"nine_router_whisper: exhausted attempts: {last_error}")
+        logger.warning(f"groq_whisper ({provider_label}): exhausted attempts: {last_error}")
         return []
 
     def _parse_response(self, transcription) -> list[dict]:

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # production so Gemini/Groq keys are not used accidentally.
     LLM_PROVIDER: str = "nine_router"
     FORCE_V2_PIPELINE: bool = True
-    ALLOW_DIRECT_PROVIDER_FALLBACKS: bool = False
+    ALLOW_DIRECT_PROVIDER_FALLBACKS: bool = True
     # Legacy value retained for existing deployments. When 9router is
     # configured, Whisper calls are router-first with an automatic local fallback.
     TRANSCRIPTION_PROVIDER: str = "local"
