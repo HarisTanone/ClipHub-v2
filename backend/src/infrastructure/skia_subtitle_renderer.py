@@ -8,7 +8,9 @@ import logging
 import os
 import subprocess
 import tempfile
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.infrastructure.subtitle_styles import SKIA_STYLES, get_skia_style
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +36,74 @@ class SkiaSubtitleRenderer:
         self._width = width
         self._height = height
 
+    def _normalize_style(self, style: Any) -> dict:
+        """Normalize style dict from frontend camelCase or backend preset format."""
+        if not isinstance(style, dict):
+            style = {}
+
+        # Look up preset by ID if provided
+        preset_id = style.get("id") or style.get("style_id") or ""
+        base = dict(SKIA_STYLES.get(preset_id, {})) if preset_id in SKIA_STYLES else {}
+
+        normalized = {
+            "id": preset_id or base.get("id", "glassmorphism"),
+            "font_family": style.get("fontFamily") or style.get("font_family") or base.get("font_family", "Inter"),
+            "font_size": int(style.get("fontSize") or style.get("font_size") or base.get("font_size", 34)),
+            "font_weight": str(style.get("fontWeight") or style.get("font_weight") or base.get("font_weight", "Bold")),
+            "text_color": style.get("color") or style.get("text_color") or base.get("text_color", "#FFFFFF"),
+            "highlight_color": style.get("highlightColor") or style.get("highlight_color") or base.get("highlight_color", "#38BDF8"),
+            "position_y_pct": float(style.get("positionY") or style.get("position_y_pct") or base.get("position_y_pct", 78)),
+            "max_words_per_line": int(style.get("maxWordsPerLine") or style.get("max_words_per_line") or base.get("max_words_per_line", 4)),
+            "line_transition": style.get("lineTransition") or style.get("line_transition") or base.get("line_transition", "karaoke"),
+            "uppercase": bool(style.get("uppercase", base.get("uppercase", False))),
+            "enabled": style.get("enabled", True) is not False,
+            "start_offset": float(style.get("start_offset", 0.0)),
+        }
+
+        # Background parameters
+        bg_enabled = bool(
+            style.get("bgOpacity", 0) > 0
+            or style.get("bg_enabled")
+            or style.get("glassmorphism")
+            or (base.get("background") is not None)
+        )
+        base_bg = base.get("background") or {}
+        normalized["bg_enabled"] = bg_enabled
+        normalized["bg_opacity"] = float(style.get("bgOpacity") or style.get("bg_opacity") or base_bg.get("bg_opacity", 0.45) if bg_enabled else 0.0)
+        normalized["bg_color"] = style.get("bgColor") or style.get("bg_color") or base_bg.get("bg_color", "#1E293B")
+        normalized["bg_radius"] = int(style.get("bgRadius") or style.get("bg_radius") or base_bg.get("border_radius", 16))
+        normalized["bg_padding"] = int(style.get("bgPadding") or style.get("bg_padding") or base_bg.get("padding_x", 20))
+        normalized["blur_radius"] = int(style.get("blurRadius") or style.get("blur_radius") or base_bg.get("blur_radius", 0))
+
+        # Glow parameters
+        glow_enabled = bool(style.get("glowEnabled") or style.get("glow_enabled") or base.get("glow_enabled"))
+        normalized["glow_enabled"] = glow_enabled
+        normalized["glow_color"] = style.get("glowColor") or style.get("glow_color") or base.get("glow_color") or normalized["highlight_color"]
+        normalized["glow_radius"] = int(style.get("glowSize") or style.get("glow_radius") or base.get("glow_radius", 14))
+
+        # Stroke / Border
+        base_stroke = base.get("stroke") or {}
+        stroke_enabled = bool(style.get("strokeEnabled") or style.get("stroke_enabled") or bool(base_stroke))
+        normalized["stroke_enabled"] = stroke_enabled
+        normalized["stroke_width"] = int(style.get("strokeWidth") or style.get("stroke_width") or base_stroke.get("width", 2) if stroke_enabled else 0)
+        normalized["stroke_color"] = style.get("strokeColor") or style.get("stroke_color") or base_stroke.get("color", "#000000")
+
+        # Shadow
+        base_shadow = base.get("shadow") or {}
+        shadow_enabled = bool(style.get("shadowEnabled") or style.get("shadow_enabled") or bool(base_shadow))
+        normalized["shadow_enabled"] = shadow_enabled
+        normalized["shadow_color"] = style.get("shadowColor") or style.get("shadow_color") or base_shadow.get("color", "#000000")
+        normalized["shadow_blur"] = int(style.get("shadowBlur") or style.get("shadow_blur") or base_shadow.get("blur", 6))
+        normalized["shadow_offset_x"] = int(style.get("shadowOffsetX") or style.get("shadow_offset_x") or base_shadow.get("offset_x", 0))
+        normalized["shadow_offset_y"] = int(style.get("shadowOffsetY") or style.get("shadow_offset_y") or base_shadow.get("offset_y", 2))
+
+        return normalized
+
     def render_subtitles(
         self,
         video_path: str,
         words: list,
-        style: dict,
+        style: Any,
         output_path: str,
         start_offset: float = 0.0,
     ) -> str:
@@ -47,7 +112,7 @@ class SkiaSubtitleRenderer:
         Args:
             video_path: Input video path.
             words: List of word dicts [{word, start, end}] from Whisper.
-            style: Skia style config dict (from subtitle_styles.SKIA_STYLES).
+            style: Skia style config dict.
             output_path: Output video path.
             start_offset: Seconds delay before subtitles start.
 
@@ -60,9 +125,14 @@ class SkiaSubtitleRenderer:
 
         if not words:
             logger.info("skia_subtitle: no words, skipping")
-            return video_path
+            if video_path != output_path and os.path.exists(video_path):
+                import shutil
+                shutil.copy2(video_path, output_path)
+            return output_path
 
-        if isinstance(style, dict) and style.get("enabled", True) is False:
+        norm_style = self._normalize_style(style)
+
+        if not norm_style.get("enabled", True):
             logger.info("skia_subtitle: subtitles disabled via config, bypassing render")
             if video_path != output_path and os.path.exists(video_path):
                 import shutil
@@ -70,14 +140,18 @@ class SkiaSubtitleRenderer:
             return output_path
 
         if not SKIA_AVAILABLE:
-            logger.warning("skia_subtitle: skia-python not available, falling back to FFmpeg")
-            return self._ffmpeg_fallback(video_path, words, style, output_path, start_offset)
+            logger.info("skia_subtitle: using robust FFmpeg renderer fallback")
+            return self._ffmpeg_fallback(video_path, words, norm_style, output_path, start_offset)
 
         try:
-            return self._render_with_skia(video_path, words, style, output_path, start_offset)
+            res = self._render_with_skia(video_path, words, norm_style, output_path, start_offset)
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return res
+            logger.warning("skia_subtitle: Skia render did not produce valid output, falling back to FFmpeg")
+            return self._ffmpeg_fallback(video_path, words, norm_style, output_path, start_offset)
         except Exception as e:
             logger.error(f"skia_subtitle: render failed ({e}), falling back to FFmpeg")
-            return self._ffmpeg_fallback(video_path, words, style, output_path, start_offset)
+            return self._ffmpeg_fallback(video_path, words, norm_style, output_path, start_offset)
 
     def _render_with_skia(
         self,
@@ -88,67 +162,66 @@ class SkiaSubtitleRenderer:
         start_offset: float,
     ) -> str:
         """Core Skia rendering: generate PNG overlays per line, composite via FFmpeg."""
-        lines = self._group_words_into_lines(words, style.get("max_words_per_line", 3))
+        lines = self._group_words_into_lines(words, style.get("max_words_per_line", 4))
         if not lines:
             return video_path
 
         tmp_dir = tempfile.mkdtemp(prefix="skia_sub_")
         overlay_specs = []  # (png_path, start_time, end_time)
 
-        for idx, line in enumerate(lines):
-            line_start = line[0]["start"] + start_offset
-            line_end = line[-1]["end"] + start_offset
-            line_text = " ".join(w["word"] for w in line)
+        try:
+            for idx, line in enumerate(lines):
+                line_start = line[0]["start"] + start_offset
+                line_end = line[-1]["end"] + start_offset
+                line_text = " ".join(w["word"] for w in line)
 
-            if style.get("uppercase", False):
-                line_text = line_text.upper()
+                if style.get("uppercase", False):
+                    line_text = line_text.upper()
 
-            # Determine which word is active (for word_pop, render each word separately)
-            transition = style.get("line_transition", "karaoke")
+                transition = style.get("line_transition", "karaoke")
 
-            if transition == "word_pop":
-                # Render each word as individual overlay
-                for w_idx, w in enumerate(line):
-                    w_start = w["start"] + start_offset
-                    w_end = w["end"] + start_offset
-                    word_text = w["word"].upper() if style.get("uppercase") else w["word"]
-                    png_path = os.path.join(tmp_dir, f"word_{idx}_{w_idx}.png")
-                    self._render_text_frame(png_path, word_text, style, is_highlight=True)
-                    overlay_specs.append((png_path, w_start, w_end))
-            else:
-                # Full line overlay
-                png_path = os.path.join(tmp_dir, f"line_{idx}.png")
-                self._render_text_frame(png_path, line_text, style, is_highlight=False)
-                overlay_specs.append((png_path, line_start, line_end))
-
-                # Active word highlight overlay (for karaoke mode)
-                if transition == "karaoke":
+                if transition == "word_pop":
                     for w_idx, w in enumerate(line):
                         w_start = w["start"] + start_offset
                         w_end = w["end"] + start_offset
                         word_text = w["word"].upper() if style.get("uppercase") else w["word"]
-                        hl_path = os.path.join(tmp_dir, f"hl_{idx}_{w_idx}.png")
-                        self._render_text_frame(hl_path, word_text, style, is_highlight=True)
-                        overlay_specs.append((hl_path, w_start, w_end))
+                        png_path = os.path.join(tmp_dir, f"word_{idx}_{w_idx}.png")
+                        self._render_text_frame(png_path, word_text, style, is_highlight=True)
+                        overlay_specs.append((png_path, w_start, w_end))
+                else:
+                    # Full line overlay
+                    png_path = os.path.join(tmp_dir, f"line_{idx}.png")
+                    self._render_text_frame(png_path, line_text, style, is_highlight=False)
+                    overlay_specs.append((png_path, line_start, line_end))
 
-        if not overlay_specs:
-            return video_path
+                    # Active word highlight overlay (karaoke)
+                    if transition == "karaoke":
+                        for w_idx, w in enumerate(line):
+                            w_start = w["start"] + start_offset
+                            w_end = w["end"] + start_offset
+                            word_text = w["word"].upper() if style.get("uppercase") else w["word"]
+                            hl_path = os.path.join(tmp_dir, f"hl_{idx}_{w_idx}.png")
+                            self._render_text_frame(hl_path, word_text, style, is_highlight=True)
+                            overlay_specs.append((hl_path, w_start, w_end))
 
-        # Build FFmpeg command with overlay chain
-        result = self._composite_overlays(video_path, overlay_specs, style, output_path)
+            if not overlay_specs:
+                return video_path
 
-        # Cleanup temp PNGs
-        for f in os.listdir(tmp_dir):
-            try:
-                os.remove(os.path.join(tmp_dir, f))
-            except OSError:
-                pass
-        try:
-            os.rmdir(tmp_dir)
-        except OSError:
-            pass
+            result = self._composite_overlays(video_path, overlay_specs, style, output_path)
+            return result
 
-        return result
+        finally:
+            # Cleanup temp PNGs
+            if os.path.exists(tmp_dir):
+                for f in os.listdir(tmp_dir):
+                    try:
+                        os.remove(os.path.join(tmp_dir, f))
+                    except OSError:
+                        pass
+                try:
+                    os.rmdir(tmp_dir)
+                except OSError:
+                    pass
 
     def _render_text_frame(self, output_png: str, text: str, style: dict, is_highlight: bool = False):
         """Render a single text frame as transparent PNG using Skia."""
@@ -156,10 +229,9 @@ class SkiaSubtitleRenderer:
         canvas = surface.getCanvas()
         canvas.clear(skia.ColorTRANSPARENT)
 
-        # Load font
-        font_family = style.get("font_family", "Poppins")
+        font_family = style.get("font_family", "Inter")
         font_weight = style.get("font_weight", "Bold")
-        font_size = style.get("font_size", 36)
+        font_size = style.get("font_size", 34)
         font_path = self._resolve_font(font_family, font_weight)
 
         typeface = None
@@ -172,17 +244,16 @@ class SkiaSubtitleRenderer:
         text_blob = skia.TextBlob.MakeFromString(text, font)
         text_bounds = font.measureText(text)
 
-        # Calculate position
-        position_y_pct = style.get("position_y_pct", 82)
+        position_y_pct = style.get("position_y_pct", 78)
         x = (self._width - text_bounds) / 2
         y = self._height * (position_y_pct / 100)
 
         # Background
         if style.get("bg_enabled") and not is_highlight:
-            bg_padding = style.get("bg_padding", 16)
-            bg_radius = style.get("bg_radius", 12)
-            bg_opacity = style.get("bg_opacity", 0.7)
-            bg_color_hex = style.get("bg_color", "#000000")
+            bg_padding = style.get("bg_padding", 20)
+            bg_radius = style.get("bg_radius", 16)
+            bg_opacity = style.get("bg_opacity", 0.5)
+            bg_color_hex = style.get("bg_color", "#1E293B")
 
             bg_paint = skia.Paint()
             bg_paint.setAntiAlias(True)
@@ -207,8 +278,8 @@ class SkiaSubtitleRenderer:
             glow_paint = skia.Paint()
             glow_paint.setAntiAlias(True)
             r, g, b = self._hex_to_rgb(style["glow_color"])
-            glow_paint.setColor(skia.Color(r, g, b, 120))
-            glow_radius = style.get("glow_radius", 12)
+            glow_paint.setColor(skia.Color(r, g, b, 140))
+            glow_radius = style.get("glow_radius", 14)
             blur_filter = skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, glow_radius)
             glow_paint.setMaskFilter(blur_filter)
             canvas.drawTextBlob(text_blob, x, y, glow_paint)
@@ -218,7 +289,7 @@ class SkiaSubtitleRenderer:
             shadow_paint = skia.Paint()
             shadow_paint.setAntiAlias(True)
             r, g, b = self._hex_to_rgb(style["shadow_color"])
-            shadow_blur = style.get("shadow_blur", 4)
+            shadow_blur = style.get("shadow_blur", 6)
             shadow_paint.setColor(skia.Color(r, g, b, 180))
             if shadow_blur > 0:
                 blur_filter = skia.MaskFilter.MakeBlur(skia.kNormal_BlurStyle, shadow_blur)
@@ -228,68 +299,25 @@ class SkiaSubtitleRenderer:
             canvas.drawTextBlob(text_blob, x + ox, y + oy, shadow_paint)
 
         # Stroke
-        if style.get("stroke_enabled") and style.get("stroke_width", 0) > 0:
+        if style.get("stroke_enabled"):
             stroke_paint = skia.Paint()
             stroke_paint.setAntiAlias(True)
             stroke_paint.setStyle(skia.Paint.kStroke_Style)
-            stroke_paint.setStrokeWidth(style["stroke_width"])
+            stroke_paint.setStrokeWidth(style.get("stroke_width", 2))
             r, g, b = self._hex_to_rgb(style.get("stroke_color", "#000000"))
             stroke_paint.setColor(skia.Color(r, g, b, 255))
             canvas.drawTextBlob(text_blob, x, y, stroke_paint)
 
-        # Main text fill
+        # Text fill
         text_paint = skia.Paint()
         text_paint.setAntiAlias(True)
-
-        if is_highlight and style.get("highlight_color"):
-            color_hex = style["highlight_color"]
-        else:
-            color_hex = style.get("text_color", "#FFFFFF")
-
-        # Gradient fill
-        gradient_colors = None
-        if style.get("gradient_enabled"):
-            if is_highlight and style.get("highlight_gradient_colors"):
-                gradient_colors = style["highlight_gradient_colors"]
-            elif style.get("gradient_colors"):
-                gradient_colors = style["gradient_colors"]
-
-        if gradient_colors and len(gradient_colors) >= 2 and color_hex != "transparent":
-            colors = [self._hex_to_skia_color(c) for c in gradient_colors]
-            angle = style.get("gradient_angle", 90)
-            grad_type = style.get("gradient_type", "linear")
-
-            if grad_type == "radial":
-                shader = skia.GradientShader.MakeRadial(
-                    skia.Point(x + text_bounds / 2, y - font_size / 2),
-                    max(text_bounds, font_size),
-                    colors,
-                    None,
-                    skia.TileMode.kClamp,
-                )
-            else:
-                # Linear gradient
-                import math
-                rad = math.radians(angle)
-                dx = text_bounds * math.cos(rad)
-                dy = text_bounds * math.sin(rad)
-                shader = skia.GradientShader.MakeLinear(
-                    [skia.Point(x, y), skia.Point(x + dx, y + dy)],
-                    colors,
-                    None,
-                    skia.TileMode.kClamp,
-                )
-            text_paint.setShader(shader)
-        elif color_hex != "transparent":
-            r, g, b = self._hex_to_rgb(color_hex)
-            text_paint.setColor(skia.Color(r, g, b, 255))
-        else:
-            # Transparent text (stroke-only neon style)
-            text_paint.setColor(skia.ColorTRANSPARENT)
+        color_hex = style.get("highlight_color", "#38BDF8") if is_highlight else style.get("text_color", "#FFFFFF")
+        r, g, b = self._hex_to_rgb(color_hex)
+        text_paint.setColor(skia.Color(r, g, b, 255))
 
         canvas.drawTextBlob(text_blob, x, y, text_paint)
 
-        # Save PNG
+        # Save to PNG
         image = surface.makeImageSnapshot()
         image.save(output_png, skia.kPNG)
 
@@ -304,11 +332,9 @@ class SkiaSubtitleRenderer:
         if not overlay_specs:
             return video_path
 
-        # Limit overlays to prevent command-line overflow
         max_overlays = 150
         specs = overlay_specs[:max_overlays]
 
-        # Build filter_complex
         inputs = ["-i", video_path]
         for png_path, _, _ in specs:
             inputs.extend(["-i", png_path])
@@ -319,8 +345,7 @@ class SkiaSubtitleRenderer:
         for i, (_, start, end) in enumerate(specs):
             in_label = f"[{i + 1}:v]"
             out_label = f"[v{i}]"
-            position_y_pct = style.get("position_y_pct", 82)
-            # Overlay centered, at correct Y position
+            position_y_pct = style.get("position_y_pct", 78)
             filter_parts.append(
                 f"{prev_label}{in_label}overlay="
                 f"x=(W-w)/2:y=(H*{position_y_pct}/100-h/2)"
@@ -329,8 +354,6 @@ class SkiaSubtitleRenderer:
             prev_label = out_label
 
         filter_complex = ";".join(filter_parts)
-
-        # Final label
         final_label = f"[v{len(specs) - 1}]"
 
         cmd = [
@@ -366,25 +389,25 @@ class SkiaSubtitleRenderer:
         output_path: str,
         start_offset: float,
     ) -> str:
-        """Fallback: use FFmpeg drawtext when Skia is not available."""
+        """Fallback: use FFmpeg drawtext with exact normalized style parameters."""
         from src.infrastructure.subtitle_renderer import SubtitleRenderer
         from src.domain.entities import SubtitleStyleConfig
 
-        # Map Skia style to SubtitleStyleConfig
+        # Map normalized Skia style to SubtitleStyleConfig
         config = SubtitleStyleConfig(
             font_family=style.get("font_family", "Poppins"),
-            font_size=style.get("font_size", 34),
+            font_size=int(style.get("font_size", 34)),
             font_weight=style.get("font_weight", "Bold"),
             color=style.get("text_color", "#FFFFFF"),
-            highlight_color=style.get("highlight_color", "#FFCC00"),
+            highlight_color=style.get("highlight_color", "#38BDF8"),
             stroke_color=style.get("stroke_color", "#000000") if style.get("stroke_enabled") else "",
-            stroke_width=style.get("stroke_width", 0) if style.get("stroke_enabled") else 0,
-            background_opacity=style.get("bg_opacity", 0.0) if style.get("bg_enabled") else 0.0,
+            stroke_width=int(style.get("stroke_width", 0)) if style.get("stroke_enabled") else 0,
+            background_opacity=float(style.get("bg_opacity", 0.0)) if style.get("bg_enabled") else 0.0,
             position="bottom",
-            padding_bottom=int(1920 * (1 - style.get("position_y_pct", 82) / 100)),
+            padding_bottom=int(1920 * (1 - style.get("position_y_pct", 78) / 100)),
             uppercase=style.get("uppercase", False),
-            max_words_per_line=style.get("max_words_per_line", 3),
-            line_transition=style.get("line_transition", "word_pop"),
+            max_words_per_line=int(style.get("max_words_per_line", 4)),
+            line_transition=style.get("line_transition", "karaoke"),
             start_offset=start_offset,
         )
 
@@ -435,6 +458,7 @@ class SkiaSubtitleRenderer:
             f"{font_family.replace(' ', '')}-{font_weight}.ttf",
             f"{font_family.replace(' ', '')}-Regular.ttf",
             "Poppins-Bold.ttf",
+            "Inter-Variable.ttf",
         ]
         for name in candidates:
             path = os.path.join(self._font_dir, name)
@@ -446,7 +470,9 @@ class SkiaSubtitleRenderer:
     def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
         """Convert hex color to RGB tuple."""
         hex_color = hex_color.lstrip("#")
-        if len(hex_color) == 6:
+        if len(hex_color) == 3:
+            hex_color = "".join(2 * c for c in hex_color)
+        if len(hex_color) >= 6:
             return int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
         return 255, 255, 255
 

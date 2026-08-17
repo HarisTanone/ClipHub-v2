@@ -1682,6 +1682,22 @@ async def restyle_clip(
         )
         hook_duration = float(hook_config.get("duration", 3.0) or 3.0)
         render_words = clip_data.get("words") or []
+        if do_subtitle and not render_words and raw_path and os.path.exists(raw_path):
+            try:
+                from src.infrastructure.word_level_transcriber import WordLevelTranscriber
+                transcriber = getattr(service, "_word_level_transcriber", None) or WordLevelTranscriber()
+                res = await transcriber._transcribe_one(
+                    clip_rank,
+                    raw_path,
+                    language=(job.clips_data or {}).get("language", "id") if isinstance(job.clips_data, dict) else "id",
+                )
+                if res and res.get("words"):
+                    render_words = res["words"]
+                    clip_data["words"] = render_words
+                    logger.info(f"[restyle] recovered {len(render_words)} words on-demand for clip {clip_rank}")
+            except Exception as we:
+                logger.warning(f"[restyle] on-demand word transcription failed clip {clip_rank}: {we}")
+
         if do_subtitle and render_words:
             try:
                 from src.infrastructure.subtitle_words import sanitize_subtitle_words
@@ -1886,16 +1902,28 @@ async def restyle_clip(
             if hook_render_engine in ("ffmpeg", "skia") and hook_text:
                 tmp_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-hook.mp4"
                 try:
-                    from src.application.services import AutoClipService
-                    svc = AutoClipService.__new__(AutoClipService)
-                    svc._fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
-                    await svc._render_hook_ffmpeg(
-                        staged_final_path,
-                        hook_text,
-                        tmp_hook_path,
-                        hook_style=hook_style,
-                        style_config=hook_config,
-                    )
+                    if hook_render_engine == "skia" or str(hook_style).startswith("skia_"):
+                        from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+                        fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
+                        skia_hook = SkiaHookRenderer(font_dir=fonts_dir)
+                        await skia_hook.render_hook(
+                            staged_final_path,
+                            hook_text,
+                            tmp_hook_path,
+                            hook_style=hook_style,
+                            style_config=hook_config,
+                        )
+                    else:
+                        from src.application.services import AutoClipService
+                        svc = AutoClipService.__new__(AutoClipService)
+                        svc._fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
+                        await svc._render_hook_ffmpeg(
+                            staged_final_path,
+                            hook_text,
+                            tmp_hook_path,
+                            hook_style=hook_style,
+                            style_config=hook_config,
+                        )
                     if os.path.exists(tmp_hook_path):
                         os.replace(tmp_hook_path, staged_final_path)
                         current_path = staged_final_path

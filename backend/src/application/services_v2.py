@@ -2339,15 +2339,25 @@ class V2PipelineService:
             hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
             if clip.hook:
                 try:
-                    from src.application.services import AutoClipService
-                    svc = AutoClipService.__new__(AutoClipService)
-                    svc._fonts_dir = fonts_dir
-                    await svc._render_hook_ffmpeg(
-                        base_path, clip.hook, hooked_path,
-                        hook_style=hook_style,
-                        style_config=hook_style_config,
-                    )
-                    logger.info(f"[{job_id}] {hook_engine} hook rendered clip {clip.rank}")
+                    if hook_engine == "skia" or str(hook_style).startswith("skia_"):
+                        from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+                        skia_hook = SkiaHookRenderer(font_dir=fonts_dir)
+                        await skia_hook.render_hook(
+                            base_path, clip.hook, hooked_path,
+                            hook_style=hook_style,
+                            style_config=hook_style_config,
+                        )
+                        logger.info(f"[{job_id}] Skia hook rendered clip {clip.rank} style={hook_style}")
+                    else:
+                        from src.application.services import AutoClipService
+                        svc = AutoClipService.__new__(AutoClipService)
+                        svc._fonts_dir = fonts_dir
+                        await svc._render_hook_ffmpeg(
+                            base_path, clip.hook, hooked_path,
+                            hook_style=hook_style,
+                            style_config=hook_style_config,
+                        )
+                        logger.info(f"[{job_id}] {hook_engine} hook rendered clip {clip.rank}")
                 except Exception as e:
                     logger.warning(f"[{job_id}] {hook_engine} hook failed clip {clip.rank}: {e}")
                     errors.append(f"hook clip {clip.rank}: {e}")
@@ -2372,6 +2382,11 @@ class V2PipelineService:
                         style_cfg = SubtitleStyleConfig(**(subtitle_style_config or {}))
                         renderer.render_subtitles(hooked_path, words, style_cfg, final_path)
                         logger.info(f"[{job_id}] FFmpeg subtitle rendered clip {clip.rank}")
+
+                    # Verify final_path exists; if not created by renderer, copy hooked_path
+                    if not os.path.exists(final_path) or os.path.getsize(final_path) == 0:
+                        import shutil
+                        shutil.copy2(hooked_path, final_path)
                 except Exception as e:
                     logger.warning(f"[{job_id}] {sub_engine} subtitle failed clip {clip.rank}: {e}")
                     errors.append(f"subtitle clip {clip.rank}: {e}")
@@ -2481,14 +2496,23 @@ class V2PipelineService:
                 # ── Multi-Step Direct Pass (Fallback or Skia Subtitle) ──
                 # Direct hook pass (if hook_engine is ffmpeg or skia)
                 if hook_engine in ("ffmpeg", "skia") and clip.hook:
-                    from src.application.services import AutoClipService
-                    svc = AutoClipService.__new__(AutoClipService)
-                    svc._fonts_dir = getattr(self, "_fonts_dir", "/usr/share/fonts/truetype")
-                    await svc._render_hook_ffmpeg(
-                        current, clip.hook, tmp_hook,
-                        hook_style=hook_style,
-                        style_config=hook_style_config,
-                    )
+                    if hook_engine == "skia" or str(hook_style).startswith("skia_"):
+                        from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+                        skia_hook = SkiaHookRenderer(font_dir=fonts_dir)
+                        await skia_hook.render_hook(
+                            current, clip.hook, tmp_hook,
+                            hook_style=hook_style,
+                            style_config=hook_style_config,
+                        )
+                    else:
+                        from src.application.services import AutoClipService
+                        svc = AutoClipService.__new__(AutoClipService)
+                        svc._fonts_dir = getattr(self, "_fonts_dir", "/usr/share/fonts/truetype")
+                        await svc._render_hook_ffmpeg(
+                            current, clip.hook, tmp_hook,
+                            hook_style=hook_style,
+                            style_config=hook_style_config,
+                        )
                     if os.path.exists(tmp_hook):
                         current = tmp_hook
 

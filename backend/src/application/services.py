@@ -1464,6 +1464,18 @@ class JobService:
             shutil.copy2(video_path, output_path)
             return
 
+        # If Skia engine or preset is requested, delegate to SkiaHookRenderer
+        if str(hook_style).startswith("skia_") or (style_config and style_config.get("engine") == "skia"):
+            try:
+                from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+                fonts_dir = getattr(self, "_fonts_dir", "assets/fonts")
+                renderer = SkiaHookRenderer(font_dir=fonts_dir)
+                await renderer.render_hook(video_path, hook_text, output_path, hook_style=hook_style, style_config=style_config)
+                if os.path.exists(output_path):
+                    return
+            except Exception as e:
+                logger.warning(f"SkiaHookRenderer failed ({e}), falling back to FFmpeg drawtext")
+
         # ─── Style-specific parameters ─────────────────────────────────────
         HOOK_STYLES = {
             "zoom_punch": {
