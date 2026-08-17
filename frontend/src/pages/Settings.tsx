@@ -624,8 +624,8 @@ export function Settings() {
 
   async function handleClearStorage() {
     if (!(await confirmDialog({
-      title: "Clear all storage?",
-      message: "This will delete ALL job records, output files, downloads, and every object in the MinIO bucket (cliperhub).\n\nPresets and user accounts will be preserved.\n\nThis action cannot be undone.",
+      title: "Clear all storage & processing data?",
+      message: "This will delete ALL clipping jobs, video generator assets, output videos, downloaded footages, thumbnails, analysis caches, and all objects in the MinIO bucket (cliperhub).\n\nPresets, user accounts, and system settings will be preserved.\n\nThis action cannot be undone.",
       confirmText: "Yes, Clear Everything",
       danger: true,
     }))) return;
@@ -1131,7 +1131,7 @@ export function Settings() {
                   <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
                   <h3 className="text-xs font-semibold text-zinc-200">Clear Storage</h3>
                 </div>
-                <p className="text-[11px] text-zinc-500 mb-3">Delete all job records, output videos, and downloaded files. Presets and user accounts will be preserved.</p>
+                <p className="text-[11px] text-zinc-500 mb-3">Delete all job records, video generator assets, output videos, footages, thumbnails, and MinIO objects. Presets and user accounts will be preserved.</p>
                 <Button type="button" size="sm" onClick={handleClearStorage} loading={isClearing} className="bg-red-600 hover:bg-red-700 border-red-700" icon={<Trash2 className="h-3.5 w-3.5" />}>
                   Clear All Processing Data
                 </Button>
