@@ -1771,7 +1771,14 @@ class JobService:
 
     def _resolve_hook_font(self, preferred: list[str] = None) -> str:
         """Resolve font file path for hook text rendering."""
-        font_dir = "assets/fonts"
+        font_dirs = [
+            getattr(self, "_fonts_dir", "assets/fonts"),
+            "assets/fonts",
+            "backend/assets/fonts",
+            "/usr/share/fonts/truetype",
+            "/System/Library/Fonts",
+            "/Library/Fonts",
+        ]
         # Use preferred list if provided, else defaults (NotoSans as final fallback for Unicode)
         candidates = preferred or [
             "Poppins-Bold.ttf",
@@ -1782,15 +1789,20 @@ class JobService:
         ]
         # Always add NotoSans as final fallback
         candidates.append("NotoSans-Variable.ttf")
-        for name in candidates:
-            path = os.path.join(font_dir, name)
-            if os.path.exists(path):
-                return os.path.abspath(path)
-        # Try any .ttf file
-        if os.path.isdir(font_dir):
-            for f in os.listdir(font_dir):
-                if f.endswith(".ttf"):
-                    return os.path.abspath(os.path.join(font_dir, f))
+        for fdir in font_dirs:
+            if not fdir or not os.path.isdir(fdir):
+                continue
+            for name in candidates:
+                path = os.path.join(fdir, name)
+                if os.path.exists(path):
+                    return os.path.abspath(path)
+            # Try any .ttf file in the directory
+            try:
+                for f in os.listdir(fdir):
+                    if f.endswith(".ttf") or f.endswith(".otf"):
+                        return os.path.abspath(os.path.join(fdir, f))
+            except OSError:
+                pass
         return ""
 
     async def _apply_watermark(self, job, clip_rank: int, output_dir: str, final_path: str, job_id: str) -> None:
@@ -1936,3 +1948,7 @@ class JobService:
             "creative_direction": cd_dict,
             "clips": assembled_clips,
         }
+
+
+# Backward-compatible alias
+AutoClipService = JobService

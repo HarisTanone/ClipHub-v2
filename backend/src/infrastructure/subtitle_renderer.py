@@ -315,24 +315,42 @@ class SubtitleRenderer(ISubtitleRenderer):
             return f"h-text_h-{config.padding_bottom}"
 
     def _resolve_font(self, font_family: str, font_weight: str = "Regular") -> Optional[str]:
-        """Try to find font file in assets/fonts/."""
-        if not os.path.isdir(self._font_dir):
-            return None
+        """Try to find font file across assets and system font directories."""
+        search_dirs = [
+            self._font_dir,
+            "assets/fonts",
+            "backend/assets/fonts",
+            "/usr/share/fonts/truetype",
+            "/System/Library/Fonts",
+            "/Library/Fonts",
+        ]
         candidates = [
             f"{font_family}-{font_weight}.ttf",
             f"{font_family}-Regular.ttf",
             f"{font_family.replace(' ', '')}-{font_weight}.ttf",
             f"{font_family.replace(' ', '')}-Regular.ttf",
             f"{font_family}-Variable.ttf",
-            # Fallback to any available font
+            # Fallback to standard bold fonts
             "Poppins-Bold.ttf",
             "Inter-Bold.ttf",
             "Montserrat-Bold.ttf",
+            "Montserrat-Variable.ttf",
+            "NotoSans-Variable.ttf",
         ]
-        for name in candidates:
-            path = os.path.join(self._font_dir, name)
-            if os.path.exists(path):
-                return path
+        for sdir in search_dirs:
+            if not sdir or not os.path.isdir(sdir):
+                continue
+            for name in candidates:
+                path = os.path.join(sdir, name)
+                if os.path.exists(path):
+                    return os.path.abspath(path)
+            # Fallback search by partial name match
+            try:
+                for f in os.listdir(sdir):
+                    if font_family.lower() in f.lower() and (f.endswith(".ttf") or f.endswith(".otf")):
+                        return os.path.abspath(os.path.join(sdir, f))
+            except OSError:
+                pass
         return None
 
     # ─── Emphasis Style Renderer (Big Keyword + Small Context) ────────────────

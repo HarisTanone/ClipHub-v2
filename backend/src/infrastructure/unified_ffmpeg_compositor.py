@@ -104,6 +104,7 @@ class UnifiedFFmpegCompositor:
         search_dirs = [
             self._font_dir,
             "assets/fonts",
+            "backend/assets/fonts",
             "/usr/share/fonts/truetype",
             "/usr/share/fonts/truetype/montserrat",
             "/usr/share/fonts/opentype",

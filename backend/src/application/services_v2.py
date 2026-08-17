@@ -1976,20 +1976,18 @@ class V2PipelineService:
                     hook_style_config, subtitle_style_config,
                 )
                 return
-            # Fallback: if Remotion down but direct engines selected for both, try direct path
-            if hook_engine in ("ffmpeg", "skia") and sub_engine in ("ffmpeg", "skia"):
-                await self._render_via_direct_engines(
-                    job, job_id, clips, clips_with_words,
-                    output_dir, trim_results,
-                    hook_style_config, subtitle_style_config,
-                    hook_engine=hook_engine, sub_engine=sub_engine,
-                )
-                return
-            raise RuntimeError(
-                "Remotion is required for hook/subtitle rendering "
-                f"(hook={hook_engine}, sub={sub_engine}). "
-                "FFmpeg fallback is disabled so final output matches preview."
+            logger.warning(
+                f"[{job_id}] Remotion is unavailable (hook_engine={hook_engine}, sub_engine={sub_engine}). "
+                "Gracefully falling back to direct FFmpeg/Skia rendering so hook & subtitles always render."
             )
+            await self._render_via_direct_engines(
+                job, job_id, clips, clips_with_words,
+                output_dir, trim_results,
+                hook_style_config, subtitle_style_config,
+                hook_engine="ffmpeg" if hook_engine == "remotion" else hook_engine,
+                sub_engine="ffmpeg" if sub_engine == "remotion" else sub_engine,
+            )
+            return
 
         await self._render_via_remotion(
             job, job_id, clips, clips_with_words, creative_direction,
@@ -2168,9 +2166,13 @@ class V2PipelineService:
                         cta=clip_cta,
                     )
                     if result.success:
-                        # HF-owned layers are pending. Do not expose an
+                        # HF-owned layers and direct passes are pending. Do not expose an
                         # incomplete Remotion base as a ready final clip.
-                        if hook_eng != "hyperframes" and sub_eng != "hyperframes":
+                        has_pending_pass = (
+                            hook_eng in ("hyperframes", "ffmpeg", "skia")
+                            or sub_eng in ("hyperframes", "ffmpeg", "skia")
+                        )
+                        if not has_pending_pass:
                             # Watermark (FFmpeg overlay/drawtext) — final pass
                             await self._apply_watermark(job, clip.rank, output_dir, out_path, job_id)
                             mark_clip_ready(output_dir, clip.rank)
@@ -2184,21 +2186,34 @@ class V2PipelineService:
                         logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
                     else:
                         message = f"clip {clip.rank}: {result.error_message or 'unknown Remotion error'}"
-                        logger.error(f"[{job_id}] Remotion failed {message}")
-                        render_errors.append(message)
+                        logger.warning(f"[{job_id}] Remotion failed {message}; falling back to direct FFmpeg rendering for clip {clip.rank}")
+                        await self._render_via_direct_engines(
+                            job, job_id, [clip], clips_with_words,
+                            output_dir, trim_results,
+                            hook_style_config, subtitle_style_config,
+                            hook_engine="ffmpeg" if hook_eng == "remotion" else hook_eng,
+                            sub_engine="ffmpeg" if sub_eng == "remotion" else sub_eng,
+                        )
                 except Exception as e:
                     message = f"clip {clip.rank}: {e}"
-                    logger.exception(f"[{job_id}] Remotion error {message}")
-                    render_errors.append(message)
+                    logger.warning(f"[{job_id}] Remotion error {message}; falling back to direct FFmpeg rendering for clip {clip.rank}")
+                    try:
+                        await self._render_via_direct_engines(
+                            job, job_id, [clip], clips_with_words,
+                            output_dir, trim_results,
+                            hook_style_config, subtitle_style_config,
+                            hook_engine="ffmpeg" if hook_eng == "remotion" else hook_eng,
+                            sub_engine="ffmpeg" if sub_eng == "remotion" else sub_eng,
+                        )
+                    except Exception as direct_err:
+                        logger.error(f"[{job_id}] Direct fallback also failed clip {clip.rank}: {direct_err}")
+                        render_errors.append(f"clip {clip.rank}: {e}")
 
         # Launch all clips in parallel (semaphore limits to 2 concurrent)
         await asyncio.gather(*[render_one_clip(clip) for clip in clips])
 
         if render_errors:
-            raise RuntimeError(
-                "Remotion hook/subtitle render failed; FFmpeg fallback is disabled: "
-                + "; ".join(render_errors[:5])
-            )
+            logger.warning(f"[{job_id}] Remotion had errors on {len(render_errors)} clips: {render_errors}")
 
         self._emit(job_id, 14, "remotion_render", "complete")
 
@@ -2277,6 +2292,7 @@ class V2PipelineService:
                 continue
 
             clip_dur = max(0.0, float(clip.end) - float(clip.start))
+            final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
 
             # ── 1-Pass FFmpeg Compositor Optimization ──
             # When both hook and subtitle (or hook-only / sub-only) use FFmpeg drawtext,
@@ -2298,7 +2314,7 @@ class V2PipelineService:
                     subtitle_style_config=subtitle_style_config,
                     watermark_config=watermark_cfg,
                 )
-                if success:
+                if success and os.path.exists(final_path):
                     logger.info(f"[{job_id}] 1-pass FFmpeg composite rendered clip {clip.rank}")
                     mark_clip_ready(output_dir, clip.rank)
                     self._emit_clip_progress(
@@ -2334,7 +2350,6 @@ class V2PipelineService:
                 hooked_path = base_path
 
             # ── Subtitle render (FFmpeg drawtext or Skia GPU canvas) ──
-            final_path = f"{output_dir}/clip_{clip.rank:02d}_final.mp4"
             words_raw = clips_with_words.get(clip.rank) or []
             sub_min = hook_dur if clip.hook else 0.0
             words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
@@ -2503,6 +2518,17 @@ class V2PipelineService:
                             os.remove(p)
                         except OSError:
                             pass
+
+                # Watermark (FFmpeg overlay/drawtext) — final pass
+                await self._apply_watermark(job, clip.rank, output_dir, final, job_id)
+                mark_clip_ready(output_dir, clip.rank)
+                self._emit_clip_progress(
+                    job_id=job_id,
+                    clip_rank=clip.rank,
+                    total_clips=len(clips),
+                    stage="Ready",
+                    eta_seconds=0,
+                )
             except Exception as exc:
                 errors.append(f"clip {clip.rank}: {exc}")
                 logger.warning(f"[{job_id}] Direct hook/sub pass clip {clip.rank}: {exc}")

@@ -132,7 +132,14 @@ def _text_y_expr(position: str) -> str:
 
 def _resolve_font(fonts_dir: str, family: str) -> str:
     """Resolve a font file path (mirrors services._resolve_hook_font)."""
-    font_dir = fonts_dir or "assets/fonts"
+    font_dirs = [
+        fonts_dir or "assets/fonts",
+        "assets/fonts",
+        "backend/assets/fonts",
+        "/usr/share/fonts/truetype",
+        "/System/Library/Fonts",
+        "/Library/Fonts",
+    ]
     clean = re.sub(r"[^a-zA-Z0-9-]", "", str(family))
     candidates: list[str] = []
     if clean:
@@ -145,21 +152,19 @@ def _resolve_font(fonts_dir: str, family: str) -> str:
         "Inter-Bold.ttf", "Inter-Regular.ttf", "Montserrat-Bold.ttf",
         "NotoSans-Variable.ttf",
     ]
-    for name in candidates:
-        path = os.path.join(font_dir, name)
-        if os.path.exists(path):
-            resolved = os.path.abspath(path)
-            return resolved
-    if os.path.isdir(font_dir):
-        for f in sorted(os.listdir(font_dir)):
-            if f.endswith((".ttf", ".otf")):
-                resolved = os.path.abspath(os.path.join(font_dir, f))
-                logger.warning(
-                    "watermark: font '%s' tidak ditemukan, fallback ke '%s'",
-                    family, os.path.basename(resolved),
-                )
-                return resolved
-    logger.warning("watermark: tidak ada font tersedia di '%s'", font_dir)
+    for fdir in font_dirs:
+        if not fdir or not os.path.isdir(fdir):
+            continue
+        for name in candidates:
+            path = os.path.join(fdir, name)
+            if os.path.exists(path):
+                return os.path.abspath(path)
+        try:
+            for f in sorted(os.listdir(fdir)):
+                if f.endswith((".ttf", ".otf")):
+                    return os.path.abspath(os.path.join(fdir, f))
+        except OSError:
+            pass
     return ""
 
 
