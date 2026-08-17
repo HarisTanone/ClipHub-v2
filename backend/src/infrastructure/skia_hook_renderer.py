@@ -669,6 +669,8 @@ class SkiaHookRenderer:
             cmd = [
                 "ffmpeg", "-y",
                 "-i", video_path,
+                "-loop", "1",
+                "-t", str(duration + 1.0),
                 "-i", png_path,
                 "-filter_complex", filter_complex,
                 "-map", "[outv]",
