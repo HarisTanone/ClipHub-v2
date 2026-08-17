@@ -169,8 +169,10 @@ class HyperFramesAdapter:
                 self.base_url = cfg["server_url"]
             if db.get("timeout_sec"):
                 cfg["timeout_sec"] = int(db["timeout_sec"])
-            # env OR DB enables optional polish; engine-selected HF uses force=True
-            cfg["enabled"] = bool(cfg["enabled"] or db.get("enabled"))
+            if "enabled" in db and db["enabled"] is not None:
+                cfg["enabled"] = bool(db["enabled"])
+            else:
+                cfg["enabled"] = bool(self.enabled)
         except Exception:
             pass
         return cfg

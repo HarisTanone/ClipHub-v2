@@ -13,7 +13,7 @@ HYPERFRAMES_COLUMNS = (
 )
 
 HYPERFRAMES_DEFAULTS = {
-    "enabled": 1,  # 1 = ON, 0 = OFF
+    "enabled": 0,  # 1 = ON, 0 = OFF
     "mode": "auto",  # "auto" (AI picks/rotates style) or "manual" (specific style)
     "default_template": "hook_cyber_hud",
     "position": "safe_upper",  # "safe_upper", "top", "floating_badge"

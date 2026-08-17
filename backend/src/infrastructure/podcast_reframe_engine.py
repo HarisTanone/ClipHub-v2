@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.config import settings
 from src.domain.interfaces import IReframeEngine
 from src.infrastructure.gpu_encoder import get_video_encoder_args
 from src.infrastructure.active_speaker_detector import ActiveSpeakerDetector, ActiveSpeakerResult, SpeakerSegment

@@ -656,15 +656,13 @@ class SkiaHookRenderer:
             overlay_img = self.generate_hook_frame(hook_text, hook_style=hook_style, style_config=style_config)
             overlay_img.save(png_path, format="PNG")
 
-            # 2. FFmpeg overlay with alpha fade expression
-            alpha_expr = (
-                f"if(lt(t\\,0.35)\\,t/0.35\\,"
-                f"if(gt(t\\,{duration - 0.35})\\,({duration}-t)/0.35\\,1))"
-            )
-
-            # Smooth pop-in scale & position filter
+            # 2. FFmpeg overlay with alpha fade
+            fade_out_st = max(0.0, duration - 0.35)
+            fade_out_dur = min(0.35, duration / 2)
             filter_complex = (
-                f"[1:v]format=rgba,colorchannelmixer=aa='{alpha_expr}'[hook];"
+                f"[1:v]format=rgba,"
+                f"fade=t=in:st=0:d=0.35:alpha=1,"
+                f"fade=t=out:st={fade_out_st:.3f}:d={fade_out_dur:.3f}:alpha=1[hook];"
                 f"[0:v][hook]overlay=x=0:y=0:enable='between(t,0,{duration})'[outv]"
             )
 
