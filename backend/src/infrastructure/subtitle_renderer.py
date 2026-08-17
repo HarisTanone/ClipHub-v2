@@ -268,11 +268,7 @@ class SubtitleRenderer(ISubtitleRenderer):
             return video_path
 
     def _normalize_style(self, style: Any) -> SubtitleStyleConfig:
-        if isinstance(style, SubtitleStyleConfig):
-            return style
-        if isinstance(style, dict):
-            return SubtitleStyleConfig(**{k: v for k, v in style.items() if hasattr(SubtitleStyleConfig, k)})
-        return SubtitleStyleConfig()
+        return SubtitleStyleConfig.from_dict(style)
 
     def _group_words_into_lines(self, words: list, max_per_line: int) -> list[list[dict]]:
         """Group words into lines respecting both word count and character width.

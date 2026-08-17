@@ -1959,7 +1959,7 @@ async def restyle_clip(
                         from src.infrastructure.subtitle_renderer import SubtitleRenderer
                         from src.domain.entities import SubtitleStyleConfig
                         renderer = SubtitleRenderer(font_dir=fonts_dir)
-                        style_cfg = SubtitleStyleConfig(**(subtitle_config or {}))
+                        style_cfg = SubtitleStyleConfig.from_dict(subtitle_config or {})
                         renderer.render_subtitles(
                             staged_final_path,
                             render_words,

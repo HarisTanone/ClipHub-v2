@@ -2431,7 +2431,7 @@ class V2PipelineService:
                         logger.info(f"[{job_id}] Skia subtitle rendered clip {clip.rank}")
                     else:
                         renderer = SubtitleRenderer(font_dir=fonts_dir)
-                        style_cfg = SubtitleStyleConfig(**(subtitle_style_config or {}))
+                        style_cfg = SubtitleStyleConfig.from_dict(subtitle_style_config or {})
                         renderer.render_subtitles(hooked_path, words, style_cfg, final_path)
                         logger.info(f"[{job_id}] FFmpeg subtitle rendered clip {clip.rank}")
 
@@ -2590,7 +2590,7 @@ class V2PipelineService:
                             from src.infrastructure.subtitle_renderer import SubtitleRenderer
                             from src.domain.entities import SubtitleStyleConfig
                             renderer = SubtitleRenderer(font_dir=fonts_dir)
-                            style_cfg = SubtitleStyleConfig(**(subtitle_style_config or {}))
+                            style_cfg = SubtitleStyleConfig.from_dict(subtitle_style_config or {})
                             renderer.render_subtitles(current, words, style_cfg, tmp_sub)
 
                         if os.path.exists(tmp_sub):

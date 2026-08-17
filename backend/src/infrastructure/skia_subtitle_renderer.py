@@ -400,6 +400,7 @@ class SkiaSubtitleRenderer:
             font_weight=style.get("font_weight", "Bold"),
             color=style.get("text_color", "#FFFFFF"),
             highlight_color=style.get("highlight_color", "#38BDF8"),
+            highlight_words=True,
             stroke_color=style.get("stroke_color", "#000000") if style.get("stroke_enabled") else "",
             stroke_width=int(style.get("stroke_width", 0)) if style.get("stroke_enabled") else 0,
             background_opacity=float(style.get("bg_opacity", 0.0)) if style.get("bg_enabled") else 0.0,

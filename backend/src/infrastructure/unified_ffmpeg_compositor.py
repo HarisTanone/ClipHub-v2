@@ -277,12 +277,7 @@ class UnifiedFFmpegCompositor:
         if not words:
             return []
 
-        if isinstance(style, dict):
-            config = SubtitleStyleConfig(**style)
-        elif isinstance(style, SubtitleStyleConfig):
-            config = style
-        else:
-            config = SubtitleStyleConfig()
+        config = SubtitleStyleConfig.from_dict(style)
 
         if getattr(config, "enabled", True) is False:
             return []
@@ -291,6 +286,11 @@ class UnifiedFFmpegCompositor:
         timing_adj = config.timing_offset
         font_path = self._resolve_font(config.font_family, config.font_weight)
         font_file_opt = f":fontfile='{font_path}'" if font_path else ""
+
+        stroke_color = config.stroke_color or "black"
+        stroke_opt = f":borderw={config.stroke_width}:bordercolor={stroke_color}" if (config.stroke_width and config.stroke_width > 0) else ""
+        shadow_color = config.shadow_color or "black@0.5"
+        shadow_opt = f":shadowx={config.shadow_x}:shadowy={config.shadow_y}:shadowcolor={shadow_color}" if (config.shadow_x or config.shadow_y) else ""
 
         pos_y_raw = getattr(config, "position_y", None)
         if isinstance(pos_y_raw, (int, float)):
@@ -331,13 +331,15 @@ class UnifiedFFmpegCompositor:
                         word_text = word_text.upper()
                     escaped_word = self._escape_drawtext(word_text)
                     box_opt = f":box=1:boxcolor=black@{config.background_opacity}:boxborderw=10" if config.background_opacity > 0 else ""
+                    active_stroke_w = (config.stroke_width + 1) if (config.stroke_width and config.stroke_width > 0) else 0
+                    active_stroke_opt = f":borderw={active_stroke_w}:bordercolor={stroke_color}" if active_stroke_w > 0 else ""
                     filters.append(
                         f"drawtext=text='{escaped_word}'"
                         f":fontsize={int(config.font_size * 1.2)}"
                         f"{font_file_opt}"
                         f":fontcolor={config.highlight_color or config.color}"
-                        f":borderw={config.stroke_width + 1}:bordercolor={config.stroke_color}"
-                        f":shadowx={config.shadow_x}:shadowy={config.shadow_y}:shadowcolor={config.shadow_color}"
+                        f"{active_stroke_opt}"
+                        f"{shadow_opt}"
                         f"{box_opt}"
                         f":x=(w-text_w)/2:y={y_pos}"
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
@@ -354,8 +356,8 @@ class UnifiedFFmpegCompositor:
                     f":fontsize={config.font_size}"
                     f"{font_file_opt}"
                     f":fontcolor={config.highlight_color or config.color}"
-                    f":borderw={config.stroke_width}:bordercolor={config.stroke_color}"
-                    f":shadowx={config.shadow_x}:shadowy={config.shadow_y}:shadowcolor={config.shadow_color}"
+                    f"{stroke_opt}"
+                    f"{shadow_opt}"
                     f"{box_opt}"
                     f":x=(w-text_w)/2:y={y_pos}"
                     f":enable='between(t,{line_start:.3f},{line_end:.3f})'"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """Domain entities — pure Python dataclasses and enums (v0.4)."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 
@@ -525,7 +525,7 @@ class ConcurrencyConfig:
 
 @dataclass
 class SubtitleStyleConfig:
-    """Configuration for subtitle word-by-word rendering (FFmpeg drawtext)."""
+    """Configuration for subtitle word-by-word rendering (FFmpeg drawtext / Skia / Remotion)."""
     enabled: bool = True
     font_family: str = "Poppins"
     font_size: int = 34
@@ -534,6 +534,7 @@ class SubtitleStyleConfig:
     capitalize: bool = False
     color: str = "#FFFFFF"
     highlight_color: str = "#FFCC00"
+    highlight_words: bool = True
     background_color: str = ""
     background_opacity: float = 0.3
     stroke_color: str = "#000000"
@@ -550,11 +551,49 @@ class SubtitleStyleConfig:
     start_offset: float = 0.0
     timing_offset: float = 0.0
     word_padding: float = 0.05
-    line_transition: str = "word_pop"  # word_pop | emphasis | line_reveal
+    line_transition: str = "word_pop"  # word_pop | emphasis | line_reveal | karaoke
     fade_in: float = 0.1
     fade_out: float = 0.1
     highlight_style: str = "color"
     highlight_scale: float = 1.2
+    # Additional styling and preset compatibility fields
+    engine: str = "remotion"
+    stylePreset: str = ""
+    style_id: str = ""
+    id: str = ""
+    hf_template: str = ""
+    template_mode: str = ""
+    preset: str = ""
+    effect: str = ""
+    glow_enabled: bool = False
+    glow_color: str = ""
+    glow_radius: int = 0
+    active_scale: float = 1.0
+    box_enabled: bool = False
+    box_color: str = ""
+    box_opacity: float = 0.0
+    box_border_width: int = 0
+    box_border_color: str = ""
+    box_corner_radius: int = 0
+    box_padding_x: int = 0
+    box_padding_y: int = 0
+
+    @classmethod
+    def from_dict(cls, data: dict | Any) -> SubtitleStyleConfig:
+        if isinstance(data, cls):
+            return data
+        if not isinstance(data, dict):
+            return cls()
+        known = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in known}
+        # map common aliases
+        if "text_color" in data and "color" not in filtered:
+            filtered["color"] = data["text_color"]
+        if "stylePreset" in data and "stylePreset" not in filtered:
+            filtered["stylePreset"] = str(data["stylePreset"])
+        if "highlight_words" not in filtered:
+            filtered["highlight_words"] = bool(data.get("highlight_words", True))
+        return cls(**filtered)
 
 
 @dataclass
@@ -580,6 +619,18 @@ class HookStyleConfig:
     uppercase: bool = True
     animation: str = "zoom_punch"
     position: str = "center"
+    hf_template: str = ""
+    template_mode: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict | Any) -> HookStyleConfig:
+        if isinstance(data, cls):
+            return data
+        if not isinstance(data, dict):
+            return cls()
+        known = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in known}
+        return cls(**filtered)
 
 
 @dataclass
