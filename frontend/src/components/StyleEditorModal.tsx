@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -1515,11 +1515,11 @@ function WatermarkEditor({ style, onChange, thumbnailUrl, aspectRatio, canvasBac
   );
 }
 
-const TRANSITION_META: Record<string, { label: string; desc: string; icon: string }> = {
-  cut: { label: "Cut", desc: "Hard cut antar framing. Cepat & energik.", icon: "⫛" },
-  fade: { label: "Fade", desc: "Cross-fade halus. Cinematic & natural.", icon: "◐" },
-  slide: { label: "Slide", desc: "Geser horizontal. Dinamis & modern.", icon: "→" },
-  zoom: { label: "Zoom", desc: "Zoom in/out transisi. Dramatis.", icon: "⊙" },
+const TRANSITION_META: Record<string, { label: string; desc: string; icon: React.ComponentType<{ className?: string }> }> = {
+  cut: { label: "Cut", desc: "Hard cut antar framing. Cepat & energik.", icon: Scissors },
+  fade: { label: "Fade", desc: "Cross-fade halus. Cinematic & natural.", icon: Layers },
+  slide: { label: "Slide", desc: "Geser horizontal. Dinamis & modern.", icon: MoveRight },
+  zoom: { label: "Zoom", desc: "Zoom in/out transisi. Dramatis.", icon: Maximize2 },
 };
 
 function TransitionEditor({
@@ -1591,7 +1591,7 @@ function TransitionEditor({
               return (
                 <button type="button" key={value} onClick={() => update({ transitionStyle: value })} className={cn("rounded-xl border p-3 text-left transition-all", active === value ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700")}>
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-lg leading-none">{meta.icon}</span>
+                    <meta.icon className={cn("h-4 w-4", active === value ? "text-emerald-400" : "text-zinc-500")} />
                     {active === value && <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-400">Active</span>}
                   </div>
                   <p className={cn("text-xs font-semibold", active === value ? "text-emerald-300" : "text-zinc-300")}>{meta.label}</p>

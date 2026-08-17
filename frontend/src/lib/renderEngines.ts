@@ -91,7 +91,7 @@ export const HF_HOOK_STYLES: HfStylePreset[] = [
     mood: "Electric",
     accent: "#818CF8",
     desc: "High-voltage plasma nebula aura · electric shockwave glow",
-    preview: "⚡ VIRAL REVEAL",
+    preview: "VIRAL REVEAL",
   },
   {
     id: "hook_glass_minimal",
@@ -165,7 +165,7 @@ export const HF_HOOK_STYLES: HfStylePreset[] = [
     mood: "Caution",
     accent: "#F59E0B",
     desc: "Industrial diagonal hazard stripes · critical alert warning",
-    preview: "⚠️ JANGAN SKIP",
+    preview: "JANGAN SKIP",
   },
 
   // ── Page 3: Creative Technical & Sci-Fi ──

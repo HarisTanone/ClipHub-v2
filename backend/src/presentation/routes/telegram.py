@@ -137,7 +137,7 @@ async def test_telegram_video(
 
     result = await telegram_service.send_video(
         video_path=test_video,
-        caption="🎬 <b>ClipHub Test Video</b>\n\nKoneksi pengiriman video klip ke Telegram berhasil! 🚀",
+        caption="<b>[ClipHub] Test Video</b>\n\nKoneksi pengiriman video klip ke Telegram berhasil!",
         target_id=body.target_id
     )
     return result

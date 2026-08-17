@@ -17,9 +17,9 @@ DEAD_AIR_GAP_S = 1.4
 DEAD_AIR_MIN_GAPS = 1
 
 CTA_TEMPLATES = (
-    "Follow biar nggak ketinggalan part 2 🔥",
-    "Save dulu, nonton lagi nanti 📌",
-    "Komen setuju atau nggak 👇",
+    "Follow biar nggak ketinggalan part 2",
+    "Save dulu, nonton lagi nanti",
+    "Komen setuju atau nggak",
     "Share ke temen yang perlu dengar ini",
 )
 
@@ -536,7 +536,6 @@ def hook_roulette(hook: str = "", reason: str = "", n: int = 6) -> list[dict[str
     if words:
         add(f"{words[0].upper()}: {' '.join(words[1:])}".strip(": "), "colon")
         add(" ".join(w.upper() if i < min(3, len(words)) else w for i, w in enumerate(words)), "caps_lead")
-    add(f"{base} 🔥", "emoji_fire")
     add(f"Part {max(1, n % 5)} — {base}", "series")
     if len(words) > 4:
         add(" ".join(words[:4]) + "…", "tease")
@@ -616,7 +615,7 @@ def build_share_pack(
             opener,
             reason_s[:160] if reason_s else "",
             "",
-            (cta or {}).get("text") or "Save biar gampang dicari 📌",
+            (cta or {}).get("text") or "Save biar gampang dicari",
             "",
             " ".join(hashtags),
         ] if x

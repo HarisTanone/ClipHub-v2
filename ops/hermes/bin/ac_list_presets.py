@@ -37,7 +37,7 @@ def main():
         if args.format == "json":
             print(json.dumps({"error": str(e)}))
         else:
-            print(f"❌ Gagal mengambil daftar presets: {e}")
+            print(f"[ERROR] Gagal mengambil daftar presets: {e}")
         sys.exit(1)
 
     presets = result.get("data", [])
@@ -54,14 +54,13 @@ def main():
         print(json.dumps({"system": presets, "user": user_presets}, indent=2))
         return
 
-    # Format text untuk Telegram
     if not presets and not user_presets:
-        print("❌ Tidak ada style preset tersedia.")
+        print("Tidak ada style preset tersedia.")
         return
 
     # System presets
     if presets:
-        print("🎨 <b>System Style Presets:</b>\n")
+        print("<b>System Style Presets:</b>\n")
         for preset in presets:
             preset_id = preset.get("id", "unknown")
             name = preset.get("name", "Unnamed")
@@ -71,14 +70,14 @@ def main():
 
     # User presets
     if user_presets:
-        print(f"\n👤 <b>Preset Kamu ({len(user_presets)}):</b>\n")
+        print(f"\n<b>Preset Kamu ({len(user_presets)}):</b>\n")
         for preset in user_presets:
             preset_id = preset.get("id", "unknown")
             name = preset.get("name", "Unnamed")
             print(f"• <code>user:{preset_id}</code> — {name}")
 
     # Usage hint
-    print("\n💡 <b>Cara pakai:</b>")
+    print("\n<b>Cara pakai:</b>")
     print("<code>/submit &lt;url&gt; --preset bold_black</code>")
     print("<code>/submit &lt;url&gt; --preset user:3</code>  (preset kamu)")
 

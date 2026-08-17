@@ -67,7 +67,7 @@ class AlertingService:
             return
 
         message = (
-            f"⚠️ AutoCliper Queue Alert\n"
+            f"[ALERT] AutoCliper Queue Alert\n"
             f"Queue depth: {queue_depth} (threshold: {self._threshold})\n"
             f"Action required: check pipeline health"
         )

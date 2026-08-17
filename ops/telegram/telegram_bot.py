@@ -186,41 +186,41 @@ MODELS: list[tuple[str, str, str]] = [
 
 # Quick-pick viral topics
 VIRAL_TOPICS: list[tuple[str, str, str]] = [
-    # (emoji, label, query)
-    ("💪", "Gym Motivation",  "gym motivation"),
-    ("📈", "Trading Crypto",  "trading crypto"),
-    ("🎮", "Gaming Clips",    "gaming clips"),
-    ("🧠", "AI Tutorial",     "AI tutorial"),
-    ("😂", "Funny Clips",     "funny viral clips"),
-    ("🍳", "Cooking",         "cooking recipes"),
-    ("💪", "Fitness",         "fitness workout"),
-    ("🎸", "Music",           "music viral"),
+    # (icon/tag, label, query)
+    ("", "Gym Motivation",  "gym motivation"),
+    ("", "Trading Crypto",  "trading crypto"),
+    ("", "Gaming Clips",    "gaming clips"),
+    ("", "AI Tutorial",     "AI tutorial"),
+    ("", "Funny Clips",     "funny viral clips"),
+    ("", "Cooking",         "cooking recipes"),
+    ("", "Fitness",         "fitness workout"),
+    ("", "Music",           "music viral"),
 ]
 
-# Emoji constants
+# Text constants
 E = {
-    "rocket":   "🚀",
-    "search":   "🔍",
-    "chart":    "📊",
-    "list":     "📋",
-    "robot":    "🤖",
-    "check":    "✅",
-    "cross":    "❌",
-    "warn":     "⚠️",
-    "clock":    "⏰",
-    "back":     "◀️",
-    "home":     "🏠",
-    "help":     "❓",
-    "id":       "🆔",
-    "loading":  "⏳",
-    "spark":    "✨",
-    "fire":     "🔥",
-    "gear":     "⚙️",
-    "link":     "🔗",
-    "user":     "👤",
-    "cancel":   "🚫",
-    "success":  "✅",
-    "error":    "💥",
+    "rocket":   "",
+    "search":   "",
+    "chart":    "",
+    "list":     "",
+    "robot":    "",
+    "check":    "[OK]",
+    "cross":    "[FAILED]",
+    "warn":     "[WARN]",
+    "clock":    "",
+    "back":     "<",
+    "home":     "",
+    "help":     "?",
+    "id":       "ID:",
+    "loading":  "...",
+    "spark":    "",
+    "fire":     "",
+    "gear":     "",
+    "link":     "",
+    "user":     "",
+    "cancel":   "[CANCEL]",
+    "success":  "[OK]",
+    "error":    "[ERROR]",
 }
 
 
@@ -474,7 +474,7 @@ class Msg:
             f"• <code>--force</code> proses ulang\n\n"
             f"<b>Contoh:</b>\n"
             f"<code>/submit https://youtu.be/... --preset bold_black --ratio 9:16</code>\n\n"
-            f"💡 Gunakan <code>/presets</code> untuk melihat daftar style preset yang tersedia."
+            f"Gunakan <code>/presets</code> untuk melihat daftar style preset yang tersedia."
         )
 
     @staticmethod
@@ -501,20 +501,20 @@ class KB:
     def main_menu() -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton(f"{E['search']} Cari Viral",   callback_data="menu_viral"),
-                InlineKeyboardButton(f"{E['rocket']} Submit URL",   callback_data="menu_submit"),
+                InlineKeyboardButton("Cari Viral",   callback_data="menu_viral"),
+                InlineKeyboardButton("Submit URL",   callback_data="menu_submit"),
             ],
             [
-                InlineKeyboardButton(f"{E['list']} Job Terbaru",    callback_data="act_jobs"),
-                InlineKeyboardButton(f"{E['chart']} Cek Status",    callback_data="menu_status"),
+                InlineKeyboardButton("Job Terbaru",  callback_data="act_jobs"),
+                InlineKeyboardButton("Cek Status",   callback_data="menu_status"),
             ],
             [
-                InlineKeyboardButton(f"🚀 Auto-Post Sosmed",         callback_data="menu_autopost"),
-                InlineKeyboardButton(f"{E['robot']} Model LLM",     callback_data="menu_model"),
+                InlineKeyboardButton("Auto-Post Sosmed", callback_data="menu_autopost"),
+                InlineKeyboardButton("Model LLM",    callback_data="menu_model"),
             ],
             [
-                InlineKeyboardButton(f"{E['id']} My ID",            callback_data="act_myid"),
-                InlineKeyboardButton(f"{E['help']} Bantuan",        callback_data="act_help"),
+                InlineKeyboardButton("My ID",        callback_data="act_myid"),
+                InlineKeyboardButton("Bantuan",      callback_data="act_help"),
             ],
         ])
 
@@ -534,7 +534,7 @@ class KB:
         rows: list[list[InlineKeyboardButton]] = [
             [
                 InlineKeyboardButton(
-                    f"{'✅ Auto-Post: AKTIF' if is_enabled else '❌ Auto-Post: NONAKTIF'}",
+                    f"{'[ON] Auto-Post: AKTIF' if is_enabled else '[OFF] Auto-Post: NONAKTIF'}",
                     callback_data="act_autopost_toggle"
                 )
             ]
@@ -545,14 +545,14 @@ class KB:
             row = []
             for code, name in all_platforms[i:i + 2]:
                 checked = code in plat_set
-                prefix = "✅" if checked else "⬜"
+                prefix = "[v]" if checked else "[ ]"
                 row.append(InlineKeyboardButton(f"{prefix} {name}", callback_data=f"act_autopost_plat_{code}"))
             rows.append(row)
 
         rows.append([
-            InlineKeyboardButton(f"🤖 Mode: {mode.upper()} Peak Hours", callback_data="act_autopost_mode"),
+            InlineKeyboardButton(f"Mode: {mode.upper()} Peak Hours", callback_data="act_autopost_mode"),
         ])
-        rows.append([InlineKeyboardButton(f"{E['home']} Menu Utama", callback_data="act_back")])
+        rows.append([InlineKeyboardButton("Menu Utama", callback_data="act_back")])
         return InlineKeyboardMarkup(rows)
 
     @staticmethod
@@ -579,12 +579,12 @@ class KB:
         rows: list[list[InlineKeyboardButton]] = []
         for i in range(0, len(VIRAL_TOPICS), 2):
             row = []
-            for emoji, label, query in VIRAL_TOPICS[i:i + 2]:
-                row.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"viral_{query}"))
+            for _tag, label, query in VIRAL_TOPICS[i:i + 2]:
+                row.append(InlineKeyboardButton(label, callback_data=f"viral_{query}"))
             rows.append(row)
         rows.append([
-            InlineKeyboardButton("✏️ Ketik Sendiri", callback_data="viral_custom"),
-            InlineKeyboardButton(f"{E['back']} Kembali", callback_data="act_back"),
+            InlineKeyboardButton("Ketik Sendiri", callback_data="viral_custom"),
+            InlineKeyboardButton("Kembali", callback_data="act_back"),
         ])
         return InlineKeyboardMarkup(rows)
 
@@ -601,10 +601,10 @@ class KB:
         # Pagination row
         nav_row = []
         if page > 1:
-            nav_row.append(InlineKeyboardButton("◀️ Prev", callback_data=f"jobs_{page - 1}_{status_filter}"))
+            nav_row.append(InlineKeyboardButton("< Prev", callback_data=f"jobs_{page - 1}_{status_filter}"))
         nav_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
         if page < total_pages:
-            nav_row.append(InlineKeyboardButton("▶️ Next", callback_data=f"jobs_{page + 1}_{status_filter}"))
+            nav_row.append(InlineKeyboardButton("Next >", callback_data=f"jobs_{page + 1}_{status_filter}"))
         rows.append(nav_row)
         # Filter row
         rows.append([
@@ -1425,16 +1425,16 @@ async def _show_autopost_menu(target, toast: str = ""):
     acc_count = len(accounts)
 
     text = (
-        f"🚀 <b>Auto-Post ke Media Sosial (AI Scheduled)</b>\n\n"
-        f"Status: <b>{'✅ AKTIF' if is_enabled else '❌ NONAKTIF'}</b>\n"
+        f"<b>Auto-Post ke Media Sosial (AI Scheduled)</b>\n\n"
+        f"Status: <b>{'[AKTIF]' if is_enabled else '[NONAKTIF]'}</b>\n"
         f"Akun Terhubung: <b>{acc_count} akun</b>\n"
         f"Platform Target: <code>{', '.join(platforms) if platforms else 'Semua Akun'}</code>\n"
         f"Mode Jadwal: <b>{mode.upper()} Smart Peak Hours</b>\n"
         f"Jam Tayang AI: <code>{peak_hours}</code>\n\n"
-        f"💡 <i>Klip video yang selesai dirender akan otomatis diunggah dan dijadwalkan posting dengan caption & hashtag optimal dari metadata AI.</i>"
+        f"<i>Klip video yang selesai dirender akan otomatis diunggah dan dijadwalkan posting dengan caption & hashtag optimal dari metadata AI.</i>"
     )
     if toast:
-        text = f"✨ <i>{toast}</i>\n\n" + text
+        text = f"<i>{toast}</i>\n\n" + text
 
     kb = KB.autopost_menu(is_enabled, platforms, mode)
     if hasattr(target, "edit_message_text"):
@@ -1456,13 +1456,13 @@ async def cmd_autopost(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if arg in ("on", "enable", "true", "1"):
             telegram_service.update_settings({"auto_post_social": True})
             await update.message.reply_text(
-                "✅ <b>Auto-Post ke media sosial telah diaktifkan!</b>",
+                "<b>Auto-Post ke media sosial telah diaktifkan!</b>",
                 parse_mode=ParseMode.HTML,
             )
         elif arg in ("off", "disable", "false", "0"):
             telegram_service.update_settings({"auto_post_social": False})
             await update.message.reply_text(
-                "❌ <b>Auto-Post ke media sosial telah dinonaktifkan.</b>",
+                "<b>Auto-Post ke media sosial telah dinonaktifkan.</b>",
                 parse_mode=ParseMode.HTML,
             )
 
@@ -1626,7 +1626,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if topic == "custom":
             await edit_or_reply(
                 query,
-                f"✏️ <b>Ketik topik pencarian kamu</b>\n\n"
+                f"<b>Ketik topik pencarian kamu</b>\n\n"
                 f"<code>/viral &lt;topik&gt;</code>\n\n"
                 f"Contoh: <code>/viral motivasi bisnis --lang id</code>",
                 KB.back(),
@@ -1912,8 +1912,8 @@ def main():
 
     if not CONFIG.allowed_users:
         logger.warning(
-            "⚠️  TELEGRAM_ALLOWED_USERS tidak di-set — SEMUA ORANG bisa akses bot!\n"
-            "    Set di $HERMES_HOME/.env untuk keamanan."
+            "[WARN] TELEGRAM_ALLOWED_USERS tidak di-set — SEMUA ORANG bisa akses bot!\n"
+            "       Set di $HERMES_HOME/.env untuk keamanan."
         )
 
     logger.info("Starting AutoCliper Bot...")

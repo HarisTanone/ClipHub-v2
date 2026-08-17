@@ -347,7 +347,7 @@ async def test_all_models(user: CurrentUser = Depends(require_superadmin())):
     """Test ALL available models from 9router — returns status per model.
 
     Fetches /models list, then sends a minimal chat completion to each one.
-    Reports ✅ or ❌ per model with latency and error info.
+    Reports success or failure per model with latency and error info.
     """
     base_url = (get_model_setting("NINE_ROUTER_BASE_URL") or "").rstrip("/")
     api_key = get_model_setting("NINE_ROUTER_API_KEY")

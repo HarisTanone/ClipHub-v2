@@ -120,11 +120,11 @@ def main():
     is_cached = result.get("is_cached", False)
 
     if is_cached:
-        print(f"\n✅ Job sudah ada (cached): {job_id}")
+        print(f"\n[OK] Job sudah ada (cached): {job_id}")
         print(f"Status: {status}")
         print(f"Gunakan force_reprocess=true untuk proses ulang.")
     else:
-        print(f"\n✅ Job berhasil dibuat!")
+        print(f"\n[OK] Job berhasil dibuat!")
         print(f"Job ID: {job_id}")
         print(f"Status: {status}")
         print(f"\nPantau progress dengan: autocliper_job_status job_id={job_id}")

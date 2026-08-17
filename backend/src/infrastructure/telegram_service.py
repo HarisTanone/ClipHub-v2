@@ -248,12 +248,12 @@ class TelegramService:
 
                 if destination:
                     test_msg = (
-                        f"🤖 <b>ClipHub Telegram Bot Connected!</b>\n\n"
+                        f"<b>[ClipHub] Telegram Bot Connected</b>\n\n"
                         f"• <b>Bot:</b> {bot_name} (@{bot_username})\n"
                         f"• <b>Target:</b> <code>{destination}</code>\n"
                         f"• <b>Latency:</b> <code>{latency_ms}ms</code>\n"
                         f"• <b>Time:</b> <code>{time.strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n"
-                        f"✨ <i>Koneksi bot dan grup/channel Telegram siap digunakan!</i>"
+                        f"<i>Koneksi bot dan grup/channel Telegram siap digunakan!</i>"
                     )
                     payload: Dict[str, Any] = {
                         "chat_id": destination,
@@ -381,7 +381,7 @@ class TelegramService:
             logger.warning(f"telegram: file {video_path} is {file_size / (1024*1024):.1f}MB (>50MB limit)")
             # Send message instead with warning
             await self.send_message(
-                f"⚠️ <b>Video Terlalu Besar untuk Dikirim Langsung</b>\n\n"
+                f"<b>[WARNING] Video Terlalu Besar untuk Dikirim Langsung</b>\n\n"
                 f"File: <code>{os.path.basename(video_path)}</code> ({file_size / (1024*1024):.1f}MB)\n"
                 f"Batas upload Telegram Bot API adalah 50MB.",
                 target_id=target_id
@@ -447,11 +447,11 @@ class TelegramService:
 
         short_id = job_id.replace("job_", "")[:8]
         msg = (
-            f"🎬 <b>Job Rendering Dimulai</b>\n\n"
-            f"📌 <b>Judul:</b> {title or 'Video'}\n"
-            f"🔗 <b>Source:</b> {source_url}\n"
-            f"🆔 <code>{short_id}</code>\n"
-            f"⏳ <i>Sedang menganalisis momen terbaik & merender klip 9:16...</i>"
+            f"<b>[Job Started] Rendering Dimulai</b>\n\n"
+            f"<b>Judul:</b> {title or 'Video'}\n"
+            f"<b>Source:</b> {source_url}\n"
+            f"<b>ID:</b> <code>{short_id}</code>\n"
+            f"<i>Sedang menganalisis momen terbaik & merender klip 9:16...</i>"
         )
         return await self.send_message(msg)
 
@@ -470,10 +470,10 @@ class TelegramService:
 
         short_id = job_id.replace("job_", "")[:8]
         msg = (
-            f"🎉 <b>Job Selesai — {clips_count} Klip Siap!</b>\n\n"
-            f"📌 <b>Judul:</b> {title or 'Video'}\n"
-            f"🆔 <code>{short_id}</code>\n"
-            f"✂️ <b>Total Klip:</b> {clips_count}\n\n"
+            f"<b>[Job Completed] {clips_count} Klip Siap!</b>\n\n"
+            f"<b>Judul:</b> {title or 'Video'}\n"
+            f"<b>ID:</b> <code>{short_id}</code>\n"
+            f"<b>Total Klip:</b> {clips_count}\n\n"
         )
 
         for i, clip in enumerate(clips[:5], 1):
@@ -485,7 +485,7 @@ class TelegramService:
         if clips_count > 5:
             msg += f"\n<i>...dan {clips_count - 5} klip lainnya.</i>\n"
 
-        msg += f"\n👉 <i>Buka dashboard ClipHub untuk review & download.</i>"
+        msg += f"\n<i>Buka dashboard ClipHub untuk review & download.</i>"
 
         await self.send_message(msg)
 
@@ -503,7 +503,7 @@ class TelegramService:
                 if video_file:
                     hook_title = clip.get("hook", f"Clip #{rank}")
                     tags = " #fyp #viral #shorts #reels #podcast" if cfg.get("include_hashtags") else ""
-                    caption = f"🎬 <b>Clip #{rank}:</b> {hook_title}\n\n{tags}"
+                    caption = f"<b>Clip #{rank}:</b> {hook_title}\n\n{tags}"
                     await self.send_video(video_file, caption=caption)
                     # small delay between sending multiple videos
                     await asyncio.sleep(1.0)
@@ -534,10 +534,10 @@ class TelegramService:
 
         short_id = job_id.replace("job_", "")[:8]
         msg = (
-            f"❌ <b>Job Gagal Diproses</b>\n\n"
-            f"📌 <b>Judul:</b> {title or 'Video'}\n"
-            f"🆔 <code>{short_id}</code>\n"
-            f"⚠️ <b>Error:</b> <code>{error[:300]}</code>"
+            f"<b>[Job Failed] Gagal Diproses</b>\n\n"
+            f"<b>Judul:</b> {title or 'Video'}\n"
+            f"<b>ID:</b> <code>{short_id}</code>\n"
+            f"<b>Error:</b> <code>{error[:300]}</code>"
         )
         return await self.send_message(msg)
 
@@ -559,7 +559,7 @@ class TelegramService:
         if not video_file:
             return {"success": False, "error": f"File video klip #{clip_rank} belum tersedia"}
 
-        caption = custom_caption or f"🎬 Clip #{clip_rank} - {job_id}"
+        caption = custom_caption or f"Clip #{clip_rank} - {job_id}"
         return await self.send_video(video_file, caption=caption, target_id=target_id)
 
 

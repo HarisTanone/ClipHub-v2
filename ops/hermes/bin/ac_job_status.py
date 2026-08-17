@@ -21,17 +21,17 @@ if os.path.exists(_env_file):
 sys.path.insert(0, str(Path(__file__).parent))
 import ac_auth
 
-STATUS_EMOJI = {
-    "queued": "⏳",
-    "processing": "⚙️",
-    "downloading": "⬇️",
-    "transcribing": "📝",
-    "analyzing": "🧠",
-    "trimming": "✂️",
-    "rendering": "🎬",
-    "completed": "✅",
-    "failed": "❌",
-    "timeout": "⏰",
+STATUS_TAG = {
+    "queued": "[QUEUED]",
+    "processing": "[RUNNING]",
+    "downloading": "[DOWNLOADING]",
+    "transcribing": "[TRANSCRIBING]",
+    "analyzing": "[ANALYZING]",
+    "trimming": "[TRIMMING]",
+    "rendering": "[RENDERING]",
+    "completed": "[COMPLETED]",
+    "failed": "[FAILED]",
+    "timeout": "[TIMEOUT]",
 }
 
 
@@ -45,7 +45,7 @@ def main():
     data = progress.get("data", {})
 
     status = data.get("status", "unknown")
-    emoji = STATUS_EMOJI.get(status, "❓")
+    tag = STATUS_TAG.get(status, f"[{status.upper()}]")
     is_terminal = data.get("is_terminal", False)
 
     prog = data.get("progress", {})
@@ -66,7 +66,7 @@ def main():
     eta = data.get("eta")
 
     # ─── Format output ────────────────────────────────────────────────────────
-    print(f"\n{emoji} Job: {args.job_id}")
+    print(f"\n{tag} Job: {args.job_id}")
     print(f"Status: {status.upper()}")
 
     if created_at:

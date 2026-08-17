@@ -292,15 +292,15 @@ class SocialAutoPostService:
             try:
                 from src.infrastructure.telegram_service import telegram_service
                 msg = (
-                    f"🚀 <b>AI Auto-Post Scheduled ({len(scheduled_records)} Postingan)</b>\n\n"
-                    f"📌 <b>Job:</b> <code>{job_id[:12]}</code>\n"
-                    f"🤖 <b>Mode:</b> AI Smart Peak-Hours\n\n"
+                    f"<b>AI Auto-Post Scheduled ({len(scheduled_records)} Postingan)</b>\n\n"
+                    f"<b>Job:</b> <code>{job_id[:12]}</code>\n"
+                    f"<b>Mode:</b> AI Smart Peak-Hours\n\n"
                 )
                 for rec in scheduled_records[:6]:
                     time_display = rec['schedule_at'][:16].replace("T", " ")
-                    msg += f"• <b>Clip #{rec['clip_rank']}</b> ➔ <b>{rec['platform'].upper()}</b> ({rec['account_name']})\n"
-                    msg += f"  ⏰ <code>{time_display} UTC</code>\n"
-                    msg += f"  💬 <i>{rec['title'][:40]}...</i>\n\n"
+                    msg += f"• <b>Clip #{rec['clip_rank']}</b> -> <b>{rec['platform'].upper()}</b> ({rec['account_name']})\n"
+                    msg += f"  Time: <code>{time_display} UTC</code>\n"
+                    msg += f"  Title: <i>{rec['title'][:40]}...</i>\n\n"
 
                 if len(scheduled_records) > 6:
                     msg += f"<i>...dan {len(scheduled_records) - 6} postingan lainnya.</i>\n"

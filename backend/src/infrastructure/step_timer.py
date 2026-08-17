@@ -21,9 +21,9 @@ class StepTimer:
 
     async def __aenter__(self):
         self.start = time.time()
-        logger.info(f"[{self.job_id}] ▶ {self.step}")
+        logger.info(f"[{self.job_id}] >> {self.step}")
         return self
 
     async def __aexit__(self, *args):
         self.elapsed = time.time() - self.start
-        logger.info(f"[{self.job_id}] ✓ {self.step} — {self.elapsed:.1f}s")
+        logger.info(f"[{self.job_id}] [DONE] {self.step} - {self.elapsed:.1f}s")

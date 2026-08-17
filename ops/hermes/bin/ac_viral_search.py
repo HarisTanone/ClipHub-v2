@@ -89,9 +89,9 @@ def format_results(results: list[dict]) -> str:
         return "Tidak ada hasil ditemukan."
 
     if len(results) == 1 and "error" in results[0]:
-        return f"❌ {results[0]['error']}"
+        return f"[ERROR] {results[0]['error']}"
 
-    lines = [f"🔍 Ditemukan {len(results)} video:\n"]
+    lines = [f"Ditemukan {len(results)} video:\n"]
     for i, video in enumerate(results, 1):
         url = video.get("url", "")
         if not url and video.get("id"):
@@ -117,8 +117,8 @@ def format_results(results: list[dict]) -> str:
                 views_str = f" | {views} views"
 
         lines.append(f"{i}. {title}")
-        lines.append(f"   📺 {channel}{duration_str}{views_str}")
-        lines.append(f"   🔗 {url}")
+        lines.append(f"   Channel: {channel}{duration_str}{views_str}")
+        lines.append(f"   URL: {url}")
         lines.append("")
 
     return "\n".join(lines)

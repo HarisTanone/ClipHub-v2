@@ -77,8 +77,8 @@ def print_available_models(models: list[str]):
             alias_str = f"  (alias: {', '.join(aliases)})" if aliases else ""
             print(f"  • {m}{alias_str}")
     else:
-        print("\n⚠️  Tidak bisa connect ke 9router — daftar model tidak tersedia.")
-        print(f"    URL: {NINE_ROUTER_BASE_URL}/models")
+        print("\n[WARN] Tidak bisa connect ke 9router — daftar model tidak tersedia.")
+        print(f"       URL: {NINE_ROUTER_BASE_URL}/models")
 
     # Tampilkan alias yang tidak match model manapun di 9router (bisa jadi combo/special)
     shown_full = set()
@@ -89,11 +89,11 @@ def print_available_models(models: list[str]):
             shown_full.add(full)
 
     if extra_aliases:
-        print("\n🏷️  Alias shortcut (non-9router / combo):")
+        print("\nAlias shortcut (non-9router / combo):")
         for alias, full in extra_aliases:
-            print(f"  • {alias:<15} → {full}")
+            print(f"  • {alias:<15} -> {full}")
 
-    print("\n💡 Bisa pakai nama model langsung dari 9router atau alias di atas.")
+    print("\nBisa pakai nama model langsung dari 9router atau alias di atas.")
 
 
 def main():
@@ -125,11 +125,10 @@ def main():
     model = KNOWN_ALIASES.get(args.model.lower(), args.model)
     is_alias = args.model.lower() in KNOWN_ALIASES
 
-    # Validasi: cek apakah model ada di 9router (warning saja, tidak block)
     if available_models and model not in available_models:
-        print(f"⚠️  Model '{model}' tidak ditemukan di 9router.")
-        print(f"   Model tersedia: {', '.join(available_models[:10])}")
-        print(f"   Tetap dipakai — mungkin model baru atau combo.\n")
+        print(f"[WARN] Model '{model}' tidak ditemukan di 9router.")
+        print(f"       Model tersedia: {', '.join(available_models[:10])}")
+        print(f"       Tetap dipakai — mungkin model baru atau combo.\n")
 
     config_path = os.path.join(_hermes_home, "config.yaml")
     if not os.path.exists(config_path):
@@ -175,7 +174,7 @@ def main():
     with open(config_path, "w") as f:
         f.write(new_content)
 
-    print(f"✅ Model berhasil diganti!")
+    print(f"[OK] Model berhasil diganti!")
     print(f"Sebelum : {current_model or 'tidak diketahui'}")
     print(f"Sekarang: {model}")
     if is_alias:

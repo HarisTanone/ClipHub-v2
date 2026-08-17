@@ -21,12 +21,12 @@ if os.path.exists(_env_file):
 sys.path.insert(0, str(Path(__file__).parent))
 import ac_auth
 
-STATUS_EMOJI = {
-    "queued": "⏳",
-    "processing": "⚙️",
-    "completed": "✅",
-    "failed": "❌",
-    "timeout": "⏰",
+STATUS_TAG = {
+    "queued": "[QUEUED]",
+    "processing": "[RUNNING]",
+    "completed": "[COMPLETED]",
+    "failed": "[FAILED]",
+    "timeout": "[TIMEOUT]",
 }
 
 
@@ -57,13 +57,13 @@ def main():
     for job in jobs[:args.limit]:
         job_id = job.get("job_id", "")[:35]
         status = job.get("status", "unknown")
-        emoji = STATUS_EMOJI.get(status, "❓")
+        tag = STATUS_TAG.get(status, f"[{status.upper()}]")
         progress = job.get("render_progress") or 0
         created = (job.get("created_at") or "")[:16].replace("T", " ")
         url = job.get("youtube_url") or job.get("source_label") or ""
         url_short = url[:50] + "..." if len(url) > 50 else url
 
-        print(f"{job_id:<36} {emoji} {status:<10} {progress:>3}%       {created:<20} {url_short}")
+        print(f"{job_id:<36} {tag:<12} {progress:>3}%       {created:<20} {url_short}")
 
     print(f"\nTotal: {len(jobs)} job")
     print(json.dumps({"count": len(jobs), "jobs": [j.get("job_id") for j in jobs]}), file=sys.stderr)
