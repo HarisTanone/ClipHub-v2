@@ -2134,6 +2134,10 @@ class V2PipelineService:
                     ):
                         if clip_reframe.get(key) is not None:
                             cd_dict[key] = clip_reframe[key]
+                if "transition_style" not in cd_dict and hook_style_config.get("transitionStyle"):
+                    cd_dict["transition_style"] = hook_style_config.get("transitionStyle")
+                if "transition_duration" not in cd_dict and hook_style_config.get("transitionDuration") is not None:
+                    cd_dict["transition_duration"] = hook_style_config.get("transitionDuration")
 
                 # Prosody punch: energy peaks → zoom_events for Remotion
                 prosody = prosody_map.get(clip.rank)
