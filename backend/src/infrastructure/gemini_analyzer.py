@@ -38,14 +38,25 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         logger.info(f"gemini_analyzer_init: model={self._model}, fallback={self._fallback_model}")
 
     def _switch_to_fallback(self) -> None:
-        """Switch to next fallback model after repeated 503/overload errors."""
+        """Switch to next fallback model after repeated 503/overload/404 errors."""
         cascade = [
             settings.GEMINI_MODEL or "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3.1-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
             settings.GEMINI_FALLBACK_MODEL or "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
             "gemini-2.0-flash",
             "gemini-1.5-flash",
+            "gemini-1.5-pro",
             "gemini-1.5-flash-8b",
         ]
         models = [m for i, m in enumerate(cascade) if m and m not in cascade[:i]]
@@ -57,11 +68,11 @@ class GeminiAnalyzer(IGeminiAnalyzer):
 
         if next_idx < len(models):
             next_model = models[next_idx]
-            logger.warning(f"Switching from {self._model} → {next_model} (repeated 503 / overload)")
+            logger.warning(f"Switching from {self._model} → {next_model} (503 / overload / fallback)")
             self._model = next_model
             self._consecutive_503 = 0
         else:
-            logger.warning(f"All Gemini fallback models in cascade exhausted (last: {self._model})")
+            logger.warning(f"All {len(models)} Gemini fallback models in cascade exhausted (last: {self._model})")
 
     def _init_client(self) -> None:
         key = self._key_rotator.get_current_key()
@@ -291,9 +302,14 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                         time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                         continue
 
-                if "503" in error_str or "unavailable" in error_str:
+                if "404" in error_str or "not found" in error_str or "no longer available" in error_str:
+                    logger.warning(f"Model {self._model} not available/retired; switching to next fallback...")
+                    self._switch_to_fallback()
+                    continue
+
+                if "503" in error_str or "unavailable" in error_str or "high demand" in error_str:
                     self._consecutive_503 += 1
-                    if self._consecutive_503 >= 3:
+                    if self._consecutive_503 >= 2:
                         self._switch_to_fallback()
 
                 if attempt < MAX_RETRIES - 1:
@@ -305,7 +321,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
 
     def _call_text_only(self, prompt: str) -> str:
         """Call Gemini with text-only prompt (no video, much cheaper/faster)."""
-        for attempt in range(2):  # Fewer retries for text-only
+        for attempt in range(3):  # 3 attempts for text-only
             try:
                 if not self._client:
                     self._init_client()
@@ -321,11 +337,14 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                 raise ValueError("Respons Gemini kosong (text-only)")
 
             except Exception as e:
-                if "429" in str(e).lower() or "rate" in str(e).lower():
+                err_lower = str(e).lower()
+                if "429" in err_lower or "rate" in err_lower:
                     self._key_rotator.mark_rate_limited()
                     self._init_client()
-                if attempt == 0:
-                    time.sleep(3)
+                if "404" in err_lower or "503" in err_lower or "not found" in err_lower:
+                    self._switch_to_fallback()
+                if attempt < 2:
+                    time.sleep(2)
                     continue
                 raise
 
