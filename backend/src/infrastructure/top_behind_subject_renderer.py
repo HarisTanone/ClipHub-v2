@@ -138,7 +138,7 @@ class TopBehindSubjectRenderer:
             np.clip(
                 person_scale
                 if person_scale is not None
-                else getattr(settings, "TOP_OVERLAY_PERSON_SCALE", 0.80),
+                else getattr(settings, "TOP_OVERLAY_PERSON_SCALE", 1.0),
                 0.35,
                 1.0,
             )
@@ -147,7 +147,7 @@ class TopBehindSubjectRenderer:
             np.clip(
                 person_shift_y
                 if person_shift_y is not None
-                else getattr(settings, "TOP_OVERLAY_PERSON_SHIFT_Y", 0.12),
+                else getattr(settings, "TOP_OVERLAY_PERSON_SHIFT_Y", 0.0),
                 0.0,
                 0.75,
             )
@@ -171,7 +171,7 @@ class TopBehindSubjectRenderer:
             np.clip(
                 bg_black
                 if bg_black is not None
-                else getattr(settings, "TOP_OVERLAY_BG_BLACK", 0.55),
+                else getattr(settings, "TOP_OVERLAY_BG_BLACK", 0.0),
                 0.0,
                 1.0,
             )
@@ -205,7 +205,7 @@ class TopBehindSubjectRenderer:
         self._max_mask_components = 1
         # Temporal mask EMA (per-instance; reset between clips by new renderer)
         self._prev_clean_mask: np.ndarray | None = None
-        self._mask_ema = 0.55  # weight on previous frame
+        self._mask_ema = 0.65  # smooth weight on previous frame
         # Speaker stickiness: prefer same person across frames (anti-flip)
         self._prev_mask_centroid: tuple[float, float] | None = None
 
@@ -218,10 +218,10 @@ class TopBehindSubjectRenderer:
         person_mask: np.ndarray,
         overlay_frame: np.ndarray,
     ) -> np.ndarray:
-        """Composite one BGR frame.
+        """Composite one BGR frame with pristine foreground alpha matting.
 
         Args:
-            frame: original BGR HxWx3 uint8
+            frame: original BGR HxWx3 uint8 (speaker video)
             person_mask: HxW float/uint8, person=foreground ( >0.5 or >127 )
             overlay_frame: BGR HxWx3 already cover-cropped to frame size
         """
@@ -233,60 +233,50 @@ class TopBehindSubjectRenderer:
 
         p = self._normalize_person_mask(person_mask, h, w)
         p = self._clean_person_mask(p)
-        # Temporal EMA: kill flicker / hair edge jitter between frames
+        # Temporal EMA on continuous alpha matte (kills edge jitter without hard binarizing)
         if (
             self._prev_clean_mask is not None
             and self._prev_clean_mask.shape == p.shape
         ):
-            a = float(np.clip(self._mask_ema, 0.0, 0.9))
+            a = float(np.clip(self._mask_ema, 0.0, 0.85))
             p = a * self._prev_clean_mask + (1.0 - a) * p
-            p = np.where(p >= 0.48, 1.0, 0.0).astype(np.float32)
+            p = np.clip(p, 0.0, 1.0)
         self._prev_clean_mask = p.copy()
 
-        # Person as supporting sticker: shrink + pin to edge so stock dominates
+        # Person layout: default scale=1.0, shift=0.0 keeps natural original frame
         frame_f, p, layout = self._layout_person_supporting(frame, p)
 
         # Top region alpha with soft bottom fade (0 = no overlay, 1 = full)
         top_alpha = self._top_gradient(h, w) * float(np.clip(self.overlay_opacity, 0.0, 1.0))
-        # Overlay only where NOT person, in top region
-        bg_blend = top_alpha * (1.0 - p)
-        bg_blend3 = bg_blend[:, :, None]
+        top_alpha3 = top_alpha[:, :, None]
 
-        out = frame_f.astype(np.float32)
-        # Soft charcoal→black stage under stock (depth; top footage stays hero)
-        black_a = float(self.bg_black)
-        yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
-        xx = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
-        if black_a > 0.01:
-            # Protect top band — stock readable
-            top_protect = np.clip((yy - 0.04) / 0.22, 0.0, 1.0)
-            top_protect = top_protect * top_protect * (3.0 - 2.0 * top_protect)
-            vert = np.clip((yy - 0.18) / 0.70, 0.0, 1.0)
-            vert = vert * vert * (3.0 - 2.0 * vert)
-            edge_x = np.minimum(xx, 1.0 - xx)
-            side = np.clip(1.0 - edge_x / 0.25, 0.0, 1.0) * 0.18
-            dark = np.clip(vert * 0.72 + side, 0.0, 1.0) * black_a * top_protect
-            dark3 = (dark * top_alpha)[:, :, None]
-            # Charcoal gray, never pure black crush
-            charcoal = np.array([28.0, 28.0, 32.0], dtype=np.float32)
-            out = out * (1.0 - dark3 * 0.85) + charcoal[None, None, :] * (dark3 * 0.55)
-
+        # 1) Background plate: B-roll in top band, smoothly blending into original frame below
         ov = overlay_frame.astype(np.float32)
-        # Mild depth blur on stock
-        ov_soft = cv2.GaussianBlur(ov, (0, 0), 0.9)
-        ov = ov * 0.70 + ov_soft * 0.30
-        # Dim only lower stock band — top stays clear
+        # Subtle cinematic depth softening on background B-roll
+        ov_soft = cv2.GaussianBlur(ov, (0, 0), 0.8)
+        ov = ov * 0.80 + ov_soft * 0.20
+
+        frame_float = frame_f.astype(np.float32)
+        bg_plate = ov * top_alpha3 + frame_float * (1.0 - top_alpha3)
+
+        # Optional soft backdrop depth grade (if bg_black > 0) applied ONLY to top B-roll overlay
+        black_a = float(self.bg_black)
         if black_a > 0.01:
-            dim_map = 1.0 - (black_a * 0.12 * np.clip((yy - 0.15) / 0.55, 0.0, 1.0))
-            ov = ov * dim_map[:, :, None]
-        out = out * (1.0 - bg_blend3) + ov * bg_blend3
+            yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+            dim_map = 1.0 - (black_a * 0.15 * np.clip((yy - 0.10) / 0.60, 0.0, 1.0))
+            bg_plate = bg_plate * dim_map[:, :, None]
 
-        # Soft contact shadow only (no hard black blob)
+        # 2) Optional contact drop shadow onto background plate ONLY (behind person)
         if self.person_shadow and p.max() > 0.01:
-            shadow = cv2.GaussianBlur(p, (31, 31), 0)
-            shadow = shadow * top_alpha * 0.14
-            out = out * (1.0 - shadow[:, :, None])
+            shadow = cv2.GaussianBlur(p, (21, 21), 0)
+            shadow_intensity = 0.18 * top_alpha
+            bg_plate = bg_plate * (1.0 - (shadow * shadow_intensity)[:, :, None])
 
+        # 3) Foreground person composited over background plate
+        p3 = p[:, :, None]
+        out = frame_float * p3 + bg_plate * (1.0 - p3)
+
+        # 4) Optional stylized outline / glow if explicitly enabled
         if self.person_outline and p.max() > 0.01:
             out = self._draw_person_outline(out, p, top_alpha, layout=layout)
 
@@ -298,11 +288,7 @@ class TopBehindSubjectRenderer:
         frame: np.ndarray,
         p: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, dict]:
-        """Shrink person ~20%; keep natural X; no black-hole clear.
-
-        Gap between old large mask and new small person is filled by stock/
-        gradient via (1-new_p) — never hard charcoal paint (causes black blobs).
-        """
+        """Keep natural 1:1 person by default (scale=1.0, shift=0.0)."""
         import cv2
 
         h, w = frame.shape[:2]
@@ -352,13 +338,12 @@ class TopBehindSubjectRenderer:
         m_s = cv2.resize(mcrop, (nw, nh), interpolation=cv2.INTER_LINEAR)
         m_s = np.clip(m_s, 0.0, 1.0)
 
-        # Gentle vertical ease — preserve natural composition
-        base_y = y0p + int(round((ph - nh) * 0.35))  # shrink from center-ish
+        # Gentle vertical ease
+        base_y = y0p + int(round((ph - nh) * 0.35))
         room_below = max(0, h - (base_y + nh))
         dy = int(round(room_below * shift * 0.40))
         ny0 = int(np.clip(base_y + dy, 0, max(0, h - nh)))
 
-        # NATURAL X = keep source centroid (never force center/edge)
         margin = int(round(w * float(self.person_edge_margin)))
         cx = (x0p + x1p) * 0.5
         side = self.person_anchor
@@ -377,9 +362,13 @@ class TopBehindSubjectRenderer:
         nx0 = int(np.clip(nx0, 0, max(0, w - nw)))
         layout["anchor"] = side
 
-        # NO hard charcoal clear — black blobs come from painting old mask.
-        # Keep original frame; paste shrunk person; stock fills gap via new mask.
-        frame_out = frame.copy()
+        # Inpaint/clean old mask area so the original unshrunk subject does NOT create a ghost silhouette
+        old_mask_u8 = (p >= 0.35).astype(np.uint8) * 255
+        try:
+            frame_out = cv2.inpaint(frame, old_mask_u8, 5, cv2.INPAINT_TELEA)
+        except Exception:
+            frame_out = frame.copy()
+
         new_p = np.zeros((h, w), dtype=np.float32)
         y1n, x1n = ny0 + nh, nx0 + nw
         roi = frame_out[ny0:y1n, nx0:x1n].astype(np.float32)
@@ -387,11 +376,7 @@ class TopBehindSubjectRenderer:
         blended = roi * (1.0 - alpha) + crop_s.astype(np.float32) * alpha
         frame_out[ny0:y1n, nx0:x1n] = np.clip(blended, 0, 255).astype(np.uint8)
         new_p[ny0:y1n, nx0:x1n] = np.maximum(new_p[ny0:y1n, nx0:x1n], m_s)
-        # Soft edge on new mask (no hard binary snap → cleaner outline)
         new_p = np.clip(new_p, 0.0, 1.0)
-        if new_p.max() > 0.01:
-            new_p = cv2.GaussianBlur(new_p, (3, 3), 0)
-            new_p = np.where(new_p >= 0.40, 1.0, 0.0).astype(np.float32)
 
         nys, nxs = np.where(new_p >= 0.5)
         if len(nys):
@@ -668,35 +653,21 @@ class TopBehindSubjectRenderer:
         return np.clip(p, 0.0, 1.0)
 
     def _clean_person_mask(self, p: np.ndarray) -> np.ndarray:
-        """Hard sticker cutout: fill holes, kill fringe, crisp silhouette."""
+        """High-precision anti-aliased matte: solid core + subpixel soft rim."""
         import cv2
 
         if p.max() < 0.01:
             return p
 
         h, w = p.shape[:2]
-        # Higher threshold = less muddy YOLO fringe (0.55 kills soft halo).
-        binary = (p >= 0.55).astype(np.uint8) * 255
-        # Scale kernels to frame size (1080p needs bigger morph than 120px tests).
-        k = max(3, int(round(min(h, w) * 0.005)))
-        if k % 2 == 0:
-            k += 1
-        k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        k_med = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-        k_big = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k + 2, k + 2))
+        binary = (p >= 0.45).astype(np.uint8) * 255
 
-        # CLOSE first (fill hair/shoulder gaps), OPEN (kill fringe), CLOSE again.
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_big, iterations=3)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, k_med, iterations=1)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_med, iterations=2)
-
-        # Largest component = main speaker; dual_auto keeps top-2 if 2-shot.
+        # 1) Largest component = main speaker; dual_auto keeps top-2 if 2-shot
         n, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
         if n > 1:
             areas = stats[1:, cv2.CC_STAT_AREA]
             order = np.argsort(areas)[::-1]
             keep_n = max(1, min(int(self._max_mask_components), len(order)))
-            # dual: 2nd person only if ≥35% of largest (real 2-shot, not fringe)
             if keep_n >= 2 and len(order) >= 2:
                 a0 = float(areas[order[0]])
                 a1 = float(areas[order[1]])
@@ -705,33 +676,31 @@ class TopBehindSubjectRenderer:
             keep_labels = {1 + int(order[i]) for i in range(keep_n)}
             binary = np.where(np.isin(labels, list(keep_labels)), 255, 0).astype(np.uint8)
 
-        # Fill internal holes so B-roll never punches through torso/hair.
+        # 2) Fill internal holes so B-roll never punches through torso/hair/cap/microphone
         flood = binary.copy()
         ff_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
         cv2.floodFill(flood, ff_mask, (0, 0), 128)
         holes = (flood != 128) & (binary == 0)
         binary[holes] = 255
 
-        # Expand slightly so shoulders/hair not nibble-eaten by stock.
-        binary = cv2.dilate(binary, k3, iterations=2)
-        # One more close after dilate for smooth shoulder/arm edge.
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_med, iterations=1)
-        clean = binary.astype(np.float32) / 255.0
+        # 3) Subtle smoothing close (small 3x3 ellipse) to avoid jagged polygon edges
+        k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k3, iterations=1)
 
-        # Minimal feather + hard core (sticker edge, not soft matte).
-        feather = max(1, min(int(self.mask_feather), 3))
-        if feather % 2 == 0:
-            feather += 1
+        # 4) Subpixel anti-aliased matte feathering
+        feather = max(1, min(int(self.mask_feather), 7))
         if feather > 1:
-            soft = cv2.GaussianBlur(clean, (feather, feather), 0)
-            core = cv2.erode(binary, k3, iterations=2).astype(np.float32) / 255.0
-            # Hard interior, only 1-2px soft rim.
-            clean = np.where(core > 0.5, 1.0, soft)
-            clean = np.where(clean >= 0.50, 1.0, 0.0)  # hard binary snap
-            clean = np.clip(clean, 0.0, 1.0)
+            dist_in = cv2.distanceTransform(binary, cv2.DIST_L2, 3)
+            dist_out = cv2.distanceTransform(255 - binary, cv2.DIST_L2, 3)
+            signed_dist = dist_in - dist_out
+            band = float(feather)
+            alpha = np.clip((signed_dist + band * 0.5) / band, 0.0, 1.0)
+            # Smoothstep curve for natural edge falloff
+            clean = alpha * alpha * (3.0 - 2.0 * alpha)
         else:
-            clean = (clean >= 0.5).astype(np.float32)
-        return clean
+            clean = (binary >= 128).astype(np.float32)
+
+        return clean.astype(np.float32)
 
     def _draw_person_outline(
         self,

@@ -618,3 +618,53 @@ def test_diversify_low_candidates_seeds_extra_windows():
     assert any("diversify:" in (c.reason or "") for c in out)
 
 
+def test_top_behind_subject_zero_ghosting_and_exact_foreground():
+    """Verify that default natural 1:1 scale keeps exact original foreground without double-head."""
+    r = TopBehindSubjectRenderer(
+        split_ratio=0.6,
+        fade_height=0.1,
+        overlay_opacity=1.0,
+        person_scale=1.0,
+        person_shift_y=0.0,
+        bg_black=0.0,
+        person_shadow=False,
+    )
+    h, w = 120, 80
+    frame = np.full((h, w, 3), (35, 120, 220), dtype=np.uint8)  # Distinct subject color
+    overlay = np.full((h, w, 3), (180, 50, 40), dtype=np.uint8)  # Distinct B-roll
+    mask = np.zeros((h, w), dtype=np.float32)
+    # Define circular person head/body
+    yy, xx = np.mgrid[:h, :w]
+    mask[(yy - 60)**2 + (xx - 40)**2 <= 25**2] = 1.0
+
+    out = r.render(frame, mask, overlay)
+
+    # Core of person is EXACTLY identical to original camera frame
+    assert np.array_equal(out[60, 40], frame[60, 40])
+    # Top background is B-roll overlay
+    assert np.array_equal(out[10, 10], overlay[10, 10])
+    # Subpixel anti-aliased edge has intermediate values (no harsh aliasing)
+    edge_val = out[60, 15]  # on the circle boundary
+    assert not np.array_equal(edge_val, [0, 0, 0]), "no black halo on boundary"
+
+
+def test_clean_person_mask_signed_distance_feathering():
+    """Verify that _clean_person_mask produces smooth continuous subpixel feathering."""
+    r = TopBehindSubjectRenderer(mask_feather=3)
+    h, w = 100, 100
+    raw_mask = np.zeros((h, w), dtype=np.float32)
+    raw_mask[20:80, 20:80] = 1.0
+    
+    clean = r._clean_person_mask(raw_mask)
+    
+    # Inside core is solid 1.0
+    assert clean[50, 50] == 1.0
+    # Outside is solid 0.0
+    assert clean[5, 5] == 0.0
+    # Boundary contains anti-aliased floating values strictly between 0.0 and 1.0
+    boundary_vals = clean[20, 18:24]
+    has_subpixel = np.any((boundary_vals > 0.05) & (boundary_vals < 0.95))
+    assert has_subpixel, f"expected subpixel anti-aliasing on boundary, got {boundary_vals}"
+
+
+

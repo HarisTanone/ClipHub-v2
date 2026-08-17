@@ -236,29 +236,29 @@ class Settings(BaseSettings):
 
     # ─── Top Behind Subject Overlay (portrait 9:16, additive to full-frame B-roll)
     TOP_OVERLAY_ENABLED: bool = True
-    TOP_OVERLAY_SPLIT_RATIO: float = 0.68      # stock band upper; charcoal stage below
-    TOP_OVERLAY_FADE_HEIGHT: float = 0.12      # gradient fade as fraction of frame height
+    TOP_OVERLAY_SPLIT_RATIO: float = 0.65      # upper band for B-roll footage behind person
+    TOP_OVERLAY_FADE_HEIGHT: float = 0.15      # smooth gradient fade height fraction
     TOP_OVERLAY_OPACITY: float = 1.0
-    TOP_OVERLAY_PERSON_OUTLINE: bool = False   # disabled — was causing messy white lines around person
-    TOP_OVERLAY_PERSON_SHADOW: bool = True
-    TOP_OVERLAY_OUTLINE_THICKNESS: int = 9     # px stroke @720p; organic bust glow
+    TOP_OVERLAY_PERSON_OUTLINE: bool = False   # clean natural silhouette cutout (no messy white border)
+    TOP_OVERLAY_PERSON_SHADOW: bool = False    # no artificial dark halo on subject
+    TOP_OVERLAY_OUTLINE_THICKNESS: int = 9     # px stroke @720p; organic bust glow (when enabled)
     TOP_OVERLAY_OUTLINE_COLOR: str = "255,255,255"
     # white | neon | black | gradient | comic
     TOP_OVERLAY_OUTLINE_STYLE: str = "white"
     TOP_OVERLAY_MAX_PER_CLIP: int = 2
     TOP_OVERLAY_SEG_CONFIDENCE: float = 0.25
-    TOP_OVERLAY_MASK_FEATHER: int = 1
+    TOP_OVERLAY_MASK_FEATHER: int = 3          # subpixel anti-aliased matte edge feathering
     TOP_OVERLAY_MASK_STRIDE: int = 1
     TOP_OVERLAY_CROP_BIAS_Y: float = 0.08
     TOP_OVERLAY_SPEAKER_MASK_MODE: str = "dual_auto"
     TOP_OVERLAY_SMART_CROP: bool = True
     TOP_OVERLAY_SMART_CROP_CONF: float = 0.18
-    # Person supporting FG: ~20% smaller, natural X (no center/edge force)
-    TOP_OVERLAY_PERSON_SCALE: float = 0.80
-    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.12   # gentle down only — keep natural layout
-    TOP_OVERLAY_PERSON_ANCHOR: str = "natural" # natural|center|left|right — natural = keep source X
+    # Natural 1:1 subject scale (100% full-resolution original subject, zero ghosting)
+    TOP_OVERLAY_PERSON_SCALE: float = 1.0
+    TOP_OVERLAY_PERSON_SHIFT_Y: float = 0.0    # 1:1 natural anchor
+    TOP_OVERLAY_PERSON_ANCHOR: str = "natural" # natural|center|left|right
     TOP_OVERLAY_PERSON_EDGE_MARGIN: float = 0.03
-    TOP_OVERLAY_BG_BLACK: float = 0.55         # charcoal→black depth under stock (not flat pure black)
+    TOP_OVERLAY_BG_BLACK: float = 0.0          # clean backdrop without muddy dark wash
     TOP_OVERLAY_OUTLINE_BUST_RATIO: float = 0.48  # head→neck→shoulder
     TOP_OVERLAY_OUTLINE_EDGE_MARGIN: float = 0.05
 
