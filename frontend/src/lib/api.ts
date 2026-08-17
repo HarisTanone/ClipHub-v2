@@ -120,6 +120,75 @@ async function requestForm<T>(
   return res.json();
 }
 
+async function requestFormWithProgress<T>(
+  path: string,
+  formData: FormData,
+  onProgress?: (percent: number) => void
+): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  let token = getToken();
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          onProgress(percent);
+        }
+      };
+    }
+
+    xhr.onload = async () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          resolve(json);
+        } catch {
+          resolve({} as T);
+        }
+      } else if (xhr.status === 401 && token) {
+        const newToken = await refreshAccessToken();
+        if (newToken) {
+          try {
+            const res = await requestFormWithProgress<T>(path, formData, onProgress);
+            resolve(res);
+          } catch (err) {
+            reject(err);
+          }
+        } else {
+          clearTokens();
+          window.location.href = "/login";
+          reject(new Error("Session expired"));
+        }
+      } else {
+        try {
+          const error = JSON.parse(xhr.responseText);
+          reject(new ApiError(xhr.status, error.detail || "Upload failed"));
+        } catch {
+          reject(new ApiError(xhr.status, xhr.statusText || "Upload failed"));
+        }
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new ApiError(0, "Network error during upload"));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new ApiError(0, "Upload timed out"));
+    };
+
+    xhr.send(formData);
+  });
+}
+
 async function requestBlob(path: string): Promise<Blob> {
   const url = `${API_BASE}${path}`;
   let token = getToken();
@@ -494,11 +563,15 @@ export const jobs = {
     });
   },
 
-  async createUpload(file: File, payload: UploadJobPayload): Promise<JobResponse> {
+  async createUpload(
+    file: File,
+    payload: UploadJobPayload,
+    onProgress?: (percent: number) => void
+  ): Promise<JobResponse> {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("options_json", JSON.stringify(payload));
-    return requestForm<JobResponse>("/api/jobs/upload", formData);
+    return requestFormWithProgress<JobResponse>("/api/jobs/upload", formData, onProgress);
   },
 
   async cancel(jobId: string): Promise<{ success: boolean; message: string }> {

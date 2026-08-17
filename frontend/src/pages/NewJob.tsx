@@ -38,6 +38,7 @@ export function NewJob() {
   const [autogridEnabled, setAutogridEnabled] = useState(false);
   const [textEmphasisEnabled, setTextEmphasisEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [urlError, setUrlError] = useState("");
 
   // ─── Analyze-only flow state ─────────────────────────────────────
@@ -195,8 +196,13 @@ export function NewJob() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isSubmitting || isAnalyzing) return;
     if (sourceMode === "youtube" && !validateUrl(url)) return;
     if (sourceMode === "upload" && !validateUpload(uploadFile)) return;
+
+    setIsSubmitting(true);
+    setUploadProgress(sourceMode === "upload" ? 0 : null);
+
     const isFromReview = analyzeStep === "review" && editableClips.length > 0;
     const jobOptions = {
       target_aspect_ratio: aspectRatio,
@@ -252,7 +258,9 @@ export function NewJob() {
     try {
       let res;
       if (sourceMode === "upload" && uploadFile) {
-        res = await jobs.createUpload(uploadFile, jobOptions);
+        res = await jobs.createUpload(uploadFile, jobOptions, (pct) => {
+          setUploadProgress(pct);
+        });
       } else {
         let submitUrl = url.trim();
         if (!submitUrl.startsWith("http")) {
@@ -268,8 +276,17 @@ export function NewJob() {
       toast.error(e.message || "Failed to create job");
     } finally {
       setIsSubmitting(false);
+      setUploadProgress(null);
     }
   }
+
+  const submitButtonLabel = isSubmitting
+    ? uploadProgress !== null
+      ? uploadProgress >= 100
+        ? "Processing Video..."
+        : `Uploading (${uploadProgress}%)...`
+      : "Creating Job..."
+    : "Start Processing";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -295,12 +312,26 @@ export function NewJob() {
           )}
         </div>
         {analyzeStep === "review" ? (
-          <Button type="button" size="sm" loading={isSubmitting} onClick={handleSubmit} icon={<Send className="h-3.5 w-3.5" />}>
-            Start Processing
+          <Button
+            type="button"
+            size="sm"
+            loading={isSubmitting}
+            disabled={isSubmitting || isAnalyzing}
+            onClick={handleSubmit}
+            icon={<Send className="h-3.5 w-3.5" />}
+          >
+            {submitButtonLabel}
           </Button>
         ) : (
-          <Button type="button" size="sm" loading={isSubmitting} onClick={handleSubmit} icon={<Send className="h-3.5 w-3.5" />}>
-            Start Processing
+          <Button
+            type="button"
+            size="sm"
+            loading={isSubmitting}
+            disabled={isSubmitting || isAnalyzing}
+            onClick={handleSubmit}
+            icon={<Send className="h-3.5 w-3.5" />}
+          >
+            {submitButtonLabel}
           </Button>
         )}
       </div>
@@ -421,9 +452,26 @@ export function NewJob() {
                       <p className="truncate text-[11px] font-medium text-zinc-200">{uploadFile.name}</p>
                       <p className="text-[9px] text-zinc-600">{(uploadFile.size / 1024 / 1024).toFixed(1)} MB</p>
                     </div>
-                    <button type="button" onClick={() => { setUploadFile(null); setUploadError(""); }} className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300">
+                    <button type="button" disabled={isSubmitting} onClick={() => { setUploadFile(null); setUploadError(""); }} className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-50">
                       <X className="h-3.5 w-3.5" />
                     </button>
+                  </div>
+                )}
+                {uploadProgress !== null && (
+                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-2.5">
+                    <div className="flex items-center justify-between text-[11px] font-medium text-zinc-200 mb-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                        {uploadProgress >= 100 ? "Processing on server..." : "Uploading video..."}
+                      </span>
+                      <span className="text-emerald-400 font-mono text-xs">{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-emerald-500 h-1.5 rounded-full transition-all duration-200 ease-out"
+                        style={{ width: `${Math.max(5, uploadProgress)}%` }}
+                      />
+                    </div>
                   </div>
                 )}
                 {uploadError && <p className="text-[10px] text-red-400">{uploadError}</p>}
