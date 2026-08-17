@@ -1,7 +1,8 @@
-"""YouTubeDownloader — yt-dlp subprocess wrapper."""
 import asyncio
 import logging
+import os
 import re
+import sys
 from typing import Optional
 
 from src.config import settings
@@ -13,6 +14,33 @@ logger = logging.getLogger(__name__)
 YOUTUBE_PATTERN = re.compile(
     r"(youtube\.com/watch\?v=|youtu\.be/)([\w\-]{11})"
 )
+
+
+def _get_ytdlp_cmd() -> str:
+    venv_bin = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
+    return venv_bin if os.path.exists(venv_bin) else "yt-dlp"
+
+
+def _get_cookie_args() -> list[str]:
+    """Retrieve cookies args from settings, local cookies.txt, or macOS browser."""
+    cookies_path = getattr(settings, "YOUTUBE_COOKIES_PATH", "")
+    if cookies_path and os.path.exists(cookies_path):
+        return ["--cookies", cookies_path]
+    if os.path.exists("cookies.txt"):
+        return ["--cookies", "cookies.txt"]
+    backend_cookies = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../cookies.txt")
+    )
+    if os.path.exists(backend_cookies):
+        return ["--cookies", backend_cookies]
+    if sys.platform == "darwin":
+        return ["--cookies-from-browser", "chrome"]
+    return []
+
+
+def _get_extractor_args() -> list[str]:
+    """Extractor arguments to bypass YouTube 403 Forbidden on cloud/VPS servers."""
+    return ["--extractor-args", "youtube:player_client=android,web,web_creator,ios"]
 
 
 class YouTubeDownloader(IDownloader):
@@ -33,22 +61,18 @@ class YouTubeDownloader(IDownloader):
             return False, "Format URL tidak valid. Gunakan youtube.com/watch?v= atau youtu.be/", None
 
         try:
-            import os
-            import sys
-            venv_bin = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
-            ytdlp_cmd = venv_bin if os.path.exists(venv_bin) else "yt-dlp"
+            ytdlp_cmd = _get_ytdlp_cmd()
 
             env = os.environ.copy()
             homebrew_bin = "/opt/homebrew/bin"
             if homebrew_bin not in env.get("PATH", ""):
                 env["PATH"] = f"{homebrew_bin}:{env.get('PATH', '')}"
 
-            # Build command — only use cookies on local (Mac with Chrome)
-            cmd_args = [ytdlp_cmd]
-            if sys.platform == "darwin":
-                cmd_args += ["--cookies-from-browser", "chrome"]
-            cmd_args += [
+            cmd_args = [
+                ytdlp_cmd,
                 "--geo-bypass",
+                *_get_extractor_args(),
+                *_get_cookie_args(),
                 "--no-download",
                 "--print", "%(duration)s\n%(title)s",
                 "--no-warnings",
@@ -98,13 +122,8 @@ class YouTubeDownloader(IDownloader):
         """Download video YouTube menggunakan yt-dlp (+ aria2c di production)."""
         logger.info(f"Downloading video: {url} → {output_path}")
 
-        import os
-        import sys
-        # Use venv yt-dlp binary path
-        venv_bin = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
-        ytdlp_cmd = venv_bin if os.path.exists(venv_bin) else "yt-dlp"
+        ytdlp_cmd = _get_ytdlp_cmd()
 
-        # Ensure /opt/homebrew/bin in PATH for deno (required by yt-dlp JS solver)
         env = os.environ.copy()
         homebrew_bin = "/opt/homebrew/bin"
         if homebrew_bin not in env.get("PATH", ""):
@@ -112,17 +131,15 @@ class YouTubeDownloader(IDownloader):
 
         cmd = [
             ytdlp_cmd,
-        ]
-        if sys.platform == "darwin":
-            cmd += ["--cookies-from-browser", "chrome"]
-        cmd += [
             "--geo-bypass",
+            *_get_extractor_args(),
+            *_get_cookie_args(),
             "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "--merge-output-format", "mp4",
             "-o", output_path,
             "--no-warnings",
-            "--retries", "3",
-            "--fragment-retries", "5",
+            "--retries", "5",
+            "--fragment-retries", "10",
         ]
 
         # aria2c multi-thread download (production only)
@@ -156,6 +173,34 @@ class YouTubeDownloader(IDownloader):
 
         if proc.returncode != 0:
             err = stderr.decode().strip()
+            # If 403 occurs on first attempt, retry once with fallback format and ios client
+            if "403" in err or "Forbidden" in err:
+                logger.warning("yt-dlp 403 Forbidden detected; retrying with ios player client fallback...")
+                retry_cmd = [
+                    ytdlp_cmd,
+                    "--geo-bypass",
+                    "--extractor-args", "youtube:player_client=ios,android",
+                    *_get_cookie_args(),
+                    "-f", "best[height<=1080]/best",
+                    "--merge-output-format", "mp4",
+                    "-o", output_path,
+                    "--no-warnings",
+                    url,
+                ]
+                retry_proc = await asyncio.create_subprocess_exec(
+                    *retry_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+                r_stdout, r_stderr = await asyncio.wait_for(
+                    retry_proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
+                )
+                if retry_proc.returncode == 0:
+                    logger.info("yt-dlp fallback download succeeded!")
+                    return True
+                err = r_stderr.decode().strip()
+
             logger.error(f"yt-dlp gagal: {err[:300]}")
             raise RuntimeError(f"Download gagal: {err[:300]}")
 

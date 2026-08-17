@@ -410,9 +410,18 @@ class GroqTranscriber(IGroqTranscriber):
 
     async def _download_audio(self, youtube_url: str, output_dir: str) -> Optional[str]:
         """Download audio only using yt-dlp (no video)."""
-        output_template = os.path.join(output_dir, "audio.%(ext)s")
+        cookies_path = getattr(settings, "YOUTUBE_COOKIES_PATH", "")
+        cookie_args = []
+        if cookies_path and os.path.exists(cookies_path):
+            cookie_args = ["--cookies", cookies_path]
+        elif os.path.exists("cookies.txt"):
+            cookie_args = ["--cookies", "cookies.txt"]
+
         cmd = [
             "yt-dlp",
+            "--geo-bypass",
+            "--extractor-args", "youtube:player_client=android,web,web_creator,ios",
+            *cookie_args,
             "--extract-audio",
             "--audio-format", "mp3",
             "--audio-quality", "5",  # Medium quality (smaller file)

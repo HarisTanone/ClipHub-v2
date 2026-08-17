@@ -134,6 +134,8 @@ class FootageDownloader:
 
         cmd = [
             "yt-dlp",
+            "--geo-bypass",
+            "--extractor-args", "youtube:player_client=android,web,web_creator,ios",
             "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "--download-sections", section,
             "--merge-output-format", "mp4",
