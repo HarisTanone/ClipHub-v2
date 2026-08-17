@@ -38,12 +38,27 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         logger.info(f"gemini_analyzer_init: model={self._model}, fallback={self._fallback_model}")
 
     def _switch_to_fallback(self) -> None:
-        """Switch to fallback model after repeated 503 errors."""
-        if not self._using_fallback and self._fallback_model and self._fallback_model != self._model:
-            logger.warning(f"Switching from {self._model} → {self._fallback_model} (repeated 503)")
-            self._model = self._fallback_model
-            self._using_fallback = True
+        """Switch to next fallback model after repeated 503/overload errors."""
+        cascade = [
+            settings.GEMINI_MODEL or "gemini-3.7-flash",
+            settings.GEMINI_FALLBACK_MODEL or "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+        ]
+        models = [m for i, m in enumerate(cascade) if m and m not in cascade[:i]]
+        try:
+            current_idx = models.index(self._model)
+            next_idx = current_idx + 1
+        except ValueError:
+            next_idx = 1
+
+        if next_idx < len(models):
+            next_model = models[next_idx]
+            logger.warning(f"Switching from {self._model} → {next_model} (repeated 503 / overload)")
+            self._model = next_model
             self._consecutive_503 = 0
+        else:
+            logger.warning(f"All Gemini fallback models in cascade exhausted (last: {self._model})")
 
     def _init_client(self) -> None:
         key = self._key_rotator.get_current_key()
