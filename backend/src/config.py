@@ -3,7 +3,7 @@ import os
 from typing import Optional
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PIPELINE_ENV = os.getenv("PIPELINE_ENV", "local")
 
@@ -416,9 +416,11 @@ class Settings(BaseSettings):
         # Fallback
         return "data/autoclip.db"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore",
+    )
 
 
 settings = Settings()

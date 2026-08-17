@@ -222,6 +222,21 @@ else
     echo "  ✅ 9router CLI installed"
 fi
 
+# ─── Step 2.6: System Font Provisioning ──────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Step 2.6: Fontconfig & Custom Typography"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+sudo apt-get install -y fontconfig fonts-dejavu-core 2>/dev/null || true
+if [ -d "$BACKEND_DIR/assets/fonts" ]; then
+    echo "  Installing custom typography into system font directory..."
+    sudo mkdir -p /usr/local/share/fonts/autocliper
+    sudo cp -f "$BACKEND_DIR"/assets/fonts/*.ttf /usr/local/share/fonts/autocliper/ 2>/dev/null || true
+    sudo fc-cache -f /usr/local/share/fonts/autocliper 2>/dev/null || fc-cache -f 2>/dev/null || true
+    echo "  ✅ Custom fonts cached ($(ls "$BACKEND_DIR/assets/fonts"/*.ttf 2>/dev/null | wc -l | tr -d ' ') fonts)"
+fi
+
 # ─── Step 3: Backend Setup ──────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -2335,7 +2335,7 @@ class V2PipelineService:
                 try:
                     from src.application.services import AutoClipService
                     svc = AutoClipService.__new__(AutoClipService)
-                    svc._fonts_dir = getattr(self, "_fonts_dir", "/usr/share/fonts/truetype")
+                    svc._fonts_dir = fonts_dir
                     await svc._render_hook_ffmpeg(
                         base_path, clip.hook, hooked_path,
                         hook_style=hook_style,
