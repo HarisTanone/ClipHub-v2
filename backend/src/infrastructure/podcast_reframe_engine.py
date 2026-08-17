@@ -720,6 +720,10 @@ class PodcastReframeEngine(IReframeEngine):
             )
 
             # Build speaker-face mapping using EXISTING tracker data
+            if self._face_mapper is None:
+                map_thresh = settings.MAPPING_MARGIN_THRESHOLD if settings.REFRAME_PIPELINE_MODE != "legacy" else settings.DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD
+                self._face_mapper = SpeakerFaceMapper(confidence_threshold=map_thresh)
+
             sample_timestamps = tracked_data.get("sample_timestamps") or [
                 i * self.SAMPLE_INTERVAL_SEC
                 for i in range(len(tracked_data["per_frame_tracked"]))

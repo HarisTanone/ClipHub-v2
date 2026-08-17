@@ -455,6 +455,10 @@ class PersonFirstReframeEngine(IReframeEngine):
             )
 
             # Map speakers to person tracks
+            if self._face_mapper is None:
+                map_thresh = settings.MAPPING_MARGIN_THRESHOLD if settings.REFRAME_PIPELINE_MODE != "legacy" else settings.DIARIZATION_MAPPING_CONFIDENCE_THRESHOLD
+                self._face_mapper = SpeakerFaceMapper(confidence_threshold=map_thresh)
+
             sample_timestamps = tracked_data.get("sample_timestamps") or []
             mapping_result = self._face_mapper.build_mapping(
                 diarization_segments=diarization_result.segments,
