@@ -64,15 +64,26 @@ class SkiaSubtitleRenderer:
         }
         default_font = preset_default_fonts.get(preset_id, "Inter")
 
+        # Clamp max_words_per_line between 1 and 6
+        raw_words_per_line = (
+            style.get("maxWordsPerLine")
+            or style.get("max_words_per_line")
+            or base.get("max_words_per_line", 4)
+        )
+        try:
+            max_words_per_line = max(1, min(6, int(raw_words_per_line)))
+        except (ValueError, TypeError):
+            max_words_per_line = 4
+
         normalized = {
             "id": preset_id,
             "font_family": style.get("fontFamily") or style.get("font_family") or base.get("font_family", default_font),
-            "font_size": int(style.get("fontSize") or style.get("font_size") or base.get("font_size", 42)),
+            "font_size": int(style.get("fontSize") or style.get("font_size") or base.get("font_size", 48)),
             "font_weight": str(style.get("fontWeight") or style.get("font_weight") or base.get("font_weight", "Bold")),
             "text_color": style.get("color") or style.get("text_color") or base.get("text_color", "#FFFFFF"),
             "highlight_color": style.get("highlightColor") or style.get("highlight_color") or base.get("highlight_color", "#38BDF8"),
             "position_y_pct": float(style.get("positionY") or style.get("position_y_pct") or base.get("position_y_pct", 78)),
-            "max_words_per_line": int(style.get("maxWordsPerLine") or style.get("max_words_per_line") or base.get("max_words_per_line", 4)),
+            "max_words_per_line": max_words_per_line,
             "line_transition": style.get("lineTransition") or style.get("line_transition") or base.get("line_transition", "karaoke"),
             "uppercase": bool(style.get("uppercase", base.get("uppercase", False))),
             "enabled": style.get("enabled", True) is not False,
@@ -202,7 +213,8 @@ class SkiaSubtitleRenderer:
         start_offset: float,
     ) -> str:
         """Core high-definition Pillow rendering: generates transparent PNG frames and composites via FFmpeg concat demuxer."""
-        lines = self._group_words_into_lines(words, style.get("max_words_per_line", 4))
+        max_words = style.get("max_words_per_line", 4)
+        lines = self._group_words_into_lines(words, max_words)
         if not lines:
             return video_path
 
@@ -219,7 +231,6 @@ class SkiaSubtitleRenderer:
         concat_entries: List[Tuple[str, float]] = []
         cur_time = 0.0
         frame_idx = 0
-        transition = style.get("line_transition", "karaoke")
 
         try:
             for line_idx, line in enumerate(lines):
@@ -233,56 +244,37 @@ class SkiaSubtitleRenderer:
                         concat_entries.append((empty_png, gap_dur))
                         cur_time = line_start
 
-                if transition == "word_pop":
-                    # Word-pop mode: show only active word in sequence
-                    for w_idx, w in enumerate(line):
-                        w_start = max(0.0, float(w.get("start", 0)) + start_offset)
-                        w_end = max(w_start + 0.08, float(w.get("end", 0)) + start_offset)
+                # Show full line with active word highlighted as speech progresses
+                for w_idx, w in enumerate(line):
+                    w_start = max(0.0, float(w.get("start", 0)) + start_offset)
+                    w_end = max(w_start + 0.08, float(w.get("end", 0)) + start_offset)
 
-                        if w_start > cur_time:
-                            gap = w_start - cur_time
-                            if gap >= 0.02:
-                                concat_entries.append((empty_png, gap))
-                                cur_time = w_start
-
-                        dur = max(0.06, w_end - w_start)
-                        f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
-                        self._render_line_frame_pil(f_path, [w], active_word_index=0, style=style)
-                        concat_entries.append((f_path, dur))
-                        cur_time = w_end
-                        frame_idx += 1
-                else:
-                    # Line / Karaoke mode: show full line with word-by-word active highlight
-                    for w_idx, w in enumerate(line):
-                        w_start = max(0.0, float(w.get("start", 0)) + start_offset)
-                        w_end = max(w_start + 0.08, float(w.get("end", 0)) + start_offset)
-
-                        # Gap before active word in line
-                        if w_start > cur_time:
-                            gap = w_start - cur_time
-                            if gap >= 0.02:
-                                f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
-                                self._render_line_frame_pil(f_path, line, active_word_index=None, style=style)
-                                concat_entries.append((f_path, gap))
-                                cur_time = w_start
-                                frame_idx += 1
-
-                        dur = max(0.06, w_end - w_start)
-                        f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
-                        self._render_line_frame_pil(f_path, line, active_word_index=w_idx, style=style)
-                        concat_entries.append((f_path, dur))
-                        cur_time = w_end
-                        frame_idx += 1
-
-                    # Hold line if line_end is greater than last word end
-                    if line_end > cur_time:
-                        hold_dur = line_end - cur_time
-                        if hold_dur >= 0.05:
+                    # Gap before active word inside line
+                    if w_start > cur_time:
+                        gap = w_start - cur_time
+                        if gap >= 0.02:
                             f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
-                            self._render_line_frame_pil(f_path, line, active_word_index=len(line) - 1, style=style)
-                            concat_entries.append((f_path, hold_dur))
-                            cur_time = line_end
+                            self._render_line_frame_pil(f_path, line, active_word_index=None, style=style)
+                            concat_entries.append((f_path, gap))
+                            cur_time = w_start
                             frame_idx += 1
+
+                    dur = max(0.06, w_end - w_start)
+                    f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
+                    self._render_line_frame_pil(f_path, line, active_word_index=w_idx, style=style)
+                    concat_entries.append((f_path, dur))
+                    cur_time = w_end
+                    frame_idx += 1
+
+                # Hold line if line_end is greater than last word end
+                if line_end > cur_time:
+                    hold_dur = line_end - cur_time
+                    if hold_dur >= 0.05:
+                        f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
+                        self._render_line_frame_pil(f_path, line, active_word_index=len(line) - 1, style=style)
+                        concat_entries.append((f_path, hold_dur))
+                        cur_time = line_end
+                        frame_idx += 1
 
             # Trailing silence until end of video
             if video_dur > cur_time:
@@ -316,7 +308,7 @@ class SkiaSubtitleRenderer:
                 output_path,
             ]
 
-            logger.info(f"skia_subtitle: rendering '{style.get('id')}' ({len(concat_entries)} timing cuts) → {os.path.basename(output_path)}")
+            logger.info(f"skia_subtitle: rendering '{style.get('id')}' ({max_words} words/line, {len(concat_entries)} timing cuts) → {os.path.basename(output_path)}")
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=max(180, int(video_dur * 3 + 60)))
             if res.returncode != 0:
                 logger.error(f"skia_subtitle FFmpeg overlay failed: {res.stderr[-400:]}")
@@ -351,7 +343,7 @@ class SkiaSubtitleRenderer:
 
         preset_id = style.get("id", "glassmorphism")
         font_family = style.get("font_family", "Inter")
-        font_size = int(style.get("font_size", 42))
+        font_size = int(style.get("font_size", 48))
         is_uppercase = style.get("uppercase", False)
 
         font = self._load_pil_font(font_family, font_size)
@@ -376,8 +368,21 @@ class SkiaSubtitleRenderer:
             img.save(output_png, format="PNG")
             return
 
-        spacing = max(16, int(font_size * 0.35))
+        spacing = max(16, int(font_size * 0.32))
         total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
+
+        # Auto-scale font if line exceeds safe margins (940px)
+        max_safe_width = 940
+        if total_text_width > max_safe_width:
+            scale = max_safe_width / total_text_width
+            font_size = max(24, int(font_size * scale))
+            font = self._load_pil_font(font_family, font_size)
+            spacing = max(12, int(font_size * 0.32))
+            for item in word_items:
+                bbox = draw.textbbox((0, 0), item["text"], font=font)
+                item["width"] = max(1, bbox[2] - bbox[0])
+                item["height"] = max(1, bbox[3] - bbox[1])
+            total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
 
         # Center positions
         pos_y_pct = float(style.get("position_y_pct", 78))
@@ -390,7 +395,7 @@ class SkiaSubtitleRenderer:
 
         # ─── 1. Background / Card Shapes ──────────────────────────────────────
         card_pad_x = int(style.get("bg_padding", 28))
-        card_pad_y = max(14, int(font_size * 0.32))
+        card_pad_y = max(14, int(font_size * 0.34))
         card_left = max(30, start_x - card_pad_x)
         card_right = min(self._width - 30, start_x + total_text_width + card_pad_x)
         card_top = center_y - line_height // 2 - card_pad_y
@@ -401,7 +406,7 @@ class SkiaSubtitleRenderer:
             draw.rounded_rectangle(
                 [card_left, card_top, card_right, card_bottom],
                 radius=20,
-                fill=(30, 41, 59, int(255 * 0.70)),
+                fill=(30, 41, 59, int(255 * 0.72)),
                 outline=(255, 255, 255, 140),
                 width=2,
             )
@@ -416,7 +421,7 @@ class SkiaSubtitleRenderer:
             )
         elif preset_id == "podcast_pro":
             # Dark charcoal pill with emerald border & MIC dot
-            mic_extra_left = 60
+            mic_extra_left = 64
             c_left = max(30, card_left - mic_extra_left)
             draw.rounded_rectangle(
                 [c_left, card_top, card_right, card_bottom],
@@ -426,14 +431,14 @@ class SkiaSubtitleRenderer:
                 width=2,
             )
             # Emerald MIC indicator dot
-            dot_cx = c_left + 24
+            dot_cx = c_left + 26
             dot_cy = center_y
             draw.ellipse([dot_cx - 6, dot_cy - 6, dot_cx + 6, dot_cy + 6], fill=(16, 185, 129, 255))
             mic_font = self._load_pil_font("Inter", 18)
             draw.text((dot_cx + 12, dot_cy - 10), "MIC", font=mic_font, fill=(16, 185, 129, 230))
         elif preset_id == "modern_mono":
             # Cyber Terminal window with mini header bar
-            header_h = 28
+            header_h = 30
             term_top = card_top - header_h
             draw.rounded_rectangle(
                 [card_left, term_top, card_right, card_bottom],
@@ -443,11 +448,11 @@ class SkiaSubtitleRenderer:
                 width=2,
             )
             # Traffic light window dots
-            draw.ellipse([card_left + 12, term_top + 8, card_left + 22, term_top + 18], fill=(239, 68, 68, 255))
-            draw.ellipse([card_left + 26, term_top + 8, card_left + 36, term_top + 18], fill=(234, 179, 8, 255))
-            draw.ellipse([card_left + 40, term_top + 8, card_left + 50, term_top + 18], fill=(34, 197, 94, 255))
+            draw.ellipse([card_left + 12, term_top + 9, card_left + 22, term_top + 19], fill=(239, 68, 68, 255))
+            draw.ellipse([card_left + 26, term_top + 9, card_left + 36, term_top + 19], fill=(234, 179, 8, 255))
+            draw.ellipse([card_left + 40, term_top + 9, card_left + 50, term_top + 19], fill=(34, 197, 94, 255))
             term_font = self._load_pil_font("Space Grotesk", 14)
-            draw.text((card_left + 58, term_top + 5), "TERMINAL v2.0", font=term_font, fill=(6, 182, 212, 200))
+            draw.text((card_left + 58, term_top + 6), "TERMINAL v2.0", font=term_font, fill=(6, 182, 212, 200))
             draw.line([card_left, term_top + header_h, card_right, term_top + header_h], fill=(6, 182, 212, 80), width=1)
         elif preset_id == "cinematic_slate":
             # Hollywood gold top & bottom rules
@@ -476,7 +481,7 @@ class SkiaSubtitleRenderer:
             word_y = baseline_y
 
             if preset_id == "kinetic_word_box" and is_active:
-                # Hot pink solid badge behind active word
+                # Solid rounded badge behind active word
                 badge_pad_x = 12
                 badge_pad_y = 6
                 badge_box = [
@@ -538,7 +543,7 @@ class SkiaSubtitleRenderer:
 
     def _group_words_into_lines(self, words: list, max_per_line: int) -> list[list[dict]]:
         """Group words into lines respecting word count and natural speech pauses."""
-        max_chars = 26
+        max_chars = max(40, max_per_line * 16)
         lines = []
         current_line = []
         current_chars = 0
@@ -555,10 +560,10 @@ class SkiaSubtitleRenderer:
             if current_line:
                 prev_end = float(current_line[-1].get("end", 0))
                 curr_start = float(w.get("start", 0))
-                if curr_start - prev_end > 0.45:
+                if curr_start - prev_end > 0.75:
                     force_new = True
 
-            if force_new or word_count > max_per_line or new_chars > max_chars:
+            if force_new or word_count > max_per_line or (word_count > 1 and new_chars > max_chars):
                 if current_line:
                     lines.append(current_line)
                 current_line = [w]

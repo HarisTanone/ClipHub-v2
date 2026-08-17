@@ -3378,7 +3378,9 @@ function SkiaSubtitleLivePreview({
   const presetId = style.stylePreset || "clean_editorial";
   const preset = SKIA_SUBTITLE_PRESETS.find(p => p.id === presetId) || SKIA_SUBTITLE_PRESETS[0];
   const posTop = `${style.positionY ?? 78}%`;
-  const words = ["ini", "kata", "penting", "banget"];
+  const sampleWords = ["ini", "kata", "penting", "banget", "untuk", "kamu"];
+  const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
+  const words = sampleWords.slice(0, count);
 
   // Ensure all preset Google Fonts are available in the DOM
   useGoogleFont(style.fontFamily || "Inter");
@@ -4814,7 +4816,7 @@ export function SubtitleEditor({
 
             <Section title="Line Settings">
               <div className="grid grid-cols-2 gap-3">
-                <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
+                <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={1} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
                 <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
               </div>
             </Section>
@@ -5007,7 +5009,7 @@ export function SubtitleEditor({
 
             <Section title="Line Settings">
               <div className="grid grid-cols-2 gap-3">
-                <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
+                <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={1} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
                 <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
               </div>
             </Section>
@@ -5042,7 +5044,7 @@ export function SubtitleEditor({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3">
                   <RangeInput label={`Speed: ${style.animationSpeed.toFixed(1)}x`} min={5} max={20} value={Math.round(style.animationSpeed * 10)} onChange={(v) => update({ animationSpeed: v / 10 })} />
-                  <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={2} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
+                  <RangeInput label={`Words/line: ${style.maxWordsPerLine}`} min={1} max={6} value={style.maxWordsPerLine} onChange={(v) => update({ maxWordsPerLine: v })} />
                   <RangeInput label={`Word gap: ${style.wordSpacing}px`} min={2} max={18} value={style.wordSpacing} onChange={(v) => update({ wordSpacing: v })} />
                 </div>
               </div>

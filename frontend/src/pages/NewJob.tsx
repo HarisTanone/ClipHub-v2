@@ -679,6 +679,7 @@ export function NewJob() {
               <Row label="Font" value={hookStyleConfig.fontFamily} />
               <Row label="Sub Highlight" value={subtitleStyleConfig.highlightColor} color={subtitleStyleConfig.highlightColor} />
               <Row label="Sub Position" value={`${subtitleStyleConfig.position} ${subtitleStyleConfig.positionY}%`} />
+              <Row label="Words/Line" value={`${subtitleStyleConfig.maxWordsPerLine || 4} kata`} />
               <Row label="AI Text" value={textEmphasisEnabled ? textEmphasisStyleConfig.effectMode.replace(/_/g, " ") : "off"} />
               <Row label="Watermark" value={watermarkStyleConfig.enabled ? (watermarkStyleConfig.type === "text" ? watermarkStyleConfig.text || "text" : "image") : "off"} />
             </div>
