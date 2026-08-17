@@ -68,6 +68,26 @@ logger = logging.getLogger(__name__)
 MAX_CONCURRENT_JOBS = settings.MAX_CONCURRENT_JOBS
 _pipeline_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
+_active_job_tasks: dict[str, asyncio.Task] = {}
+
+
+def register_active_job_task(job_id: str, task: asyncio.Task) -> None:
+    _active_job_tasks[job_id] = task
+    task.add_done_callback(lambda _: _active_job_tasks.pop(job_id, None))
+
+
+def cancel_active_job_task(job_id: str) -> bool:
+    task = _active_job_tasks.pop(job_id, None)
+    if task and not task.done():
+        task.cancel()
+        return True
+    return False
+
+
+def is_job_active(job_id: str) -> bool:
+    task = _active_job_tasks.get(job_id)
+    return task is not None and not task.done()
+
 
 class JobService:
     """Pipeline orchestrator — 15 steps, v0.4 architecture (no transcript step)."""
@@ -342,9 +362,10 @@ class JobService:
 
         # ─── Route to appropriate pipeline ────────────────────────────
         if pipeline_version == "v2":
-            asyncio.create_task(self._run_v2_guarded(job))
+            task = asyncio.create_task(self._run_v2_guarded(job))
         else:
-            asyncio.create_task(self._run_guarded(job))
+            task = asyncio.create_task(self._run_guarded(job))
+        register_active_job_task(job.job_id, task)
         return job, False
 
     async def get_job(self, job_id: str) -> Optional[Job]:
@@ -952,6 +973,13 @@ class JobService:
             except Exception:
                 pass
 
+        except asyncio.CancelledError:
+            logger.info(f"[{job_id}] Pipeline cancelled by user.")
+            try:
+                await self._repo.update_status(job_id, JobStatus.FAILED, "Cancelled by user")
+            except Exception:
+                pass
+            return
         except Exception as e:
             logger.exception(f"[{job_id}] Pipeline failed: {e}")
             await self._repo.update_status(job_id, JobStatus.FAILED, str(e)[:512])

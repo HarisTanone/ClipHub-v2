@@ -1075,6 +1075,10 @@ async def cancel_job(
             detail=f"Cannot cancel job in '{job.status.value}' status",
         )
 
+    # Cancel the running asyncio task immediately to halt background processing
+    from src.application.services import cancel_active_job_task
+    cancelled_task = cancel_active_job_task(job_id)
+
     # Update status to failed with cancellation message
     from src.domain.entities import JobStatus
     await service._repo.update_status(job_id, JobStatus.FAILED, error_message="Cancelled by user")
@@ -1082,6 +1086,7 @@ async def cancel_job(
     return {
         "success": True,
         "message": f"Job '{job_id}' cancelled",
+        "task_cancelled": cancelled_task,
         "previous_status": job.status.value,
     }
 
@@ -1169,6 +1174,10 @@ async def delete_job(
             status_code=400,
             detail=f"Cannot delete job in '{job.status.value}' status. Cancel it first.",
         )
+
+    # Cancel any background task still lingering
+    from src.application.services import cancel_active_job_task
+    cancel_active_job_task(job_id)
 
     # Delete output files
     output_dir = f"{settings.OUTPUT_DIR}/{job_id}"

@@ -1075,6 +1075,13 @@ class V2PipelineService:
             except Exception:
                 pass
 
+        except asyncio.CancelledError:
+            logger.info(f"[{job_id}] V2 pipeline cancelled by user.")
+            try:
+                await self._repo.update_status(job_id, JobStatus.FAILED, "Cancelled by user")
+            except Exception:
+                pass
+            return
         except Exception as e:
             logger.exception(f"[{job_id}] V2 pipeline FAILED: {e}")
             await self._repo.update_status(
