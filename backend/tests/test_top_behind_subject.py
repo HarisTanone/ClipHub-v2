@@ -306,8 +306,8 @@ def test_outline_style_black():
     assert dark >= 1, f"expected black outline, dark={dark}"
 
 
-def test_person_scale_shrinks_and_shifts_down():
-    """Supporting element: ~20% smaller; natural X preserved; gentle Y ease."""
+def test_person_scale_preserves_natural_1to1():
+    """Subject stays 1:1 natural: zero shrink, zero shift, 100% original sharpness."""
     r = TopBehindSubjectRenderer(
         split_ratio=0.7,
         fade_height=0.05,
@@ -315,33 +315,31 @@ def test_person_scale_shrinks_and_shifts_down():
         person_outline=False,
         person_shadow=False,
         mask_feather=1,
-        person_scale=0.80,
-        person_shift_y=0.12,
+        person_scale=1.0,
+        person_shift_y=0.0,
         person_anchor="natural",
         bg_black=0.0,
     )
     h, w = 200, 120
     frame = np.full((h, w, 3), 50, dtype=np.uint8)
-    # Person OFF-center left (natural layout must not jump to center/edge)
+    # Person OFF-center left
     frame[40:160, 15:70] = (20, 20, 200)
     overlay = np.full((h, w, 3), (10, 180, 10), dtype=np.uint8)
     mask = np.zeros((h, w), dtype=np.float32)
     mask[40:160, 15:70] = 1.0
 
     out = r.render(frame, mask, overlay)
-    top_free = out[42:50, 30:55]
-    red_left = int(np.mean(top_free[:, :, 2]))
-    assert red_left < 150, f"person should leave top room, red={red_left}"
+    # Person area must retain original person color perfectly
+    person_core = out[80:120, 30:55]
+    red_core = int(np.mean(person_core[:, :, 2]))
+    assert red_core > 180, f"person core should stay 100% solid, red={red_core}"
 
     _, p2, layout = r._layout_person_supporting(frame, mask)
-    assert layout["scale"] == 0.80
+    assert layout["scale"] == 1.0
+    assert layout["shift_y"] == 0.0
     assert layout["anchor"] == "natural"
-    # Natural X: new center near original center (~42.5), not frame center (60) or edge
-    cx_new = (layout["x0"] + layout["x1"]) * 0.5
-    assert 20 < cx_new < 55, f"natural X broken, cx={cx_new}"
-    area0 = float(mask.sum())
-    area1 = float(p2.sum())
-    assert area1 < area0 * 0.95, f"mask area should shrink {area1} vs {area0}"
+    # Person area intact
+    assert float(p2.sum()) == float(mask.sum())
 
 
 def test_charcoal_gradient_protects_top_footage():

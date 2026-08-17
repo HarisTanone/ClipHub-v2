@@ -288,106 +288,28 @@ class TopBehindSubjectRenderer:
         frame: np.ndarray,
         p: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, dict]:
-        """Keep natural 1:1 person by default (scale=1.0, shift=0.0)."""
-        import cv2
-
+        """Keep natural 1:1 person always: 100% original sharpness, zero shrink, zero shift, zero inpaint."""
         h, w = frame.shape[:2]
-        scale = float(self.person_scale)
-        shift = float(self.person_shift_y)
         layout = {
-            "scale": scale,
-            "shift_y": shift,
-            "anchor": self.person_anchor,
+            "scale": 1.0,
+            "shift_y": 0.0,
+            "anchor": "natural",
             "y0": 0,
             "y1": h - 1,
             "x0": 0,
             "x1": w - 1,
             "ph": h,
         }
-        if p.max() < 0.01 or (scale >= 0.995 and shift <= 0.01):
-            ys, xs = np.where(p >= 0.5)
-            if len(ys):
-                layout.update(
-                    y0=int(ys.min()),
-                    y1=int(ys.max()),
-                    x0=int(xs.min()),
-                    x1=int(xs.max()),
-                    ph=int(ys.max() - ys.min() + 1),
-                )
-            return frame, p, layout
-
         ys, xs = np.where(p >= 0.45)
-        if len(ys) < 8:
-            return frame, p, layout
-
-        y0, y1 = int(ys.min()), int(ys.max())
-        x0, x1 = int(xs.min()), int(xs.max())
-        pad = max(4, int(round(min(h, w) * 0.012)))
-        y0p, y1p = max(0, y0 - pad), min(h - 1, y1 + pad)
-        x0p, x1p = max(0, x0 - pad), min(w - 1, x1 + pad)
-        ph, pw = y1p - y0p + 1, x1p - x0p + 1
-        if ph < 8 or pw < 8:
-            return frame, p, layout
-
-        crop = frame[y0p : y1p + 1, x0p : x1p + 1].copy()
-        mcrop = p[y0p : y1p + 1, x0p : x1p + 1].copy()
-
-        nh = max(8, int(round(ph * scale)))
-        nw = max(8, int(round(pw * scale)))
-        crop_s = cv2.resize(crop, (nw, nh), interpolation=cv2.INTER_AREA)
-        m_s = cv2.resize(mcrop, (nw, nh), interpolation=cv2.INTER_LINEAR)
-        m_s = np.clip(m_s, 0.0, 1.0)
-
-        # Gentle vertical ease
-        base_y = y0p + int(round((ph - nh) * 0.35))
-        room_below = max(0, h - (base_y + nh))
-        dy = int(round(room_below * shift * 0.40))
-        ny0 = int(np.clip(base_y + dy, 0, max(0, h - nh)))
-
-        margin = int(round(w * float(self.person_edge_margin)))
-        cx = (x0p + x1p) * 0.5
-        side = self.person_anchor
-        if side in {"auto", "natural", ""}:
-            nx0 = int(round(cx - nw * 0.5))
-            side = "natural"
-        elif side == "left":
-            nx0 = margin
-        elif side == "right":
-            nx0 = max(0, w - nw - margin)
-        elif side == "center":
-            nx0 = int(round((w - nw) * 0.5))
-        else:
-            nx0 = int(round(cx - nw * 0.5))
-            side = "natural"
-        nx0 = int(np.clip(nx0, 0, max(0, w - nw)))
-        layout["anchor"] = side
-
-        # Inpaint/clean old mask area so the original unshrunk subject does NOT create a ghost silhouette
-        old_mask_u8 = (p >= 0.35).astype(np.uint8) * 255
-        try:
-            frame_out = cv2.inpaint(frame, old_mask_u8, 5, cv2.INPAINT_TELEA)
-        except Exception:
-            frame_out = frame.copy()
-
-        new_p = np.zeros((h, w), dtype=np.float32)
-        y1n, x1n = ny0 + nh, nx0 + nw
-        roi = frame_out[ny0:y1n, nx0:x1n].astype(np.float32)
-        alpha = m_s[:, :, None]
-        blended = roi * (1.0 - alpha) + crop_s.astype(np.float32) * alpha
-        frame_out[ny0:y1n, nx0:x1n] = np.clip(blended, 0, 255).astype(np.uint8)
-        new_p[ny0:y1n, nx0:x1n] = np.maximum(new_p[ny0:y1n, nx0:x1n], m_s)
-        new_p = np.clip(new_p, 0.0, 1.0)
-
-        nys, nxs = np.where(new_p >= 0.5)
-        if len(nys):
+        if len(ys):
             layout.update(
-                y0=int(nys.min()),
-                y1=int(nys.max()),
-                x0=int(nxs.min()),
-                x1=int(nxs.max()),
-                ph=int(nys.max() - nys.min() + 1),
+                y0=int(ys.min()),
+                y1=int(ys.max()),
+                x0=int(xs.min()),
+                x1=int(xs.max()),
+                ph=int(ys.max() - ys.min() + 1),
             )
-        return frame_out, new_p, layout
+        return frame, p, layout
 
 
 
@@ -687,11 +609,13 @@ class TopBehindSubjectRenderer:
         k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k3, iterations=1)
 
-        # 4) Subpixel anti-aliased matte feathering
+        # 4) Subpixel anti-aliased matte feathering with frame-edge protection
         feather = max(1, min(int(self.mask_feather), 7))
         if feather > 1:
-            dist_in = cv2.distanceTransform(binary, cv2.DIST_L2, 3)
-            dist_out = cv2.distanceTransform(255 - binary, cv2.DIST_L2, 3)
+            pad = feather + 4
+            padded = cv2.copyMakeBorder(binary, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+            dist_in = cv2.distanceTransform(padded, cv2.DIST_L2, 3)[pad : pad + h, pad : pad + w]
+            dist_out = cv2.distanceTransform(255 - padded, cv2.DIST_L2, 3)[pad : pad + h, pad : pad + w]
             signed_dist = dist_in - dist_out
             band = float(feather)
             alpha = np.clip((signed_dist + band * 0.5) / band, 0.0, 1.0)
