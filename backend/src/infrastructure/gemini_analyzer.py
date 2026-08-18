@@ -295,6 +295,12 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                     raise RuntimeError(f"Gemini auth error: {e}")
 
                 if "429" in error_str or "rate" in error_str or "quota" in error_str:
+                    # If this model has 0 quota on the current tier (e.g. Pro preview model on free tier),
+                    # rotating free-tier API keys will not help. Switch immediately to the next fallback model.
+                    if "limit: 0" in error_str or "limit: 0.0" in error_str:
+                        logger.warning(f"Model {self._model} has limit: 0 quota on current API tier; switching to next fallback...")
+                        self._switch_to_fallback()
+                        continue
                     self._key_rotator.mark_rate_limited()
                     self._init_client()
                     logger.warning(f"Gemini rate limited, rotated to key[{self._key_rotator.current_index}]")
@@ -338,7 +344,11 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
 
             except Exception as e:
                 err_lower = str(e).lower()
-                if "429" in err_lower or "rate" in err_lower:
+                if "429" in err_lower or "rate" in err_lower or "quota" in err_lower:
+                    if "limit: 0" in err_lower or "limit: 0.0" in err_lower:
+                        logger.warning(f"Model {self._model} has limit: 0 text quota; switching to fallback...")
+                        self._switch_to_fallback()
+                        continue
                     self._key_rotator.mark_rate_limited()
                     self._init_client()
                 if "404" in err_lower or "503" in err_lower or "not found" in err_lower:

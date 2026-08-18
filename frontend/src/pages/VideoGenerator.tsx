@@ -691,11 +691,8 @@ function LiveVideoPreview({
 
         {/* Right Side Social Overlay (TikTok / Reels style) */}
         <div className="absolute right-2 bottom-16 z-20 flex flex-col items-center gap-3">
-          <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-white/40 bg-gradient-to-tr from-violet-600 to-fuchsia-600 text-[10px] font-bold text-white shadow-md">
+          <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-zinc-800 text-[10px] font-bold text-white shadow-md">
             AI
-            <div className="absolute -bottom-1 flex h-3 w-3 items-center justify-center rounded-full bg-rose-500 text-[8px] text-white">
-              +
-            </div>
           </div>
           <div className="flex flex-col items-center">
             <Heart className="h-4 w-4 text-rose-500 fill-rose-500 drop-shadow-md" />
@@ -1493,65 +1490,19 @@ function VideoCard({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-interface TopicCategory {
-  name: string;
-  icon: string;
-  topics: string[];
-}
-
-const TOPIC_CATEGORIES: TopicCategory[] = [
-  {
-    name: "Tech & AI",
-    icon: "🤖",
-    topics: [
-      "Can AI really replace human software engineers in 2026?",
-      "The mystery of the developer who pushed 10,000 commits at night",
-      "Why quantum computing will break modern encryption overnight",
-    ],
-  },
-  {
-    name: "Deep Mysteries",
-    icon: "🌊",
-    topics: [
-      "How deep-sea animals withstand extreme ocean pressure",
-      "The bizarre physics of rogue ocean waves appearing from nowhere",
-      "Why airplanes avoid flying over the Pacific Ocean",
-    ],
-  },
-  {
-    name: "Mind & Habits",
-    icon: "🧠",
-    topics: [
-      "The psychology of why we procrastinate hard tasks",
-      "The hidden dopamine loops inside your favorite mobile apps",
-      "How 10 minutes of morning sunlight reprograms your circadian clock",
-    ],
-  },
-  {
-    name: "Secrets & History",
-    icon: "🏛️",
-    topics: [
-      "How ancient builders engineered earthquake-proof pyramids",
-      "The mysterious lost civilizations hidden under rainforest canopies",
-      "The secret communication network used before the telegraph",
-    ],
-  },
-  {
-    name: "Business & Wealth",
-    icon: "💼",
-    topics: [
-      "Why modern airlines make more profit on miles than flights",
-      "How a single chip shortage paused global car manufacturing",
-      "The untold origin of the standard 40-hour work week",
-    ],
-  },
+const TOPIC_IDEAS = [
+  "How deep-sea animals withstand extreme ocean pressure",
+  "Why airplanes avoid flying over the Pacific Ocean",
+  "The psychology behind why we procrastinate hard tasks",
+  "How ancient builders engineered earthquake-proof pyramids",
+  "Can AI really replace human software engineers in 2026?",
 ];
 
-const CREATIVE_VIBES = [
-  { label: "⚡ High Energy Viral", prompt: "Fast-paced, high energy viral storytelling with punchy surprising facts." },
-  { label: "🎬 Cinematic Mystery", prompt: "Atmospheric, mysterious mood with dramatic tension and deep questions." },
-  { label: "🔬 Sharp Explainer", prompt: "Clear, authoritative breakdown focusing on fascinating technical mechanics." },
-  { label: "💡 Mindset Takeaway", prompt: "Reflective, inspirational narrative ending with a thought-provoking conclusion." },
+const CREATIVE_TONES = [
+  { label: "Viral Hook", prompt: "Fast-paced viral storytelling with punchy surprising facts." },
+  { label: "Cinematic", prompt: "Atmospheric, mysterious mood with dramatic tension and deep questions." },
+  { label: "Explainer", prompt: "Clear, authoritative breakdown focusing on technical mechanics." },
+  { label: "Storytelling", prompt: "Reflective narrative ending with a thought-provoking conclusion." },
 ];
 
 export function VideoGeneratorPage() {
@@ -1560,7 +1511,6 @@ export function VideoGeneratorPage() {
 
   // Basic narrative state
   const [topic, setTopic] = useState("");
-  const [activeCategoryIdx, setActiveCategoryIdx] = useState(0);
   const [targetDuration, setTargetDuration] = useState(65);
   const [voice, setVoice] = useState("");
   const [speed, setSpeed] = useState(1);
@@ -1981,17 +1931,14 @@ export function VideoGeneratorPage() {
 
             {/* Studio Layout: Left Controls vs Right Visual Suite */}
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(340px,1fr)]">
-              {/* Left Column: Narrative, Audio Suite, Format, Specs */}
+              {/* Left Column: Narrative, Audio, Format & Spec */}
               <div className="space-y-4">
-                {/* 1. Topic & Story Ideation Card */}
-                <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 space-y-3.5 shadow-sm">
-                  <div className="flex items-center justify-between gap-3 border-b border-zinc-800/60 pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-violet-400" />
-                      <label htmlFor="video-topic" className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
-                        Video Topic & Subject
-                      </label>
-                    </div>
+                {/* 1. Topic & Narrative Card */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <label htmlFor="video-topic" className="text-xs font-medium uppercase tracking-wider text-zinc-300">
+                      Video Topic & Subject
+                    </label>
                     <span className="text-[11px] tabular-nums text-zinc-500 font-mono">{topic.length}/500</span>
                   </div>
 
@@ -2002,75 +1949,59 @@ export function VideoGeneratorPage() {
                     placeholder="Example: How deep-sea creatures survive extreme ocean pressure"
                     maxLength={500}
                     rows={3}
-                    className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-900/60 px-3.5 py-2.5 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/70 focus:ring-2 focus:ring-violet-500/20"
+                    className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900/60 px-3.5 py-2.5 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60"
                   />
 
-                  {/* Category Pills & Interactive Topic Suggestions */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                      <span className="text-[10px] uppercase font-medium tracking-wider text-zinc-500 shrink-0">Inspiration:</span>
-                      {TOPIC_CATEGORIES.map((cat, idx) => (
-                        <button
-                          key={cat.name}
-                          type="button"
-                          onClick={() => setActiveCategoryIdx(idx)}
-                          className={cn(
-                            "flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium transition shrink-0",
-                            activeCategoryIdx === idx
-                              ? "bg-violet-600/30 text-violet-200 border border-violet-500/40 shadow-xs"
-                              : "bg-zinc-900/60 text-zinc-400 border border-zinc-800/80 hover:text-zinc-200 hover:border-zinc-700"
-                          )}
-                        >
-                          <span>{cat.icon}</span>
-                          <span>{cat.name}</span>
-                        </button>
-                      ))}
-                    </div>
+                  {/* Topic Quick Ideas */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-0.5">Try idea:</span>
+                    {TOPIC_IDEAS.map((idea, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setTopic(idea)}
+                        className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-violet-500/40 hover:text-zinc-200 transition truncate max-w-[210px]"
+                        title={idea}
+                      >
+                        {idea.length > 30 ? `${idea.slice(0, 28)}...` : idea}
+                      </button>
+                    ))}
+                  </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
-                      {TOPIC_CATEGORIES[activeCategoryIdx].topics.map((t, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => setTopic(t)}
-                          className={cn(
-                            "flex items-start gap-1.5 rounded-lg border p-2 text-left text-xs transition",
-                            topic === t
-                              ? "border-violet-500/50 bg-violet-500/10 text-violet-200"
-                              : "border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:border-violet-500/30 hover:text-zinc-200"
-                          )}
-                        >
-                          <Lightbulb className="h-3.5 w-3.5 text-amber-400/80 shrink-0 mt-0.5" />
-                          <span className="line-clamp-2 leading-relaxed">{t}</span>
-                        </button>
-                      ))}
-                    </div>
+                  {/* Directorial Tone Chips */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-zinc-900">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-0.5">Tone:</span>
+                    {CREATIVE_TONES.map((t) => (
+                      <button
+                        key={t.label}
+                        type="button"
+                        onClick={() => setInstructions((prev) => (prev ? `${prev}. ${t.prompt}` : t.prompt))}
+                        className="rounded-md border border-zinc-800/70 bg-zinc-950 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 transition"
+                      >
+                        {t.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* 2. Audio & Speech Engine Card (Voice, Pacing & BGM) */}
-                <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 space-y-3.5 shadow-sm">
-                  <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
+                {/* 2. Audio & Narration Card */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-3.5">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Volume2 className="h-4 w-4 text-emerald-400" />
                       <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
-                        Audio & Speech Engine
+                        Audio & Narration
                       </h3>
                     </div>
-                    <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
-                      Deepgram Aura-2
-                    </span>
+                    <span className="text-[11px] text-zinc-500 font-mono">Deepgram Aura-2</span>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     {/* Narrator Voice */}
                     <div>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <label htmlFor="video-voice" className="text-xs font-medium text-zinc-300">
-                          Narrator voice
-                        </label>
-                        <span className="text-[10px] text-zinc-500">Natural TTS</span>
-                      </div>
+                      <label htmlFor="video-voice" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                        Narrator voice
+                      </label>
                       <select
                         id="video-voice"
                         value={voice}
@@ -2088,12 +2019,9 @@ export function VideoGeneratorPage() {
 
                     {/* Voice Pacing Dropdown */}
                     <div>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <label htmlFor="video-speed" className="text-xs font-medium text-zinc-300">
-                          Pacing
-                        </label>
-                        <span className="text-[10px] font-semibold text-violet-300">{speed}× Tempo</span>
-                      </div>
+                      <label htmlFor="video-speed" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                        Pacing
+                      </label>
                       <select
                         id="video-speed"
                         value={speed}
@@ -2108,41 +2036,14 @@ export function VideoGeneratorPage() {
                     </div>
                   </div>
 
-                  {/* Speed Quick Selector Cards */}
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[
-                      { val: 0.85, label: "0.85×", sub: "Calm" },
-                      { val: 1.0, label: "1.0×", sub: "Natural" },
-                      { val: 1.15, label: "1.15×", sub: "Viral" },
-                      { val: 1.3, label: "1.3×", sub: "Rapid" },
-                    ].map((s) => (
-                      <button
-                        key={s.val}
-                        type="button"
-                        onClick={() => setSpeed(s.val)}
-                        className={cn(
-                          "rounded-lg border py-1.5 text-center transition",
-                          speed === s.val
-                            ? "border-violet-400/60 bg-violet-500/20 text-violet-100"
-                            : "border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                        )}
-                      >
-                        <div className="text-xs font-bold">{s.label}</div>
-                        <div className="text-[9px] text-zinc-500">{s.sub}</div>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Background Music Integrated into Audio Engine */}
-                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Toggle
-                        checked={includeBgm}
-                        onChange={setIncludeBgm}
-                        label="Background Music"
-                        description="A royalty-free track is mixed below the narration."
-                      />
-                    </div>
+                  {/* Background Music Row */}
+                  <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-3 space-y-2">
+                    <Toggle
+                      checked={includeBgm}
+                      onChange={setIncludeBgm}
+                      label="Background Music"
+                      description="A royalty-free track is mixed below the narration."
+                    />
                     {includeBgm && (
                       <div className="pt-1">
                         <RangeSlider
@@ -2161,43 +2062,37 @@ export function VideoGeneratorPage() {
                 </div>
 
                 {/* 3. Format & Scene Pacing Card */}
-                <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 space-y-3.5 shadow-sm">
-                  <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-3.5">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Film className="h-4 w-4 text-blue-400" />
+                      <Film className="h-4 w-4 text-sky-400" />
                       <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
-                        Format & Scene Pacing
+                        Video Format & Pacing
                       </h3>
                     </div>
-                    <span className="text-[11px] text-zinc-400 font-mono">9:16 Vertical</span>
+                    <span className="text-[11px] text-zinc-500 font-mono">9:16 · 1080×1920</span>
                   </div>
 
                   {/* Duration Picker */}
                   <div>
-                    <div className="mb-2 flex items-center justify-between gap-3">
+                    <div className="mb-1.5 flex items-center justify-between">
                       <label className="text-xs font-medium text-zinc-300">Target duration</label>
-                      <span className="text-xs font-medium text-violet-200">{targetDuration} seconds</span>
+                      <span className="text-xs text-violet-300 font-medium">{targetDuration}s</span>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { duration: 50, label: "50s", desc: "Quick Reel", words: "~120 words" },
-                        { duration: 65, label: "65s", desc: "Standard", words: "~160 words" },
-                        { duration: 90, label: "90s", desc: "Deep Dive", words: "~220 words" },
-                      ].map((item) => (
+                      {[50, 65, 90].map((d) => (
                         <button
-                          key={item.duration}
+                          key={d}
                           type="button"
-                          onClick={() => setTargetDuration(item.duration)}
+                          onClick={() => setTargetDuration(d)}
                           className={cn(
-                            "rounded-xl border p-2.5 text-center transition",
-                            targetDuration === item.duration
-                              ? "border-violet-400/60 bg-violet-500/15 text-violet-100 shadow-xs"
-                              : "border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                            "rounded-lg border py-2 text-xs font-medium transition text-center",
+                            targetDuration === d
+                              ? "border-violet-400/60 bg-violet-500/15 text-violet-100"
+                              : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                           )}
                         >
-                          <div className="text-xs font-bold">{item.label}</div>
-                          <div className="text-[10px] text-zinc-300">{item.desc}</div>
-                          <div className="text-[9px] text-zinc-500">{item.words}</div>
+                          {d}s {d === 50 ? "Quick" : d === 65 ? "Standard" : "Extended"}
                         </button>
                       ))}
                     </div>
@@ -2223,9 +2118,9 @@ export function VideoGeneratorPage() {
                     </select>
                   </div>
 
-                  {/* Creative Direction & Vibe Chips */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
+                  {/* Creative Direction */}
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between">
                       <label htmlFor="video-instructions" className="text-xs font-medium text-zinc-300">
                         Creative direction <span className="font-normal text-zinc-600">optional</span>
                       </label>
@@ -2238,51 +2133,29 @@ export function VideoGeneratorPage() {
                       placeholder="Example: cinematic documentary mood, focus on mysterious biology, end with a philosophical question."
                       maxLength={1000}
                       rows={2}
-                      className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-900/60 px-3.5 py-2.5 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/15"
+                      className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900/60 px-3.5 py-2 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60"
                     />
-                    <div className="flex flex-wrap gap-1">
-                      {CREATIVE_VIBES.map((vibe) => (
-                        <button
-                          key={vibe.label}
-                          type="button"
-                          onClick={() => setInstructions((prev) => (prev ? `${prev}. ${vibe.prompt}` : vibe.prompt))}
-                          className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-violet-500/40 hover:text-zinc-200 transition"
-                        >
-                          {vibe.label}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 </div>
 
-                {/* 4. Live Production Spec Sheet */}
-                <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-950/30 via-zinc-950 to-zinc-950 p-3.5">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-300 mb-2">
-                    <Wand2 className="h-3.5 w-3.5" /> Studio Output Specs
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                    <div className="rounded-lg border border-zinc-800/80 bg-black/40 p-2">
-                      <span className="text-zinc-500 block text-[9px] uppercase">Format</span>
-                      <span className="font-semibold text-zinc-200">1080×1920 9:16</span>
-                    </div>
-                    <div className="rounded-lg border border-zinc-800/80 bg-black/40 p-2">
-                      <span className="text-zinc-500 block text-[9px] uppercase">Narration</span>
-                      <span className="font-semibold text-zinc-200">{voice ? voice.split("-")[2] || "Deepgram" : "Default"} ({speed}×)</span>
-                    </div>
-                    <div className="rounded-lg border border-zinc-800/80 bg-black/40 p-2">
-                      <span className="text-zinc-500 block text-[9px] uppercase">Hook Overlay</span>
-                      <span className="font-semibold text-amber-300">{hookEnabled ? "Active (0-3s)" : "Disabled"}</span>
-                    </div>
-                    <div className="rounded-lg border border-zinc-800/80 bg-black/40 p-2">
-                      <span className="text-zinc-500 block text-[9px] uppercase">Karaoke Captions</span>
-                      <span className="font-semibold text-violet-300">{subtitlesEnabled ? `${subtitleStyle.maxWordsPerLine || 3}w / line` : "Disabled"}</span>
-                    </div>
-                  </div>
+                {/* 4. Subtle Specs Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-3.5 py-2.5 text-[11px] text-zinc-400">
+                  <span className="font-mono text-zinc-300">1080×1920 9:16</span>
+                  <span className="text-zinc-700">•</span>
+                  <span>{voice ? voice.split("-")[2] || "Deepgram" : "Default"} ({speed}×)</span>
+                  <span className="text-zinc-700">•</span>
+                  <span className={hookEnabled ? "text-amber-300/90" : "text-zinc-600"}>
+                    {hookEnabled ? "Hook Active" : "No Hook"}
+                  </span>
+                  <span className="text-zinc-700">•</span>
+                  <span className={subtitlesEnabled ? "text-violet-300/90" : "text-zinc-600"}>
+                    {subtitlesEnabled ? `${subtitleStyle.maxWordsPerLine || 3}w Captions` : "No Captions"}
+                  </span>
                 </div>
               </div>
 
               {/* Right Column: Visual Studio (Live 9:16 Preview + Hook + Subtitles Controls) */}
-              <div className="space-y-4 rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 shadow-sm">
+              <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
                 <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal className="h-4 w-4 text-violet-300" />
