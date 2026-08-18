@@ -480,55 +480,59 @@ class JobService:
                 self._emit(job_id, 3, "gemini_analysis", "start")
                 await self._repo.update_status(job_id, JobStatus.ANALYZING)
                 max_clips = self._calc_max_clips(duration)
-                try:
-                    gemini_result = await self._gemini_call(
-                        lambda: self._gemini.analyze(url, duration, max_clips)
-                    )
-                except Exception as e:
-                    logger.warning(f"[{job_id}] Gemini video analysis failed ({e}). Running Whisper + HighlightAnalyzer failover...")
-                    gemini_result = None
+                gemini_result = None
 
+                # Primary: Ultra-Fast Groq Whisper + LLM HighlightAnalyzer
+                try:
+                    logger.info(f"[{job_id}] Analyzing highlights with Groq Whisper + LLM...")
+                    from src.infrastructure.local_transcriber import LocalTranscriber
+                    from src.infrastructure.highlight_analyzer import HighlightAnalyzer
+                    transcriber = LocalTranscriber(self._whisper)
+                    transcript_result, _ = await transcriber.transcribe(video_path, duration)
+                    if transcript_result and transcript_result.segments:
+                        analyzer = HighlightAnalyzer()
+                        highlight_result = await analyzer.analyze_highlights(
+                            transcript_result, duration, max_clips=max_clips or 8
+                        )
+                        if highlight_result and highlight_result.clips:
+                            clips_data = [
+                                {
+                                    "rank": c.rank,
+                                    "start": c.start,
+                                    "end": c.end,
+                                    "score": c.score,
+                                    "hook": c.hook,
+                                    "reason": c.reason,
+                                    "content_type": c.content_type,
+                                    "speaker_energy": c.speaker_energy,
+                                }
+                                for c in highlight_result.clips
+                            ]
+                            gemini_result = {
+                                "clips": clips_data,
+                                "creative_direction": {
+                                    "primary_color": "#FFCC00",
+                                    "secondary_color": "#FF3366",
+                                    "background_accent": "#111827",
+                                    "typography_mood": "bold_impact",
+                                    "energy_level": "high",
+                                    "transition_style": "fast_cuts",
+                                    "music_mood": "energetic",
+                                    "hook_animation": "fade_scale",
+                                },
+                            }
+                            logger.info(f"[{job_id}] Groq Whisper + LLM analysis SUCCESS: {len(clips_data)} clips")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Groq Whisper analysis error ({e}). Trying Gemini Multimodal fallback...")
+
+                # Fallback: Gemini Multimodal
                 if not gemini_result or "clips" not in gemini_result or not gemini_result["clips"]:
                     try:
-                        from src.infrastructure.local_transcriber import LocalTranscriber
-                        from src.infrastructure.highlight_analyzer import HighlightAnalyzer
-                        transcriber = LocalTranscriber(self._whisper)
-                        transcript_result, _ = await transcriber.transcribe(video_path, duration)
-                        if transcript_result and transcript_result.segments:
-                            analyzer = HighlightAnalyzer()
-                            highlight_result = await analyzer.analyze_highlights(
-                                transcript_result, duration, max_clips=max_clips or 8
-                            )
-                            if highlight_result and highlight_result.clips:
-                                clips_data = [
-                                    {
-                                        "rank": c.rank,
-                                        "start": c.start,
-                                        "end": c.end,
-                                        "score": c.score,
-                                        "hook": c.hook,
-                                        "reason": c.reason,
-                                        "content_type": c.content_type,
-                                        "speaker_energy": c.speaker_energy,
-                                    }
-                                    for c in highlight_result.clips
-                                ]
-                                gemini_result = {
-                                    "clips": clips_data,
-                                    "creative_direction": {
-                                        "primary_color": "#FFCC00",
-                                        "secondary_color": "#FF3366",
-                                        "background_accent": "#111827",
-                                        "typography_mood": "bold_impact",
-                                        "energy_level": "high",
-                                        "transition_style": "fast_cuts",
-                                        "music_mood": "energetic",
-                                        "hook_animation": "fade_scale",
-                                    },
-                                }
-                                logger.info(f"[{job_id}] Background Failover SUCCESS: {len(clips_data)} clips generated from transcript!")
-                    except Exception as fallback_err:
-                        logger.error(f"[{job_id}] Background Transcript failover failed: {fallback_err}")
+                        gemini_result = await self._gemini_call(
+                            lambda: self._gemini.analyze(url, duration, max_clips)
+                        )
+                    except Exception as gemini_err:
+                        logger.error(f"[{job_id}] Gemini fallback failed: {gemini_err}")
 
                 # Save to cache
                 if video_id and gemini_result and "clips" in gemini_result:
