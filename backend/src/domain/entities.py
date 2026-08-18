@@ -650,19 +650,26 @@ class StylePreset:
 @dataclass
 class VideoCandidate:
     """A video result from ClipScout API, before AI selection."""
-    id: str
-    title: str
-    thumbnail_url: str
-    source_url: str
-    embed_url: str
-    platform: str           # "pexels", "pixabay", "youtube"
-    license: str            # "royalty-free", "standard"
-    duration_seconds: int
-    start_timestamp: int    # Relevant for YouTube (start point in source video)
-    relevance_score: float
+    id: str = ""
+    title: str = ""
+    thumbnail_url: str = ""
+    source_url: str = ""
+    embed_url: str = ""
+    platform: str = "pexels"           # "pexels", "pixabay", "youtube"
+    license: str = "royalty-free"      # "royalty-free", "standard"
+    duration_seconds: int = 0
+    start_timestamp: int = 0           # Relevant for YouTube (start point in source video)
+    relevance_score: float = 1.0
     transcript_snippet: str = ""
     transcript_reason: str = ""
     channel_or_author: str = ""
+    preview_url: str = ""              # Optional alias for preview/thumbnail URL
+
+    def __post_init__(self):
+        if not self.thumbnail_url and self.preview_url:
+            self.thumbnail_url = self.preview_url
+        elif not self.preview_url and self.thumbnail_url:
+            self.preview_url = self.thumbnail_url
 
 
 @dataclass

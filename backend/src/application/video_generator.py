@@ -622,6 +622,7 @@ class VideoGenerator:
                     id=best.get("video_id", f"scene_{i}"),
                     platform="pexels",
                     embed_url=url,
+                    thumbnail_url=best.get("thumbnail_url", ""),
                     preview_url=best.get("thumbnail_url", ""),
                     source_url=url,
                     title=best.get("title", ""),
