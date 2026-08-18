@@ -89,11 +89,7 @@ async def analyze_only(
     import secrets
     job_id = f"analyze_{secrets.token_hex(6)}"
 
-    # ─── Step 2: Download ───────────────────────────────────────────
-    video_path = os.path.join(settings.DOWNLOAD_DIR, f"{job_id}.mp4")
-    os.makedirs(settings.DOWNLOAD_DIR, exist_ok=True)
-
-    # Check cache first
+    # Check cache and prepare paths
     from src.infrastructure.cache_manager import CacheManager
     cache = CacheManager()
     try:
@@ -102,38 +98,46 @@ async def analyze_only(
         pass
     video_id = cache.extract_video_id(url)
 
-    cached_video = cache.get_video_path(video_id) if video_id else None
-    if cached_video and os.path.exists(cached_video):
-        import shutil
-        try:
-            os.link(cached_video, video_path)
-        except OSError:
-            shutil.copy2(cached_video, video_path)
-        logger.info(f"[{job_id}] Download SKIPPED (cached: {video_id})")
-    else:
-        logger.info(f"[{job_id}] Downloading video: {url}")
-        await downloader.download_video(url, video_path)
-        if video_id and os.path.exists(video_path):
-            cache.save_video(video_id, video_path)
+    video_path = os.path.join(settings.DOWNLOAD_DIR, f"{job_id}.mp4")
+    os.makedirs(settings.DOWNLOAD_DIR, exist_ok=True)
 
-    if not os.path.exists(video_path):
-        raise HTTPException(status_code=500, detail="Download gagal — file tidak ditemukan")
+    # ─── Task A: Video Download / Cache Link (Parallel) ─────────────
+    async def _prepare_video():
+        cached_video = cache.get_video_path(video_id) if video_id else None
+        if cached_video and os.path.exists(cached_video):
+            import shutil
+            try:
+                os.link(cached_video, video_path)
+            except OSError:
+                shutil.copy2(cached_video, video_path)
+            logger.info(f"[{job_id}] Download SKIPPED (cached: {video_id})")
+        else:
+            logger.info(f"[{job_id}] Downloading video in parallel: {url}")
+            await downloader.download_video(url, video_path)
+            if video_id and os.path.exists(video_path):
+                cache.save_video(video_id, video_path)
 
-    # ─── Step 3: AI Analysis (Gemini) ───────────────────────────────
-    cached_analysis = cache.load_analysis(video_id, "v1") if video_id else None
-    if cached_analysis and "clips" in cached_analysis:
-        gemini_result = cached_analysis
-        logger.info(f"[{job_id}] Gemini analysis SKIPPED (cached: {len(gemini_result['clips'])} clips)")
-    else:
-        logger.info(f"[{job_id}] Running Gemini analysis...")
+        if not os.path.exists(video_path):
+            raise HTTPException(status_code=500, detail="Download gagal — file tidak ditemukan")
+
+    # ─── Task B: AI Analysis (Gemini in Parallel) ───────────────────
+    async def _run_gemini():
+        cached_analysis = cache.load_analysis(video_id, "v1") if video_id else None
+        if cached_analysis and "clips" in cached_analysis:
+            logger.info(f"[{job_id}] Gemini analysis SKIPPED (cached: {len(cached_analysis['clips'])} clips)")
+            return cached_analysis
+
+        logger.info(f"[{job_id}] Running Gemini analysis in parallel...")
         max_clips = service._calc_max_clips(duration)
-
-        # Use rate limiter + retry handler if available
         gemini_call = lambda: service._gemini.analyze(url, duration, max_clips)
-        gemini_result = await service._gemini_call(gemini_call)
+        result = await service._gemini_call(gemini_call)
 
-        if video_id and gemini_result and "clips" in gemini_result:
-            cache.save_analysis(video_id, gemini_result, version="v1")
+        if video_id and result and "clips" in result:
+            cache.save_analysis(video_id, result, version="v1")
+        return result
+
+    # ─── Execute Video Download and Gemini Analysis Concurrently ─────
+    _, gemini_result = await asyncio.gather(_prepare_video(), _run_gemini())
 
     if not gemini_result or "clips" not in gemini_result or not gemini_result["clips"]:
         raise HTTPException(status_code=500, detail="AI analysis gagal — tidak ada clip candidates")
