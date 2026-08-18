@@ -129,3 +129,38 @@ def test_delete_video_generator_job(tmp_path):
     deleted = generator.delete_job(job_id)
     assert deleted is True
     assert generator.get_job(job_id) is None
+
+
+def test_story_agent_parses_truncated_json():
+    from src.infrastructure.story_agent import StoryAgent
+
+    agent = StoryAgent()
+    # Truncated mid-string without closing array/braces
+    truncated_raw = """```json
+{
+  "title": "The Programmer Who Never Sleeps",
+  "hook": "At 3 AM, when the world is silent, one developer pushes thousands of commits.",
+  "mood": "mysterious",
+  "target_duration": 65,
+  "scenes": [
+    {
+      "id": 1,
+      "narration": "At 3 AM, when the world is completely silent, one developer is awake.",
+      "visual": "Dark room illuminated only by glowing monitor",
+      "search_queries": ["developer coding at night dark room"]
+    },
+    {
+      "id": 2,
+      "narration": "Lines of code fly across multiple screens like a digital symphony.",
+      "visual": "Fast scrolling terminal code green text",
+      "search_queries": ["matrix terminal code scrolling"]
+    },
+    {
+      "id": 3,
+      "narration": "Coffee cups pile up beside the keyboard
+"""
+    story = agent._parse_response(truncated_raw, "The Programmer")
+    assert story["title"] == "The Programmer Who Never Sleeps"
+    assert len(story["scenes"]) >= 2
+    assert story["scenes"][0]["id"] == 1
+    assert "developer" in story["scenes"][0]["narration"]

@@ -130,34 +130,59 @@ class StoryAgent:
             instructions=instructions or "None — use your best judgment",
         )
 
-        raw_response = self._call_llm(prompt)
+        last_error: Optional[Exception] = None
+        for attempt in range(self._max_retries):
+            try:
+                raw_response = self._call_llm(prompt, attempt=attempt)
+                story = self._parse_response(raw_response, topic)
+                story = self._validate_and_fix(story, target_duration)
 
-        # Parse and validate
-        story = self._parse_response(raw_response, topic)
-        story = self._validate_and_fix(story, target_duration)
+                if len(story.get("scenes", [])) >= 3:
+                    logger.info(
+                        f"story_agent: generated '{story.get('title', '')}' — "
+                        f"{len(story.get('scenes', []))} scenes, "
+                        f"target {target_duration}s (attempt {attempt + 1})"
+                    )
+                    return story
 
-        logger.info(
-            f"story_agent: generated '{story.get('title', '')}' — "
-            f"{len(story.get('scenes', []))} scenes, "
-            f"target {target_duration}s"
-        )
+                logger.warning(
+                    f"story_agent: parsed story had too few scenes ({len(story.get('scenes', []))}), "
+                    f"retrying attempt {attempt + 1}..."
+                )
+            except Exception as e:
+                last_error = e
+                logger.warning(f"story_agent: attempt {attempt + 1} failed: {e}")
+                time.sleep(1.5)
 
-        return story
+        # Fallback to direct Gemini if 9router output failed
+        if getattr(settings, "ALLOW_DIRECT_PROVIDER_FALLBACKS", True) and settings.gemini_api_keys:
+            try:
+                logger.info("story_agent: attempting fallback to direct Gemini")
+                raw_gemini = self._call_gemini(prompt)
+                story = self._parse_response(raw_gemini, topic)
+                story = self._validate_and_fix(story, target_duration)
+                if len(story.get("scenes", [])) >= 2:
+                    return story
+            except Exception as gemini_err:
+                logger.error(f"story_agent: direct Gemini fallback failed: {gemini_err}")
 
-    def _call_llm(self, prompt: str) -> str:
+        raise StoryGenerationError(f"Story generation failed after {self._max_retries} attempts: {last_error}")
+
+    def _call_llm(self, prompt: str, attempt: int = 0) -> str:
         """Call LLM via 9Router or Gemini fallback."""
         if settings.use_nine_router:
-            return self._call_nine_router(prompt)
+            return self._call_nine_router(prompt, attempt=attempt)
         else:
             return self._call_gemini(prompt)
 
-    def _call_nine_router(self, prompt: str) -> str:
+    def _call_nine_router(self, prompt: str, attempt: int = 0) -> str:
         """Call 9Router for story generation."""
         from src.infrastructure.nine_router_client import get_nine_router_client
 
         client = get_nine_router_client()
+        temp = 0.5 if attempt > 0 else 0.7
 
-        for attempt in range(self._max_retries):
+        for retry in range(self._max_retries):
             try:
                 return client.chat(
                     messages=[
@@ -166,22 +191,22 @@ class StoryAgent:
                     ],
                     model=settings.get_nine_router("NINE_ROUTER_PASS2_MODEL")
                     or settings.nine_router_model,
-                    temperature=0.7,  # More creative for storytelling
-                    max_tokens=4000,
+                    temperature=temp,
+                    max_tokens=4096,
                     response_format={"type": "json_object"},
                 )
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "rate" in error_str:
-                    wait = min(10 * (2 ** attempt), 60)
+                    wait = min(5 * (2 ** retry), 30)
                     logger.warning(f"story_agent: rate limited, waiting {wait}s")
                     time.sleep(wait)
                     continue
 
-                if attempt >= self._max_retries - 1:
+                if retry >= self._max_retries - 1:
                     raise StoryGenerationError(f"LLM call failed: {e}")
 
-                time.sleep(3)
+                time.sleep(2)
 
         raise StoryGenerationError("LLM max retries exceeded")
 
@@ -210,7 +235,7 @@ class StoryAgent:
             ],
             "generationConfig": {
                 "temperature": 0.7,
-                "maxOutputTokens": 4000,
+                "maxOutputTokens": 4096,
                 "responseMimeType": "application/json",
             },
         }
@@ -221,14 +246,13 @@ class StoryAgent:
                     resp = client.post(url, json=payload)
 
                 if resp.status_code == 429:
-                    # Rotate key if available
                     if len(keys) > 1:
                         api_key = keys[(attempt + 1) % len(keys)]
                         url = (
                             f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
                             f":generateContent?key={api_key}"
                         )
-                    time.sleep(5 * (attempt + 1))
+                    time.sleep(3 * (attempt + 1))
                     continue
 
                 if resp.status_code != 200:
@@ -251,20 +275,22 @@ class StoryAgent:
             except httpx.TimeoutException:
                 if attempt >= self._max_retries - 1:
                     raise StoryGenerationError("Gemini timeout")
-                time.sleep(3)
+                time.sleep(2)
             except StoryGenerationError:
                 raise
             except Exception as e:
                 if attempt >= self._max_retries - 1:
                     raise StoryGenerationError(f"Gemini error: {e}")
-                time.sleep(3)
+                time.sleep(2)
 
         raise StoryGenerationError("Gemini max retries exceeded")
 
     def _parse_response(self, raw: str, topic: str) -> dict:
-        """Parse LLM JSON response to structured story dict."""
-        # Clean potential markdown code fences
+        """Parse LLM JSON response to structured story dict with truncated JSON repair."""
+        import re
+
         text = raw.strip()
+        # Clean markdown fences
         if text.startswith("```"):
             lines = text.split("\n")
             text = "\n".join(lines[1:])
@@ -272,31 +298,129 @@ class StoryAgent:
                 text = text[:-3]
             text = text.strip()
 
+        # 1. Direct JSON parse
         try:
             story = json.loads(text)
-        except json.JSONDecodeError as e:
-            # Try to find JSON object in response
-            import re
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
+            if isinstance(story, dict) and story.get("scenes"):
+                return story
+        except json.JSONDecodeError:
+            pass
+
+        # 2. Extract outermost JSON block
+        start_idx = text.find("{")
+        if start_idx != -1:
+            candidate = text[start_idx:]
+            try:
+                story = json.loads(candidate)
+                if isinstance(story, dict) and story.get("scenes"):
+                    return story
+            except json.JSONDecodeError:
+                pass
+
+            # 3. Repair truncated JSON structure (unclosed quotes/braces/brackets)
+            repaired = self._repair_truncated_json(candidate)
+            if repaired:
                 try:
-                    story = json.loads(match.group())
+                    story = json.loads(repaired)
+                    if isinstance(story, dict) and story.get("scenes"):
+                        logger.info("story_agent: successfully repaired truncated JSON response")
+                        return story
                 except json.JSONDecodeError:
-                    raise StoryGenerationError(
-                        f"Cannot parse LLM response as JSON: {e}"
-                    )
-            else:
-                raise StoryGenerationError(
-                    f"No JSON found in LLM response: {text[:300]}"
-                )
+                    pass
 
-        if not isinstance(story, dict):
-            raise StoryGenerationError("LLM response is not a JSON object")
+        # 4. Fallback: Regex extraction of scenes if JSON is heavily corrupted
+        story = self._extract_story_with_regex(text, topic)
+        if story and story.get("scenes"):
+            logger.info("story_agent: recovered story using regex extraction fallback")
+            return story
 
-        if "scenes" not in story or not story["scenes"]:
-            raise StoryGenerationError("LLM response missing 'scenes' array")
+        raise StoryGenerationError(f"No JSON found in LLM response: {text[:300]}")
 
-        return story
+    def _repair_truncated_json(self, json_str: str) -> Optional[str]:
+        """Attempt to repair truncated JSON by closing arrays, objects, and strings."""
+        # Prefer cutting back to the last complete scene object if available
+        last_scene_end = json_str.rfind("},")
+        if last_scene_end != -1:
+            cut = json_str[: last_scene_end + 1]
+            closed = self._close_json_structure(cut)
+            if closed:
+                return closed
+
+        return self._close_json_structure(json_str)
+
+    def _close_json_structure(self, s: str) -> Optional[str]:
+        """Close unclosed strings and nest braces/brackets in reverse order."""
+        stack: list[str] = []
+        in_string = False
+        escape = False
+        for ch in s:
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                stack.append("}")
+            elif ch == "[":
+                stack.append("]")
+            elif ch in "}]":
+                if stack and stack[-1] == ch:
+                    stack.pop()
+                else:
+                    return None
+
+        out = s
+        if in_string:
+            out += '"'
+        out += "".join(reversed(stack))
+        return out
+
+    def _extract_story_with_regex(self, text: str, topic: str) -> Optional[dict]:
+        """Fallback regex extractor for partial or malformed LLM responses."""
+        import re
+
+        title_match = re.search(r'"title"\s*:\s*"([^"]+)"', text)
+        hook_match = re.search(r'"hook"\s*:\s*"([^"]+)"', text)
+        mood_match = re.search(r'"mood"\s*:\s*"([^"]+)"', text)
+
+        # Find scene blocks
+        scene_blocks = re.findall(
+            r'\{\s*"id"\s*:\s*(\d+)[^}]*?"narration"\s*:\s*"([^"]+)"(?:[^}]*?"visual"\s*:\s*"([^"]+)")?',
+            text,
+            re.DOTALL,
+        )
+        if not scene_blocks:
+            return None
+
+        scenes = []
+        for match in scene_blocks:
+            scene_id = int(match[0])
+            narration = match[1].strip()
+            visual = match[2].strip() if len(match) > 2 and match[2] else ""
+            if narration:
+                scenes.append({
+                    "id": scene_id,
+                    "narration": narration,
+                    "visual": visual,
+                    "search_queries": [visual] if visual else [topic],
+                    "duration_estimate": max(4, int(len(narration.split()) / 2.5)),
+                    "transition": "cut",
+                })
+
+        if not scenes:
+            return None
+
+        return {
+            "title": title_match.group(1) if title_match else topic,
+            "hook": hook_match.group(1) if hook_match else (scenes[0]["narration"] if scenes else ""),
+            "mood": mood_match.group(1) if mood_match else "educational",
+            "scenes": scenes,
+        }
 
     def _validate_and_fix(self, story: dict, target_duration: int) -> dict:
         """Validate story structure and fix common issues."""
