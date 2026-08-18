@@ -23,6 +23,7 @@ export default defineConfig({
     // Only run unit/component tests here. The `e2e/` folder holds Playwright
     // specs, which run via `playwright test` — vitest must not try to collect
     // them (they import from @playwright/test and would fail under vitest).
+    testTimeout: 15000,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
   },

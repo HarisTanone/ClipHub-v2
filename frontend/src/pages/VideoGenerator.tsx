@@ -385,7 +385,29 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  let response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (response.status === 401 && token) {
+    const refreshToken = localStorage.getItem("refresh_token");
+    if (refreshToken) {
+      try {
+        const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (refreshRes.ok) {
+          const data = await refreshRes.json();
+          localStorage.setItem("access_token", data.access_token);
+          localStorage.setItem("refresh_token", data.refresh_token);
+          headers.set("Authorization", `Bearer ${data.access_token}`);
+          response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+        }
+      } catch {
+        // ignore refresh failure
+      }
+    }
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
     throw new Error(error.detail || response.statusText);
@@ -645,12 +667,15 @@ function SceneFootageStudioModal({
   job,
   onClose,
   onStartRender,
+  onUpdateJob,
 }: {
   job: VideoJob;
   onClose: () => void;
   onStartRender: (jobId: string, updatedScenes: SceneItem[]) => Promise<void>;
+  onUpdateJob?: (job: VideoJob) => void;
 }) {
   const toast = useToast();
+  const [currentJob, setCurrentJob] = useState<VideoJob>(job);
   const [scenes, setScenes] = useState<SceneItem[]>(() => {
     return (job.scenes || []).map((s) => ({
       ...s,
@@ -658,18 +683,47 @@ function SceneFootageStudioModal({
     }));
   });
 
-  // Sync internal scenes when job.scenes updates (e.g. from planning background task or polling)
+  // Keep currentJob in sync with prop
   useEffect(() => {
-    if (job.scenes && job.scenes.length > 0) {
+    setCurrentJob(job);
+  }, [job]);
+
+  // Active polling when job is still in planning / processing state
+  useEffect(() => {
+    const shouldPoll = isProcessing(currentJob.status) || !currentJob.scenes || currentJob.scenes.length === 0;
+    if (!shouldPoll) return;
+
+    let isMounted = true;
+    const interval = window.setInterval(async () => {
+      try {
+        const updated = await fetchApi<VideoJob>(`/api/video-generator/jobs/${currentJob.job_id}`);
+        if (isMounted && updated) {
+          setCurrentJob(updated);
+          onUpdateJob?.(updated);
+        }
+      } catch {
+        // ignore transient network errors
+      }
+    }, 2000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(interval);
+    };
+  }, [currentJob.job_id, currentJob.status, currentJob.scenes, onUpdateJob]);
+
+  // Sync internal scenes when currentJob.scenes updates (e.g. from planning background task or polling)
+  useEffect(() => {
+    if (currentJob.scenes && currentJob.scenes.length > 0) {
       setScenes((prev) => {
         if (prev.length === 0) {
-          return job.scenes!.map((s) => ({
+          return currentJob.scenes!.map((s) => ({
             ...s,
             selected_footage: s.selected_footage || s.footage_source || (s.footage_candidates?.[0] || null),
           }));
         }
         // Preserve user selections for existing scenes while bringing in any new candidates
-        return job.scenes!.map((s) => {
+        return currentJob.scenes!.map((s) => {
           const existing = prev.find((p) => p.id === s.id);
           return {
             ...s,
@@ -682,7 +736,7 @@ function SceneFootageStudioModal({
         });
       });
     }
-  }, [job.scenes]);
+  }, [currentJob.scenes]);
   const [searchingSceneId, setSearchingSceneId] = useState<number | null>(null);
   const [sceneSearchQueries, setSceneSearchQueries] = useState<Record<number, string>>({});
   const [isRendering, setIsRendering] = useState(false);
@@ -738,7 +792,7 @@ function SceneFootageStudioModal({
     setSearchingSceneId(sceneId);
     try {
       const res = await fetchApi<{ scene_id: number; candidates: FootageCandidate[] }>(
-        `/api/video-generator/jobs/${job.job_id}/search-scene`,
+        `/api/video-generator/jobs/${currentJob.job_id}/search-scene`,
         {
           method: "POST",
           body: JSON.stringify({ scene_id: sceneId, query }),
@@ -768,7 +822,7 @@ function SceneFootageStudioModal({
   const handleConfirmRender = async () => {
     setIsRendering(true);
     try {
-      await onStartRender(job.job_id, scenes);
+      await onStartRender(currentJob.job_id, scenes);
       onClose();
     } catch (e: any) {
       toast.error(errorMessage(e, "Render launch failed"));
@@ -793,7 +847,7 @@ function SceneFootageStudioModal({
             </div>
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-zinc-100 truncate">
-                Footage Studio: {job.title || job.topic}
+                Footage Studio: {currentJob.title || currentJob.topic}
               </h2>
               <p className="text-[11px] text-zinc-400">
                 Select footage 1 by 1 per scene or search custom footage before rendering.
@@ -824,27 +878,27 @@ function SceneFootageStudioModal({
         {/* Scene List */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
           {scenes.length === 0 ? (
-            isProcessing(job.status) ? (
+            isProcessing(currentJob.status) ? (
               <div className="py-16 text-center space-y-3">
                 <Loader2 className="mx-auto h-9 w-9 animate-spin text-violet-400" />
                 <div>
                   <p className="text-sm font-semibold text-zinc-200">
-                    {job.step_label || "AI is planning scenes & finding footage candidates..."}
+                    {currentJob.step_label || "AI is planning scenes & finding footage candidates..."}
                   </p>
                   <p className="text-xs text-zinc-400 mt-1">
                     This takes ~5-15 seconds. Footage candidates will appear here automatically.
                   </p>
                 </div>
                 <div className="max-w-xs mx-auto pt-2">
-                  <ProgressIndicator progress={job.progress} stepLabel={job.step_label} />
+                  <ProgressIndicator progress={currentJob.progress} stepLabel={currentJob.step_label} />
                 </div>
               </div>
             ) : (
               <div className="py-12 text-center text-zinc-500">
                 <Film className="mx-auto h-8 w-8 mb-2 opacity-50" />
                 <p className="text-sm">No scenes generated for this job.</p>
-                {job.error && (
-                  <p className="text-xs text-red-400 mt-2 max-w-md mx-auto">{job.error}</p>
+                {currentJob.error && (
+                  <p className="text-xs text-red-400 mt-2 max-w-md mx-auto">{currentJob.error}</p>
                 )}
               </div>
             )
@@ -1326,7 +1380,15 @@ export function VideoGeneratorPage() {
     localStorage.setItem("autocliper_video_generator_subtitle_style", JSON.stringify(subtitleStyle));
   }, [subtitleStyle]);
 
-  const hasProcessingJob = useMemo(() => jobs.some((job) => isProcessing(job.status)), [jobs]);
+  const hasProcessingJob = useMemo(() => {
+    return (
+      jobs.some((job) => isProcessing(job.status)) ||
+      (studioJob ? isProcessing(studioJob.status) : false) ||
+      (activeJob ? isProcessing(activeJob.status) : false) ||
+      isPlanning ||
+      isSubmitting
+    );
+  }, [jobs, studioJob, activeJob, isPlanning, isSubmitting]);
 
   useEffect(() => {
     if (!hasProcessingJob) return undefined;
@@ -1335,6 +1397,19 @@ export function VideoGeneratorPage() {
     }, 3000);
     return () => window.clearInterval(timer);
   }, [hasProcessingJob, loadJobs]);
+
+  const handleUpdateStudioJob = useCallback((updatedJob: VideoJob) => {
+    setStudioJob((prev) => (prev?.job_id === updatedJob.job_id ? updatedJob : prev));
+    setJobs((prev) => {
+      const idx = prev.findIndex((j) => j.job_id === updatedJob.job_id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = updatedJob;
+        return next;
+      }
+      return [updatedJob, ...prev];
+    });
+  }, []);
 
   useEffect(() => {
     if (!activeJob) return;
@@ -2108,6 +2183,7 @@ export function VideoGeneratorPage() {
           job={studioJob}
           onClose={() => setStudioJob(null)}
           onStartRender={handleStartRenderWithSelected}
+          onUpdateJob={handleUpdateStudioJob}
         />
       )}
 
