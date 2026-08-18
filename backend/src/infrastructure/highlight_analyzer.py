@@ -141,7 +141,7 @@ class HighlightAnalyzer:
                 model=settings.NINE_ROUTER_PASS2_MODEL or settings.nine_router_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=8192,
                 response_format={"type": "json_object"},
             )
 
@@ -476,33 +476,28 @@ Baca SELURUH transkrip video berikut dan identifikasi momen-momen PALING MENARIK
 
 VIDEO INFO:
 - Durasi total: {video_duration:.0f} detik
-- Target: Temukan TEPAT {max_clips} momen terbaik (durasi MINIMUM 45 detik, biarkan cerita selesai utuh — jangan potong di bagian penting)
+- Target: Temukan {max_clips} momen terbaik (durasi MINIMUM 45 detik, biarkan cerita selesai utuh — jangan potong di bagian penting)
 - Format timestamp: detik (contoh: 125.5)
 
 TRANSKRIP LENGKAP:
 {transcript_text}
 
-KRITERIA PEMILIHAN CLIP (prioritas tinggi ke rendah):
-1. HOOK KUAT di awal — kalimat pembuka yang membuat orang berhenti scroll
-2. KONFLIK / DRAMA / EMOSI — momen dengan intensitas tinggi
-3. PUNCHLINE / INSIGHT — "aha moment" atau twist yang mengejutkan
-4. STORYTELLING ARC — clip harus punya awal, tengah, akhir yang memuaskan
-5. RE-WATCH VALUE — momen yang membuat orang ingin tonton ulang atau share
+KRITERIA PEMILIHAN CLIP:
+1. HOOK KUAT di awal
+2. KONFLIK / DRAMA / EMOSI / INSIGHT
+3. STORYTELLING LENGKAP (awal, tengah, punchline akhir)
 
-ATURAN HOOK TEXT:
-- Hook text 3-8 kata, HARUS membuat penasaran
-- JANGAN gunakan spoiler
-- Contoh BAGUS: "Ternyata dia bohong selama ini...", "Gue hampir mati karena ini"
-- Contoh BURUK: "Tips editing video", "Cara membuat konten"
-
-OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa komentar):
+ATURAN OUTPUT:
+- "hook": 3-8 kata clickbait (contoh: "Ternyata dia bohong selama ini...")
+- "reason": ringkas maksimal 15 kata
+- HANYA RAW JSON:
 {{"clips": [{{"rank": 1, "score": 90, "start": 120.0, "end": 180.0, "hook": "hook text viral", "reason": "alasan singkat", "content_type": "storytelling", "speaker_energy": "high"}}]}}"""
 
     # ─── Shared: Parse LLM Response ───────────────────────────────────────────
 
     def _parse_llm_response(self, raw_text: str, video_duration: float) -> list[HighlightCandidate]:
-        """Parse JSON from LLM response into HighlightCandidate list."""
-        # Clean markdown/code block wrappers
+        """Parse JSON from LLM response into HighlightCandidate list with robust tolerance for truncation."""
+        import re
         text = raw_text.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
@@ -510,28 +505,49 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
             text = text[:-3]
         text = text.replace("```json", "").replace("```", "").strip()
 
-        # Try to find JSON object
+        data = None
+        # Attempt 1: Standard JSON parse
         json_start = text.find("{")
         json_end = text.rfind("}") + 1
-        if json_start == -1 or json_end <= json_start:
-            logger.warning(f"highlight_analyzer: no JSON found in response ({len(raw_text)} chars)")
-            return []
-
-        try:
-            data = json.loads(text[json_start:json_end])
-        except json.JSONDecodeError:
-            # Try fixing common issues
+        if json_start != -1 and json_end > json_start:
             try:
-                import re
-                fixed = re.sub(r',\s*([}\]])', r'\1', text[json_start:json_end])
-                data = json.loads(fixed)
+                data = json.loads(text[json_start:json_end])
             except json.JSONDecodeError:
-                logger.error(f"highlight_analyzer: failed to parse JSON: {text[:200]}")
-                return []
+                try:
+                    fixed = re.sub(r',\s*([}\]])', r'\1', text[json_start:json_end])
+                    data = json.loads(fixed)
+                except json.JSONDecodeError:
+                    data = None
 
-        raw_clips = data.get("clips", [])
+        # Attempt 2: Auto-close truncated JSON (e.g. truncated before ']}')
+        if not data and json_start != -1:
+            snippet = text[json_start:]
+            for closing in ["]}", "}]}", "\"]}", "}\"]}", "0}]}", "0.0}]}", "true}]}"]:
+                try:
+                    data = json.loads(snippet + closing)
+                    break
+                except json.JSONDecodeError:
+                    pass
+
+        raw_clips = []
+        if isinstance(data, dict):
+            raw_clips = data.get("clips", [])
+        elif isinstance(data, list):
+            raw_clips = data
+
+        # Attempt 3: Regex extract individual clip objects if full JSON object failed
         if not raw_clips:
-            logger.warning(f"highlight_analyzer: JSON parsed but 'clips' array is empty. Keys found: {list(data.keys())}")
+            clip_matches = re.findall(r'\{\s*["\']rank["\']\s*:\s*\d+[^}]*\}', text)
+            for cm in clip_matches:
+                try:
+                    c_obj = json.loads(cm)
+                    if isinstance(c_obj, dict) and "start" in c_obj:
+                        raw_clips.append(c_obj)
+                except Exception:
+                    pass
+
+        if not raw_clips:
+            logger.warning(f"highlight_analyzer: failed to extract clips from response: {text[:200]}")
             return []
 
         candidates = []
@@ -543,21 +559,19 @@ OUTPUT FORMAT — HANYA RAW JSON (tanpa penjelasan, tanpa markdown, tanpa koment
                 # Validate timestamps
                 if end <= start or start < 0 or end > video_duration + 10:
                     continue
-                if end - start < 45 or end - start > 300:
-                    # Hard reject: too short (<45s) or absurdly long (>5min)
+                if end - start < 15 or end - start > 400:
                     continue
-                # Duration is guaranteed >= 45s by the hard reject above
 
                 candidates.append(HighlightCandidate(
-                    rank=c.get("rank", i + 1),
+                    rank=int(c.get("rank", i + 1)),
                     start=round(start, 2),
                     end=round(end, 2),
                     score=min(100, max(0, int(c.get("score", 70)))),
-                    hook=c.get("hook", ""),
-                    reason=c.get("reason", ""),
-                    content_type=c.get("content_type", "general"),
-                    speaker_energy=c.get("speaker_energy", "medium"),
-                    hook_alt=c.get("hook_alt", ""),
+                    hook=str(c.get("hook", "")).strip(),
+                    reason=str(c.get("reason", "")).strip(),
+                    content_type=str(c.get("content_type", "general")),
+                    speaker_energy=str(c.get("speaker_energy", "medium")),
+                    hook_alt=str(c.get("hook_alt", "")),
                 ))
             except (ValueError, TypeError):
                 continue
