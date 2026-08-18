@@ -2892,7 +2892,7 @@ class PodcastReframeEngine(IReframeEngine):
         fps_value = max(1.0, float(fps))
         vf = (
             f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x_expr}:0,"
-            f"scale=1080:1920,format=yuv420p,setsar=1,"
+            f"scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1,"
             f"fps={fps_value:.6f},settb=AVTB"
         )
 
@@ -3296,7 +3296,7 @@ class PodcastReframeEngine(IReframeEngine):
 
         vf = (
             f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x}:0,"
-            "scale=1080:1920,format=yuv420p,setsar=1"
+            "scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1"
         )
 
         cmd = [
@@ -3775,7 +3775,7 @@ class PodcastReframeEngine(IReframeEngine):
         """Center crop to 9:16."""
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
-            "-vf", "setpts=PTS-STARTPTS,crop=ih*9/16:ih,scale=1080:1920,format=yuv420p,setsar=1",
+            "-vf", "setpts=PTS-STARTPTS,crop=ih*9/16:ih,scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1",
             "-af", self.AUDIO_FILTER,
             *get_video_encoder_args("medium"),
             "-c:a", "aac", "-b:a", "192k",
