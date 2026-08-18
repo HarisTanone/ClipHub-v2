@@ -523,30 +523,24 @@ class GroqWhisperTranscriber:
         chunk_duration = duration / num_chunks
         logger.info(
             f"nine_router_whisper: chunking {duration:.0f}s into "
-            f"{num_chunks} parts ({chunk_duration:.0f}s each)"
+            f"{num_chunks} parts ({chunk_duration:.0f}s each, parallel execution)"
         )
 
-        all_segments = []
-        for i in range(num_chunks):
-            start_time = i * chunk_duration
-            end_time = min((i + 1) * chunk_duration, duration)
-
-            # Extract chunk as FLAC
+        async def _process_single_chunk(idx: int) -> list[dict]:
+            start_time = idx * chunk_duration
+            end_time = min((idx + 1) * chunk_duration, duration)
             chunk_base, _ = os.path.splitext(video_path)
-            chunk_path = f"{chunk_base}_chunk{i:02d}.flac"
+            chunk_path = f"{chunk_base}_chunk{idx:02d}.flac"
             try:
                 await self._extract_chunk_flac(video_path, chunk_path, start_time, end_time)
-
                 if not os.path.exists(chunk_path):
-                    continue
+                    return []
 
-                # Transcribe chunk
                 loop = asyncio.get_event_loop()
                 chunk_segments = await loop.run_in_executor(
                     None, self._call_groq_api, chunk_path, language
                 )
 
-                # Offset timestamps by chunk start time
                 for seg in chunk_segments:
                     seg["start"] = round(seg["start"] + start_time, 3)
                     seg["end"] = round(seg["end"] + start_time, 3)
@@ -554,15 +548,20 @@ class GroqWhisperTranscriber:
                         w["start"] = round(w["start"] + start_time, 3)
                         w["end"] = round(w["end"] + start_time, 3)
 
-                all_segments.extend(chunk_segments)
                 logger.info(
-                    f"nine_router_whisper: chunk {i + 1}/{num_chunks} done "
+                    f"nine_router_whisper: chunk {idx + 1}/{num_chunks} done "
                     f"({len(chunk_segments)} segments)"
                 )
-
+                return chunk_segments
             finally:
                 if os.path.exists(chunk_path):
                     os.remove(chunk_path)
+
+        chunk_results = await asyncio.gather(*[_process_single_chunk(i) for i in range(num_chunks)])
+        all_segments = []
+        for r in chunk_results:
+            if r:
+                all_segments.extend(r)
 
         # Deduplicate words at chunk boundaries (fix non-monotonic timestamps)
         all_segments = self._deduplicate_chunk_boundaries(all_segments)
