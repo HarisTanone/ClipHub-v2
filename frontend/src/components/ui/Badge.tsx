@@ -7,6 +7,7 @@ interface BadgeProps {
   status?: string;
   dot?: boolean;
   size?: "sm" | "md";
+  className?: string;
 }
 
 const variantStyles = {
@@ -26,7 +27,7 @@ const dotColors: Record<string, string> = {
   info: "bg-blue-400",
 };
 
-export function Badge({ children, variant = "default", status, dot, size = "sm" }: BadgeProps) {
+export function Badge({ children, variant = "default", status, dot, size = "sm", className }: BadgeProps) {
   const resolvedVariant = variant === "status" && status ? undefined : variant;
   const statusStyles = variant === "status" && status ? getStatusBg(status) : "";
 
@@ -36,7 +37,8 @@ export function Badge({ children, variant = "default", status, dot, size = "sm" 
         "inline-flex items-center gap-1.5 font-medium border",
         size === "sm" ? "px-2 py-0.5 text-[11px] rounded-md" : "px-2.5 py-1 text-xs rounded-lg",
         resolvedVariant ? variantStyles[resolvedVariant] : statusStyles,
-        !resolvedVariant && !statusStyles && variantStyles.default
+        !resolvedVariant && !statusStyles && variantStyles.default,
+        className
       )}
     >
       {dot && (

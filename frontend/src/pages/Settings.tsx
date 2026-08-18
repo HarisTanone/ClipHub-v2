@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
-import { Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield, Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot, Send, Key, Eye, EyeOff, Radio, Bell, Video, Copy, Check, MessageSquare, Palette } from "lucide-react";
+import {
+  Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield,
+  Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot,
+  Send, Key, Eye, EyeOff, Radio, Bell, Video, Copy, Check, MessageSquare, Palette,
+  SlidersHorizontal, UserCheck, Layers, Lock, Activity, Globe, Info, HelpCircle, HardDrive, CheckSquare
+} from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -987,250 +992,500 @@ export function Settings() {
 
 
   const tabs = [
-    { id: "general" as const, label: "General" },
-    { id: "hyperframes" as const, label: "HyperFrames Hook" },
-    { id: "object" as const, label: "Object Overlay" },
-    { id: "reframe" as const, label: "Reframe Tuning" },
-    ...(isSuperadmin ? [{ id: "models" as const, label: "AI Models" }] : []),
-    ...(isSuperadmin ? [{ id: "telegram" as const, label: "Telegram Bot" }] : []),
-    ...(isSuperadmin ? [{ id: "render" as const, label: "Render Engine" }] : []),
-    ...(isSuperadmin ? [{ id: "testing" as const, label: "Test & Deploy" }] : []),
-    ...(isSuperadmin ? [{ id: "users" as const, label: "Users" }] : []),
+    { id: "general" as const, label: "General", icon: <SlidersHorizontal className="h-3.5 w-3.5" />, group: "Preferences", badge: "All Users" },
+    { id: "render" as const, label: "Render Engine", icon: <Film className="h-3.5 w-3.5" />, group: "Preferences", badge: "All Users" },
+    { id: "reframe" as const, label: "Reframe Tuning", icon: <Cpu className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
+    { id: "hyperframes" as const, label: "HyperFrames Hook", icon: <Sparkles className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
+    { id: "object" as const, label: "Object Overlay", icon: <Palette className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
+    ...(isSuperadmin ? [
+      { id: "models" as const, label: "AI Models", icon: <BrainCircuit className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
+      { id: "telegram" as const, label: "Telegram Bot", icon: <Bot className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
+      { id: "users" as const, label: "Users", icon: <UserPlus className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
+      { id: "testing" as const, label: "Test & Deploy", icon: <Terminal className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
+    ] : []),
   ];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between shrink-0 mb-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-semibold text-zinc-100">Settings</h1>
-          <div className="flex bg-zinc-800/80 rounded-lg p-0.5">
-            {tabs.map((t) => (
-              <button key={t.id} type="button" onClick={() => setTab(t.id)}
-                className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", tab === t.id ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300")}>
-                {t.label}
-              </button>
-            ))}
+      <div className="shrink-0 space-y-3 mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-zinc-950/70 border border-zinc-800/80 rounded-2xl px-4 py-3 backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500/20 to-indigo-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300">
+              <SlidersHorizontal className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-semibold text-zinc-100">Settings</h1>
+                {isSuperadmin ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    <Shield className="h-2.5 w-2.5" />
+                    Superadmin
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-300 border border-zinc-700">
+                    <UserCheck className="h-2.5 w-2.5" />
+                    User Settings
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-zinc-400">
+                {isSuperadmin
+                  ? "Sistem kontrol penuh: model AI, bot Telegram, manajemen pengguna, dan visual tuning global."
+                  : "Pengaturan preferensi video, engine rendering, dan studio visual personal."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {tab === "users" || tab === "testing" ? null : tab === "hyperframes" ? (
+              <div className="flex items-center gap-2">
+                {hfDirty && <span className="text-[10px] text-amber-400 font-medium mr-1 animate-pulse">Unsaved changes</span>}
+                <Button onClick={handleRestoreHfDefaults} loading={isResettingHf} size="sm" variant="outline">Restore Defaults</Button>
+                <Button onClick={handleResetHf} disabled={!hfDirty} size="sm" variant="outline">Reset</Button>
+                <Button onClick={handleSaveHf} disabled={!hfDirty} loading={isSavingHf} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+              </div>
+            ) : tab === "reframe" ? (
+              <div className="flex items-center gap-2">
+                {reframeDirty && <span className="text-[10px] text-amber-400 font-medium mr-1 animate-pulse">Unsaved changes</span>}
+                <Button onClick={handleRestoreReframeDefaults} loading={isResettingReframe} size="sm" variant="outline">Restore Defaults</Button>
+                <Button onClick={handleResetReframe} disabled={!reframeDirty} size="sm" variant="outline">Reset</Button>
+                <Button onClick={handleSaveReframe} disabled={!reframeDirty} loading={isSavingReframe} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+              </div>
+            ) : tab === "object" ? (
+              <div className="flex items-center gap-2">
+                {objectDirty && <span className="text-[10px] text-amber-400 font-medium mr-1 animate-pulse">Unsaved changes</span>}
+                <Button onClick={handleRestoreObjectDefaults} loading={isResettingObject} size="sm" variant="outline">Restore Defaults</Button>
+                <Button onClick={handleResetObject} disabled={!objectDirty} size="sm" variant="outline">Reset</Button>
+                <Button onClick={handleSaveObject} disabled={!objectDirty} loading={isSavingObject} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+              </div>
+            ) : tab === "models" ? (
+              <div className="flex items-center gap-2">
+                <Button onClick={handleTestAllModels} loading={isTestingAll} size="sm" variant="outline" icon={<RefreshCw className="h-3.5 w-3.5" />}>Test All</Button>
+                <Button onClick={() => handleTestModel()} loading={isTestingModel} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Model</Button>
+                <Button onClick={handleSaveModels} loading={isSavingModels} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+              </div>
+            ) : tab === "telegram" ? (
+              <div className="flex items-center gap-2">
+                <Button onClick={handleTestTelegram} loading={isTestingTelegram} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Ping</Button>
+                <Button onClick={handleTestTelegramVideo} loading={isTestingTelegramVideo} size="sm" variant="outline" icon={<Play className="h-3.5 w-3.5" />}>Test Video</Button>
+                <Button onClick={handleSaveTelegram} loading={isSavingTelegram} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+              </div>
+            ) : (
+              <Button onClick={handleSave} loading={isSaving} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+            )}
           </div>
         </div>
-        {tab === "users" || tab === "testing" ? null : tab === "hyperframes" ? (
-          <div className="flex items-center gap-2">
-            {hfDirty && <span className="text-[10px] text-amber-400 font-medium mr-1">Unsaved changes</span>}
-            <Button onClick={handleRestoreHfDefaults} loading={isResettingHf} size="sm" variant="outline">Restore Defaults</Button>
-            <Button onClick={handleResetHf} disabled={!hfDirty} size="sm" variant="outline">Reset</Button>
-            <Button onClick={handleSaveHf} disabled={!hfDirty} loading={isSavingHf} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
-          </div>
-        ) : tab === "reframe" ? (
-          <div className="flex items-center gap-2">
-            {reframeDirty && <span className="text-[10px] text-amber-400 font-medium mr-1">Unsaved changes</span>}
-            <Button onClick={handleRestoreReframeDefaults} loading={isResettingReframe} size="sm" variant="outline">Restore Defaults</Button>
-            <Button onClick={handleResetReframe} disabled={!reframeDirty} size="sm" variant="outline">Reset</Button>
-            <Button onClick={handleSaveReframe} disabled={!reframeDirty} loading={isSavingReframe} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
-          </div>
-        ) : tab === "object" ? (
-          <div className="flex items-center gap-2">
-            {objectDirty && <span className="text-[10px] text-amber-400 font-medium mr-1">Unsaved changes</span>}
-            <Button onClick={handleRestoreObjectDefaults} loading={isResettingObject} size="sm" variant="outline">Restore Defaults</Button>
-            <Button onClick={handleResetObject} disabled={!objectDirty} size="sm" variant="outline">Reset</Button>
-            <Button onClick={handleSaveObject} disabled={!objectDirty} loading={isSavingObject} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
-          </div>
-        ) : tab === "models" ? (
-          <div className="flex items-center gap-2">
-            <Button onClick={handleTestAllModels} loading={isTestingAll} size="sm" variant="outline" icon={<RefreshCw className="h-3.5 w-3.5" />}>Test All</Button>
-            <Button onClick={() => handleTestModel()} loading={isTestingModel} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Model</Button>
-            <Button onClick={handleSaveModels} loading={isSavingModels} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
-          </div>
-        ) : tab === "telegram" ? (
-          <div className="flex items-center gap-2">
-            <Button onClick={handleTestTelegram} loading={isTestingTelegram} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Ping</Button>
-            <Button onClick={handleTestTelegramVideo} loading={isTestingTelegramVideo} size="sm" variant="outline" icon={<Play className="h-3.5 w-3.5" />}>Test Video</Button>
-            <Button onClick={handleSaveTelegram} loading={isSavingTelegram} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
-          </div>
-        ) : (
 
-          <Button onClick={handleSave} loading={isSaving} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
-        )}
+        {/* Tab Pills Navigation */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {tabs.map((t) => {
+            const isActive = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border transition-all whitespace-nowrap",
+                  isActive
+                    ? "bg-zinc-800 border-zinc-700 text-zinc-100 shadow-sm"
+                    : "bg-zinc-900/40 border-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+                )}
+              >
+                <span className={cn(isActive ? "text-violet-400" : "text-zinc-500")}>{t.icon}</span>
+                <span>{t.label}</span>
+                {t.group === "Administration" && (
+                  <span className="text-[9px] font-semibold px-1 rounded bg-red-500/10 text-red-400 border border-red-500/20">Admin</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Tab content */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === "general" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-4xl">
-            {health && (
-              <Card className="p-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center"><Server className="h-4 w-4 text-emerald-400" /></div>
-                  <div><p className="text-sm text-zinc-200 font-medium">Backend Connected</p><p className="text-[11px] text-zinc-500">v{health.version} — {health.mode}</p></div>
-                  <span className="ml-auto h-2 w-2 rounded-full bg-emerald-500" />
-                </div>
-              </Card>
-            )}
-
-            <Card className="p-4">
-              <h3 className="text-xs font-semibold text-zinc-200 mb-3">Default Aspect Ratio</h3>
-              <Select value={settings.default_aspect_ratio} onChange={(e) => handleChange("default_aspect_ratio", e.target.value)}
-                options={[{ value: "9:16", label: "9:16 (Portrait)" }, { value: "16:9", label: "16:9 (Landscape)" }, { value: "1:1", label: "1:1 (Square)" }]} />
-            </Card>
-
-            <Card className="p-4">
-              <div className="flex items-center gap-1.5 mb-3"><Cpu className="h-3.5 w-3.5 text-zinc-500" /><h3 className="text-xs font-semibold text-zinc-200">Whisper Model</h3></div>
-              {isSuperadmin ? (
-                <>
-                  <Select value={settings.whisper_model_size} onChange={(e) => handleChange("whisper_model_size", e.target.value)}
-                    options={[{ value: "tiny", label: "Tiny (fastest)" }, { value: "base", label: "Base" }, { value: "small", label: "Small" }, { value: "medium", label: "Medium (recommended)" }, { value: "large-v3", label: "Large v3 (best)" }]} />
-                  <p className="text-[10px] text-zinc-600 mt-2">Larger = more accurate timestamps, slower.</p>
-                </>
-              ) : (
-                <p className="text-[11px] text-zinc-500">Model: <span className="text-zinc-300 font-medium">{settings.whisper_model_size}</span></p>
-              )}
-            </Card>
-
-            <Card className="p-4">
-              <h3 className="text-xs font-semibold text-zinc-200 mb-3">How It Works</h3>
-              <div className="space-y-1.5 text-[11px] text-zinc-500">
-                <p>1. Paste YouTube URL → AI picks best clips</p>
-                <p>2. Whisper generates word timestamps</p>
-                <p>3. Remotion renders with your custom style</p>
-                <p>4. Download final clips</p>
+          <div className="space-y-4 max-w-4xl">
+            {/* Scope info card */}
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <Info className="h-4 w-4 text-violet-400 shrink-0" />
+                <span className="text-zinc-300">
+                  {isSuperadmin
+                    ? "Pengaturan preferensi default tingkat akun dan parameter pipeline sistem."
+                    : "Preferensi render default yang otomatis digunakan saat memproses video baru."}
+                </span>
               </div>
-            </Card>
+              <Badge variant="default" className="text-[10px]">
+                {isSuperadmin ? "Admin & User Preferences" : "User Preferences"}
+              </Badge>
+            </div>
 
-            {isSuperadmin && (
-              <Card className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Zap className="h-3.5 w-3.5 text-amber-400" />
-                  <h3 className="text-xs font-semibold text-zinc-200">Pipeline Mode</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {health && (
+                <Card className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                      <Server className="h-4 w-4 text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-zinc-200">Backend Server Status</p>
+                      <p className="text-[11px] text-zinc-500">v{health.version} — Mode: {health.mode}</p>
+                    </div>
+                  </div>
+                  <span className="flex items-center gap-1.5 text-[11px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Online
+                  </span>
+                </Card>
+              )}
+
+              <Card className="p-4 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                    <Film className="h-3.5 w-3.5 text-zinc-400" />
+                    Default Aspect Ratio
+                  </h3>
+                  <span className="text-[10px] text-zinc-500 font-mono">{settings.default_aspect_ratio}</span>
                 </div>
-                <p className="text-[11px] text-zinc-500 mb-3">Switch AI engine untuk processing video Anda sendiri.</p>
-                <div className="flex gap-2">
-                  <button type="button"
-                    onClick={() => handleChange("pipeline_mode", "v1")}
-                    className={cn("flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-all",
-                      settings.pipeline_mode === "v1"
-                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-400"
-                        : "border-zinc-700 text-zinc-500 hover:border-zinc-600")}>
-                    <span className="block text-[10px] opacity-70">Premium</span>
-                    V1 — Gemini
-                  </button>
-                  <button type="button"
-                    onClick={() => handleChange("pipeline_mode", "v2")}
-                    className={cn("flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-all",
-                      settings.pipeline_mode === "v2"
-                        ? "border-blue-500 bg-blue-500/10 text-blue-400"
-                        : "border-zinc-700 text-zinc-500 hover:border-zinc-600")}>
-                    <span className="block text-[10px] opacity-70">Free</span>
-                    V2 — 9router
-                  </button>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "9:16", label: "9:16", desc: "Shorts/Reels" },
+                    { id: "16:9", label: "16:9", desc: "YouTube" },
+                    { id: "1:1", label: "1:1", desc: "Square" },
+                  ].map((ratio) => (
+                    <button
+                      key={ratio.id}
+                      type="button"
+                      onClick={() => handleChange("default_aspect_ratio", ratio.id)}
+                      className={cn(
+                        "rounded-lg border p-2 text-center transition-all",
+                        settings.default_aspect_ratio === ratio.id
+                          ? "border-violet-500 bg-violet-500/10 text-zinc-100"
+                          : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700"
+                      )}
+                    >
+                      <span className="block text-xs font-bold">{ratio.label}</span>
+                      <span className="block text-[10px] text-zinc-500">{ratio.desc}</span>
+                    </button>
+                  ))}
                 </div>
               </Card>
-            )}
 
-            {isSuperadmin && (
-              <Card className="p-4 border-red-500/20">
-                <div className="flex items-center gap-2 mb-3">
-                  <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
-                  <h3 className="text-xs font-semibold text-zinc-200">Clear Storage</h3>
+              <Card className="p-4 space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Cpu className="h-3.5 w-3.5 text-zinc-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Whisper Speech-to-Text Model</h3>
                 </div>
-                <p className="text-[11px] text-zinc-500 mb-3">Delete all job records, video generator assets, output videos, footages, thumbnails, and MinIO objects. Presets and user accounts will be preserved.</p>
-                <Button type="button" size="sm" onClick={handleClearStorage} loading={isClearing} className="bg-red-600 hover:bg-red-700 border-red-700" icon={<Trash2 className="h-3.5 w-3.5" />}>
-                  Clear All Processing Data
-                </Button>
+                {isSuperadmin ? (
+                  <>
+                    <Select
+                      value={settings.whisper_model_size}
+                      onChange={(e) => handleChange("whisper_model_size", e.target.value)}
+                      options={[
+                        { value: "tiny", label: "Tiny (Sangat Cepat · Akurasi Dasar)" },
+                        { value: "base", label: "Base (Cepat · Akurasi Standar)" },
+                        { value: "small", label: "Small (Seimbang)" },
+                        { value: "medium", label: "Medium (Direkomendasikan)" },
+                        { value: "large-v3", label: "Large v3 (Akurasi Timestamp Tertinggi)" },
+                      ]}
+                    />
+                    <p className="text-[10px] text-zinc-500">
+                      Model berukuran lebih besar menghasilkan timestamp kata dan akurasi karaoke yang lebih presisi.
+                    </p>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2.5">
+                    <p className="text-xs text-zinc-300 font-medium">Model Aktif: <span className="text-violet-300 uppercase">{settings.whisper_model_size}</span></p>
+                    <p className="text-[10px] text-zinc-500 mt-0.5">Dikonfigurasi oleh administrator sistem untuk pemrosesan transkrip.</p>
+                  </div>
+                )}
               </Card>
-            )}
 
+              <Card className="p-4 space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <HelpCircle className="h-3.5 w-3.5 text-zinc-400" />
+                  <h3 className="text-xs font-semibold text-zinc-200">Alur Kerja Otomatisasi Video</h3>
+                </div>
+                <div className="space-y-1.5 text-[11px] text-zinc-400">
+                  <div className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full bg-violet-500/20 text-violet-300 text-[10px] font-bold flex items-center justify-center">1</span>
+                    <span>Masukkan URL YouTube / topik konten</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full bg-violet-500/20 text-violet-300 text-[10px] font-bold flex items-center justify-center">2</span>
+                    <span>AI menganalisis scene viral & transkrip kata</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full bg-violet-500/20 text-violet-300 text-[10px] font-bold flex items-center justify-center">3</span>
+                    <span>Remotion / HyperFrames me-render hook & subtitle</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full bg-violet-500/20 text-violet-300 text-[10px] font-bold flex items-center justify-center">4</span>
+                    <span>Unduh hasil video berkualitas tinggi atau kirim ke Telegram</span>
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Superadmin System Controls */}
+            {isSuperadmin && (
+              <div className="pt-2 space-y-4">
+                <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
+                  <Shield className="h-3.5 w-3.5 text-red-400" />
+                  <span>Superadmin System Controls</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Card className="p-4 border-amber-500/20 bg-zinc-950/40">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Zap className="h-3.5 w-3.5 text-amber-400" />
+                      <h3 className="text-xs font-semibold text-zinc-200">Pipeline Engine Mode</h3>
+                    </div>
+                    <p className="text-[11px] text-zinc-400 mb-3">
+                      Pilih engine AI default untuk pemrosesan kurasi video klip.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleChange("pipeline_mode", "v1")}
+                        className={cn(
+                          "flex-1 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all text-left",
+                          settings.pipeline_mode === "v1"
+                            ? "border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-sm"
+                            : "border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                        )}
+                      >
+                        <span className="block text-[10px] uppercase font-bold text-emerald-400">V1 — Gemini</span>
+                        <span className="text-[11px] text-zinc-300">Multi-Key Pool & High Accuracy</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleChange("pipeline_mode", "v2")}
+                        className={cn(
+                          "flex-1 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all text-left",
+                          settings.pipeline_mode === "v2"
+                            ? "border-blue-500 bg-blue-500/10 text-blue-400 shadow-sm"
+                            : "border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                        )}
+                      >
+                        <span className="block text-[10px] uppercase font-bold text-blue-400">V2 — 9Router</span>
+                        <span className="text-[11px] text-zinc-300">Local Gateway & LLM Fallback</span>
+                      </button>
+                    </div>
+                  </Card>
+
+                  <Card className="p-4 border-red-500/20 bg-zinc-950/40">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+                      <h3 className="text-xs font-semibold text-zinc-200">Danger Zone: Bersihkan Storage</h3>
+                    </div>
+                    <p className="text-[11px] text-zinc-400 mb-3">
+                      Hapus seluruh riwayat job, file video hasil render, footage unduhan, dan objek di MinIO. Akun dan preset akan dipertahankan.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleClearStorage}
+                      loading={isClearing}
+                      className="bg-red-600/90 hover:bg-red-600 text-white border-red-600 w-full"
+                      icon={<Trash2 className="h-3.5 w-3.5" />}
+                    >
+                      Bersihkan Semua Data Pemrosesan
+                    </Button>
+                  </Card>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {tab === "render" && (
-          <div className="max-w-2xl space-y-4">
-            <Card className="p-4">
-              <div className="flex items-center gap-1.5 mb-3"><Sparkles className="h-3.5 w-3.5 text-zinc-500" /><h3 className="text-xs font-semibold text-zinc-200">Render Engine</h3></div>
+          <div className="space-y-4 max-w-3xl">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <Film className="h-4 w-4 text-violet-400 shrink-0" />
+                <span className="text-zinc-300">
+                  Konfigurasi render engine Remotion berbasis React untuk animasi hook, subtitle karaoke, dan visual layer.
+                </span>
+              </div>
+              <Badge variant="default" className="text-[10px]">Tersedia untuk Semua Pengguna</Badge>
+            </div>
+
+            <Card className="p-4 space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+                    <Sparkles className="h-4 w-4 text-violet-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-semibold text-zinc-100">Remotion React Renderer</h3>
+                    <p className="text-[11px] text-zinc-400">Rendering visual dinamis dengan frame-accurate timeline.</p>
+                  </div>
+                </div>
+                <span className={cn(
+                  "px-2 py-0.5 text-[10px] font-medium rounded-full border",
+                  settings.use_remotion
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                    : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                )}>
+                  {settings.use_remotion ? "Aktif" : "Nonaktif"}
+                </span>
+              </div>
+
               <div className="space-y-3">
-                <FeatureToggle icon={<Film className="h-3.5 w-3.5" />} label="Use Remotion" desc="React-based rendering" active={settings.use_remotion} onToggle={() => handleChange("use_remotion", !settings.use_remotion)} />
+                <FeatureToggle
+                  icon={<Film className="h-3.5 w-3.5" />}
+                  label="Gunakan Engine Remotion"
+                  desc="Me-render hook dan subtitle dengan engine React modern untuk kualitas tertinggi"
+                  active={settings.use_remotion}
+                  onToggle={() => handleChange("use_remotion", !settings.use_remotion)}
+                />
+
                 {settings.use_remotion && (
                   <>
-                    <FeatureToggle icon={<Sparkles className="h-3.5 w-3.5" />} label="AI Layer" desc="Auto VFX from transcript" active={settings.remotion_ai_layer} onToggle={() => handleChange("remotion_ai_layer", !settings.remotion_ai_layer)} />
-                    <Select label="Quality" value={settings.remotion_quality} onChange={(e) => handleChange("remotion_quality", e.target.value)}
-                      options={[{ value: "low", label: "Low (CRF 28)" }, { value: "medium", label: "Medium (CRF 18)" }, { value: "high", label: "High (CRF 12)" }]} />
+                    <FeatureToggle
+                      icon={<Sparkles className="h-3.5 w-3.5" />}
+                      label="AI Cinematic Text Layer"
+                      desc="Otomatis mengekstrak kata kunci transkrip dan memunculkan animasi tipografi dinamis"
+                      active={settings.remotion_ai_layer}
+                      onToggle={() => handleChange("remotion_ai_layer", !settings.remotion_ai_layer)}
+                    />
+
+                    <div className="pt-1">
+                      <Select
+                        label="Kualitas Encoding Video (CRF)"
+                        value={settings.remotion_quality}
+                        onChange={(e) => handleChange("remotion_quality", e.target.value)}
+                        options={[
+                          { value: "low", label: "Fast Draft (CRF 28 · Render Cepat · Ukuran Kecil)" },
+                          { value: "medium", label: "Standard 1080p (CRF 18 · Seimbang & Jernih)" },
+                          { value: "high", label: "Cinematic High (CRF 12 · Kualitas Maksimal)" },
+                        ]}
+                      />
+                    </div>
                   </>
                 )}
               </div>
+            </Card>
+
+            <Card className="p-4 space-y-2">
+              <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                <Activity className="h-3.5 w-3.5 text-zinc-400" />
+                Akselerasi & Optimasi Performa
+              </h3>
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                Engine Remotion bekerja berdampingan dengan FFmpeg hardware passthrough. Ketika mode AI Layer aktif, frame visual di-overlay langsung ke video master tanpa perlu encoding ulang ganda.
+              </p>
             </Card>
           </div>
         )}
 
         {tab === "reframe" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* LEFT: Config sliders (col-4) */}
-            <div className="lg:col-span-4 space-y-4 order-2 lg:order-1">
-              {/* Sampling & Detection */}
-              <Card className="p-4">
-                <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-zinc-500" />Sampling &amp; Detection</h3>
-                <SectionDescription
-                  pipelineStage={REFRAME_SECTION_DESCRIPTIONS.samplingDetection.pipelineStage}
-                  description={REFRAME_SECTION_DESCRIPTIONS.samplingDetection.description}
-                />
-                <div className="space-y-3 mt-3">
-                  <RangeSlider label="Sample Interval (sec)" value={reframeTuning.sample_interval_sec} min={0.1} max={1.0} step={0.01} onChange={(v) => handleReframeChange("sample_interval_sec", v)} description={REFRAME_SLIDER_META.sample_interval_sec.description} tooltip={REFRAME_SLIDER_META.sample_interval_sec.tooltip} />
-                  <RangeSlider label="Max Samples" value={reframeTuning.max_samples} min={60} max={1440} step={10} onChange={(v) => handleReframeChange("max_samples", v)} description={REFRAME_SLIDER_META.max_samples.description} tooltip={REFRAME_SLIDER_META.max_samples.tooltip} />
-                  <RangeSlider label="Face Confidence" value={reframeTuning.face_confidence} min={0.1} max={0.9} step={0.01} onChange={(v) => handleReframeChange("face_confidence", v)} description={REFRAME_SLIDER_META.face_confidence.description} tooltip={REFRAME_SLIDER_META.face_confidence.tooltip} />
-                  <RangeSlider label="Min Face Size Ratio" value={reframeTuning.min_face_size_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("min_face_size_ratio", v)} description={REFRAME_SLIDER_META.min_face_size_ratio.description} tooltip={REFRAME_SLIDER_META.min_face_size_ratio.tooltip} />
-                  <RangeSlider label="Max Face Size Ratio" value={reframeTuning.max_face_size_ratio} min={0.20} max={0.80} step={0.01} onChange={(v) => handleReframeChange("max_face_size_ratio", v)} description={REFRAME_SLIDER_META.max_face_size_ratio.description} tooltip={REFRAME_SLIDER_META.max_face_size_ratio.tooltip} />
-                  <RangeSlider label="Min Separation Ratio (two-person threshold)" value={reframeTuning.min_separation_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_separation_ratio", v)} description={REFRAME_SLIDER_META.min_separation_ratio.description} tooltip={REFRAME_SLIDER_META.min_separation_ratio.tooltip} />
-                  <RangeSlider label="Min Coexist Ratio (both faces simultaneous)" value={reframeTuning.min_coexist_ratio} min={0.10} max={0.80} step={0.01} onChange={(v) => handleReframeChange("min_coexist_ratio", v)} description={REFRAME_SLIDER_META.min_coexist_ratio.description} tooltip={REFRAME_SLIDER_META.min_coexist_ratio.tooltip} />
-                </div>
-              </Card>
-
-              {/* Auto Grid */}
-              <Card className="p-4">
-                <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Film className="h-3.5 w-3.5 text-zinc-500" />Auto Grid</h3>
-                <SectionDescription
-                  pipelineStage={REFRAME_SECTION_DESCRIPTIONS.autoGrid.pipelineStage}
-                  description={REFRAME_SECTION_DESCRIPTIONS.autoGrid.description}
-                />
-                <div className="space-y-3 mt-3">
-                  <RangeSlider label="Dominance Single Crop (switch to single above this)" value={reframeTuning.dominance_single_crop} min={0.50} max={0.95} step={0.01} onChange={(v) => handleReframeChange("dominance_single_crop", v)} description={REFRAME_SLIDER_META.dominance_single_crop.description} tooltip={REFRAME_SLIDER_META.dominance_single_crop.tooltip} />
-                  <RangeSlider label="Grid Base Zoom" value={reframeTuning.grid_base_zoom} min={1.0} max={1.5} step={0.01} onChange={(v) => handleReframeChange("grid_base_zoom", v)} description={REFRAME_SLIDER_META.grid_base_zoom.description} tooltip={REFRAME_SLIDER_META.grid_base_zoom.tooltip} />
-                  <RangeSlider label="Grid Max Zoom (2-person separation)" value={reframeTuning.grid_max_zoom} min={1.2} max={3.0} step={0.01} onChange={(v) => handleReframeChange("grid_max_zoom", v)} description={REFRAME_SLIDER_META.grid_max_zoom.description} tooltip={REFRAME_SLIDER_META.grid_max_zoom.tooltip} />
-                  <RangeSlider label="Grid Face Margin (breathing room)" value={reframeTuning.grid_face_margin} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("grid_face_margin", v)} description={REFRAME_SLIDER_META.grid_face_margin.description} tooltip={REFRAME_SLIDER_META.grid_face_margin.tooltip} />
-                  <RangeSlider label="Grid Enter Samples (confirm 2nd person)" value={reframeTuning.grid_enter_samples} min={1} max={10} step={1} onChange={(v) => handleReframeChange("grid_enter_samples", v)} description={REFRAME_SLIDER_META.grid_enter_samples.description} tooltip={REFRAME_SLIDER_META.grid_enter_samples.tooltip} />
-                  <RangeSlider label="Grid Exit Samples (close when 1 leaves)" value={reframeTuning.grid_exit_samples} min={1} max={6} step={1} onChange={(v) => handleReframeChange("grid_exit_samples", v)} description={REFRAME_SLIDER_META.grid_exit_samples.description} tooltip={REFRAME_SLIDER_META.grid_exit_samples.tooltip} />
-                  <RangeSlider label="Min Grid Segment (sec, anti-flicker)" value={reframeTuning.min_grid_segment_seconds} min={0.5} max={3.0} step={0.1} onChange={(v) => handleReframeChange("min_grid_segment_seconds", v)} description={REFRAME_SLIDER_META.min_grid_segment_seconds.description} tooltip={REFRAME_SLIDER_META.min_grid_segment_seconds.tooltip} />
-                </div>
-              </Card>
-
-              {/* Ghost Detection */}
-              <Card className="p-4">
-                <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-zinc-500" />Ghost Detection</h3>
-                <SectionDescription
-                  pipelineStage={REFRAME_SECTION_DESCRIPTIONS.ghostDetection.pipelineStage}
-                  description={REFRAME_SECTION_DESCRIPTIONS.ghostDetection.description}
-                />
-                <div className="space-y-3 mt-3">
-                  <RangeSlider label="Min Face Area (px)" value={reframeTuning.min_face_area_px} min={500} max={15000} step={100} onChange={(v) => handleReframeChange("min_face_area_px", v)} description={REFRAME_SLIDER_META.min_face_area_px.description} tooltip={REFRAME_SLIDER_META.min_face_area_px.tooltip} />
-                  <RangeSlider label="Min Area Ratio to Max" value={reframeTuning.min_area_ratio_to_max} min={0.05} max={0.60} step={0.01} onChange={(v) => handleReframeChange("min_area_ratio_to_max", v)} description={REFRAME_SLIDER_META.min_area_ratio_to_max.description} tooltip={REFRAME_SLIDER_META.min_area_ratio_to_max.tooltip} />
-                  <RangeSlider label="Min Frame Ratio (track persistence)" value={reframeTuning.min_frame_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_frame_ratio", v)} description={REFRAME_SLIDER_META.min_frame_ratio.description} tooltip={REFRAME_SLIDER_META.min_frame_ratio.tooltip} />
-                  <RangeSlider label="Ghost IoU Threshold (duplicate overlap)" value={reframeTuning.ghost_iou_threshold} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("ghost_iou_threshold", v)} description={REFRAME_SLIDER_META.ghost_iou_threshold.description} tooltip={REFRAME_SLIDER_META.ghost_iou_threshold.tooltip} />
-                  <RangeSlider label="Ghost Center Dist Ratio" value={reframeTuning.ghost_center_dist_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_ratio", v)} description={REFRAME_SLIDER_META.ghost_center_dist_ratio.description} tooltip={REFRAME_SLIDER_META.ghost_center_dist_ratio.tooltip} />
-                  <RangeSlider label="Ghost Center Dist Broad" value={reframeTuning.ghost_center_dist_broad} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_broad", v)} description={REFRAME_SLIDER_META.ghost_center_dist_broad.description} tooltip={REFRAME_SLIDER_META.ghost_center_dist_broad.tooltip} />
-                  <RangeSlider label="Min Pair Size Ratio (big+small face pairing)" value={reframeTuning.min_pair_size_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_pair_size_ratio", v)} description={REFRAME_SLIDER_META.min_pair_size_ratio.description} tooltip={REFRAME_SLIDER_META.min_pair_size_ratio.tooltip} />
-                </div>
-              </Card>
-
+          <div className="space-y-4">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <Cpu className="h-4 w-4 text-violet-400 shrink-0" />
+                <span className="text-zinc-300">
+                  {isSuperadmin
+                    ? "Konfigurasi Person-First Reframe Global (default untuk seluruh proses kliping video di server)."
+                    : "Kustomisasi Person-First Reframe untuk workspace akun Anda."}
+                </span>
+              </div>
+              <Badge variant="default" className="text-[10px]">
+                {isSuperadmin ? "Global Defaults (Superadmin)" : "Personal Tuning Override"}
+              </Badge>
             </div>
-            {/* RIGHT: Preview panel (col-8) */}
-            <div className="lg:col-span-8 order-1 lg:order-2">
-              <ImagePreviewPanel
-                reframeTuning={reframeTuning}
-                aspectRatio={aspectRatio}
-                onAspectRatioChange={setAspectRatio}
-              />
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* LEFT: Config sliders (col-4) */}
+              <div className="lg:col-span-4 space-y-4 order-2 lg:order-1">
+                {/* Sampling & Detection */}
+                <Card className="p-4">
+                  <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-zinc-500" />Sampling &amp; Detection</h3>
+                  <SectionDescription
+                    pipelineStage={REFRAME_SECTION_DESCRIPTIONS.samplingDetection.pipelineStage}
+                    description={REFRAME_SECTION_DESCRIPTIONS.samplingDetection.description}
+                  />
+                  <div className="space-y-3 mt-3">
+                    <RangeSlider label="Sample Interval (sec)" value={reframeTuning.sample_interval_sec} min={0.1} max={1.0} step={0.01} onChange={(v) => handleReframeChange("sample_interval_sec", v)} description={REFRAME_SLIDER_META.sample_interval_sec.description} tooltip={REFRAME_SLIDER_META.sample_interval_sec.tooltip} />
+                    <RangeSlider label="Max Samples" value={reframeTuning.max_samples} min={60} max={1440} step={10} onChange={(v) => handleReframeChange("max_samples", v)} description={REFRAME_SLIDER_META.max_samples.description} tooltip={REFRAME_SLIDER_META.max_samples.tooltip} />
+                    <RangeSlider label="Face Confidence" value={reframeTuning.face_confidence} min={0.1} max={0.9} step={0.01} onChange={(v) => handleReframeChange("face_confidence", v)} description={REFRAME_SLIDER_META.face_confidence.description} tooltip={REFRAME_SLIDER_META.face_confidence.tooltip} />
+                    <RangeSlider label="Min Face Size Ratio" value={reframeTuning.min_face_size_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("min_face_size_ratio", v)} description={REFRAME_SLIDER_META.min_face_size_ratio.description} tooltip={REFRAME_SLIDER_META.min_face_size_ratio.tooltip} />
+                    <RangeSlider label="Max Face Size Ratio" value={reframeTuning.max_face_size_ratio} min={0.20} max={0.80} step={0.01} onChange={(v) => handleReframeChange("max_face_size_ratio", v)} description={REFRAME_SLIDER_META.max_face_size_ratio.description} tooltip={REFRAME_SLIDER_META.max_face_size_ratio.tooltip} />
+                    <RangeSlider label="Min Separation Ratio (two-person threshold)" value={reframeTuning.min_separation_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_separation_ratio", v)} description={REFRAME_SLIDER_META.min_separation_ratio.description} tooltip={REFRAME_SLIDER_META.min_separation_ratio.tooltip} />
+                    <RangeSlider label="Min Coexist Ratio (both faces simultaneous)" value={reframeTuning.min_coexist_ratio} min={0.10} max={0.80} step={0.01} onChange={(v) => handleReframeChange("min_coexist_ratio", v)} description={REFRAME_SLIDER_META.min_coexist_ratio.description} tooltip={REFRAME_SLIDER_META.min_coexist_ratio.tooltip} />
+                  </div>
+                </Card>
+
+                {/* Auto Grid */}
+                <Card className="p-4">
+                  <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><Film className="h-3.5 w-3.5 text-zinc-500" />Auto Grid</h3>
+                  <SectionDescription
+                    pipelineStage={REFRAME_SECTION_DESCRIPTIONS.autoGrid.pipelineStage}
+                    description={REFRAME_SECTION_DESCRIPTIONS.autoGrid.description}
+                  />
+                  <div className="space-y-3 mt-3">
+                    <RangeSlider label="Dominance Single Crop (switch to single above this)" value={reframeTuning.dominance_single_crop} min={0.50} max={0.95} step={0.01} onChange={(v) => handleReframeChange("dominance_single_crop", v)} description={REFRAME_SLIDER_META.dominance_single_crop.description} tooltip={REFRAME_SLIDER_META.dominance_single_crop.tooltip} />
+                    <RangeSlider label="Grid Base Zoom" value={reframeTuning.grid_base_zoom} min={1.0} max={1.5} step={0.01} onChange={(v) => handleReframeChange("grid_base_zoom", v)} description={REFRAME_SLIDER_META.grid_base_zoom.description} tooltip={REFRAME_SLIDER_META.grid_base_zoom.tooltip} />
+                    <RangeSlider label="Grid Max Zoom (2-person separation)" value={reframeTuning.grid_max_zoom} min={1.2} max={3.0} step={0.01} onChange={(v) => handleReframeChange("grid_max_zoom", v)} description={REFRAME_SLIDER_META.grid_max_zoom.description} tooltip={REFRAME_SLIDER_META.grid_max_zoom.tooltip} />
+                    <RangeSlider label="Grid Face Margin (breathing room)" value={reframeTuning.grid_face_margin} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("grid_face_margin", v)} description={REFRAME_SLIDER_META.grid_face_margin.description} tooltip={REFRAME_SLIDER_META.grid_face_margin.tooltip} />
+                    <RangeSlider label="Grid Enter Samples (confirm 2nd person)" value={reframeTuning.grid_enter_samples} min={1} max={10} step={1} onChange={(v) => handleReframeChange("grid_enter_samples", v)} description={REFRAME_SLIDER_META.grid_enter_samples.description} tooltip={REFRAME_SLIDER_META.grid_enter_samples.tooltip} />
+                    <RangeSlider label="Grid Exit Samples (close when 1 leaves)" value={reframeTuning.grid_exit_samples} min={1} max={6} step={1} onChange={(v) => handleReframeChange("grid_exit_samples", v)} description={REFRAME_SLIDER_META.grid_exit_samples.description} tooltip={REFRAME_SLIDER_META.grid_exit_samples.tooltip} />
+                    <RangeSlider label="Min Grid Segment (sec, anti-flicker)" value={reframeTuning.min_grid_segment_seconds} min={0.5} max={3.0} step={0.1} onChange={(v) => handleReframeChange("min_grid_segment_seconds", v)} description={REFRAME_SLIDER_META.min_grid_segment_seconds.description} tooltip={REFRAME_SLIDER_META.min_grid_segment_seconds.tooltip} />
+                  </div>
+                </Card>
+
+                {/* Ghost Detection */}
+                <Card className="p-4">
+                  <h3 className="text-xs font-semibold text-zinc-200 mb-3 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-zinc-500" />Ghost Detection</h3>
+                  <SectionDescription
+                    pipelineStage={REFRAME_SECTION_DESCRIPTIONS.ghostDetection.pipelineStage}
+                    description={REFRAME_SECTION_DESCRIPTIONS.ghostDetection.description}
+                  />
+                  <div className="space-y-3 mt-3">
+                    <RangeSlider label="Min Face Area (px)" value={reframeTuning.min_face_area_px} min={500} max={15000} step={100} onChange={(v) => handleReframeChange("min_face_area_px", v)} description={REFRAME_SLIDER_META.min_face_area_px.description} tooltip={REFRAME_SLIDER_META.min_face_area_px.tooltip} />
+                    <RangeSlider label="Min Area Ratio to Max" value={reframeTuning.min_area_ratio_to_max} min={0.05} max={0.60} step={0.01} onChange={(v) => handleReframeChange("min_area_ratio_to_max", v)} description={REFRAME_SLIDER_META.min_area_ratio_to_max.description} tooltip={REFRAME_SLIDER_META.min_area_ratio_to_max.tooltip} />
+                    <RangeSlider label="Min Frame Ratio (track persistence)" value={reframeTuning.min_frame_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_frame_ratio", v)} description={REFRAME_SLIDER_META.min_frame_ratio.description} tooltip={REFRAME_SLIDER_META.min_frame_ratio.tooltip} />
+                    <RangeSlider label="Ghost IoU Threshold (duplicate overlap)" value={reframeTuning.ghost_iou_threshold} min={0.10} max={0.60} step={0.01} onChange={(v) => handleReframeChange("ghost_iou_threshold", v)} description={REFRAME_SLIDER_META.ghost_iou_threshold.description} tooltip={REFRAME_SLIDER_META.ghost_iou_threshold.tooltip} />
+                    <RangeSlider label="Ghost Center Dist Ratio" value={reframeTuning.ghost_center_dist_ratio} min={0.02} max={0.30} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_ratio", v)} description={REFRAME_SLIDER_META.ghost_center_dist_ratio.description} tooltip={REFRAME_SLIDER_META.ghost_center_dist_ratio.tooltip} />
+                    <RangeSlider label="Ghost Center Dist Broad" value={reframeTuning.ghost_center_dist_broad} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("ghost_center_dist_broad", v)} description={REFRAME_SLIDER_META.ghost_center_dist_broad.description} tooltip={REFRAME_SLIDER_META.ghost_center_dist_broad.tooltip} />
+                    <RangeSlider label="Min Pair Size Ratio (big+small face pairing)" value={reframeTuning.min_pair_size_ratio} min={0.05} max={0.50} step={0.01} onChange={(v) => handleReframeChange("min_pair_size_ratio", v)} description={REFRAME_SLIDER_META.min_pair_size_ratio.description} tooltip={REFRAME_SLIDER_META.min_pair_size_ratio.tooltip} />
+                  </div>
+                </Card>
+
+              </div>
+              {/* RIGHT: Preview panel (col-8) */}
+              <div className="lg:col-span-8 order-1 lg:order-2">
+                <ImagePreviewPanel
+                  reframeTuning={reframeTuning}
+                  aspectRatio={aspectRatio}
+                  onAspectRatioChange={setAspectRatio}
+                />
+              </div>
             </div>
           </div>
         )}
 
         {tab === "hyperframes" && (
           <div className="max-w-4xl space-y-5">
+            {/* Scope info card */}
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="h-4 w-4 text-violet-400 shrink-0" />
+                <span className="text-zinc-300">
+                  {isSuperadmin
+                    ? "Katalog Template HyperFrames Hook & Polish (dapat dipilih langsung saat generate video)."
+                    : "Pilihan template HyperFrames Hook & Polish untuk video klip akun Anda."}
+                </span>
+              </div>
+              <Badge variant="default" className="text-[10px]">
+                {isSuperadmin ? "Global Template Catalog" : "Studio Style Presets"}
+              </Badge>
+            </div>
+
             {/* Master Controls Card */}
             <Card className="p-5 space-y-4 border-violet-500/20 bg-zinc-950/70">
               <div className="flex items-center justify-between">
@@ -1467,10 +1722,23 @@ export function Settings() {
 
         {tab === "object" && (
           <div className="max-w-2xl space-y-4">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <Palette className="h-4 w-4 text-violet-400 shrink-0" />
+                <span className="text-zinc-300">
+                  {isSuperadmin
+                    ? "Pengaturan Top Image & Watermark Branding Global (default untuk seluruh server)."
+                    : "Pengaturan Top Image & Watermark Branding untuk video akun Anda."}
+                </span>
+              </div>
+              <Badge variant="default" className="text-[10px]">
+                {isSuperadmin ? "Global Defaults (Superadmin)" : "Personal Workspace"}
+              </Badge>
+            </div>
+
             <Card className="p-4">
-              <p className="text-[11px] text-zinc-500 mb-3">
-                Style only. Object/entity words + bilingual search queries come from AI per-clip (no hardcode lexicon).
-                Card is baked into video before Remotion (hook/subtitle layer).
+              <p className="text-[11px] text-zinc-400 mb-3">
+                Entity card and branding layer baked into video before subtitle overlays.
               </p>
               <div className="space-y-3">
                 <FeatureToggle
@@ -1529,10 +1797,20 @@ export function Settings() {
           </div>
         )}
 
-        {tab === "users" && (
+        {tab === "users" && isSuperadmin && (
           <div className="max-w-3xl space-y-4">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <UserPlus className="h-4 w-4 text-violet-400 shrink-0" />
+                <span className="text-zinc-300">
+                  Manajemen akun pengguna sistem dan aktivasi fitur premium (Dual Subtitle, Auto Grid, Three.js, AI Layer).
+                </span>
+              </div>
+              <Badge variant="default" className="text-[10px]">Superadmin Access</Badge>
+            </div>
+
             <div className="flex items-center justify-between">
-              <p className="text-xs text-zinc-500">{users.length} users</p>
+              <p className="text-xs text-zinc-500">{users.length} users registered</p>
               <Button size="sm" onClick={() => setShowCreateUser(!showCreateUser)} icon={showCreateUser ? undefined : <UserPlus className="h-3.5 w-3.5" />}>
                 {showCreateUser ? "Cancel" : "Add User"}
               </Button>
@@ -1560,7 +1838,18 @@ export function Settings() {
         )}
 
         {tab === "models" && isSuperadmin && (
-          <div className="max-w-4xl grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="max-w-4xl space-y-4">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <BrainCircuit className="h-4 w-4 text-violet-400 shrink-0" />
+                <span className="text-zinc-300">
+                  Monitoring status LLM model 9Router, fallback provider, kuota Gemini API key pool, dan latensi benchmark.
+                </span>
+              </div>
+              <Badge variant="default" className="text-[10px]">Superadmin Access</Badge>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Left: Model Settings Form */}
             <div className="lg:col-span-2 space-y-4">
               <Card className="p-4">
@@ -1875,10 +2164,22 @@ export function Settings() {
               </Card>
             </div>
           </div>
+          </div>
         )}
 
         {tab === "telegram" && isSuperadmin && (
-          <div className="max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="max-w-5xl space-y-4">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <Bot className="h-4 w-4 text-violet-400 shrink-0" />
+                <span className="text-zinc-300">
+                  Konfigurasi Bot Telegram @AutoCliperBot, routing webhook/polling, serta scheduler social media auto-posting.
+                </span>
+              </div>
+              <Badge variant="default" className="text-[10px]">Superadmin Access</Badge>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Left Column: Configuration & Triggers */}
             <div className="space-y-4">
               {/* Integration Status & Master Switch */}
@@ -2342,10 +2643,22 @@ export function Settings() {
               </Card>
             </div>
           </div>
+          </div>
         )}
 
         {tab === "testing" && isSuperadmin && (
-          <div className="max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="max-w-5xl space-y-4">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <Terminal className="h-4 w-4 text-emerald-400 shrink-0" />
+                <span className="text-zinc-300">
+                  Server Automated Test Suite: Menjalankan unit test backend & frontend, Remotion render check, dan smoke test video preview.
+                </span>
+              </div>
+              <Badge variant="default" className="text-[10px]">Superadmin Access</Badge>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="space-y-4">
               <Card className="p-4">
                 <div className="flex items-start justify-between gap-4">
@@ -2424,6 +2737,7 @@ export function Settings() {
                 </div>
               )}
             </Card>
+          </div>
           </div>
         )}
       </div>
