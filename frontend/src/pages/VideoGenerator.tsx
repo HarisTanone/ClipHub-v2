@@ -13,6 +13,7 @@ import {
   Loader2,
   Palette,
   Play,
+  Pause,
   RefreshCw,
   RotateCcw,
   Search,
@@ -26,6 +27,15 @@ import {
   Bookmark,
   MessageSquare,
   Flame,
+  Heart,
+  Share2,
+  Music,
+  Mic,
+  Gauge,
+  Lightbulb,
+  Radio,
+  Wand2,
+  Compass,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -488,12 +498,111 @@ function LiveVideoPreview({
   onCustomizeHook: () => void;
   onCustomizeSubtitle: () => void;
 }) {
+  const [activeWordIdx, setActiveWordIdx] = useState(0);
+  const [previewMode, setPreviewMode] = useState<"full" | "hook" | "subtitles">("full");
+  const [isPlaying, setIsPlaying] = useState(true);
+
   const hookText =
     customHook.trim() ||
-    (topic.trim() ? topic.trim().slice(0, 42).toUpperCase() : "THE SECRETS OF DEEP OCEAN");
+    (topic.trim() ? topic.trim().slice(0, 48).toUpperCase() : "CAN AI REPLACE PROGRAMMERS?");
 
-  const hookBg = hookStyle.boxEnabled ? (hookStyle.bgColor || "#FACC15") : "transparent";
-  const hookOpacity = hookStyle.boxEnabled ? (hookStyle.bgOpacity ?? 1) : 1;
+  const wordsCount = Math.max(1, Math.min(6, subtitleStyle.maxWordsPerLine || 3));
+
+  // Dynamic sample words adapted from topic if available
+  const sampleWords = useMemo(() => {
+    if (topic.trim()) {
+      const clean = topic
+        .trim()
+        .replace(/[^\w\s]/gi, "")
+        .toUpperCase()
+        .split(/\s+/)
+        .filter(Boolean);
+      if (clean.length >= wordsCount) {
+        return clean.slice(0, wordsCount);
+      }
+      if (clean.length > 0) {
+        const fillers = ["IN", "THIS", "EXCLUSIVE", "STORY", "NOW"];
+        return [...clean, ...fillers].slice(0, wordsCount);
+      }
+    }
+    return ["UNVEILING", "THE", "HIDDEN", "TRUTH", "RIGHT", "NOW"].slice(0, wordsCount);
+  }, [topic, wordsCount]);
+
+  // Animate karaoke active word cycle
+  useEffect(() => {
+    if (!isPlaying) return;
+    const timer = setInterval(() => {
+      setActiveWordIdx((prev) => (prev + 1) % wordsCount);
+    }, 650);
+    return () => clearInterval(timer);
+  }, [isPlaying, wordsCount]);
+
+  // Hook preset style mapping
+  const isImpact = hookStyle.animation === "skia_impact_badge";
+  const isNeon = hookStyle.animation === "skia_neon_cyberpunk";
+  const isFrosted = hookStyle.animation === "skia_frosted_pill";
+  const isAurora = hookStyle.animation === "skia_aurora_gradient";
+
+  const hookBoxStyle = useMemo(() => {
+    if (isImpact) {
+      return {
+        backgroundColor: "#FACC15",
+        color: "#000000",
+        fontFamily: "Anton, Impact, sans-serif",
+        border: "2px solid #000000",
+        boxShadow: "0 4px 14px rgba(0, 0, 0, 0.8), 0 0 0 1px #FACC15",
+        borderRadius: "10px",
+        padding: "6px 12px",
+      };
+    }
+    if (isNeon) {
+      return {
+        backgroundColor: "rgba(10, 15, 30, 0.9)",
+        color: "#00F0FF",
+        fontFamily: "Montserrat, sans-serif",
+        border: "2px solid #00F0FF",
+        boxShadow: "0 0 16px rgba(0, 240, 255, 0.6), inset 0 0 8px rgba(0, 240, 255, 0.3)",
+        borderRadius: "12px",
+        padding: "6px 12px",
+      };
+    }
+    if (isFrosted) {
+      return {
+        backgroundColor: "rgba(255, 255, 255, 0.2)",
+        backdropFilter: "blur(12px)",
+        color: "#FFFFFF",
+        fontFamily: "Inter, sans-serif",
+        border: "1.5px solid rgba(255, 255, 255, 0.7)",
+        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
+        borderRadius: "999px",
+        padding: "5px 14px",
+      };
+    }
+    if (isAurora) {
+      return {
+        background: "linear-gradient(135deg, rgba(16,185,129,0.35) 0%, rgba(139,92,246,0.35) 100%)",
+        backdropFilter: "blur(10px)",
+        color: "#10B981",
+        fontFamily: "Outfit, sans-serif",
+        border: "1.5px solid #10B981",
+        boxShadow: "0 0 18px rgba(16, 185, 129, 0.4)",
+        borderRadius: "12px",
+        padding: "6px 12px",
+      };
+    }
+    const hookBg = hookStyle.boxEnabled ? (hookStyle.bgColor || "#FACC15") : "transparent";
+    const hookOpacity = hookStyle.boxEnabled ? (hookStyle.bgOpacity ?? 1) : 1;
+    return {
+      backgroundColor: hookBg,
+      opacity: hookOpacity,
+      color: hookStyle.color || "#000000",
+      borderRadius: `${Math.min(16, hookStyle.boxRadius || 12)}px`,
+      padding: "5px 8px",
+      fontFamily: hookStyle.fontFamily || "Anton",
+      border: hookStyle.strokeEnabled ? `${hookStyle.strokeWidth || 1}px solid ${hookStyle.strokeColor || "#000"}` : undefined,
+      boxShadow: hookStyle.shadowEnabled ? `0 3px ${hookStyle.shadowBlur || 6}px ${hookStyle.shadowColor || "#000000"}` : undefined,
+    };
+  }, [isImpact, isNeon, isFrosted, isAurora, hookStyle]);
 
   const subBg = subtitleStyle.bgEnabled
     ? `${subtitleStyle.bgColor}${Math.round(Math.max(0, Math.min(subtitleStyle.bgOpacity, 1)) * 255).toString(16).padStart(2, "0")}`
@@ -504,110 +613,208 @@ function LiveVideoPreview({
       ? "top-14"
       : subtitleStyle.position === "center"
       ? "top-1/2 -translate-y-1/2"
-      : "bottom-8";
-
-  const wordsCount = Math.max(1, Math.min(6, subtitleStyle.maxWordsPerLine || 3));
-  const sampleWords = ["UNVEILING", "THE", "HIDDEN", "TRUTH", "RIGHT", "NOW"].slice(0, wordsCount);
+      : "bottom-14";
 
   return (
-    <div className="relative mx-auto flex flex-col items-center">
-      <div className="relative aspect-[9/16] w-[200px] sm:w-[220px] shrink-0 overflow-hidden rounded-[26px] border-[4px] border-zinc-800 bg-zinc-950 shadow-2xl ring-1 ring-white/10">
-        <div className="absolute left-1/2 top-2 z-20 h-3 w-14 -translate-x-1/2 rounded-full bg-zinc-900/90 border border-zinc-800/80" />
+    <div className="flex flex-col items-center gap-3">
+      {/* Mode Switcher Tabs */}
+      <div className="flex items-center gap-1 rounded-xl bg-zinc-950/80 p-1 border border-zinc-800/80 text-[11px]">
+        <button
+          type="button"
+          onClick={() => setPreviewMode("full")}
+          className={cn(
+            "flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition",
+            previewMode === "full"
+              ? "bg-violet-600/30 text-violet-200 border border-violet-500/40 shadow-xs"
+              : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Film className="h-3 w-3" /> Full View
+        </button>
+        <button
+          type="button"
+          onClick={() => setPreviewMode("hook")}
+          className={cn(
+            "flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition",
+            previewMode === "hook"
+              ? "bg-amber-500/20 text-amber-200 border border-amber-500/40 shadow-xs"
+              : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Sparkles className="h-3 w-3 text-amber-400" /> Hook (0-3s)
+        </button>
+        <button
+          type="button"
+          onClick={() => setPreviewMode("subtitles")}
+          className={cn(
+            "flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition",
+            previewMode === "subtitles"
+              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
+              : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Type className="h-3 w-3 text-violet-400" /> Captions
+        </button>
+      </div>
 
-        <div
-          className="absolute inset-0 bg-cover bg-center opacity-40 transition-all"
-          style={{
-            backgroundImage: "radial-gradient(circle at 50% 25%, #6366f1 0%, #1e1b4b 55%, #030712 100%)",
-          }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/70" />
-
-        <div className="absolute top-6 right-3 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[8px] font-mono text-zinc-400 backdrop-blur-xs">
-          9:16
+      {/* Realistic Smartphone Mockup */}
+      <div className="relative aspect-[9/16] w-[230px] sm:w-[250px] shrink-0 overflow-hidden rounded-[32px] border-[5px] border-zinc-800/90 bg-zinc-950 shadow-2xl ring-1 ring-white/15">
+        {/* Dynamic Island Notch */}
+        <div className="absolute left-1/2 top-2 z-30 flex h-4 w-20 -translate-x-1/2 items-center justify-between rounded-full bg-black px-2.5 border border-zinc-800/80 shadow-md">
+          <div className="h-1.5 w-1.5 rounded-full bg-zinc-700" />
+          <div className="h-1.5 w-1.5 rounded-full bg-emerald-500/70" />
         </div>
 
-        {hookEnabled ? (
+        {/* Top Status Bar */}
+        <div className="absolute left-0 right-0 top-1.5 z-20 flex items-center justify-between px-5 text-[9px] font-medium text-zinc-400">
+          <span className="font-semibold text-zinc-300">9:41</span>
+          <div className="flex items-center gap-1 text-[8px]">
+            <span className="tracking-tight text-zinc-400 font-bold">5G</span>
+            <div className="h-2 w-3 rounded-xs border border-zinc-400/80 p-0.5">
+              <div className="h-full w-full bg-zinc-300 rounded-[1px]" />
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic Animated Cinematic Background */}
+        <div className="absolute inset-0 bg-cover bg-center overflow-hidden">
+          <div
+            className="absolute inset-0 transition-transform duration-1000 scale-105"
+            style={{
+              backgroundImage: "radial-gradient(circle at 50% 30%, #4338ca 0%, #1e1b4b 45%, #09090b 85%, #000000 100%)",
+            }}
+          />
+          {/* Subtle Cyber Grid Overlay */}
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:16px_16px] opacity-30" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/85" />
+        </div>
+
+        {/* Right Side Social Overlay (TikTok / Reels style) */}
+        <div className="absolute right-2 bottom-16 z-20 flex flex-col items-center gap-3">
+          <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-white/40 bg-gradient-to-tr from-violet-600 to-fuchsia-600 text-[10px] font-bold text-white shadow-md">
+            AI
+            <div className="absolute -bottom-1 flex h-3 w-3 items-center justify-center rounded-full bg-rose-500 text-[8px] text-white">
+              +
+            </div>
+          </div>
+          <div className="flex flex-col items-center">
+            <Heart className="h-4 w-4 text-rose-500 fill-rose-500 drop-shadow-md" />
+            <span className="text-[8px] font-medium text-white/90 drop-shadow">184K</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <MessageSquare className="h-4 w-4 text-white drop-shadow-md" />
+            <span className="text-[8px] font-medium text-white/90 drop-shadow">1.4K</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <Bookmark className="h-4 w-4 text-amber-400 fill-amber-400 drop-shadow-md" />
+            <span className="text-[8px] font-medium text-white/90 drop-shadow">12K</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <Share2 className="h-4 w-4 text-white drop-shadow-md" />
+          </div>
+          {/* Spinning Music Vinyl */}
+          <div className="relative flex h-6 w-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 shadow-md animate-[spin_4s_linear_infinite]">
+            <Music className="h-3 w-3 text-violet-300" />
+          </div>
+        </div>
+
+        {/* Bottom Metadata Safe Area */}
+        <div className="absolute left-3 right-12 bottom-3 z-20 space-y-1 text-left">
+          <p className="text-[10px] font-semibold text-white drop-shadow-sm flex items-center gap-1">
+            @autoclipper <CheckCircle2 className="h-2.5 w-2.5 text-blue-400 inline fill-blue-400" />
+          </p>
+          <p className="text-[9px] text-white/80 line-clamp-1 drop-shadow-sm">
+            {topic.trim() ? topic.trim() : "Watch how this AI video generator builds high-converting clips"}
+          </p>
+          <div className="flex items-center gap-1 text-[8px] text-white/70">
+            <Music className="h-2.5 w-2.5 animate-pulse text-violet-300" />
+            <span className="truncate">Deepgram Aura · AutoCliper Mix</span>
+          </div>
+          {/* Timeline Bar */}
+          <div className="h-0.5 w-full bg-white/20 rounded-full overflow-hidden mt-1">
+            <div className="h-full w-1/3 bg-white/90 rounded-full animate-pulse" />
+          </div>
+        </div>
+
+        {/* Opening Hook Overlay */}
+        {hookEnabled && (previewMode === "full" || previewMode === "hook") ? (
           <div
             onClick={onCustomizeHook}
-            className="absolute left-2.5 right-2.5 top-9 z-10 cursor-pointer transition hover:scale-[1.02]"
+            className="absolute left-3 right-10 top-10 z-20 cursor-pointer transition-all hover:scale-[1.03]"
             title="Click to customize opening hook"
           >
             <div
-              className="text-center transition-all shadow-md mx-auto"
+              className="text-center transition-all mx-auto leading-snug break-words"
               style={{
-                backgroundColor: hookBg,
-                opacity: hookOpacity,
-                color: hookStyle.color || "#000000",
-                borderRadius: `${Math.min(16, hookStyle.boxRadius || 12)}px`,
-                padding: "5px 6px",
-                fontFamily: hookStyle.fontFamily || "Anton",
+                ...hookBoxStyle,
                 fontSize: "11px",
                 fontWeight: Number(hookStyle.fontWeight) || 800,
                 textTransform: hookStyle.uppercase ? "uppercase" : "none",
-                letterSpacing: `${hookStyle.letterSpacing || 0}px`,
-                border: hookStyle.strokeEnabled ? `${hookStyle.strokeWidth || 1}px solid ${hookStyle.strokeColor || "#000"}` : undefined,
-                boxShadow: hookStyle.shadowEnabled ? `0 3px ${hookStyle.shadowBlur || 6}px ${hookStyle.shadowColor || "#000000"}` : undefined,
+                letterSpacing: `${hookStyle.letterSpacing || 0.5}px`,
               }}
             >
               {hookText}
             </div>
-            <div className="mt-0.5 flex items-center justify-center gap-1 text-[8px] uppercase tracking-wider text-amber-300/80">
-              <Sparkles className="h-2 w-2" /> Opening Hook (0-3s)
+            <div className="mt-1 flex items-center justify-center gap-1 text-[8px] font-medium uppercase tracking-wider text-amber-300 drop-shadow-md">
+              <Sparkles className="h-2.5 w-2.5 text-amber-400" /> Opening Hook (0–3s)
             </div>
           </div>
-        ) : (
-          <div className="absolute left-2.5 right-2.5 top-11 z-10 text-center">
-            <span className="rounded bg-black/50 px-2 py-0.5 text-[8px] text-zinc-600">Hook Disabled</span>
-          </div>
-        )}
+        ) : null}
 
-        {subtitlesEnabled ? (
+        {/* Karaoke Subtitles Overlay */}
+        {subtitlesEnabled && (previewMode === "full" || previewMode === "subtitles") ? (
           <div
             onClick={onCustomizeSubtitle}
-            className={cn("absolute left-2.5 right-2.5 z-10 cursor-pointer transition hover:scale-[1.02]", positionClass)}
+            className={cn("absolute left-3 right-10 z-20 cursor-pointer transition-all hover:scale-[1.03]", positionClass)}
             title="Click to customize captions"
           >
             <div
-              className="text-center transition-all mx-auto leading-tight"
+              className="text-center transition-all mx-auto leading-snug flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1"
               style={{
-                color: subtitleStyle.color || "#FFFFFF",
                 backgroundColor: subBg,
-                borderRadius: subtitleStyle.bgEnabled ? `${Math.min(subtitleStyle.bgRadius, 10)}px` : undefined,
-                padding: subtitleStyle.bgEnabled ? "3px 6px" : "2px",
-                fontFamily: subtitleStyle.fontFamily || "Montserrat",
-                fontSize: `${Math.max(9, Math.min(16, (subtitleStyle.fontSize || 54) * 0.22))}px`,
+                borderRadius: subtitleStyle.bgEnabled ? `${Math.min(subtitleStyle.bgRadius || 8, 12)}px` : undefined,
+                padding: subtitleStyle.bgEnabled ? "4px 8px" : "2px 4px",
+                fontFamily: subtitleStyle.fontFamily || "Montserrat, sans-serif",
+                fontSize: `${Math.max(10, Math.min(16, (subtitleStyle.fontSize || 54) * 0.22))}px`,
                 fontWeight: Number(subtitleStyle.fontWeight) || 800,
                 fontStyle: subtitleStyle.italic ? "italic" : "normal",
                 textTransform: subtitleStyle.uppercase ? "uppercase" : "none",
                 textShadow: subtitleStyle.strokeEnabled || subtitleStyle.shadowEnabled
-                  ? `0 1px ${Math.max(1, (subtitleStyle.shadowBlur || 8) * 0.25)}px ${subtitleStyle.strokeColor || "#000"}`
+                  ? `0 1px ${Math.max(2, (subtitleStyle.shadowBlur || 8) * 0.3)}px ${subtitleStyle.strokeColor || "#000000"}`
                   : undefined,
               }}
             >
-              {sampleWords.map((word, idx) => (
-                <span
-                  key={idx}
-                  style={{
-                    color: idx === 0 ? subtitleStyle.highlightColor || "#FACC15" : undefined,
-                    marginRight: "3px",
-                  }}
-                >
-                  {word}
-                </span>
-              ))}
+              {sampleWords.map((word, idx) => {
+                const isActive = idx === activeWordIdx;
+                return (
+                  <span
+                    key={idx}
+                    className={cn(
+                      "transition-all duration-150 inline-block",
+                      isActive
+                        ? "scale-110 font-black drop-shadow-[0_2px_8px_rgba(250,204,21,0.6)]"
+                        : "opacity-90"
+                    )}
+                    style={{
+                      color: isActive
+                        ? subtitleStyle.highlightColor || "#FACC15"
+                        : subtitleStyle.color || "#FFFFFF",
+                    }}
+                  >
+                    {word}
+                  </span>
+                );
+              })}
             </div>
-            <div className="mt-0.5 flex items-center justify-center gap-1 text-[8px] uppercase tracking-wider text-violet-300/80">
-              <Type className="h-2 w-2" /> {wordsCount} word{wordsCount > 1 ? "s" : ""} / line
+            <div className="mt-1 flex items-center justify-center gap-1 text-[8px] font-medium uppercase tracking-wider text-violet-300 drop-shadow-md">
+              <Type className="h-2.5 w-2.5 text-violet-400" /> {wordsCount} {wordsCount === 1 ? "word" : "words"} / line (Karaoke Sync)
             </div>
           </div>
-        ) : (
-          <div className="absolute bottom-8 left-2.5 right-2.5 z-10 text-center">
-            <span className="rounded bg-black/50 px-2 py-0.5 text-[8px] text-zinc-600">Subtitles Disabled</span>
-          </div>
-        )}
+        ) : null}
       </div>
 
-      <div className="mt-2 flex items-center gap-1.5">
+      {/* Quick Action Trigger Buttons */}
+      <div className="flex items-center gap-2">
         <Button
           type="button"
           size="xs"
@@ -626,6 +833,15 @@ function LiveVideoPreview({
         >
           Subtitles
         </Button>
+        <button
+          type="button"
+          onClick={() => setIsPlaying((p) => !p)}
+          className="flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition"
+          title="Play/Pause live karaoke preview"
+        >
+          {isPlaying ? <Pause className="h-3 w-3 text-emerald-400" /> : <Play className="h-3 w-3 text-zinc-400" />}
+          {isPlaying ? "Playing" : "Paused"}
+        </button>
       </div>
     </div>
   );
@@ -1277,7 +1493,66 @@ function VideoCard({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+interface TopicCategory {
+  name: string;
+  icon: string;
+  topics: string[];
+}
+
+const TOPIC_CATEGORIES: TopicCategory[] = [
+  {
+    name: "Tech & AI",
+    icon: "🤖",
+    topics: [
+      "Can AI really replace human software engineers in 2026?",
+      "The mystery of the developer who pushed 10,000 commits at night",
+      "Why quantum computing will break modern encryption overnight",
+    ],
+  },
+  {
+    name: "Deep Mysteries",
+    icon: "🌊",
+    topics: [
+      "How deep-sea animals withstand extreme ocean pressure",
+      "The bizarre physics of rogue ocean waves appearing from nowhere",
+      "Why airplanes avoid flying over the Pacific Ocean",
+    ],
+  },
+  {
+    name: "Mind & Habits",
+    icon: "🧠",
+    topics: [
+      "The psychology of why we procrastinate hard tasks",
+      "The hidden dopamine loops inside your favorite mobile apps",
+      "How 10 minutes of morning sunlight reprograms your circadian clock",
+    ],
+  },
+  {
+    name: "Secrets & History",
+    icon: "🏛️",
+    topics: [
+      "How ancient builders engineered earthquake-proof pyramids",
+      "The mysterious lost civilizations hidden under rainforest canopies",
+      "The secret communication network used before the telegraph",
+    ],
+  },
+  {
+    name: "Business & Wealth",
+    icon: "💼",
+    topics: [
+      "Why modern airlines make more profit on miles than flights",
+      "How a single chip shortage paused global car manufacturing",
+      "The untold origin of the standard 40-hour work week",
+    ],
+  },
+];
+
+const CREATIVE_VIBES = [
+  { label: "⚡ High Energy Viral", prompt: "Fast-paced, high energy viral storytelling with punchy surprising facts." },
+  { label: "🎬 Cinematic Mystery", prompt: "Atmospheric, mysterious mood with dramatic tension and deep questions." },
+  { label: "🔬 Sharp Explainer", prompt: "Clear, authoritative breakdown focusing on fascinating technical mechanics." },
+  { label: "💡 Mindset Takeaway", prompt: "Reflective, inspirational narrative ending with a thought-provoking conclusion." },
+];
 
 export function VideoGeneratorPage() {
   const { user } = useAuth();
@@ -1285,6 +1560,7 @@ export function VideoGeneratorPage() {
 
   // Basic narrative state
   const [topic, setTopic] = useState("");
+  const [activeCategoryIdx, setActiveCategoryIdx] = useState(0);
   const [targetDuration, setTargetDuration] = useState(65);
   const [voice, setVoice] = useState("");
   const [speed, setSpeed] = useState(1);
@@ -1705,16 +1981,20 @@ export function VideoGeneratorPage() {
 
             {/* Studio Layout: Left Controls vs Right Visual Suite */}
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(340px,1fr)]">
-              {/* Left Column: Narrative, Voice, Duration, Scenes */}
-              <div className="space-y-5">
-                {/* Topic Input */}
-                <div>
-                  <div className="mb-1.5 flex items-center justify-between gap-3">
-                    <label htmlFor="video-topic" className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                      Video Topic & Subject
-                    </label>
-                    <span className="text-[11px] tabular-nums text-zinc-500">{topic.length}/500</span>
+              {/* Left Column: Narrative, Audio Suite, Format, Specs */}
+              <div className="space-y-4">
+                {/* 1. Topic & Story Ideation Card */}
+                <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 space-y-3.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 border-b border-zinc-800/60 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-violet-400" />
+                      <label htmlFor="video-topic" className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
+                        Video Topic & Subject
+                      </label>
+                    </div>
+                    <span className="text-[11px] tabular-nums text-zinc-500 font-mono">{topic.length}/500</span>
                   </div>
+
                   <textarea
                     id="video-topic"
                     value={topic}
@@ -1722,60 +2002,208 @@ export function VideoGeneratorPage() {
                     placeholder="Example: How deep-sea creatures survive extreme ocean pressure"
                     maxLength={500}
                     rows={3}
-                    className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950/70 px-3.5 py-3 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/15"
+                    className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-900/60 px-3.5 py-2.5 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/70 focus:ring-2 focus:ring-violet-500/20"
                   />
-                  {/* Topic Suggestion Chips */}
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-1">Try idea:</span>
-                    {topicSuggestions.map((suggestion, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setTopic(suggestion)}
-                        className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400 hover:border-violet-500/40 hover:text-zinc-200 transition"
-                      >
-                        {suggestion.slice(0, 32)}...
-                      </button>
-                    ))}
+
+                  {/* Category Pills & Interactive Topic Suggestions */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                      <span className="text-[10px] uppercase font-medium tracking-wider text-zinc-500 shrink-0">Inspiration:</span>
+                      {TOPIC_CATEGORIES.map((cat, idx) => (
+                        <button
+                          key={cat.name}
+                          type="button"
+                          onClick={() => setActiveCategoryIdx(idx)}
+                          className={cn(
+                            "flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium transition shrink-0",
+                            activeCategoryIdx === idx
+                              ? "bg-violet-600/30 text-violet-200 border border-violet-500/40 shadow-xs"
+                              : "bg-zinc-900/60 text-zinc-400 border border-zinc-800/80 hover:text-zinc-200 hover:border-zinc-700"
+                          )}
+                        >
+                          <span>{cat.icon}</span>
+                          <span>{cat.name}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
+                      {TOPIC_CATEGORIES[activeCategoryIdx].topics.map((t, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setTopic(t)}
+                          className={cn(
+                            "flex items-start gap-1.5 rounded-lg border p-2 text-left text-xs transition",
+                            topic === t
+                              ? "border-violet-500/50 bg-violet-500/10 text-violet-200"
+                              : "border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:border-violet-500/30 hover:text-zinc-200"
+                          )}
+                        >
+                          <Lightbulb className="h-3.5 w-3.5 text-amber-400/80 shrink-0 mt-0.5" />
+                          <span className="line-clamp-2 leading-relaxed">{t}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
-                {/* Voice, Speed & Scene Count */}
-                <div className="grid gap-3 sm:grid-cols-3">
+                {/* 2. Audio & Speech Engine Card (Voice, Pacing & BGM) */}
+                <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 space-y-3.5 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Volume2 className="h-4 w-4 text-emerald-400" />
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
+                        Audio & Speech Engine
+                      </h3>
+                    </div>
+                    <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+                      Deepgram Aura-2
+                    </span>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {/* Narrator Voice */}
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <label htmlFor="video-voice" className="text-xs font-medium text-zinc-300">
+                          Narrator voice
+                        </label>
+                        <span className="text-[10px] text-zinc-500">Natural TTS</span>
+                      </div>
+                      <select
+                        id="video-voice"
+                        value={voice}
+                        onChange={(event) => setVoice(event.target.value)}
+                        className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                      >
+                        <option value="">Default narrator</option>
+                        {voices.map((option) => (
+                          <option key={option.key} value={option.model}>
+                            {option.key} · {option.model}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Voice Pacing Dropdown */}
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <label htmlFor="video-speed" className="text-xs font-medium text-zinc-300">
+                          Pacing
+                        </label>
+                        <span className="text-[10px] font-semibold text-violet-300">{speed}× Tempo</span>
+                      </div>
+                      <select
+                        id="video-speed"
+                        value={speed}
+                        onChange={(event) => setSpeed(Number(event.target.value))}
+                        className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                      >
+                        <option value={0.85}>Calm · 0.85×</option>
+                        <option value={1}>Natural · 1.0×</option>
+                        <option value={1.15}>Energetic · 1.15×</option>
+                        <option value={1.3}>Fast · 1.3×</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Speed Quick Selector Cards */}
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { val: 0.85, label: "0.85×", sub: "Calm" },
+                      { val: 1.0, label: "1.0×", sub: "Natural" },
+                      { val: 1.15, label: "1.15×", sub: "Viral" },
+                      { val: 1.3, label: "1.3×", sub: "Rapid" },
+                    ].map((s) => (
+                      <button
+                        key={s.val}
+                        type="button"
+                        onClick={() => setSpeed(s.val)}
+                        className={cn(
+                          "rounded-lg border py-1.5 text-center transition",
+                          speed === s.val
+                            ? "border-violet-400/60 bg-violet-500/20 text-violet-100"
+                            : "border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                        )}
+                      >
+                        <div className="text-xs font-bold">{s.label}</div>
+                        <div className="text-[9px] text-zinc-500">{s.sub}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Background Music Integrated into Audio Engine */}
+                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Toggle
+                        checked={includeBgm}
+                        onChange={setIncludeBgm}
+                        label="Background Music"
+                        description="A royalty-free track is mixed below the narration."
+                      />
+                    </div>
+                    {includeBgm && (
+                      <div className="pt-1">
+                        <RangeSlider
+                          label="Music Level"
+                          value={bgmVolume}
+                          min={0.05}
+                          max={0.3}
+                          step={0.01}
+                          onChange={setBgmVolume}
+                          suffix=""
+                          description="Narration remains dominant."
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Format & Scene Pacing Card */}
+                <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 space-y-3.5 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Film className="h-4 w-4 text-blue-400" />
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
+                        Format & Scene Pacing
+                      </h3>
+                    </div>
+                    <span className="text-[11px] text-zinc-400 font-mono">9:16 Vertical</span>
+                  </div>
+
+                  {/* Duration Picker */}
                   <div>
-                    <label htmlFor="video-voice" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                      Narrator voice
-                    </label>
-                    <select
-                      id="video-voice"
-                      value={voice}
-                      onChange={(event) => setVoice(event.target.value)}
-                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
-                    >
-                      <option value="">Default narrator</option>
-                      {voices.map((option) => (
-                        <option key={option.key} value={option.model}>
-                          {option.key} · {option.model}
-                        </option>
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <label className="text-xs font-medium text-zinc-300">Target duration</label>
+                      <span className="text-xs font-medium text-violet-200">{targetDuration} seconds</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { duration: 50, label: "50s", desc: "Quick Reel", words: "~120 words" },
+                        { duration: 65, label: "65s", desc: "Standard", words: "~160 words" },
+                        { duration: 90, label: "90s", desc: "Deep Dive", words: "~220 words" },
+                      ].map((item) => (
+                        <button
+                          key={item.duration}
+                          type="button"
+                          onClick={() => setTargetDuration(item.duration)}
+                          className={cn(
+                            "rounded-xl border p-2.5 text-center transition",
+                            targetDuration === item.duration
+                              ? "border-violet-400/60 bg-violet-500/15 text-violet-100 shadow-xs"
+                              : "border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                          )}
+                        >
+                          <div className="text-xs font-bold">{item.label}</div>
+                          <div className="text-[10px] text-zinc-300">{item.desc}</div>
+                          <div className="text-[9px] text-zinc-500">{item.words}</div>
+                        </button>
                       ))}
-                    </select>
+                    </div>
                   </div>
-                  <div>
-                    <label htmlFor="video-speed" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                      Pacing
-                    </label>
-                    <select
-                      id="video-speed"
-                      value={speed}
-                      onChange={(event) => setSpeed(Number(event.target.value))}
-                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
-                    >
-                      <option value={0.85}>Calm · 0.85×</option>
-                      <option value={1}>Natural · 1.0×</option>
-                      <option value={1.15}>Energetic · 1.15×</option>
-                      <option value={1.3}>Fast · 1.3×</option>
-                    </select>
-                  </div>
+
+                  {/* Footage Cuts Dropdown */}
                   <div>
                     <label htmlFor="video-scenes" className="mb-1.5 block text-xs font-medium text-zinc-300">
                       Footage pacing & cuts
@@ -1784,7 +2212,7 @@ export function VideoGeneratorPage() {
                       id="video-scenes"
                       value={numScenes}
                       onChange={(event) => setNumScenes(Number(event.target.value))}
-                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
                     >
                       <option value={0}>Auto (AI Dynamic Pacing · 3s–10s Smart Cuts)</option>
                       <option value={8}>8 cuts (Cinematic ~8s shots)</option>
@@ -1794,65 +2222,77 @@ export function VideoGeneratorPage() {
                       <option value={22}>22 cuts (Max density)</option>
                     </select>
                   </div>
+
+                  {/* Creative Direction & Vibe Chips */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <label htmlFor="video-instructions" className="text-xs font-medium text-zinc-300">
+                        Creative direction <span className="font-normal text-zinc-600">optional</span>
+                      </label>
+                      <span className="text-[11px] tabular-nums text-zinc-600 font-mono">{instructions.length}/1000</span>
+                    </div>
+                    <textarea
+                      id="video-instructions"
+                      value={instructions}
+                      onChange={(event) => setInstructions(event.target.value)}
+                      placeholder="Example: cinematic documentary mood, focus on mysterious biology, end with a philosophical question."
+                      maxLength={1000}
+                      rows={2}
+                      className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-900/60 px-3.5 py-2.5 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/15"
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {CREATIVE_VIBES.map((vibe) => (
+                        <button
+                          key={vibe.label}
+                          type="button"
+                          onClick={() => setInstructions((prev) => (prev ? `${prev}. ${vibe.prompt}` : vibe.prompt))}
+                          className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-violet-500/40 hover:text-zinc-200 transition"
+                        >
+                          {vibe.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                {/* Duration Picker */}
-                <div>
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <label className="text-xs font-medium text-zinc-300">Target duration</label>
-                    <span className="text-xs font-medium text-violet-200">{targetDuration} seconds</span>
+                {/* 4. Live Production Spec Sheet */}
+                <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-950/30 via-zinc-950 to-zinc-950 p-3.5">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-300 mb-2">
+                    <Wand2 className="h-3.5 w-3.5" /> Studio Output Specs
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[50, 65, 90].map((duration) => (
-                      <button
-                        key={duration}
-                        type="button"
-                        onClick={() => setTargetDuration(duration)}
-                        className={cn(
-                          "rounded-lg border px-3 py-2 text-xs font-medium transition",
-                          targetDuration === duration
-                            ? "border-violet-400/60 bg-violet-500/15 text-violet-100"
-                            : "border-zinc-800 bg-zinc-950/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                        )}
-                      >
-                        {duration}s {duration === 50 ? "Quick" : duration === 65 ? "Balanced" : "Long"}
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                    <div className="rounded-lg border border-zinc-800/80 bg-black/40 p-2">
+                      <span className="text-zinc-500 block text-[9px] uppercase">Format</span>
+                      <span className="font-semibold text-zinc-200">1080×1920 9:16</span>
+                    </div>
+                    <div className="rounded-lg border border-zinc-800/80 bg-black/40 p-2">
+                      <span className="text-zinc-500 block text-[9px] uppercase">Narration</span>
+                      <span className="font-semibold text-zinc-200">{voice ? voice.split("-")[2] || "Deepgram" : "Default"} ({speed}×)</span>
+                    </div>
+                    <div className="rounded-lg border border-zinc-800/80 bg-black/40 p-2">
+                      <span className="text-zinc-500 block text-[9px] uppercase">Hook Overlay</span>
+                      <span className="font-semibold text-amber-300">{hookEnabled ? "Active (0-3s)" : "Disabled"}</span>
+                    </div>
+                    <div className="rounded-lg border border-zinc-800/80 bg-black/40 p-2">
+                      <span className="text-zinc-500 block text-[9px] uppercase">Karaoke Captions</span>
+                      <span className="font-semibold text-violet-300">{subtitlesEnabled ? `${subtitleStyle.maxWordsPerLine || 3}w / line` : "Disabled"}</span>
+                    </div>
                   </div>
-                </div>
-
-                {/* Creative Direction */}
-                <div>
-                  <div className="mb-1.5 flex items-center justify-between gap-3">
-                    <label htmlFor="video-instructions" className="text-xs font-medium text-zinc-300">
-                      Creative direction <span className="font-normal text-zinc-600">optional</span>
-                    </label>
-                    <span className="text-[11px] tabular-nums text-zinc-600">{instructions.length}/1000</span>
-                  </div>
-                  <textarea
-                    id="video-instructions"
-                    value={instructions}
-                    onChange={(event) => setInstructions(event.target.value)}
-                    placeholder="Example: cinematic documentary mood, focus on mysterious biology, end with a philosophical question."
-                    maxLength={1000}
-                    rows={2}
-                    className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950/70 px-3.5 py-2.5 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/15"
-                  />
                 </div>
               </div>
 
               {/* Right Column: Visual Studio (Live 9:16 Preview + Hook + Subtitles Controls) */}
-              <div className="space-y-4 rounded-2xl border border-zinc-800/80 bg-zinc-950/50 p-4">
-                <div className="flex items-center justify-between">
+              <div className="space-y-4 rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal className="h-4 w-4 text-violet-300" />
-                    <h3 className="text-sm font-semibold text-zinc-100">Visual & Audio Studio</h3>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">Visual & Audio Studio</h3>
                   </div>
-                  <span className="text-[11px] text-zinc-400 font-mono">1080×1920</span>
+                  <span className="text-[11px] text-zinc-400 font-mono bg-zinc-900/80 border border-zinc-800 px-2 py-0.5 rounded-md">1080×1920 · 9:16</span>
                 </div>
 
                 {/* Live 9:16 Canvas Preview */}
-                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3">
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3 shadow-inner">
                   <LiveVideoPreview
                     hookEnabled={hookEnabled}
                     customHook={customHook}
@@ -1866,7 +2306,7 @@ export function VideoGeneratorPage() {
                 </div>
 
                 {/* Opening Hook Overlay Section */}
-                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5 space-y-3">
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3.5 space-y-3">
                   <div className="flex items-center justify-between">
                     <Toggle
                       checked={hookEnabled}
@@ -1903,7 +2343,7 @@ export function VideoGeneratorPage() {
 
                       {/* Hook Quick Presets */}
                       <div>
-                        <span className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1 block">Hook Style Presets:</span>
+                        <span className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5 block">Hook Style Presets:</span>
                         <div className="grid grid-cols-2 gap-1.5">
                           {HOOK_PRESETS.map((preset) => (
                             <button
@@ -1911,16 +2351,17 @@ export function VideoGeneratorPage() {
                               type="button"
                               onClick={() => applyHookPreset(preset)}
                               className={cn(
-                                "rounded-lg border px-2 py-1.5 text-left transition text-xs",
+                                "rounded-lg border px-2.5 py-2 text-left transition text-xs",
                                 hookStyle.animation === preset.patch.animation
-                                  ? "border-amber-400/50 bg-amber-500/10 text-amber-100"
-                                  : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                                  ? "border-amber-400/60 bg-amber-500/15 text-amber-100 shadow-xs"
+                                  : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                               )}
                             >
                               <div className="flex items-center gap-1.5">
-                                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: preset.accent }} />
+                                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: preset.accent }} />
                                 <span className="font-medium truncate">{preset.name}</span>
                               </div>
+                              <div className="text-[10px] text-zinc-500 truncate mt-0.5">{preset.description}</div>
                             </button>
                           ))}
                         </div>
@@ -1930,7 +2371,7 @@ export function VideoGeneratorPage() {
                 </div>
 
                 {/* Subtitles & Words-Per-Line Section */}
-                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5 space-y-3">
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3.5 space-y-3">
                   <div className="flex items-center justify-between">
                     <Toggle
                       checked={subtitlesEnabled}
@@ -1968,10 +2409,10 @@ export function VideoGeneratorPage() {
                               type="button"
                               onClick={() => handleWordsPerLineChange(w)}
                               className={cn(
-                                "rounded-md border py-1 text-xs font-medium transition text-center",
+                                "rounded-md border py-1.5 text-xs font-medium transition text-center",
                                 (subtitleStyle.maxWordsPerLine || 3) === w
-                                  ? "border-violet-400/60 bg-violet-500/20 text-violet-200"
-                                  : "border-zinc-800 bg-zinc-950/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                                  ? "border-violet-400/60 bg-violet-500/25 text-violet-200 shadow-xs"
+                                  : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                               )}
                             >
                               {w}
@@ -1982,7 +2423,7 @@ export function VideoGeneratorPage() {
 
                       {/* Subtitle Quick Presets */}
                       <div>
-                        <span className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1 block">Caption Presets:</span>
+                        <span className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5 block">Caption Presets:</span>
                         <div className="grid grid-cols-2 gap-1.5">
                           {CAPTION_PRESETS.map((preset) => (
                             <button
@@ -1990,43 +2431,22 @@ export function VideoGeneratorPage() {
                               type="button"
                               onClick={() => applyCaptionPreset(preset)}
                               className={cn(
-                                "rounded-lg border px-2 py-1.5 text-left transition text-xs",
+                                "rounded-lg border px-2.5 py-2 text-left transition text-xs",
                                 subtitleStyle.stylePreset === preset.patch.stylePreset
-                                  ? "border-violet-400/50 bg-violet-500/10 text-violet-100"
-                                  : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                                  ? "border-violet-400/60 bg-violet-500/15 text-violet-100 shadow-xs"
+                                  : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                               )}
                             >
                               <div className="flex items-center gap-1.5">
-                                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: preset.accent }} />
+                                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: preset.accent }} />
                                 <span className="font-medium truncate">{preset.name}</span>
                               </div>
+                              <div className="text-[10px] text-zinc-500 truncate mt-0.5">{preset.description}</div>
                             </button>
                           ))}
                         </div>
                       </div>
                     </div>
-                  )}
-                </div>
-
-                {/* Background Music Section */}
-                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5 space-y-2">
-                  <Toggle
-                    checked={includeBgm}
-                    onChange={setIncludeBgm}
-                    label="Background Music"
-                    description="A royalty-free track is mixed below the narration."
-                  />
-                  {includeBgm && (
-                    <RangeSlider
-                      label="Music Level"
-                      value={bgmVolume}
-                      min={0.05}
-                      max={0.3}
-                      step={0.01}
-                      onChange={setBgmVolume}
-                      suffix=""
-                      description="Narration remains dominant."
-                    />
                   )}
                 </div>
               </div>
