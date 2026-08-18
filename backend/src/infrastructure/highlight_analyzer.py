@@ -230,7 +230,6 @@ class HighlightAnalyzer:
         from groq import Groq, RateLimitError, APIConnectionError
 
         client = Groq(api_key=self._groq_key)
-        groq_model = "llama-3.3-70b-versatile"
 
         # Build indexed transcript: each segment gets an ID for precise referencing
         # This prevents LLM from hallucinating timestamps
@@ -329,126 +328,126 @@ Ekstrak {max_clips} clip terbaik. Gunakan segment ID dari transcript di atas."""
             },
         }
 
-        for attempt in range(3):
-            try:
-                def _groq_call(m=groq_model, s=system_prompt, u=user_prompt, schema=clip_schema):
-                    try:
-                        # Try json_schema first (strict structure)
-                        return client.chat.completions.create(
-                            model=m,
-                            messages=[
-                                {"role": "system", "content": s},
-                                {"role": "user", "content": u},
-                            ],
-                            temperature=0.3,
-                            max_tokens=4096,
-                            response_format=schema,
-                        )
-                    except Exception:
-                        # Fallback to json_object if schema not supported
-                        return client.chat.completions.create(
-                            model=m,
-                            messages=[
-                                {"role": "system", "content": s},
-                                {"role": "user", "content": u},
-                            ],
-                            temperature=0.3,
-                            max_tokens=4096,
-                            response_format={"type": "json_object"},
-                        )
+        models_to_try = [
+            settings.GROQ_LLM_MODEL or "llama-3.3-70b-versatile",
+            "llama-3.1-70b-versatile",
+            "llama-3.1-8b-instant",
+            "mixtral-8x7b-32768",
+        ]
+        models_to_try = list(dict.fromkeys([m for m in models_to_try if m]))
 
-                response = await asyncio.wait_for(
-                    asyncio.get_running_loop().run_in_executor(None, _groq_call),
-                    timeout=settings.GROQ_LLM_TIMEOUT,
-                )
-
-                if not response.choices:
-                    return None
-
-                raw_text = response.choices[0].message.content or ""
-
-                # Parse JSON
+        for groq_model in models_to_try:
+            for attempt in range(2):
                 try:
-                    data = json.loads(raw_text)
-                except json.JSONDecodeError:
-                    logger.warning(f"highlight_analyzer: Groq JSON parse failed: {raw_text[:200]}")
-                    clips = self._parse_llm_response(raw_text, video_duration)
-                    if clips:
-                        return self._build_result(clips, max_clips, video_duration, f"groq_{groq_model}")
-                    return None
+                    def _groq_call(m=groq_model, s=system_prompt, u=user_prompt, schema=clip_schema):
+                        try:
+                            # Try json_schema first (strict structure)
+                            return client.chat.completions.create(
+                                model=m,
+                                messages=[
+                                    {"role": "system", "content": s},
+                                    {"role": "user", "content": u},
+                                ],
+                                temperature=0.3,
+                                max_tokens=8192,
+                                response_format=schema,
+                            )
+                        except Exception:
+                            # Fallback to json_object if schema not supported
+                            return client.chat.completions.create(
+                                model=m,
+                                messages=[
+                                    {"role": "system", "content": s},
+                                    {"role": "user", "content": u},
+                                ],
+                                temperature=0.3,
+                                max_tokens=8192,
+                                response_format={"type": "json_object"},
+                            )
 
-                raw_clips = data.get("clips", [])
-                if not raw_clips:
-                    logger.warning(f"highlight_analyzer: Groq JSON valid but no clips. Keys: {list(data.keys())}")
-                    return None
+                    response = await asyncio.wait_for(
+                        asyncio.get_running_loop().run_in_executor(None, _groq_call),
+                        timeout=settings.GROQ_LLM_TIMEOUT,
+                    )
 
-                # Convert segment IDs back to timestamps
-                candidates = []
-                for i, c in enumerate(raw_clips):
+                    if not response.choices:
+                        break
+
+                    raw_text = response.choices[0].message.content or ""
+
+                    # Parse JSON
                     try:
-                        # Resolve segment IDs to actual timestamps
-                        start_id = c.get("start_id", "")
-                        end_id = c.get("end_id", "")
-                        
-                        # Handle both ID-based (new) and raw timestamp (fallback)
-                        if start_id in segment_map and end_id in segment_map:
-                            start = segment_map[start_id]["start"]
-                            end = segment_map[end_id]["end"]
-                        elif "start" in c and "end" in c:
-                            # Fallback: model returned raw timestamps instead of IDs
-                            start = float(c["start"])
-                            end = float(c["end"])
-                        else:
-                            logger.debug(f"highlight_analyzer: Groq clip {i} has invalid IDs: {start_id}, {end_id}")
+                        data = json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        logger.warning(f"highlight_analyzer: Groq JSON parse failed: {raw_text[:200]}")
+                        clips = self._parse_llm_response(raw_text, video_duration)
+                        if clips:
+                            return self._build_result(clips, max_clips, video_duration, f"groq_{groq_model}")
+                        break
+
+                    raw_clips = data.get("clips", [])
+                    if not raw_clips:
+                        logger.warning(f"highlight_analyzer: Groq JSON valid but no clips. Keys: {list(data.keys())}")
+                        break
+
+                    # Convert segment IDs back to timestamps
+                    candidates = []
+                    for i, c in enumerate(raw_clips):
+                        try:
+                            start_id = c.get("start_id", "")
+                            end_id = c.get("end_id", "")
+                            
+                            if start_id in segment_map and end_id in segment_map:
+                                start = segment_map[start_id]["start"]
+                                end = segment_map[end_id]["end"]
+                            elif "start" in c and "end" in c:
+                                start = float(c["start"])
+                                end = float(c["end"])
+                            else:
+                                logger.debug(f"highlight_analyzer: Groq clip {i} has invalid IDs: {start_id}, {end_id}")
+                                continue
+
+                            duration = end - start
+                            if end <= start or start < 0 or end > video_duration + 10:
+                                continue
+                            if duration < 45 or duration > 300:
+                                continue
+
+                            candidates.append(HighlightCandidate(
+                                rank=c.get("rank", i + 1),
+                                start=round(start, 2),
+                                end=round(end, 2),
+                                score=min(100, max(0, int(c.get("score", 70)))),
+                                hook=c.get("hook", ""),
+                                reason=c.get("reason", ""),
+                                content_type=c.get("content_type", "general"),
+                                speaker_energy=c.get("speaker_energy", "medium"),
+                                hook_alt="",
+                            ))
+                        except (ValueError, TypeError) as e:
+                            logger.debug(f"highlight_analyzer: Groq clip {i} parse error: {e}")
                             continue
 
-                        duration = end - start
+                    if candidates:
+                        logger.info(f"highlight_analyzer: Groq produced {len(candidates)} valid clips from {len(raw_clips)} raw")
+                        return self._build_result(candidates, max_clips, video_duration, f"groq_{groq_model}")
 
-                        # Validate
-                        if end <= start or start < 0 or end > video_duration + 10:
-                            logger.debug(f"highlight_analyzer: Groq clip {i} rejected (range): {start:.1f}-{end:.1f}")
-                            continue
-                        if duration < 45 or duration > 300:
-                            logger.debug(f"highlight_analyzer: Groq clip {i} rejected (duration {duration:.1f}s)")
-                            continue
-
-                        candidates.append(HighlightCandidate(
-                            rank=c.get("rank", i + 1),
-                            start=round(start, 2),
-                            end=round(end, 2),
-                            score=min(100, max(0, int(c.get("score", 70)))),
-                            hook=c.get("hook", ""),
-                            reason=c.get("reason", ""),
-                            content_type=c.get("content_type", "general"),
-                            speaker_energy=c.get("speaker_energy", "medium"),
-                            hook_alt="",
-                        ))
-                    except (ValueError, TypeError) as e:
-                        logger.debug(f"highlight_analyzer: Groq clip {i} parse error: {e}")
-                        continue
-
-                if candidates:
-                    logger.info(f"highlight_analyzer: Groq produced {len(candidates)} valid clips from {len(raw_clips)} raw")
-                    return self._build_result(candidates, max_clips, video_duration, f"groq_{groq_model}")
-
-                logger.warning(f"highlight_analyzer: Groq {len(raw_clips)} raw clips but 0 passed validation")
-                return None
-
-            except asyncio.TimeoutError:
-                logger.warning(f"highlight_analyzer: Groq LLM timeout attempt {attempt + 1}/{3} ({settings.GROQ_LLM_TIMEOUT}s)")
-                continue
-            except RateLimitError as e:
-                wait = (attempt + 1) * 15
-                logger.warning(f"highlight_analyzer: Groq rate limit (attempt {attempt + 1}), waiting {wait}s: {e}")
-                await asyncio.sleep(wait)
-            except APIConnectionError as e:
-                logger.warning(f"highlight_analyzer: Groq connection error: {e}")
-                break
-            except Exception as e:
-                logger.warning(f"highlight_analyzer: Groq unexpected error (attempt {attempt + 1}): {e}")
-                if attempt == 2:
+                    logger.warning(f"highlight_analyzer: Groq {len(raw_clips)} raw clips but 0 passed validation")
                     break
-                continue
+
+                except asyncio.TimeoutError:
+                    logger.warning(f"highlight_analyzer: Groq LLM timeout attempt {attempt + 1}/{2} ({settings.GROQ_LLM_TIMEOUT}s)")
+                    continue
+                except RateLimitError as e:
+                    wait = (attempt + 1) * 10
+                    logger.warning(f"highlight_analyzer: Groq rate limit (attempt {attempt + 1}), waiting {wait}s: {e}")
+                    await asyncio.sleep(wait)
+                except APIConnectionError as e:
+                    logger.warning(f"highlight_analyzer: Groq connection error: {e}")
+                    break
+                except Exception as e:
+                    logger.warning(f"highlight_analyzer: Groq unexpected error (attempt {attempt + 1}, model {groq_model}): {e}")
+                    break
 
         return None
 

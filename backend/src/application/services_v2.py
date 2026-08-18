@@ -431,9 +431,32 @@ class V2PipelineService:
                     f"broll_enabled={job.broll_enabled}, "
                     f"broll_count={len(analysis_result.broll_suggestions.get('1', []))}"
                 )
-            else:
-                cached_analysis = cache.load_analysis(video_id, "v2") if video_id else None
-            if not direct_mode and cached_analysis:
+            user_custom_clips = (job.clips_data or {}).get("custom_clips")
+            if user_custom_clips:
+                from src.domain.entities import HighlightCandidate, HighlightAnalysisResult
+                analysis_result = HighlightAnalysisResult(
+                    clips=[
+                        HighlightCandidate(
+                            rank=int(c.get("rank", i + 1)),
+                            start=float(c.get("start", 0)),
+                            end=float(c.get("end", 0)),
+                            score=int(c.get("score") or 90),
+                            hook=str(c.get("hook", f"Klip #{i+1}")),
+                            reason=str(c.get("reason", "Custom clip from review")),
+                            content_type=str(c.get("content_type", "general")),
+                            speaker_energy=str(c.get("speaker_energy", "medium")),
+                            hook_alt=str(c.get("hook_alt", "")),
+                        )
+                        for i, c in enumerate(user_custom_clips)
+                    ],
+                    creative_direction=(job.clips_data or {}).get("creative_direction", {}),
+                    broll_suggestions={},
+                    model_used="custom_clips_from_review",
+                    chunks_processed=0,
+                )
+                logger.info(f"[{job_id}] Viral analysis SKIPPED (using {len(analysis_result.clips)} custom clips from preview review)")
+                self._emit(job_id, 4, "v2_highlight_analysis", "complete")
+            elif not direct_mode and (cached_analysis := ((cache.load_analysis(video_id, "v1") or cache.load_analysis(video_id, "v2")) if video_id else None)):
                 from src.domain.entities import HighlightCandidate, HighlightAnalysisResult
                 analysis_result = HighlightAnalysisResult(
                     clips=[HighlightCandidate(**c) for c in cached_analysis["clips"]],
@@ -512,7 +535,20 @@ class V2PipelineService:
             # ═══ Step 5: Prepare Clips ═══
             self._emit(job_id, 5, "prepare_clips", "start")
             await self._repo.update_status(job_id, JobStatus.PREPARING)
-            if direct_mode:
+            if user_custom_clips:
+                clips = [
+                    Clip(
+                        rank=int(c.get("rank", i + 1)),
+                        score=int(c.get("score") or 90),
+                        start=float(c.get("start", 0)),
+                        end=float(c.get("end", 0)),
+                        hook=str(c.get("hook", f"Klip #{i+1}")),
+                        reason=str(c.get("reason", "Custom clip from review")),
+                        broll_suggestions=[],
+                    )
+                    for i, c in enumerate(user_custom_clips)
+                ]
+            elif direct_mode:
                 direct_highlight = analysis_result.clips[0]
                 clips = [Clip(
                     rank=1,
@@ -533,14 +569,14 @@ class V2PipelineService:
                     analysis_result.broll_suggestions,
                     duration,
                 )
-            if self._overlap_detector and clips:
-                try:
-                    clips = self._overlap_detector.resolve_overlaps(clips)
-                except Exception:
-                    pass
-            limit = settings.VIDEO_FINAL_RESULT
-            if limit and limit > 0 and clips:
-                clips = clips[:limit]
+                if self._overlap_detector and clips:
+                    try:
+                        clips = self._overlap_detector.resolve_overlaps(clips)
+                    except Exception:
+                        pass
+                limit = settings.VIDEO_FINAL_RESULT
+                if limit and limit > 0 and clips:
+                    clips = clips[:limit]
             if not clips:
                 await self._repo.update_status(
                     job_id, JobStatus.FAILED, "Tidak ada clip valid setelah filtering"
