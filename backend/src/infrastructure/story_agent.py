@@ -31,19 +31,22 @@ The video will be rendered as a vertical (9:16) short-form video with:
 - Subtitles auto-generated from narration
 - Background music
 
-Rules for High Retention & Visual Dynamism:
+Rules for High Retention & Dynamic Visual Pacing:
 1. THE HOOK (first 3 seconds): Must be punchy, curiosity-inducing, and visually explosive.
-2. FAST-PACED SCENE CUTS: Short-form audiences have short attention spans. Keep each scene concise (3.5 to 5.5 seconds of spoken narration, ~8-14 words per scene). Change visual footage frequently to keep the video exciting and varied.
-3. HIGH VISUAL DIVERSITY: Never repeat visual styles across adjacent scenes. Alternate between wide landscape/drone shots, close-up macro details, high-energy subject action, dramatic camera angles, cinematic slow-motion, and vivid environments.
+2. DYNAMIC & ASYMMETRICAL PACING: Do NOT make every scene identical in duration. Master editors vary the rhythm organically:
+   - Use rapid 2.5s - 4.0s punchy cuts for the opening hook, fast action, and sudden twists.
+   - Use medium 4.5s - 6.5s cuts for regular progression and character/subject focus.
+   - Use immersive 7.0s - 10.0s shots for deep storytelling, technical explanations, or cinematic wide vistas.
+3. HIGH VISUAL DIVERSITY: Never repeat visual styles across adjacent scenes. Alternate between wide drone shots, macro close-ups, high-energy subject action, dramatic camera angles, cinematic slow-motion, and vivid environments.
 4. SPECIFIC SEARCH QUERIES: Provide 3 distinct, highly descriptive visual search queries per scene targeting exact b-roll footage.
 5. NATURAL NARRATIVE FLOW: Narration should sound natural, conversational, and energetic.
 6. SCENE COUNT: Generate {num_scenes} distinct scenes matching the target duration.
 7. STRICT RULE: NEVER include generic subscribe, like, follow, or channel CTA. The final scene MUST be an insightful, memorable takeaway directly related to the topic."""
 
-STORY_USER_PROMPT = """Create a dynamic, fast-paced vertical video script about: "{topic}"
+STORY_USER_PROMPT = """Create a dynamic, organically paced vertical video script about: "{topic}"
 
 Target duration: {target_duration} seconds (approximately {word_count} words of narration total)
-Number of scenes to generate: {num_scenes} scenes (approximately 3.5 to 5.0 seconds per scene for frequent visual cuts)
+Number of scenes to generate: {num_scenes} scenes (with varied lengths from 3s quick cuts up to 10s storytelling moments)
 
 Additional instructions: {instructions}
 
@@ -56,22 +59,22 @@ Output this exact JSON structure:
   "scenes": [
     {{
       "id": 1,
-      "narration": "The spoken narration for this scene (1 concise sentence, 8-14 words)",
-      "visual": "Concrete description of the exact visual footage to display",
+      "narration": "The spoken narration for this scene (length varies based on scene pace: 6 words for quick 3s cuts, up to 24 words for deep 10s shots)",
+      "visual": "Concrete description of the exact visual footage and camera movement to display",
       "search_queries": [
         "cinematic 4k specific visual query",
         "action motion drone footage query",
         "stock b-roll subject query"
       ],
-      "duration_estimate": 4.5,
+      "duration_estimate": 3.5,
       "transition": "cut|zoom|fade"
     }}
   ]
 }}
 
 Important Guidelines:
-- High footage variety: Each scene should have completely unique visual ideas and search terms.
-- Average speaking rate is ~2.5 words per second. Keep scene narration to ~9-14 words so each scene is ~4-5 seconds.
+- Organic Pacing Variation: Intentionally vary the shot lengths and word counts across scenes (e.g. Scene 1 = 3s hook, Scene 2 = 8s context, Scene 3 = 4s reveal, Scene 4 = 9s breakdown, Scene 5 = 3.5s climax, Scene 6 = 5s conclusion).
+- Average speaking rate is ~2.5 words per second. Set duration_estimate to match the word count naturally.
 - search_queries MUST be highly concrete and visual:
   * Use specific visual nouns with adjectives: "glowing jellyfish deep ocean abyss 4k", NOT "jellyfish"
   * Include camera motion or format: "drone shot mountain peak clouds cinematic", "macro extreme close up circuit board glowing"
@@ -116,9 +119,9 @@ class StoryAgent:
             target_duration = settings.VIDEO_GEN_TARGET_DURATION
 
         if not num_scenes:
-            # Auto-calculate: dynamic ~4.5 - 5.0 seconds per scene for fast-paced viral retention
-            calculated_scenes = int(round(target_duration / 4.8))
-            num_scenes = max(8, min(settings.VIDEO_GEN_MAX_SCENES, calculated_scenes))
+            # Auto-calculate: dynamic organic pacing averaging ~4.5 - 5.5s per cut
+            calculated_scenes = max(7, min(settings.VIDEO_GEN_MAX_SCENES, int(round(target_duration / 5.0))))
+            num_scenes = calculated_scenes
 
         # Approximate word count for target duration (2.5 words/sec)
         word_count = int(target_duration * 2.5)
@@ -458,7 +461,15 @@ class StoryAgent:
             scene["narration"] = raw_narration
             scene.setdefault("visual", "")
             scene.setdefault("search_queries", [])
-            scene.setdefault("duration_estimate", 7)
+            
+            # Dynamic duration computation based on narration or AI estimate (2.5s - 12s)
+            dur_est = scene.get("duration_estimate")
+            if dur_est is None or not isinstance(dur_est, (int, float)):
+                words = len(raw_narration.split())
+                scene["duration_estimate"] = max(2.5, min(12.0, round(words / 2.5, 1))) if words > 0 else 5.0
+            else:
+                scene["duration_estimate"] = max(2.0, min(14.0, float(dur_est)))
+
             scene.setdefault("transition", "cut")
 
             # Ensure search_queries is a list

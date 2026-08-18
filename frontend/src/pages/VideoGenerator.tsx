@@ -1703,7 +1703,7 @@ export function VideoGeneratorPage() {
                   </div>
                   <div>
                     <label htmlFor="video-scenes" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                      Footage cuts & scenes
+                      Footage pacing & cuts
                     </label>
                     <select
                       id="video-scenes"
@@ -1711,12 +1711,12 @@ export function VideoGeneratorPage() {
                       onChange={(event) => setNumScenes(Number(event.target.value))}
                       className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
                     >
-                      <option value={0}>Auto (Fast viral cuts ~4.5s)</option>
-                      <option value={8}>8 footage cuts (~8s)</option>
-                      <option value={12}>12 footage cuts (~5s dynamic)</option>
-                      <option value={15}>15 footage cuts (~4s viral)</option>
-                      <option value={18}>18 footage cuts (~3.5s ultra)</option>
-                      <option value={22}>22 footage cuts (Max variety)</option>
+                      <option value={0}>Auto (AI Dynamic Pacing · 3s–10s Smart Cuts)</option>
+                      <option value={8}>8 cuts (Cinematic ~8s shots)</option>
+                      <option value={12}>12 cuts (Dynamic ~5s cuts)</option>
+                      <option value={15}>15 cuts (Fast viral ~4s cuts)</option>
+                      <option value={18}>18 cuts (Ultra rapid ~3.5s)</option>
+                      <option value={22}>22 cuts (Max density)</option>
                     </select>
                   </div>
                 </div>
