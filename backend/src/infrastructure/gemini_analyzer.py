@@ -267,24 +267,18 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
     # ─── API Call Methods ─────────────────────────────────────────────────────
 
     def _call_with_retry(self, video_url: str, prompt: str) -> str:
-        """Call Gemini with YouTube URL as video content + text prompt."""
+        """Call Gemini with YouTube URL as video content + text prompt across all keys concurrently."""
         for attempt in range(MAX_RETRIES):
             try:
-                if not self._client:
-                    self._init_client()
-                if not self._client:
-                    raise RuntimeError("No Gemini API key configured")
-
-                response = self._generate_with_video(video_url, prompt, timeout=300)
+                response = self._generate_with_video(video_url, prompt, timeout=180)
                 if response and response.text:
                     return response.text
                 raise ValueError("Respons Gemini kosong")
 
             except TimeoutError:
                 if attempt < MAX_RETRIES - 1:
-                    logger.warning(f"Gemini attempt {attempt + 1} timeout. Retry...")
-                    self._key_rotator.mark_rate_limited()
-                    self._init_client()
+                    logger.warning(f"Gemini attempt {attempt + 1} timeout across all keys. Switching fallback...")
+                    self._switch_to_fallback()
                     continue
                 raise RuntimeError("Gemini timeout setelah semua percobaan")
 
@@ -292,31 +286,18 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                 error_str = str(e).lower()
 
                 if "api key" in error_str or "permission" in error_str:
-                    raise RuntimeError(f"Gemini auth error: {e}")
+                    logger.warning(f"Gemini auth error: {e}")
 
-                if "429" in error_str or "rate" in error_str or "quota" in error_str:
-                    # If this model has 0 quota on the current tier (e.g. Pro preview model on free tier),
-                    # rotating free-tier API keys will not help. Switch immediately to the next fallback model.
-                    if "limit: 0" in error_str or "limit: 0.0" in error_str:
-                        logger.warning(f"Model {self._model} has limit: 0 quota on current API tier; switching to next fallback...")
-                        self._switch_to_fallback()
-                        continue
-                    self._key_rotator.mark_rate_limited()
-                    self._init_client()
-                    logger.warning(f"Gemini rate limited, rotated to key[{self._key_rotator.current_index}]")
-                    if attempt < MAX_RETRIES - 1:
-                        time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
-                        continue
-
-                if "404" in error_str or "not found" in error_str or "no longer available" in error_str:
-                    logger.warning(f"Model {self._model} not available/retired; switching to next fallback...")
+                if "limit: 0" in error_str or "limit: 0.0" in error_str or "404" in error_str or "not found" in error_str:
+                    logger.warning(f"Model {self._model} unavailable/unsupported ({e}); switching to next fallback...")
                     self._switch_to_fallback()
                     continue
 
-                if "503" in error_str or "unavailable" in error_str or "high demand" in error_str:
+                if "503" in error_str or "unavailable" in error_str or "high demand" in error_str or "429" in error_str:
                     self._consecutive_503 += 1
-                    if self._consecutive_503 >= 2:
-                        self._switch_to_fallback()
+                    logger.warning(f"Model {self._model} overloaded/exhausted across keys ({e}); switching fallback...")
+                    self._switch_to_fallback()
+                    continue
 
                 if attempt < MAX_RETRIES - 1:
                     delay = RETRY_DELAYS[attempt]
@@ -326,59 +307,94 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                     raise RuntimeError(f"Gemini gagal setelah {MAX_RETRIES} percobaan: {e}")
 
     def _call_text_only(self, prompt: str) -> str:
-        """Call Gemini with text-only prompt (no video, much cheaper/faster)."""
-        for attempt in range(3):  # 3 attempts for text-only
-            try:
-                if not self._client:
-                    self._init_client()
-                if not self._client:
-                    raise RuntimeError("No Gemini API key configured")
+        """Call Gemini with text-only prompt across all available keys concurrently."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
-                response = self._client.models.generate_content(
-                    model=self._model,
-                    contents=[types.Part.from_text(text=prompt)],
-                )
-                if response and response.text:
-                    return response.text
-                raise ValueError("Respons Gemini kosong (text-only)")
+        keys = settings.gemini_api_keys or ([self._key_rotator.get_current_key()] if self._key_rotator.get_current_key() else [])
+        if not keys:
+            raise RuntimeError("No Gemini API key configured")
 
-            except Exception as e:
-                err_lower = str(e).lower()
-                if "429" in err_lower or "rate" in err_lower or "quota" in err_lower:
-                    if "limit: 0" in err_lower or "limit: 0.0" in err_lower:
-                        logger.warning(f"Model {self._model} has limit: 0 text quota; switching to fallback...")
-                        self._switch_to_fallback()
-                        continue
-                    self._key_rotator.mark_rate_limited()
-                    self._init_client()
-                if "404" in err_lower or "503" in err_lower or "not found" in err_lower:
-                    self._switch_to_fallback()
-                if attempt < 2:
-                    time.sleep(2)
-                    continue
-                raise
+        contents = [types.Part.from_text(text=prompt)]
 
-    def _generate_with_video(self, video_url: str, prompt: str, timeout: int = 300):
-        """Send YouTube URL + prompt to Gemini. Gemini processes the video directly."""
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-
-        def _call():
-            contents = [
-                types.Part.from_uri(file_uri=video_url, mime_type="video/mp4"),
-                types.Part.from_text(text=prompt),
-            ]
-            return self._client.models.generate_content(
+        def _call_single(k: str, idx: int):
+            client = genai.Client(api_key=k)
+            return k, idx, client.models.generate_content(
                 model=self._model,
                 contents=contents,
             )
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_call)
+        for attempt in range(3):
+            with ThreadPoolExecutor(max_workers=max(1, len(keys))) as executor:
+                future_to_key = {executor.submit(_call_single, k, i): (k, i) for i, k in enumerate(keys)}
+                errors = []
+                try:
+                    for future in as_completed(future_to_key, timeout=60):
+                        k, i = future_to_key[future]
+                        try:
+                            _, idx, response = future.result()
+                            if response and response.text:
+                                return response.text
+                        except Exception as e:
+                            errors.append(e)
+                except FuturesTimeout:
+                    pass
+
+            if errors:
+                last_err = errors[-1]
+                err_lower = str(last_err).lower()
+                if "404" in err_lower or "503" in err_lower or "limit: 0" in err_lower:
+                    self._switch_to_fallback()
+                if attempt < 2:
+                    time.sleep(2)
+                    continue
+                raise last_err
+
+        raise ValueError("Respons Gemini kosong (text-only)")
+
+    def _generate_with_video(self, video_url: str, prompt: str, timeout: int = 180):
+        """Send YouTube URL + prompt to Gemini across ALL available keys concurrently.
+        Whichever key responds first with valid content wins immediately.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+
+        keys = settings.gemini_api_keys or ([self._key_rotator.get_current_key()] if self._key_rotator.get_current_key() else [])
+        if not keys:
+            raise RuntimeError("No Gemini API key configured")
+
+        contents = [
+            types.Part.from_uri(file_uri=video_url, mime_type="video/mp4"),
+            types.Part.from_text(text=prompt),
+        ]
+
+        def _call(k: str, idx: int):
+            client = genai.Client(api_key=k)
+            res = client.models.generate_content(
+                model=self._model,
+                contents=contents,
+            )
+            return k, idx, res
+
+        with ThreadPoolExecutor(max_workers=max(1, len(keys))) as executor:
+            future_to_key = {executor.submit(_call, k, i): (k, i) for i, k in enumerate(keys)}
+            errors = []
             try:
-                return future.result(timeout=timeout)
+                for future in as_completed(future_to_key, timeout=timeout):
+                    k, i = future_to_key[future]
+                    try:
+                        _, idx, response = future.result()
+                        if response and response.text:
+                            logger.info(f"gemini_concurrent_win: key[{idx}] (...{k[-6:]}) responded first")
+                            return response
+                    except Exception as e:
+                        logger.warning(f"gemini_concurrent_key_failed: key[{i}] failed: {e}")
+                        errors.append(e)
             except FuturesTimeout:
-                logger.error(f"Gemini API call timed out after {timeout}s")
+                logger.error(f"Gemini API call timed out after {timeout}s across {len(keys)} keys")
                 raise TimeoutError(f"Gemini API timeout ({timeout}s)")
+
+        if errors:
+            raise errors[-1]
+        raise ValueError("Respons Gemini kosong dari semua key")
 
     def _parse_response(self, raw_text: str) -> dict:
         """Parse Gemini JSON response with tolerance for markdown fences."""
