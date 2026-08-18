@@ -317,6 +317,23 @@ async def retry_video(
     return _job_to_response(job)
 
 
+@router.delete("/jobs/{job_id}")
+async def delete_job(
+    job_id: str,
+    user: CurrentUser = Depends(require_superadmin()),
+):
+    """Delete a video generation job and all its artifacts (superuser only)."""
+    from src.application.video_generator import get_video_generator
+
+    vg = get_video_generator()
+    job = vg.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    vg.delete_job(job_id)
+    return {"success": True, "message": f"Job {job_id} deleted successfully"}
+
+
 @router.get("/jobs/{job_id}/stream")
 async def stream_video(
     job_id: str,

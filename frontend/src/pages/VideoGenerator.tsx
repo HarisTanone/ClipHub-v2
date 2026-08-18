@@ -22,12 +22,14 @@ import {
   Video,
   Volume2,
   X,
+  Trash2,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { RangeSlider } from "@/components/ui/RangeSlider";
 import { Toggle } from "@/components/ui/Toggle";
 import { useToast } from "@/components/ui/Toast";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   DEFAULT_HOOK_STYLE,
   DEFAULT_SUBTITLE_STYLE,
@@ -380,6 +382,32 @@ function SceneFootageStudioModal({
       selected_footage: s.selected_footage || s.footage_source || (s.footage_candidates?.[0] || null),
     }));
   });
+
+  // Sync internal scenes when job.scenes updates (e.g. from planning background task or polling)
+  useEffect(() => {
+    if (job.scenes && job.scenes.length > 0) {
+      setScenes((prev) => {
+        if (prev.length === 0) {
+          return job.scenes!.map((s) => ({
+            ...s,
+            selected_footage: s.selected_footage || s.footage_source || (s.footage_candidates?.[0] || null),
+          }));
+        }
+        // Preserve user selections for existing scenes while bringing in any new candidates
+        return job.scenes!.map((s) => {
+          const existing = prev.find((p) => p.id === s.id);
+          return {
+            ...s,
+            narration: existing?.narration ?? s.narration,
+            selected_footage:
+              existing?.selected_footage !== undefined
+                ? existing.selected_footage
+                : s.selected_footage || s.footage_source || (s.footage_candidates?.[0] || null),
+          };
+        });
+      });
+    }
+  }, [job.scenes]);
   const [searchingSceneId, setSearchingSceneId] = useState<number | null>(null);
   const [sceneSearchQueries, setSceneSearchQueries] = useState<Record<number, string>>({});
   const [isRendering, setIsRendering] = useState(false);
@@ -521,10 +549,30 @@ function SceneFootageStudioModal({
         {/* Scene List */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
           {scenes.length === 0 ? (
-            <div className="py-12 text-center text-zinc-500">
-              <Film className="mx-auto h-8 w-8 mb-2 opacity-50" />
-              <p className="text-sm">No scenes generated for this job.</p>
-            </div>
+            isProcessing(job.status) ? (
+              <div className="py-16 text-center space-y-3">
+                <Loader2 className="mx-auto h-9 w-9 animate-spin text-violet-400" />
+                <div>
+                  <p className="text-sm font-semibold text-zinc-200">
+                    {job.step_label || "AI is planning scenes & finding footage candidates..."}
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    This takes ~5-15 seconds. Footage candidates will appear here automatically.
+                  </p>
+                </div>
+                <div className="max-w-xs mx-auto pt-2">
+                  <ProgressIndicator progress={job.progress} stepLabel={job.step_label} />
+                </div>
+              </div>
+            ) : (
+              <div className="py-12 text-center text-zinc-500">
+                <Film className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                <p className="text-sm">No scenes generated for this job.</p>
+                {job.error && (
+                  <p className="text-xs text-red-400 mt-2 max-w-md mx-auto">{job.error}</p>
+                )}
+              </div>
+            )
           ) : (
             scenes.map((scene, idx) => {
               const isSelectedSome = Boolean(scene.selected_footage);
@@ -743,12 +791,14 @@ function VideoCard({
   onPlay,
   onDownload,
   onRetry,
+  onDelete,
   onOpenStudio,
 }: {
   job: VideoJob;
   onPlay: (job: VideoJob) => void;
   onDownload: (jobId: string) => void;
   onRetry: (jobId: string) => void;
+  onDelete: (jobId: string) => void;
   onOpenStudio: (job: VideoJob) => void;
 }) {
   const completed = job.status === "completed";
@@ -828,54 +878,64 @@ function VideoCard({
         )}
 
         {/* Action Buttons */}
-        <div className="pt-1 flex flex-wrap gap-1.5">
-          {isAwaitingSelection && (
-            <Button
-              type="button"
-              size="xs"
-              variant="primary"
-              className="w-full"
-              onClick={() => onOpenStudio(job)}
-              icon={<Layers className="h-3 w-3" />}
-            >
-              Select Footage
-            </Button>
-          )}
+        <div className="pt-1 flex items-center justify-between gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
+            {isAwaitingSelection && (
+              <Button
+                type="button"
+                size="xs"
+                variant="primary"
+                onClick={() => onOpenStudio(job)}
+                icon={<Layers className="h-3 w-3" />}
+              >
+                Select Footage
+              </Button>
+            )}
 
-          {completed && (
-            <>
+            {completed && (
+              <>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => onPlay(job)}
+                  icon={<Play className="h-3 w-3" />}
+                >
+                  Watch
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => onDownload(job.job_id)}
+                  icon={<Download className="h-3 w-3" />}
+                >
+                  Download
+                </Button>
+              </>
+            )}
+
+            {job.status === "failed" && (
               <Button
                 type="button"
                 size="xs"
                 variant="outline"
-                onClick={() => onPlay(job)}
-                icon={<Play className="h-3 w-3" />}
+                onClick={() => onRetry(job.job_id)}
+                icon={<RotateCcw className="h-3 w-3" />}
               >
-                Watch
+                Retry
               </Button>
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                onClick={() => onDownload(job.job_id)}
-                icon={<Download className="h-3 w-3" />}
-              >
-                Download
-              </Button>
-            </>
-          )}
+            )}
+          </div>
 
-          {job.status === "failed" && (
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              onClick={() => onRetry(job.job_id)}
-              icon={<RotateCcw className="h-3 w-3" />}
-            >
-              Retry
-            </Button>
-          )}
+          <button
+            type="button"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition ml-auto"
+            onClick={() => onDelete(job.job_id)}
+            title="Delete Job"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
     </Card>
@@ -1088,6 +1148,31 @@ export function VideoGeneratorPage() {
       toast.error(errorMessage(error, "Unable to retry this job."));
     } finally {
       setIsRetrying(null);
+    }
+  };
+
+  const handleDeleteJob = async (jobId: string) => {
+    if (
+      !(await confirmDialog({
+        title: "Delete video generator job?",
+        message: "This will permanently delete this job record, downloaded footage clips, and the generated final video.\n\nThis action cannot be undone.",
+        confirmText: "Yes, Delete Job",
+        danger: true,
+      }))
+    )
+      return;
+
+    try {
+      await fetchApi(`/api/video-generator/jobs/${jobId}`, {
+        method: "DELETE",
+      });
+      setJobs((prev) => prev.filter((j) => j.job_id !== jobId));
+      setTotalJobs((prev) => Math.max(0, prev - 1));
+      if (activeJob?.job_id === jobId) setActiveJob(null);
+      if (studioJob?.job_id === jobId) setStudioJob(null);
+      toast.success("Job deleted successfully.");
+    } catch (error) {
+      toast.error(errorMessage(error, "Failed to delete job."));
     }
   };
 
@@ -1444,6 +1529,7 @@ export function VideoGeneratorPage() {
                     onPlay={setActiveJob}
                     onDownload={handleDownload}
                     onRetry={handleRetry}
+                    onDelete={handleDeleteJob}
                     onOpenStudio={setStudioJob}
                   />
                 ))}

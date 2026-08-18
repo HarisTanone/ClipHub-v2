@@ -117,3 +117,15 @@ def test_byte_range_rejects_invalid_ranges():
             assert exc.headers == {"Content-Range": "bytes */1000"}
         else:
             raise AssertionError(f"Expected range {value!r} to be rejected")
+
+
+def test_delete_video_generator_job(tmp_path):
+    generator = VideoGenerator(output_dir=str(tmp_path))
+    job = generator.create_job(topic="Test Delete Job")
+    job_id = job.job_id
+
+    assert generator.get_job(job_id) is not None
+
+    deleted = generator.delete_job(job_id)
+    assert deleted is True
+    assert generator.get_job(job_id) is None

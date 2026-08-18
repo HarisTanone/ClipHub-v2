@@ -88,9 +88,9 @@ class VideoGenerator:
     - FFmpeg (final render)
     """
 
-    def __init__(self):
+    def __init__(self, output_dir: Optional[str] = None):
         self._jobs: dict[str, VideoGenJob] = {}
-        self._output_dir = settings.VIDEO_GEN_OUTPUT_DIR
+        self._output_dir = output_dir or settings.VIDEO_GEN_OUTPUT_DIR
         os.makedirs(self._output_dir, exist_ok=True)
 
     def _persist_job(self, job: VideoGenJob) -> None:
@@ -260,6 +260,39 @@ class VideoGenerator:
         except Exception as exc:
             logger.warning(f"video_gen: failed to read job {job_id} from DB: {exc}")
         return None
+
+    def delete_job(self, job_id: str) -> bool:
+        """Delete a video generation job and clean up its temporary and output files."""
+        job = self.get_job(job_id)
+        # Pop from in-memory cache
+        self._jobs.pop(job_id, None)
+
+        # Delete from DB
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            conn = get_dict_connection()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM video_generator_jobs WHERE job_id = ?", (job_id,))
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            logger.warning(f"video_gen: failed to delete job {job_id} from DB: {exc}")
+
+        # Delete local files/work dir
+        work_dir = os.path.join(self._output_dir, job_id)
+        if os.path.exists(work_dir):
+            try:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            except Exception as exc:
+                logger.warning(f"video_gen: failed to delete work_dir for job {job_id}: {exc}")
+
+        if job and job.output_path and os.path.exists(job.output_path):
+            try:
+                os.remove(job.output_path)
+            except Exception:
+                pass
+
+        return True
 
     def list_jobs(
         self,
