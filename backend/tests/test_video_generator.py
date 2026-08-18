@@ -186,3 +186,44 @@ def test_retry_video_generator_job_in_place(tmp_path):
     assert fetched is not None
     assert fetched.status == VideoGenStatus.QUEUED
     assert fetched.error is None
+
+
+def test_normalize_subtitle_style_preserves_custom_words_per_line_and_font():
+    # User specified maxWordsPerLine=1 (word by word) with meme_impact preset
+    style = normalize_subtitle_style({
+        "stylePreset": "meme_impact",
+        "maxWordsPerLine": 1,
+        "fontSize": 72,
+        "fontFamily": "Montserrat",
+    })
+    assert style["maxWordsPerLine"] == 1
+    assert style["fontSize"] == 72
+    assert style["fontFamily"] == "Montserrat"
+
+    # User specified maxWordsPerLine=6 with classic preset
+    style6 = normalize_subtitle_style({
+        "stylePreset": "classic",
+        "maxWordsPerLine": 6,
+    })
+    assert style6["maxWordsPerLine"] == 6
+
+
+def test_video_generator_preserves_hook_configuration():
+    generator = VideoGenerator()
+    job = generator.create_job(
+        topic="Hook test",
+        hook_enabled=True,
+        custom_hook="CUSTOM HOOK HEADLINE",
+        hook_style={"animation": "skia_neon_cyberpunk", "fontSize": 50},
+    )
+
+    assert job.hook_enabled is True
+    assert job.custom_hook == "CUSTOM HOOK HEADLINE"
+    assert job.hook_style["animation"] == "skia_neon_cyberpunk"
+
+    fetched = generator.get_job(job.job_id)
+    assert fetched is not None
+    assert fetched.hook_enabled is True
+    assert fetched.custom_hook == "CUSTOM HOOK HEADLINE"
+    assert fetched.hook_style.get("animation") == "skia_neon_cyberpunk"
+

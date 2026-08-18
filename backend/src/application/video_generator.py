@@ -61,6 +61,9 @@ class VideoGenJob:
     num_scenes: int = 0
     subtitles_enabled: bool = True
     subtitle_style: dict[str, Any] = field(default_factory=dict)
+    hook_enabled: bool = True
+    custom_hook: Optional[str] = None
+    hook_style: dict[str, Any] = field(default_factory=dict)
     include_bgm: bool = True
     bgm_volume: float = field(default_factory=lambda: settings.VIDEO_GEN_BGM_VOLUME)
     title: Optional[str] = None
@@ -86,12 +89,62 @@ class VideoGenerator:
     - FootageDownloader (yt-dlp)
     - DeepgramTTS (narration)
     - FFmpeg (final render)
+    - SkiaHookRenderer (opening hook title overlay)
     """
 
     def __init__(self, output_dir: Optional[str] = None):
         self._jobs: dict[str, VideoGenJob] = {}
         self._output_dir = output_dir or settings.VIDEO_GEN_OUTPUT_DIR
         os.makedirs(self._output_dir, exist_ok=True)
+        self._ensure_table()
+
+    def _ensure_table(self) -> None:
+        """Create video_generator_jobs table if needed and migrate missing columns."""
+        try:
+            from src.infrastructure.db_connection import get_dict_connection
+            conn = get_dict_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS video_generator_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    user_id INTEGER,
+                    topic TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    progress INTEGER DEFAULT 0,
+                    target_duration INTEGER DEFAULT 65,
+                    voice TEXT DEFAULT '',
+                    speed REAL DEFAULT 1.0,
+                    instructions TEXT DEFAULT '',
+                    num_scenes INTEGER DEFAULT 0,
+                    subtitles_enabled INTEGER DEFAULT 1,
+                    subtitle_style_json TEXT,
+                    hook_enabled INTEGER DEFAULT 1,
+                    custom_hook TEXT,
+                    hook_style_json TEXT,
+                    include_bgm INTEGER DEFAULT 1,
+                    bgm_volume REAL DEFAULT 0.15,
+                    title TEXT,
+                    story_json TEXT,
+                    scenes_json TEXT,
+                    timeline_json TEXT,
+                    output_path TEXT,
+                    error TEXT,
+                    created_at REAL,
+                    completed_at REAL
+                )
+            """)
+            cur.execute("PRAGMA table_info(video_generator_jobs)")
+            cols = {row["name"] for row in cur.fetchall()}
+            if "hook_enabled" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN hook_enabled INTEGER DEFAULT 1")
+            if "custom_hook" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN custom_hook TEXT")
+            if "hook_style_json" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN hook_style_json TEXT")
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            logger.warning(f"video_gen: failed to ensure video_generator_jobs table: {exc}")
 
     def _persist_job(self, job: VideoGenJob) -> None:
         """Persist job state to SQLite database."""
@@ -105,15 +158,16 @@ class VideoGenerator:
             scenes_json = json.dumps(job.scenes_with_footage) if job.scenes_with_footage else None
             timeline_json = json.dumps(job.timeline) if job.timeline else None
             subtitle_style_json = json.dumps(job.subtitle_style) if job.subtitle_style else None
+            hook_style_json = json.dumps(job.hook_style) if job.hook_style else None
 
             cur.execute("""
                 INSERT INTO video_generator_jobs (
                     job_id, user_id, topic, status, progress, target_duration,
                     voice, speed, instructions, num_scenes, subtitles_enabled,
-                    subtitle_style_json, include_bgm, bgm_volume, title,
-                    story_json, scenes_json, timeline_json, output_path, error,
-                    created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    subtitle_style_json, hook_enabled, custom_hook, hook_style_json,
+                    include_bgm, bgm_volume, title, story_json, scenes_json,
+                    timeline_json, output_path, error, created_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     user_id=excluded.user_id,
                     topic=excluded.topic,
@@ -126,6 +180,9 @@ class VideoGenerator:
                     num_scenes=excluded.num_scenes,
                     subtitles_enabled=excluded.subtitles_enabled,
                     subtitle_style_json=excluded.subtitle_style_json,
+                    hook_enabled=excluded.hook_enabled,
+                    custom_hook=excluded.custom_hook,
+                    hook_style_json=excluded.hook_style_json,
                     include_bgm=excluded.include_bgm,
                     bgm_volume=excluded.bgm_volume,
                     title=excluded.title,
@@ -148,6 +205,9 @@ class VideoGenerator:
                 job.num_scenes,
                 1 if job.subtitles_enabled else 0,
                 subtitle_style_json,
+                1 if job.hook_enabled else 0,
+                job.custom_hook,
+                hook_style_json,
                 1 if job.include_bgm else 0,
                 job.bgm_volume,
                 title,
@@ -179,6 +239,11 @@ class VideoGenerator:
             if ("subtitle_style_json" in row.keys() and row["subtitle_style_json"])
             else {}
         )
+        hook_style = (
+            json.loads(row["hook_style_json"])
+            if ("hook_style_json" in row.keys() and row["hook_style_json"])
+            else {}
+        )
 
         return VideoGenJob(
             job_id=row["job_id"],
@@ -192,6 +257,9 @@ class VideoGenerator:
             num_scenes=int(row["num_scenes"]) if "num_scenes" in row.keys() and row["num_scenes"] is not None else 0,
             subtitles_enabled=bool(row["subtitles_enabled"]) if "subtitles_enabled" in row.keys() and row["subtitles_enabled"] is not None else True,
             subtitle_style=subtitle_style,
+            hook_enabled=bool(row["hook_enabled"]) if "hook_enabled" in row.keys() and row["hook_enabled"] is not None else True,
+            custom_hook=row["custom_hook"] if "custom_hook" in row.keys() else None,
+            hook_style=hook_style,
             include_bgm=bool(row["include_bgm"]) if "include_bgm" in row.keys() and row["include_bgm"] is not None else True,
             bgm_volume=float(row["bgm_volume"]) if "bgm_volume" in row.keys() and row["bgm_volume"] is not None else settings.VIDEO_GEN_BGM_VOLUME,
             title=row["title"],
@@ -215,6 +283,9 @@ class VideoGenerator:
         num_scenes: int = 0,
         subtitles_enabled: bool = True,
         subtitle_style: Optional[dict[str, Any]] = None,
+        hook_enabled: bool = True,
+        custom_hook: Optional[str] = None,
+        hook_style: Optional[dict[str, Any]] = None,
         include_bgm: bool = True,
         bgm_volume: Optional[float] = None,
         user_id: Optional[int] = None,
@@ -231,6 +302,9 @@ class VideoGenerator:
             num_scenes=num_scenes,
             subtitles_enabled=subtitles_enabled,
             subtitle_style=normalize_subtitle_style(subtitle_style),
+            hook_enabled=hook_enabled,
+            custom_hook=custom_hook.strip() if custom_hook and custom_hook.strip() else None,
+            hook_style=hook_style or {},
             include_bgm=include_bgm,
             bgm_volume=(
                 settings.VIDEO_GEN_BGM_VOLUME
@@ -610,6 +684,9 @@ class VideoGenerator:
             instructions=job.instructions,
         )
 
+        if job.custom_hook and job.custom_hook.strip():
+            story["hook"] = job.custom_hook.strip()
+
         logger.info(
             f"video_gen [{job.job_id}]: story generated — "
             f"'{story.get('title', '')}', {len(story.get('scenes', []))} scenes"
@@ -636,130 +713,117 @@ class VideoGenerator:
             f"video_gen: found {total_candidates} footage candidates "
             f"across {len(scenes)} scenes"
         )
-
         return scenes
 
     async def _step_download_footage(
         self, scenes: list[dict], work_dir: str
     ) -> list[dict]:
-        """Step 3: Download chosen/best footage candidate for each scene."""
-        footage_dir = os.path.join(work_dir, "footage")
-        os.makedirs(footage_dir, exist_ok=True)
+        """Step 3: Download top candidate for each scene via yt-dlp."""
+        from src.infrastructure.footage_downloader import FootageDownloader
+
+        downloader = FootageDownloader(output_dir=os.path.join(work_dir, "footage"))
 
         for i, scene in enumerate(scenes):
-            best = scene.get("selected_footage") or scene.get("footage_source")
+            # If user already selected a footage candidate (Studio mode), respect it!
+            selected = scene.get("selected_footage") or scene.get("footage_source")
+            best = selected if selected else self._pick_best_candidate(scene.get("footage_candidates", []), scene)
             if not best:
-                candidates = scene.get("footage_candidates", [])
-                if candidates:
-                    best = self._pick_best_candidate(candidates, scene)
-
-            if not best:
-                scene["footage_path"] = None
+                logger.warning(f"video_gen: no candidate for scene {i + 1}")
                 continue
 
-            duration_needed = scene.get("duration_estimate", 10) + 3  # buffer
-            url = best.get("url") or ""
-            platform = best.get("platform", "youtube")
-
-            path = None
-            if platform == "pexels" or (url.startswith("http") and ".mp4" in url):
-                from src.infrastructure.footage_downloader import FootageDownloader
-                from src.domain.entities import VideoCandidate
-                candidate_obj = VideoCandidate(
-                    id=best.get("video_id", f"scene_{i}"),
-                    platform="pexels",
-                    embed_url=url,
-                    thumbnail_url=best.get("thumbnail_url", ""),
-                    preview_url=best.get("thumbnail_url", ""),
-                    source_url=url,
-                    title=best.get("title", ""),
-                )
-                dl = FootageDownloader(output_dir=footage_dir)
-                path = await dl.download(candidate_obj, duration_needed)
-            else:
-                path = await self._download_youtube_segment(
-                    url=url,
-                    duration_needed=duration_needed,
-                    output_dir=footage_dir,
-                    scene_id=scene.get("id", i),
-                )
-
-            scene["footage_path"] = path
+            scene["selected_footage"] = best
             scene["footage_source"] = best
 
-            if path:
-                logger.info(
-                    f"video_gen: scene {scene.get('id', i)} footage downloaded "
-                    f"from '{best.get('title', '')[:40]}'"
+            try:
+                # If already downloaded local file exists, reuse
+                if best.get("local_path") and os.path.exists(best["local_path"]):
+                    scene["footage_path"] = best["local_path"]
+                    continue
+
+                video_url = best.get("url", "")
+                if not video_url and best.get("video_id"):
+                    video_url = f"https://www.youtube.com/watch?v={best['video_id']}"
+
+                if not video_url:
+                    continue
+
+                logger.info(f"video_gen: downloading footage for scene {i + 1}: {best.get('title', '')[:50]}")
+                local_path = await downloader.download_segment(
+                    url=video_url,
+                    start_time=float(best.get("start_timestamp") or 0.0),
+                    duration=max(10.0, float(scene.get("duration_estimate", 7)) + 4.0),
+                    scene_id=scene.get("id", i + 1),
                 )
-
-            await asyncio.sleep(0.3)
-
-        downloaded = sum(1 for s in scenes if s.get("footage_path"))
-        logger.info(f"video_gen: downloaded footage for {downloaded}/{len(scenes)} scenes")
+                scene["footage_path"] = local_path
+            except Exception as e:
+                logger.warning(f"video_gen: failed to download footage for scene {i + 1}: {e}")
 
         return scenes
 
     async def _step_generate_tts(
         self, scenes: list[dict], job: VideoGenJob, work_dir: str
     ) -> list[dict]:
-        """Step 4: Generate TTS narration for each scene."""
+        """Step 4: Generate TTS audio per scene via Deepgram."""
         from src.infrastructure.deepgram_tts import DeepgramTTS
 
         tts_dir = os.path.join(work_dir, "tts")
         os.makedirs(tts_dir, exist_ok=True)
-
         tts = DeepgramTTS(output_dir=tts_dir)
+        voice = job.voice or settings.DEEPGRAM_TTS_VOICE
 
-        scenes = await tts.synthesize_scenes(
-            scenes=scenes,
-            voice=job.voice,
-            speed=job.speed,
-        )
-
-        # Log TTS results
-        total_tts_duration = sum(s.get("tts_duration", 0) for s in scenes)
-        tts_count = sum(1 for s in scenes if s.get("tts_path"))
-        logger.info(
-            f"video_gen [{job.job_id}]: TTS generated for {tts_count}/{len(scenes)} "
-            f"scenes, total narration: {total_tts_duration:.1f}s"
-        )
-
-        if any(scene.get("narration", "").strip() for scene in scenes) and not tts_count:
-            raise RuntimeError(
-                "Narration generation failed for every scene. Check the Deepgram API configuration."
+        try:
+            scenes = await tts.synthesize_scenes(
+                scenes=scenes,
+                voice=voice,
+                speed=job.speed,
             )
+        except Exception as exc:
+            logger.warning(f"video_gen: synthesize_scenes failed ({exc}), falling back to individual calls")
+            for i, scene in enumerate(scenes):
+                narration = scene.get("narration", "")
+                if not narration:
+                    continue
+                try:
+                    audio_path = await tts.synthesize(
+                        text=narration,
+                        voice=voice,
+                        speed=job.speed,
+                        output_path=os.path.join(tts_dir, f"tts_{i + 1}.mp3"),
+                    )
+                    if audio_path:
+                        duration = await self._media_duration(audio_path)
+                        scene["tts_path"] = audio_path
+                        scene["tts_duration"] = duration
+                except Exception as e:
+                    logger.warning(f"video_gen: TTS failed for scene {i + 1}: {e}")
+
+        # Ensure audio_path and audio_duration aliases
+        for scene in scenes:
+            if scene.get("tts_path"):
+                scene["audio_path"] = scene["tts_path"]
+            if scene.get("tts_duration"):
+                scene["audio_duration"] = scene["tts_duration"]
 
         return scenes
 
     def _step_assemble_timeline(self, scenes: list[dict]) -> list[dict]:
-        """Step 5: Build render timeline — sync footage to TTS duration.
-
-        Each timeline entry has:
-        - scene_id
-        - footage_path (video file)
-        - tts_path (audio narration)
-        - start_time (in final video)
-        - duration (from TTS, or estimated)
-        - narration (for subtitle generation)
-        """
+        """Step 5: Assemble timeline with exact timing."""
         timeline = []
         current_time = 0.0
 
         for scene in scenes:
-            # Duration comes from TTS (authoritative) or estimate
-            duration = scene.get("tts_duration", 0)
-            if duration <= 0:
-                duration = scene.get("duration_estimate", 7)
-
+            duration = scene.get("tts_duration") or scene.get("audio_duration") or scene.get("duration_estimate", 7)
+            audio_path = scene.get("tts_path") or scene.get("audio_path")
             entry = {
-                "scene_id": scene.get("id", 0),
+                "scene_id": scene.get("id", len(timeline) + 1),
+                "narration": scene.get("narration", ""),
                 "footage_path": scene.get("footage_path"),
-                "tts_path": scene.get("tts_path"),
+                "audio_path": audio_path,
+                "tts_path": audio_path,
                 "start_time": current_time,
                 "duration": duration,
-                "narration": scene.get("narration", ""),
                 "transition": scene.get("transition", "cut"),
+                "visual": scene.get("visual", ""),
             }
             timeline.append(entry)
             current_time += duration
@@ -775,7 +839,7 @@ class VideoGenerator:
     async def _step_render_video(
         self, timeline: list[dict], job: VideoGenJob, work_dir: str
     ) -> str:
-        """Step 6: FFmpeg render — combine footage + TTS + subtitles.
+        """Step 6: FFmpeg render — combine footage + TTS + subtitles + opening hook.
 
         Produces a final 9:16 (1080x1920) MP4.
         """
@@ -817,6 +881,39 @@ class VideoGenerator:
 
         if not os.path.exists(output_path):
             raise RuntimeError("Final video render failed — output file not created")
+
+        # Step 6f: Burn opening Hook overlay if hook is enabled
+        if job.hook_enabled and os.path.exists(output_path):
+            hook_text = (
+                job.custom_hook
+                or (job.story.get("hook") if job.story else "")
+                or (job.title if job.title else "")
+                or (timeline[0].get("narration") if timeline else "")
+            )
+            if hook_text and hook_text.strip():
+                try:
+                    from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+                    fonts_dir = "backend/assets/fonts" if os.path.exists("backend/assets/fonts") else "assets/fonts"
+                    renderer = SkiaHookRenderer(font_dir=fonts_dir)
+                    hooked_path = os.path.join(work_dir, f"hooked_{job.job_id}.mp4")
+                    hook_style_name = (
+                        job.hook_style.get("animation")
+                        or job.hook_style.get("hook_style")
+                        or "skia_impact_badge"
+                    )
+                    await renderer.render_hook(
+                        video_path=output_path,
+                        hook_text=hook_text.strip(),
+                        output_path=hooked_path,
+                        hook_style=hook_style_name,
+                        style_config=job.hook_style,
+                    )
+                    if os.path.exists(hooked_path) and os.path.getsize(hooked_path) > 0:
+                        import shutil
+                        shutil.move(hooked_path, output_path)
+                        logger.info(f"video_gen [{job.job_id}]: successfully applied opening hook overlay")
+                except Exception as hook_err:
+                    logger.warning(f"video_gen [{job.job_id}]: failed to burn hook overlay: {hook_err}")
 
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
         logger.info(f"video_gen [{job.job_id}]: final video {size_mb:.1f}MB → {output_path}")

@@ -32,6 +32,10 @@ class GenerateVideoRequest(BaseModel):
     subtitles_enabled: bool = Field(default=True, description="Burn captions into the final video")
     subtitle_style_config: dict[str, Any] = Field(default_factory=dict)
     subtitle_style: Optional[dict[str, Any]] = Field(default=None, exclude=True)
+    hook_enabled: bool = Field(default=True, description="Burn opening hook title overlay into the video")
+    custom_hook: Optional[str] = Field(default=None, max_length=250, description="Custom hook title text (empty=auto)")
+    hook_style_config: dict[str, Any] = Field(default_factory=dict)
+    hook_style: Optional[dict[str, Any]] = Field(default=None, exclude=True)
     include_bgm: bool = Field(default=True, description="Mix background music when available")
     bgm_volume: float = Field(default=0.15, ge=0.0, le=0.5)
 
@@ -58,6 +62,9 @@ class JobStatusResponse(BaseModel):
     num_scenes: int = 0
     subtitles_enabled: bool = True
     subtitle_style_config: dict[str, Any] = Field(default_factory=dict)
+    hook_enabled: bool = True
+    custom_hook: Optional[str] = None
+    hook_style_config: dict[str, Any] = Field(default_factory=dict)
     include_bgm: bool = True
     bgm_volume: float = 0.15
     title: Optional[str] = None
@@ -124,6 +131,9 @@ async def generate_video(
         num_scenes=req.num_scenes,
         subtitles_enabled=req.subtitles_enabled,
         subtitle_style=req.subtitle_style_config or req.subtitle_style,
+        hook_enabled=req.hook_enabled,
+        custom_hook=req.custom_hook,
+        hook_style=req.hook_style_config or req.hook_style,
         include_bgm=req.include_bgm,
         bgm_volume=req.bgm_volume,
         user_id=user.id,
@@ -163,6 +173,9 @@ async def plan_video(
         num_scenes=req.num_scenes,
         subtitles_enabled=req.subtitles_enabled,
         subtitle_style=req.subtitle_style_config or req.subtitle_style,
+        hook_enabled=req.hook_enabled,
+        custom_hook=req.custom_hook,
+        hook_style=req.hook_style_config or req.hook_style,
         include_bgm=req.include_bgm,
         bgm_volume=req.bgm_volume,
         user_id=user.id,
@@ -492,6 +505,9 @@ def _job_to_response(job) -> JobStatusResponse:
         num_scenes=job.num_scenes,
         subtitles_enabled=job.subtitles_enabled,
         subtitle_style_config=job.subtitle_style,
+        hook_enabled=job.hook_enabled,
+        custom_hook=job.custom_hook,
+        hook_style_config=job.hook_style,
         include_bgm=job.include_bgm,
         bgm_volume=job.bgm_volume,
         title=title,

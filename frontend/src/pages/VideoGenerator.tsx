@@ -23,6 +23,9 @@ import {
   Volume2,
   X,
   Trash2,
+  Bookmark,
+  MessageSquare,
+  Flame,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -37,7 +40,7 @@ import {
   type HookStyle,
   type SubtitleStyle,
 } from "@/components/StyleEditorModal";
-import { API_BASE, getToken } from "@/lib/api";
+import { API_BASE, getToken, presets as presetsApi, type Preset } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
@@ -77,6 +80,9 @@ export interface VideoJob {
   voice: string;
   speed: number;
   num_scenes: number;
+  hook_enabled?: boolean;
+  custom_hook?: string | null;
+  hook_style_config?: Record<string, unknown>;
   subtitles_enabled: boolean;
   subtitle_style_config: Record<string, unknown>;
   include_bgm: boolean;
@@ -113,6 +119,109 @@ interface CaptionPreset {
   patch: Partial<SubtitleStyle>;
 }
 
+interface HookPreset {
+  id: string;
+  name: string;
+  description: string;
+  accent: string;
+  patch: Partial<HookStyle>;
+}
+
+const HOOK_PRESETS: HookPreset[] = [
+  {
+    id: "impact_badge",
+    name: "Impact Hazard",
+    description: "Yellow caution pill",
+    accent: "#FACC15",
+    patch: {
+      animation: "skia_impact_badge",
+      fontFamily: "Anton",
+      fontSize: 54,
+      fontWeight: "800",
+      color: "#000000",
+      bgColor: "#FACC15",
+      bgOpacity: 1,
+      boxEnabled: true,
+      boxRadius: 14,
+      boxColor: "#FACC15",
+      position: "top",
+      positionY: 15,
+      uppercase: true,
+    },
+  },
+  {
+    id: "neon_cyber",
+    name: "Neon Cyber",
+    description: "Cyan glow frame",
+    accent: "#00F0FF",
+    patch: {
+      animation: "skia_neon_cyberpunk",
+      fontFamily: "Montserrat",
+      fontSize: 50,
+      fontWeight: "900",
+      color: "#00F0FF",
+      bgColor: "#0A0F1E",
+      bgOpacity: 0.85,
+      boxEnabled: true,
+      boxRadius: 16,
+      strokeEnabled: true,
+      strokeColor: "#00F0FF",
+      strokeWidth: 3,
+      glowEnabled: true,
+      glowColor: "#00F0FF",
+      position: "top",
+      positionY: 15,
+      uppercase: true,
+    },
+  },
+  {
+    id: "frosted_pill",
+    name: "Frosted Glass",
+    description: "Modern capsule blur",
+    accent: "#FFFFFF",
+    patch: {
+      animation: "skia_frosted_pill",
+      fontFamily: "Inter",
+      fontSize: 46,
+      fontWeight: "800",
+      color: "#FFFFFF",
+      bgColor: "#FFFFFF",
+      bgOpacity: 0.22,
+      boxEnabled: true,
+      boxRadius: 999,
+      strokeEnabled: true,
+      strokeColor: "#FFFFFF",
+      strokeWidth: 2,
+      position: "top",
+      positionY: 15,
+      uppercase: false,
+    },
+  },
+  {
+    id: "aurora",
+    name: "Aurora Glow",
+    description: "Emerald gradient",
+    accent: "#10B981",
+    patch: {
+      animation: "skia_aurora_gradient",
+      fontFamily: "Outfit",
+      fontSize: 50,
+      fontWeight: "800",
+      color: "#10B981",
+      gradientEnabled: true,
+      gradientFrom: "#10B981",
+      gradientTo: "#8B5CF6",
+      bgColor: "#050F0A",
+      bgOpacity: 0.82,
+      boxEnabled: true,
+      boxRadius: 16,
+      position: "top",
+      positionY: 15,
+      uppercase: false,
+    },
+  },
+];
+
 const CAPTION_PRESETS: CaptionPreset[] = [
   {
     id: "classic",
@@ -121,7 +230,7 @@ const CAPTION_PRESETS: CaptionPreset[] = [
     accent: "#FACC15",
     patch: {
       stylePreset: "classic",
-      fontFamily: "DejaVu Sans",
+      fontFamily: "Montserrat",
       fontSize: 54,
       fontWeight: "800",
       color: "#FFFFFF",
@@ -142,8 +251,8 @@ const CAPTION_PRESETS: CaptionPreset[] = [
     accent: "#FB3B4E",
     patch: {
       stylePreset: "meme_impact",
-      fontFamily: "DejaVu Sans",
-      fontSize: 64,
+      fontFamily: "Anton",
+      fontSize: 62,
       fontWeight: "900",
       color: "#FFFFFF",
       highlightColor: "#FB3B4E",
@@ -165,7 +274,7 @@ const CAPTION_PRESETS: CaptionPreset[] = [
     accent: "#22D3EE",
     patch: {
       stylePreset: "neon_pulse",
-      fontFamily: "DejaVu Sans",
+      fontFamily: "Montserrat",
       fontSize: 56,
       fontWeight: "900",
       color: "#ECFEFF",
@@ -191,8 +300,8 @@ const CAPTION_PRESETS: CaptionPreset[] = [
     accent: "#F8FAFC",
     patch: {
       stylePreset: "minimal_clean",
-      fontFamily: "DejaVu Sans",
-      fontSize: 50,
+      fontFamily: "Inter",
+      fontSize: 48,
       fontWeight: "700",
       color: "#F8FAFC",
       highlightColor: "#FFFFFF",
@@ -202,31 +311,69 @@ const CAPTION_PRESETS: CaptionPreset[] = [
       shadowBlur: 10,
       position: "bottom",
       positionY: 84,
-      maxWordsPerLine: 5,
+      maxWordsPerLine: 4,
       lineTransition: "line_reveal",
     },
   },
 ];
+
+function loadHookStyle(): HookStyle {
+  try {
+    const saved = localStorage.getItem("autocliper_video_generator_hook_style");
+    return {
+      ...DEFAULT_HOOK_STYLE,
+      animation: "skia_impact_badge",
+      fontFamily: "Anton",
+      fontSize: 54,
+      fontWeight: "800",
+      position: "top",
+      positionY: 15,
+      boxEnabled: true,
+      boxRadius: 14,
+      bgColor: "#FACC15",
+      color: "#000000",
+      uppercase: true,
+      ...(saved ? JSON.parse(saved) : {}),
+    } as HookStyle;
+  } catch {
+    return {
+      ...DEFAULT_HOOK_STYLE,
+      animation: "skia_impact_badge",
+      fontFamily: "Anton",
+      fontSize: 54,
+      fontWeight: "800",
+      position: "top",
+      positionY: 15,
+      boxEnabled: true,
+      boxRadius: 14,
+      bgColor: "#FACC15",
+      color: "#000000",
+      uppercase: true,
+    } as HookStyle;
+  }
+}
 
 function loadSubtitleStyle(): SubtitleStyle {
   try {
     const saved = localStorage.getItem("autocliper_video_generator_subtitle_style");
     return {
       ...DEFAULT_SUBTITLE_STYLE,
-      fontFamily: "DejaVu Sans",
+      fontFamily: "Montserrat",
       fontSize: 54,
       fontWeight: "800",
       positionY: 84,
+      maxWordsPerLine: 3,
       ...(saved ? JSON.parse(saved) : {}),
       engine: "ffmpeg",
     } as SubtitleStyle;
   } catch {
     return {
       ...DEFAULT_SUBTITLE_STYLE,
-      fontFamily: "DejaVu Sans",
+      fontFamily: "Montserrat",
       fontSize: 54,
       fontWeight: "800",
       positionY: 84,
+      maxWordsPerLine: 3,
       engine: "ffmpeg",
     };
   }
@@ -300,35 +447,163 @@ function ProgressIndicator({ progress, stepLabel }: { progress: number; stepLabe
   );
 }
 
-function CaptionPreview({ style }: { style: SubtitleStyle }) {
-  const background = style.bgEnabled
-    ? `${style.bgColor}${Math.round(Math.max(0, Math.min(style.bgOpacity, 1)) * 255).toString(16).padStart(2, "0")}`
+function LiveVideoPreview({
+  hookEnabled,
+  customHook,
+  hookStyle,
+  subtitlesEnabled,
+  subtitleStyle,
+  topic,
+  onCustomizeHook,
+  onCustomizeSubtitle,
+}: {
+  hookEnabled: boolean;
+  customHook: string;
+  hookStyle: HookStyle;
+  subtitlesEnabled: boolean;
+  subtitleStyle: SubtitleStyle;
+  topic: string;
+  onCustomizeHook: () => void;
+  onCustomizeSubtitle: () => void;
+}) {
+  const hookText =
+    customHook.trim() ||
+    (topic.trim() ? topic.trim().slice(0, 42).toUpperCase() : "THE SECRETS OF DEEP OCEAN");
+
+  const hookBg = hookStyle.boxEnabled ? (hookStyle.bgColor || "#FACC15") : "transparent";
+  const hookOpacity = hookStyle.boxEnabled ? (hookStyle.bgOpacity ?? 1) : 1;
+
+  const subBg = subtitleStyle.bgEnabled
+    ? `${subtitleStyle.bgColor}${Math.round(Math.max(0, Math.min(subtitleStyle.bgOpacity, 1)) * 255).toString(16).padStart(2, "0")}`
     : "transparent";
-  const positionClass = style.position === "top" ? "top-5" : style.position === "center" ? "top-1/2 -translate-y-1/2" : "bottom-5";
+
+  const positionClass =
+    subtitleStyle.position === "top"
+      ? "top-14"
+      : subtitleStyle.position === "center"
+      ? "top-1/2 -translate-y-1/2"
+      : "bottom-8";
+
+  const wordsCount = Math.max(1, Math.min(6, subtitleStyle.maxWordsPerLine || 3));
+  const sampleWords = ["UNVEILING", "THE", "HIDDEN", "TRUTH", "RIGHT", "NOW"].slice(0, wordsCount);
 
   return (
-    <div className="relative aspect-[9/16] w-[104px] shrink-0 overflow-hidden rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-700 via-zinc-900 to-black shadow-xl">
-      <div className="absolute inset-0 opacity-40" style={{ background: "radial-gradient(circle at 74% 22%, #a855f7, transparent 30%), radial-gradient(circle at 24% 70%, #0ea5e9, transparent 32%)" }} />
-      <div className={cn("absolute left-2 right-2", positionClass)}>
-        <p
-          className="text-center leading-tight"
+    <div className="relative mx-auto flex flex-col items-center">
+      <div className="relative aspect-[9/16] w-[200px] sm:w-[220px] shrink-0 overflow-hidden rounded-[26px] border-[4px] border-zinc-800 bg-zinc-950 shadow-2xl ring-1 ring-white/10">
+        <div className="absolute left-1/2 top-2 z-20 h-3 w-14 -translate-x-1/2 rounded-full bg-zinc-900/90 border border-zinc-800/80" />
+
+        <div
+          className="absolute inset-0 bg-cover bg-center opacity-40 transition-all"
           style={{
-            color: style.color,
-            background,
-            borderRadius: style.bgEnabled ? Math.min(style.bgRadius, 12) : undefined,
-            padding: style.bgEnabled ? "5px 4px" : 0,
-            fontFamily: style.fontFamily,
-            fontSize: `${Math.max(10, Math.min(19, style.fontSize * 0.31))}px`,
-            fontWeight: Number(style.fontWeight),
-            fontStyle: style.italic ? "italic" : "normal",
-            textTransform: style.uppercase ? "uppercase" : "none",
-            textShadow: style.strokeEnabled || style.shadowEnabled
-              ? `0 1px ${Math.max(1, style.shadowBlur * 0.28)}px ${style.strokeColor}`
-              : undefined,
+            backgroundImage: "radial-gradient(circle at 50% 25%, #6366f1 0%, #1e1b4b 55%, #030712 100%)",
           }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/70" />
+
+        <div className="absolute top-6 right-3 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[8px] font-mono text-zinc-400 backdrop-blur-xs">
+          9:16
+        </div>
+
+        {hookEnabled ? (
+          <div
+            onClick={onCustomizeHook}
+            className="absolute left-2.5 right-2.5 top-9 z-10 cursor-pointer transition hover:scale-[1.02]"
+            title="Click to customize opening hook"
+          >
+            <div
+              className="text-center transition-all shadow-md mx-auto"
+              style={{
+                backgroundColor: hookBg,
+                opacity: hookOpacity,
+                color: hookStyle.color || "#000000",
+                borderRadius: `${Math.min(16, hookStyle.boxRadius || 12)}px`,
+                padding: "5px 6px",
+                fontFamily: hookStyle.fontFamily || "Anton",
+                fontSize: "11px",
+                fontWeight: Number(hookStyle.fontWeight) || 800,
+                textTransform: hookStyle.uppercase ? "uppercase" : "none",
+                letterSpacing: `${hookStyle.letterSpacing || 0}px`,
+                border: hookStyle.strokeEnabled ? `${hookStyle.strokeWidth || 1}px solid ${hookStyle.strokeColor || "#000"}` : undefined,
+                boxShadow: hookStyle.shadowEnabled ? `0 3px ${hookStyle.shadowBlur || 6}px ${hookStyle.shadowColor || "#000000"}` : undefined,
+              }}
+            >
+              {hookText}
+            </div>
+            <div className="mt-0.5 flex items-center justify-center gap-1 text-[8px] uppercase tracking-wider text-amber-300/80">
+              <Sparkles className="h-2 w-2" /> Opening Hook (0-3s)
+            </div>
+          </div>
+        ) : (
+          <div className="absolute left-2.5 right-2.5 top-11 z-10 text-center">
+            <span className="rounded bg-black/50 px-2 py-0.5 text-[8px] text-zinc-600">Hook Disabled</span>
+          </div>
+        )}
+
+        {subtitlesEnabled ? (
+          <div
+            onClick={onCustomizeSubtitle}
+            className={cn("absolute left-2.5 right-2.5 z-10 cursor-pointer transition hover:scale-[1.02]", positionClass)}
+            title="Click to customize captions"
+          >
+            <div
+              className="text-center transition-all mx-auto leading-tight"
+              style={{
+                color: subtitleStyle.color || "#FFFFFF",
+                backgroundColor: subBg,
+                borderRadius: subtitleStyle.bgEnabled ? `${Math.min(subtitleStyle.bgRadius, 10)}px` : undefined,
+                padding: subtitleStyle.bgEnabled ? "3px 6px" : "2px",
+                fontFamily: subtitleStyle.fontFamily || "Montserrat",
+                fontSize: `${Math.max(9, Math.min(16, (subtitleStyle.fontSize || 54) * 0.22))}px`,
+                fontWeight: Number(subtitleStyle.fontWeight) || 800,
+                fontStyle: subtitleStyle.italic ? "italic" : "normal",
+                textTransform: subtitleStyle.uppercase ? "uppercase" : "none",
+                textShadow: subtitleStyle.strokeEnabled || subtitleStyle.shadowEnabled
+                  ? `0 1px ${Math.max(1, (subtitleStyle.shadowBlur || 8) * 0.25)}px ${subtitleStyle.strokeColor || "#000"}`
+                  : undefined,
+              }}
+            >
+              {sampleWords.map((word, idx) => (
+                <span
+                  key={idx}
+                  style={{
+                    color: idx === 0 ? subtitleStyle.highlightColor || "#FACC15" : undefined,
+                    marginRight: "3px",
+                  }}
+                >
+                  {word}
+                </span>
+              ))}
+            </div>
+            <div className="mt-0.5 flex items-center justify-center gap-1 text-[8px] uppercase tracking-wider text-violet-300/80">
+              <Type className="h-2 w-2" /> {wordsCount} word{wordsCount > 1 ? "s" : ""} / line
+            </div>
+          </div>
+        ) : (
+          <div className="absolute bottom-8 left-2.5 right-2.5 z-10 text-center">
+            <span className="rounded bg-black/50 px-2 py-0.5 text-[8px] text-zinc-600">Subtitles Disabled</span>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-2 flex items-center gap-1.5">
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          onClick={onCustomizeHook}
+          icon={<Sparkles className="h-3 w-3 text-amber-400" />}
         >
-          THIS IS <span style={{ color: style.highlightColor }}>THE MOMENT</span>
-        </p>
+          Hook
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          onClick={onCustomizeSubtitle}
+          icon={<Palette className="h-3 w-3 text-violet-400" />}
+        >
+          Subtitles
+        </Button>
       </div>
     </div>
   );
@@ -948,21 +1223,43 @@ function VideoCard({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export function VideoGeneratorPage() {
   const { user } = useAuth();
   const toast = useToast();
 
+  // Basic narrative state
   const [topic, setTopic] = useState("");
   const [targetDuration, setTargetDuration] = useState(65);
   const [voice, setVoice] = useState("");
   const [speed, setSpeed] = useState(1);
   const [numScenes, setNumScenes] = useState(0);
   const [instructions, setInstructions] = useState("");
+
+  // Hook Overlay state
+  const [hookEnabled, setHookEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("autocliper_video_generator_hook_enabled");
+    return saved !== null ? saved === "true" : true;
+  });
+  const [customHook, setCustomHook] = useState<string>("");
+  const [hookStyle, setHookStyle] = useState<HookStyle>(loadHookStyle);
+
+  // Subtitle / Captions state
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(loadSubtitleStyle);
+
+  // Background Music state
   const [includeBgm, setIncludeBgm] = useState(true);
   const [bgmVolume, setBgmVolume] = useState(0.15);
 
+  // Presets & Editor Modal state
+  const [userPresets, setUserPresets] = useState<Preset[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("");
+  const [showStyleEditor, setShowStyleEditor] = useState(false);
+  const [activeStyleTab, setActiveStyleTab] = useState<"presets" | "hook" | "subtitle">("subtitle");
+
+  // Job and list state
   const [voices, setVoices] = useState<VoiceOption[]>([]);
   const [jobs, setJobs] = useState<VideoJob[]>([]);
   const [totalJobs, setTotalJobs] = useState(0);
@@ -977,9 +1274,6 @@ export function VideoGeneratorPage() {
   const [isPlanning, setIsPlanning] = useState(false);
   const [isRetrying, setIsRetrying] = useState<string | null>(null);
   const [loadError, setLoadError] = useState("");
-
-  const [showStyleEditor, setShowStyleEditor] = useState(false);
-  const [editorHookStyle, setEditorHookStyle] = useState<HookStyle>(DEFAULT_HOOK_STYLE);
 
   const loadJobs = useCallback(async (targetPage = page) => {
     try {
@@ -1005,10 +1299,28 @@ export function VideoGeneratorPage() {
     }
   }, []);
 
+  const loadUserPresets = useCallback(async () => {
+    try {
+      const list = await presetsApi.list();
+      setUserPresets(list || []);
+    } catch {
+      setUserPresets([]);
+    }
+  }, []);
+
   useEffect(() => {
     void loadJobs();
     void loadVoices();
-  }, [loadJobs, loadVoices]);
+    void loadUserPresets();
+  }, [loadJobs, loadVoices, loadUserPresets]);
+
+  useEffect(() => {
+    localStorage.setItem("autocliper_video_generator_hook_enabled", String(hookEnabled));
+  }, [hookEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem("autocliper_video_generator_hook_style", JSON.stringify(hookStyle));
+  }, [hookStyle]);
 
   useEffect(() => {
     localStorage.setItem("autocliper_video_generator_subtitle_style", JSON.stringify(subtitleStyle));
@@ -1036,6 +1348,47 @@ export function VideoGeneratorPage() {
     if (updatedJob && updatedJob !== studioJob) setStudioJob(updatedJob);
   }, [studioJob, jobs]);
 
+  // Preset Selection Handler
+  const handleSelectPreset = (presetId: string) => {
+    setSelectedPresetId(presetId);
+    if (!presetId) return;
+
+    const matched = userPresets.find((p) => String(p.id) === presetId);
+    if (matched) {
+      if (matched.hook_style && Object.keys(matched.hook_style).length > 0) {
+        setHookStyle((prev) => ({ ...prev, ...matched.hook_style }));
+      }
+      if (matched.subtitle_style && Object.keys(matched.subtitle_style).length > 0) {
+        setSubtitleStyle((prev) => ({ ...prev, ...matched.subtitle_style, engine: "ffmpeg" }));
+      }
+      toast.success(`Preset "${matched.name}" loaded for Hook & Subtitles`);
+    }
+  };
+
+  const applyCaptionPreset = (preset: CaptionPreset) => {
+    setSubtitleStyle((current) => ({
+      ...current,
+      ...preset.patch,
+      engine: "ffmpeg",
+    } as SubtitleStyle));
+  };
+
+  const applyHookPreset = (preset: HookPreset) => {
+    setHookStyle((current) => ({
+      ...current,
+      ...preset.patch,
+    } as HookStyle));
+  };
+
+  // Words per line change handler
+  const handleWordsPerLineChange = (words: number) => {
+    setSubtitleStyle((prev) => ({
+      ...prev,
+      maxWordsPerLine: words,
+      engine: "ffmpeg",
+    }));
+  };
+
   // One-click quick generation (Auto mode)
   const handleQuickSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1052,6 +1405,9 @@ export function VideoGeneratorPage() {
           speed,
           num_scenes: numScenes,
           instructions: instructions.trim(),
+          hook_enabled: hookEnabled,
+          custom_hook: customHook.trim() || undefined,
+          hook_style_config: hookStyle,
           subtitles_enabled: subtitlesEnabled,
           subtitle_style_config: { ...subtitleStyle, engine: "ffmpeg" },
           include_bgm: includeBgm,
@@ -1085,6 +1441,9 @@ export function VideoGeneratorPage() {
           speed,
           num_scenes: numScenes,
           instructions: instructions.trim(),
+          hook_enabled: hookEnabled,
+          custom_hook: customHook.trim() || undefined,
+          hook_style_config: hookStyle,
           subtitles_enabled: subtitlesEnabled,
           subtitle_style_config: { ...subtitleStyle, engine: "ffmpeg" },
           include_bgm: includeBgm,
@@ -1094,7 +1453,7 @@ export function VideoGeneratorPage() {
       setPage(1);
       void loadJobs(1);
       setStudioJob(job);
-      toast.success("AI script & footage candidate search started. Reviewing studio...");
+      toast.success("AI script & candidate footage search started. Reviewing studio...");
     } catch (error) {
       toast.error(errorMessage(error, "Failed to plan video."));
     } finally {
@@ -1179,9 +1538,18 @@ export function VideoGeneratorPage() {
     }
   };
 
-  const applyCaptionPreset = (preset: CaptionPreset) => {
-    setSubtitleStyle((current) => ({ ...current, ...preset.patch, engine: "ffmpeg" } as SubtitleStyle));
+  const openEditorFor = (tab: "presets" | "hook" | "subtitle") => {
+    setActiveStyleTab(tab);
+    setShowStyleEditor(true);
   };
+
+  const topicSuggestions = [
+    "How deep-sea animals withstand extreme ocean pressure",
+    "The mystery of the developer who pushed 10,000 commits at night",
+    "Why airplanes avoid flying over the Pacific Ocean",
+    "The psychology of why we procrastinate hard tasks",
+    "How ancient builders engineered earthquake-proof pyramids",
+  ];
 
   if (!user?.is_superadmin) {
     return (
@@ -1200,63 +1568,104 @@ export function VideoGeneratorPage() {
   return (
     <div className="h-full overflow-y-auto p-4 sm:p-6 space-y-6">
       <div className="mx-auto max-w-7xl space-y-6 pb-6">
-        {/* Banner */}
+        {/* Banner Header */}
         <section className="relative overflow-hidden rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-950/40 via-zinc-950 to-zinc-950 p-5 sm:p-6">
           <div className="absolute -right-20 -top-24 h-56 w-56 rounded-full bg-fuchsia-500/15 blur-3xl" />
           <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300 border border-violet-500/30">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300 border border-violet-500/30 shadow-inner">
                 <Sparkles className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-violet-300">AI Video Studio</p>
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-violet-300">AI Video Production Studio</p>
                 <h1 className="mt-1 text-xl font-semibold tracking-tight text-zinc-50">Video Generator</h1>
                 <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">
-                  Transform any topic into a 9:16 vertical video with AI narration, multi-source footage selection, styled karaoke captions, and delivery-ready MP4.
+                  Generate full vertical 9:16 short-form videos with custom opening hooks, karaoke captions (1-6 words), multi-source footage selection, and voice synthesis.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 self-start rounded-lg border border-zinc-800 bg-black/30 px-3 py-2 text-xs text-zinc-400 sm:self-auto">
-              <Film className="h-3.5 w-3.5 text-violet-300" /> 9:16 · 1080 × 1920 · MP4
+            <div className="flex items-center gap-2 self-start rounded-lg border border-zinc-800 bg-black/40 px-3 py-2 text-xs text-zinc-300 sm:self-auto backdrop-blur-xs">
+              <Film className="h-3.5 w-3.5 text-violet-300" /> 9:16 · 1080 × 1920 · Skia Hook & ASS Subtitles
             </div>
           </div>
         </section>
 
-        {/* Creation Form */}
+        {/* Creation Form Studio */}
         <form onSubmit={handleQuickSubmit}>
-          <Card className="p-4 sm:p-5">
-            <div className="mb-5 flex items-center justify-between border-b border-zinc-800/80 pb-3">
+          <Card className="p-4 sm:p-6 space-y-6">
+            {/* Form Top Bar: Title & Preset Selector */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/80 pb-4">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-violet-300" />
-                <h2 className="text-sm font-semibold text-zinc-100">Create New Video</h2>
+                <h2 className="text-sm font-semibold text-zinc-100">Video Studio & Configuration</h2>
               </div>
-              <span className="text-[11px] text-zinc-500">Interactive Studio or Quick Auto</span>
+
+              {/* Preset Selector */}
+              <div className="flex items-center gap-2">
+                <Bookmark className="h-3.5 w-3.5 text-zinc-400" />
+                <span className="text-xs text-zinc-400 font-medium">Style Preset:</span>
+                <select
+                  value={selectedPresetId}
+                  onChange={(e) => handleSelectPreset(e.target.value)}
+                  className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-2.5 py-1.5 text-xs text-zinc-200 outline-none transition focus:border-violet-500/60"
+                >
+                  <option value="">Custom Styles</option>
+                  {userPresets.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => openEditorFor("presets")}
+                  icon={<Palette className="h-3 w-3 text-violet-300" />}
+                >
+                  Presets
+                </Button>
+              </div>
             </div>
 
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.9fr)]">
-              {/* Left Column: Script & Voice Controls */}
-              <div className="space-y-4">
+            {/* Studio Layout: Left Controls vs Right Visual Suite */}
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(340px,1fr)]">
+              {/* Left Column: Narrative, Voice, Duration, Scenes */}
+              <div className="space-y-5">
+                {/* Topic Input */}
                 <div>
                   <div className="mb-1.5 flex items-center justify-between gap-3">
-                    <label htmlFor="video-topic" className="text-xs font-medium text-zinc-300">
-                      Topic
+                    <label htmlFor="video-topic" className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                      Video Topic & Subject
                     </label>
-                    <span className="text-[11px] tabular-nums text-zinc-600">{topic.length}/500</span>
+                    <span className="text-[11px] tabular-nums text-zinc-500">{topic.length}/500</span>
                   </div>
                   <textarea
                     id="video-topic"
                     value={topic}
                     onChange={(event) => setTopic(event.target.value)}
-                    placeholder="Example: How the deep ocean creatures survive extreme pressures"
+                    placeholder="Example: How deep-sea creatures survive extreme ocean pressure"
                     maxLength={500}
                     rows={3}
                     className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950/70 px-3.5 py-3 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/15"
                   />
-                  <p className="mt-1.5 text-[11px] leading-4 text-zinc-500">
-                    Be specific about the subject. The AI will write the hook, narrative breakdown, and search multi-source footage per scene.
-                  </p>
+                  {/* Topic Suggestion Chips */}
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-1">Try idea:</span>
+                    {topicSuggestions.map((suggestion, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setTopic(suggestion)}
+                        className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400 hover:border-violet-500/40 hover:text-zinc-200 transition"
+                      >
+                        {suggestion.slice(0, 32)}...
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
+                {/* Voice, Speed & Scene Count */}
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div>
                     <label htmlFor="video-voice" className="mb-1.5 block text-xs font-medium text-zinc-300">
@@ -1266,7 +1675,7 @@ export function VideoGeneratorPage() {
                       id="video-voice"
                       value={voice}
                       onChange={(event) => setVoice(event.target.value)}
-                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
                     >
                       <option value="">Default narrator</option>
                       {voices.map((option) => (
@@ -1284,7 +1693,7 @@ export function VideoGeneratorPage() {
                       id="video-speed"
                       value={speed}
                       onChange={(event) => setSpeed(Number(event.target.value))}
-                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
                     >
                       <option value={0.85}>Calm · 0.85×</option>
                       <option value={1}>Natural · 1.0×</option>
@@ -1300,7 +1709,7 @@ export function VideoGeneratorPage() {
                       id="video-scenes"
                       value={numScenes}
                       onChange={(event) => setNumScenes(Number(event.target.value))}
-                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
                     >
                       <option value={0}>Auto plan</option>
                       <option value={6}>6 scenes</option>
@@ -1310,6 +1719,7 @@ export function VideoGeneratorPage() {
                   </div>
                 </div>
 
+                {/* Duration Picker */}
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <label className="text-xs font-medium text-zinc-300">Target duration</label>
@@ -1334,6 +1744,7 @@ export function VideoGeneratorPage() {
                   </div>
                 </div>
 
+                {/* Creative Direction */}
                 <div>
                   <div className="mb-1.5 flex items-center justify-between gap-3">
                     <label htmlFor="video-instructions" className="text-xs font-medium text-zinc-300">
@@ -1353,100 +1764,204 @@ export function VideoGeneratorPage() {
                 </div>
               </div>
 
-              {/* Right Column: Style & Audio Controls */}
-              <div className="space-y-4 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-3.5 sm:p-4">
-                <div className="flex items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 text-violet-300" />
-                  <h3 className="text-sm font-medium text-zinc-100">Render controls</h3>
+              {/* Right Column: Visual Studio (Live 9:16 Preview + Hook + Subtitles Controls) */}
+              <div className="space-y-4 rounded-2xl border border-zinc-800/80 bg-zinc-950/50 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="h-4 w-4 text-violet-300" />
+                    <h3 className="text-sm font-semibold text-zinc-100">Visual & Audio Studio</h3>
+                  </div>
+                  <span className="text-[11px] text-zinc-400 font-mono">1080×1920</span>
                 </div>
 
-                <Toggle
-                  checked={subtitlesEnabled}
-                  onChange={setSubtitlesEnabled}
-                  label="Burn-in subtitles"
-                  description="Timed ASS karaoke captions are rendered directly into the MP4."
-                />
+                {/* Live 9:16 Canvas Preview */}
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3">
+                  <LiveVideoPreview
+                    hookEnabled={hookEnabled}
+                    customHook={customHook}
+                    hookStyle={hookStyle}
+                    subtitlesEnabled={subtitlesEnabled}
+                    subtitleStyle={subtitleStyle}
+                    topic={topic}
+                    onCustomizeHook={() => openEditorFor("hook")}
+                    onCustomizeSubtitle={() => openEditorFor("subtitle")}
+                  />
+                </div>
 
-                {subtitlesEnabled && (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 space-y-3">
-                    <div className="flex gap-3">
-                      <CaptionPreview style={subtitleStyle} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
-                          <Type className="h-3.5 w-3.5 text-violet-300" /> Caption style
+                {/* Opening Hook Overlay Section */}
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Toggle
+                      checked={hookEnabled}
+                      onChange={setHookEnabled}
+                      label="Opening Hook Title"
+                      description="Burn an attention-grabbing hook overlay in the first 3 seconds."
+                    />
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      onClick={() => openEditorFor("hook")}
+                      icon={<Palette className="h-3 w-3 text-amber-400" />}
+                    >
+                      Style
+                    </Button>
+                  </div>
+
+                  {hookEnabled && (
+                    <div className="space-y-2.5 pt-1">
+                      <div>
+                        <label className="text-[11px] font-medium text-zinc-400 mb-1 block">
+                          Custom Hook Text <span className="text-zinc-600 font-normal">(empty = AI generated)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={customHook}
+                          onChange={(e) => setCustomHook(e.target.value)}
+                          placeholder="e.g. THE SECRET OF DEEP OCEAN"
+                          maxLength={100}
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-amber-500/60"
+                        />
+                      </div>
+
+                      {/* Hook Quick Presets */}
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1 block">Hook Style Presets:</span>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {HOOK_PRESETS.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => applyHookPreset(preset)}
+                              className={cn(
+                                "rounded-lg border px-2 py-1.5 text-left transition text-xs",
+                                hookStyle.animation === preset.patch.animation
+                                  ? "border-amber-400/50 bg-amber-500/10 text-amber-100"
+                                  : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                              )}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: preset.accent }} />
+                                <span className="font-medium truncate">{preset.name}</span>
+                              </div>
+                            </button>
+                          ))}
                         </div>
-                        <p className="mt-1 text-[11px] leading-4 text-zinc-500">
-                          {subtitleStyle.fontFamily} · {subtitleStyle.fontSize}px · {subtitleStyle.position}
-                        </p>
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          className="mt-2.5"
-                          onClick={() => setShowStyleEditor(true)}
-                          icon={<Palette className="h-3 w-3" />}
-                        >
-                          Customize
-                        </Button>
                       </div>
                     </div>
+                  )}
+                </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      {CAPTION_PRESETS.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => applyCaptionPreset(preset)}
-                          className={cn(
-                            "rounded-lg border px-2.5 py-2 text-left transition",
-                            subtitleStyle.stylePreset === preset.patch.stylePreset
-                              ? "border-violet-400/50 bg-violet-500/10"
-                              : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700"
-                          )}
-                        >
-                          <span className="block text-[11px] font-medium text-zinc-200">
-                            <span
-                              className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full"
-                              style={{ backgroundColor: preset.accent }}
-                            />
-                            {preset.name}
-                          </span>
-                          <span className="mt-0.5 block text-[10px] text-zinc-500">{preset.description}</span>
-                        </button>
-                      ))}
-                    </div>
+                {/* Subtitles & Words-Per-Line Section */}
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Toggle
+                      checked={subtitlesEnabled}
+                      onChange={setSubtitlesEnabled}
+                      label="Karaoke Subtitles"
+                      description="Render styled ASS captions synced with narration."
+                    />
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      onClick={() => openEditorFor("subtitle")}
+                      icon={<Palette className="h-3 w-3 text-violet-400" />}
+                    >
+                      Style
+                    </Button>
                   </div>
-                )}
 
-                <Toggle
-                  checked={includeBgm}
-                  onChange={setIncludeBgm}
-                  label="Background music"
-                  description="A royalty-free track is mixed below the narration when available."
-                />
+                  {subtitlesEnabled && (
+                    <div className="space-y-3 pt-1">
+                      {/* Words Per Line Selector (1 to 6 words) */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-[11px] font-medium text-zinc-300">
+                            Words displayed per line:
+                          </label>
+                          <span className="text-xs font-semibold text-violet-300">
+                            {subtitleStyle.maxWordsPerLine || 3} {Number(subtitleStyle.maxWordsPerLine) === 1 ? "word" : "words"}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-6 gap-1">
+                          {[1, 2, 3, 4, 5, 6].map((w) => (
+                            <button
+                              key={w}
+                              type="button"
+                              onClick={() => handleWordsPerLineChange(w)}
+                              className={cn(
+                                "rounded-md border py-1 text-xs font-medium transition text-center",
+                                (subtitleStyle.maxWordsPerLine || 3) === w
+                                  ? "border-violet-400/60 bg-violet-500/20 text-violet-200"
+                                  : "border-zinc-800 bg-zinc-950/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                              )}
+                            >
+                              {w}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
 
-                {includeBgm && (
-                  <RangeSlider
-                    label="Music level"
-                    value={bgmVolume}
-                    min={0.05}
-                    max={0.3}
-                    step={0.01}
-                    onChange={setBgmVolume}
-                    suffix=""
-                    description="Narration remains dominant."
+                      {/* Subtitle Quick Presets */}
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1 block">Caption Presets:</span>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {CAPTION_PRESETS.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => applyCaptionPreset(preset)}
+                              className={cn(
+                                "rounded-lg border px-2 py-1.5 text-left transition text-xs",
+                                subtitleStyle.stylePreset === preset.patch.stylePreset
+                                  ? "border-violet-400/50 bg-violet-500/10 text-violet-100"
+                                  : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                              )}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: preset.accent }} />
+                                <span className="font-medium truncate">{preset.name}</span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Background Music Section */}
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5 space-y-2">
+                  <Toggle
+                    checked={includeBgm}
+                    onChange={setIncludeBgm}
+                    label="Background Music"
+                    description="A royalty-free track is mixed below the narration."
                   />
-                )}
+                  {includeBgm && (
+                    <RangeSlider
+                      label="Music Level"
+                      value={bgmVolume}
+                      min={0.05}
+                      max={0.3}
+                      step={0.01}
+                      onChange={setBgmVolume}
+                      suffix=""
+                      description="Narration remains dominant."
+                    />
+                  )}
+                </div>
               </div>
             </div>
 
             {/* Action Buttons Bar */}
-            <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-zinc-800/80 pt-4">
-              <p className="text-xs leading-5 text-zinc-500">
-                Choose <span className="text-violet-300 font-medium">Studio Plan</span> to select footage 1 by 1 per scene, or <span className="text-zinc-300 font-medium">Generate video</span> for 1-click auto.
+            <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-zinc-800/80 pt-4">
+              <p className="text-xs leading-5 text-zinc-400">
+                Choose <span className="text-violet-300 font-medium">Studio Plan</span> to curate footage 1-by-1 in Footage Studio, or <span className="text-zinc-200 font-medium">Generate video</span> for 1-click auto.
               </p>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <Button
                   type="button"
                   size="md"
@@ -1520,7 +2035,7 @@ export function VideoGeneratorPage() {
             <Card className="p-12 text-center">
               <Film className="mx-auto mb-3 h-10 w-10 text-zinc-700" />
               <p className="text-sm text-zinc-400">Your generated videos will appear here.</p>
-              <p className="mt-1 text-xs text-zinc-600">Start with a topic and choose a caption style above.</p>
+              <p className="mt-1 text-xs text-zinc-600">Start with a topic, pick a hook & subtitle style above.</p>
             </Card>
           ) : (
             <>
@@ -1594,15 +2109,15 @@ export function VideoGeneratorPage() {
         />
       )}
 
-      {/* Subtitle Style Editor Modal */}
+      {/* Style Editor Modal (Hook, Subtitle & Presets Tabs) */}
       <StyleEditorModal
         open={showStyleEditor}
         onClose={() => setShowStyleEditor(false)}
-        hookStyle={editorHookStyle}
+        hookStyle={hookStyle}
         subtitleStyle={subtitleStyle}
-        onHookChange={setEditorHookStyle}
+        onHookChange={setHookStyle}
         onSubtitleChange={(style) => setSubtitleStyle({ ...style, engine: "ffmpeg" })}
-        activeTab="subtitle"
+        activeTab={activeStyleTab}
         aspectRatio="9:16"
         isSuperadmin={user?.is_superadmin}
         isPremium={user?.is_premium}

@@ -69,17 +69,26 @@ def normalize_subtitle_style(raw_style: Mapping[str, Any] | None = None) -> dict
         "animationStyle": animation,
     }
 
+    # Only apply preset defaults if user did NOT explicitly override the field
     if preset == "minimal_clean":
-        style["bgEnabled"] = _boolean(raw.get("bgEnabled"), False)
-        style["strokeEnabled"] = _boolean(raw.get("strokeEnabled"), False)
+        if "bgEnabled" not in raw:
+            style["bgEnabled"] = False
+        if "strokeEnabled" not in raw:
+            style["strokeEnabled"] = False
     elif preset in {"meme_impact", "comic_burst"}:
-        style["uppercase"] = _boolean(raw.get("uppercase"), True)
-        style["fontSize"] = max(style["fontSize"], 56)
-        style["maxWordsPerLine"] = min(style["maxWordsPerLine"], 3)
+        if "uppercase" not in raw:
+            style["uppercase"] = True
+        if "fontSize" not in raw:
+            style["fontSize"] = max(style["fontSize"], 56)
+        if "maxWordsPerLine" not in raw:
+            style["maxWordsPerLine"] = min(style["maxWordsPerLine"], 3)
     elif preset == "lower_third":
-        style["position"] = _choice(raw.get("position"), "bottom", {"top", "center", "bottom"})
-        style["positionY"] = _number(raw.get("positionY"), 78, 5, 95)
-        style["maxWordsPerLine"] = max(style["maxWordsPerLine"], 4)
+        if "position" not in raw:
+            style["position"] = "bottom"
+        if "positionY" not in raw:
+            style["positionY"] = 78
+        if "maxWordsPerLine" not in raw:
+            style["maxWordsPerLine"] = max(style["maxWordsPerLine"], 4)
 
     return style
 
@@ -110,9 +119,19 @@ def write_ass_subtitles(
     return cue_count
 
 
-def ffmpeg_subtitle_filter(ass_path: str | Path) -> str:
-    """Build a safely escaped FFmpeg subtitles filter for an ASS file."""
+def ffmpeg_subtitle_filter(ass_path: str | Path, fonts_dir: str | Path | None = None) -> str:
+    """Build a safely escaped FFmpeg subtitles filter for an ASS file with font directory support."""
+    import os
     escaped_path = str(ass_path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    if not fonts_dir:
+        for candidate in ["backend/assets/fonts", "assets/fonts", "/usr/local/share/fonts/autocliper", "/usr/share/fonts/truetype"]:
+            if os.path.isdir(candidate):
+                fonts_dir = candidate
+                break
+
+    if fonts_dir and os.path.isdir(fonts_dir):
+        escaped_fonts = str(fonts_dir).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        return f"subtitles=filename='{escaped_path}':fontsdir='{escaped_fonts}':original_size={VIDEO_WIDTH}x{VIDEO_HEIGHT}"
     return f"subtitles=filename='{escaped_path}':original_size={VIDEO_WIDTH}x{VIDEO_HEIGHT}"
 
 
