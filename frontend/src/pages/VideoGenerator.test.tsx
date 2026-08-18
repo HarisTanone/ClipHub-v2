@@ -93,9 +93,10 @@ describe("VideoGeneratorPage", () => {
     render(<VideoGeneratorPage />);
 
     expect(screen.getByRole("heading", { name: "Video Generator" })).toBeInTheDocument();
-    expect(screen.getByText("Burn-in subtitles")).toBeInTheDocument();
-    expect(screen.getByText("Background music")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Customize" })).toBeInTheDocument();
+    expect(screen.getByText("Opening Hook Title")).toBeInTheDocument();
+    expect(screen.getByText("Karaoke Subtitles")).toBeInTheDocument();
+    expect(screen.getByText("Background Music")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hook" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("option", { name: /orion/i })).toBeInTheDocument());
   });
 
@@ -104,11 +105,11 @@ describe("VideoGeneratorPage", () => {
     render(<VideoGeneratorPage />);
 
     await waitFor(() => expect(screen.getByRole("option", { name: /orion/i })).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText("Topic"), { target: { value: "Black holes" } });
-    fireEvent.change(screen.getByLabelText("Narrator voice"), { target: { value: "aura-2-orion-en" } });
-    fireEvent.change(screen.getByLabelText("Pacing"), { target: { value: "1.15" } });
-    fireEvent.change(screen.getByLabelText("Scene count"), { target: { value: "8" } });
-    fireEvent.click(screen.getByRole("button", { name: /65s balanced/i }));
+    fireEvent.change(screen.getByLabelText(/topic/i), { target: { value: "Black holes" } });
+    fireEvent.change(screen.getByRole("combobox", { name: /voice/i }), { target: { value: "aura-2-orion-en" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Pacing" }), { target: { value: "1.15" } });
+    fireEvent.change(screen.getByRole("combobox", { name: /footage pacing & cuts/i }), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /65s/i }));
     fireEvent.click(screen.getByRole("button", { name: "Generate video" }));
 
     await waitFor(() => {
@@ -209,7 +210,7 @@ describe("VideoGeneratorPage", () => {
     const { VideoGeneratorPage } = await import("@/pages/VideoGenerator");
     render(<VideoGeneratorPage />);
 
-    fireEvent.change(screen.getByLabelText("Topic"), { target: { value: "Ocean Giants" } });
+    fireEvent.change(screen.getByLabelText(/topic/i), { target: { value: "Ocean Giants" } });
     fireEvent.click(screen.getByRole("button", { name: "Studio Plan & Select Footage" }));
 
     await waitFor(() => {
