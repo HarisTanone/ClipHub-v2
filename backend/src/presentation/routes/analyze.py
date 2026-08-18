@@ -127,10 +127,9 @@ async def analyze_only(
             logger.info(f"[{job_id}] Gemini analysis SKIPPED (cached: {len(cached_analysis['clips'])} clips)")
             return cached_analysis
 
-        logger.info(f"[{job_id}] Running Gemini analysis in parallel...")
-        # In analyze-review step, request a rich set of 8-10 candidate clips for the user to choose from
-        max_clips = min(10, max(5, int(duration / 70))) if duration >= 300 else service._calc_max_clips(duration)
-        gemini_call = lambda: service._gemini.analyze(url, duration, max_clips)
+        logger.info(f"[{job_id}] Running Gemini analysis in parallel (unconstrained AI clip discovery)...")
+        # Let Gemini discover all potential viral clips naturally without any artificial limit
+        gemini_call = lambda: service._gemini.analyze(url, duration, max_clips=None)
         result = await service._gemini_call(gemini_call)
 
         if video_id and result and "clips" in result:

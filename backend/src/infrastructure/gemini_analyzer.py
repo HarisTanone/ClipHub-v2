@@ -40,14 +40,15 @@ class GeminiAnalyzer(IGeminiAnalyzer):
     def _switch_to_fallback(self) -> None:
         """Switch to next fallback model after repeated 503/overload/404 errors."""
         cascade = [
-            settings.GEMINI_MODEL or "gemini-2.5-flash",
-            settings.GEMINI_FALLBACK_MODEL or "gemini-2.0-flash",
+            settings.GEMINI_MODEL or "gemini-3.7-flash",
+            settings.GEMINI_FALLBACK_MODEL or "gemini-2.5-pro",
+            "gemini-3.7-flash",
+            "gemini-2.5-pro",
             "gemini-2.5-flash",
             "gemini-2.0-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-1.5-flash",
-            "gemini-2.5-pro",
             "gemini-1.5-pro",
+            "gemini-1.5-flash",
+            "gemini-2.5-flash-lite",
             "gemini-1.5-flash-8b",
             "gemini-flash-latest",
             "gemini-pro-latest",
@@ -75,7 +76,7 @@ class GeminiAnalyzer(IGeminiAnalyzer):
             self._client = None
 
     async def analyze(
-        self, video_url: str, video_duration: float, max_clips: int
+        self, video_url: str, video_duration: float, max_clips: Optional[int] = None
     ) -> dict:
         """Multi-phase video analysis.
 
@@ -91,11 +92,11 @@ class GeminiAnalyzer(IGeminiAnalyzer):
 
     # ─── Multi-Phase Analysis ─────────────────────────────────────────────────
 
-    def _analyze_multi_phase(self, video_url: str, video_duration: float, max_clips: int) -> dict:
+    def _analyze_multi_phase(self, video_url: str, video_duration: float, max_clips: Optional[int] = None) -> dict:
         """Run decomposed multi-phase analysis."""
 
         # ═══ Phase 1: Video Understanding (clip selection + creative direction) ═══
-        logger.info(f"gemini_phase_1: clip selection + creative direction (model={self._model}, max_clips={max_clips})")
+        logger.info(f"gemini_phase_1: clip selection + creative direction (model={self._model}, max_clips={max_clips or 'unlimited'})")
         phase1_result = self._phase1_clip_selection(video_url, video_duration, max_clips)
 
         if not phase1_result or "clips" not in phase1_result:
@@ -138,7 +139,7 @@ class GeminiAnalyzer(IGeminiAnalyzer):
 
     # ─── Phase 1: Clip Selection (Video Understanding) ────────────────────────
 
-    def _phase1_clip_selection(self, video_url: str, video_duration: float, max_clips: int) -> dict:
+    def _phase1_clip_selection(self, video_url: str, video_duration: float, max_clips: Optional[int] = None) -> dict:
         """Phase 1: Watch video → select best viral moments + define visual style.
 
         This is the expensive call (processes video). Focused on:
@@ -146,10 +147,15 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         - Understanding the video's mood/tone (creative direction)
         - Initial hook suggestions (will be refined in phase 2)
         """
+        if max_clips and max_clips > 0:
+            target_instruction = f"Temukan hingga {max_clips} momen PALING VIRAL (durasi per klip MINIMUM 45 detik — biarkan cerita/argumen SELESAI UTUH, jangan potong di tengah)."
+        else:
+            target_instruction = "Temukan SEMUA momen PALING VIRAL yang ada di video ini tanpa dibatasi (durasi per klip MINIMUM 45 detik — biarkan cerita/argumen SELESAI UTUH, jangan potong di tengah)."
+
         prompt = f"""Kamu adalah AI analis video viral profesional. Tonton video ini dan analisis secara mendalam.
 
 DURASI VIDEO: {video_duration:.1f} detik
-TARGET: Temukan maksimal {max_clips} momen PALING VIRAL (durasi MINIMUM 45 detik — biarkan cerita/argumen SELESAI UTUH, jangan potong di tengah).
+TARGET: {target_instruction}
 
 ═══ TUGAS 1: CLIP SELECTION ═══
 Identifikasi momen-momen yang:
