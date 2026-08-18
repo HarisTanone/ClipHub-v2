@@ -49,10 +49,28 @@ class HighlightAnalyzer:
         tracker = ModelStatusTracker()
         errors = []
 
-        # ─── 1. Try 9router (PRIMARY) ─────────────────────────────────
+        # ─── 1. Try Direct Groq LLM (PRIMARY — Ultra fast ~1.5s, 128K context) ──
+        if self._groq_key and tracker.is_available("groq_llm"):
+            try:
+                logger.info("highlight_analyzer: trying Direct Groq LLM (primary)")
+                result = await self._analyze_with_groq(transcript, video_duration, max_clips)
+                if result and result.clips:
+                    logger.info(f"highlight_analyzer: Groq LLM success — {len(result.clips)} clips")
+                    tracker.mark_success("groq_llm")
+                    return result
+                logger.warning("highlight_analyzer: Groq LLM returned empty result")
+            except Exception as e:
+                errors.append(f"Groq: {e}")
+                logger.warning(f"highlight_analyzer: Groq LLM failed: {e}")
+                if "413" in str(e) or "429" in str(e) or "rate" in str(e).lower():
+                    tracker.mark_rate_limited("groq_llm", 60, str(e)[:200])
+                else:
+                    tracker.mark_error("groq_llm", str(e)[:200])
+
+        # ─── 2. Try 9router (Fast Secondary) ──────────────────────────
         if self._use_nine_router and tracker.is_available("nine_router"):
             try:
-                logger.info("highlight_analyzer: trying 9router (primary)")
+                logger.info("highlight_analyzer: trying 9router")
                 result = await self._analyze_with_nine_router(
                     transcript, video_duration, max_clips
                 )
@@ -69,33 +87,10 @@ class HighlightAnalyzer:
                 else:
                     tracker.mark_error("nine_router", str(e)[:200])
 
-        if not settings.ALLOW_DIRECT_PROVIDER_FALLBACKS:
-            raise HighlightAnalyzerError(
-                f"9router failed and direct provider fallbacks are disabled: {'; '.join(errors)}"
-            )
-
-        # ─── 1. Try Groq LLM (PRIMARY — fast, 128K context, JSON mode) ────
-        if self._groq_key and tracker.is_available("groq_llm"):
-            try:
-                logger.info("highlight_analyzer: trying Groq LLM (primary)")
-                result = await self._analyze_with_groq(transcript, video_duration, max_clips)
-                if result and result.clips:
-                    logger.info(f"highlight_analyzer: Groq LLM success — {len(result.clips)} clips")
-                    tracker.mark_success("groq_llm")
-                    return result
-                logger.warning("highlight_analyzer: Groq LLM returned empty result")
-            except Exception as e:
-                errors.append(f"Groq: {e}")
-                logger.warning(f"highlight_analyzer: Groq LLM failed: {e}")
-                if "413" in str(e) or "429" in str(e) or "rate" in str(e).lower():
-                    tracker.mark_rate_limited("groq_llm", 60, str(e)[:200])
-                else:
-                    tracker.mark_error("groq_llm", str(e)[:200])
-
-        # ─── 2. Try Gemini (fallback — 1M context, but often timeout) ─────
+        # ─── 3. Try Gemini Text (fallback — 1M context) ───────────────
         if self._gemini_keys and tracker.is_available("gemini"):
             try:
-                logger.info("highlight_analyzer: trying Gemini (fallback)")
+                logger.info("highlight_analyzer: trying Gemini Text (fallback)")
                 result = await self._analyze_with_gemini(transcript, video_duration, max_clips)
                 if result and result.clips:
                     logger.info(f"highlight_analyzer: Gemini success — {len(result.clips)} clips")
@@ -110,7 +105,7 @@ class HighlightAnalyzer:
                 else:
                     tracker.mark_error("gemini", str(e)[:200])
 
-        # ─── 3. Ollama local (last resort — slow but guaranteed) ──────
+        # ─── 4. Ollama local (last resort — slow but guaranteed) ──────
         try:
             logger.info("highlight_analyzer: trying Ollama (last resort)")
             from src.infrastructure.ollama_analyzer import OllamaAnalyzer
@@ -152,7 +147,7 @@ class HighlightAnalyzer:
 
         raw_text = await asyncio.wait_for(
             asyncio.get_running_loop().run_in_executor(None, _router_call),
-            timeout=settings.NINE_ROUTER_TIMEOUT,
+            timeout=min(25, settings.NINE_ROUTER_TIMEOUT or 25),
         )
         clips = self._parse_llm_response(raw_text, video_duration)
         if clips:
