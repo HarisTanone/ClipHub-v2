@@ -294,6 +294,20 @@ class VideoGenerator:
 
         return True
 
+    def retry_job(self, job_id: str) -> VideoGenJob:
+        """Reset and restart a failed job in place."""
+        job = self.get_job(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        job.status = VideoGenStatus.QUEUED
+        job.progress = 0
+        job.error = None
+        job.completed_at = None
+        self._jobs[job_id] = job
+        self._persist_job(job)
+        return job
+
     def list_jobs(
         self,
         user_id: Optional[int] = None,
@@ -361,7 +375,7 @@ class VideoGenerator:
 
     async def run_pipeline(self, job_id: str) -> VideoGenJob:
         """Execute the full video generation pipeline (one-click auto mode)."""
-        job = self._jobs.get(job_id)
+        job = self.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} not found")
 

@@ -290,31 +290,25 @@ async def retry_video(
     background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(require_superadmin()),
 ):
-    """Retry a failed video generation job with the same settings."""
+    """Retry a failed video generation job in place with the same settings (superuser only)."""
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
-    previous_job = vg.get_job(job_id)
-    if not previous_job:
+    job = vg.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if previous_job.status != VideoGenStatus.FAILED:
+    if job.status != VideoGenStatus.FAILED:
         raise HTTPException(status_code=400, detail="Only failed jobs can be retried")
 
-    job = vg.create_job(
-        topic=previous_job.topic,
-        target_duration=previous_job.target_duration,
-        voice=previous_job.voice,
-        speed=previous_job.speed,
-        instructions=previous_job.instructions,
-        num_scenes=previous_job.num_scenes,
-        subtitles_enabled=previous_job.subtitles_enabled,
-        subtitle_style=previous_job.subtitle_style,
-        include_bgm=previous_job.include_bgm,
-        bgm_volume=previous_job.bgm_volume,
-        user_id=user.id,
-    )
-    background_tasks.add_task(vg.run_pipeline, job.job_id)
-    return _job_to_response(job)
+    retried_job = vg.retry_job(job_id)
+
+    # If the job already had curated scenes or was rendered with custom footage, resume render
+    if retried_job.scenes_with_footage and any(s.get("selected_footage") for s in retried_job.scenes_with_footage):
+        background_tasks.add_task(vg.render_with_selected_scenes, retried_job.job_id, retried_job.scenes_with_footage)
+    else:
+        background_tasks.add_task(vg.run_pipeline, retried_job.job_id)
+
+    return _job_to_response(retried_job)
 
 
 @router.delete("/jobs/{job_id}")

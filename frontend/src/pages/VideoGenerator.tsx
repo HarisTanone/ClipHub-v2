@@ -793,6 +793,7 @@ function VideoCard({
   onRetry,
   onDelete,
   onOpenStudio,
+  isRetrying,
 }: {
   job: VideoJob;
   onPlay: (job: VideoJob) => void;
@@ -800,6 +801,7 @@ function VideoCard({
   onRetry: (jobId: string) => void;
   onDelete: (jobId: string) => void;
   onOpenStudio: (job: VideoJob) => void;
+  isRetrying?: boolean;
 }) {
   const completed = job.status === "completed";
   const isAwaitingSelection = job.status === "awaiting_selection";
@@ -920,6 +922,8 @@ function VideoCard({
                 type="button"
                 size="xs"
                 variant="outline"
+                loading={isRetrying}
+                disabled={isRetrying}
                 onClick={() => onRetry(job.job_id)}
                 icon={<RotateCcw className="h-3 w-3" />}
               >
@@ -1140,10 +1144,9 @@ export function VideoGeneratorPage() {
     if (isRetrying) return;
     setIsRetrying(jobId);
     try {
-      await fetchApi<VideoJob>(`/api/video-generator/jobs/${jobId}/retry`, { method: "POST" });
-      setPage(1);
-      void loadJobs(1);
-      toast.success("A new generation attempt has started.");
+      const updatedJob = await fetchApi<VideoJob>(`/api/video-generator/jobs/${jobId}/retry`, { method: "POST" });
+      setJobs((prev) => prev.map((j) => (j.job_id === jobId ? updatedJob : j)));
+      toast.success("Retrying video generation in background.");
     } catch (error) {
       toast.error(errorMessage(error, "Unable to retry this job."));
     } finally {
@@ -1531,6 +1534,7 @@ export function VideoGeneratorPage() {
                     onRetry={handleRetry}
                     onDelete={handleDeleteJob}
                     onOpenStudio={setStudioJob}
+                    isRetrying={isRetrying === job.job_id}
                   />
                 ))}
               </div>

@@ -164,3 +164,25 @@ def test_story_agent_parses_truncated_json():
     assert len(story["scenes"]) >= 2
     assert story["scenes"][0]["id"] == 1
     assert "developer" in story["scenes"][0]["narration"]
+
+
+def test_retry_video_generator_job_in_place(tmp_path):
+    from src.application.video_generator import VideoGenStatus
+
+    generator = VideoGenerator(output_dir=str(tmp_path))
+    job = generator.create_job(topic="Retry Test")
+    job.status = VideoGenStatus.FAILED
+    job.error = "Original failure reason"
+    job.progress = 45
+    generator._persist_job(job)
+
+    retried = generator.retry_job(job.job_id)
+    assert retried.job_id == job.job_id
+    assert retried.status == VideoGenStatus.QUEUED
+    assert retried.error is None
+    assert retried.progress == 0
+
+    fetched = generator.get_job(job.job_id)
+    assert fetched is not None
+    assert fetched.status == VideoGenStatus.QUEUED
+    assert fetched.error is None
