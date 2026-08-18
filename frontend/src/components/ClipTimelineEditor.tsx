@@ -1,5 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock, Film, GripHorizontal, Play, Pause, RotateCcw, Scissors, Plus, Trash2, Edit3, FastForward, Rewind, Sparkles, HelpCircle, Shield, Gauge, Check, Copy, Heart, MessageSquare, Share2, Music, X } from "lucide-react";
+import {
+  Clock,
+  Film,
+  GripHorizontal,
+  Play,
+  Pause,
+  RotateCcw,
+  Scissors,
+  Plus,
+  Trash2,
+  Edit3,
+  FastForward,
+  Rewind,
+  Sparkles,
+  HelpCircle,
+  Shield,
+  Copy,
+  Heart,
+  MessageSquare,
+  Share2,
+  Music,
+  X,
+  BookmarkPlus,
+  ArrowRightToLine,
+  ArrowLeftToLine,
+  Sliders,
+  Check,
+} from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
@@ -60,15 +87,20 @@ export function ClipTimelineEditor({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [showSafeZone, setShowSafeZone] = useState<boolean>(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [activeClipIndex, setActiveClipIndex] = useState(0);
   const [startInputText, setStartInputText] = useState("");
   const [endInputText, setEndInputText] = useState("");
+
   const [dragging, setDragging] = useState<{
     clipIndex: number;
-    handle: "start" | "end";
+    handle: "start" | "end" | "move";
+    initialTime: number;
+    initialStart: number;
+    initialEnd: number;
   } | null>(null);
 
   const activeClip = clips[activeClipIndex] || null;
@@ -120,7 +152,7 @@ export function ClipTimelineEditor({
     setPlaybackSpeed(speed);
   }, []);
 
-  // Seek to clip start
+  // Seek to specific clip
   const seekToClip = useCallback((index: number) => {
     const video = videoRef.current;
     if (!video || !clips[index]) return;
@@ -128,6 +160,19 @@ export function ClipTimelineEditor({
     video.currentTime = clips[index].start;
     setCurrentTime(clips[index].start);
   }, [clips]);
+
+  // Jump to clip start/end
+  const jumpToActiveStart = useCallback(() => {
+    if (!activeClip || !videoRef.current) return;
+    videoRef.current.currentTime = activeClip.start;
+    setCurrentTime(activeClip.start);
+  }, [activeClip]);
+
+  const jumpToActiveEnd = useCallback(() => {
+    if (!activeClip || !videoRef.current) return;
+    videoRef.current.currentTime = activeClip.end;
+    setCurrentTime(activeClip.end);
+  }, [activeClip]);
 
   // Preview active clip (play from start to end)
   const previewClip = useCallback((index: number) => {
@@ -173,24 +218,23 @@ export function ClipTimelineEditor({
     onClipsChange(updated);
   }, [clips, onClipsChange]);
 
-  // Add new clip at current playhead position
-  const addClip = useCallback(() => {
-    const start = Math.max(0, currentTime);
-    const defaultDuration = 20;
-    const end = Math.min(videoDuration, start + defaultDuration);
+  // Add new clip at current playhead position or target time
+  const addClipAtTime = useCallback((targetTime?: number, defaultLen: number = 45) => {
+    const start = Math.max(0, targetTime !== undefined ? targetTime : currentTime);
+    const end = Math.min(videoDuration, start + defaultLen);
     if (end - start < 5) return;
 
     const maxRank = clips.length > 0 ? Math.max(...clips.map((c) => c.rank)) : 0;
     const newClip: EditableClip = {
       rank: maxRank + 1,
-      start,
-      end,
+      start: Math.round(start * 10) / 10,
+      end: Math.round(end * 10) / 10,
       duration: Math.round((end - start) * 100) / 100,
       score: null,
-      hook: "Custom Clip",
-      reason: null,
-      content_type: null,
-      speaker_energy: null,
+      hook: `Klip #${maxRank + 1}`,
+      reason: "Dibuat manual oleh pengguna",
+      content_type: "custom",
+      speaker_energy: "medium",
       ai_start: start,
       ai_end: end,
       modified: false,
@@ -200,7 +244,38 @@ export function ClipTimelineEditor({
     const updated = [...clips, newClip];
     onClipsChange(updated);
     setActiveClipIndex(updated.length - 1);
+    if (videoRef.current) {
+      videoRef.current.currentTime = start;
+      setCurrentTime(start);
+    }
   }, [clips, currentTime, videoDuration, onClipsChange]);
+
+  // Duplicate clip
+  const duplicateClip = useCallback((index: number) => {
+    const source = clips[index];
+    if (!source) return;
+    const len = source.end - source.start;
+    const newStart = Math.min(videoDuration - 5, source.end + 1);
+    const newEnd = Math.min(videoDuration, newStart + len);
+
+    const maxRank = clips.length > 0 ? Math.max(...clips.map((c) => c.rank)) : 0;
+    const newClip: EditableClip = {
+      ...source,
+      rank: maxRank + 1,
+      start: Math.round(newStart * 10) / 10,
+      end: Math.round(newEnd * 10) / 10,
+      duration: Math.round((newEnd - newStart) * 100) / 100,
+      hook: `${source.hook || "Klip"} (Salinan)`,
+      ai_start: newStart,
+      ai_end: newEnd,
+      modified: true,
+      manual: true,
+    };
+
+    const updated = [...clips, newClip];
+    onClipsChange(updated);
+    setActiveClipIndex(updated.length - 1);
+  }, [clips, videoDuration, onClipsChange]);
 
   // Delete clip
   const deleteClip = useCallback((index: number) => {
@@ -210,6 +285,18 @@ export function ClipTimelineEditor({
     onClipsChange(updated);
     setActiveClipIndex(Math.min(activeClipIndex, updated.length - 1));
   }, [clips, activeClipIndex, onClipsChange]);
+
+  // Set preset duration for active clip
+  const setExactDuration = useCallback((desiredDuration: number) => {
+    if (!activeClip) return;
+    const updated = [...clips];
+    const clip = updated[activeClipIndex];
+    const newEnd = Math.min(videoDuration, clip.start + desiredDuration);
+    clip.end = Math.round(newEnd * 10) / 10;
+    clip.duration = Math.round((clip.end - clip.start) * 100) / 100;
+    clip.modified = clip.start !== clip.ai_start || clip.end !== clip.ai_end;
+    onClipsChange(updated);
+  }, [activeClip, activeClipIndex, clips, videoDuration, onClipsChange]);
 
   // Nudge timing helpers
   const nudgeStart = useCallback((delta: number) => {
@@ -244,20 +331,30 @@ export function ClipTimelineEditor({
     const updated = [...clips];
     const clip = updated[activeClipIndex];
     const minDuration = 5;
-    if (currentTime >= clip.end - minDuration) return;
-    clip.start = Math.round(currentTime * 10) / 10;
+    if (currentTime >= clip.end - minDuration) {
+      // If current playhead is past end, push end forward
+      clip.start = Math.round(currentTime * 10) / 10;
+      clip.end = Math.min(videoDuration, clip.start + 30);
+    } else {
+      clip.start = Math.round(currentTime * 10) / 10;
+    }
     clip.duration = Math.round((clip.end - clip.start) * 100) / 100;
     clip.modified = clip.start !== clip.ai_start || clip.end !== clip.ai_end;
     onClipsChange(updated);
-  }, [activeClip, activeClipIndex, clips, currentTime, onClipsChange]);
+  }, [activeClip, activeClipIndex, clips, currentTime, videoDuration, onClipsChange]);
 
   const setEndToPlayhead = useCallback(() => {
     if (!activeClip) return;
     const updated = [...clips];
     const clip = updated[activeClipIndex];
     const minDuration = 5;
-    if (currentTime <= clip.start + minDuration) return;
-    clip.end = Math.round(Math.min(videoDuration, currentTime) * 10) / 10;
+    if (currentTime <= clip.start + minDuration) {
+      // If current playhead is before start, pull start backward
+      clip.end = Math.round(Math.min(videoDuration, currentTime) * 10) / 10;
+      clip.start = Math.max(0, clip.end - 30);
+    } else {
+      clip.end = Math.round(Math.min(videoDuration, currentTime) * 10) / 10;
+    }
     clip.duration = Math.round((clip.end - clip.start) * 100) / 100;
     clip.modified = clip.start !== clip.ai_start || clip.end !== clip.ai_end;
     onClipsChange(updated);
@@ -275,7 +372,6 @@ export function ClipTimelineEditor({
   // Global Keyboard Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger shortcuts if user is typing in an input or textarea
       const target = e.target as HTMLElement;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
         return;
@@ -298,7 +394,7 @@ export function ClipTimelineEditor({
         setEndToPlayhead();
       } else if (e.key === "n" || e.key === "N") {
         e.preventDefault();
-        addClip();
+        addClipAtTime();
       } else if (e.key === "p" || e.key === "P") {
         e.preventDefault();
         previewClip(activeClipIndex);
@@ -310,16 +406,28 @@ export function ClipTimelineEditor({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [togglePlay, seekRelative, setStartToPlayhead, setEndToPlayhead, addClip, previewClip, activeClipIndex]);
+  }, [togglePlay, seekRelative, setStartToPlayhead, setEndToPlayhead, addClipAtTime, previewClip, activeClipIndex]);
 
-  // Timeline drag handler
+  // Timeline Mouse Drag Handler (Supports start handle, end handle, and whole-clip move)
   const handleTimelineMouseDown = useCallback(
-    (e: React.MouseEvent, clipIndex: number, handle: "start" | "end") => {
+    (e: React.MouseEvent, clipIndex: number, handle: "start" | "end" | "move") => {
       e.preventDefault();
       e.stopPropagation();
-      setDragging({ clipIndex, handle });
+      const timeline = timelineRef.current;
+      if (!timeline) return;
+      const rect = timeline.getBoundingClientRect();
+      const clickTime = Math.max(0, Math.min(videoDuration, ((e.clientX - rect.left) / rect.width) * videoDuration));
+
+      setActiveClipIndex(clipIndex);
+      setDragging({
+        clipIndex,
+        handle,
+        initialTime: clickTime,
+        initialStart: clips[clipIndex].start,
+        initialEnd: clips[clipIndex].end,
+      });
     },
-    []
+    [clips, videoDuration]
   );
 
   useEffect(() => {
@@ -330,27 +438,44 @@ export function ClipTimelineEditor({
       if (!timeline) return;
       const rect = timeline.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const newTime = ratio * videoDuration;
+      const currentMouseTime = ratio * videoDuration;
 
       const updated = [...clips];
       const clip = updated[dragging.clipIndex];
       const minDuration = 5;
+      const clipLen = dragging.initialEnd - dragging.initialStart;
 
       if (dragging.handle === "start") {
         const maxStart = clip.end - minDuration;
-        clip.start = Math.max(0, Math.min(newTime, maxStart));
-      } else {
+        clip.start = Math.max(0, Math.min(currentMouseTime, maxStart));
+        clip.duration = Math.round((clip.end - clip.start) * 100) / 100;
+        if (videoRef.current) videoRef.current.currentTime = clip.start;
+      } else if (dragging.handle === "end") {
         const minEnd = clip.start + minDuration;
-        clip.end = Math.min(videoDuration, Math.max(newTime, minEnd));
+        clip.end = Math.min(videoDuration, Math.max(currentMouseTime, minEnd));
+        clip.duration = Math.round((clip.end - clip.start) * 100) / 100;
+        if (videoRef.current) videoRef.current.currentTime = clip.end;
+      } else if (dragging.handle === "move") {
+        const delta = currentMouseTime - dragging.initialTime;
+        let newStart = dragging.initialStart + delta;
+        let newEnd = dragging.initialEnd + delta;
+
+        if (newStart < 0) {
+          newStart = 0;
+          newEnd = clipLen;
+        } else if (newEnd > videoDuration) {
+          newEnd = videoDuration;
+          newStart = Math.max(0, videoDuration - clipLen);
+        }
+
+        clip.start = Math.round(newStart * 10) / 10;
+        clip.end = Math.round(newEnd * 10) / 10;
+        clip.duration = Math.round((clip.end - clip.start) * 100) / 100;
+        if (videoRef.current) videoRef.current.currentTime = clip.start;
       }
-      clip.duration = Math.round((clip.end - clip.start) * 100) / 100;
+
       clip.modified = clip.start !== clip.ai_start || clip.end !== clip.ai_end;
       onClipsChange(updated);
-
-      const video = videoRef.current;
-      if (video) {
-        video.currentTime = dragging.handle === "start" ? clip.start : clip.end;
-      }
     };
 
     const onMouseUp = () => setDragging(null);
@@ -366,59 +491,64 @@ export function ClipTimelineEditor({
   const hasAnyModified = clips.some((c) => c.modified);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-3 min-h-0 relative">
-      {/* Left: AI Analysis Results + Add/Delete */}
-      <div className="lg:w-[360px] shrink-0 space-y-2 overflow-y-auto max-h-[calc(100vh-250px)] pr-1">
-        <div className="flex items-center justify-between mb-1 sticky top-0 bg-[var(--color-surface)] py-1 z-10">
+    <div className="flex flex-col lg:flex-row gap-3 min-h-0 relative select-none">
+      {/* ─── LEFT: Clip Candidates List ──────────────────────────── */}
+      <div className="lg:w-[340px] shrink-0 space-y-2 overflow-y-auto max-h-[calc(100vh-220px)] pr-1">
+        <div className="flex items-center justify-between sticky top-0 bg-[var(--color-surface)] py-1.5 z-10 border-b border-zinc-800">
           <div className="flex items-center gap-1.5">
             <Scissors className="h-3.5 w-3.5 text-emerald-400" />
             <h3 className="text-xs font-semibold text-zinc-100">
-              Clips ({clips.length})
+              Kandidat Klip ({clips.length})
             </h3>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {hasAnyModified && (
               <button
                 type="button"
                 onClick={resetAll}
-                className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 font-medium"
+                className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 font-medium px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors"
+                title="Kembalikan semua ke timestamp AI"
               >
-                <RotateCcw className="h-3 w-3" />
-                Reset All
+                <RotateCcw className="h-2.5 w-2.5" />
+                Reset
               </button>
             )}
             <button
               type="button"
-              onClick={addClip}
-              className="flex items-center gap-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-[10px] text-emerald-300 hover:bg-emerald-500/25 font-medium transition-colors"
-              title="Add clip at current position (Shortcut: N)"
+              onClick={() => addClipAtTime()}
+              className="flex items-center gap-1 rounded-md bg-emerald-500/20 border border-emerald-500/40 px-2.5 py-1 text-[11px] text-emerald-300 hover:bg-emerald-500/30 font-semibold transition-all shadow-sm"
+              title="Tambah klip baru pada posisi playhead (Shortcut: N)"
             >
-              <Plus className="h-3 w-3" />
-              Add Clip
+              <Plus className="h-3.5 w-3.5" />
+              Tambah Klip
             </button>
           </div>
         </div>
 
         {clips.map((clip, idx) => {
           const isSelected = activeClipIndex === idx;
+          const isSweetSpot = clip.duration >= 30 && clip.duration <= 70;
+
           return (
             <Card
               key={`${clip.rank}-${idx}`}
               className={cn(
-                "p-3 cursor-pointer transition-all border relative",
+                "p-2.5 cursor-pointer transition-all border relative rounded-xl",
                 isSelected
-                  ? "border-emerald-500 bg-emerald-500/[0.08] shadow-[0_0_12px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/40"
-                  : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700 hover:bg-zinc-900/40"
+                  ? "border-emerald-500 bg-emerald-500/[0.08] shadow-[0_0_15px_rgba(16,185,129,0.12)] ring-1 ring-emerald-500/50"
+                  : "border-zinc-800 bg-zinc-950/50 hover:border-zinc-700 hover:bg-zinc-900/50"
               )}
               onClick={() => seekToClip(idx)}
             >
-              <div className="flex items-start justify-between gap-2.5">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className={cn(
-                      "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-extrabold",
-                      isSelected ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-200"
-                    )}>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black",
+                        isSelected ? "bg-emerald-500 text-zinc-950" : "bg-zinc-800 text-zinc-200"
+                      )}
+                    >
                       #{clip.rank}
                     </span>
                     {clip.score !== null && (
@@ -428,59 +558,73 @@ export function ClipTimelineEditor({
                       </span>
                     )}
                     {clip.manual && (
-                      <span className="shrink-0 rounded bg-blue-500/20 border border-blue-500/30 px-1.5 py-0.5 text-[9px] font-medium text-blue-300">
+                      <span className="shrink-0 rounded bg-sky-500/20 border border-sky-500/30 px-1.5 py-0.5 text-[9px] font-medium text-sky-300">
                         Manual
                       </span>
                     )}
                     {clip.modified && !clip.manual && (
                       <span className="shrink-0 rounded bg-amber-500/20 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-medium text-amber-300">
-                        Edited
+                        Disesuaikan
                       </span>
                     )}
                   </div>
+
                   {clip.hook && (
-                    <p className="mt-1.5 text-xs font-semibold text-zinc-100 line-clamp-2 leading-snug">
+                    <p className="mt-1 text-xs font-semibold text-zinc-100 line-clamp-2 leading-snug">
                       {clip.hook}
                     </p>
                   )}
-                  <div className="mt-2 flex items-center gap-2.5 text-[10px] text-zinc-400">
-                    <span className="flex items-center gap-1 bg-zinc-900/80 px-2 py-0.5 rounded font-mono border border-zinc-800">
-                      <Clock className="h-3 w-3 text-emerald-400" />
+
+                  <div className="mt-1.5 flex items-center gap-2 text-[10px] text-zinc-400">
+                    <span className="flex items-center gap-1 bg-zinc-900/90 px-1.5 py-0.5 rounded font-mono border border-zinc-800">
+                      <Clock className="h-2.5 w-2.5 text-emerald-400" />
                       {formatTime(clip.start)} - {formatTime(clip.end)}
                     </span>
-                    <span className="font-mono text-zinc-300 font-medium">{clip.duration.toFixed(1)}s</span>
+                    <span
+                      className={cn(
+                        "font-mono font-medium",
+                        isSweetSpot ? "text-emerald-400" : "text-amber-400"
+                      )}
+                    >
+                      {clip.duration.toFixed(1)}s
+                    </span>
                   </div>
-                  {clip.reason && (
-                    <p className="mt-1.5 text-[10px] text-zinc-500 line-clamp-2 leading-relaxed">{clip.reason}</p>
-                  )}
                 </div>
-                <div className="flex flex-col gap-1.5 shrink-0 pt-0.5">
+
+                <div className="flex flex-col gap-1 shrink-0">
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); previewClip(idx); }}
-                    className="rounded-lg p-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
-                    title="Preview clip audio/video (P)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      previewClip(idx);
+                    }}
+                    className="rounded-lg p-1.5 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30 transition-colors"
+                    title="Putar pratinjau klip (P)"
                   >
                     <Play className="h-3.5 w-3.5 fill-current" />
                   </button>
-                  {clip.modified && !clip.manual && (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); resetClip(idx); }}
-                      className="rounded-lg p-1.5 bg-amber-500/10 text-amber-400 hover:bg-amber-500/25 transition-colors"
-                      title="Reset to AI timestamps"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      duplicateClip(idx);
+                    }}
+                    className="rounded-lg p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                    title="Duplikat klip ini"
+                  >
+                    <Copy className="h-3 w-3" />
+                  </button>
                   {clips.length > 1 && (
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); deleteClip(idx); }}
-                      className="rounded-lg p-1.5 bg-red-500/10 text-red-400 hover:bg-red-500/25 transition-colors"
-                      title="Delete clip"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteClip(idx);
+                      }}
+                      className="rounded-lg p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Hapus klip"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 className="h-3 w-3" />
                     </button>
                   )}
                 </div>
@@ -490,10 +634,10 @@ export function ClipTimelineEditor({
         })}
       </div>
 
-      {/* Right: Video Player + Safe Zones + Controls + Timeline */}
+      {/* ─── RIGHT: Video Player + Timeline Track + Quick Action Controls ─ */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
-        {/* Video Player Container with Safe-Zone overlay support */}
-        <div className="relative rounded-xl overflow-hidden border border-zinc-800 bg-black shadow-lg">
+        {/* Video Player Container */}
+        <div className="relative rounded-xl overflow-hidden border border-zinc-800 bg-black shadow-xl">
           <video
             ref={videoRef}
             src={videoSrc}
@@ -506,14 +650,10 @@ export function ClipTimelineEditor({
           {/* Social Safe Zone Mockup Overlay (9:16 TikTok / Reels simulator) */}
           {showSafeZone && (
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              {/* 9:16 bounding box in video */}
               <div className="h-full aspect-[9/16] border-2 border-dashed border-sky-400/70 bg-sky-500/[0.04] relative flex flex-col justify-between p-3 select-none">
-                {/* Top Safe Area (Header / Search / Live tabs) */}
                 <div className="rounded border border-sky-400/30 bg-sky-500/20 px-2 py-1 text-[8px] font-bold text-sky-200 text-center tracking-wider uppercase">
-                  Top UI Zone (Search / Tabs)
+                  Top UI Safe Zone
                 </div>
-
-                {/* Right Action Icons Zone */}
                 <div className="absolute right-2 bottom-16 flex flex-col items-center gap-2">
                   <div className="w-6 h-6 rounded-full bg-black/60 border border-sky-400/40 flex items-center justify-center text-[7px] text-white">
                     <Heart className="w-3 h-3 fill-rose-500 text-rose-500" />
@@ -524,48 +664,46 @@ export function ClipTimelineEditor({
                   <div className="w-6 h-6 rounded-full bg-black/60 border border-sky-400/40 flex items-center justify-center text-[7px] text-white">
                     <Share2 className="w-3 h-3 text-zinc-300" />
                   </div>
-                  <div className="w-6 h-6 rounded-full bg-black/60 border border-sky-400/40 flex items-center justify-center text-[7px] text-white">
-                    <Music className="w-3 h-3 text-zinc-300" />
-                  </div>
                 </div>
-
-                {/* Bottom Safe Area (Username & Caption Zone) */}
                 <div className="rounded border border-sky-400/30 bg-sky-500/20 p-1.5 text-[8px] font-bold text-sky-200 text-left w-3/4 space-y-0.5">
-                  <p className="font-bold">@creator · TikTok / Reels UI</p>
-                  <p className="text-[7px] text-sky-300 font-normal truncate">Caption & audio title safe area...</p>
+                  <p className="font-bold">@creator · 9:16 Safe Area</p>
+                  <p className="text-[7px] text-sky-300 font-normal truncate">Subtitle & caption safe space</p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Center Play overlay */}
+          {/* Center Play Overlay Button */}
           <button
             type="button"
             onClick={togglePlay}
-            className="absolute inset-0 flex items-center justify-center bg-transparent hover:bg-black/20 transition-colors group"
+            className="absolute inset-0 flex items-center justify-center bg-transparent hover:bg-black/15 transition-colors group"
           >
             {!isPlaying && (
-              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/60 text-white opacity-90 group-hover:opacity-100 group-hover:scale-105 transition-all shadow-xl backdrop-blur-sm">
-                <Play className="h-6 w-6 ml-0.5 fill-current" />
+              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/70 text-white opacity-90 group-hover:opacity-100 group-hover:scale-105 transition-all shadow-2xl backdrop-blur-md border border-white/20">
+                <Play className="h-6 w-6 ml-0.5 fill-current text-emerald-400" />
               </span>
             )}
           </button>
 
-          {/* Control bar */}
-          <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 rounded-lg bg-black/80 px-3 py-1.5 text-xs font-mono text-white backdrop-blur-md border border-zinc-800">
-            {/* Left: Play/Pause & Time */}
+          {/* Control Bar Overlay on Video */}
+          <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 rounded-lg bg-black/85 px-3 py-1.5 text-xs font-mono text-white backdrop-blur-md border border-zinc-800 shadow-md">
             <div className="flex items-center gap-2.5">
-              <button type="button" onClick={togglePlay} className="hover:text-emerald-400 transition-colors">
-                {isPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5 fill-current" />}
+              <button type="button" onClick={togglePlay} className="hover:text-emerald-400 transition-colors p-0.5">
+                {isPlaying ? <Pause className="h-3.5 w-3.5 fill-current text-emerald-400" /> : <Play className="h-3.5 w-3.5 fill-current" />}
+              </button>
+              <button type="button" onClick={() => seekRelative(-5)} className="text-zinc-400 hover:text-white" title="Mundur 5s (J)">
+                <Rewind className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => seekRelative(5)} className="text-zinc-400 hover:text-white" title="Maju 5s (L)">
+                <FastForward className="h-3.5 w-3.5" />
               </button>
               <span className="font-semibold text-emerald-300">{formatTimePrecise(currentTime)}</span>
-              <span className="text-zinc-500">/</span>
+              <span className="text-zinc-600">/</span>
               <span className="text-zinc-400">{formatTimePrecise(videoDuration)}</span>
             </div>
 
-            {/* Right: Playback Speed, Safe Zone & Shortcut Help */}
             <div className="flex items-center gap-2">
-              {/* Speed buttons */}
               <div className="flex items-center bg-zinc-900/90 rounded-md border border-zinc-800 p-0.5">
                 {[0.75, 1, 1.25, 1.5, 2].map((spd) => (
                   <button
@@ -574,9 +712,7 @@ export function ClipTimelineEditor({
                     onClick={() => changeSpeed(spd)}
                     className={cn(
                       "px-1.5 py-0.5 text-[9px] rounded font-mono font-medium transition-colors",
-                      playbackSpeed === spd
-                        ? "bg-emerald-500 text-zinc-950 font-bold"
-                        : "text-zinc-400 hover:text-zinc-200"
+                      playbackSpeed === spd ? "bg-emerald-500 text-zinc-950 font-bold" : "text-zinc-400 hover:text-zinc-200"
                     )}
                   >
                     {spd}x
@@ -584,28 +720,24 @@ export function ClipTimelineEditor({
                 ))}
               </div>
 
-              {/* Safe Zone Toggle */}
               <button
                 type="button"
                 onClick={() => setShowSafeZone(!showSafeZone)}
                 className={cn(
                   "flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-sans font-medium transition-colors border",
-                  showSafeZone
-                    ? "border-sky-500/50 bg-sky-500/20 text-sky-300"
-                    : "border-zinc-700/60 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
+                  showSafeZone ? "border-sky-500/50 bg-sky-500/20 text-sky-300" : "border-zinc-700/60 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
                 )}
                 title="Toggle 9:16 Social Safe-Zone Overlay"
               >
                 <Shield className="h-3 w-3" />
-                Safe Zone
+                9:16 Safe Zone
               </button>
 
-              {/* Shortcut Help Button */}
               <button
                 type="button"
                 onClick={() => setShowShortcutsModal(!showShortcutsModal)}
                 className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-                title="Keyboard Shortcuts (?)"
+                title="Panduan Pintasan Keyboard (?)"
               >
                 <HelpCircle className="h-3.5 w-3.5" />
               </button>
@@ -615,11 +747,11 @@ export function ClipTimelineEditor({
 
         {/* Shortcuts popover */}
         {showShortcutsModal && (
-          <div className="p-3 rounded-lg border border-zinc-700/80 bg-zinc-900/95 text-xs space-y-2 shadow-xl">
+          <div className="p-3 rounded-xl border border-zinc-700/80 bg-zinc-900/95 text-xs space-y-2 shadow-2xl">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
               <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
                 <HelpCircle className="h-3.5 w-3.5 text-emerald-400" />
-                Keyboard Shortcuts Pro
+                Pintasan Keyboard Editor
               </span>
               <button type="button" onClick={() => setShowShortcutsModal(false)} className="text-zinc-500 hover:text-zinc-300">
                 <X className="w-4 h-4" />
@@ -627,42 +759,117 @@ export function ClipTimelineEditor({
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
               <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">Space</kbd> Play / Pause</div>
-              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">J</kbd> / <kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">L</kbd> Seek -5s / +5s</div>
-              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">[</kbd> Set Start here</div>
-              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">]</kbd> Set End here</div>
-              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">N</kbd> Add Clip at Playhead</div>
-              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">P</kbd> Preview Active Clip</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">J</kbd> / <kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">L</kbd> Mundur/Maju 5s</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">[</kbd> Pasang Titik Mulai (Start)</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">]</kbd> Pasang Titik Selesai (End)</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">N</kbd> Buat Klip Baru di Sini</div>
+              <div><kbd className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono border border-zinc-700 text-emerald-300">P</kbd> Pratinjau Klip Aktif</div>
             </div>
           </div>
         )}
 
-        {/* Timeline with clip markers */}
-        <Card className="p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <Film className="h-3.5 w-3.5 text-violet-400" />
-              <span className="text-[10px] font-medium text-zinc-300 uppercase tracking-wider">Visual Timeline</span>
-            </div>
-            <span className="text-[10px] text-zinc-500">
-              Drag handles to adjust · Click timeline to seek
+        {/* ─── QUICK CLIP ACTIONS BAR (Paling Mudah Digunakan) ────────── */}
+        <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-zinc-900/70 border border-zinc-800 shadow-inner">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider pl-1">
+              Set Titik:
             </span>
+            <button
+              type="button"
+              onClick={setStartToPlayhead}
+              className="flex items-center gap-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25 transition-all"
+              title="Set awal klip aktif pada waktu video saat ini (Pintasan: [)"
+            >
+              <ArrowRightToLine className="h-3.5 w-3.5" />
+              Mulai di Sini <span className="text-[10px] opacity-60 font-mono">[</span>
+            </button>
+            <button
+              type="button"
+              onClick={setEndToPlayhead}
+              className="flex items-center gap-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25 transition-all"
+              title="Set akhir klip aktif pada waktu video saat ini (Pintasan: ])"
+            >
+              <ArrowLeftToLine className="h-3.5 w-3.5" />
+              Selesai di Sini <span className="text-[10px] opacity-60 font-mono">]</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => addClipAtTime(currentTime, 45)}
+              className="flex items-center gap-1 rounded-lg bg-sky-500/20 border border-sky-500/40 px-2.5 py-1 text-xs font-semibold text-sky-200 hover:bg-sky-500/30 transition-all ml-1"
+              title="Buat klip baru 45 detik mulai dari posisi sekarang (Pintasan: N)"
+            >
+              <BookmarkPlus className="h-3.5 w-3.5 text-sky-300" />
+              + Klip Baru (45s)
+            </button>
           </div>
 
-          {/* Timeline bar */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-medium text-zinc-400">Durasi Cepat:</span>
+            {[30, 45, 60, 90].map((sec) => (
+              <button
+                key={sec}
+                type="button"
+                onClick={() => setExactDuration(sec)}
+                className="px-2 py-0.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[10px] font-mono text-zinc-300 hover:text-white transition-colors"
+                title={`Ubah durasi klip aktif menjadi ${sec} detik`}
+              >
+                {sec}s
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ─── VISUAL TIMELINE TRACK ───────────────────────────────────── */}
+        <Card className="p-3 space-y-2 border-zinc-800 bg-zinc-950/80">
+          <div className="flex items-center justify-between text-[11px]">
+            <div className="flex items-center gap-2">
+              <Film className="h-3.5 w-3.5 text-emerald-400" />
+              <span className="font-semibold text-zinc-200">Visual Timeline Multi-Klip</span>
+              <span className="text-[10px] text-zinc-500">
+                (Klik/geser track untuk seek · Geser kotak untuk atur waktu · Double click untuk tambah klip)
+              </span>
+            </div>
+            {hoverTime !== null && (
+              <span className="text-[10px] font-mono text-emerald-400 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+                Posisi Kursor: {formatTimePrecise(hoverTime)}
+              </span>
+            )}
+          </div>
+
+          {/* Main Timeline Bar */}
           <div
             ref={timelineRef}
-            className="relative h-14 rounded-lg bg-zinc-950 border border-zinc-800 overflow-visible cursor-crosshair"
+            className="relative h-16 rounded-xl bg-zinc-950 border-2 border-zinc-800/90 overflow-visible cursor-crosshair select-none shadow-inner"
+            onMouseMove={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+              setHoverTime(ratio * videoDuration);
+            }}
+            onMouseLeave={() => setHoverTime(null)}
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
-              const ratio = (e.clientX - rect.left) / rect.width;
-              const time = Math.max(0, Math.min(videoDuration, ratio * videoDuration));
+              const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+              const time = ratio * videoDuration;
               if (videoRef.current) {
                 videoRef.current.currentTime = time;
                 setCurrentTime(time);
               }
             }}
+            onDoubleClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+              const time = ratio * videoDuration;
+              addClipAtTime(time, 45);
+            }}
           >
-            {/* Clip regions */}
+            {/* Background Tick Lines */}
+            <div className="absolute inset-0 flex justify-between pointer-events-none opacity-20 px-2">
+              {Array.from({ length: 20 }).map((_, i) => (
+                <div key={i} className="h-full w-px bg-zinc-500" />
+              ))}
+            </div>
+
+            {/* Clip Regions */}
             {clips.map((clip, idx) => {
               const clampedStart = Math.max(0, Math.min(clip.start, videoDuration));
               const clampedEnd = Math.max(0, Math.min(clip.end, videoDuration));
@@ -675,39 +882,55 @@ export function ClipTimelineEditor({
                 <div
                   key={`${clip.rank}-${idx}`}
                   className={cn(
-                    "absolute top-1 bottom-1 rounded-md border transition-colors select-none",
+                    "absolute top-1 bottom-1 rounded-lg border-2 transition-all select-none group/clip",
                     isActive
-                      ? "bg-emerald-500/30 border-emerald-400 z-[5] shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                      ? "bg-emerald-500/35 border-emerald-400 z-20 shadow-[0_0_12px_rgba(16,185,129,0.4)]"
                       : clip.manual
-                        ? "bg-blue-500/15 border-blue-500/40"
-                        : "bg-violet-500/20 border-violet-500/40",
-                    clip.modified && !clip.manual && "border-amber-400/70"
+                        ? "bg-sky-500/20 border-sky-500/50 hover:border-sky-400 z-10"
+                        : "bg-violet-500/20 border-violet-500/50 hover:border-violet-400 z-10",
+                    clip.modified && !clip.manual && "border-amber-400"
                   )}
-                  style={{ left: `${left}%`, width: `${Math.max(width, 0.5)}%` }}
-                  onClick={(e) => { e.stopPropagation(); seekToClip(idx); }}
+                  style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
+                  onMouseDown={(e) => handleTimelineMouseDown(e, idx, "move")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    seekToClip(idx);
+                  }}
+                  title="Geser area tengah untuk memindahkan seluruh klip"
                 >
-                  {/* Clip label */}
-                  <span className={cn(
-                    "absolute top-0.5 left-1 text-[9px] font-black",
-                    isActive ? "text-emerald-300" : clip.manual ? "text-blue-300" : "text-violet-300"
-                  )}>
-                    #{clip.rank}
-                  </span>
+                  {/* Clip Header Label */}
+                  <div className="absolute top-1 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                    <span
+                      className={cn(
+                        "text-[10px] font-black px-1 rounded",
+                        isActive
+                          ? "bg-emerald-400 text-zinc-950"
+                          : clip.manual
+                            ? "bg-sky-400 text-zinc-950"
+                            : "bg-violet-400 text-zinc-950"
+                      )}
+                    >
+                      #{clip.rank}
+                    </span>
+                    <span className="text-[9px] font-mono font-bold text-white bg-black/60 px-1 rounded">
+                      {clip.duration.toFixed(1)}s
+                    </span>
+                  </div>
 
-                  {/* Start handle */}
+                  {/* Left (Start) Grab Handle */}
                   <div
-                    className="absolute left-0 top-0 bottom-0 w-3 cursor-col-resize flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/50 rounded-l-md"
+                    className="absolute left-0 top-0 bottom-0 w-3.5 cursor-col-resize flex items-center justify-center bg-emerald-500/40 hover:bg-emerald-400 rounded-l-md transition-colors"
                     onMouseDown={(e) => handleTimelineMouseDown(e, idx, "start")}
-                    title="Drag to adjust Start"
+                    title="Tarik untuk mengatur Titik Mulai (Start)"
                   >
                     <GripHorizontal className="h-3 w-3 text-white rotate-90" />
                   </div>
 
-                  {/* End handle */}
+                  {/* Right (End) Grab Handle */}
                   <div
-                    className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/50 rounded-r-md"
+                    className="absolute right-0 top-0 bottom-0 w-3.5 cursor-col-resize flex items-center justify-center bg-emerald-500/40 hover:bg-emerald-400 rounded-r-md transition-colors"
                     onMouseDown={(e) => handleTimelineMouseDown(e, idx, "end")}
-                    title="Drag to adjust End"
+                    title="Tarik untuk mengatur Titik Selesai (End)"
                   >
                     <GripHorizontal className="h-3 w-3 text-white rotate-90" />
                   </div>
@@ -715,17 +938,25 @@ export function ClipTimelineEditor({
               );
             })}
 
-            {/* Playhead */}
+            {/* Hover Cursor Line */}
+            {hoverTime !== null && (
+              <div
+                className="absolute top-0 bottom-0 w-px border-r border-dashed border-emerald-400/80 pointer-events-none z-25"
+                style={{ left: `${(hoverTime / videoDuration) * 100}%` }}
+              />
+            )}
+
+            {/* Live Playhead Line */}
             <div
-              className="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none z-10 shadow-[0_0_6px_#fff]"
+              className="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none z-30 shadow-[0_0_8px_#fff]"
               style={{ left: `${(currentTime / videoDuration) * 100}%` }}
             >
-              <div className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 rounded-full bg-white shadow-md border-2 border-emerald-500" />
+              <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-white shadow-xl border-2 border-emerald-500" />
             </div>
           </div>
 
-          {/* Time scale */}
-          <div className="flex justify-between mt-1.5 text-[9px] text-zinc-500 font-mono">
+          {/* Time Scale Footer */}
+          <div className="flex justify-between text-[10px] text-zinc-500 font-mono pt-0.5">
             <span>0:00</span>
             <span>{formatTime(videoDuration * 0.25)}</span>
             <span>{formatTime(videoDuration * 0.5)}</span>
@@ -734,21 +965,22 @@ export function ClipTimelineEditor({
           </div>
         </Card>
 
-        {/* Active clip detailed timing editor */}
+        {/* ─── ACTIVE CLIP DETAILED ADJUSTMENT PANEL ───────────────────── */}
         {activeClip && (
-          <Card className="p-3.5 space-y-3 border-zinc-800 bg-zinc-950/60">
+          <Card className="p-3.5 space-y-3 border-zinc-800 bg-zinc-950/70 rounded-xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Edit3 className="h-3.5 w-3.5 text-emerald-400" />
-                <span className="text-xs font-semibold text-zinc-200">
-                  Clip #{activeClip.rank} Timing & Details
+                <Sliders className="h-4 w-4 text-emerald-400" />
+                <span className="text-xs font-bold text-zinc-100">
+                  Pengaturan Presisi Klip #{activeClip.rank}
                 </span>
                 {activeClip.modified && (
-                  <span className="rounded bg-amber-500/20 px-1.5 py-0.2 text-[9px] font-semibold text-amber-300">
-                    Custom Timing
+                  <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300">
+                    Kustomisasi Aktif
                   </span>
                 )}
               </div>
+
               <div className="flex items-center gap-2">
                 {activeClip.modified && !activeClip.manual && (
                   <button
@@ -757,7 +989,7 @@ export function ClipTimelineEditor({
                     className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 font-medium"
                   >
                     <RotateCcw className="h-3 w-3" />
-                    Reset to AI
+                    Reset AI
                   </button>
                 )}
                 {clips.length > 1 && (
@@ -767,7 +999,7 @@ export function ClipTimelineEditor({
                     className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 font-medium"
                   >
                     <Trash2 className="h-3 w-3" />
-                    Delete
+                    Hapus Klip
                   </button>
                 )}
               </div>
@@ -775,22 +1007,26 @@ export function ClipTimelineEditor({
 
             {/* Editable Hook Title */}
             <div>
-              <label className="block text-[10px] font-medium text-zinc-400 mb-1">Hook Title</label>
+              <label className="block text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">
+                Judul Hook Klip (3 Detik Pertama)
+              </label>
               <input
                 type="text"
                 value={activeClip.hook || ""}
                 onChange={(e) => updateHookTitle(e.target.value)}
-                placeholder="Judul hook untuk clip ini..."
+                placeholder="Masukkan judul atau hook untuk klip ini..."
                 className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none"
               />
             </div>
 
-            {/* Start & End Precision Inputs with Nudges */}
+            {/* Start & End Precision Inputs with Step Nudges */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {/* Start Time Box */}
-              <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-2.5 space-y-1.5">
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-2.5 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Start Time</label>
+                  <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                    Titik Mulai (Start)
+                  </label>
                   <span className="text-[9px] text-zinc-500 font-mono">{activeClip.start.toFixed(1)}s</span>
                 </div>
                 <input
@@ -820,17 +1056,19 @@ export function ClipTimelineEditor({
                 </div>
                 <button
                   type="button"
-                  onClick={setStartToPlayhead}
-                  className="w-full text-center py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 hover:bg-emerald-500/20 font-medium transition-colors"
+                  onClick={jumpToActiveStart}
+                  className="w-full text-center py-1 rounded bg-zinc-800/80 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-700 transition-colors"
                 >
-                  Set to Playhead ({formatTime(currentTime)}) [Key: []
+                  Lompat ke Mulai ({formatTime(activeClip.start)})
                 </button>
               </div>
 
               {/* End Time Box */}
-              <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-2.5 space-y-1.5">
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-2.5 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">End Time</label>
+                  <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                    Titik Selesai (End)
+                  </label>
                   <span className="text-[9px] text-zinc-500 font-mono">{activeClip.end.toFixed(1)}s</span>
                 </div>
                 <input
@@ -860,22 +1098,25 @@ export function ClipTimelineEditor({
                 </div>
                 <button
                   type="button"
-                  onClick={setEndToPlayhead}
-                  className="w-full text-center py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 hover:bg-emerald-500/20 font-medium transition-colors"
+                  onClick={jumpToActiveEnd}
+                  className="w-full text-center py-1 rounded bg-zinc-800/80 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-700 transition-colors"
                 >
-                  Set to Playhead ({formatTime(currentTime)}) [Key: ]]
+                  Lompat ke Selesai ({formatTime(activeClip.end)})
                 </button>
               </div>
 
               {/* Total Duration & Preview Box */}
-              <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-2.5 flex flex-col justify-between">
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-2.5 flex flex-col justify-between">
                 <div>
-                  <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Clip Duration</label>
-                  <p className="text-xl font-bold font-mono text-zinc-100 mt-1">
-                    {activeClip.duration.toFixed(1)}<span className="text-xs text-zinc-500 font-normal ml-1">detik</span>
+                  <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                    Total Durasi Klip
+                  </label>
+                  <p className="text-2xl font-bold font-mono text-zinc-100 mt-1">
+                    {activeClip.duration.toFixed(1)}
+                    <span className="text-xs text-zinc-500 font-normal ml-1">detik</span>
                   </p>
-                  <p className="text-[10px] text-zinc-500 mt-1">
-                    {formatTime(activeClip.start)} sampai {formatTime(activeClip.end)}
+                  <p className="text-[10px] text-zinc-400 mt-0.5">
+                    {formatTime(activeClip.start)} s/d {formatTime(activeClip.end)}
                   </p>
                 </div>
                 <Button
@@ -883,10 +1124,10 @@ export function ClipTimelineEditor({
                   size="sm"
                   variant="outline"
                   onClick={() => previewClip(activeClipIndex)}
-                  icon={<Play className="h-3.5 w-3.5 fill-current" />}
-                  className="w-full mt-2"
+                  icon={<Play className="h-3.5 w-3.5 fill-current text-emerald-400" />}
+                  className="w-full mt-2 border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-300"
                 >
-                  Play Active Clip (P)
+                  Putar Klip Ini (P)
                 </Button>
               </div>
             </div>

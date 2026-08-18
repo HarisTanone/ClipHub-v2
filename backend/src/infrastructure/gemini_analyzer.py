@@ -307,49 +307,36 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                     raise RuntimeError(f"Gemini gagal setelah {MAX_RETRIES} percobaan: {e}")
 
     def _call_text_only(self, prompt: str) -> str:
-        """Call Gemini with text-only prompt across all available keys concurrently."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
-
-        keys = settings.gemini_api_keys or ([self._key_rotator.get_current_key()] if self._key_rotator.get_current_key() else [])
-        if not keys:
-            raise RuntimeError("No Gemini API key configured")
-
-        contents = [types.Part.from_text(text=prompt)]
-
-        def _call_single(k: str, idx: int):
-            client = genai.Client(api_key=k)
-            return k, idx, client.models.generate_content(
-                model=self._model,
-                contents=contents,
-            )
-
+        """Call Gemini with text-only prompt using standard key rotation."""
         for attempt in range(3):
-            with ThreadPoolExecutor(max_workers=max(1, len(keys))) as executor:
-                future_to_key = {executor.submit(_call_single, k, i): (k, i) for i, k in enumerate(keys)}
-                errors = []
-                try:
-                    for future in as_completed(future_to_key, timeout=60):
-                        k, i = future_to_key[future]
-                        try:
-                            _, idx, response = future.result()
-                            if response and response.text:
-                                return response.text
-                        except Exception as e:
-                            errors.append(e)
-                except FuturesTimeout:
-                    pass
+            try:
+                if not self._client:
+                    self._init_client()
+                if not self._client:
+                    raise RuntimeError("No Gemini API key configured")
 
-            if errors:
-                last_err = errors[-1]
-                err_lower = str(last_err).lower()
-                if "404" in err_lower or "503" in err_lower or "limit: 0" in err_lower:
+                response = self._client.models.generate_content(
+                    model=self._model,
+                    contents=[types.Part.from_text(text=prompt)],
+                )
+                if response and response.text:
+                    return response.text
+                raise ValueError("Respons Gemini kosong (text-only)")
+
+            except Exception as e:
+                err_lower = str(e).lower()
+                if "429" in err_lower or "rate" in err_lower or "quota" in err_lower:
+                    if "limit: 0" in err_lower or "limit: 0.0" in err_lower:
+                        self._switch_to_fallback()
+                        continue
+                    self._key_rotator.mark_rate_limited()
+                    self._init_client()
+                if "404" in err_lower or "503" in err_lower or "not found" in err_lower:
                     self._switch_to_fallback()
                 if attempt < 2:
                     time.sleep(2)
                     continue
-                raise last_err
-
-        raise ValueError("Respons Gemini kosong (text-only)")
+                raise
 
     def _generate_with_video(self, video_url: str, prompt: str, timeout: int = 180):
         """Send YouTube URL + prompt to Gemini across ALL available keys concurrently.
