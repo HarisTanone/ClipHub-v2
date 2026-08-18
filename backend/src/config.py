@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     VIDEO_GEN_TARGET_DURATION: int = 65       # target seconds
     VIDEO_GEN_MIN_DURATION: int = 50
     VIDEO_GEN_MAX_DURATION: int = 90
-    VIDEO_GEN_MAX_SCENES: int = 10
+    VIDEO_GEN_MAX_SCENES: int = 25
     VIDEO_GEN_BGM_DIR: str = "assets/bgm"    # folder with royalty-free MP3s
     VIDEO_GEN_BGM_VOLUME: float = 0.15       # background music volume (0-1)
     VIDEO_GEN_OUTPUT_DIR: str = "tmp/video_gen"

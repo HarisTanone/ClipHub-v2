@@ -282,12 +282,11 @@ class YouTubeSearch:
         seen_ids = set()
 
         tasks = []
-        # Parallel tasks: Pexels, Pixabay, YouTube
-        for q in queries[:2]:
-            tasks.append(self.search_pexels(q, max_results=3))
-            tasks.append(self.search_pixabay(q, max_results=3))
+        # Parallel tasks: Pexels, Pixabay, YouTube across all queries
         for q in queries[:3]:
-            tasks.append(self.search(query=q, max_results=results_per_query, shorts_only=False))
+            tasks.append(self.search_pexels(q, max_results=5))
+            tasks.append(self.search_pixabay(q, max_results=5))
+            tasks.append(self.search(query=q, max_results=max(results_per_query, 6), shorts_only=False))
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 

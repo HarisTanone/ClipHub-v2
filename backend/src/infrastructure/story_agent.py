@@ -20,64 +20,64 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
-STORY_SYSTEM_PROMPT = """You are an expert AI video director and scriptwriter.
-Your job is to create compelling short-form video scripts (50-90 seconds) from a given topic.
+STORY_SYSTEM_PROMPT = """You are an expert AI video director and scriptwriter for viral vertical (9:16) short-form videos (TikTok, Instagram Reels, YouTube Shorts).
+Your job is to create compelling, highly dynamic short-form video scripts from a given topic.
 
 You must output VALID JSON only. No markdown, no explanation outside JSON.
 
 The video will be rendered as a vertical (9:16) short-form video with:
 - AI-generated narration (text-to-speech)
-- Stock footage from YouTube/Pexels matching each scene
+- High visual diversity of stock footage from YouTube, Pexels, and Pixabay matching each scene
 - Subtitles auto-generated from narration
 - Background music
 
-Rules:
-1. The HOOK (first 3 seconds) must be extremely attention-grabbing
-2. Each scene narration should be 1-3 sentences, natural spoken language
-3. Search queries should be specific and visual (not abstract concepts)
-4. Total narration when spoken should fit within the target duration
-5. Scenes should flow logically as a narrative
-6. Visual descriptions should be concrete and searchable
-7. Generate 6-10 scenes depending on target duration
-8. STRICT RULE: NEVER include any generic subscribe, like, follow, share, or channel CTA (e.g. "Jangan lupa subscribe", "Don't forget to subscribe", "Like and subscribe"). The final scene MUST be a strong, punchy takeaway or conclusion related directly to the topic."""
+Rules for High Retention & Visual Dynamism:
+1. THE HOOK (first 3 seconds): Must be punchy, curiosity-inducing, and visually explosive.
+2. FAST-PACED SCENE CUTS: Short-form audiences have short attention spans. Keep each scene concise (3.5 to 5.5 seconds of spoken narration, ~8-14 words per scene). Change visual footage frequently to keep the video exciting and varied.
+3. HIGH VISUAL DIVERSITY: Never repeat visual styles across adjacent scenes. Alternate between wide landscape/drone shots, close-up macro details, high-energy subject action, dramatic camera angles, cinematic slow-motion, and vivid environments.
+4. SPECIFIC SEARCH QUERIES: Provide 3 distinct, highly descriptive visual search queries per scene targeting exact b-roll footage.
+5. NATURAL NARRATIVE FLOW: Narration should sound natural, conversational, and energetic.
+6. SCENE COUNT: Generate {num_scenes} distinct scenes matching the target duration.
+7. STRICT RULE: NEVER include generic subscribe, like, follow, or channel CTA. The final scene MUST be an insightful, memorable takeaway directly related to the topic."""
 
-STORY_USER_PROMPT = """Create a video script about: "{topic}"
+STORY_USER_PROMPT = """Create a dynamic, fast-paced vertical video script about: "{topic}"
 
 Target duration: {target_duration} seconds (approximately {word_count} words of narration total)
-Number of scenes: {num_scenes}
+Number of scenes to generate: {num_scenes} scenes (approximately 3.5 to 5.0 seconds per scene for frequent visual cuts)
 
 Additional instructions: {instructions}
 
 Output this exact JSON structure:
 {{
-  "title": "Video title (short, catchy)",
-  "hook": "The opening hook text (first 3 seconds, must grab attention)",
-  "mood": "overall mood (dramatic, educational, mysterious, inspiring, funny)",
+  "title": "Video title (short, catchy, max 6 words)",
+  "hook": "The opening hook text (first 3 seconds, must grab instant attention)",
+  "mood": "overall mood (dramatic, educational, mysterious, inspiring, funny, energetic)",
   "target_duration": {target_duration},
   "scenes": [
     {{
       "id": 1,
-      "narration": "The spoken narration for this scene",
-      "visual": "Description of what should be shown visually",
-      "search_queries": ["youtube search query 1", "youtube search query 2", "stock footage query 3"],
-      "duration_estimate": 7,
-      "transition": "cut|fade|zoom"
+      "narration": "The spoken narration for this scene (1 concise sentence, 8-14 words)",
+      "visual": "Concrete description of the exact visual footage to display",
+      "search_queries": [
+        "cinematic 4k specific visual query",
+        "action motion drone footage query",
+        "stock b-roll subject query"
+      ],
+      "duration_estimate": 4.5,
+      "transition": "cut|zoom|fade"
     }}
   ]
 }}
 
-Important:
-- Each scene's narration should be speakable in about duration_estimate seconds
-- Average speaking rate is ~2.5 words per second
-- search_queries MUST be highly specific visual YouTube search terms that match the narration context:
-  * Use concrete visual nouns: "volcano erupting lava flow", NOT "volcano" alone
-  * Include action/motion: "tsunami wave crashing coastline drone footage"
-  * Add "footage", "cinematic", "drone", "timelapse", "4K" when appropriate
-  * Each query should describe EXACTLY what should appear on screen during that narration
-  * Avoid abstract concepts — always describe the VISUAL: "scientist in lab mixing chemicals" not "science experiment"
-  * Include 3 search queries per scene: 1 very specific, 1 slightly broader, 1 with "stock footage" suffix
-- First scene should be the HOOK
-- The final scene must be an insightful, memorable takeaway or punchy conclusion related to the topic. STRICTLY DO NOT mention subscribe, follow, or like buttons."""
+Important Guidelines:
+- High footage variety: Each scene should have completely unique visual ideas and search terms.
+- Average speaking rate is ~2.5 words per second. Keep scene narration to ~9-14 words so each scene is ~4-5 seconds.
+- search_queries MUST be highly concrete and visual:
+  * Use specific visual nouns with adjectives: "glowing jellyfish deep ocean abyss 4k", NOT "jellyfish"
+  * Include camera motion or format: "drone shot mountain peak clouds cinematic", "macro extreme close up circuit board glowing"
+  * Provide 3 varied queries per scene so the footage engine can find diverse candidates.
+- First scene is the opening HOOK.
+- Final scene is a punchy, thought-provoking conclusion or takeaway. No like/subscribe CTAs."""
 
 
 class StoryAgent:
@@ -116,8 +116,9 @@ class StoryAgent:
             target_duration = settings.VIDEO_GEN_TARGET_DURATION
 
         if not num_scenes:
-            # Auto-calculate: ~8 seconds per scene average
-            num_scenes = max(5, min(settings.VIDEO_GEN_MAX_SCENES, target_duration // 8))
+            # Auto-calculate: dynamic ~4.5 - 5.0 seconds per scene for fast-paced viral retention
+            calculated_scenes = int(round(target_duration / 4.8))
+            num_scenes = max(8, min(settings.VIDEO_GEN_MAX_SCENES, calculated_scenes))
 
         # Approximate word count for target duration (2.5 words/sec)
         word_count = int(target_duration * 2.5)

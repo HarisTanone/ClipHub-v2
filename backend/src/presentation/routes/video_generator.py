@@ -28,7 +28,7 @@ class GenerateVideoRequest(BaseModel):
     voice: str = Field(default="", max_length=100, description="TTS voice model (empty=default)")
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="TTS speed multiplier")
     instructions: str = Field(default="", max_length=1000, description="Additional instructions for AI")
-    num_scenes: int = Field(default=0, ge=0, le=15, description="Number of scenes (0=auto)")
+    num_scenes: int = Field(default=0, ge=0, le=25, description="Number of scenes (0=auto)")
     subtitles_enabled: bool = Field(default=True, description="Burn captions into the final video")
     subtitle_style_config: dict[str, Any] = Field(default_factory=dict)
     subtitle_style: Optional[dict[str, Any]] = Field(default=None, exclude=True)
