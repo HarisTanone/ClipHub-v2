@@ -302,41 +302,59 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                 else:
                     raise RuntimeError(f"Gemini gagal setelah {MAX_RETRIES} percobaan: {e}")
 
-    def _call_text_only(self, prompt: str) -> str:
-        """Call Gemini with text-only prompt using standard key rotation."""
-        for attempt in range(3):
+    def _call_text_only(self, prompt: str, timeout: int = 60) -> str:
+        """Call Gemini with text-only prompt racing across all keys and top models concurrently."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+
+        keys = settings.gemini_api_keys or ([self._key_rotator.get_current_key()] if self._key_rotator.get_current_key() else [])
+        if not keys:
+            raise RuntimeError("No Gemini API key configured")
+
+        contents = [types.Part.from_text(text=prompt)]
+        models_to_race = [
+            settings.GEMINI_MODEL or "gemini-3.6-flash",
+            settings.GEMINI_FALLBACK_MODEL or "gemini-3.7-flash",
+        ]
+        models_to_race = list(dict.fromkeys([m for m in models_to_race if m]))
+
+        tasks = []
+        for m in models_to_race:
+            for idx, k in enumerate(keys):
+                tasks.append((k, idx, m))
+
+        def _call_text(k: str, idx: int, m: str):
+            client = genai.Client(api_key=k)
+            res = client.models.generate_content(
+                model=m,
+                contents=contents,
+            )
+            return k, idx, m, res
+
+        with ThreadPoolExecutor(max_workers=max(1, len(tasks))) as executor:
+            future_to_task = {executor.submit(_call_text, k, i, m): (k, i, m) for (k, i, m) in tasks}
+            errors = []
             try:
-                if not self._client:
-                    self._init_client()
-                if not self._client:
-                    raise RuntimeError("No Gemini API key configured")
+                for future in as_completed(future_to_task, timeout=timeout):
+                    k, i, m = future_to_task[future]
+                    try:
+                        _, idx, m_used, response = future.result()
+                        if response and response.text:
+                            logger.info(f"gemini_text_concurrent_win: key[{idx}] (...{k[-6:]}) with model={m_used} responded first!")
+                            return response.text
+                    except Exception as e:
+                        logger.debug(f"gemini_text_concurrent_failed: key[{i}] with model={m} failed: {e}")
+                        errors.append(e)
+            except FuturesTimeout:
+                logger.error(f"Gemini text-only call timed out after {timeout}s across {len(tasks)} workers")
+                raise TimeoutError(f"Gemini text API timeout ({timeout}s)")
 
-                response = self._client.models.generate_content(
-                    model=self._model,
-                    contents=[types.Part.from_text(text=prompt)],
-                )
-                if response and response.text:
-                    return response.text
-                raise ValueError("Respons Gemini kosong (text-only)")
-
-            except Exception as e:
-                err_lower = str(e).lower()
-                if "429" in err_lower or "rate" in err_lower or "quota" in err_lower:
-                    if "limit: 0" in err_lower or "limit: 0.0" in err_lower:
-                        self._switch_to_fallback()
-                        continue
-                    self._key_rotator.mark_rate_limited()
-                    self._init_client()
-                if "404" in err_lower or "503" in err_lower or "not found" in err_lower:
-                    self._switch_to_fallback()
-                if attempt < 2:
-                    time.sleep(2)
-                    continue
-                raise
+        if errors:
+            raise errors[-1]
+        raise ValueError("Respons Gemini kosong dari semua key dan model (text-only)")
 
     def _generate_with_video(self, video_url: str, prompt: str, timeout: int = 180):
-        """Send YouTube URL + prompt to Gemini across ALL available keys concurrently.
-        Whichever key responds first with valid content wins immediately.
+        """Send YouTube URL + prompt to Gemini across ALL available keys AND top models concurrently.
+        4 keys x 2 models = 8 racing workers! Whichever combination responds first wins immediately.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
@@ -349,35 +367,47 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             types.Part.from_text(text=prompt),
         ]
 
-        def _call(k: str, idx: int):
+        # Race the top 2 models simultaneously across all keys (4 keys x 2 models = 8 workers)
+        models_to_race = [
+            settings.GEMINI_MODEL or "gemini-3.6-flash",
+            settings.GEMINI_FALLBACK_MODEL or "gemini-3.7-flash",
+        ]
+        models_to_race = list(dict.fromkeys([m for m in models_to_race if m]))
+
+        tasks = []
+        for m in models_to_race:
+            for idx, k in enumerate(keys):
+                tasks.append((k, idx, m))
+
+        def _call(k: str, idx: int, m: str):
             client = genai.Client(api_key=k)
             res = client.models.generate_content(
-                model=self._model,
+                model=m,
                 contents=contents,
             )
-            return k, idx, res
+            return k, idx, m, res
 
-        with ThreadPoolExecutor(max_workers=max(1, len(keys))) as executor:
-            future_to_key = {executor.submit(_call, k, i): (k, i) for i, k in enumerate(keys)}
+        with ThreadPoolExecutor(max_workers=max(1, len(tasks))) as executor:
+            future_to_task = {executor.submit(_call, k, i, m): (k, i, m) for (k, i, m) in tasks}
             errors = []
             try:
-                for future in as_completed(future_to_key, timeout=timeout):
-                    k, i = future_to_key[future]
+                for future in as_completed(future_to_task, timeout=timeout):
+                    k, i, m = future_to_task[future]
                     try:
-                        _, idx, response = future.result()
+                        _, idx, m_used, response = future.result()
                         if response and response.text:
-                            logger.info(f"gemini_concurrent_win: key[{idx}] (...{k[-6:]}) responded first")
+                            logger.info(f"gemini_concurrent_win: key[{idx}] (...{k[-6:]}) with model={m_used} responded first!")
                             return response
                     except Exception as e:
-                        logger.warning(f"gemini_concurrent_key_failed: key[{i}] failed: {e}")
+                        logger.warning(f"gemini_concurrent_failed: key[{i}] with model={m} failed: {e}")
                         errors.append(e)
             except FuturesTimeout:
-                logger.error(f"Gemini API call timed out after {timeout}s across {len(keys)} keys")
+                logger.error(f"Gemini API call timed out after {timeout}s across {len(tasks)} workers")
                 raise TimeoutError(f"Gemini API timeout ({timeout}s)")
 
         if errors:
             raise errors[-1]
-        raise ValueError("Respons Gemini kosong dari semua key")
+        raise ValueError("Respons Gemini kosong dari semua key dan model")
 
     def _parse_response(self, raw_text: str) -> dict:
         """Parse Gemini JSON response with tolerance for markdown fences."""
