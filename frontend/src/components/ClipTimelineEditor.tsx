@@ -113,27 +113,58 @@ export function ClipTimelineEditor({
     }
   }, [activeClip?.start, activeClip?.end, activeClipIndex]);
 
-  // Sync video time display
+  // Sync video time display + Auto-stop at active clip end
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const onTimeUpdate = () => setCurrentTime(video.currentTime);
-    video.addEventListener("timeupdate", onTimeUpdate);
-    return () => video.removeEventListener("timeupdate", onTimeUpdate);
-  }, []);
 
-  // Play/pause toggle
+    const onTimeUpdate = () => {
+      const t = video.currentTime;
+      setCurrentTime(t);
+
+      // Auto-stop at current active clip ending point
+      const currentClip = clips[activeClipIndex];
+      if (currentClip && !video.paused) {
+        if (t >= currentClip.end) {
+          video.pause();
+          video.currentTime = currentClip.end;
+          setCurrentTime(currentClip.end);
+          setIsPlaying(false);
+        }
+      }
+    };
+
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("play", onPlay);
+    video.addEventListener("pause", onPause);
+
+    return () => {
+      video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("pause", onPause);
+    };
+  }, [clips, activeClipIndex]);
+
+  // Play/pause toggle (Rewinds to clip start if at clip end)
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    const currentClip = clips[activeClipIndex];
+
     if (video.paused) {
-      video.play();
-      setIsPlaying(true);
+      // If playhead is at or beyond clip end, restart from clip start
+      if (currentClip && video.currentTime >= currentClip.end - 0.2) {
+        video.currentTime = currentClip.start;
+        setCurrentTime(currentClip.start);
+      }
+      video.play().catch(() => {});
     } else {
       video.pause();
-      setIsPlaying(false);
     }
-  }, []);
+  }, [clips, activeClipIndex]);
 
   // Seek relative
   const seekRelative = useCallback((delta: number) => {
@@ -152,13 +183,17 @@ export function ClipTimelineEditor({
     setPlaybackSpeed(speed);
   }, []);
 
-  // Seek to specific clip
-  const seekToClip = useCallback((index: number) => {
+  // Seek to specific clip and auto-play from start to end (stops at end)
+  const seekToClip = useCallback((index: number, autoPlay: boolean = true) => {
     const video = videoRef.current;
     if (!video || !clips[index]) return;
     setActiveClipIndex(index);
-    video.currentTime = clips[index].start;
-    setCurrentTime(clips[index].start);
+    const targetClip = clips[index];
+    video.currentTime = targetClip.start;
+    setCurrentTime(targetClip.start);
+    if (autoPlay) {
+      video.play().catch(() => {});
+    }
   }, [clips]);
 
   // Jump to clip start/end
@@ -174,24 +209,10 @@ export function ClipTimelineEditor({
     setCurrentTime(activeClip.end);
   }, [activeClip]);
 
-  // Preview active clip (play from start to end)
+  // Preview active clip (explicit preview trigger)
   const previewClip = useCallback((index: number) => {
-    const video = videoRef.current;
-    if (!video || !clips[index]) return;
-    setActiveClipIndex(index);
-    video.currentTime = clips[index].start;
-    video.play();
-    setIsPlaying(true);
-
-    const checkEnd = () => {
-      if (video.currentTime >= clips[index].end) {
-        video.pause();
-        setIsPlaying(false);
-        video.removeEventListener("timeupdate", checkEnd);
-      }
-    };
-    video.addEventListener("timeupdate", checkEnd);
-  }, [clips]);
+    seekToClip(index, true);
+  }, [seekToClip]);
 
   // Reset clip to AI original
   const resetClip = useCallback((index: number) => {
