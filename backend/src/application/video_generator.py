@@ -318,8 +318,7 @@ class VideoGenerator:
         return job
 
     def get_job(self, job_id: str) -> Optional[VideoGenJob]:
-        if job_id in self._jobs:
-            return self._jobs[job_id]
+        # Always check database first to maintain consistency across multi-worker processes
         try:
             from src.infrastructure.db_connection import get_dict_connection
             conn = get_dict_connection()
@@ -333,7 +332,8 @@ class VideoGenerator:
                 return job
         except Exception as exc:
             logger.warning(f"video_gen: failed to read job {job_id} from DB: {exc}")
-        return None
+
+        return self._jobs.get(job_id)
 
     def delete_job(self, job_id: str) -> bool:
         """Delete a video generation job and clean up its temporary and output files."""
@@ -408,12 +408,7 @@ class VideoGenerator:
             conn.close()
             for r in rows:
                 j = self._row_to_job(r)
-                # Keep in memory cache or merge with ongoing in-memory status
-                if j.job_id in self._jobs:
-                    mem_job = self._jobs[j.job_id]
-                    if mem_job.status not in (VideoGenStatus.COMPLETED, VideoGenStatus.FAILED):
-                        db_jobs.append(mem_job)
-                        continue
+                self._jobs[j.job_id] = j
                 db_jobs.append(j)
             return db_jobs
         except Exception as exc:
@@ -753,6 +748,8 @@ class VideoGenerator:
                     start_time=float(best.get("start_timestamp") or 0.0),
                     duration=max(10.0, float(scene.get("duration_estimate", 7)) + 4.0),
                     scene_id=scene.get("id", i + 1),
+                    platform=best.get("platform"),
+                    video_id=best.get("video_id"),
                 )
                 scene["footage_path"] = local_path
             except Exception as e:

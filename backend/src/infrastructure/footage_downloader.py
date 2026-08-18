@@ -14,7 +14,7 @@ import asyncio
 import logging
 import os
 import tempfile
-from typing import Optional
+from typing import Any, Optional, Union
 from uuid import uuid4
 
 import httpx
@@ -37,35 +37,90 @@ class FootageDownloader:
         self._output_dir = output_dir or settings.OUTPUT_DIR
         self._max_size_bytes = settings.BROLL_MAX_FOOTAGE_SIZE_MB * 1024 * 1024
 
+    async def download_segment(
+        self,
+        url: str,
+        start_time: float = 0.0,
+        duration: float = 10.0,
+        scene_id: Union[int, str] = 1,
+        platform: Optional[str] = None,
+        video_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Download footage segment for a scene.
+
+        Automatically routes:
+        - Direct HTTP/HTTPS stream download (Pexels, Pixabay, CDN)
+        - yt-dlp with section extraction (YouTube)
+        """
+        if not url:
+            return None
+
+        vid_id = str(video_id or f"scene_{scene_id}")
+        is_yt = (
+            (platform and platform.lower() == "youtube")
+            or "youtube.com" in url
+            or "youtu.be" in url
+        )
+
+        if is_yt:
+            return await self._download_youtube(
+                url=url,
+                start_ts=int(start_time),
+                duration_needed=duration,
+                video_id=vid_id,
+            )
+        else:
+            return await self._download_direct(
+                url=url,
+                video_id=vid_id,
+            )
+
     async def download(
         self,
-        candidate: VideoCandidate,
-        duration_needed: float,
+        candidate: Union[VideoCandidate, dict[str, Any]],
+        duration_needed: float = 10.0,
     ) -> Optional[str]:
-        """Download footage to a temp file.
+        """Download footage to a temp file from a VideoCandidate or dict.
 
         Args:
-            candidate: Selected VideoCandidate with source info.
+            candidate: Selected VideoCandidate or candidate dict with source info.
             duration_needed: Required footage duration (seconds) for YouTube trimming.
 
         Returns:
             Path to downloaded file, or None on failure.
         """
         try:
-            if candidate.platform in ("pexels", "pixabay"):
-                return await self._download_direct(candidate.embed_url, candidate.id)
-            elif candidate.platform == "youtube":
-                return await self._download_youtube(
-                    candidate.source_url,
-                    candidate.start_timestamp,
-                    duration_needed,
-                    candidate.id,
+            if isinstance(candidate, dict):
+                platform = candidate.get("platform", "pexels")
+                url = (
+                    candidate.get("embed_url")
+                    or candidate.get("url")
+                    or candidate.get("source_url", "")
                 )
+                vid_id = candidate.get("id") or candidate.get("video_id") or "video"
+                start_ts = float(candidate.get("start_timestamp") or 0.0)
             else:
-                logger.warning(f"footage_dl: unsupported platform '{candidate.platform}'")
-                return None
+                platform = candidate.platform
+                url = (
+                    candidate.embed_url
+                    or candidate.source_url
+                    or getattr(candidate, "url", "")
+                )
+                vid_id = candidate.id or getattr(candidate, "video_id", "video")
+                start_ts = float(candidate.start_timestamp or 0.0)
+
+            return await self.download_segment(
+                url=url,
+                start_time=start_ts,
+                duration=duration_needed,
+                platform=platform,
+                video_id=vid_id,
+            )
         except Exception as exc:
-            logger.warning(f"footage_dl: download failed for '{candidate.id}': {exc}")
+            cand_id = getattr(candidate, "id", None) or (
+                candidate.get("id") if isinstance(candidate, dict) else "unknown"
+            )
+            logger.warning(f"footage_dl: download failed for '{cand_id}': {exc}")
             return None
 
     async def _download_direct(self, url: str, video_id: str) -> Optional[str]:

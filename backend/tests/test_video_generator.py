@@ -227,3 +227,99 @@ def test_video_generator_preserves_hook_configuration():
     assert fetched.custom_hook == "CUSTOM HOOK HEADLINE"
     assert fetched.hook_style.get("animation") == "skia_neon_cyberpunk"
 
+
+import pytest
+from unittest.mock import AsyncMock
+from src.domain.entities import VideoCandidate
+from src.infrastructure.footage_downloader import FootageDownloader
+
+
+@pytest.mark.asyncio
+async def test_footage_downloader_download_segment_routing(monkeypatch, tmp_path):
+    downloader = FootageDownloader(output_dir=str(tmp_path))
+
+    mock_direct = AsyncMock(return_value="/tmp/direct.mp4")
+    mock_yt = AsyncMock(return_value="/tmp/yt.mp4")
+    monkeypatch.setattr(downloader, "_download_direct", mock_direct)
+    monkeypatch.setattr(downloader, "_download_youtube", mock_yt)
+
+    # 1. Pexels/Direct URL
+    res_direct = await downloader.download_segment(
+        url="https://images.pexels.com/videos/123/video.mp4",
+        start_time=0.0,
+        duration=7.5,
+        scene_id=1,
+        platform="pexels",
+        video_id="pexels_123",
+    )
+    assert res_direct == "/tmp/direct.mp4"
+    mock_direct.assert_called_once_with(
+        url="https://images.pexels.com/videos/123/video.mp4",
+        video_id="pexels_123",
+    )
+
+    # 2. YouTube URL
+    res_yt = await downloader.download_segment(
+        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        start_time=15.0,
+        duration=8.0,
+        scene_id=2,
+        platform="youtube",
+        video_id="dQw4w9WgXcQ",
+    )
+    assert res_yt == "/tmp/yt.mp4"
+    mock_yt.assert_called_once_with(
+        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        start_ts=15,
+        duration_needed=8.0,
+        video_id="dQw4w9WgXcQ",
+    )
+
+    # 3. download() with dict candidate
+    dict_cand = {
+        "platform": "pixabay",
+        "url": "https://cdn.pixabay.com/video/123.mp4",
+        "video_id": "pixabay_123",
+        "start_timestamp": 0,
+    }
+    res_cand = await downloader.download(dict_cand, duration_needed=5.0)
+    assert res_cand == "/tmp/direct.mp4"
+
+    # 4. download() with VideoCandidate object
+    vc = VideoCandidate(
+        id="vc_456",
+        platform="pexels",
+        embed_url="https://images.pexels.com/videos/456.mp4",
+    )
+    res_vc = await downloader.download(vc, duration_needed=6.0)
+    assert res_vc == "/tmp/direct.mp4"
+
+
+def test_video_generator_multi_worker_db_sync(tmp_path):
+    from src.application.video_generator import VideoGenStatus
+    from src.infrastructure.db_connection import get_dict_connection
+
+    # Simulate Worker 1
+    worker1_generator = VideoGenerator(output_dir=str(tmp_path))
+    job = worker1_generator.create_job(topic="Multi Worker Test")
+    job.status = VideoGenStatus.AWAITING_SELECTION
+    worker1_generator._jobs[job.job_id] = job
+    worker1_generator._persist_job(job)
+
+    # Simulate Worker 2 updating DB directly (rendering complete)
+    conn = get_dict_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE video_generator_jobs SET status = ?, output_path = ? WHERE job_id = ?",
+        (VideoGenStatus.COMPLETED.value, "/tmp/final_video.mp4", job.job_id),
+    )
+    conn.commit()
+    conn.close()
+
+    # Worker 1 receives stream/status request — must read fresh COMPLETED status from DB
+    fetched = worker1_generator.get_job(job.job_id)
+    assert fetched is not None
+    assert fetched.status == VideoGenStatus.COMPLETED
+    assert fetched.output_path == "/tmp/final_video.mp4"
+
+
