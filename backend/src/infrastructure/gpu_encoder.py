@@ -60,13 +60,13 @@ def get_video_encoder_args(quality: str = "medium") -> list[str]:
     """
     if _nvenc_available:
         # NVENC presets: p1 (fastest) → p7 (slowest/best quality)
-        # CQ: lower = better quality (18-28 typical range)
+        # CQ: lower = better quality (16-28 typical range)
         presets = {
-            "low": ("p1", "28"),
-            "medium": ("p4", "22"),
-            "high": ("p6", "18"),
+            "low": ("p3", "24"),
+            "medium": ("p5", "18"),   # Ultra crisp 1080p, pristine detail
+            "high": ("p6", "16"),     # Near-lossless studio master
         }
-        preset, cq = presets.get(quality, ("p4", "22"))
+        preset, cq = presets.get(quality, ("p5", "18"))
         return [
             "-c:v", "h264_nvenc",
             "-preset", preset,
@@ -76,11 +76,11 @@ def get_video_encoder_args(quality: str = "medium") -> list[str]:
     else:
         # libx264 fallback
         presets = {
-            "low": ("ultrafast", "23"),
-            "medium": ("fast", "18"),
+            "low": ("veryfast", "22"),
+            "medium": ("medium", "17"),  # Sharp HD
             "high": ("slow", "15"),
         }
-        preset, crf = presets.get(quality, ("fast", "18"))
+        preset, crf = presets.get(quality, ("medium", "17"))
         return [
             "-c:v", "libx264",
             "-preset", preset,

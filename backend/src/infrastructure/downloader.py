@@ -181,7 +181,7 @@ class YouTubeDownloader(IDownloader):
                     "--geo-bypass",
                     "--extractor-args", "youtube:player_client=ios,android",
                     *_get_cookie_args(),
-                    "-f", "best[height<=1080]/best",
+                    "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
                     "--merge-output-format", "mp4",
                     "-o", output_path,
                     "--no-warnings",

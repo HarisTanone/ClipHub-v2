@@ -17,7 +17,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PORT = Number(process.env.HYPERFRAMES_SERVER_PORT || process.env.PORT || 3003);
 const WORK = process.env.HYPERFRAMES_WORK_DIR || path.join(ROOT, 'work');
-const HF_TIMEOUT = Number(process.env.HYPERFRAMES_TIMEOUT || 180) * 1000;
+const HF_TIMEOUT = Number(process.env.HYPERFRAMES_TIMEOUT || 600) * 1000;
 
 fs.mkdirSync(WORK, { recursive: true });
 

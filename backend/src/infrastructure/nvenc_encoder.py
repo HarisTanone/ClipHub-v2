@@ -14,10 +14,10 @@ class NVENCEncoder:
     Fallback: libx264, preset fast, CRF 18
     """
 
-    NVENC_PRESET = "p4"
-    NVENC_CQ = "23"
-    LIBX264_PRESET = "fast"
-    LIBX264_CRF = "18"
+    NVENC_PRESET = "p5"
+    NVENC_CQ = "18"
+    LIBX264_PRESET = "medium"
+    LIBX264_CRF = "17"
 
     def __init__(self, use_nvenc: Optional[bool] = None):
         env_val = os.getenv("USE_NVENC", "false").lower()

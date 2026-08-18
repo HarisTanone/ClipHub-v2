@@ -301,7 +301,7 @@ class Settings(BaseSettings):
     HYPERFRAMES_SERVER_URL: str = "http://127.0.0.1:3003"
     HYPERFRAMES_SERVER_PORT: int = 3003
     HYPERFRAMES_PROJECT_PATH: str = "../hyperframes-renderer"
-    HYPERFRAMES_TIMEOUT: int = 180
+    HYPERFRAMES_TIMEOUT: int = 600
     HYPERFRAMES_DEFAULT_TEMPLATE: str = "lower_third_v1"
 
     # ─── Hermes agent (creative/template author; not per-clip batch) ───
