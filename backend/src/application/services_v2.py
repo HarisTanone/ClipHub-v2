@@ -2754,11 +2754,34 @@ class V2PipelineService:
                             r.get("ok")
                             and r.get("mode") == "hyperframes"
                             and os.path.exists(tmp_hook)
+                            and os.path.getsize(tmp_hook) > 1000
                         ):
                             current = tmp_hook
                         else:
-                            errors.append(f"clip {clip.rank} hook: {r}")
-                            continue
+                            logger.warning(
+                                f"[{job_id}] HyperFrames hook failed on clip {clip.rank} ({r}), falling back to Skia/FFmpeg hook"
+                            )
+                            # Fallback to Skia / FFmpeg hook
+                            fb_ok = False
+                            try:
+                                from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+                                skia_hook = SkiaHookRenderer(font_dir=getattr(self, "_fonts_dir", "assets/fonts"))
+                                hook_style = hook_style_config.get("animation", "skia_impact_badge") if hook_style_config else "skia_impact_badge"
+                                await skia_hook.render_hook(
+                                    current, clip.hook or "", tmp_hook,
+                                    hook_style=hook_style,
+                                    style_config=hook_style_config,
+                                )
+                                if os.path.exists(tmp_hook) and os.path.getsize(tmp_hook) > 1000:
+                                    current = tmp_hook
+                                    fb_ok = True
+                                    logger.info(f"[{job_id}] Skia hook fallback successful for clip {clip.rank}")
+                            except Exception as fb_exc:
+                                logger.warning(f"[{job_id}] Skia hook fallback failed: {fb_exc}")
+
+                            if not fb_ok:
+                                errors.append(f"clip {clip.rank} hook: {r}")
+                                continue
 
                 sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
                 if sub_engine == "hyperframes" and sub_enabled:
@@ -2792,11 +2815,32 @@ class V2PipelineService:
                             r.get("ok")
                             and r.get("mode") == "hyperframes"
                             and os.path.exists(tmp_sub)
+                            and os.path.getsize(tmp_sub) > 1000
                         ):
                             current = tmp_sub
                         else:
-                            errors.append(f"clip {clip.rank} sub: {r}")
-                            continue
+                            logger.warning(
+                                f"[{job_id}] HyperFrames subtitle failed on clip {clip.rank} ({r}), falling back to Skia subtitle"
+                            )
+                            # Fallback to Skia subtitle
+                            fb_ok = False
+                            try:
+                                from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+                                from src.infrastructure.subtitle_words import sanitize_subtitle_words
+                                renderer = SkiaSubtitleRenderer(font_dir=getattr(self, "_fonts_dir", "assets/fonts"))
+                                sub_min = hook_dur if clip.hook else 0.0
+                                words_clean = sanitize_subtitle_words(words, clip_dur, subtitle_min_start=sub_min)
+                                renderer.render_subtitles(current, words_clean, subtitle_style_config or {}, tmp_sub)
+                                if os.path.exists(tmp_sub) and os.path.getsize(tmp_sub) > 1000:
+                                    current = tmp_sub
+                                    fb_ok = True
+                                    logger.info(f"[{job_id}] Skia subtitle fallback successful for clip {clip.rank}")
+                            except Exception as fb_exc:
+                                logger.warning(f"[{job_id}] Skia subtitle fallback failed: {fb_exc}")
+
+                            if not fb_ok:
+                                errors.append(f"clip {clip.rank} sub: {r}")
+                                continue
 
                 if base_is_input and current == in_path:
                     # No hook/subtitle events: preserve the reusable base and
