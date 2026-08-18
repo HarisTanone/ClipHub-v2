@@ -87,7 +87,7 @@ def main():
     elif status == "completed":
         print(f"\nSelesai! {clips_success}/{clips_total} klip berhasil.")
         if available_clips:
-            api_url = os.environ.get("AUTOCLIPER_API_URL", "http://127.0.0.1:8000/api")
+            api_url = ac_auth.get_public_api_url()
             print(f"\nKlip tersedia ({len(available_clips)}):")
             for rank in available_clips:
                 print(f"  Klip #{rank}: {api_url}/jobs/{args.job_id}/clips/{rank}/final")

@@ -139,3 +139,85 @@ def api_post(path: str, body: dict) -> dict:
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def get_public_api_url() -> str:
+    """Resolve public accessible API URL for clickable user links (Telegram / Hermes)."""
+    # 1. Check explicit environment variables
+    for key in ("AUTOCLIPER_PUBLIC_URL", "PUBLIC_BACKEND_URL"):
+        val = os.environ.get(key, "").strip().rstrip("/")
+        if val:
+            if not val.endswith("/api"):
+                val = f"{val}/api"
+            return val
+
+    # 2. Check PUBLIC_HOST environment variable
+    public_host = os.environ.get("PUBLIC_HOST", "").strip()
+    if public_host and public_host not in ("127.0.0.1", "localhost", "0.0.0.0"):
+        return f"http://{public_host}:8000/api"
+
+    # 3. Inspect backend/.env or .hermes/.env
+    for root in (
+        Path(__file__).resolve().parents[3] / "backend" / ".env",
+        Path.cwd() / "backend" / ".env",
+        Path(HERMES_HOME) / ".env",
+    ):
+        if root.exists():
+            try:
+                with open(root) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("PUBLIC_BACKEND_URL="):
+                            url = line.split("=", 1)[1].strip().strip('"').strip("'").rstrip("/")
+                            if url and "127.0.0.1" not in url and "localhost" not in url:
+                                if not url.endswith("/api"):
+                                    url = f"{url}/api"
+                                return url
+                        elif line.startswith("PUBLIC_HOST="):
+                            host = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            if host and host not in ("127.0.0.1", "localhost", "0.0.0.0"):
+                                return f"http://{host}:8000/api"
+            except Exception:
+                pass
+
+    # 4. Fallback to configured internal API URL
+    return AUTOCLIPER_API
+
+
+def get_public_dashboard_url() -> str:
+    """Resolve public accessible frontend dashboard URL."""
+    # 1. Check explicit environment variables
+    for key in ("AUTOCLIPER_DASHBOARD_URL", "PUBLIC_FRONTEND_URL"):
+        val = os.environ.get(key, "").strip().rstrip("/")
+        if val:
+            return val
+
+    # 2. Check PUBLIC_HOST
+    public_host = os.environ.get("PUBLIC_HOST", "").strip()
+    if public_host and public_host not in ("127.0.0.1", "localhost", "0.0.0.0"):
+        return f"http://{public_host}:3001"
+
+    # 3. Inspect backend/.env or .hermes/.env
+    for root in (
+        Path(__file__).resolve().parents[3] / "backend" / ".env",
+        Path.cwd() / "backend" / ".env",
+        Path(HERMES_HOME) / ".env",
+    ):
+        if root.exists():
+            try:
+                with open(root) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("PUBLIC_FRONTEND_URL="):
+                            url = line.split("=", 1)[1].strip().strip('"').strip("'").rstrip("/")
+                            if url and "127.0.0.1" not in url and "localhost" not in url:
+                                return url
+                        elif line.startswith("PUBLIC_HOST="):
+                            host = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            if host and host not in ("127.0.0.1", "localhost", "0.0.0.0"):
+                                return f"http://{host}:3001"
+            except Exception:
+                pass
+
+    api = get_public_api_url()
+    return api.replace("/api", "")

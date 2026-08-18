@@ -69,6 +69,17 @@ else
     echo 'TELEGRAM_ALLOWED_USERS=' >> "$HERMES_HOME/.env"
     echo "  ⚠️  Set TELEGRAM_BOT_TOKEN di $HERMES_HOME/.env"
   fi
+  # Sync public URLs from backend/.env if available
+  if [ -f "$PROJECT_DIR/backend/.env" ]; then
+    PUBLIC_BACKEND_VAL="$(grep -E '^PUBLIC_BACKEND_URL=' "$PROJECT_DIR/backend/.env" 2>/dev/null | tail -n 1 | cut -d'=' -f2- | tr -d '\"' | tr -d "'")"
+    if [ -n "$PUBLIC_BACKEND_VAL" ] && ! grep -qE '^PUBLIC_BACKEND_URL=' "$HERMES_HOME/.env" 2>/dev/null; then
+      echo "PUBLIC_BACKEND_URL=$PUBLIC_BACKEND_VAL" >> "$HERMES_HOME/.env"
+    fi
+    PUBLIC_FRONTEND_VAL="$(grep -E '^PUBLIC_FRONTEND_URL=' "$PROJECT_DIR/backend/.env" 2>/dev/null | tail -n 1 | cut -d'=' -f2- | tr -d '\"' | tr -d "'")"
+    if [ -n "$PUBLIC_FRONTEND_VAL" ] && ! grep -qE '^PUBLIC_FRONTEND_URL=' "$HERMES_HOME/.env" 2>/dev/null; then
+      echo "PUBLIC_FRONTEND_URL=$PUBLIC_FRONTEND_VAL" >> "$HERMES_HOME/.env"
+    fi
+  fi
   echo "Kept existing $HERMES_HOME/.env"
 fi
 

@@ -129,9 +129,8 @@ def main():
         print(f"Status: {status}")
         print(f"\nPantau progress dengan: autocliper_job_status job_id={job_id}")
 
-    api_url = os.environ.get("AUTOCLIPER_API_URL", "http://127.0.0.1:8000/api")
-    base_url = api_url.replace("/api", "")
-    print(f"Dashboard: {base_url}")
+    dashboard_url = ac_auth.get_public_dashboard_url()
+    print(f"Dashboard: {dashboard_url}")
 
     # Metadata ke stderr untuk Hermes
     print(json.dumps({"job_id": job_id, "status": status, "is_cached": is_cached}), file=sys.stderr)

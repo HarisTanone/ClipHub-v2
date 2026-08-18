@@ -102,6 +102,7 @@ Wants=autocliper-backend.service
 Type=simple
 User=$DEPLOY_USER
 WorkingDirectory=$BOT_DIR
+EnvironmentFile=-$BACKEND_DIR/.env
 Environment=HERMES_HOME=$HERMES_HOME
 Environment=AUTOCLIPER_API_URL=http://127.0.0.1:8000/api
 ExecStart=$PYTHON_BIN $BOT_SCRIPT
