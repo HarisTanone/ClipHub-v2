@@ -203,14 +203,15 @@ async def analyze_only(
     if not gemini_result or "clips" not in gemini_result or not gemini_result["clips"]:
         raise HTTPException(status_code=500, detail="AI analysis gagal — tidak ada clip candidates")
 
-    # ─── Build response ─────────────────────────────────────────────
-    raw_clips = gemini_result["clips"]
+    # ─── Build response (Sorted chronologically by start timestamp) ──
+    raw_clips = list(gemini_result["clips"])
+    raw_clips.sort(key=lambda x: float(x.get("start", 0)))
     clips_out: list[ClipCandidate] = []
     for i, c in enumerate(raw_clips, start=1):
         start = float(c.get("start", 0))
         end = float(c.get("end", 0))
         clips_out.append(ClipCandidate(
-            rank=c.get("rank", i),
+            rank=i,
             start=start,
             end=end,
             duration=round(end - start, 2),

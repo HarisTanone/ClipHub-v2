@@ -508,6 +508,10 @@ class JobService:
                                 }
                                 for c in highlight_result.clips
                             ]
+                            clips_data.sort(key=lambda x: float(x.get("start", 0)))
+                            for idx, c in enumerate(clips_data, start=1):
+                                c["rank"] = idx
+
                             gemini_result = {
                                 "clips": clips_data,
                                 "creative_direction": {

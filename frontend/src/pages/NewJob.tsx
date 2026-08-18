@@ -171,9 +171,11 @@ export function NewJob() {
       }
       const result = await analyze.analyzeOnly(submitUrl);
       setAnalyzeResult(result);
+      const sortedClips = [...(result.clips || [])].sort((a, b) => a.start - b.start);
       setEditableClips(
-        result.clips.map((c) => ({
+        sortedClips.map((c, i) => ({
           ...c,
+          rank: i + 1,
           ai_start: c.start,
           ai_end: c.end,
           modified: false,
