@@ -163,3 +163,27 @@ def test_skia_subtitle_renderer_autogrid_dynamic_centering(tmp_path):
     out_disabled = str(tmp_path / "disabled.png")
     renderer._render_line_frame_pil(out_disabled, words_line, active_word_index=0, style=style_disabled, time_sec=6.0)
     assert os.path.exists(out_disabled)
+
+
+def test_resolve_engine_subtitle_presets():
+    from src.infrastructure.hf_style_catalog import resolve_engine
+    from src.infrastructure.subtitle_styles import SKIA_STYLES, FFMPEG_STYLES
+
+    # Every preset in SKIA_STYLES must resolve to 'skia'
+    for skia_id in SKIA_STYLES.keys():
+        assert resolve_engine({"stylePreset": skia_id}) == "skia", f"Failed for {skia_id}"
+        assert resolve_engine({"style_preset": skia_id}) == "skia"
+        assert resolve_engine({"preset": skia_id}) == "skia"
+        assert resolve_engine({"id": skia_id}) == "skia"
+
+    # Explicit engine overrides
+    assert resolve_engine({"engine": "skia", "stylePreset": "classic_karaoke"}) == "skia"
+    assert resolve_engine({"engine": "ffmpeg", "stylePreset": "glassmorphism"}) == "ffmpeg"
+
+    # FFmpeg presets
+    for ffmpeg_id in FFMPEG_STYLES.keys():
+        if ffmpeg_id == "neon_glow":
+            # neon_glow without engine resolves to skia for backward compatibility with task7, but with engine='ffmpeg' resolves to ffmpeg
+            assert resolve_engine({"engine": "ffmpeg", "stylePreset": ffmpeg_id}) == "ffmpeg"
+            continue
+        assert resolve_engine({"stylePreset": ffmpeg_id}) == "ffmpeg", f"Failed for {ffmpeg_id}"

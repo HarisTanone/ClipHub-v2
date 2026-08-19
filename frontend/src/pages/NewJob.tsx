@@ -223,7 +223,12 @@ export function NewJob() {
       },
       subtitle_style_config: {
         ...subtitleStyleConfig,
-        engine: subtitleStyleConfig.engine || (subtitleStyleConfig.stylePreset?.startsWith("skia_") || ["glassmorphism", "neon_glow", "gradient_pill", "comic_pop", "cyberpunk", "minimal_clean", "split_duotone", "impact_yellow"].includes(subtitleStyleConfig.stylePreset || "") ? "skia" : (subtitleStyleConfig.hf_template?.startsWith("sub_") ? "hyperframes" : "remotion")),
+        engine: subtitleStyleConfig.engine || (
+          ["glassmorphism", "clean_editorial", "podcast_pro", "kinetic_word_box", "neon_tube", "gradient_fill", "cinematic_slate", "modern_mono", "bold_impact_stroke", "dual_layer", "retro_chrome", "outline_stack"].includes(subtitleStyleConfig.stylePreset || "")
+          || subtitleStyleConfig.stylePreset?.startsWith("skia_")
+            ? "skia"
+            : (subtitleStyleConfig.hf_template?.startsWith("sub_") ? "hyperframes" : "ffmpeg")
+        ),
         hf_template: subtitleStyleConfig.hf_template,
       },
       broll_enabled: brollEnabled,

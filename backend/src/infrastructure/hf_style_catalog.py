@@ -108,10 +108,12 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     if eng in ("skia", "canvaskit", "skia-python", "skia_python"):
         return "skia"
 
-    # Auto-detect from animation, style, style_id, id, template, etc.
+    # Auto-detect from animation, style, style_id, id, stylePreset, template, etc.
     anim = str(
-        cfg.get("animation")
+        cfg.get("stylePreset")
+        or cfg.get("style_preset")
         or cfg.get("preset")
+        or cfg.get("animation")
         or cfg.get("style")
         or cfg.get("style_id")
         or cfg.get("id")
@@ -121,8 +123,32 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
 
     if anim.startswith("skia_") or anim.startswith("skia-") or "skia" in anim:
         return "skia"
-    if anim in ("glassmorphism", "neon_glow", "gradient_pill", "comic_pop", "cyberpunk", "minimal_clean", "split_duotone", "impact_yellow"):
+
+    if anim in (
+        "glassmorphism", "clean_editorial", "podcast_pro", "kinetic_word_box",
+        "neon_tube", "gradient_fill", "cinematic_slate", "modern_mono",
+        "bold_impact_stroke", "dual_layer", "retro_chrome", "outline_stack",
+        "neon_glow", "gradient_pill", "comic_pop", "cyberpunk", "minimal_clean",
+        "split_duotone", "impact_yellow",
+    ):
         return "skia"
+
+    try:
+        from src.infrastructure.subtitle_styles import SKIA_STYLES, FFMPEG_STYLES
+        if anim in SKIA_STYLES:
+            return "skia"
+        if anim in FFMPEG_STYLES or anim.startswith("ffmpeg_"):
+            return "ffmpeg"
+    except Exception:
+        pass
+
+    if anim in (
+        "classic_karaoke", "hormozi_pop", "devon_clean", "podcast_dialogue",
+        "bold_impact", "cinematic_bar", "fire_emphasis", "glass_blur",
+        "tech_mono", "gold_luxury", "minimal_lower", "classic",
+    ):
+        return "ffmpeg"
+
     if anim.startswith("hook_") or anim.startswith("sub_") or anim.startswith("hf_"):
         return "hyperframes"
     return "remotion"
