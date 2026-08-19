@@ -6,7 +6,7 @@ import logging
 import sqlite3
 
 from src.config import settings
-from src.infrastructure.auth import hash_password
+from src.infrastructure.auth import hash_password, verify_password
 from src.infrastructure.db_connection import get_dict_connection
 
 logger = logging.getLogger(__name__)
@@ -171,7 +171,7 @@ def seed_database() -> None:
             cur.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (3, ?)", (viewer_perm["id"],))
 
         # 5. Seed superadmin user
-        cur.execute("SELECT id FROM users WHERE email = ?", (settings.SUPERADMIN_EMAIL,))
+        cur.execute("SELECT id, hashed_password FROM users WHERE email = ?", (settings.SUPERADMIN_EMAIL,))
         existing = cur.fetchone()
         if not existing:
             hashed = hash_password(settings.SUPERADMIN_PASSWORD)
@@ -181,7 +181,15 @@ def seed_database() -> None:
             )
             logger.info(f"db_seeder: superadmin created ({settings.SUPERADMIN_EMAIL})")
         else:
-            logger.info(f"db_seeder: superadmin already exists ({settings.SUPERADMIN_EMAIL})")
+            if not verify_password(settings.SUPERADMIN_PASSWORD, existing["hashed_password"]):
+                new_hashed = hash_password(settings.SUPERADMIN_PASSWORD)
+                cur.execute(
+                    "UPDATE users SET hashed_password = ?, is_active = 1, role_id = 1 WHERE id = ?",
+                    (new_hashed, existing["id"]),
+                )
+                logger.info(f"db_seeder: superadmin password updated to match settings ({settings.SUPERADMIN_EMAIL})")
+            else:
+                logger.info(f"db_seeder: superadmin already exists ({settings.SUPERADMIN_EMAIL})")
 
         # 6. Seed B-Roll templates
         templates = [
