@@ -614,38 +614,48 @@ def build_overlay_card(
         img_region = card[sy0:sy0 + box, sx0:sx0 + box, c]
         card[sy0:sy0 + box, sx0:sx0 + box, c] = np.where(edge > 0, val, img_region)
 
-    # ── 4. Glassmorphism Pill Label ──
+    # ── 4. Glassmorphism Pill Label with Live Indicator ──
     if label_h > 0:
         lbl_y0 = sy0 + box - 4
         lbl_y1 = lbl_y0 + label_h + 4
         lbl_x0 = sx0 + 4
         lbl_x1 = sx0 + box - 4
 
-        # Pill background
+        # Pill background (dark translucent glass)
         pill_mask = np.zeros((card_h, card_w), dtype=np.uint8)
-        cv2.rectangle(pill_mask, (lbl_x0, lbl_y0), (lbl_x1, lbl_y1), 235, -1)
+        cv2.rectangle(pill_mask, (lbl_x0, lbl_y0), (lbl_x1, lbl_y1), 245, -1)
 
         for c, val in enumerate(bg):
             card[lbl_y0:lbl_y1, lbl_x0:lbl_x1, c] = val
         card[:, :, 3] = np.maximum(card[:, :, 3], pill_mask)
 
-        # Border for pill
+        # Border for pill with subtle neon accent
         bgr = np.ascontiguousarray(card[:, :, :3])
         cv2.rectangle(bgr, (lbl_x0, lbl_y0), (lbl_x1, lbl_y1), bc, 1)
 
-        # High-contrast label text with badge indicator
+        # High-contrast label text with live indicator dot
         clean_text = str(label).strip()[:16].upper()
-        badge_text = f"{clean_text}"
         font = cv2.FONT_HERSHEY_DUPLEX
         scale = max(0.32, float(font_scale) * (box / 210.0))
         thickness = 1
-        (tw, th), _ = cv2.getTextSize(badge_text, font, scale, thickness)
-        tx = max(lbl_x0 + 6, (lbl_x0 + lbl_x1 - tw) // 2)
+        (tw, th), _ = cv2.getTextSize(clean_text, font, scale, thickness)
+        
+        # Center text with space for accent dot
+        dot_radius = max(2, int(scale * 4.5))
+        spacing = dot_radius * 3
+        total_content_w = tw + spacing
+        tx = max(lbl_x0 + 10, (lbl_x0 + lbl_x1 - total_content_w) // 2 + spacing)
         ty = lbl_y0 + (label_h + th) // 2 + 1
+        dot_cx = tx - spacing + dot_radius
+        dot_cy = ty - (th // 2)
 
-        # Drop shadow for text
-        cv2.putText(bgr, badge_text, (tx + 1, ty + 1), font, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
-        cv2.putText(bgr, badge_text, (tx, ty), font, scale, tc, thickness, cv2.LINE_AA)
+        # Draw glowing accent dot
+        cv2.circle(bgr, (dot_cx, dot_cy), dot_radius + 1, (0, 0, 0), -1, cv2.LINE_AA)
+        cv2.circle(bgr, (dot_cx, dot_cy), dot_radius, bc, -1, cv2.LINE_AA)
+
+        # Drop shadow for text + main text
+        cv2.putText(bgr, clean_text, (tx + 1, ty + 1), font, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+        cv2.putText(bgr, clean_text, (tx, ty), font, scale, tc, thickness, cv2.LINE_AA)
         card[:, :, :3] = bgr
 
     return card

@@ -331,8 +331,23 @@ class TopBehindSubjectRenderer:
         ih, iw = image.shape[:2]
         if ih <= 0 or iw <= 0:
             return np.zeros((target_h, target_w, 3), dtype=np.uint8)
-        # Slightly more overscale so subject has crop room without edge chop.
-        scale = max(target_w / iw, target_h / ih) * 1.22
+
+        # If target is portrait (9:16) and source footage is landscape/16:9:
+        # Fit the 16:9 width naturally to display full visual context without 2.2x over-zoom,
+        # placing it in the top band where the soft gradient smoothly fades into background.
+        if target_h > target_w and iw >= ih:
+            top_target_h = int(target_h * float(np.clip(self.split_ratio, 0.35, 0.65)))
+            scale = max(target_w / iw, top_target_h / ih)
+            nw, nh = max(target_w, int(round(iw * scale))), max(1, int(round(ih * scale)))
+            resized = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_AREA)
+            x0 = max(0, (nw - target_w) // 2)
+            out_frame = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+            copy_h = min(nh, target_h)
+            out_frame[:copy_h, :target_w] = resized[:copy_h, x0 : x0 + target_w]
+            return out_frame
+
+        # Standard cover crop for square/portrait sources
+        scale = max(target_w / iw, target_h / ih) * 1.12
         nw, nh = max(1, int(round(iw * scale))), max(1, int(round(ih * scale)))
         resized = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_AREA)
         max_x = max(0, nw - target_w)
