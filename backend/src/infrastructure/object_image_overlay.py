@@ -28,7 +28,7 @@ def default_object_overlay_style() -> dict[str, Any]:
         "max_per_clip": int(getattr(settings, "OBJECT_OVERLAY_MAX_PER_CLIP", 3)),
         "box_size_ratio": float(getattr(settings, "OBJECT_OVERLAY_BOX_SIZE", 0.28)),
         "corner_radius": int(getattr(settings, "OBJECT_OVERLAY_CORNER_RADIUS", 18)),
-        "position": str(getattr(settings, "OBJECT_OVERLAY_POSITION", "top_right")),
+        "position": str(getattr(settings, "OBJECT_OVERLAY_POSITION", "auto")),
         "animation": str(getattr(settings, "OBJECT_OVERLAY_ANIMATION", "slide_right")),
         "duration_sec": float(getattr(settings, "OBJECT_OVERLAY_DURATION", 2.4)),
         "margin_ratio": float(getattr(settings, "OBJECT_OVERLAY_MARGIN", 0.04)),
@@ -66,11 +66,11 @@ def normalise_object_overlay_style(raw: object = None) -> dict[str, Any]:
         "slide_right", "slide_left", "slide_down", "slide_up", "fade", "pop",
     }:
         out["animation"] = "slide_right"
-    pos = str(out.get("position") or "top_right").lower()
+    pos = str(out.get("position") or "auto").lower()
     if pos not in {
-        "top_right", "top_left", "bottom_right", "bottom_left", "center_right", "center_left",
+        "auto", "dynamic", "smart", "top_right", "top_left", "bottom_right", "bottom_left", "center_right", "center_left", "top_center",
     }:
-        out["position"] = "top_right"
+        out["position"] = "auto"
     out["box_size_ratio"] = min(0.55, max(0.12, float(out["box_size_ratio"])))
     out["duration_sec"] = min(5.0, max(1.0, float(out["duration_sec"])))
     out["max_per_clip"] = min(10, max(0, int(out["max_per_clip"])))
@@ -362,6 +362,33 @@ def score_image_relevance(
     return max(0.0, min(1.0, score))
 
 
+def _load_card_font(font_size: int = 24):
+    from PIL import ImageFont
+    candidates = [
+        "PlusJakartaSans-Bold.ttf",
+        "Montserrat-Variable.ttf",
+        "Inter-Variable.ttf",
+        "Poppins-Bold.ttf",
+        "Roboto-Bold.ttf",
+    ]
+    search_dirs = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts")),
+        os.path.abspath(os.path.join(os.getcwd(), "backend", "assets", "fonts")),
+        os.path.abspath(os.path.join(os.getcwd(), "assets", "fonts")),
+    ]
+    for d in search_dirs:
+        if not d or not os.path.exists(d):
+            continue
+        for name in candidates:
+            p = os.path.join(d, name)
+            if os.path.exists(p):
+                try:
+                    return ImageFont.truetype(p, font_size)
+                except Exception:
+                    pass
+    return ImageFont.load_default()
+
+
 def _photo_queries(
     query_id: str,
     query_en: str,
@@ -369,7 +396,7 @@ def _photo_queries(
     word: str = "",
     label: str = "",
 ) -> list[str]:
-    """Deduped multi-query list — EN first, then ID, then extras."""
+    """Deduped multi-query list — high precision English queries first, then specific queries."""
     out: list[str] = []
     seen: set[str] = set()
 
@@ -381,7 +408,7 @@ def _photo_queries(
         seen.add(low)
         out.append(q)
 
-    for q in (word, query_en, query_id, *(search_queries or []), label):
+    for q in (query_en, *(search_queries or []), label, query_id):
         _add(q)
     return out[:6]
 
@@ -399,7 +426,7 @@ async def search_stock_photo(
     search_queries: list[str] | None = None,
     exclude_ids: set[str] | None = None,
 ) -> Optional[dict[str, Any]]:
-    """Search Pexels/Pixabay multi-query; skip already-used photo ids."""
+    """Search Pexels/Pixabay multi-query; skip already-used photo ids; strictly enforce min_relevance."""
     os.makedirs(download_dir, exist_ok=True)
     candidates: list[dict] = []
     seen_ids: set[str] = set()
@@ -498,12 +525,10 @@ async def search_stock_photo(
     rel = float(best.get("relevance") or 0)
     if rel < min_relevance:
         logger.info(
-            "object_overlay: best relevance %.2f < min %.2f for '%s' q=%s",
+            "object_overlay: best relevance %.2f < min %.2f for '%s' q=%s — skipping to avoid wrong image",
             rel, min_relevance, label or word, best.get("query"),
         )
-        # Weak match without entity token → skip (stops same junk image reuse)
-        if rel < 0.22:
-            return None
+        return None
 
     url = best["url"]
     ext = ".jpg"
@@ -540,128 +565,144 @@ def build_overlay_card(
     image_path: str,
     label: str,
     *,
-    box_px: int = 200,
-    corner_radius: int = 18,
+    box_px: int = 220,
+    corner_radius: int = 20,
     text_color: str = "255,255,255",
-    bg_color: str = "20,20,24",
-    border_color: str = "255,255,255",
+    bg_color: str = "10,15,29",
+    border_color: str = "6,182,212",
     font_scale: float = 0.55,
     show_label: bool = True,
 ) -> Optional[Any]:
-    """Build BGRA glassmorphism card: rounded thumbnail + pill badge + drop shadow."""
+    """Build BGRA ultra-crisp glassmorphism card with Pillow + Google Fonts anti-aliasing."""
     try:
-        import cv2
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont
         import numpy as np
     except ImportError:
         return None
-    img = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    if img is None:
+
+    if not os.path.exists(image_path):
         return None
-    box = max(64, int(box_px))
-    radius = max(0, min(corner_radius, box // 3))
-    # square cover crop
-    h, w = img.shape[:2]
-    side = min(h, w)
-    y0 = (h - side) // 2
-    x0 = (w - side) // 2
-    crop = img[y0:y0 + side, x0:x0 + side]
-    thumb = cv2.resize(crop, (box, box), interpolation=cv2.INTER_AREA)
 
-    label_h = int(box * 0.26) if show_label and label else 0
-    shadow_margin = 12
-    card_h = box + label_h + shadow_margin
-    card_w = box + shadow_margin
-    bg = _parse_rgb(bg_color, (15, 23, 42))  # modern dark slate
+    try:
+        raw_photo = Image.open(image_path).convert("RGBA")
+    except Exception:
+        return None
+
+    # Sleek 16:11 aspect ratio card dimensions
+    card_w = max(140, int(box_px * 1.15))
+    has_label = bool(show_label and label and label.strip())
+    label_h = int(card_w * 0.28) if has_label else 0
+    photo_h = int(card_w * 0.72)
+    card_h = photo_h + label_h
+    radius = max(8, min(corner_radius, card_w // 4))
+
+    shadow_pad = 18
+    full_w = card_w + shadow_pad * 2
+    full_h = card_h + shadow_pad * 2
+
+    # Parse colors
     tc = _parse_rgb(text_color, (255, 255, 255))
-    bc = _parse_rgb(border_color, (56, 189, 248))  # cyan/emerald neon accent
+    bc = _parse_rgb(border_color, (6, 182, 212))
+    bg = _parse_rgb(bg_color, (10, 15, 29))
 
-    card = np.zeros((card_h, card_w, 4), dtype=np.uint8)
-
-    # ── 1. Soft Blurred Drop Shadow ──
-    shadow_mask = np.zeros((card_h, card_w), dtype=np.uint8)
-    sx0, sy0 = shadow_margin // 2, shadow_margin // 2
-    cv2.rectangle(
-        shadow_mask,
-        (sx0 + 2, sy0 + 4),
-        (sx0 + box - 2, sy0 + box + label_h - 2),
-        160,
-        -1,
+    # 1. Base Transparent Canvas with Gaussian Blurred Drop Shadow
+    full_canvas = Image.new("RGBA", (full_w, full_h), (0, 0, 0, 0))
+    shadow = Image.new("RGBA", (full_w, full_h), (0, 0, 0, 0))
+    s_draw = ImageDraw.Draw(shadow)
+    s_draw.rounded_rectangle(
+        [shadow_pad, shadow_pad + 6, shadow_pad + card_w, shadow_pad + card_h + 6],
+        radius=radius,
+        fill=(0, 0, 0, 160),
     )
-    shadow_blur = cv2.GaussianBlur(shadow_mask, (15, 15), 0)
-    card[:, :, 3] = shadow_blur
+    shadow = shadow.filter(ImageFilter.GaussianBlur(12))
+    full_canvas.paste(shadow, (0, 0), shadow)
 
-    # ── 2. Rounded Thumbnail Mask ──
-    mask = np.zeros((box, box), dtype=np.uint8)
-    if radius > 0:
-        cv2.rectangle(mask, (radius, 0), (box - radius - 1, box - 1), 255, -1)
-        cv2.rectangle(mask, (0, radius), (box - 1, box - radius - 1), 255, -1)
-        cv2.circle(mask, (radius, radius), radius, 255, -1)
-        cv2.circle(mask, (box - radius - 1, radius), radius, 255, -1)
-        cv2.circle(mask, (radius, box - radius - 1), radius, 255, -1)
-        cv2.circle(mask, (box - radius - 1, box - radius - 1), radius, 255, -1)
+    # 2. Main Card Surface
+    card_surface = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+    c_draw = ImageDraw.Draw(card_surface)
+
+    # Photo Cover Crop
+    pw, ph = raw_photo.size
+    target_aspect = card_w / float(photo_h)
+    curr_aspect = pw / float(ph)
+    if curr_aspect > target_aspect:
+        new_w = int(ph * target_aspect)
+        x0 = (pw - new_w) // 2
+        crop_box = (x0, 0, x0 + new_w, ph)
     else:
-        cv2.rectangle(mask, (0, 0), (box - 1, box - 1), 255, -1)
+        new_h = int(pw / target_aspect)
+        y0 = (ph - new_h) // 2
+        crop_box = (0, y0, pw, y0 + new_h)
 
-    # Copy image with rounded mask
-    for c in range(3):
-        card[sy0:sy0 + box, sx0:sx0 + box, c] = thumb[:, :, c]
-    card[sy0:sy0 + box, sx0:sx0 + box, 3] = np.maximum(
-        card[sy0:sy0 + box, sx0:sx0 + box, 3], mask
+    photo_cropped = raw_photo.crop(crop_box).resize((card_w, photo_h), Image.Resampling.LANCZOS)
+    card_surface.paste(photo_cropped, (0, 0))
+
+    # Subtle inner vignette/gradient on photo bottom
+    grad_h = min(40, photo_h // 2)
+    for gy in range(grad_h):
+        alpha_val = int(140 * (gy / float(grad_h)))
+        c_draw.line([0, photo_h - grad_h + gy, card_w, photo_h - grad_h + gy], fill=(0, 0, 0, alpha_val), width=1)
+
+    # 3. Glassmorphic Footer Bar
+    if has_label:
+        footer_y0 = photo_h
+        # Translucent dark glass fill
+        c_draw.rectangle([0, footer_y0, card_w, card_h], fill=(bg[0], bg[1], bg[2], 245))
+        # Glossy divider line
+        c_draw.line([0, footer_y0, card_w, footer_y0], fill=(255, 255, 255, 45), width=1)
+
+        # Anti-aliased typography & live status badge
+        clean_text = str(label).strip()[:18].upper()
+        font_size = max(14, int(18 * float(font_scale) * (card_w / 220.0)))
+        font = _load_card_font(font_size)
+
+        # Measure text
+        bbox = c_draw.textbbox((0, 0), clean_text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+
+        dot_radius = max(3, font_size // 4)
+        dot_gap = 10
+        total_w = dot_radius * 2 + dot_gap + tw
+        start_x = max(12, (card_w - total_w) // 2)
+        center_y = footer_y0 + label_h // 2
+
+        # Glowing neon dot
+        dot_cx = start_x + dot_radius
+        dot_cy = center_y
+        c_draw.ellipse(
+            [dot_cx - dot_radius - 2, dot_cy - dot_radius - 2, dot_cx + dot_radius + 2, dot_cy + dot_radius + 2],
+            fill=(bc[0], bc[1], bc[2], 90),
+        )
+        c_draw.ellipse(
+            [dot_cx - dot_radius, dot_cy - dot_radius, dot_cx + dot_radius, dot_cy + dot_radius],
+            fill=(bc[0], bc[1], bc[2], 255),
+        )
+
+        # Drop shadow for text
+        text_x = start_x + dot_radius * 2 + dot_gap
+        text_y = center_y - th // 2 - 1
+        c_draw.text((text_x + 1, text_y + 1), clean_text, font=font, fill=(0, 0, 0, 220))
+        c_draw.text((text_x, text_y), clean_text, font=font, fill=(tc[0], tc[1], tc[2], 255))
+
+    # 4. Outer Glowing Border with Rounded Mask
+    mask = Image.new("L", (card_w, card_h), 0)
+    m_draw = ImageDraw.Draw(mask)
+    m_draw.rounded_rectangle([0, 0, card_w, card_h], radius=radius, fill=255)
+
+    c_draw.rounded_rectangle(
+        [0, 0, card_w - 1, card_h - 1],
+        radius=radius,
+        outline=(bc[0], bc[1], bc[2], 220),
+        width=2,
     )
 
-    # ── 3. Glowing Border Ring ──
-    border = np.zeros((box, box), dtype=np.uint8)
-    cv2.rectangle(border, (1, 1), (box - 2, box - 2), 255, 2)
-    edge = cv2.bitwise_and(border, mask)
-    for c, val in enumerate(bc):
-        img_region = card[sy0:sy0 + box, sx0:sx0 + box, c]
-        card[sy0:sy0 + box, sx0:sx0 + box, c] = np.where(edge > 0, val, img_region)
+    full_canvas.paste(card_surface, (shadow_pad, shadow_pad), mask)
 
-    # ── 4. Glassmorphism Pill Label with Live Indicator ──
-    if label_h > 0:
-        lbl_y0 = sy0 + box - 4
-        lbl_y1 = lbl_y0 + label_h + 4
-        lbl_x0 = sx0 + 4
-        lbl_x1 = sx0 + box - 4
-
-        # Pill background (dark translucent glass)
-        pill_mask = np.zeros((card_h, card_w), dtype=np.uint8)
-        cv2.rectangle(pill_mask, (lbl_x0, lbl_y0), (lbl_x1, lbl_y1), 245, -1)
-
-        for c, val in enumerate(bg):
-            card[lbl_y0:lbl_y1, lbl_x0:lbl_x1, c] = val
-        card[:, :, 3] = np.maximum(card[:, :, 3], pill_mask)
-
-        # Border for pill with subtle neon accent
-        bgr = np.ascontiguousarray(card[:, :, :3])
-        cv2.rectangle(bgr, (lbl_x0, lbl_y0), (lbl_x1, lbl_y1), bc, 1)
-
-        # High-contrast label text with live indicator dot
-        clean_text = str(label).strip()[:16].upper()
-        font = cv2.FONT_HERSHEY_DUPLEX
-        scale = max(0.32, float(font_scale) * (box / 210.0))
-        thickness = 1
-        (tw, th), _ = cv2.getTextSize(clean_text, font, scale, thickness)
-        
-        # Center text with space for accent dot
-        dot_radius = max(2, int(scale * 4.5))
-        spacing = dot_radius * 3
-        total_content_w = tw + spacing
-        tx = max(lbl_x0 + 10, (lbl_x0 + lbl_x1 - total_content_w) // 2 + spacing)
-        ty = lbl_y0 + (label_h + th) // 2 + 1
-        dot_cx = tx - spacing + dot_radius
-        dot_cy = ty - (th // 2)
-
-        # Draw glowing accent dot
-        cv2.circle(bgr, (dot_cx, dot_cy), dot_radius + 1, (0, 0, 0), -1, cv2.LINE_AA)
-        cv2.circle(bgr, (dot_cx, dot_cy), dot_radius, bc, -1, cv2.LINE_AA)
-
-        # Drop shadow for text + main text
-        cv2.putText(bgr, clean_text, (tx + 1, ty + 1), font, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
-        cv2.putText(bgr, clean_text, (tx, ty), font, scale, tc, thickness, cv2.LINE_AA)
-        card[:, :, :3] = bgr
-
-    return card
+    # Convert PIL RGBA to OpenCV BGRA numpy array
+    rgba_arr = np.array(full_canvas)
+    bgra_arr = rgba_arr[:, :, [2, 1, 0, 3]]
+    return np.ascontiguousarray(bgra_arr)
 
 
 def _anchor_xy(
@@ -921,7 +962,7 @@ class ObjectImageOverlayRenderer:
 
         frame_i = 0
         opacity_base = float(style.get("opacity", 0.95))
-        position = str(style.get("position", "top_right"))
+        position = str(style.get("position", "auto"))
         animation = str(style.get("animation", "slide_right"))
         margin = float(style.get("margin_ratio", 0.04))
 
@@ -930,13 +971,19 @@ class ObjectImageOverlayRenderer:
             if not ok:
                 break
             t = frame_i / fps
-            for ev, card in cards:
+            for ev_idx, (ev, card) in enumerate(cards):
                 t0 = float(ev.at_time)
                 dur = float(ev.duration)
                 if t < t0 or t > t0 + dur:
                     continue
                 ch, cw = card.shape[:2]
-                ax, ay = _anchor_xy(fw, fh, cw, ch, position, margin)
+                ax, ay = _anchor_xy(
+                    fw, fh, cw, ch,
+                    position=position,
+                    margin_ratio=margin,
+                    speaker_cx=None,
+                    event_index=ev_idx,
+                )
                 dx, dy, amul, smul = _anim_offset(t - t0, dur, animation, cw, ch, with_scale=True)
 
                 # Ken Burns Micro-Zoom: smooth scale expansion

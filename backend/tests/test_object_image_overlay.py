@@ -219,7 +219,7 @@ def test_style_normalise_clamps():
         "max_per_clip": 99,
     })
     assert s["animation"] == "slide_right"
-    assert s["position"] == "top_right"
+    assert s["position"] == "auto"
     assert s["box_size_ratio"] <= 0.55
     assert s["max_per_clip"] <= 10
 

@@ -297,7 +297,7 @@ const OBJECT_OVERLAY_DEFAULTS: ObjectOverlayConfig = {
   max_per_clip: 3,
   box_size_ratio: 0.28,
   corner_radius: 18,
-  position: "top_right",
+  position: "auto",
   animation: "slide_right",
   duration_sec: 2.4,
   margin_ratio: 0.04,
@@ -1830,12 +1830,13 @@ export function Settings() {
                   value={objectOverlay.position}
                   onChange={(e) => handleObjectChange("position", e.target.value)}
                   options={[
-                    { value: "top_right", label: "Top right" },
-                    { value: "top_left", label: "Top left" },
-                    { value: "bottom_right", label: "Bottom right" },
-                    { value: "bottom_left", label: "Bottom left" },
-                    { value: "center_right", label: "Center right" },
-                    { value: "center_left", label: "Center left" },
+                    { value: "auto", label: "✨ Dynamic Auto (Speaker Avoidance)" },
+                    { value: "top_left", label: "Top Left" },
+                    { value: "top_right", label: "Top Right" },
+                    { value: "center_left", label: "Center Left" },
+                    { value: "center_right", label: "Center Right" },
+                    { value: "bottom_left", label: "Bottom Left" },
+                    { value: "bottom_right", label: "Bottom Right" },
                   ]}
                 />
                 <Select
