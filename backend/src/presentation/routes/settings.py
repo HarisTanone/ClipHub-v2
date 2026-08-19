@@ -10,11 +10,11 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.config import settings
 from src.infrastructure.db_connection import get_dict_connection
@@ -1068,4 +1068,117 @@ async def reset_hyperframes_endpoint(user: CurrentUser = Depends(get_current_use
         }
     finally:
         conn.close()
+
+
+# ─── Dynamic Database System Config with RBAC ─────────────────────────────────
+
+class SystemConfigUpdateRequest(BaseModel):
+    settings: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SystemConfigResetRequest(BaseModel):
+    key: Optional[str] = None
+
+
+@router.get("/system-config")
+async def get_system_config_endpoint(
+    unmask: bool = False,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Retrieve dynamic system settings filtered by current user role."""
+    from src.infrastructure.system_config_store import (
+        get_all_settings_for_role,
+        ROLE_LEVELS,
+    )
+
+    user_role = getattr(user, "role", "viewer") or "viewer"
+    can_unmask = user.is_superadmin or ROLE_LEVELS.get(user_role.lower(), 1) >= 3
+
+    items = get_all_settings_for_role(user_role, unmask_secrets=(unmask and can_unmask))
+    return {
+        "success": True,
+        "role": user_role,
+        "can_edit_secrets": can_unmask,
+        "count": len(items),
+        "data": items,
+    }
+
+
+@router.put("/system-config")
+async def update_system_config_endpoint(
+    req: SystemConfigUpdateRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Bulk update dynamic system settings with role permission validation."""
+    from src.infrastructure.system_config_store import (
+        SYSTEM_SETTINGS_METADATA,
+        ROLE_LEVELS,
+        bulk_set_system_settings,
+    )
+
+    user_role = getattr(user, "role", "viewer") or "viewer"
+    user_level = ROLE_LEVELS.get(user_role.lower(), 1)
+
+    # Validate permissions for each requested key
+    denied_keys = []
+    allowed_updates = {}
+
+    for k, v in req.settings.items():
+        if k not in SYSTEM_SETTINGS_METADATA:
+            continue
+        req_role = SYSTEM_SETTINGS_METADATA[k]["min_role"]
+        req_level = ROLE_LEVELS.get(req_role, 3)
+
+        if user_level < req_level:
+            denied_keys.append(k)
+        else:
+            # Don't update if secret is passed as masked placeholder
+            if SYSTEM_SETTINGS_METADATA[k]["is_secret"] and isinstance(v, str) and ("..." in v or "******" in v):
+                continue
+            allowed_updates[k] = v
+
+    if denied_keys:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Forbidden: Your role '{user_role}' cannot modify: {', '.join(denied_keys)}"
+        )
+
+    updated_count = bulk_set_system_settings(allowed_updates, user_id=user.id)
+    return {
+        "success": True,
+        "message": f"{updated_count} system settings successfully updated",
+        "updated_count": updated_count,
+    }
+
+
+@router.post("/system-config/reset")
+async def reset_system_config_endpoint(
+    req: SystemConfigResetRequest,
+    user: CurrentUser = Depends(require_superadmin()),
+):
+    """Reset one or all system settings to system metadata defaults (superadmin only)."""
+    from src.infrastructure.system_config_store import (
+        SYSTEM_SETTINGS_METADATA,
+        set_system_setting,
+        seed_system_settings_defaults,
+    )
+
+    if req.key:
+        if req.key not in SYSTEM_SETTINGS_METADATA:
+            raise HTTPException(status_code=404, detail=f"Unknown setting key '{req.key}'")
+        default_val = SYSTEM_SETTINGS_METADATA[req.key]["default"]
+        set_system_setting(req.key, default_val, user_id=user.id)
+        return {
+            "success": True,
+            "message": f"Setting '{req.key}' reset to default",
+            "key": req.key,
+            "value": default_val,
+        }
+
+    seed_system_settings_defaults()
+    return {
+        "success": True,
+        "message": "All system settings reset to defaults",
+    }
+
 

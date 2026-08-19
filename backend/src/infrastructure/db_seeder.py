@@ -105,6 +105,20 @@ CREATE TABLE IF NOT EXISTS transcript_cache (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Dynamic System Settings with RBAC
+CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'general',
+    data_type TEXT NOT NULL DEFAULT 'string',
+    min_role TEXT NOT NULL DEFAULT 'superadmin',
+    is_secret INTEGER NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_by INTEGER DEFAULT NULL,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+);
 """
 
 
@@ -192,6 +206,15 @@ def seed_database() -> None:
             )
 
         conn.commit()
+
+        # 7. Seed dynamic system settings defaults
+        try:
+            from src.infrastructure.system_config_store import seed_system_settings_defaults
+            seed_system_settings_defaults()
+            logger.info("db_seeder: system settings defaults initialized")
+        except Exception as err:
+            logger.warning(f"db_seeder: warning seeding system settings: {err}")
+
         logger.info("db_seeder: seed complete")
 
     except Exception as e:

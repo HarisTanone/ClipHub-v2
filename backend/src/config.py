@@ -388,14 +388,41 @@ class Settings(BaseSettings):
             pass
         return self.NINE_ROUTER_MODEL or "CliperHub"
 
-    def get_nine_router(self, key: str):
-        """Get a 9router setting from DB first, fallback to .env.
+    def __getattribute__(self, name: str):
+        if not name.startswith("_") and name.isupper():
+            try:
+                from src.infrastructure.system_config_store import get_system_setting, SYSTEM_SETTINGS_METADATA
+                if name in SYSTEM_SETTINGS_METADATA:
+                    val = get_system_setting(name)
+                    if val is not None:
+                        return val
+            except Exception:
+                pass
+        return super().__getattribute__(name)
 
-        Usage: settings.get_nine_router("NINE_ROUTER_PASS1_MODEL")
-        """
+    def __setattr__(self, name: str, value: Any):
+        super().__setattr__(name, value)
+        if not name.startswith("_") and name.isupper():
+            try:
+                from src.infrastructure.system_config_store import _SETTINGS_CACHE
+                _SETTINGS_CACHE[name] = value
+            except Exception:
+                pass
+
+    def __delattr__(self, name: str):
+        super().__delattr__(name)
+        if not name.startswith("_") and name.isupper():
+            try:
+                from src.infrastructure.system_config_store import _SETTINGS_CACHE
+                _SETTINGS_CACHE.pop(name, None)
+            except Exception:
+                pass
+
+    def get_nine_router(self, key: str):
+        """Get a 9router setting from DB first, fallback to .env."""
         try:
-            from src.infrastructure.model_settings_store import get_model_setting
-            val = get_model_setting(key)
+            from src.infrastructure.system_config_store import get_system_setting
+            val = get_system_setting(key)
             if val is not None and val != "":
                 return val
         except Exception:

@@ -857,3 +857,48 @@ export const models = {
     return res.models;
   },
 };
+
+// ─── System Config API (Dynamic DB-backed RBAC settings) ─────────────────────
+
+export interface SystemConfigItem {
+  key: string;
+  value: any;
+  raw_value?: string;
+  category: "ai_llm" | "api_keys" | "render_limits" | "vision_reframe" | "broll_effects" | "storage_cdn" | string;
+  data_type: "string" | "int" | "float" | "bool" | "json";
+  min_role: "superadmin" | "editor" | "viewer";
+  is_secret: boolean;
+  description: string;
+  updated_at: string | null;
+  updated_by: number | null;
+}
+
+export const systemConfig = {
+  async get(unmask: boolean = false): Promise<{
+    success: boolean;
+    role: string;
+    can_edit_secrets: boolean;
+    data: SystemConfigItem[];
+  }> {
+    return request(`/api/settings/system-config?unmask=${unmask ? "true" : "false"}`);
+  },
+  async update(settings: Record<string, any>): Promise<{
+    success: boolean;
+    message: string;
+    updated_count: number;
+  }> {
+    return request("/api/settings/system-config", {
+      method: "PUT",
+      body: JSON.stringify({ settings }),
+    });
+  },
+  async reset(key?: string): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    return request("/api/settings/system-config/reset", {
+      method: "POST",
+      body: JSON.stringify({ key }),
+    });
+  },
+};

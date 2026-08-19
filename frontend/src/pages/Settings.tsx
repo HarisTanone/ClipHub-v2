@@ -13,7 +13,7 @@ import { RangeSlider } from "@/components/ui/RangeSlider";
 import { useToast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
-import { system, storage, API_BASE, getToken } from "@/lib/api";
+import { system, storage, systemConfig, type SystemConfigItem, API_BASE, getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SectionDescription } from "@/components/reframe/SectionDescription";
 import { ImagePreviewPanel } from "@/components/reframe/ImagePreviewPanel";
@@ -458,9 +458,19 @@ export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram" | "system_config">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Dynamic Database System Config
+  const [sysConfigItems, setSysConfigItems] = useState<SystemConfigItem[]>([]);
+  const [sysConfigEdits, setSysConfigEdits] = useState<Record<string, any>>({});
+  const [sysConfigCategory, setSysConfigCategory] = useState<string>("all");
+  const [sysConfigSearch, setSysConfigSearch] = useState<string>("");
+  const [sysConfigUnmask, setSysConfigUnmask] = useState<boolean>(false);
+  const [isLoadingSysConfig, setIsLoadingSysConfig] = useState<boolean>(false);
+  const [isSavingSysConfig, setIsSavingSysConfig] = useState<boolean>(false);
+  const [canEditSecrets, setCanEditSecrets] = useState<boolean>(false);
 
   const [settings, setSettings] = useState({
     default_aspect_ratio: "9:16",
@@ -927,7 +937,58 @@ export function Settings() {
       });
       fetchTelegramSocialAccounts().then(setTelegramSocialAccounts);
     }
-  }, [isSuperadmin, tab]);
+    if (tab === "system_config") {
+      loadSystemConfig(sysConfigUnmask);
+    }
+  }, [isSuperadmin, tab, sysConfigUnmask]);
+
+  async function loadSystemConfig(unmask: boolean = false) {
+    setIsLoadingSysConfig(true);
+    try {
+      const res = await systemConfig.get(unmask);
+      if (res && res.data) {
+        setSysConfigItems(res.data);
+        setCanEditSecrets(res.can_edit_secrets);
+        const initialEdits: Record<string, any> = {};
+        res.data.forEach(item => {
+          initialEdits[item.key] = item.value;
+        });
+        setSysConfigEdits(initialEdits);
+      }
+    } catch (err: any) {
+      toast.error("Gagal memuat konfigurasi sistem: " + (err?.message || ""));
+    } finally {
+      setIsLoadingSysConfig(false);
+    }
+  }
+
+  async function handleSaveSysConfig() {
+    setIsSavingSysConfig(true);
+    try {
+      const res = await systemConfig.update(sysConfigEdits);
+      if (res && res.success) {
+        toast.success(res.message || "Konfigurasi sistem berhasil diperbarui");
+        loadSystemConfig(sysConfigUnmask);
+      }
+    } catch (err: any) {
+      toast.error("Gagal menyimpan konfigurasi: " + (err?.message || ""));
+    } finally {
+      setIsSavingSysConfig(false);
+    }
+  }
+
+  async function handleResetSysConfigKey(key: string) {
+    if (!(await confirmDialog({ title: `Reset ${key}?`, message: `Reset konfigurasi ${key} ke default sistem?`, confirmText: "Reset", danger: true }))) return;
+    try {
+      const res = await systemConfig.reset(key);
+      if (res && res.success) {
+        toast.success(`Konfigurasi ${key} direset ke default`);
+        loadSystemConfig(sysConfigUnmask);
+      }
+    } catch (err: any) {
+      toast.error("Gagal mereset konfigurasi: " + (err?.message || ""));
+    }
+  }
 
   async function handleSaveTelegram() {
     setIsSavingTelegram(true);
@@ -998,6 +1059,7 @@ export function Settings() {
     { id: "hyperframes" as const, label: "HyperFrames Hook", icon: <Sparkles className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
     { id: "object" as const, label: "Object Overlay", icon: <Palette className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
     ...(isSuperadmin ? [
+      { id: "system_config" as const, label: "Database & Env Config", icon: <HardDrive className="h-3.5 w-3.5" />, group: "Administration", badge: "Dynamic DB" },
       { id: "models" as const, label: "AI Models", icon: <BrainCircuit className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
       { id: "telegram" as const, label: "Telegram Bot", icon: <Bot className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
       { id: "users" as const, label: "Users", icon: <UserPlus className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
@@ -2738,6 +2800,208 @@ export function Settings() {
               )}
             </Card>
           </div>
+          </div>
+        )}
+
+        {tab === "system_config" && (
+          <div className="max-w-6xl space-y-4">
+            {/* Header info banner */}
+            <div className="rounded-xl border border-violet-500/30 bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-zinc-900/60 p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/30 flex items-center justify-center text-violet-300">
+                  <HardDrive className="h-4 w-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                    Dynamic Database &amp; Runtime Config (RBAC)
+                    <Badge variant="default" className="text-[9px] uppercase font-bold text-violet-300 border-violet-500/30 bg-violet-500/10">
+                      Live Settings
+                    </Badge>
+                  </h2>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                    Semua konfigurasi di bawah tersimpan di database dan berlaku langsung saat rendering tanpa perlu restart server.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {canEditSecrets && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const next = !sysConfigUnmask;
+                      setSysConfigUnmask(next);
+                      loadSystemConfig(next);
+                    }}
+                    icon={sysConfigUnmask ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  >
+                    {sysConfigUnmask ? "Mask Secrets" : "Show Secrets"}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  onClick={handleSaveSysConfig}
+                  loading={isSavingSysConfig}
+                  icon={<Save className="h-3.5 w-3.5" />}
+                >
+                  Save All Config
+                </Button>
+              </div>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-zinc-900/60 border border-zinc-800 p-3 rounded-xl">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { id: "all", label: "Semua Kategori" },
+                  { id: "ai_llm", label: "🤖 AI & LLM" },
+                  { id: "api_keys", label: "🔑 API Keys" },
+                  { id: "render_limits", label: "⚡ Render & Limits" },
+                  { id: "vision_reframe", label: "🎯 Vision & Reframe" },
+                  { id: "broll_effects", label: "🎨 B-Roll & Effects" },
+                  { id: "storage_cdn", label: "☁️ Storage & CDN" },
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSysConfigCategory(cat.id)}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-xs font-medium transition-colors border",
+                      sysConfigCategory === cat.id
+                        ? "bg-violet-600 border-violet-500 text-white shadow"
+                        : "bg-zinc-800/80 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+                    )}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="w-full sm:w-64">
+                <input
+                  type="text"
+                  value={sysConfigSearch}
+                  onChange={(e) => setSysConfigSearch(e.target.value)}
+                  placeholder="Cari nama setting / deskripsi..."
+                  className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-violet-500"
+                />
+              </div>
+            </div>
+
+            {/* Settings Cards List */}
+            {isLoadingSysConfig ? (
+              <div className="p-8 text-center text-zinc-500 text-xs">
+                <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-violet-400" />
+                Memuat konfigurasi sistem dari database...
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {sysConfigItems
+                  .filter((item) => {
+                    if (sysConfigCategory !== "all" && item.category !== sysConfigCategory) return false;
+                    if (sysConfigSearch.trim()) {
+                      const q = sysConfigSearch.toLowerCase();
+                      return item.key.toLowerCase().includes(q) || (item.description || "").toLowerCase().includes(q);
+                    }
+                    return true;
+                  })
+                  .map((item) => {
+                    const currentVal = sysConfigEdits[item.key] !== undefined ? sysConfigEdits[item.key] : item.value;
+                    return (
+                      <div
+                        key={item.key}
+                        className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3.5 space-y-2.5 flex flex-col justify-between hover:border-zinc-700 transition-colors"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <code className="text-xs font-mono font-bold text-violet-300 truncate" title={item.key}>
+                              {item.key}
+                            </code>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={cn(
+                                "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border",
+                                item.min_role === "superadmin" ? "bg-red-500/10 border-red-500/30 text-red-400" :
+                                item.min_role === "editor" ? "bg-amber-500/10 border-amber-500/30 text-amber-400" :
+                                "bg-zinc-800 border-zinc-700 text-zinc-400"
+                              )}>
+                                {item.min_role}
+                              </span>
+                              {item.is_secret && (
+                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-violet-500/10 border border-violet-500/30 text-violet-400">
+                                  Secret
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-zinc-400 leading-relaxed">{item.description}</p>
+                        </div>
+
+                        {/* Input editor based on data_type */}
+                        <div className="pt-2 border-t border-zinc-800/60 flex items-center justify-between gap-3">
+                          {item.data_type === "bool" ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = !currentVal;
+                                setSysConfigEdits(prev => ({ ...prev, [item.key]: next }));
+                              }}
+                              className={cn(
+                                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                                currentVal ? "bg-emerald-600" : "bg-zinc-700"
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                                  currentVal ? "translate-x-4" : "translate-x-0"
+                                )}
+                              />
+                            </button>
+                          ) : item.data_type === "int" || item.data_type === "float" ? (
+                            <input
+                              type="number"
+                              step={item.data_type === "float" ? "0.05" : "1"}
+                              value={currentVal ?? ""}
+                              onChange={(e) => {
+                                const v = item.data_type === "float" ? parseFloat(e.target.value) : parseInt(e.target.value, 10);
+                                setSysConfigEdits(prev => ({ ...prev, [item.key]: isNaN(v) ? e.target.value : v }));
+                              }}
+                              className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-violet-500"
+                            />
+                          ) : item.is_secret && !sysConfigUnmask ? (
+                            <input
+                              type="password"
+                              value={currentVal ?? ""}
+                              onChange={(e) => setSysConfigEdits(prev => ({ ...prev, [item.key]: e.target.value }))}
+                              placeholder={item.value ? "••••••••••••" : "Belum diisi..."}
+                              className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-violet-500"
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={typeof currentVal === "object" ? JSON.stringify(currentVal) : (currentVal ?? "")}
+                              onChange={(e) => setSysConfigEdits(prev => ({ ...prev, [item.key]: e.target.value }))}
+                              className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-violet-500"
+                            />
+                          )}
+
+                          {isSuperadmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleResetSysConfigKey(item.key)}
+                              className="text-[10px] text-zinc-500 hover:text-red-400 shrink-0 transition-colors"
+                              title="Reset ke default"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         )}
       </div>
