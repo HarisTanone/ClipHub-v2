@@ -611,6 +611,11 @@ class SubtitleStyleConfig:
     subject_aware_positioning: bool = False
     safe_area_margin: int = 40
     max_width_pct: int = 90
+    # Badge and Footer text components (for news portal, speech notch, comment reply, etc.)
+    badge_enabled: bool = True
+    badge_text: str = ""
+    footer_enabled: bool = True
+    footer_text: str = ""
 
     @classmethod
     def from_dict(cls, data: dict | Any) -> SubtitleStyleConfig:
@@ -662,6 +667,10 @@ class SubtitleStyleConfig:
             "subjectAwarePositioning": "subject_aware_positioning",
             "safeAreaMargin": "safe_area_margin",
             "maxWidthPct": "max_width_pct",
+            "badgeEnabled": "badge_enabled",
+            "badgeText": "badge_text",
+            "footerEnabled": "footer_enabled",
+            "footerText": "footer_text",
         }
         normalized = {}
         for k, v in data.items():

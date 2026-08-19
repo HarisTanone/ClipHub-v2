@@ -104,6 +104,8 @@ export interface HookStyle {
   // Custom hook components
   badgeEnabled: boolean;
   badgeText: string;
+  footerEnabled?: boolean;
+  footerText?: string;
   decorativeElements: boolean;
   motionIntensity: number;
   // Duration
@@ -297,6 +299,8 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
   strokeWidth: 3,
   badgeEnabled: true,
   badgeText: "ON AIR",
+  footerEnabled: true,
+  footerText: "READ MORE AT PANTAU.COM",
   decorativeElements: true,
   motionIntensity: 1.0,
   duration: 3.0,
@@ -517,6 +521,7 @@ const HIGHLIGHT_STYLE_META: Record<SubtitleStyle["highlightStyle"], OptionMeta> 
 
 type HookCapabilities = {
   badge: boolean;
+  footer: boolean;
   decorative: boolean;
   gradient: boolean;
   panel: boolean;
@@ -525,6 +530,7 @@ type HookCapabilities = {
 
 const DEFAULT_HOOK_CAPABILITIES: HookCapabilities = {
   badge: true,
+  footer: true,
   decorative: true,
   gradient: true,
   panel: false,
@@ -532,25 +538,25 @@ const DEFAULT_HOOK_CAPABILITIES: HookCapabilities = {
 };
 
 const HOOK_CAPABILITIES: Record<string, HookCapabilities> = {
-  news_viralin_badge: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
-  news_portal_pantau: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
-  news_offset_box: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
-  brutalist_bracket: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
-  quote_strip_tape: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
-  podcast_lower_third: { badge: true, decorative: true, gradient: false, panel: false, outline: false },
-  quote_card: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
-  waveform_pulse: { badge: true, decorative: true, gradient: true, panel: false, outline: false },
-  breaking_tape: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
-  mic_drop: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
-  split_panel: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
-  kinetic_stack: { badge: false, decorative: false, gradient: false, panel: true, outline: false },
-  glass_flash: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
-  marker_swipe: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
-  signal_scan: { badge: true, decorative: true, gradient: true, panel: true, outline: false },
-  comment_reply: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
-  search_prompt: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
-  countdown_list: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
-  pov_stamp: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
+  news_viralin_badge: { badge: true, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  news_portal_pantau: { badge: true, footer: true, decorative: true, gradient: false, panel: true, outline: false },
+  news_offset_box: { badge: false, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  brutalist_bracket: { badge: false, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  quote_strip_tape: { badge: true, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  podcast_lower_third: { badge: true, footer: false, decorative: true, gradient: false, panel: false, outline: false },
+  quote_card: { badge: false, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  waveform_pulse: { badge: true, footer: false, decorative: true, gradient: true, panel: false, outline: false },
+  breaking_tape: { badge: true, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  mic_drop: { badge: true, footer: false, decorative: true, gradient: true, panel: true, outline: false },
+  split_panel: { badge: true, footer: false, decorative: true, gradient: true, panel: true, outline: false },
+  kinetic_stack: { badge: false, footer: false, decorative: false, gradient: false, panel: true, outline: false },
+  glass_flash: { badge: true, footer: false, decorative: true, gradient: true, panel: true, outline: false },
+  marker_swipe: { badge: true, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  signal_scan: { badge: true, footer: false, decorative: true, gradient: true, panel: true, outline: false },
+  comment_reply: { badge: true, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  search_prompt: { badge: false, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  countdown_list: { badge: true, footer: false, decorative: true, gradient: false, panel: true, outline: false },
+  pov_stamp: { badge: true, footer: false, decorative: true, gradient: false, panel: true, outline: false },
 };
 
 function hookCapabilities(animation: string): HookCapabilities {
@@ -559,7 +565,7 @@ function hookCapabilities(animation: string): HookCapabilities {
 
 const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = [
   { id: "news_viralin_badge_preset", name: "#VIRALIN Akurat Badge", style: { animation: "news_viralin_badge", color: "#09090B", boxColor: "#EAB308", lineColor: "#1D4ED8", fontSize: 46, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, badgeEnabled: true, badgeText: "#VIRALIN", position: "center", positionY: 48, decorativeElements: true, motionIntensity: 1.0 } },
-  { id: "news_portal_pantau_preset", name: "News Portal Speech Notch", style: { animation: "news_portal_pantau", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#DC2626", fontSize: 44, fontFamily: "Inter", fontWeight: "900", uppercase: true, badgeEnabled: true, badgeText: "INTERNASIONAL", position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "news_portal_pantau_preset", name: "News Portal Speech Notch", style: { animation: "news_portal_pantau", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#DC2626", fontSize: 44, fontFamily: "Inter", fontWeight: "900", uppercase: true, badgeEnabled: true, badgeText: "INTERNASIONAL", footerEnabled: true, footerText: "READ MORE AT PANTAU.COM", position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
   { id: "news_offset_box_preset", name: "Detik Red Breaking Box", style: { animation: "news_offset_box", color: "#FFFFFF", boxColor: "#DC2626", lineColor: "#FFFFFF", fontSize: 44, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
   { id: "brutalist_bracket_preset", name: "Brutalist Bracket Frame", style: { animation: "brutalist_bracket", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#000000", fontSize: 46, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
   { id: "quote_strip_tape_preset", name: "Quote Tape Strips", style: { animation: "quote_strip_tape", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#0D9488", fontSize: 42, fontFamily: "Montserrat", fontWeight: "900", uppercase: true, position: "center", positionY: 52, decorativeElements: true, motionIntensity: 1.0 } },
@@ -2278,15 +2284,21 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
       const cardBg = style.boxColor || "#FFFFFF";
       const accentColor = style.lineColor || "#DC2626";
       const categoryTag = style.badgeText || "INTERNASIONAL";
-      const footerLabel = (style as any).footerText || "READ MORE AT PANTAU.COM";
+      const footerLabel = style.footerText || "READ MORE AT PANTAU.COM";
+      const showBadge = style.badgeEnabled !== false;
+      const showFooter = style.footerEnabled !== false;
       return (
         <>
           <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
           <div className="absolute left-4 right-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
             <div style={{ position: "relative", background: cardBg, borderRadius: "10px 10px 0 0", padding: "18px 18px 14px 18px", boxShadow: "0 18px 40px rgba(0,0,0,0.5)", borderBottom: `4px solid ${accentColor}` }}>
-              <div style={{ display: "inline-block", background: accentColor, color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 3, marginBottom: 8 }}>{categoryTag}</div>
+              {showBadge && (
+                <div style={{ display: "inline-block", background: accentColor, color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 3, marginBottom: 8 }}>{categoryTag}</div>
+              )}
               <p style={{ ...baseTextStyle, color: style.color || "#09090B", fontSize: Math.max(fontSize * 0.76, 12), fontWeight: 900, textAlign: "left", lineHeight: 1.18, textTransform: "uppercase" }}>{text}</p>
-              <div style={{ marginTop: 10, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)", color: "#71717A", fontSize: 8, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>{footerLabel}</div>
+              {showFooter && (
+                <div style={{ marginTop: 10, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)", color: "#71717A", fontSize: 8, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>{footerLabel}</div>
+              )}
               {/* Bottom speech notch */}
               <div style={{ position: "absolute", bottom: -12, right: 28, width: 0, height: 0, borderLeft: "10px solid transparent", borderRight: "10px solid transparent", borderTop: `12px solid ${accentColor}` }} />
             </div>
@@ -4359,17 +4371,17 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
             </Section>
 
             <Section title="Hook Components">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Checkbox label="Show badge / label" checked={style.badgeEnabled} onChange={(v) => update({ badgeEnabled: v })} disabled={!capabilities.badge} />
+                    <Checkbox label="Show badge / category label" checked={style.badgeEnabled} onChange={(v) => update({ badgeEnabled: v })} disabled={!capabilities.badge} />
                     {!capabilities.badge && <UnavailableHint text="Style ini tidak memakai badge." />}
                     {style.badgeEnabled && capabilities.badge && (
                       <input
                         type="text"
                         value={style.badgeText}
                         onChange={(e) => update({ badgeText: e.target.value })}
-                        placeholder="Badge text"
+                        placeholder="Badge text (mis: INTERNASIONAL, HOT TAKE)"
                         className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
                       />
                     )}
@@ -4378,6 +4390,23 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                     <Checkbox label="Decorative motion elements" checked={style.decorativeElements} onChange={(v) => update({ decorativeElements: v })} disabled={!capabilities.decorative} />
                     {!capabilities.decorative && <UnavailableHint text="Style ini memakai motion utama tanpa dekorasi tambahan." />}
                     <RangeInput label={`Motion: ${style.motionIntensity.toFixed(1)}x`} min={0} max={20} value={Math.round(style.motionIntensity * 10)} onChange={(v) => update({ motionIntensity: v / 10 })} />
+                  </div>
+                </div>
+
+                {/* Footer / Source Bar Label (e.g. READ MORE AT PANTAU.COM) */}
+                <div className="pt-2 border-t border-zinc-800/80">
+                  <div className="space-y-2">
+                    <Checkbox label="Show footer / source label" checked={style.footerEnabled !== false} onChange={(v) => update({ footerEnabled: v })} disabled={!capabilities.footer} />
+                    {!capabilities.footer && <UnavailableHint text="Style ini tidak memakai footer bar." />}
+                    {style.footerEnabled !== false && capabilities.footer && (
+                      <input
+                        type="text"
+                        value={style.footerText || ""}
+                        onChange={(e) => update({ footerText: e.target.value })}
+                        placeholder="Footer text (mis: READ MORE AT PANTAU.COM, SWIPE UP FOR MORE)"
+                        className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+                      />
+                    )}
                   </div>
                 </div>
               </div>
@@ -4624,6 +4653,13 @@ export function SubtitleEditor({
     useGoogleFont(style.highlightFontFamily);
   }
   const update = (patch: Partial<SubtitleStyle>) => onChange({ ...style, ...patch });
+
+  function addHighlightWord() {
+    if (newWord.trim() && !(style.highlightWords || []).includes(newWord.trim().toLowerCase())) {
+      update({ highlightWords: [...(style.highlightWords || []), newWord.trim().toLowerCase()] });
+      setNewWord("");
+    }
+  }
   const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
     ? buildCanvasConfig(aspectRatio, {
       backgroundMode: canvasBackground?.mode || "template",
@@ -4664,43 +4700,6 @@ export function SubtitleEditor({
     }, 800);
     return () => clearInterval(interval);
   }, []);
-
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiMessage, setAiMessage] = useState<string | null>(null);
-
-  async function handleGenerateWithAI(customPrompt?: string) {
-    const promptToUse = (customPrompt || aiPrompt).trim();
-    if (!promptToUse) return;
-    setAiLoading(true);
-    setAiMessage(null);
-    try {
-      const res = await subtitleStyles.generateWithAI(promptToUse, style);
-      if (res && res.subtitle_style) {
-        update({
-          ...res.subtitle_style,
-          highlightWords: res.highlight_keywords?.length ? res.highlight_keywords : (style.highlightWords || []),
-        });
-        setAiMessage(res.explanation || "Gaya subtitle AI berhasil diterapkan!");
-      }
-    } catch (err: any) {
-      console.error("AI Subtitle error:", err);
-      setAiMessage("Gagal memanggil AI. Silakan coba lagi.");
-    } finally {
-      setAiLoading(false);
-    }
-  }
-
-  function addHighlightWord() {
-    if (newWord.trim() && !style.highlightWords.includes(newWord.trim().toLowerCase())) {
-      update({ highlightWords: [...style.highlightWords, newWord.trim().toLowerCase()] });
-      setNewWord("");
-    }
-  }
-
-  function removeHighlightWord(wordToRemove: string) {
-    update({ highlightWords: (style.highlightWords || []).filter(w => w !== wordToRemove) });
-  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 h-full min-h-0 overflow-hidden">
@@ -4744,172 +4743,6 @@ export function SubtitleEditor({
             </button>
           </div>
         </Section>
-
-        {style.enabled !== false && (
-          <Section title="✨ Dynamic Subtitle AI (Generate with AI)">
-            <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-purple-950/30 to-zinc-900/70 p-3.5 space-y-3 shadow-lg shadow-indigo-950/20">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
-                    AI Natural Language Subtitle Generator
-                  </p>
-                  <p className="text-[10px] text-zinc-400 mt-0.5">Ketik instruksi gaya yang Anda inginkan, AI akan mengatur seluruh parameter secara otomatis.</p>
-                </div>
-                {aiLoading && (
-                  <span className="flex items-center gap-1 text-[10px] text-indigo-400 font-semibold animate-pulse">
-                    <Loader2 className="w-3 h-3 animate-spin" /> Generating...
-                  </span>
-                )}
-              </div>
-
-              {/* Natural language prompt box */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !aiLoading) { e.preventDefault(); handleGenerateWithAI(); } }}
-                  placeholder="Contoh: Modern podcast subtitle, bold white text, important words yellow, smooth pop..."
-                  className="flex-1 bg-zinc-900/90 border border-indigo-500/30 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none ring-1 ring-transparent focus:ring-indigo-500/30 transition-all"
-                  disabled={aiLoading}
-                />
-                <button
-                  type="button"
-                  onClick={() => handleGenerateWithAI()}
-                  disabled={aiLoading || !aiPrompt.trim()}
-                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 transition-all shadow-md shadow-indigo-600/20"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Generate AI
-                </button>
-              </div>
-
-              {/* AI Feedback Message */}
-              {aiMessage && (
-                <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-[10px] text-indigo-200 flex items-center justify-between">
-                  <span>{aiMessage}</span>
-                  <button type="button" onClick={() => setAiMessage(null)} className="text-zinc-400 hover:text-zinc-200 ml-2">✕</button>
-                </div>
-              )}
-
-              {/* Instant Prompt Recommendations */}
-              <div>
-                <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-semibold mb-1.5">Rekomendasi Cepat AI:</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {[
-                    {
-                      name: "🔥 Hormozi Viral",
-                      prompt: "Hormozi viral word pop 1 kata per frame, font Anton black, teks putih lime highlight tebal, stroke hitam tebal",
-                    },
-                    {
-                      name: "📰 Breaking News",
-                      prompt: "News portal style, kapsul obsidian, Inter bold, teks putih dengan highlight kuning cerah, 3 kata per baris",
-                    },
-                    {
-                      name: "⚡ Cyberpunk Glow",
-                      prompt: "Cyberpunk neon glow shader, font Montserrat 900 uppercase, cyan glow and hot pink highlight",
-                    },
-                    {
-                      name: "🎧 Podcast Pro",
-                      prompt: "Modern podcast dialogue, charcoal rounded capsule, Plus Jakarta Sans, emerald active speaker highlight",
-                    },
-                    {
-                      name: "💎 Swiss Minimal",
-                      prompt: "Clean swiss minimalist subtitle at bottom, soft slate background pill, Inter font, cyan underline",
-                    },
-                    {
-                      name: "👑 Gold Luxury",
-                      prompt: "Cinematic gold luxury serif, Playfair Display 800, champagne gold highlight with ambient black shadow",
-                    },
-                  ].map((item) => (
-                    <button
-                      key={item.name}
-                      type="button"
-                      onClick={() => {
-                        setAiPrompt(item.prompt);
-                        handleGenerateWithAI(item.prompt);
-                      }}
-                      className="p-2 rounded-lg border border-indigo-500/20 bg-zinc-900/60 hover:bg-indigo-950/40 hover:border-indigo-500/50 text-left transition-all group"
-                    >
-                      <p className="text-[11px] font-bold text-zinc-200 group-hover:text-indigo-300">{item.name}</p>
-                      <p className="text-[8px] text-zinc-500 mt-0.5 line-clamp-1">{item.prompt}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* AI Highlight Keywords */}
-              <div className="pt-2 border-t border-indigo-500/20">
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-[10px] font-semibold text-zinc-300 flex items-center gap-1">
-                    <Check className="w-3 h-3 text-amber-400" />
-                    <span>🎯 AI Highlight Keywords ({style.highlightWords?.length || 0} kata aktif)</span>
-                  </p>
-                </div>
-
-                {/* Active Highlight Tags */}
-                {(style.highlightWords && style.highlightWords.length > 0) && (
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {style.highlightWords.map((w) => (
-                      <span key={w} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-semibold">
-                        {w}
-                        <button type="button" onClick={() => removeHighlightWord(w)} className="hover:text-red-400 ml-0.5">✕</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Preset suggestions */}
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {["viral", "penting", "rahasia", "sukses", "cuan", "bahaya", "tips", "kaget", "fakta", "solusi"].map((w) => {
-                    const isSelected = style.highlightWords?.includes(w);
-                    return (
-                      <button
-                        key={w}
-                        type="button"
-                        onClick={() => {
-                          const current = style.highlightWords || [];
-                          if (isSelected) {
-                            update({ highlightWords: current.filter((x) => x !== w) });
-                          } else {
-                            update({ highlightWords: [...current, w] });
-                          }
-                        }}
-                        className={cn(
-                          "px-2 py-0.5 rounded-md text-[9px] font-medium border transition-colors",
-                          isSelected
-                            ? "bg-amber-500/20 border-amber-500/50 text-amber-300 font-bold"
-                            : "bg-zinc-800/80 border-zinc-700 text-zinc-400 hover:text-zinc-200"
-                        )}
-                      >
-                        +{w}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newWord}
-                    onChange={(e) => setNewWord(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addHighlightWord(); } }}
-                    placeholder="Ketik kata penting kustom lalu tekan Enter (mis: omset, strategi)..."
-                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1 text-[10px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={addHighlightWord}
-                    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-semibold"
-                  >
-                    Tambah
-                  </button>
-                </div>
-              </div>
-            </div>
-          </Section>
-        )}
 
         <Section title="Render Engine">
           <EnginePicker
