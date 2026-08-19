@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from src.domain.entities import SubtitleStyleConfig
 from src.domain.interfaces import ISubtitleRenderer
+from src.infrastructure.gpu_encoder import get_video_encoder_args
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ class SubtitleRenderer(ISubtitleRenderer):
             "ffmpeg", "-y",
             "-i", video_path,
             "-vf", filter_chain,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            *get_video_encoder_args("medium"),
             "-c:a", "copy",
             "-movflags", "+faststart",
             output_path,
@@ -250,7 +251,7 @@ class SubtitleRenderer(ISubtitleRenderer):
             "ffmpeg", "-y",
             "-i", video_path,
             "-vf", filter_chain,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            *get_video_encoder_args("medium"),
             "-c:a", "copy",
             "-movflags", "+faststart",
             output_path,
@@ -503,7 +504,7 @@ class SubtitleRenderer(ISubtitleRenderer):
             "ffmpeg", "-y",
             "-i", video_path,
             "-vf", filter_chain,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            *get_video_encoder_args("medium"),
             "-c:a", "copy",
             "-movflags", "+faststart",
             output_path,
