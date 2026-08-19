@@ -1820,7 +1820,7 @@ class V2PipelineService:
             recovered = await analyze(
                 words_map,
                 durations,
-                max_suggestions=2,
+                max_suggestions=99,
                 clip_meta=clip_meta,
                 visual_entities=visual_entities,
             )
@@ -1833,7 +1833,7 @@ class V2PipelineService:
                 recovered = await analyze(
                     words_map,
                     durations,
-                    max_suggestions=2,
+                    max_suggestions=99,
                     clip_meta=clip_meta,
                 )
             except Exception as exc:

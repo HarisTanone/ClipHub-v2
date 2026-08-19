@@ -209,3 +209,40 @@ def test_splice_mode_promotes_motion_graphic_to_footage_fallback(tmp_path):
         asyncio.run(fetcher.fetch_assets([suggestion]))
 
     assert suggestion.visual_category == VisualCategory.FOOTAGE
+
+
+def test_unconstrained_dynamic_broll_and_behind_person_analysis():
+    """Verify that multiple (5+) dynamic AI B-roll and Behind Person suggestions are preserved without artificial caps."""
+    analyzer = GroqAnalyzer()
+
+    def fake_multi_llm(prompt, model=None, max_tokens=3000):
+        import json
+        return json.dumps({
+            "items": [
+                {"at_time": 3.5, "keyword": "doctor hospital clinic", "duration": 2.0, "visual_category": "footage", "placement": "full_frame", "template": "word_pop_typography"},
+                {"at_time": 7.5, "keyword": "medical stethoscope closeup", "duration": 2.0, "visual_category": "icon", "placement": "behind_person", "template": "word_pop_typography"},
+                {"at_time": 11.5, "keyword": "laboratory test microscope", "duration": 2.0, "visual_category": "footage", "placement": "full_frame", "template": "word_pop_typography"},
+                {"at_time": 15.5, "keyword": "medicine pills icon", "duration": 2.0, "visual_category": "icon", "placement": "behind_person", "template": "word_pop_typography"},
+                {"at_time": 19.5, "keyword": "health recovery patient", "duration": 2.0, "visual_category": "footage", "placement": "full_frame", "template": "word_pop_typography"},
+            ]
+        })
+
+    analyzer._call_groq_llm = MagicMock(side_effect=fake_multi_llm)
+    words = {
+        1: [
+            {"word": f"word_{i}", "start": float(i), "end": float(i) + 0.8}
+            for i in range(1, 24)
+        ]
+    }
+    durs = {1: 25.0}
+
+    result = asyncio.run(analyzer.analyze_broll_for_clips(
+        words, durs, max_suggestions=99,
+        clip_meta={1: {"hook": "Kesehatan Masa Depan", "reason": "Pentingnya riset medis"}},
+    ))
+
+    # All 5 items should pass through without being artificially capped to 2 or 3
+    assert len(result["1"]) == 5
+    placements = [item["placement"] for item in result["1"]]
+    assert placements.count("full_frame") == 3
+    assert placements.count("behind_person") == 2

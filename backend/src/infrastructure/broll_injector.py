@@ -63,7 +63,7 @@ class BRollInjector(IBRollInjector):
     Speaker remains visible. Assets appear as styled overlay with animation.
     """
 
-    def __init__(self, render_engine: IBrowserRenderEngine, max_brolls: int = MAX_BROLLS_PER_CLIP):
+    def __init__(self, render_engine: IBrowserRenderEngine, max_brolls: Optional[int] = None):
         self._render_engine = render_engine
         self._max_brolls = max_brolls
         self._font_dir = "assets/fonts"
@@ -96,8 +96,10 @@ class BRollInjector(IBRollInjector):
             logger.warning(f"broll_injector: clip not found {clip_path}")
             return clip_path
 
-        # Limit and sort
-        selected = sorted(suggestions, key=lambda s: s.at_time)[:self._max_brolls]
+        # Sort chronologically and apply optional limit only if explicitly configured
+        selected = sorted(suggestions, key=lambda s: s.at_time)
+        if self._max_brolls is not None and self._max_brolls > 0:
+            selected = selected[:self._max_brolls]
 
         # Separate into text-only (fallback) and asset-based
         fallback_suggestions = []

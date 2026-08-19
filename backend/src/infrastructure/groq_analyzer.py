@@ -196,21 +196,20 @@ class GroqAnalyzer(IGroqAnalyzer):
         if not context_lines:
             return {}
 
-        # Dual tracks: full_frame splice + behind_person top overlay (different times)
-        max_items = min(max(max_suggestions, 3), 4)
-        prompt = f"""Kamu adalah visual director video pendek. Pilih maksimal {max_items} B-roll visual yang membantu pemahaman.
+        # Dual tracks: full_frame splice + behind_person top overlay (unconstrained dynamic AI analysis)
+        prompt = f"""Kamu adalah visual director video pendek profesional. Analisa transkrip secara mendalam dan tentukan B-roll visual (baik full_frame footage maupun behind_person image/footage) yang dibutuhkan narasi transkrip secara bebas dan dinamis tanpa batasan kaku.
 
 TRANSKRIP:
 {chr(10).join(context_lines)}
 
-DUA MODE PLACEMENT (otomatis, bukan template tetap):
+DUA MODE PLACEMENT (otomatis, dinamis):
 1) full_frame — stock VIDEO ganti layar penuh (clip→footage→clip). Person HILANG sementara. Pakai visual_category=footage.
-2) behind_person — stock IMAGE/icon di BELAKANG person (top half). Person TETAP kelihatan. Pakai visual_category=icon atau motion_graphic.
+2) behind_person — stock IMAGE/icon di BELAKANG person (top half). Person TETAP kelihatan. Pakai visual_category=icon atau motion_graphic atau footage.
 
 ATURAN:
 - at_time WAJIB salah satu timestamp di transkrip; jangan sebelum detik 3.
 - JANGAN pakai waktu yang sama untuk full_frame dan behind_person (min jarak 4 detik).
-- Ideal: 1-2 full_frame + 1-2 behind_person di momen berbeda.
+- Tentukan jumlah B-roll dan Behind Person yang pas sesuai alur cerita transkrip (sebanyak yang dibutuhkan konteks cerita).
 - keyword = query stock ENGLISH 3-8 kata, KONKRET visual dari konteks clip ini (analisa dinamis — jangan andalkan daftar kata domain tetap).
   LANGKAH: (1) baca kalimat di timestamp (2) ekstrak 1 fakta visual UTAMA (3) terjemah 1:1 ke query stock literal.
   Format: [concrete subject] [action OR state] [framing/detail]
@@ -235,7 +234,7 @@ OUTPUT RAW JSON:
                     self._call_groq_llm,
                     prompt,
                     self._model_pass1,
-                    1200,
+                    1600,
                 ),
                 timeout=self._timeout,
             )
@@ -248,13 +247,13 @@ OUTPUT RAW JSON:
         if not isinstance(raw_items, list):
             return {}
 
-        allowed_times = [float(segment.start) for segment in sampled_segments]
         allowed_templates = {
             "word_pop_typography",
             "line_reveal_typography",
             "particle_text_burst",
         }
         allowed_categories = {"footage", "icon", "motion_graphic", "reaction"}
+        allowed_times = [float(segment.start) for segment in eligible_segments]
         suggestions = []
 
         for item in raw_items:
@@ -313,7 +312,7 @@ OUTPUT RAW JSON:
                 "visual_category": visual_category,
                 "placement": placement,
             })
-            if len(suggestions) >= max_items:
+            if max_suggestions and len(suggestions) >= max_suggestions:
                 break
 
         return {"1": suggestions} if suggestions else {}
@@ -692,7 +691,7 @@ OUTPUT RAW JSON only:
         self,
         clips_words: dict[int, list[dict]],
         clip_durations: dict[int, float],
-        max_suggestions: int = 2,
+        max_suggestions: int = 99,
         clip_meta: dict | None = None,
         visual_entities: dict | None = None,
     ) -> dict:
@@ -703,8 +702,8 @@ OUTPUT RAW JSON only:
         visual_entities: AI-extracted objects/queries per rank (dynamic, no lexicon).
         Fallback: local words + AI/fallback visual entities.
         """
-        max_suggestions = max(0, min(int(max_suggestions), 4))
-        if max_suggestions <= 0 or not clips_words:
+        max_suggestions = int(max_suggestions) if max_suggestions and int(max_suggestions) > 0 else 99
+        if not clips_words:
             return {}
 
         eligible: dict[int, list[dict]] = {}
@@ -722,8 +721,8 @@ OUTPUT RAW JSON only:
             ]
             if clean_words and duration >= 1.5:
                 eligible[rank] = clean_words
-        if not eligible:
-            return {}
+            if not eligible:
+                return {}
 
         meta = clip_meta or {}
         entities = visual_entities or {}
@@ -753,7 +752,7 @@ OUTPUT RAW JSON only:
                     items = self._fallback_broll_from_words(
                         words,
                         duration,
-                        limit=max(1, min(2, max_suggestions)),
+                        limit=min(4, max_suggestions),
                         visual_entities=ents,
                     )
                 return rank, items
@@ -774,7 +773,7 @@ OUTPUT RAW JSON only:
         rank: int,
         words: list[dict],
         duration: float,
-        max_items: int = 2,
+        max_items: int = 99,
         hook: str = "",
         reason: str = "",
         visual_entities: list[dict] | None = None,
@@ -782,7 +781,7 @@ OUTPUT RAW JSON only:
         """Single-clip B-roll LLM call — seed from AI visual entities (dynamic)."""
         from src.infrastructure.clip_quality_helpers import extract_highlight_keywords
 
-        max_items = min(max(max_items, 2), 4)
+        max_items = int(max_items) if max_items and int(max_items) > 0 else 99
         # Compact transcript windows (this clip only)
         window_size = 8
         windows = [
@@ -819,7 +818,7 @@ OUTPUT RAW JSON only:
         seed_txt = ", ".join(seeds[:14]) if seeds else "(none — derive from transcript)"
         topic = " | ".join(x for x in (hook.strip(), reason.strip()) if x)[:300]
 
-        prompt = f"""Kamu visual director 1 short clip. Pilih maksimal {max_items} B-roll.
+        prompt = f"""Kamu visual director profesional untuk short clip. Tentukan B-roll visual (baik full_frame stock video maupun behind_person visual/icon) secara bebas dan dinamis sesuai alur narasi transkrip tanpa batasan kaku.
 
 CLIP #{rank} duration={duration:.1f}s
 HOOK/TOPIC: {topic or "(n/a)"}
@@ -830,16 +829,16 @@ TRANSKRIP BERTIMESTAMP (clip ini saja):
 
 PLACEMENT:
 1) full_frame — stock VIDEO ganti layar (person hilang). visual_category=footage
-2) behind_person — IMAGE/icon di belakang person top-half. visual_category=icon|motion_graphic|footage
+2) behind_person — IMAGE/icon/footage di belakang person top-half. visual_category=icon|motion_graphic|footage
 
 ATURAN:
 - at_time = timestamp dari transkrip di atas; min 3.0s; max duration-1
 - full_frame dan behind_person TIDAK boleh waktu sama (min jarak 4s)
-- Ideal: 1 full_frame + 1 behind_person
+- Tentukan jumlah B-roll visual sebanyak yang dibutuhkan narasi cerita secara dinamis.
 - keyword = ENGLISH stock query 3-8 kata, KONKRET visual dari konteks clip ini (boleh refine seed di atas)
   JELEK: abstract mood "success", "lifestyle", "viral", "city skyline generic"
   behind_person: CLOSE-UP object fill-frame (bukan wide landscape)
-- duration 1.5-3.0; min jarak 6s antar item placement sama
+- duration 1.5-3.0; min jarak 3.5s antar item placement sama
 - placement + visual_category + template wajib
 - Analisa dinamis dari transkrip — jangan andalkan daftar kata domain tetap
 
@@ -852,7 +851,7 @@ OUTPUT RAW JSON:
                     self._call_groq_llm,
                     prompt,
                     self._model_pass1,
-                    1200,
+                    1600,
                 ),
                 timeout=self._timeout,
             )
@@ -881,7 +880,7 @@ OUTPUT RAW JSON:
         *,
         words: list[dict],
         duration: float,
-        max_items: int,
+        max_items: int = 99,
     ) -> list[dict]:
         """Anchor AI broll rows to real word timestamps + sanitize keywords."""
         allowed_templates = {
@@ -913,13 +912,13 @@ OUTPUT RAW JSON:
             tail = min(1.0, max(0.2, duration * 0.06))
             if at_time < lead or at_time >= max(lead + 0.1, duration - tail):
                 continue
-            if any(abs(at_time - existing["at_time"]) < min(4.0, max(1.5, duration * 0.15)) for existing in items):
+            if any(abs(at_time - existing["at_time"]) < min(3.5, max(1.5, duration * 0.12)) for existing in items):
                 continue
             try:
                 item_duration = float(item.get("duration", 2.25))
             except (TypeError, ValueError):
                 item_duration = 2.25
-            max_hold = min(3.0, max(0.8, duration * 0.35))
+            max_hold = min(3.5, max(0.8, duration * 0.35))
             item_duration = min(max_hold, max(0.8, item_duration), duration - at_time)
             if item_duration < 0.6:
                 continue
@@ -938,9 +937,9 @@ OUTPUT RAW JSON:
                     if category in {"icon", "motion_graphic"}
                     else "full_frame"
                 )
-            # dual-track: avoid same placement stack < 6s
+            # dual-track: avoid same placement stack < 3.5s
             if any(
-                e["placement"] == placement and abs(at_time - e["at_time"]) < 6.0
+                e["placement"] == placement and abs(at_time - e["at_time"]) < 3.5
                 for e in items
             ):
                 continue
@@ -952,7 +951,7 @@ OUTPUT RAW JSON:
                 "template": template if template in allowed_templates else "word_pop_typography",
                 "placement": placement,
             })
-            if len(items) >= max_items:
+            if max_items and len(items) >= max_items:
                 break
         return items
 

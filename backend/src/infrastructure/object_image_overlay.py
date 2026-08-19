@@ -114,14 +114,16 @@ def pick_object_mentions(
     words: list[dict] | None,
     objects: list[dict] | None = None,
     *,
-    max_items: int = 3,
+    max_items: int = 99,
     clip_duration: float = 0.0,
     blocked_ranges: list[tuple[float, float]] | None = None,
     style: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Pick timed mentions for image cards — prefers AI objects with query_id/en."""
     style = normalise_object_overlay_style(style)
-    max_items = min(max_items, int(style.get("max_per_clip", 3)))
+    user_max = style.get("max_per_clip")
+    if user_max is not None and int(user_max) > 0 and int(user_max) != 3:
+        max_items = min(max_items, int(user_max))
     if max_items <= 0:
         return []
     dur_card = float(style.get("duration_sec", 2.4))
