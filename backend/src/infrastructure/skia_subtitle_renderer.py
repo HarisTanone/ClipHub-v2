@@ -350,10 +350,11 @@ class SkiaSubtitleRenderer:
         img = Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        preset_id = style.get("id", "glassmorphism")
+        preset_id = style.get("id") or style.get("style_preset", "glassmorphism")
         font_family = style.get("font_family", "Inter")
         font_size = int(style.get("font_size", 48))
         is_uppercase = style.get("uppercase", False)
+        is_capitalize = style.get("capitalize", False)
 
         font = self._load_pil_font(font_family, font_size)
 
@@ -361,7 +362,12 @@ class SkiaSubtitleRenderer:
         word_items = []
         for idx, w_dict in enumerate(words_line):
             raw_w = str(w_dict.get("word", "")).strip()
-            w_text = raw_w.upper() if is_uppercase else raw_w
+            if is_uppercase:
+                w_text = raw_w.upper()
+            elif is_capitalize:
+                w_text = raw_w.capitalize()
+            else:
+                w_text = raw_w
             bbox = draw.textbbox((0, 0), w_text, font=font)
             w_width = max(1, bbox[2] - bbox[0])
             w_height = max(1, bbox[3] - bbox[1])
@@ -377,7 +383,8 @@ class SkiaSubtitleRenderer:
             img.save(output_png, format="PNG")
             return
 
-        spacing = max(16, int(font_size * 0.32))
+        user_spacing = style.get("word_spacing")
+        spacing = int(user_spacing * 2.5) if user_spacing is not None else max(16, int(font_size * 0.32))
         total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
 
         # Auto-scale font if line exceeds safe margins (940px)
@@ -386,7 +393,7 @@ class SkiaSubtitleRenderer:
             scale = max_safe_width / total_text_width
             font_size = max(24, int(font_size * scale))
             font = self._load_pil_font(font_family, font_size)
-            spacing = max(12, int(font_size * 0.32))
+            spacing = int(spacing * scale)
             for item in word_items:
                 bbox = draw.textbbox((0, 0), item["text"], font=font)
                 item["width"] = max(1, bbox[2] - bbox[0])
@@ -394,7 +401,7 @@ class SkiaSubtitleRenderer:
             total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
 
         # Center positions
-        pos_y_pct = float(style.get("position_y_pct", 78))
+        pos_y_pct = float(style.get("position_y") if style.get("position_y") is not None else style.get("position_y_pct", 78))
         center_y = int(self._height * (pos_y_pct / 100.0))
         center_x = self._width // 2
 
@@ -403,8 +410,9 @@ class SkiaSubtitleRenderer:
         baseline_y = center_y - line_height // 2
 
         # ─── 1. Background / Card Shapes ──────────────────────────────────────
-        card_pad_x = int(style.get("bg_padding", 28))
-        card_pad_y = max(14, int(font_size * 0.34))
+        user_pad = style.get("bg_padding")
+        card_pad_x = int(user_pad * 1.5) if user_pad is not None else int(style.get("bg_padding", 28))
+        card_pad_y = int(user_pad * 0.8) if user_pad is not None else max(14, int(font_size * 0.34))
         card_left = max(30, start_x - card_pad_x)
         card_right = min(self._width - 30, start_x + total_text_width + card_pad_x)
         card_top = center_y - line_height // 2 - card_pad_y

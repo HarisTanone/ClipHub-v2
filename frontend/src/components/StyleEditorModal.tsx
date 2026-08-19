@@ -4547,6 +4547,202 @@ export function SubtitleEditor({
           </div>
         </Section>
 
+        {style.enabled !== false && (
+          <Section title="✨ AI Smart Style Magic & Keywords">
+            <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-zinc-900/60 p-3.5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+                    AI Auto-Style Mood Generator
+                  </p>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">Pilih mood gaya AI untuk menerapkan font, warna, transisi, dan efek terbaik secara instan.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {[
+                  {
+                    name: "🔥 Hormozi Viral",
+                    desc: "Pop 1 kata, Lime #00FF66, stroke tebal",
+                    apply: () => update({
+                      fontFamily: "Montserrat",
+                      fontWeight: "900",
+                      fontSize: 48,
+                      uppercase: true,
+                      lineTransition: "word_pop",
+                      color: "#FFFFFF",
+                      highlightColor: "#00FF66",
+                      strokeEnabled: true,
+                      strokeWidth: 4,
+                      strokeColor: "#000000",
+                      highlightBold: true,
+                      highlightScale: 1.25,
+                      bgEnabled: false,
+                    }),
+                  },
+                  {
+                    name: "📰 Breaking News",
+                    desc: "Clean pill, category highlight",
+                    apply: () => update({
+                      fontFamily: "Inter",
+                      fontWeight: "800",
+                      fontSize: 34,
+                      uppercase: true,
+                      lineTransition: "karaoke",
+                      color: "#FFFFFF",
+                      highlightColor: "#FACC15",
+                      bgEnabled: true,
+                      bgColor: "#0F172A",
+                      bgOpacity: 0.85,
+                      bgRadius: 10,
+                      bgPadding: 16,
+                      strokeEnabled: false,
+                    }),
+                  },
+                  {
+                    name: "⚡ Cyber Glow",
+                    desc: "Cyan glow shader & high energy",
+                    apply: () => update({
+                      fontFamily: "Montserrat",
+                      fontWeight: "900",
+                      fontSize: 40,
+                      uppercase: true,
+                      lineTransition: "karaoke",
+                      color: "#ECFEFF",
+                      highlightColor: "#00F0FF",
+                      glowEnabled: true,
+                      glowColor: "#00F0FF",
+                      highlightGlow: true,
+                      highlightGlowColor: "#00F0FF",
+                      strokeEnabled: true,
+                      strokeWidth: 2,
+                      strokeColor: "#000000",
+                    }),
+                  },
+                  {
+                    name: "🎧 Podcast Pro",
+                    desc: "Emerald active speaker pill",
+                    apply: () => update({
+                      fontFamily: "Plus Jakarta Sans",
+                      fontWeight: "700",
+                      fontSize: 32,
+                      uppercase: false,
+                      lineTransition: "karaoke",
+                      color: "#E2E8F0",
+                      highlightColor: "#10B981",
+                      bgEnabled: true,
+                      bgColor: "#18181B",
+                      bgOpacity: 0.9,
+                      bgRadius: 999,
+                      bgPadding: 18,
+                    }),
+                  },
+                  {
+                    name: "💎 Swiss Minimal",
+                    desc: "Underline tracking & clean aesthetic",
+                    apply: () => update({
+                      fontFamily: "Inter",
+                      fontWeight: "600",
+                      fontSize: 32,
+                      uppercase: false,
+                      lineTransition: "line_reveal",
+                      color: "#CBD5E1",
+                      highlightColor: "#38BDF8",
+                      bgEnabled: true,
+                      bgColor: "#0F172A",
+                      bgOpacity: 0.7,
+                      bgRadius: 12,
+                      bgPadding: 16,
+                    }),
+                  },
+                  {
+                    name: "👑 Gold Luxury",
+                    desc: "Playfair serif & champagne gold",
+                    apply: () => update({
+                      fontFamily: "Playfair Display",
+                      fontWeight: "800",
+                      fontSize: 34,
+                      uppercase: false,
+                      lineTransition: "karaoke",
+                      color: "#CBD5E1",
+                      highlightColor: "#FCD34D",
+                      strokeEnabled: true,
+                      strokeWidth: 2,
+                      strokeColor: "#000000",
+                      shadowEnabled: true,
+                      shadowColor: "#000000",
+                      shadowBlur: 14,
+                    }),
+                  },
+                ].map((item) => (
+                  <button
+                    key={item.name}
+                    type="button"
+                    onClick={item.apply}
+                    className="p-2 rounded-lg border border-indigo-500/20 bg-zinc-900/60 hover:bg-indigo-950/40 hover:border-indigo-500/50 text-left transition-all group"
+                  >
+                    <p className="text-[11px] font-bold text-zinc-200 group-hover:text-indigo-300">{item.name}</p>
+                    <p className="text-[8px] text-zinc-500 mt-0.5 line-clamp-1">{item.desc}</p>
+                  </button>
+                ))}
+              </div>
+
+              {/* AI Highlight Keywords */}
+              <div className="pt-2 border-t border-indigo-500/20">
+                <p className="text-[10px] font-semibold text-zinc-300 mb-1.5 flex items-center justify-between">
+                  <span>🎯 AI Highlight Keywords (Kata Kunci yang Disorot)</span>
+                  <span className="text-[9px] text-zinc-500 font-normal">{style.highlightWords?.length || 0} aktif</span>
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {["viral", "penting", "rahasia", "sukses", "cuan", "bahaya", "tips", "kaget", "fakta", "solusi"].map((w) => {
+                    const isSelected = style.highlightWords?.includes(w);
+                    return (
+                      <button
+                        key={w}
+                        type="button"
+                        onClick={() => {
+                          const current = style.highlightWords || [];
+                          if (isSelected) {
+                            update({ highlightWords: current.filter((x) => x !== w) });
+                          } else {
+                            update({ highlightWords: [...current, w] });
+                          }
+                        }}
+                        className={cn(
+                          "px-2 py-0.5 rounded-md text-[9px] font-medium border transition-colors",
+                          isSelected
+                            ? "bg-amber-500/20 border-amber-500/50 text-amber-300 font-bold"
+                            : "bg-zinc-800/80 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+                        )}
+                      >
+                        +{w}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newWord}
+                    onChange={(e) => setNewWord(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addHighlightWord(); } }}
+                    placeholder="Ketik kata penting lalu tekan Enter (mis: bisnis, omset)..."
+                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1 text-[10px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={addHighlightWord}
+                    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-semibold"
+                  >
+                    Tambah
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Section>
+        )}
+
         <Section title="Render Engine">
           <EnginePicker
             engine={engine}
