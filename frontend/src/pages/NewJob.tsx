@@ -606,11 +606,25 @@ export function NewJob() {
               <Toggle
                 label="AI Cinematic Text"
                 description={textEmphasisEnabled
-                  ? "Aktif: AI memilih maksimal 2 frasa kuat. Behind Person, Spotlight, atau Side Label; subtitle berhenti sementara."
-                  : "Opsional. Jika mati, hasil subtitle tetap sama seperti sekarang."}
+                  ? "Aktif: AI memilih maksimal 2 frasa punchline/tesis paling kuat dengan 13 gaya visual (Behind Person 3D, Hero Punch, Z-Parallax, Kinetic Cascade, dll). Subtitle karaoke berhenti halus saat teks sinematik tampil."
+                  : "Opsional. Jika mati, hasil subtitle tetap normal tanpa teks sinematik."}
                 checked={textEmphasisEnabled}
                 onChange={(enabled) => { setTextEmphasisEnabled(enabled); if (enabled) setStyleTab("other"); }}
               />
+              {textEmphasisEnabled && (
+                <div className="ml-1 flex items-center justify-between rounded-lg border border-zinc-800/80 bg-zinc-950/50 px-2.5 py-1.5 text-[11px]">
+                  <span className="text-zinc-400">
+                    Mode: <span className="font-semibold text-emerald-400">{textEmphasisStyleConfig.effectMode === "auto" ? "AI Auto (Smart Selection)" : textEmphasisStyleConfig.effectMode}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setStyleTab("other")}
+                    className="text-[10px] font-medium text-emerald-400 hover:text-emerald-300 transition-colors"
+                  >
+                    Edit Style &rarr;
+                  </button>
+                </div>
+              )}
             </div>
           </Card>
 
