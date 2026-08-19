@@ -120,7 +120,7 @@ printf 'Pytest version: %s\n' "$("${PYTHON_BIN}" -m pytest --version)"
 
 run_stage "Backend test suite" bash -c 'cd "$1" && "$2" -m pytest -v --tb=short tests' _ "${BACKEND_DIR}" "${PYTHON_BIN}"
 run_stage "Frontend test suite" npm --prefix "${PROJECT_ROOT}/frontend" test
-run_stage "Frontend production build" npm --prefix "${PROJECT_ROOT}/frontend" run build
+run_stage "Frontend production build" bash -c 'rm -rf "$1/dist" 2>/dev/null || true; npm --prefix "$1" run build' _ "${PROJECT_ROOT}/frontend"
 run_stage "Remotion test suite" npm --prefix "${PROJECT_ROOT}/remotion-renderer" test
 run_stage "Remotion TypeScript build" npm --prefix "${PROJECT_ROOT}/remotion-renderer" run build
 

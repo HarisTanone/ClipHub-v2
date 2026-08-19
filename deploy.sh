@@ -133,6 +133,7 @@ if [ -d ".git" ]; then
     fi
 
     git pull origin main 2>/dev/null || git pull 2>/dev/null || true
+    sudo chown -R $DEPLOY_USER:$DEPLOY_USER "$PROJECT_DIR" 2>/dev/null || true
     echo "  [OK] Code updated"
 else
     echo "  [WARN]  No .git found — skipping pull"
@@ -967,15 +968,6 @@ fi
 # Zero-touch readiness (no manual DB/.env after deploy)
 echo ""
 echo "  Production readiness:"
-if [ -f "$BACKEND_DIR/.env" ]; then
-    for k in TOP_OVERLAY_ENABLED TOP_OVERLAY_PERSON_OUTLINE TOP_OVERLAY_SMART_CROP USE_REMOTION FORCE_V2_PIPELINE HYPERFRAMES_SERVER_URL HERMES_ENABLED; do
-        if grep -q "^${k}=" "$BACKEND_DIR/.env" 2>/dev/null; then
-            echo "  [OK] .env has $k"
-        else
-            echo "  [WARN]  .env missing $k (append_env should have set it — re-run deploy)"
-        fi
-    done
-fi
 if [ -f "$HERMES_HOME_DEPLOY/config.yaml" ]; then
     echo "  [OK] Hermes config at $HERMES_HOME_DEPLOY/config.yaml"
 else
@@ -991,6 +983,8 @@ if [ -f "$BACKEND_DIR/data/autocliper.db" ] || [ -f "$BACKEND_DIR/data/autoclip.
 else
     echo "  [INFO]  SQLite path may be under DATA_DIR — app init_db handles create"
 fi
+
+sudo chown -R $DEPLOY_USER:$DEPLOY_USER "$PROJECT_DIR" 2>/dev/null || true
 
 # ─── Done ────────────────────────────────────────────────────────────────────
 echo ""
