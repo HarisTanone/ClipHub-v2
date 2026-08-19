@@ -159,6 +159,9 @@ def pick_object_mentions(
         src = str(o.get("source") or source or "").lower()
         rank = 0 if src in ("ai", "fallback") else 1
         stem = re.sub(r"[^\w\-]+", "", word, flags=re.UNICODE).lower()
+        from src.infrastructure.stop_words_store import is_abstract_word
+        if is_abstract_word(stem) and source != "ai":
+            return
         try:
             priority = int(o.get("priority", 5) or 5)
         except (TypeError, ValueError):

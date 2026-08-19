@@ -40,6 +40,7 @@ yarn-debug.log*
 # ─── Data & Output (runtime generated) ───────────────────────────────────────
 backend/tmp/
 backend/data/
+!backend/assets/data/
 *.mp4
 *.mp3
 *.wav
@@ -105,7 +106,7 @@ backend/models/
 *.tar.gz
 
 # ─── Root-level runtime files ─────────────────────────────────────────────────
-data/
+/data/
 
 # ─── Coverage / Testing ──────────────────────────────────────────────────────
 .coverage

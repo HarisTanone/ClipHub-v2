@@ -36,7 +36,8 @@ yarn-error.log*
 
 # ─── Data & Output (generated at runtime) ────────────────────────────────────
 tmp/
-data/
+/data/
+!assets/data/
 *.mp4
 *.mp3
 *.wav
