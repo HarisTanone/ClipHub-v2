@@ -532,9 +532,19 @@ class SkiaSubtitleRenderer:
                 # Glowing active word highlight
                 hl_color = highlight_color
                 if style.get("glow_enabled", True):
-                    glow_rgba = (hl_color[0], hl_color[1], hl_color[2], 120)
-                    draw.text((word_x, word_y), w_text, font=font, fill=glow_rgba, stroke_width=5, stroke_fill=glow_rgba)
-                draw.text((word_x, word_y), w_text, font=font, fill=hl_color)
+                    glow_color_str = style.get("glow_color")
+                    if glow_color_str:
+                        glow_c = self._parse_rgba(glow_color_str, 0.65)
+                    else:
+                        glow_c = (hl_color[0], hl_color[1], hl_color[2], 140)
+                    glow_rad = max(4, int(style.get("glow_radius", 6)))
+                    draw.text((word_x, word_y), w_text, font=font, fill=glow_c, stroke_width=glow_rad, stroke_fill=glow_c)
+
+                if style.get("stroke_enabled", False) and style.get("stroke_width", 0) > 0:
+                    strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
+                    draw.text((word_x, word_y), w_text, font=font, fill=hl_color, stroke_width=style["stroke_width"], stroke_fill=strk_c)
+                else:
+                    draw.text((word_x, word_y), w_text, font=font, fill=hl_color)
 
             else:
                 # Normal inactive word

@@ -5041,20 +5041,64 @@ export function SubtitleEditor({
           <>
             <div className="mb-3 flex w-full items-center justify-between gap-2">
               <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
-              <span className="rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[9px] text-purple-300">FFmpeg Drawtext</span>
+              <span className="rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[9px] text-purple-300">
+                <Zap className="inline w-3 h-3 mr-1" />FFmpeg Drawtext
+              </span>
             </div>
             <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
-              <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                <div className="flex flex-wrap justify-center" style={{ gap: 3, maxWidth: "92%", backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgEnabled ? "4px 8px" : 0, borderRadius: style.bgRadius ? Math.min(style.bgRadius, 12) : 4 }}>
-                  {["ini", "kata", "penting", "banget"].map((w, i) => {
-                    const isActive = i === activeWordIdx;
-                    return (
-                      <span key={w} style={{ color: isActive ? style.highlightColor : style.color, fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isActive ? 900 : Number(style.fontWeight), textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", paintOrder: style.strokeEnabled ? "stroke" : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.25, 0.6)}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `1px 1px 0px ${style.shadowColor}` : undefined, wordBreak: "break-word" }}>{w}</span>
-                    );
-                  })}
-                </div>
+              <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: `${style.positionY ?? 78}%`, transform: "translateY(-50%)" }}>
+                {(() => {
+                  const isWordPop = style.lineTransition === "word_pop";
+                  const sampleWords = ["ini", "kata", "penting", "banget", "untuk", "kamu"];
+                  const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
+                  const words = sampleWords.slice(0, count);
+                  const displayWords = isWordPop ? [words[activeWordIdx % words.length]] : words;
+                  const bgAlpha = Math.round(Math.max(0, Math.min(1, style.bgOpacity ?? 0.75)) * 255).toString(16).padStart(2, "0");
+
+                  return (
+                    <div
+                      className="flex flex-wrap justify-center items-center"
+                      style={{
+                        gap: isWordPop ? 0 : Math.max(3, (style.wordSpacing ?? 6) * 0.6),
+                        maxWidth: "92%",
+                        backgroundColor: style.bgEnabled ? `${style.bgColor || "#000000"}${bgAlpha}` : "transparent",
+                        padding: style.bgEnabled ? `${Math.round((style.bgPadding ?? 12) * 0.35)}px ${Math.round((style.bgPadding ?? 12) * 0.65)}px` : "0px",
+                        borderRadius: `${style.bgRadius ? Math.min(style.bgRadius, 14) : 4}px`,
+                      }}
+                    >
+                      {displayWords.map((w, i) => {
+                        const isActive = isWordPop ? true : (i === activeWordIdx % words.length);
+                        const fontSize = Math.min(Math.max((style.fontSize || 38) * 0.22, 10), 16);
+                        const strokeWidth = style.strokeEnabled ? Math.max((style.strokeWidth || 3) * 0.25, 0.6) : 0;
+
+                        return (
+                          <span
+                            key={`${w}-${i}`}
+                            style={{
+                              color: isActive ? (style.highlightColor || "#FFCC00") : (style.color || "#FFFFFF"),
+                              fontSize: fontSize,
+                              fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
+                              fontWeight: isActive ? 900 : Number(style.fontWeight || 700),
+                              textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none",
+                              fontStyle: style.italic ? "italic" : "normal",
+                              letterSpacing: `${style.letterSpacing || 0}px`,
+                              paintOrder: strokeWidth > 0 ? "stroke fill" : undefined,
+                              WebkitTextStroke: strokeWidth > 0 ? `${strokeWidth}px ${style.strokeColor || "#000000"}` : undefined,
+                              textShadow: style.shadowEnabled ? `1px 1px 0px ${style.shadowColor || "#000000"}` : "0 2px 4px rgba(0,0,0,0.8)",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {w}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
-              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">ffmpeg {style.lineTransition || "word_pop"}</p>
+              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-500 z-10">
+                ffmpeg {style.lineTransition || "word_pop"} · {style.stylePreset || "classic"}
+              </p>
             </CanvasPreviewFrame>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
