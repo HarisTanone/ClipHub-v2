@@ -5,6 +5,8 @@ import os
 import time
 from typing import Optional
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,9 +23,9 @@ class AlertingService:
 
     def __init__(self, job_queue=None):
         self._queue = job_queue
-        self._threshold = int(os.getenv("ALERT_QUEUE_THRESHOLD", "10"))
-        self._telegram_token = os.getenv("ALERT_TELEGRAM_TOKEN")
-        self._telegram_chat_id = os.getenv("ALERT_TELEGRAM_CHAT_ID")
+        self._threshold = int(getattr(settings, "ALERT_QUEUE_THRESHOLD", "10") or os.getenv("ALERT_QUEUE_THRESHOLD", "10"))
+        self._telegram_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "") or os.getenv("ALERT_TELEGRAM_TOKEN")
+        self._telegram_chat_id = getattr(settings, "TELEGRAM_CHAT_ID", "") or os.getenv("ALERT_TELEGRAM_CHAT_ID")
         self._last_alert_time: float = 0
         self._last_alert_depth: int = 0
         self._enabled = bool(self._telegram_token and self._telegram_chat_id)
