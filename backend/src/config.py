@@ -1,6 +1,6 @@
 """Application configuration — environment-based (local M1 vs production server)."""
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
