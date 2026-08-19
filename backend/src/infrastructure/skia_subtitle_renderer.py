@@ -83,6 +83,11 @@ class SkiaSubtitleRenderer:
             "text_color": style.get("color") or style.get("text_color") or base.get("text_color", "#FFFFFF"),
             "highlight_color": style.get("highlightColor") or style.get("highlight_color") or base.get("highlight_color", "#38BDF8"),
             "position_y_pct": float(style.get("positionY") or style.get("position_y_pct") or base.get("position_y_pct", 78)),
+            "position_y": style.get("position_y") or style.get("positionY"),
+            "grid_position_y": float(style.get("gridPositionY") or style.get("grid_position_y") or 50.0),
+            "layout_events": list(style.get("layout_events") or style.get("layoutEvents") or []),
+            "autogrid_enabled": bool(style.get("autogrid_enabled", True) if style.get("autogrid_enabled") is not None else style.get("autogridEnabled", True)),
+            "reframe_layout": str(style.get("reframe_layout") or style.get("reframeLayout") or "single"),
             "max_words_per_line": max_words_per_line,
             "line_transition": style.get("lineTransition") or style.get("line_transition") or base.get("line_transition", "karaoke"),
             "uppercase": bool(style.get("uppercase", base.get("uppercase", False))),
@@ -154,6 +159,18 @@ class SkiaSubtitleRenderer:
 
         return normalized
 
+    def _get_layout_at_time(self, layout_events: list[dict], time_sec: float) -> str:
+        """Find active layout ('single' or 'double') at given time_sec."""
+        if not layout_events:
+            return "single"
+        curr = "single"
+        for ev in sorted(layout_events, key=lambda x: float(x.get("time", 0.0))):
+            if float(ev.get("time", 0.0)) <= time_sec + 0.001:
+                curr = str(ev.get("layout", "single")).lower()
+            else:
+                break
+        return curr
+
     def render_subtitles(
         self,
         video_path: str,
@@ -161,8 +178,10 @@ class SkiaSubtitleRenderer:
         style: Any,
         output_path: str,
         start_offset: float = 0.0,
+        layout_events: list[dict] | None = None,
+        autogrid_enabled: bool = True,
     ) -> str:
-        """Render subtitles with rich Skia effects onto video.
+        """Render subtitles with rich Skia effects and Auto-Grid dynamic recentering.
 
         Args:
             video_path: Input video path.
@@ -186,6 +205,10 @@ class SkiaSubtitleRenderer:
             return output_path
 
         norm_style = self._normalize_style(style)
+        if layout_events is not None:
+            norm_style["layout_events"] = list(layout_events)
+        if autogrid_enabled is not None:
+            norm_style["autogrid_enabled"] = bool(autogrid_enabled)
 
         if not norm_style.get("enabled", True):
             logger.info("skia_subtitle: subtitles disabled via config, bypassing render")
@@ -259,7 +282,7 @@ class SkiaSubtitleRenderer:
                             if is_word_pop:
                                 concat_entries.append((empty_png, gap))
                             else:
-                                self._render_line_frame_pil(f_path, line, active_word_index=None, style=style)
+                                self._render_line_frame_pil(f_path, line, active_word_index=None, style=style, time_sec=cur_time)
                                 concat_entries.append((f_path, gap))
                                 frame_idx += 1
                             cur_time = w_start
@@ -268,7 +291,7 @@ class SkiaSubtitleRenderer:
                     f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
                     words_to_render = [w] if is_word_pop else line
                     active_idx = 0 if is_word_pop else w_idx
-                    self._render_line_frame_pil(f_path, words_to_render, active_word_index=active_idx, style=style)
+                    self._render_line_frame_pil(f_path, words_to_render, active_word_index=active_idx, style=style, time_sec=w_start)
                     concat_entries.append((f_path, dur))
                     cur_time = w_end
                     frame_idx += 1
@@ -280,7 +303,7 @@ class SkiaSubtitleRenderer:
                         f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
                         words_to_render = [line[-1]] if is_word_pop else line
                         active_idx = 0 if is_word_pop else len(line) - 1
-                        self._render_line_frame_pil(f_path, words_to_render, active_word_index=active_idx, style=style)
+                        self._render_line_frame_pil(f_path, words_to_render, active_word_index=active_idx, style=style, time_sec=cur_time)
                         concat_entries.append((f_path, hold_dur))
                         cur_time = line_end
                         frame_idx += 1
@@ -317,7 +340,9 @@ class SkiaSubtitleRenderer:
                 output_path,
             ]
 
-            logger.info(f"skia_subtitle: rendering '{style.get('id')}' ({max_words} words/line, {len(concat_entries)} timing cuts) → {os.path.basename(output_path)}")
+            style_id = style.get("id") or "custom"
+            out_base = os.path.basename(output_path)
+            logger.info("skia_subtitle: rendering '%s' (%s words/line, %s timing cuts) -> %s", style_id, max_words, len(concat_entries), out_base)
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=max(180, int(video_dur * 3 + 60)))
             if res.returncode != 0:
                 logger.error(f"skia_subtitle FFmpeg overlay failed: {res.stderr[-400:]}")
@@ -345,6 +370,7 @@ class SkiaSubtitleRenderer:
         words_line: list,
         active_word_index: Optional[int],
         style: dict,
+        time_sec: Optional[float] = None,
     ) -> None:
         """Render a single full-resolution 1080x1920 PNG frame with exact preset visual identity."""
         img = Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
@@ -400,8 +426,22 @@ class SkiaSubtitleRenderer:
                 item["height"] = max(1, bbox[3] - bbox[1])
             total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
 
-        # Center positions
-        pos_y_pct = float(style.get("position_y") if style.get("position_y") is not None else style.get("position_y_pct", 78))
+        # Position calculation with Auto-Grid Dynamic Centering
+        default_pos_y = float(style.get("position_y") if style.get("position_y") is not None else style.get("position_y_pct", 78))
+        layout_events = style.get("layout_events") or []
+        autogrid_enabled = bool(style.get("autogrid_enabled", True))
+
+        if autogrid_enabled and layout_events and time_sec is not None:
+            active_layout = self._get_layout_at_time(layout_events, time_sec)
+            if active_layout in ("double", "grid", "2-grid", "split"):
+                pos_y_pct = float(style.get("grid_position_y") or 50.0)  # Center at 2-grid intersection dividing line
+            else:
+                pos_y_pct = default_pos_y
+        elif autogrid_enabled and style.get("reframe_layout") in ("double", "grid", "2-grid", "split") and not layout_events:
+            pos_y_pct = float(style.get("grid_position_y") or 50.0)
+        else:
+            pos_y_pct = default_pos_y
+
         center_y = int(self._height * (pos_y_pct / 100.0))
         center_x = self._width // 2
 

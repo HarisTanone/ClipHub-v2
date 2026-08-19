@@ -2391,6 +2391,20 @@ class V2PipelineService:
             # ── 1-Pass FFmpeg Compositor Optimization ──
             # When both hook and subtitle (or hook-only / sub-only) use FFmpeg drawtext,
             # combine Hook + Subtitle + Watermark into 1 single encode pass!
+            clip_reframe = (job.clips_data or {}).get("reframe_data", {}).get(clip.rank) or {}
+            clip_layout_events = clip_reframe.get("layout_events") or []
+            if not clip_layout_events:
+                for c_item in (job.clips_data or {}).get("clips", []):
+                    if c_item.get("rank") == clip.rank:
+                        clip_layout_events = c_item.get("layout_events") or []
+                        break
+
+            clip_sub_config = dict(subtitle_style_config or {})
+            clip_sub_config["layout_events"] = clip_layout_events
+            clip_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", True))
+            if clip_reframe.get("layout"):
+                clip_sub_config["reframe_layout"] = clip_reframe.get("layout")
+
             sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
             if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
                 from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
@@ -2406,7 +2420,7 @@ class V2PipelineService:
                     hook_text=clip.hook or "",
                     hook_style_config=hook_style_config,
                     words=words,
-                    subtitle_style_config=subtitle_style_config,
+                    subtitle_style_config=clip_sub_config,
                     watermark_config=watermark_cfg,
                 )
                 if success and os.path.exists(final_path):
@@ -2464,11 +2478,11 @@ class V2PipelineService:
                     if sub_engine == "skia":
                         from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
                         renderer = SkiaSubtitleRenderer(font_dir=fonts_dir)
-                        renderer.render_subtitles(hooked_path, words, subtitle_style_config or {}, final_path)
+                        renderer.render_subtitles(hooked_path, words, clip_sub_config, final_path)
                         logger.info(f"[{job_id}] Skia subtitle rendered clip {clip.rank}")
                     else:
                         renderer = SubtitleRenderer(font_dir=fonts_dir)
-                        style_cfg = SubtitleStyleConfig.from_dict(subtitle_style_config or {})
+                        style_cfg = SubtitleStyleConfig.from_dict(clip_sub_config)
                         renderer.render_subtitles(hooked_path, words, style_cfg, final_path)
                         logger.info(f"[{job_id}] FFmpeg subtitle rendered clip {clip.rank}")
 
@@ -2619,15 +2633,29 @@ class V2PipelineService:
                     sub_min = hook_dur if (clip.hook and hook_engine in ("ffmpeg", "skia", "hyperframes", "remotion")) else 0.0
                     words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
                     if words:
+                        clip_reframe = (job.clips_data or {}).get("reframe_data", {}).get(clip.rank) or {}
+                        clip_layout_events = clip_reframe.get("layout_events") or []
+                        if not clip_layout_events:
+                            for c_item in (job.clips_data or {}).get("clips", []):
+                                if c_item.get("rank") == clip.rank:
+                                    clip_layout_events = c_item.get("layout_events") or []
+                                    break
+
+                        clip_sub_config = dict(subtitle_style_config or {})
+                        clip_sub_config["layout_events"] = clip_layout_events
+                        clip_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", True))
+                        if clip_reframe.get("layout"):
+                            clip_sub_config["reframe_layout"] = clip_reframe.get("layout")
+
                         if sub_engine == "skia":
                             from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
                             renderer = SkiaSubtitleRenderer(font_dir=fonts_dir)
-                            renderer.render_subtitles(current, words, subtitle_style_config or {}, tmp_sub)
+                            renderer.render_subtitles(current, words, clip_sub_config, tmp_sub)
                         else:
                             from src.infrastructure.subtitle_renderer import SubtitleRenderer
                             from src.domain.entities import SubtitleStyleConfig
                             renderer = SubtitleRenderer(font_dir=fonts_dir)
-                            style_cfg = SubtitleStyleConfig.from_dict(subtitle_style_config or {})
+                            style_cfg = SubtitleStyleConfig.from_dict(clip_sub_config)
                             renderer.render_subtitles(current, words, style_cfg, tmp_sub)
 
                         if os.path.exists(tmp_sub):

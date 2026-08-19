@@ -1877,6 +1877,21 @@ async def restyle_clip(
             or {}
         )
 
+        # Enrich subtitle_config with Auto-Grid layout events & autogrid status
+        clip_reframe = (getattr(job, "clips_data", {}) or {}).get("reframe_data", {}).get(clip_rank) or {}
+        clip_layout_events = clip_reframe.get("layout_events") or []
+        if not clip_layout_events:
+            for c_item in (getattr(job, "clips_data", {}) or {}).get("clips", []):
+                if c_item.get("rank") == clip_rank:
+                    clip_layout_events = c_item.get("layout_events") or []
+                    break
+
+        enriched_sub_config = dict(subtitle_config or {})
+        enriched_sub_config["layout_events"] = clip_layout_events
+        enriched_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", True))
+        if clip_reframe.get("layout"):
+            enriched_sub_config["reframe_layout"] = clip_reframe.get("layout")
+
         # ── 1-Pass Optimization when both hook and subtitle use direct FFmpeg ──
         if hook_render_engine == "ffmpeg" and subtitle_render_engine == "ffmpeg":
             from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
@@ -1890,7 +1905,7 @@ async def restyle_clip(
                 hook_text=hook_text or "",
                 hook_style_config=hook_config,
                 words=render_words,
-                subtitle_style_config=subtitle_config,
+                subtitle_style_config=enriched_sub_config,
                 watermark_config=watermark_config,
             )
             if success and os.path.exists(tmp_1pass):
@@ -1951,7 +1966,7 @@ async def restyle_clip(
                         renderer.render_subtitles(
                             staged_final_path,
                             render_words,
-                            subtitle_config or {},
+                            enriched_sub_config,
                             tmp_sub_path,
                         )
                         logger.info(f"[restyle] Skia subtitle applied clip {clip_rank}")
@@ -1959,7 +1974,7 @@ async def restyle_clip(
                         from src.infrastructure.subtitle_renderer import SubtitleRenderer
                         from src.domain.entities import SubtitleStyleConfig
                         renderer = SubtitleRenderer(font_dir=fonts_dir)
-                        style_cfg = SubtitleStyleConfig.from_dict(subtitle_config or {})
+                        style_cfg = SubtitleStyleConfig.from_dict(enriched_sub_config)
                         renderer.render_subtitles(
                             staged_final_path,
                             render_words,

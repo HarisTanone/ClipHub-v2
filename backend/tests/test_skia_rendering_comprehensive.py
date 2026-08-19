@@ -113,3 +113,53 @@ def test_skia_subtitle_renderer_ffmpeg_fallback_invoked(tmp_path):
         result = renderer.render_subtitles(input_video, words, style, output_video)
         assert result == output_video
         assert mock_sub_render.called
+
+
+def test_skia_subtitle_renderer_autogrid_dynamic_centering(tmp_path):
+    renderer = SkiaSubtitleRenderer(font_dir="assets/fonts")
+    layout_events = [
+        {"time": 0.0, "layout": "single"},
+        {"time": 5.0, "layout": "double"},
+        {"time": 10.0, "layout": "single"},
+    ]
+
+    # Check layout time resolution
+    assert renderer._get_layout_at_time(layout_events, 2.0) == "single"
+    assert renderer._get_layout_at_time(layout_events, 5.0) == "double"
+    assert renderer._get_layout_at_time(layout_events, 7.5) == "double"
+    assert renderer._get_layout_at_time(layout_events, 12.0) == "single"
+
+    # Test PNG frame positioning calculation
+    words_line = [{"word": "Testing", "start": 0.0, "end": 1.0}]
+    style = {
+        "id": "glassmorphism",
+        "position_y_pct": 78,
+        "layout_events": layout_events,
+        "autogrid_enabled": True,
+    }
+
+    # At t=2.0 (single) -> frame rendered at standard position (~78%)
+    out_single_1 = str(tmp_path / "single_1.png")
+    renderer._render_line_frame_pil(out_single_1, words_line, active_word_index=0, style=style, time_sec=2.0)
+    assert os.path.exists(out_single_1)
+
+    # At t=6.0 (2-grid / double) -> frame rendered dynamically centered at intersection (50%)
+    out_double = str(tmp_path / "double.png")
+    renderer._render_line_frame_pil(out_double, words_line, active_word_index=0, style=style, time_sec=6.0)
+    assert os.path.exists(out_double)
+
+    # At t=11.0 (switched back to single) -> returns to normal position (78%)
+    out_single_2 = str(tmp_path / "single_2.png")
+    renderer._render_line_frame_pil(out_single_2, words_line, active_word_index=0, style=style, time_sec=11.0)
+    assert os.path.exists(out_single_2)
+
+    # When autogrid is disabled, t=6.0 stays at default position
+    style_disabled = {
+        "id": "glassmorphism",
+        "position_y_pct": 78,
+        "layout_events": layout_events,
+        "autogrid_enabled": False,
+    }
+    out_disabled = str(tmp_path / "disabled.png")
+    renderer._render_line_frame_pil(out_disabled, words_line, active_word_index=0, style=style_disabled, time_sec=6.0)
+    assert os.path.exists(out_disabled)

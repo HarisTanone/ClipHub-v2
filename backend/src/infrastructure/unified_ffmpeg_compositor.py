@@ -303,6 +303,25 @@ class UnifiedFFmpegCompositor:
         else:
             y_pos = "(h*0.75-text_h/2)"
 
+        autogrid_enabled = bool(style.get("autogrid_enabled", True)) if isinstance(style, dict) else True
+        layout_events = style.get("layout_events") or [] if isinstance(style, dict) else []
+
+        def _get_y_for_time(time_sec: float) -> str:
+            if not autogrid_enabled:
+                return y_pos
+            if layout_events:
+                curr = "single"
+                for ev in sorted(layout_events, key=lambda x: float(x.get("time", 0.0))):
+                    if float(ev.get("time", 0.0)) <= time_sec + 0.001:
+                        curr = str(ev.get("layout", "single")).lower()
+                    else:
+                        break
+                if curr in ("double", "grid", "2-grid", "split"):
+                    return "(h*0.50-text_h/2)"
+            elif isinstance(style, dict) and style.get("reframe_layout") in ("double", "grid", "2-grid", "split"):
+                return "(h*0.50-text_h/2)"
+            return y_pos
+
         # Group words into lines
         lines = []
         cur_line = []
@@ -333,6 +352,7 @@ class UnifiedFFmpegCompositor:
                     box_opt = f":box=1:boxcolor=black@{config.background_opacity}:boxborderw=10" if config.background_opacity > 0 else ""
                     active_stroke_w = (config.stroke_width + 1) if (config.stroke_width and config.stroke_width > 0) else 0
                     active_stroke_opt = f":borderw={active_stroke_w}:bordercolor={stroke_color}" if active_stroke_w > 0 else ""
+                    current_y = _get_y_for_time(w_start)
                     filters.append(
                         f"drawtext=text='{escaped_word}'"
                         f":fontsize={int(config.font_size * 1.2)}"
@@ -341,7 +361,7 @@ class UnifiedFFmpegCompositor:
                         f"{active_stroke_opt}"
                         f"{shadow_opt}"
                         f"{box_opt}"
-                        f":x=(w-text_w)/2:y={y_pos}"
+                        f":x=(w-text_w)/2:y={current_y}"
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                     )
             else:
@@ -351,6 +371,7 @@ class UnifiedFFmpegCompositor:
                     line_text = line_text.upper()
                 escaped_line = self._escape_drawtext(line_text)
                 box_opt = f":box=1:boxcolor=black@{config.background_opacity}:boxborderw=8" if config.background_opacity > 0 else ""
+                current_y = _get_y_for_time(line_start)
                 filters.append(
                     f"drawtext=text='{escaped_line}'"
                     f":fontsize={config.font_size}"
@@ -359,7 +380,7 @@ class UnifiedFFmpegCompositor:
                     f"{stroke_opt}"
                     f"{shadow_opt}"
                     f"{box_opt}"
-                    f":x=(w-text_w)/2:y={y_pos}"
+                    f":x=(w-text_w)/2:y={current_y}"
                     f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
                 )
 
