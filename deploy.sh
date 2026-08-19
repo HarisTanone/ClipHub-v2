@@ -302,47 +302,8 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Ensure .env has the 9router-first production keys, even on older servers.
 if [ -f ".env" ]; then
-    append_env_if_missing ".env" "LLM_PROVIDER" "nine_router"
-    append_env_if_missing ".env" "FORCE_V2_PIPELINE" "true"
-    append_env_if_missing ".env" "ALLOW_DIRECT_PROVIDER_FALLBACKS" "false"
-    append_env_if_missing ".env" "TRANSCRIPTION_PROVIDER" "local"
-    append_env_if_missing ".env" "NINE_ROUTER_BASE_URL" "$NINE_ROUTER_DEFAULT_BASE_URL"
-    append_env_if_missing ".env" "NINE_ROUTER_API_KEY" ""
-    append_env_if_missing ".env" "NINE_ROUTER_MODEL" "CliperHub"
-    append_env_if_missing ".env" "NINE_ROUTER_PASS1_MODEL" "CliperHub"
-    append_env_if_missing ".env" "NINE_ROUTER_PASS2_MODEL" "CliperHub"
-    append_env_if_missing ".env" "NINE_ROUTER_AI_LAYER_MODEL" "CliperHub"
-    append_env_if_missing ".env" "NINE_ROUTER_TIMEOUT" "120"
-    append_env_if_missing ".env" "NINE_ROUTER_MAX_RETRIES" "3"
-    append_env_if_missing ".env" "NINE_ROUTER_TEMPERATURE" "0.3"
-    append_env_if_missing ".env" "NINE_ROUTER_WHISPER_ENABLED" "true"
-    append_env_if_missing ".env" "NINE_ROUTER_WHISPER_MODEL" "groq/whisper-large-v3-turbo"
-    append_env_if_missing ".env" "NINE_ROUTER_WHISPER_TIMEOUT" "120"
-    append_env_if_missing ".env" "NINE_ROUTER_WHISPER_MAX_RETRIES" "1"
-
-    # YOLO model config
-    set_env_value ".env" "YOLO_MODEL_VERSION" "v26"
-    set_env_value ".env" "YOLO_MODEL_PATH" "models/yolo26n.pt"
-    set_env_value ".env" "YOLO_SEG_MODEL" "models/yolo26n-seg.pt"
-
-    set_env_value ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000"
-
-    LLM_PROVIDER_VAL="$(env_value ".env" "LLM_PROVIDER" "nine_router")"
-    NINE_ROUTER_BASE_URL_VAL="$(env_value ".env" "NINE_ROUTER_BASE_URL" "")"
-    NINE_ROUTER_API_KEY_VAL="$(env_value ".env" "NINE_ROUTER_API_KEY" "")"
-
-    if [ "$LLM_PROVIDER_VAL" = "nine_router" ] || [ "$LLM_PROVIDER_VAL" = "9router" ] || [ "$LLM_PROVIDER_VAL" = "ninerouter" ]; then
-        if [ -z "$NINE_ROUTER_BASE_URL_VAL" ]; then
-            echo "NINE_ROUTER_BASE_URL=$NINE_ROUTER_DEFAULT_BASE_URL" >> ".env"
-            NINE_ROUTER_BASE_URL_VAL="$NINE_ROUTER_DEFAULT_BASE_URL"
-        fi
-        if [ -z "$NINE_ROUTER_API_KEY_VAL" ]; then
-            echo "  [WARN]  NINE_ROUTER_API_KEY is empty. Continuing because some local 9router installs do not require auth."
-        fi
-        echo "  [OK] 9router configured (model=$(env_value ".env" "NINE_ROUTER_MODEL" "CliperHub"), url=$NINE_ROUTER_BASE_URL_VAL)"
-    fi
+    append_env_if_missing ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000"
 fi
 
 # Create directories
@@ -467,73 +428,6 @@ print('  [OK] object overlay config OK')
     echo "  [FAIL] Object overlay verification failed"
     exit 1
 }
-
-# Detection floor — append only if missing (never overwrite ops override)
-if [ -f ".env" ]; then
-    append_env_if_missing ".env" "PERSON_CONF_THRESHOLD" "0.35"
-    append_env_if_missing ".env" "REFRAME_PIPELINE_MODE" "person_first"
-    append_env_if_missing ".env" "TOP_OVERLAY_ENABLED" "true"
-    append_env_if_missing ".env" "TOP_OVERLAY_SPLIT_RATIO" "0.65"
-    append_env_if_missing ".env" "TOP_OVERLAY_FADE_HEIGHT" "0.15"
-    append_env_if_missing ".env" "TOP_OVERLAY_OPACITY" "1.0"
-    append_env_if_missing ".env" "TOP_OVERLAY_PERSON_OUTLINE" "false"
-    append_env_if_missing ".env" "TOP_OVERLAY_PERSON_SHADOW" "false"
-    append_env_if_missing ".env" "TOP_OVERLAY_OUTLINE_THICKNESS" "9"
-    append_env_if_missing ".env" "TOP_OVERLAY_OUTLINE_COLOR" "255,255,255"
-    append_env_if_missing ".env" "TOP_OVERLAY_OUTLINE_STYLE" "white"
-    append_env_if_missing ".env" "TOP_OVERLAY_MAX_PER_CLIP" "2"
-    append_env_if_missing ".env" "TOP_OVERLAY_SEG_CONFIDENCE" "0.25"
-    append_env_if_missing ".env" "TOP_OVERLAY_MASK_FEATHER" "3"
-    append_env_if_missing ".env" "TOP_OVERLAY_MASK_STRIDE" "1"
-    append_env_if_missing ".env" "TOP_OVERLAY_CROP_BIAS_Y" "0.08"
-    append_env_if_missing ".env" "TOP_OVERLAY_SPEAKER_MASK_MODE" "dual_auto"
-    append_env_if_missing ".env" "TOP_OVERLAY_SMART_CROP" "true"
-    append_env_if_missing ".env" "TOP_OVERLAY_SMART_CROP_CONF" "0.18"
-    append_env_if_missing ".env" "TOP_OVERLAY_PERSON_SCALE" "1.0"
-    append_env_if_missing ".env" "TOP_OVERLAY_PERSON_SHIFT_Y" "0.0"
-    append_env_if_missing ".env" "TOP_OVERLAY_PERSON_ANCHOR" "natural"
-    append_env_if_missing ".env" "TOP_OVERLAY_PERSON_EDGE_MARGIN" "0.03"
-    append_env_if_missing ".env" "TOP_OVERLAY_BG_BLACK" "0.0"
-    append_env_if_missing ".env" "TOP_OVERLAY_OUTLINE_BUST_RATIO" "0.48"
-    append_env_if_missing ".env" "TOP_OVERLAY_OUTLINE_EDGE_MARGIN" "0.05"
-    append_env_if_missing ".env" "BROLL_SPLICE_ENABLED" "true"
-    append_env_if_missing ".env" "ASSET_FETCH_ENABLED" "true"
-    append_env_if_missing ".env" "USE_REMOTION" "true"
-    append_env_if_missing ".env" "FORCE_V2_PIPELINE" "true"
-    # HyperFrames polish (default OFF — Remotion owns hook/subtitle)
-    append_env_if_missing ".env" "HYPERFRAMES_ENABLED" "true"
-    append_env_if_missing ".env" "HYPERFRAMES_SERVER_URL" "http://127.0.0.1:$HYPERFRAMES_PORT"
-    append_env_if_missing ".env" "HYPERFRAMES_SERVER_PORT" "$HYPERFRAMES_PORT"
-    append_env_if_missing ".env" "HYPERFRAMES_PROJECT_PATH" "../hyperframes-renderer"
-    append_env_if_missing ".env" "HYPERFRAMES_TIMEOUT" "180"
-    append_env_if_missing ".env" "HYPERFRAMES_DEFAULT_TEMPLATE" "lower_third_v1"
-    append_env_if_missing ".env" "HERMES_ENABLED" "true"
-    append_env_if_missing ".env" "HERMES_BIN" "hermes"
-    append_env_if_missing ".env" "HERMES_HOME" "$HERMES_HOME_DEPLOY"
-    # Object image+text overlay (AI visual entities → stock photo card)
-    append_env_if_missing ".env" "OBJECT_OVERLAY_ENABLED" "true"
-    append_env_if_missing ".env" "OBJECT_OVERLAY_MAX_PER_CLIP" "3"
-    append_env_if_missing ".env" "OBJECT_OVERLAY_BOX_SIZE" "0.28"
-    append_env_if_missing ".env" "OBJECT_OVERLAY_CORNER_RADIUS" "18"
-    append_env_if_missing ".env" "OBJECT_OVERLAY_POSITION" "top_right"
-    append_env_if_missing ".env" "OBJECT_OVERLAY_ANIMATION" "slide_right"
-    append_env_if_missing ".env" "OBJECT_OVERLAY_DURATION" "2.4"
-    append_env_if_missing ".env" "OBJECT_OVERLAY_MIN_RELEVANCE" "0.35"
-    append_env_if_missing ".env" "OBJECT_OVERLAY_SHOW_LABEL" "true"
-    # ─── Video Generator (AI topic→video pipeline) ────────────────────────
-    append_env_if_missing ".env" "DEEPGRAM_API_KEY" ""
-    append_env_if_missing ".env" "DEEPGRAM_TTS_VOICE" "aura-2-thalia-en"
-    append_env_if_missing ".env" "DEEPGRAM_TTS_SPEED" "1.0"
-    append_env_if_missing ".env" "DEEPGRAM_TTS_TIMEOUT" "30"
-    append_env_if_missing ".env" "VIDEO_GEN_ENABLED" "true"
-    append_env_if_missing ".env" "VIDEO_GEN_TARGET_DURATION" "65"
-    append_env_if_missing ".env" "VIDEO_GEN_MIN_DURATION" "50"
-    append_env_if_missing ".env" "VIDEO_GEN_MAX_DURATION" "90"
-    append_env_if_missing ".env" "VIDEO_GEN_MAX_SCENES" "10"
-    append_env_if_missing ".env" "VIDEO_GEN_BGM_DIR" "assets/bgm"
-    append_env_if_missing ".env" "VIDEO_GEN_BGM_VOLUME" "0.15"
-    append_env_if_missing ".env" "VIDEO_GEN_OUTPUT_DIR" "tmp/video_gen"
-fi
 
 # Ensure music assets dir exists (AudioMixer duck bed)
 mkdir -p "$BACKEND_DIR/assets/music"
