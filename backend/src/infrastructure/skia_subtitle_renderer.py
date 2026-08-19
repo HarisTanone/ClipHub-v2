@@ -244,7 +244,9 @@ class SkiaSubtitleRenderer:
                         concat_entries.append((empty_png, gap_dur))
                         cur_time = line_start
 
-                # Show full line with active word highlighted as speech progresses
+                is_word_pop = style.get("line_transition") == "word_pop"
+
+                # Show full line or single word pop with active word highlighted as speech progresses
                 for w_idx, w in enumerate(line):
                     w_start = max(0.0, float(w.get("start", 0)) + start_offset)
                     w_end = max(w_start + 0.08, float(w.get("end", 0)) + start_offset)
@@ -254,14 +256,19 @@ class SkiaSubtitleRenderer:
                         gap = w_start - cur_time
                         if gap >= 0.02:
                             f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
-                            self._render_line_frame_pil(f_path, line, active_word_index=None, style=style)
-                            concat_entries.append((f_path, gap))
+                            if is_word_pop:
+                                concat_entries.append((empty_png, gap))
+                            else:
+                                self._render_line_frame_pil(f_path, line, active_word_index=None, style=style)
+                                concat_entries.append((f_path, gap))
+                                frame_idx += 1
                             cur_time = w_start
-                            frame_idx += 1
 
                     dur = max(0.06, w_end - w_start)
                     f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
-                    self._render_line_frame_pil(f_path, line, active_word_index=w_idx, style=style)
+                    words_to_render = [w] if is_word_pop else line
+                    active_idx = 0 if is_word_pop else w_idx
+                    self._render_line_frame_pil(f_path, words_to_render, active_word_index=active_idx, style=style)
                     concat_entries.append((f_path, dur))
                     cur_time = w_end
                     frame_idx += 1
@@ -271,7 +278,9 @@ class SkiaSubtitleRenderer:
                     hold_dur = line_end - cur_time
                     if hold_dur >= 0.05:
                         f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
-                        self._render_line_frame_pil(f_path, line, active_word_index=len(line) - 1, style=style)
+                        words_to_render = [line[-1]] if is_word_pop else line
+                        active_idx = 0 if is_word_pop else len(line) - 1
+                        self._render_line_frame_pil(f_path, words_to_render, active_word_index=active_idx, style=style)
                         concat_entries.append((f_path, hold_dur))
                         cur_time = line_end
                         frame_idx += 1

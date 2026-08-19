@@ -440,7 +440,7 @@ const FONT_OPTIONS = [
 ];
 
 const HOOK_FONT_SUGGESTIONS = ["Barlow Condensed", "Anton", "Archivo Black", "Playfair Display", "Bungee", "Montserrat"];
-const SUBTITLE_FONT_SUGGESTIONS = ["Poppins", "Inter", "Montserrat", "Barlow Condensed", "Roboto Condensed", "Noto Sans"];
+const SUBTITLE_FONT_SUGGESTIONS = ["Montserrat", "Poppins", "Inter", "Anton", "Bebas Neue", "Archivo Black", "Barlow Condensed", "Roboto Condensed", "Noto Sans"];
 const HIGHLIGHT_FONT_SUGGESTIONS = ["Anton", "Archivo Black", "Bebas Neue", "Bungee", "Barlow Condensed", "Black Ops One"];
 
 const HOOK_ANIMATIONS = [
@@ -3405,389 +3405,170 @@ function SkiaSubtitleLivePreview({
       </div>
       <CanvasPreviewFrame canvas={canvas || null} thumbnailUrl={thumbnailUrl} dimOverlay>
         <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: posTop, transform: "translateY(-50%)" }}>
-          {presetId === "glassmorphism" ? (
-            /* 1. Glassmorphism: Bright Frosted Glass Card with Glossy Border */
-            <div
-              style={{
-                backdropFilter: "blur(14px)",
-                WebkitBackdropFilter: "blur(14px)",
-                background: "linear-gradient(135deg, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.07) 100%)",
-                border: "1.5px solid rgba(255, 255, 255, 0.55)",
-                boxShadow: "0 8px 32px 0 rgba(0, 0, 0, 0.45), inset 0 0 12px rgba(255, 255, 255, 0.25)",
-                borderRadius: "16px",
-                padding: "7px 14px",
-                display: "flex",
-                flexWrap: "wrap",
-                justifyContent: "center",
-                maxWidth: "92%",
-                boxSizing: "border-box",
-                gap: 5,
-              }}
-            >
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? (style.highlightColor || "#38BDF8") : "#FFFFFF",
-                      fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: isActive ? 900 : Number(style.fontWeight || 600),
-                      textShadow: isActive ? "0 0 10px #38BDF8, 0 0 20px rgba(56, 189, 248, 0.7)" : "none",
-                      transform: isActive ? "scale(1.08)" : "scale(1)",
-                      transition: "transform 0.15s ease",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "clean_editorial" ? (
-            /* 2. Clean Editorial: Minimalist Swiss Floating Text with Underline Tracking */
-            <div className="flex flex-wrap justify-center items-center gap-2" style={{ maxWidth: "92%" }}>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? "#38BDF8" : "#FFFFFF",
-                      fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: isActive ? 800 : 600,
-                      letterSpacing: "0.04em",
-                      borderBottom: isActive ? "2.5px solid #38BDF8" : "2.5px solid transparent",
-                      paddingBottom: 2,
-                      textShadow: "0 2px 8px rgba(0,0,0,0.8)",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "podcast_pro" ? (
-            /* 3. Podcast Pro: Dark Capsule with Emerald Pulsing Mic Dot */
-            <div
-              style={{
-                backgroundColor: "rgba(18, 18, 22, 0.92)",
-                borderRadius: "9999px",
-                border: "1.5px solid rgba(16, 185, 129, 0.5)",
-                boxShadow: "0 0 16px rgba(16, 185, 129, 0.35)",
-                padding: "6px 14px",
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "center",
-                maxWidth: "92%",
-                boxSizing: "border-box",
-                gap: 5,
-              }}
-            >
-              <div className="flex items-center gap-1 shrink-0 mr-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10B981]" />
-                <span className="text-[7px] font-bold text-emerald-400 tracking-wider">MIC</span>
-              </div>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? "#10B981" : "#E2E8F0",
-                      fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: isActive ? 900 : 600,
-                      textShadow: isActive ? "0 0 10px rgba(16, 185, 129, 0.9)" : "none",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "kinetic_word_box" ? (
-            /* 4. Kinetic Word Box: Hot Pink Solid Badge on Active Word */
-            <div className="flex flex-wrap justify-center items-center gap-1.5" style={{ maxWidth: "92%" }}>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      backgroundColor: isActive ? "#FF0055" : "transparent",
-                      color: isActive ? "#FFFFFF" : "#E2E8F0",
-                      fontFamily: `'${style.fontFamily || "Plus Jakarta Sans"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: isActive ? 900 : 700,
-                      borderRadius: isActive ? "6px" : "0px",
-                      padding: isActive ? "3px 8px" : "0px",
-                      boxShadow: isActive ? "0 4px 14px rgba(255,0,85,0.7)" : "none",
-                      transform: isActive ? "scale(1.12)" : "scale(1.0)",
-                      textShadow: isActive ? "none" : "0 2px 8px rgba(0,0,0,0.8)",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "neon_tube" ? (
-            /* 5. Neon Tube: Hollow Glowing Gas Tubes in Cyan & Hot Pink */
-            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? "#FF007F" : "transparent",
-                      WebkitTextStroke: isActive ? "1.2px #FF007F" : "1.2px #00FFFF",
-                      fontFamily: `'${style.fontFamily || "Montserrat"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: 900,
-                      textTransform: "uppercase",
-                      textShadow: isActive
-                        ? "0 0 8px #FF007F, 0 0 20px #FF007F, 0 0 30px rgba(255,0,127,0.9)"
-                        : "0 0 6px #00FFFF, 0 0 14px rgba(0,255,255,0.7)",
-                      transform: isActive ? "scale(1.15)" : "scale(1)",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "gradient_fill" ? (
-            /* 6. Gradient Fill: Iridescent Purple to Pink / Fire Gradient */
-            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                const grad = isActive
-                  ? "linear-gradient(135deg, #FF0844 0%, #FFB199 100%)"
-                  : "linear-gradient(135deg, #818CF8, #C084FC)";
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      background: grad,
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: isActive ? 900 : 700,
-                      filter: isActive ? "drop-shadow(0 2px 10px rgba(255, 8, 68, 0.7))" : "none",
-                      transform: isActive ? "scale(1.14)" : "scale(1)",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "cinematic_slate" ? (
-            /* 7. Cinematic Slate: Hollywood Serif Framed by Gold Rules */
-            <div
-              style={{
+          {(() => {
+            const isWordPop = style.lineTransition === "word_pop";
+            const isLineReveal = style.lineTransition === "line_reveal";
+            const displayWords = isWordPop ? [words[activeWordIdx % words.length]] : words;
+
+            // Card / Capsule background styles
+            const hasBg = style.bgEnabled || presetId === "glassmorphism" || presetId === "clean_editorial" || presetId === "podcast_pro" || presetId === "modern_mono";
+            const bgOpacity = style.bgOpacity ?? (presetId === "glassmorphism" ? 0.25 : 0.75);
+            const bgHex = style.bgColor || (presetId === "podcast_pro" ? "#121216" : presetId === "modern_mono" ? "#080c14" : presetId === "clean_editorial" ? "#0f172a" : "#1e293b");
+            const bgAlpha = Math.round(Math.max(0, Math.min(1, bgOpacity)) * 255).toString(16).padStart(2, "0");
+            const bgRadius = style.bgRadius ?? (presetId === "podcast_pro" ? 999 : presetId === "glassmorphism" ? 16 : 12);
+            const bgPadding = style.bgPadding ?? 16;
+
+            const containerStyle: React.CSSProperties = {
+              display: "flex",
+              flexWrap: isWordPop ? "nowrap" : "wrap",
+              alignItems: "center",
+              justifyContent: "center",
+              maxWidth: "94%",
+              gap: isWordPop ? 0 : Math.max(3, (style.wordSpacing ?? 6) * 0.6),
+              ...(hasBg ? {
+                backgroundColor: presetId === "glassmorphism" ? undefined : `${bgHex}${bgAlpha}`,
+                background: presetId === "glassmorphism"
+                  ? `linear-gradient(135deg, rgba(255, 255, 255, ${bgOpacity}) 0%, rgba(255, 255, 255, ${bgOpacity * 0.3}) 100%)`
+                  : undefined,
+                backdropFilter: "blur(12px)",
+                WebkitBackdropFilter: "blur(12px)",
+                border: presetId === "glassmorphism"
+                  ? "1.5px solid rgba(255, 255, 255, 0.55)"
+                  : presetId === "podcast_pro"
+                  ? "1.5px solid rgba(16, 185, 129, 0.5)"
+                  : presetId === "modern_mono"
+                  ? "1.5px solid #06B6D4"
+                  : "1px solid rgba(255, 255, 255, 0.12)",
+                boxShadow: presetId === "glassmorphism"
+                  ? "0 8px 32px 0 rgba(0, 0, 0, 0.45), inset 0 0 12px rgba(255, 255, 255, 0.25)"
+                  : presetId === "podcast_pro"
+                  ? "0 0 16px rgba(16, 185, 129, 0.35)"
+                  : presetId === "modern_mono"
+                  ? "0 0 16px rgba(6, 182, 212, 0.35)"
+                  : "0 8px 24px rgba(0,0,0,0.5)",
+                borderRadius: `${bgRadius}px`,
+                padding: `${Math.round(bgPadding * 0.35)}px ${Math.round(bgPadding * 0.65)}px`,
+              } : {}),
+              ...(isLineReveal ? {
+                borderLeft: `3px solid ${style.highlightColor || "#38BDF8"}`,
+              } : {}),
+              ...(presetId === "cinematic_slate" ? {
                 borderTop: "1.5px solid rgba(252, 211, 77, 0.6)",
                 borderBottom: "1.5px solid rgba(252, 211, 77, 0.6)",
                 padding: "6px 14px",
-                display: "flex",
-                flexWrap: "wrap",
-                justifyContent: "center",
-                maxWidth: "92%",
-                gap: 5,
-              }}
-            >
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? "#FCD34D" : "#E2E8F0",
-                      fontFamily: `'${style.fontFamily || "Playfair Display"}', serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: isActive ? 800 : 500,
-                      letterSpacing: "0.08em",
-                      textShadow: isActive ? "0 0 12px rgba(252, 211, 77, 0.8)" : "none",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "modern_mono" ? (
-            /* 8. Modern Mono: Cyber Tech Code Terminal with Mini Window Header */
-            <div
-              style={{
-                backgroundColor: "rgba(8, 12, 20, 0.95)",
-                borderRadius: "8px",
-                border: "1.5px solid #06B6D4",
-                boxShadow: "0 0 16px rgba(6, 182, 212, 0.35)",
-                padding: "6px 10px",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                maxWidth: "92%",
-                boxSizing: "border-box",
-              }}
-            >
-              <div className="flex items-center gap-1 w-full border-b border-cyan-500/30 pb-1 mb-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                <span className="text-[7px] text-cyan-400 font-mono ml-1 font-bold">TERMINAL v2.0</span>
-              </div>
-              <div className="flex flex-wrap justify-center gap-1.5">
-                <span className="text-cyan-400 font-mono text-[11px] font-bold">&gt;</span>
-                {words.map((w, i) => {
-                  const isActive = i === activeWordIdx;
+              } : {}),
+            };
+
+            return (
+              <div style={containerStyle}>
+                {presetId === "podcast_pro" && (
+                  <div className="flex items-center gap-1 shrink-0 mr-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10B981]" />
+                    <span className="text-[7px] font-bold text-emerald-400 tracking-wider">MIC</span>
+                  </div>
+                )}
+                {presetId === "modern_mono" && (
+                  <div className="flex items-center gap-1 w-full border-b border-cyan-500/30 pb-1 mb-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    <span className="text-[7px] text-cyan-400 font-mono ml-1 font-bold">TERMINAL v2.0</span>
+                  </div>
+                )}
+                {displayWords.map((w, i) => {
+                  const isActive = isWordPop ? true : (i === activeWordIdx % words.length);
+                  const isKeyword = style.highlightWords?.includes(w.toLowerCase());
+                  const shouldHighlight = isActive || isKeyword;
+
+                  const fontSize = Math.min(Math.max((style.fontSize || 42) * 0.23, 10), 17);
+                  const fontWeight = shouldHighlight
+                    ? (style.highlightBold !== false ? 900 : Number(style.fontWeight || 700))
+                    : Number(style.fontWeight || 600);
+
+                  // Colors & Gradients
+                  const gradActive = style.gradientEnabled
+                    ? `linear-gradient(135deg, ${style.gradientFrom || "#667EEA"} 0%, ${style.gradientTo || "#764BA2"} 100%)`
+                    : presetId === "retro_chrome"
+                    ? "linear-gradient(180deg, #FFF9C4 0%, #FFFFFF 35%, #F57F17 50%, #FFD54F 60%, #E65100 100%)"
+                    : null;
+
+                  const gradInactive = style.gradientEnabled
+                    ? `linear-gradient(135deg, ${style.gradientFrom || "#667EEA"}80 0%, ${style.gradientTo || "#764BA2"}80 100%)`
+                    : presetId === "retro_chrome"
+                    ? "linear-gradient(180deg, #E0E0E0 0%, #FFFFFF 40%, #757575 50%, #BDBDBD 60%, #424242 100%)"
+                    : null;
+
+                  const grad = shouldHighlight ? gradActive : gradInactive;
+
+                  // Text shadows & Glow
+                  const glowColor = style.glowColor || style.highlightColor || "#00FFFF";
+                  const shadowParts: string[] = [];
+                  if (shouldHighlight && style.glowEnabled) {
+                    shadowParts.push(`0 0 10px ${glowColor}`, `0 0 20px ${glowColor}B3`);
+                  } else if (shouldHighlight && (presetId === "neon_tube" || presetId === "glassmorphism")) {
+                    shadowParts.push(`0 0 10px ${style.highlightColor || "#38BDF8"}`);
+                  } else if (style.shadowEnabled) {
+                    shadowParts.push(`0 0 ${style.shadowBlur || 8}px ${style.shadowColor || "#000000"}`);
+                  } else {
+                    shadowParts.push("0 2px 6px rgba(0,0,0,0.8)");
+                  }
+
+                  // Active scale
+                  const scaleVal = shouldHighlight && (style.highlightBold !== false || isWordPop)
+                    ? (style.highlightScale || 1.15)
+                    : 1.0;
+
+                  // Stroke / Outline
+                  const strokeWidth = style.strokeEnabled ? (style.strokeWidth || 3) * 0.25 : 0;
+                  const strokeColor = style.strokeColor || "#000000";
+
+                  const wordStyle: React.CSSProperties = {
+                    fontFamily: `'${style.fontFamily || "Inter"}', sans-serif`,
+                    fontSize: fontSize,
+                    fontWeight: fontWeight,
+                    letterSpacing: `${style.letterSpacing || 0}px`,
+                    textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none",
+                    fontStyle: style.italic ? "italic" : "normal",
+                    transform: `scale(${scaleVal})`,
+                    transition: "transform 0.15s ease, color 0.15s ease",
+                    display: "inline-block",
+                    wordBreak: "break-word",
+                    textShadow: shadowParts.join(", ") || undefined,
+                    ...(grad ? {
+                      background: grad,
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                    } : {
+                      color: shouldHighlight ? (style.highlightColor || "#38BDF8") : (style.color || "#FFFFFF"),
+                    }),
+                    ...(strokeWidth > 0 ? {
+                      WebkitTextStroke: `${strokeWidth}px ${strokeColor}`,
+                      paintOrder: "stroke fill",
+                    } : {}),
+                    ...(presetId === "kinetic_word_box" && shouldHighlight ? {
+                      backgroundColor: style.highlightColor || "#FF0055",
+                      color: "#FFFFFF",
+                      WebkitTextFillColor: "#FFFFFF",
+                      borderRadius: "6px",
+                      padding: "2px 6px",
+                      boxShadow: `0 4px 14px ${style.highlightColor || "#FF0055"}B3`,
+                    } : {}),
+                    ...(presetId === "clean_editorial" && shouldHighlight ? {
+                      borderBottom: `2.5px solid ${style.highlightColor || "#38BDF8"}`,
+                      paddingBottom: 2,
+                    } : {}),
+                  };
+
                   return (
-                    <span
-                      key={w}
-                      style={{
-                        color: isActive ? "#06B6D4" : "#94A3B8",
-                        fontFamily: `'${style.fontFamily || "Space Grotesk"}', monospace`,
-                        fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 13),
-                        fontWeight: 700,
-                        textTransform: "uppercase",
-                        textShadow: isActive ? "0 0 8px #06B6D4" : "none",
-                        wordBreak: "break-word",
-                      }}
-                    >
+                    <span key={`${w}-${i}`} style={wordStyle}>
                       {w}
-                      {isActive && <span className="animate-pulse text-cyan-400 ml-0.5">_</span>}
+                      {presetId === "modern_mono" && shouldHighlight && <span className="animate-pulse text-cyan-400 ml-0.5">_</span>}
                     </span>
                   );
                 })}
               </div>
-            </div>
-          ) : presetId === "bold_impact_stroke" ? (
-            /* 9. Bold Impact Stroke: MrBeast / Hormozi Viral Yellow on Heavy Black Stroke */
-            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      color: isActive ? "#FACC15" : "#FFFFFF",
-                      fontFamily: `'${style.fontFamily || "Anton"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.24, 11), 16),
-                      fontWeight: 900,
-                      textTransform: "uppercase",
-                      WebkitTextStroke: "1.2px #000000",
-                      paintOrder: "stroke fill",
-                      textShadow: "0 4px 14px rgba(0,0,0,0.95)",
-                      transform: isActive ? "scale(1.18) rotate(-2deg)" : "scale(1)",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "dual_layer" ? (
-            /* 10. Dual Layer 3D: Holographic Spatial Layer with Purple Ambient Depth */
-            <div className="relative flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
-              <div className="absolute inset-0 flex flex-wrap justify-center gap-1.5 filter blur-[3px] opacity-80 transform translate-y-1">
-                {words.map((w) => (
-                  <span key={`blur-${w}`} style={{ color: "#8B5CF6", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontWeight: 900, fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif` }}>{w}</span>
-                ))}
-              </div>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      position: "relative",
-                      color: isActive ? "#FBBF24" : "#FFFFFF",
-                      fontFamily: `'${style.fontFamily || "Outfit"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: 800,
-                      textShadow: isActive ? "0 0 10px rgba(251, 191, 36, 0.8)" : "0 2px 6px rgba(0,0,0,0.8)",
-                      transform: isActive ? "scale(1.1)" : "scale(1)",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : presetId === "retro_chrome" ? (
-            /* 11. Retro Chrome: 80s Metallic Steel & 24K Gold Chrome Text */
-            <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      background: isActive
-                        ? "linear-gradient(180deg, #FFF9C4 0%, #FFFFFF 35%, #F57F17 50%, #FFD54F 60%, #E65100 100%)"
-                        : "linear-gradient(180deg, #E0E0E0 0%, #FFFFFF 40%, #757575 50%, #BDBDBD 60%, #424242 100%)",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      fontFamily: `'${style.fontFamily || "Bebas Neue"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.24, 11), 16),
-                      fontWeight: 900,
-                      textTransform: "uppercase",
-                      filter: "drop-shadow(2px 2px 0px rgba(0,0,0,0.9))",
-                      transform: isActive ? "scale(1.12)" : "scale(1)",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          ) : (
-            /* 12. Glitch Offset: Anaglyph 3D Chromatic Split Channel */
-            <div className="relative flex flex-wrap justify-center gap-1.5" style={{ maxWidth: "92%" }}>
-              <span className="absolute left-[-2px] top-[-1px] flex flex-wrap justify-center gap-1.5 text-transparent" style={{ WebkitTextStroke: "1px #FF0000", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
-                {words.join(" ")}
-              </span>
-              <span className="absolute left-[2px] top-[1px] flex flex-wrap justify-center gap-1.5 text-transparent" style={{ WebkitTextStroke: "1px #00FFFF", fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14), fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`, textTransform: "uppercase" }}>
-                {words.join(" ")}
-              </span>
-              {words.map((w, i) => {
-                const isActive = i === activeWordIdx;
-                return (
-                  <span
-                    key={w}
-                    style={{
-                      position: "relative",
-                      color: isActive ? "#FFFFFF" : "#E2E8F0",
-                      WebkitTextStroke: "0.8px #000000",
-                      fontFamily: `'${style.fontFamily || "Archivo Black"}', sans-serif`,
-                      fontSize: Math.min(Math.max(style.fontSize * 0.22, 10), 14),
-                      fontWeight: 900,
-                      textTransform: "uppercase",
-                      textShadow: isActive ? "0 0 10px #FFFFFF" : "none",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {w}
-                  </span>
-                );
-              })}
-            </div>
-          )}
+            );
+          })()}
         </div>
         <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-500 z-10">
           skia gpu · {preset.name}
