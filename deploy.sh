@@ -547,8 +547,8 @@ else
     echo "  ✅ Music beds present ($(ls "$BACKEND_DIR/assets/music" | wc -l | tr -d ' ') file(s))"
 fi
 
-# Bootstrap DB schema if missing (init_db also runs on app start)
-echo "  Ensuring SQLite schema..."
+# Bootstrap DB schema & seed dynamic system settings
+echo "  Ensuring SQLite schema & system settings..."
 ./venv/bin/python -c "
 import asyncio, sys, os
 sys.path.insert(0, '$BACKEND_DIR')
@@ -556,7 +556,9 @@ os.chdir('$BACKEND_DIR')
 async def main():
     from src.infrastructure.database import init_db
     await init_db()
-    print('  ✅ DB schema ready')
+    from src.infrastructure.db_seeder import seed_database
+    seed_database()
+    print('  ✅ DB schema, roles & system settings initialized')
 asyncio.run(main())
 " 2>&1 | sed 's/^/  /' || echo "  ⚠️  DB bootstrap deferred to app startup"
 
