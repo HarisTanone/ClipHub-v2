@@ -10,7 +10,7 @@
 #   - i7-13700K (24 threads)
 #   - 62GB RAM
 #   - 928GB NVMe
-#   - IP: 192.168.168.58 / 103.122.34.166
+#   - Host: Linux Server (Ubuntu 24.04)
 #
 # What it does:
 #   1. Git fetch + pull latest code
@@ -58,7 +58,7 @@ BACKEND_PORT=8000
 REMOTION_PORT=3002
 HYPERFRAMES_PORT="${HYPERFRAMES_PORT:-3003}"
 FRONTEND_PORT=3001
-PUBLIC_HOST="${PUBLIC_HOST:-100.64.5.96}"
+PUBLIC_HOST="${PUBLIC_HOST:-localhost}"
 PUBLIC_FRONTEND_URL="${PUBLIC_FRONTEND_URL:-http://$PUBLIC_HOST:$FRONTEND_PORT}"
 PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-http://$PUBLIC_HOST:$BACKEND_PORT}"
 NINE_ROUTER_PORT="${NINE_ROUTER_PORT:-20128}"
@@ -133,9 +133,9 @@ if [ -d ".git" ]; then
     fi
 
     git pull origin main 2>/dev/null || git pull 2>/dev/null || true
-    echo "  ✅ Code updated"
+    echo "  [OK] Code updated"
 else
-    echo "  ⚠️  No .git found — skipping pull"
+    echo "  [WARN]  No .git found — skipping pull"
 fi
 
 # ─── Step 2: System Dependencies ────────────────────────────────────────────
@@ -151,7 +151,7 @@ command -v node &>/dev/null || MISSING="$MISSING nodejs"
 command -v python3 &>/dev/null || MISSING="$MISSING python3"
 
 if [ -z "$MISSING" ]; then
-    echo "  ✅ All system dependencies present"
+    echo "  [OK] All system dependencies present"
 else
     echo "  Installing:$MISSING"
     sudo apt-get update -qq 2>/dev/null || true
@@ -187,7 +187,7 @@ else
         libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 \
         libasound2t64 libxshmfence1 2>/dev/null || true
 
-    echo "  ✅ System packages installed"
+    echo "  [OK] System packages installed"
 fi
 
 # Always ensure FFmpeg dev libs + build tools are present (needed by PyAV/faster-whisper)
@@ -200,7 +200,7 @@ if ! pkg-config --exists libavformat 2>/dev/null; then
         libavformat-dev libavcodec-dev libavdevice-dev \
         libavutil-dev libavfilter-dev libswscale-dev \
         libswresample-dev 2>/dev/null || true
-    echo "  ✅ FFmpeg dev libraries installed"
+    echo "  [OK] FFmpeg dev libraries installed"
 fi
 
 echo "  Python: $($PYTHON_BIN --version 2>/dev/null)"
@@ -214,12 +214,12 @@ echo "  Step 2.5: 9router CLI"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if command -v 9router &>/dev/null; then
-    echo "  ✅ 9router CLI found: $(command -v 9router)"
+    echo "  [OK] 9router CLI found: $(command -v 9router)"
 else
     echo "  Installing 9router@$NINE_ROUTER_CLI_VERSION..."
     npm install -g "9router@$NINE_ROUTER_CLI_VERSION" --prefer-online 2>/dev/null || \
         sudo npm install -g "9router@$NINE_ROUTER_CLI_VERSION" --prefer-online
-    echo "  ✅ 9router CLI installed"
+    echo "  [OK] 9router CLI installed"
 fi
 
 # ─── Step 2.6: System Font Provisioning ──────────────────────────────────────
@@ -234,7 +234,7 @@ if [ -d "$BACKEND_DIR/assets/fonts" ]; then
     sudo mkdir -p /usr/local/share/fonts/autocliper
     sudo cp -f "$BACKEND_DIR"/assets/fonts/*.ttf /usr/local/share/fonts/autocliper/ 2>/dev/null || true
     sudo fc-cache -f /usr/local/share/fonts/autocliper 2>/dev/null || fc-cache -f 2>/dev/null || true
-    echo "  ✅ Custom fonts cached ($(ls "$BACKEND_DIR/assets/fonts"/*.ttf 2>/dev/null | wc -l | tr -d ' ') fonts)"
+    echo "  [OK] Custom fonts cached ($(ls "$BACKEND_DIR/assets/fonts"/*.ttf 2>/dev/null | wc -l | tr -d ' ') fonts)"
 fi
 
 # ─── Step 3: Backend Setup ──────────────────────────────────────────────────
@@ -268,7 +268,7 @@ echo "  Syncing Python dependencies..."
 echo "  Validating backend imports and syntax..."
 ./venv/bin/python -m compileall -q src
 ./venv/bin/python -c "from src.presentation.api import app; assert app.routes"
-echo "  ✅ Backend validation passed"
+echo "  [OK] Backend validation passed"
 
 # Keep the server-side pre-deployment test gate ready. Test dependencies are
 # isolated from runtime requirements but installed into the backend venv that
@@ -276,7 +276,7 @@ echo "  ✅ Backend validation passed"
 if [ -f "requirements-dev.txt" ]; then
     echo "  Installing backend test dependencies..."
     ./venv/bin/pip install -r requirements-dev.txt -q
-    echo "  ✅ Backend test dependencies ready"
+    echo "  [OK] Backend test dependencies ready"
 fi
 
 # GPU: Install PyTorch with CUDA 12.1 (compatible with NVIDIA driver 535+)
@@ -285,9 +285,9 @@ if command -v nvidia-smi &>/dev/null; then
     echo "  Installing PyTorch with CUDA 12.1 (GPU detected)..."
     ./venv/bin/pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 -q 2>/dev/null || \
         ./venv/bin/pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
-    echo "  ✅ PyTorch CUDA 12.1 installed"
+    echo "  [OK] PyTorch CUDA 12.1 installed"
 else
-    echo "  ℹ️  No GPU detected — using CPU-only PyTorch"
+    echo "  [INFO]  No GPU detected — using CPU-only PyTorch"
 fi
 
 # Create .env from production template if not exists
@@ -296,8 +296,8 @@ if [ ! -f ".env" ]; then
         echo "  Copying .env.production → .env"
         cp .env.production .env
     elif [ -f ".env.example" ]; then
-        echo "  ⚠️  No .env found — copying from .env.example"
-        echo "  ⚠️  EDIT .env WITH YOUR ACTUAL CREDENTIALS"
+        echo "  [WARN]  No .env found — copying from .env.example"
+        echo "  [WARN]  EDIT .env WITH YOUR ACTUAL CREDENTIALS"
         cp .env.example .env
     fi
 fi
@@ -339,9 +339,9 @@ if [ -f ".env" ]; then
             NINE_ROUTER_BASE_URL_VAL="$NINE_ROUTER_DEFAULT_BASE_URL"
         fi
         if [ -z "$NINE_ROUTER_API_KEY_VAL" ]; then
-            echo "  ⚠️  NINE_ROUTER_API_KEY is empty. Continuing because some local 9router installs do not require auth."
+            echo "  [WARN]  NINE_ROUTER_API_KEY is empty. Continuing because some local 9router installs do not require auth."
         fi
-        echo "  ✅ 9router configured (model=$(env_value ".env" "NINE_ROUTER_MODEL" "CliperHub"), url=$NINE_ROUTER_BASE_URL_VAL)"
+        echo "  [OK] 9router configured (model=$(env_value ".env" "NINE_ROUTER_MODEL" "CliperHub"), url=$NINE_ROUTER_BASE_URL_VAL)"
     fi
 fi
 
@@ -355,7 +355,7 @@ if ! command -v yt-dlp &>/dev/null && ! ./venv/bin/python -c "import yt_dlp" 2>/
 fi
 echo "  yt-dlp: $(./venv/bin/python -c 'import yt_dlp; print(yt_dlp.version.__version__)' 2>/dev/null || yt-dlp --version 2>/dev/null || echo 'not found')"
 
-echo "  ✅ Backend ready"
+echo "  [OK] Backend ready"
 
 # ─── Step 3.1: Database Migrations ──────────────────────────────────────────
 echo ""
@@ -383,10 +383,10 @@ migrate()
     if [ $MIGRATION_COUNT -eq 0 ]; then
         echo "  No migrations found"
     else
-        echo "  ✅ $MIGRATION_COUNT migration(s) executed"
+        echo "  [OK] $MIGRATION_COUNT migration(s) executed"
     fi
 else
-    echo "  ⚠️  No migrations directory found"
+    echo "  [WARN]  No migrations directory found"
 fi
 
 # Verify reframe tuning defaults landed (anti-flicker + detection floor)
@@ -429,11 +429,11 @@ print(f'  reframe global: enter={cfg.get(\"grid_enter_samples\")} '
 print(f'  PERSON_CONF_THRESHOLD={settings.PERSON_CONF_THRESHOLD}')
 print(f'  REFRAME_PIPELINE_MODE={settings.REFRAME_PIPELINE_MODE}')
 if bad:
-    print('  ❌ reframe tuning verify failed: ' + ', '.join(bad))
+    print('  [FAIL] reframe tuning verify failed: ' + ', '.join(bad))
     sys.exit(1)
-print('  ✅ reframe tuning defaults OK')
+print('  [OK] reframe tuning defaults OK')
 " 2>&1 | sed 's/^/  /' || {
-    echo "  ❌ Reframe tuning verification failed"
+    echo "  [FAIL] Reframe tuning verification failed"
     exit 1
 }
 
@@ -453,7 +453,7 @@ cfg = get_object_overlay_config(None)
 need = ['enabled', 'max_per_clip', 'box_size_ratio', 'position', 'animation', 'show_label']
 bad = [k for k in need if k not in cfg]
 if bad:
-    print('  ❌ object overlay missing keys: ' + ', '.join(bad))
+    print('  [FAIL] object overlay missing keys: ' + ', '.join(bad))
     sys.exit(1)
 print(
     f'  object_overlay: enabled={cfg.get(\"enabled\")} '
@@ -462,9 +462,9 @@ print(
     f'anim={cfg.get(\"animation\")}'
 )
 print(f'  OBJECT_OVERLAY_ENABLED={getattr(settings, \"OBJECT_OVERLAY_ENABLED\", None)}')
-print('  ✅ object overlay config OK')
+print('  [OK] object overlay config OK')
 " 2>&1 | sed 's/^/  /' || {
-    echo "  ❌ Object overlay verification failed"
+    echo "  [FAIL] Object overlay verification failed"
     exit 1
 }
 
@@ -542,9 +542,9 @@ mkdir -p "$BACKEND_DIR/assets/bgm"
 # Ensure video generator output dir
 mkdir -p "$BACKEND_DIR/tmp/video_gen"
 if [ -z "$(ls -A "$BACKEND_DIR/assets/music" 2>/dev/null)" ]; then
-    echo "  ⚠️  assets/music empty — music bed will skip until files added (non-fatal)"
+    echo "  [WARN]  assets/music empty — music bed will skip until files added (non-fatal)"
 else
-    echo "  ✅ Music beds present ($(ls "$BACKEND_DIR/assets/music" | wc -l | tr -d ' ') file(s))"
+    echo "  [OK] Music beds present ($(ls "$BACKEND_DIR/assets/music" | wc -l | tr -d ' ') file(s))"
 fi
 
 # Bootstrap DB schema & seed dynamic system settings
@@ -558,9 +558,9 @@ async def main():
     await init_db()
     from src.infrastructure.db_seeder import seed_database
     seed_database()
-    print('  ✅ DB schema, roles & system settings initialized')
+    print('  [OK] DB schema, roles & system settings initialized')
 asyncio.run(main())
-" 2>&1 | sed 's/^/  /' || echo "  ⚠️  DB bootstrap deferred to app startup"
+" 2>&1 | sed 's/^/  /' || echo "  [WARN]  DB bootstrap deferred to app startup"
 
 # ─── Step 3.2: Person-First Pipeline Models ──────────────────────────────────
 echo ""
@@ -582,9 +582,9 @@ except Exception as e:
         RFDETRLarge()
         print('  RF-DETR Large: downloaded OK')
     except Exception as e2:
-        print(f'  ⚠️  RF-DETR download failed: {e2}')
+        print(f'  [WARN]  RF-DETR download failed: {e2}')
         print('  Will fallback to Ultralytics YOLO at runtime')
-" 2>&1 || echo "  ⚠️  RF-DETR pre-download skipped (non-fatal)"
+" 2>&1 || echo "  [WARN]  RF-DETR pre-download skipped (non-fatal)"
 
 # RetinaFace — pre-download model weights
 echo "  Checking RetinaFace model..."
@@ -597,7 +597,7 @@ except ImportError:
     print('  RetinaFace: package not available, will use MediaPipe fallback')
 except Exception as e:
     print(f'  RetinaFace: {e}')
-" 2>&1 || echo "  ⚠️  RetinaFace pre-download skipped (non-fatal)"
+" 2>&1 || echo "  [WARN]  RetinaFace pre-download skipped (non-fatal)"
 
 # Ultralytics YOLO — pre-download for tracker fallback + person detection fallback
 echo "  Checking YOLO26n model (tracker fallback)..."
@@ -610,7 +610,7 @@ model = YOLO('yolo26n.pt')
 if os.path.exists('yolo26n.pt') and not os.path.exists('models/yolo26n.pt'):
     shutil.move('yolo26n.pt', 'models/yolo26n.pt')
 print('  YOLO26n: ready')
-" 2>&1 || echo "  ⚠️  YOLO26n download skipped"
+" 2>&1 || echo "  [WARN]  YOLO26n download skipped"
 else
     echo "  YOLO26n: already present"
 fi
@@ -625,12 +625,12 @@ model = YOLO('yolo26n-seg.pt')
 if os.path.exists('yolo26n-seg.pt') and not os.path.exists('models/yolo26n-seg.pt'):
     shutil.move('yolo26n-seg.pt', 'models/yolo26n-seg.pt')
 print('  YOLO26n-seg: ready')
-" 2>&1 || echo "  ⚠️  YOLO26n-seg download skipped"
+" 2>&1 || echo "  [WARN]  YOLO26n-seg download skipped"
 else
     echo "  YOLO26n-seg: already present"
 fi
 
-echo "  ✅ Models provisioned"
+echo "  [OK] Models provisioned"
 
 # ─── Step 3.5: Optional cache clear ──────────────────────────────────────────
 echo ""
@@ -638,7 +638,7 @@ if [ "$CLEAR_AI_CACHE_ON_DEPLOY" = "1" ]; then
     echo "  Clearing cached transcripts & analysis..."
     rm -rf "$BACKEND_DIR/tmp/cache/"*/transcript*.json 2>/dev/null || true
     rm -rf "$BACKEND_DIR/tmp/cache/"*/analysis*.json 2>/dev/null || true
-    echo "  ✅ Cache cleared (transcripts + analysis)"
+    echo "  [OK] Cache cleared (transcripts + analysis)"
 else
     echo "  Keeping cached transcripts & analysis (set CLEAR_AI_CACHE_ON_DEPLOY=1 to clear)"
 fi
@@ -657,7 +657,7 @@ if [ -d "$REMOTION_DIR" ]; then
         echo "  Installing npm dependencies (including tsx/typescript)..."
         npm install 2>/dev/null || npm install
     else
-        echo "  ✅ npm dependencies up to date"
+        echo "  [OK] npm dependencies up to date"
     fi
 
     # CRITICAL: Clear webpack/remotion bundler cache to force fresh bundle
@@ -675,9 +675,9 @@ if [ -d "$REMOTION_DIR" ]; then
 
     echo "  Type-checking Remotion server and compositions..."
     npm run build
-    echo "  ✅ Remotion ready (will re-bundle on service start)"
+    echo "  [OK] Remotion ready (will re-bundle on service start)"
 else
-    echo "  ⚠️  Remotion directory not found at $REMOTION_DIR"
+    echo "  [WARN]  Remotion directory not found at $REMOTION_DIR"
 fi
 
 # ─── Step 4b: HyperFrames polish server ─────────────────────────────────────
@@ -692,16 +692,16 @@ if [ -d "$HYPERFRAMES_DIR" ]; then
         echo "  Installing HyperFrames npm dependencies..."
         npm install 2>/dev/null || npm install
     else
-        echo "  ✅ HyperFrames npm dependencies up to date"
+        echo "  [OK] HyperFrames npm dependencies up to date"
     fi
     mkdir -p "$HYPERFRAMES_DIR/work"
     chown -R $DEPLOY_USER:$DEPLOY_USER "$HYPERFRAMES_DIR" 2>/dev/null || true
     # Sanity: assembler loads
     node -e "import('./src/assemble.mjs').then(m => console.log('templates', m.listTemplates().join(',')))" \
-        || echo "  ⚠️  HyperFrames assembler check failed (non-fatal until service start)"
-    echo "  ✅ HyperFrames renderer ready (polish only; hook+subtitle = Remotion)"
+        || echo "  [WARN]  HyperFrames assembler check failed (non-fatal until service start)"
+    echo "  [OK] HyperFrames renderer ready (polish only; hook+subtitle = Remotion)"
 else
-    echo "  ⚠️  HyperFrames directory not found at $HYPERFRAMES_DIR"
+    echo "  [WARN]  HyperFrames directory not found at $HYPERFRAMES_DIR"
 fi
 
 # ─── Step 4c: Hermes config (local == server) ───────────────────────────────
@@ -714,14 +714,14 @@ if [ -x "$PROJECT_DIR/scripts/sync-hermes-config.sh" ]; then
     sudo -u "$DEPLOY_USER" env HERMES_HOME="$HERMES_HOME_DEPLOY" \
         "$PROJECT_DIR/scripts/sync-hermes-config.sh" \
         || HERMES_HOME="$HERMES_HOME_DEPLOY" bash "$PROJECT_DIR/scripts/sync-hermes-config.sh" || true
-    echo "  ✅ Hermes config synced → $HERMES_HOME_DEPLOY"
+    echo "  [OK] Hermes config synced → $HERMES_HOME_DEPLOY"
 else
-    echo "  ⚠️  scripts/sync-hermes-config.sh missing"
+    echo "  [WARN]  scripts/sync-hermes-config.sh missing"
 fi
 if command -v hermes &>/dev/null; then
-    echo "  ✅ hermes binary: $(command -v hermes)"
+    echo "  [OK] hermes binary: $(command -v hermes)"
 else
-    echo "  ℹ️  hermes not on PATH — optional install:"
+    echo "  [INFO]  hermes not on PATH — optional install:"
     echo "     curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
 fi
 
@@ -745,16 +745,16 @@ if [ -d "$FRONTEND_DIR" ]; then
         echo "  Installing npm dependencies..."
         npm install 2>/dev/null || npm install
     else
-        echo "  ✅ npm dependencies up to date"
+        echo "  [OK] npm dependencies up to date"
     fi
 
     echo "  Type-checking and building production bundle..."
     VITE_API_URL="$PUBLIC_BACKEND_URL" npm run build
 
     if [ -d "dist" ] && [ -f "dist/index.html" ]; then
-        echo "  ✅ Frontend built"
+        echo "  [OK] Frontend built"
     else
-        echo "  ❌ Frontend build did not produce dist/index.html"
+        echo "  [FAIL] Frontend build did not produce dist/index.html"
         exit 1
     fi
 
@@ -764,7 +764,7 @@ if [ -d "$FRONTEND_DIR" ]; then
         npm install -g serve 2>/dev/null || true
     fi
 else
-    echo "  ⚠️  Frontend directory not found at $FRONTEND_DIR"
+    echo "  [WARN]  Frontend directory not found at $FRONTEND_DIR"
 fi
 
 # ─── Step 6: Systemd Services ───────────────────────────────────────────────
@@ -824,7 +824,7 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 else
-    echo "  ⚠️  9router binary not found — skipping autocliper-9router.service"
+    echo "  [WARN]  9router binary not found — skipping autocliper-9router.service"
 fi
 
 # Remotion service
@@ -883,9 +883,9 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-    echo "  ✅ autocliper-hyperframes.service written"
+    echo "  [OK] autocliper-hyperframes.service written"
 else
-    echo "  ⚠️  HyperFrames server missing — skipping autocliper-hyperframes.service"
+    echo "  [WARN]  HyperFrames server missing — skipping autocliper-hyperframes.service"
 fi
 
 # Frontend service
@@ -931,13 +931,13 @@ NINE_ROUTER_READY=0
 for i in $(seq 1 40); do
     if curl -s "http://$NINE_ROUTER_HOST:$NINE_ROUTER_PORT" >/dev/null 2>&1; then
         NINE_ROUTER_READY=1
-        echo "  ✅ 9router ready (${i}s)"
+        echo "  [OK] 9router ready (${i}s)"
         break
     fi
     sleep 1
 done
 if [ $NINE_ROUTER_READY -eq 0 ]; then
-    echo "  ⚠️  9router not responding yet — check logs: sudo journalctl -u autocliper-9router -n 30"
+    echo "  [WARN]  9router not responding yet — check logs: sudo journalctl -u autocliper-9router -n 30"
 fi
 
 echo "  Starting Remotion server (bundling compositions)..."
@@ -946,13 +946,13 @@ REMOTION_READY=0
 for i in $(seq 1 60); do
     if curl -s "http://localhost:$REMOTION_PORT/health" 2>/dev/null | grep -q "healthy"; then
         REMOTION_READY=1
-        echo "  ✅ Remotion bundled and ready (${i}s)"
+        echo "  [OK] Remotion bundled and ready (${i}s)"
         break
     fi
     sleep 1
 done
 if [ $REMOTION_READY -eq 0 ]; then
-    echo "  ⚠️  Remotion not ready after 60s — check logs: sudo journalctl -u autocliper-remotion -n 30"
+    echo "  [WARN]  Remotion not ready after 60s — check logs: sudo journalctl -u autocliper-remotion -n 30"
 fi
 
 echo "  Starting HyperFrames polish server..."
@@ -961,20 +961,20 @@ HF_READY=0
 for i in $(seq 1 30); do
     if curl -s "http://localhost:$HYPERFRAMES_PORT/health" 2>/dev/null | grep -q "healthy"; then
         HF_READY=1
-        echo "  ✅ HyperFrames ready (${i}s)"
+        echo "  [OK] HyperFrames ready (${i}s)"
         break
     fi
     sleep 1
 done
 if [ $HF_READY -eq 0 ]; then
-    echo "  ⚠️  HyperFrames not ready — check: sudo journalctl -u autocliper-hyperframes -n 30"
+    echo "  [WARN]  HyperFrames not ready — check: sudo journalctl -u autocliper-hyperframes -n 30"
 fi
 
 # Now restart backend (Remotion is ready to handle render requests)
 sudo systemctl start autocliper-backend
 sudo systemctl start autocliper-frontend
 
-echo "  ✅ All services registered and started"
+echo "  [OK] All services registered and started"
 
 # ─── Step 7: Nginx (optional — only if nginx is installed) ──────────────────
 echo ""
@@ -1026,12 +1026,12 @@ server {
 EOF
         sudo ln -sf /etc/nginx/sites-available/autocliper /etc/nginx/sites-enabled/ 2>/dev/null
         sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null
-        echo "  ✅ Nginx configured"
+        echo "  [OK] Nginx configured"
     else
-        echo "  ✅ Nginx config already exists"
+        echo "  [OK] Nginx config already exists"
     fi
 else
-    echo "  ⚠️  Nginx not installed — access services directly via ports"
+    echo "  [WARN]  Nginx not installed — access services directly via ports"
 fi
 
 # ─── Step 8: Health Check ────────────────────────────────────────────────────
@@ -1044,9 +1044,9 @@ sleep 4
 
 check_service() {
     if sudo systemctl is-active --quiet "$1" 2>/dev/null; then
-        echo "  ✅ $1 — RUNNING (port $2)"
+        echo "  [OK] $1 — RUNNING (port $2)"
     else
-        echo "  ❌ $1 — FAILED"
+        echo "  [FAIL] $1 — FAILED"
         echo "     → sudo journalctl -u $1 -n 15 --no-pager"
     fi
 }
@@ -1059,15 +1059,15 @@ check_service "autocliper-frontend" "$FRONTEND_PORT"
 
 # API health check
 if curl -s "http://localhost:$BACKEND_PORT/health" | grep -q "ok" 2>/dev/null; then
-    echo "  ✅ Backend API responding"
+    echo "  [OK] Backend API responding"
 else
-    echo "  ⚠️  Backend API not responding yet (may still be starting)"
+    echo "  [WARN]  Backend API not responding yet (may still be starting)"
 fi
 
 if curl -s "http://localhost:$HYPERFRAMES_PORT/health" 2>/dev/null | grep -q "healthy"; then
-    echo "  ✅ HyperFrames API responding"
+    echo "  [OK] HyperFrames API responding"
 else
-    echo "  ⚠️  HyperFrames API not responding"
+    echo "  [WARN]  HyperFrames API not responding"
 fi
 
 # Zero-touch readiness (no manual DB/.env after deploy)
@@ -1076,32 +1076,32 @@ echo "  Production readiness:"
 if [ -f "$BACKEND_DIR/.env" ]; then
     for k in TOP_OVERLAY_ENABLED TOP_OVERLAY_PERSON_OUTLINE TOP_OVERLAY_SMART_CROP USE_REMOTION FORCE_V2_PIPELINE HYPERFRAMES_SERVER_URL HERMES_ENABLED; do
         if grep -q "^${k}=" "$BACKEND_DIR/.env" 2>/dev/null; then
-            echo "  ✅ .env has $k"
+            echo "  [OK] .env has $k"
         else
-            echo "  ⚠️  .env missing $k (append_env should have set it — re-run deploy)"
+            echo "  [WARN]  .env missing $k (append_env should have set it — re-run deploy)"
         fi
     done
 fi
 if [ -f "$HERMES_HOME_DEPLOY/config.yaml" ]; then
-    echo "  ✅ Hermes config at $HERMES_HOME_DEPLOY/config.yaml"
+    echo "  [OK] Hermes config at $HERMES_HOME_DEPLOY/config.yaml"
 else
-    echo "  ⚠️  Hermes config missing — run scripts/sync-hermes-config.sh"
+    echo "  [WARN]  Hermes config missing — run scripts/sync-hermes-config.sh"
 fi
 if [ -d "$BACKEND_DIR/assets/music" ]; then
-    echo "  ✅ assets/music ready"
+    echo "  [OK] assets/music ready"
 else
-    echo "  ⚠️  assets/music missing"
+    echo "  [WARN]  assets/music missing"
 fi
 if [ -f "$BACKEND_DIR/data/autocliper.db" ] || [ -f "$BACKEND_DIR/data/autoclip.db" ] || [ -f "$BACKEND_DIR/autocliper.db" ] || ls "$BACKEND_DIR"/data/*.db >/dev/null 2>&1; then
-    echo "  ✅ SQLite DB present"
+    echo "  [OK] SQLite DB present"
 else
-    echo "  ℹ️  SQLite path may be under DATA_DIR — app init_db handles create"
+    echo "  [INFO]  SQLite path may be under DATA_DIR — app init_db handles create"
 fi
 
 # ─── Done ────────────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
-echo "  ✅ Deployment Complete!"
+echo "  [OK] Deployment Complete!"
 echo ""
 echo "  Services:"
 echo "    9router:      http://127.0.0.1:$NINE_ROUTER_PORT"

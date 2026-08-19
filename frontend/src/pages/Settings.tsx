@@ -640,7 +640,7 @@ export function Settings() {
   async function handleClearStorage() {
     if (!(await confirmDialog({
       title: "Clear all storage & processing data?",
-      message: "This will delete ALL clipping jobs, video generator assets, output videos, downloaded footages, thumbnails, analysis caches, and all objects in the MinIO bucket (cliperhub).\n\nPresets, user accounts, and system settings will be preserved.\n\nThis action cannot be undone.",
+      message: "This will delete ALL clipping jobs, video generator assets, output videos, downloaded footages, thumbnails, analysis caches, and all objects in the configured storage bucket.\n\nPresets, user accounts, and system settings will be preserved.\n\nThis action cannot be undone.",
       confirmText: "Yes, Clear Everything",
       danger: true,
     }))) return;
@@ -2855,12 +2855,12 @@ export function Settings() {
               <div className="flex flex-wrap items-center gap-1.5">
                 {[
                   { id: "all", label: "Semua Kategori" },
-                  { id: "ai_llm", label: "🤖 AI & LLM" },
-                  { id: "api_keys", label: "🔑 API Keys" },
-                  { id: "render_limits", label: "⚡ Render & Limits" },
-                  { id: "vision_reframe", label: "🎯 Vision & Reframe" },
-                  { id: "broll_effects", label: "🎨 B-Roll & Effects" },
-                  { id: "storage_cdn", label: "☁️ Storage & CDN" },
+                  { id: "ai_llm", label: "AI & LLM" },
+                  { id: "api_keys", label: "API Keys" },
+                  { id: "render_limits", label: "Render & Limits" },
+                  { id: "vision_reframe", label: "Vision & Reframe" },
+                  { id: "broll_effects", label: "B-Roll & Effects" },
+                  { id: "storage_cdn", label: "Storage & CDN" },
                 ].map((cat) => (
                   <button
                     key={cat.id}

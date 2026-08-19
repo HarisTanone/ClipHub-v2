@@ -153,7 +153,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": "http://100.64.5.96:11434",
+        "default": "http://localhost:11434",
         "description": "Base URL server lokal Ollama",
     },
     "OLLAMA_MODEL": {
@@ -1057,7 +1057,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": "/home/backend/.hermes",
+        "default": "",
         "description": "Direktori home / state Hermes Agent",
     },
 
@@ -1067,7 +1067,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": "103.103.22.205:9000",
+        "default": "",
         "description": "Host dan port endpoint MinIO Object Storage",
     },
     "MINIO_ACCESS_KEY": {
@@ -1075,7 +1075,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": True,
-        "default": "admin",
+        "default": "",
         "description": "Access Key kredensial MinIO",
     },
     "MINIO_SECRET_KEY": {
@@ -1083,7 +1083,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": True,
-        "default": "admin1234",
+        "default": "",
         "description": "Secret Key kredensial MinIO",
     },
     "MINIO_BUCKET": {
@@ -1091,7 +1091,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": "cliperhub",
+        "default": "",
         "description": "Nama bucket penyimpanan MinIO",
     },
     "MINIO_SECURE": {

@@ -17,14 +17,14 @@ class MinioService:
 
     def __init__(self):
         self._client: Optional[Minio] = None
-        self._bucket = getattr(settings, "MINIO_BUCKET", "cliperhub")
+        self._bucket = getattr(settings, "MINIO_BUCKET", "") or "default"
 
     @property
     def client(self) -> Minio:
         if self._client is None:
-            endpoint = getattr(settings, "MINIO_ENDPOINT", "103.103.22.205:9000")
-            access_key = getattr(settings, "MINIO_ACCESS_KEY", "admin")
-            secret_key = getattr(settings, "MINIO_SECRET_KEY", "admin1234")
+            endpoint = getattr(settings, "MINIO_ENDPOINT", "") or "localhost:9000"
+            access_key = getattr(settings, "MINIO_ACCESS_KEY", "")
+            secret_key = getattr(settings, "MINIO_SECRET_KEY", "")
             secure = getattr(settings, "MINIO_SECURE", False)
 
             self._client = Minio(
@@ -64,9 +64,9 @@ class MinioService:
         Returns:
             {
                 "object_name": "job_abc123/clip_01_final.mp4",
-                "bucket": "cliperhub",
+                "bucket": "default",
                 "size": 12345678,
-                "url": "http://103.103.22.205:9000/cliperhub/job_abc123/clip_01_final.mp4",
+                "url": "http://localhost:9000/default/job_abc123/clip_01_final.mp4",
                 "presigned_url": "http://...(7 days expiry)",
             }
         """
@@ -97,7 +97,7 @@ class MinioService:
             )
 
             # Direct URL (public if bucket policy allows)
-            endpoint = getattr(settings, "MINIO_ENDPOINT", "103.103.22.205:9000")
+            endpoint = getattr(settings, "MINIO_ENDPOINT", "") or "localhost:9000"
             secure = getattr(settings, "MINIO_SECURE", False)
             protocol = "https" if secure else "http"
             direct_url = f"{protocol}://{endpoint}/{self._bucket}/{object_name}"

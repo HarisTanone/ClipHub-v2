@@ -141,12 +141,13 @@ async def clear_processing_data(user: CurrentUser = Depends(get_current_user)):
     finally:
         conn.close()
 
-    # 5. Clear ALL Objects in the MinIO Bucket (e.g. 'cliperhub')
+    # 5. Clear ALL Objects in the MinIO Bucket
     minio_deleted = 0
     try:
         from src.infrastructure.minio_service import get_minio_service
         minio_deleted = get_minio_service().clear_bucket()
-        removed_dirs.append(f"minio:{getattr(settings, 'MINIO_BUCKET', 'cliperhub')}")
+        bucket_name = getattr(settings, 'MINIO_BUCKET', '') or 'default'
+        removed_dirs.append(f"minio:{bucket_name}")
     except Exception as e:
         errors.append(f"minio: {e}")
 

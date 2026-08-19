@@ -38,7 +38,7 @@ class OllamaAnalyzer:
     """Analyze transcript using local Ollama LLM (mistral-nemo:12b)."""
 
     def __init__(self):
-        self._base_url = getattr(settings, "OLLAMA_BASE_URL", "http://100.64.5.96:11434")
+        self._base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
         self._model = getattr(settings, "OLLAMA_MODEL", "mistral-nemo:12b")
         self._chunk_max_seconds = settings.V2_CHUNK_MAX_SECONDS  # 600s
         self._chunk_max_chars = settings.V2_CHUNK_MAX_CHARS       # 4000

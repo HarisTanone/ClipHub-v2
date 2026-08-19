@@ -310,10 +310,10 @@ class Settings(BaseSettings):
     HERMES_HOME: str = ""  # empty → ~/.hermes
 
     # === MinIO (Object Storage) ===
-    MINIO_ENDPOINT: str = "103.103.22.205:9000"
-    MINIO_ACCESS_KEY: str = "admin"
-    MINIO_SECRET_KEY: str = "admin1234"
-    MINIO_BUCKET: str = "cliperhub"
+    MINIO_ENDPOINT: str = ""
+    MINIO_ACCESS_KEY: str = ""
+    MINIO_SECRET_KEY: str = ""
+    MINIO_BUCKET: str = ""
     MINIO_SECURE: bool = False
     TELEGRAM_BOT_NOTIFY_URL: str = ""  # URL to POST upload notifications to Telegram bot
     TELEGRAM_BOT_TOKEN: str = ""  # Bot token for direct Telegram API (alternative to notify URL)
@@ -360,7 +360,7 @@ class Settings(BaseSettings):
     V2_VAD_MIN_SILENCE_MS: int = 300           # Was used by Silero VAD
 
     # ─── Ollama (Local LLM) ──────────────────────────────────────────
-    OLLAMA_BASE_URL: str = "http://100.64.5.96:11434"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "mistral-nemo:12b"
 
     # ─── Gemini Multi-Key Support ─────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2, Loader2 } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2, Loader2, Quote } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -481,7 +481,7 @@ const HOOK_ANIMATION_META: Record<string, OptionMeta> = {
   news_portal_pantau: { label: "News Portal Notch", mood: "Breaking News", accent: "#DC2626", preview: "NEWS", desc: "Kartu berita putih dengan kategori merah dan speech bubble notch di bawah." },
   news_offset_box: { label: "Detik Red Box", mood: "Urgent Alert", accent: "#DC2626", preview: "ALERT", desc: "Kotak merah tebal dengan frame putih bertingkat di sudut kiri atas." },
   brutalist_bracket: { label: "Brutalist Bracket", mood: "Stop Frame", accent: "#000000", preview: "[ STOP ]", desc: "Kartu putih dengan sudut siku L hitam industrial dan aksen seru merah !!" },
-  quote_strip_tape: { label: "Quote Tape Strips", mood: "Interview Quote", accent: "#0D9488", preview: "❝ TAPE", desc: "Pita teks baris per baris dengan badge icon kutipan toska." },
+  quote_strip_tape: { label: "Quote Tape Strips", mood: "Interview Quote", accent: "#0D9488", preview: "TAPE", desc: "Pita teks baris per baris dengan badge icon kutipan toska." },
   podcast_lower_third: { label: "On-Air Lower", mood: "Podcast live", accent: "#16F2B3", preview: "LIVE", desc: "Lower-third khas podcast dengan badge on-air." },
   quote_card: { label: "Quote Card", mood: "Editorial", accent: "#FF4D2D", preview: "QUOTE", desc: "Kartu quote untuk satu kalimat yang memorable." },
   waveform_pulse: { label: "Waveform", mood: "Audio pulse", accent: "#14F1D9", preview: "WAVE", desc: "Bar audio bergerak supaya terasa seperti momen suara." },
@@ -2366,8 +2366,8 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
         <>
           <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
           <div className="absolute left-5 right-5 flex flex-col items-start" style={{ top: posTop, transform: "translateY(-50%)" }}>
-            <div style={{ background: quoteBg, color: "#FFFFFF", borderRadius: 3, padding: "4px 8px", marginBottom: 6, display: "inline-flex" }}>
-              <span style={{ fontSize: 14, fontWeight: 900, lineHeight: 1 }}>❝</span>
+            <div style={{ background: quoteBg, color: "#FFFFFF", borderRadius: 3, padding: "4px 6px", marginBottom: 6, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              <Quote className="w-3.5 h-3.5 fill-current" />
             </div>
             <div className="flex flex-col items-start gap-1.5">
               {lines.map((line, lIdx) => (

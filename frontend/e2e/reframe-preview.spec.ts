@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const EMAIL = "admin@autocliper.com";
 const PASSWORD = "YourSecurePassword123!";
-const BASE_URL = "http://100.64.5.96:3001";
+const BASE_URL = process.env.BASE_URL || "http://localhost:3001";
 
 async function login(page: any) {
   await page.goto(`${BASE_URL}/login`);
