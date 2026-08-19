@@ -643,7 +643,7 @@ if [ -d "$FRONTEND_DIR" ]; then
     fi
 
     echo "  Type-checking and building production bundle..."
-    VITE_API_URL="$PUBLIC_BACKEND_URL" npm run build
+    npm run build
 
     if [ -d "dist" ] && [ -f "dist/index.html" ]; then
         echo "  [OK] Frontend built"

@@ -1,9 +1,15 @@
 // Auto-detect API base: use same hostname as frontend but backend port (8000)
-// This ensures nip.io and production IPs work without manual env config
-function detectApiBase(): string {
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-  const { protocol, hostname } = window.location;
-  return `${protocol}//${hostname}:8000`;
+// This ensures nip.io, local LAN, and production IPs work without manual env config
+export function detectApiBase(): string {
+  if (typeof window !== "undefined" && window.location && window.location.hostname) {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:8000`;
+  }
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && typeof envUrl === "string" && envUrl.trim() !== "") {
+    return envUrl;
+  }
+  return "http://localhost:8000";
 }
 const API_BASE = detectApiBase();
 
