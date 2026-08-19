@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2 } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
-import { jobs, presets as presetsApi, type Preset } from "@/lib/api";
+import { jobs, presets as presetsApi, subtitleStyles, type Preset } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RangeSlider } from "@/components/ui/RangeSlider";
 import { buildCanvasConfig, gradientCss, type CanvasConfig } from "@/lib/canvasTemplates";
@@ -124,6 +124,8 @@ export interface SubtitleStyle {
   fontWeight: string;
   letterSpacing: number;
   lineHeight: number;
+  textAlign?: "left" | "center" | "right";
+  textOpacity?: number;
   color: string;
   highlightColor: string;
   highlightScale: number;
@@ -163,6 +165,9 @@ export interface SubtitleStyle {
   shadowEnabled: boolean;
   shadowColor: string;
   shadowBlur: number;
+  shadowX?: number;
+  shadowY?: number;
+  shadowOpacity?: number;
   maxWordsPerLine: number;
   maxWidthPct?: number;
   wordSpacing: number;
@@ -175,6 +180,8 @@ export interface SubtitleStyle {
   gradientEnabled?: boolean;
   gradientFrom?: string;
   gradientTo?: string;
+  subjectAwarePositioning?: boolean;
+  safeAreaMargin?: number;
 }
 
 export interface TextEmphasisStyle {
@@ -574,77 +581,238 @@ const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = 
 
 const SUBTITLE_PRESETS: { id: string; name: string; style: Partial<SubtitleStyle> }[] = [
   {
-    id: "classic",
-    name: "Classic Karaoke",
+    id: "clean",
+    name: "Clean",
     style: {
-      stylePreset: "classic",
-      color: "#FFFFFF",
-      highlightColor: "#FFCC00",
-      fontSize: 34,
-      bgEnabled: true,
-      bgColor: "#000000",
-      bgOpacity: 0.42,
-      bgRadius: 8,
-      animationStyle: "pop",
-      lineTransition: "word_pop",
-      maxWordsPerLine: 3,
-    },
-  },
-  {
-    id: "dual_pop",
-    name: "Dual Font Pop",
-    style: {
-      stylePreset: "dual_pop",
+      stylePreset: "minimal_clean",
       color: "#F8FAFC",
-      highlightColor: "#FDE047",
+      highlightColor: "#38BDF8",
       fontFamily: "Inter",
-      fontWeight: "800",
-      fontSize: 34,
-      dualStyleEnabled: true,
-      highlightFontFamily: "Bungee",
-      highlightFontSize: 42,
-      highlightFontWeight: "900",
-      highlightLetterSpacing: 0,
-      highlightUppercase: true,
-      highlightStrokeEnabled: true,
-      highlightStrokeWidth: 3,
-      highlightShadowEnabled: true,
-      bgColor: "#111827",
-      bgOpacity: 0.66,
-      bgRadius: 14,
-      bgPadding: 14,
+      fontWeight: "700",
+      fontSize: 32,
+      bgEnabled: true,
+      bgColor: "#0F172A",
+      bgOpacity: 0.75,
+      bgRadius: 12,
+      bgPadding: 16,
+      strokeEnabled: false,
+      animationStyle: "fade",
+      lineTransition: "karaoke",
+      maxWordsPerLine: 4,
+      wordSpacing: 6,
+    },
+  },
+  {
+    id: "bold",
+    name: "Bold",
+    style: {
+      stylePreset: "meme_impact",
+      color: "#FFFFFF",
+      highlightColor: "#FF3D3D",
+      fontFamily: "Archivo Black",
+      fontWeight: "900",
+      fontSize: 44,
+      uppercase: true,
+      bgEnabled: false,
+      strokeEnabled: true,
+      strokeColor: "#000000",
+      strokeWidth: 4,
+      shadowEnabled: true,
+      shadowColor: "#000000",
+      shadowBlur: 14,
       animationStyle: "pop",
       lineTransition: "word_pop",
+      highlightScale: 1.25,
       maxWordsPerLine: 3,
     },
   },
   {
-    id: "neon_pulse",
-    name: "Neon Pulse",
+    id: "minimal",
+    name: "Minimal",
     style: {
-      stylePreset: "neon_pulse",
-      color: "#ECFEFF",
-      highlightColor: "#22D3EE",
+      stylePreset: "minimal_clean",
+      color: "#FFFFFF",
+      highlightColor: "#FACC15",
+      fontFamily: "Poppins",
+      fontWeight: "600",
+      fontSize: 32,
+      bgEnabled: false,
+      strokeEnabled: true,
+      strokeColor: "#000000",
+      strokeWidth: 2,
+      shadowEnabled: false,
+      animationStyle: "fade",
+      lineTransition: "karaoke",
+      maxWordsPerLine: 4,
+      wordSpacing: 6,
+    },
+  },
+  {
+    id: "podcast",
+    name: "Podcast",
+    style: {
+      stylePreset: "lower_third",
+      color: "#E2E8F0",
+      highlightColor: "#10B981",
+      fontFamily: "Plus Jakarta Sans",
+      fontWeight: "700",
+      fontSize: 32,
+      bgEnabled: true,
+      bgColor: "#18181B",
+      bgOpacity: 0.9,
+      bgRadius: 999,
+      bgPadding: 18,
+      strokeEnabled: false,
+      shadowEnabled: true,
+      shadowBlur: 12,
+      animationStyle: "pop",
+      lineTransition: "karaoke",
+      maxWordsPerLine: 4,
+      wordSpacing: 6,
+    },
+  },
+  {
+    id: "highlight",
+    name: "Highlight",
+    style: {
+      stylePreset: "spotlight_keyword",
+      color: "#F8FAFC",
+      highlightColor: "#FACC15",
       fontFamily: "Montserrat",
       fontWeight: "900",
       fontSize: 36,
-      dualStyleEnabled: true,
-      highlightFontFamily: "Black Ops One",
-      highlightFontSize: 44,
-      highlightFontWeight: "900",
-      highlightGlow: true,
-      highlightGlowColor: "#22D3EE",
-      highlightShadowEnabled: true,
-      highlightShadowBlur: 18,
-      bgColor: "#020617",
-      bgOpacity: 0.72,
-      bgRadius: 10,
+      bgEnabled: false,
       strokeEnabled: true,
+      strokeColor: "#000000",
+      strokeWidth: 3,
+      highlightScale: 1.3,
+      highlightBold: true,
+      animationStyle: "pop",
+      lineTransition: "emphasis",
+      maxWordsPerLine: 3,
+    },
+  },
+  {
+    id: "karaoke",
+    name: "Karaoke",
+    style: {
+      stylePreset: "classic",
+      color: "#FFFFFF",
+      highlightColor: "#22D3EE",
+      fontFamily: "Inter",
+      fontWeight: "800",
+      fontSize: 34,
+      bgEnabled: true,
+      bgColor: "#000000",
+      bgOpacity: 0.5,
+      bgRadius: 8,
+      bgPadding: 14,
+      strokeEnabled: true,
+      strokeColor: "#000000",
       strokeWidth: 2,
+      animationStyle: "pop",
+      lineTransition: "karaoke",
+      maxWordsPerLine: 3,
+    },
+  },
+  {
+    id: "pop",
+    name: "Pop (Hormozi)",
+    style: {
+      stylePreset: "meme_impact",
+      color: "#FFFFFF",
+      highlightColor: "#00FF66",
+      fontFamily: "Anton",
+      fontWeight: "900",
+      fontSize: 50,
+      uppercase: true,
+      bgEnabled: false,
+      strokeEnabled: true,
+      strokeColor: "#000000",
+      strokeWidth: 5,
       shadowEnabled: true,
       shadowBlur: 16,
       animationStyle: "pop",
       lineTransition: "word_pop",
+      highlightScale: 1.25,
+      maxWordsPerLine: 1,
+    },
+  },
+  {
+    id: "gaming",
+    name: "Gaming (Cyber)",
+    style: {
+      stylePreset: "neon_pulse",
+      color: "#ECFEFF",
+      highlightColor: "#FF007F",
+      fontFamily: "Montserrat",
+      fontWeight: "900",
+      fontSize: 38,
+      uppercase: true,
+      glowEnabled: true,
+      glowColor: "#00F0FF",
+      highlightGlow: true,
+      highlightGlowColor: "#FF007F",
+      bgEnabled: true,
+      bgColor: "#020617",
+      bgOpacity: 0.8,
+      bgRadius: 10,
+      strokeEnabled: true,
+      strokeColor: "#000000",
+      strokeWidth: 3,
+      animationStyle: "pop",
+      lineTransition: "karaoke",
+      maxWordsPerLine: 3,
+    },
+  },
+  {
+    id: "cinematic",
+    name: "Cinematic (Gold)",
+    style: {
+      stylePreset: "quote_box",
+      color: "#F8FAFC",
+      highlightColor: "#FCD34D",
+      fontFamily: "Playfair Display",
+      fontWeight: "800",
+      fontSize: 34,
+      italic: false,
+      bgEnabled: true,
+      bgColor: "#0B0F14",
+      bgOpacity: 0.75,
+      bgRadius: 6,
+      bgPadding: 16,
+      strokeEnabled: true,
+      strokeColor: "#000000",
+      strokeWidth: 2,
+      shadowEnabled: true,
+      shadowColor: "#000000",
+      shadowBlur: 16,
+      animationStyle: "fade",
+      lineTransition: "karaoke",
+      maxWordsPerLine: 4,
+    },
+  },
+  {
+    id: "custom",
+    name: "Custom Playground",
+    style: {
+      stylePreset: "classic",
+      color: "#FFFFFF",
+      highlightColor: "#FACC15",
+      fontFamily: "Inter",
+      fontWeight: "700",
+      fontSize: 34,
+      bgEnabled: true,
+      bgColor: "#000000",
+      bgOpacity: 0.5,
+      bgRadius: 10,
+      bgPadding: 14,
+      strokeEnabled: true,
+      strokeColor: "#000000",
+      strokeWidth: 2,
+      animationStyle: "pop",
+      lineTransition: "word_pop",
+      maxWordsPerLine: 3,
     },
   },
   {
@@ -4497,11 +4665,41 @@ export function SubtitleEditor({
     return () => clearInterval(interval);
   }, []);
 
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiMessage, setAiMessage] = useState<string | null>(null);
+
+  async function handleGenerateWithAI(customPrompt?: string) {
+    const promptToUse = (customPrompt || aiPrompt).trim();
+    if (!promptToUse) return;
+    setAiLoading(true);
+    setAiMessage(null);
+    try {
+      const res = await subtitleStyles.generateWithAI(promptToUse, style);
+      if (res && res.subtitle_style) {
+        update({
+          ...res.subtitle_style,
+          highlightWords: res.highlight_keywords?.length ? res.highlight_keywords : (style.highlightWords || []),
+        });
+        setAiMessage(res.explanation || "Gaya subtitle AI berhasil diterapkan!");
+      }
+    } catch (err: any) {
+      console.error("AI Subtitle error:", err);
+      setAiMessage("Gagal memanggil AI. Silakan coba lagi.");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   function addHighlightWord() {
     if (newWord.trim() && !style.highlightWords.includes(newWord.trim().toLowerCase())) {
       update({ highlightWords: [...style.highlightWords, newWord.trim().toLowerCase()] });
       setNewWord("");
     }
+  }
+
+  function removeHighlightWord(wordToRemove: string) {
+    update({ highlightWords: (style.highlightWords || []).filter(w => w !== wordToRemove) });
   }
 
   return (
@@ -4548,152 +4746,121 @@ export function SubtitleEditor({
         </Section>
 
         {style.enabled !== false && (
-          <Section title="✨ AI Smart Style Magic & Keywords">
-            <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-zinc-900/60 p-3.5 space-y-3">
+          <Section title="✨ Dynamic Subtitle AI (Generate with AI)">
+            <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-purple-950/30 to-zinc-900/70 p-3.5 space-y-3 shadow-lg shadow-indigo-950/20">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
-                    AI Auto-Style Mood Generator
+                    <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+                    AI Natural Language Subtitle Generator
                   </p>
-                  <p className="text-[10px] text-zinc-400 mt-0.5">Pilih mood gaya AI untuk menerapkan font, warna, transisi, dan efek terbaik secara instan.</p>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">Ketik instruksi gaya yang Anda inginkan, AI akan mengatur seluruh parameter secara otomatis.</p>
                 </div>
+                {aiLoading && (
+                  <span className="flex items-center gap-1 text-[10px] text-indigo-400 font-semibold animate-pulse">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Generating...
+                  </span>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {[
-                  {
-                    name: "🔥 Hormozi Viral",
-                    desc: "Pop 1 kata, Lime #00FF66, stroke tebal",
-                    apply: () => update({
-                      fontFamily: "Montserrat",
-                      fontWeight: "900",
-                      fontSize: 48,
-                      uppercase: true,
-                      lineTransition: "word_pop",
-                      color: "#FFFFFF",
-                      highlightColor: "#00FF66",
-                      strokeEnabled: true,
-                      strokeWidth: 4,
-                      strokeColor: "#000000",
-                      highlightBold: true,
-                      highlightScale: 1.25,
-                      bgEnabled: false,
-                    }),
-                  },
-                  {
-                    name: "📰 Breaking News",
-                    desc: "Clean pill, category highlight",
-                    apply: () => update({
-                      fontFamily: "Inter",
-                      fontWeight: "800",
-                      fontSize: 34,
-                      uppercase: true,
-                      lineTransition: "karaoke",
-                      color: "#FFFFFF",
-                      highlightColor: "#FACC15",
-                      bgEnabled: true,
-                      bgColor: "#0F172A",
-                      bgOpacity: 0.85,
-                      bgRadius: 10,
-                      bgPadding: 16,
-                      strokeEnabled: false,
-                    }),
-                  },
-                  {
-                    name: "⚡ Cyber Glow",
-                    desc: "Cyan glow shader & high energy",
-                    apply: () => update({
-                      fontFamily: "Montserrat",
-                      fontWeight: "900",
-                      fontSize: 40,
-                      uppercase: true,
-                      lineTransition: "karaoke",
-                      color: "#ECFEFF",
-                      highlightColor: "#00F0FF",
-                      glowEnabled: true,
-                      glowColor: "#00F0FF",
-                      highlightGlow: true,
-                      highlightGlowColor: "#00F0FF",
-                      strokeEnabled: true,
-                      strokeWidth: 2,
-                      strokeColor: "#000000",
-                    }),
-                  },
-                  {
-                    name: "🎧 Podcast Pro",
-                    desc: "Emerald active speaker pill",
-                    apply: () => update({
-                      fontFamily: "Plus Jakarta Sans",
-                      fontWeight: "700",
-                      fontSize: 32,
-                      uppercase: false,
-                      lineTransition: "karaoke",
-                      color: "#E2E8F0",
-                      highlightColor: "#10B981",
-                      bgEnabled: true,
-                      bgColor: "#18181B",
-                      bgOpacity: 0.9,
-                      bgRadius: 999,
-                      bgPadding: 18,
-                    }),
-                  },
-                  {
-                    name: "💎 Swiss Minimal",
-                    desc: "Underline tracking & clean aesthetic",
-                    apply: () => update({
-                      fontFamily: "Inter",
-                      fontWeight: "600",
-                      fontSize: 32,
-                      uppercase: false,
-                      lineTransition: "line_reveal",
-                      color: "#CBD5E1",
-                      highlightColor: "#38BDF8",
-                      bgEnabled: true,
-                      bgColor: "#0F172A",
-                      bgOpacity: 0.7,
-                      bgRadius: 12,
-                      bgPadding: 16,
-                    }),
-                  },
-                  {
-                    name: "👑 Gold Luxury",
-                    desc: "Playfair serif & champagne gold",
-                    apply: () => update({
-                      fontFamily: "Playfair Display",
-                      fontWeight: "800",
-                      fontSize: 34,
-                      uppercase: false,
-                      lineTransition: "karaoke",
-                      color: "#CBD5E1",
-                      highlightColor: "#FCD34D",
-                      strokeEnabled: true,
-                      strokeWidth: 2,
-                      strokeColor: "#000000",
-                      shadowEnabled: true,
-                      shadowColor: "#000000",
-                      shadowBlur: 14,
-                    }),
-                  },
-                ].map((item) => (
-                  <button
-                    key={item.name}
-                    type="button"
-                    onClick={item.apply}
-                    className="p-2 rounded-lg border border-indigo-500/20 bg-zinc-900/60 hover:bg-indigo-950/40 hover:border-indigo-500/50 text-left transition-all group"
-                  >
-                    <p className="text-[11px] font-bold text-zinc-200 group-hover:text-indigo-300">{item.name}</p>
-                    <p className="text-[8px] text-zinc-500 mt-0.5 line-clamp-1">{item.desc}</p>
-                  </button>
-                ))}
+              {/* Natural language prompt box */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !aiLoading) { e.preventDefault(); handleGenerateWithAI(); } }}
+                  placeholder="Contoh: Modern podcast subtitle, bold white text, important words yellow, smooth pop..."
+                  className="flex-1 bg-zinc-900/90 border border-indigo-500/30 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none ring-1 ring-transparent focus:ring-indigo-500/30 transition-all"
+                  disabled={aiLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleGenerateWithAI()}
+                  disabled={aiLoading || !aiPrompt.trim()}
+                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 transition-all shadow-md shadow-indigo-600/20"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Generate AI
+                </button>
+              </div>
+
+              {/* AI Feedback Message */}
+              {aiMessage && (
+                <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-[10px] text-indigo-200 flex items-center justify-between">
+                  <span>{aiMessage}</span>
+                  <button type="button" onClick={() => setAiMessage(null)} className="text-zinc-400 hover:text-zinc-200 ml-2">✕</button>
+                </div>
+              )}
+
+              {/* Instant Prompt Recommendations */}
+              <div>
+                <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-semibold mb-1.5">Rekomendasi Cepat AI:</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    {
+                      name: "🔥 Hormozi Viral",
+                      prompt: "Hormozi viral word pop 1 kata per frame, font Anton black, teks putih lime highlight tebal, stroke hitam tebal",
+                    },
+                    {
+                      name: "📰 Breaking News",
+                      prompt: "News portal style, kapsul obsidian, Inter bold, teks putih dengan highlight kuning cerah, 3 kata per baris",
+                    },
+                    {
+                      name: "⚡ Cyberpunk Glow",
+                      prompt: "Cyberpunk neon glow shader, font Montserrat 900 uppercase, cyan glow and hot pink highlight",
+                    },
+                    {
+                      name: "🎧 Podcast Pro",
+                      prompt: "Modern podcast dialogue, charcoal rounded capsule, Plus Jakarta Sans, emerald active speaker highlight",
+                    },
+                    {
+                      name: "💎 Swiss Minimal",
+                      prompt: "Clean swiss minimalist subtitle at bottom, soft slate background pill, Inter font, cyan underline",
+                    },
+                    {
+                      name: "👑 Gold Luxury",
+                      prompt: "Cinematic gold luxury serif, Playfair Display 800, champagne gold highlight with ambient black shadow",
+                    },
+                  ].map((item) => (
+                    <button
+                      key={item.name}
+                      type="button"
+                      onClick={() => {
+                        setAiPrompt(item.prompt);
+                        handleGenerateWithAI(item.prompt);
+                      }}
+                      className="p-2 rounded-lg border border-indigo-500/20 bg-zinc-900/60 hover:bg-indigo-950/40 hover:border-indigo-500/50 text-left transition-all group"
+                    >
+                      <p className="text-[11px] font-bold text-zinc-200 group-hover:text-indigo-300">{item.name}</p>
+                      <p className="text-[8px] text-zinc-500 mt-0.5 line-clamp-1">{item.prompt}</p>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* AI Highlight Keywords */}
               <div className="pt-2 border-t border-indigo-500/20">
-                <p className="text-[10px] font-semibold text-zinc-300 mb-1.5 flex items-center justify-between">
-                  <span>🎯 AI Highlight Keywords (Kata Kunci yang Disorot)</span>
-                  <span className="text-[9px] text-zinc-500 font-normal">{style.highlightWords?.length || 0} aktif</span>
-                </p>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[10px] font-semibold text-zinc-300 flex items-center gap-1">
+                    <Check className="w-3 h-3 text-amber-400" />
+                    <span>🎯 AI Highlight Keywords ({style.highlightWords?.length || 0} kata aktif)</span>
+                  </p>
+                </div>
+
+                {/* Active Highlight Tags */}
+                {(style.highlightWords && style.highlightWords.length > 0) && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {style.highlightWords.map((w) => (
+                      <span key={w} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-semibold">
+                        {w}
+                        <button type="button" onClick={() => removeHighlightWord(w)} className="hover:text-red-400 ml-0.5">✕</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Preset suggestions */}
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {["viral", "penting", "rahasia", "sukses", "cuan", "bahaya", "tips", "kaget", "fakta", "solusi"].map((w) => {
                     const isSelected = style.highlightWords?.includes(w);
@@ -4721,13 +4888,14 @@ export function SubtitleEditor({
                     );
                   })}
                 </div>
+
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={newWord}
                     onChange={(e) => setNewWord(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addHighlightWord(); } }}
-                    placeholder="Ketik kata penting lalu tekan Enter (mis: bisnis, omset)..."
+                    placeholder="Ketik kata penting kustom lalu tekan Enter (mis: omset, strategi)..."
                     className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1 text-[10px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
                   />
                   <button
@@ -5191,6 +5359,35 @@ export function SubtitleEditor({
                 <RangeInput label={`Spacing: ${style.letterSpacing}px`} min={0} max={8} value={style.letterSpacing} onChange={(v) => update({ letterSpacing: v })} />
                 <RangeInput label={`Line H: ${style.lineHeight}`} min={10} max={24} value={Math.round(style.lineHeight * 10)} onChange={(v) => update({ lineHeight: v / 10 })} />
               </div>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <RangeInput
+                  label={`Opacity: ${Math.round((style.textOpacity ?? 1.0) * 100)}%`}
+                  min={20}
+                  max={100}
+                  value={Math.round((style.textOpacity ?? 1.0) * 100)}
+                  onChange={(v) => update({ textOpacity: v / 100 })}
+                />
+                <div>
+                  <p className="text-[9px] text-zinc-400 mb-1">Alignment</p>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(["left", "center", "right"] as const).map((align) => (
+                      <button
+                        key={align}
+                        type="button"
+                        onClick={() => update({ textAlign: align })}
+                        className={cn(
+                          "py-1 rounded border text-[10px] capitalize transition-colors",
+                          (style.textAlign || "center") === align
+                            ? "border-purple-500 bg-purple-500/20 text-purple-300 font-bold"
+                            : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                        )}
+                      >
+                        {align}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
               <div className="flex gap-4 mt-3">
                 <Checkbox label="UPPERCASE" checked={style.uppercase} onChange={(v) => update({ uppercase: v, capitalize: v ? false : style.capitalize })} />
                 <Checkbox label="Capitalize" checked={style.capitalize} onChange={(v) => update({ capitalize: v, uppercase: v ? false : style.uppercase })} />
@@ -5290,7 +5487,7 @@ export function SubtitleEditor({
               )}
             </Section>
 
-            <Section title="Position">
+            <Section title="Position & Layout">
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {(["top", "center", "bottom"] as const).map(p => {
                   const isSelected = (style.positionY != null ? (style.positionY <= 35 ? "top" : style.positionY >= 65 ? "bottom" : "center") : style.position) === p;
@@ -5319,6 +5516,20 @@ export function SubtitleEditor({
                   position: v <= 35 ? "top" : v >= 65 ? "bottom" : "center",
                 })}
               />
+              <div className="mt-3 space-y-2 pt-2 border-t border-zinc-800">
+                <Checkbox
+                  label="Person-Aware (Hindari wajah/subjek otomatis)"
+                  checked={!!style.subjectAwarePositioning}
+                  onChange={(v) => update({ subjectAwarePositioning: v })}
+                />
+                <RangeInput
+                  label={`Safe Area Margin: ${style.safeAreaMargin || 40}px`}
+                  min={10}
+                  max={100}
+                  value={style.safeAreaMargin || 40}
+                  onChange={(v) => update({ safeAreaMargin: v })}
+                />
+              </div>
             </Section>
 
             <Section title="Highlight Words (kata penting)">

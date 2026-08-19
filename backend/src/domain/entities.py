@@ -532,30 +532,50 @@ class SubtitleStyleConfig:
     font_weight: str = "Bold"
     uppercase: bool = False
     capitalize: bool = False
+    italic: bool = False
+    text_opacity: float = 1.0
+    text_align: str = "center"  # left | center | right
+    letter_spacing: float = 0.0
     color: str = "#FFFFFF"
     highlight_color: str = "#FFCC00"
     highlight_words: bool = True
+    highlight_words_list: list[str] = field(default_factory=list)
     background_color: str = ""
     background_opacity: float = 0.3
+    stroke_enabled: bool = True
     stroke_color: str = "#000000"
     stroke_width: int = 3
+    shadow_enabled: bool = False
     shadow_color: str = "black@0.7"
+    shadow_blur: int = 4
+    shadow_opacity: float = 0.8
     shadow_x: int = 1
     shadow_y: int = 2
     position: str = "bottom"
     position_y: str = ""
     position_x: str = "(w-text_w)/2"
     max_words_per_line: int = 3
+    word_spacing: int = 6
     line_spacing: float = 1.3
     padding_bottom: int = 120
     start_offset: float = 0.0
     timing_offset: float = 0.0
     word_padding: float = 0.05
     line_transition: str = "word_pop"  # word_pop | emphasis | line_reveal | karaoke
+    animation_style: str = "pop"       # pop | fade | slide | none
+    animation_speed: float = 1.0
     fade_in: float = 0.1
     fade_out: float = 0.1
-    highlight_style: str = "color"
+    highlight_style: str = "scale"
     highlight_scale: float = 1.2
+    highlight_bold: bool = True
+    highlight_glow: bool = False
+    highlight_glow_color: str = "#00FFFF"
+    # Dual Style
+    dual_style_enabled: bool = False
+    highlight_font_family: str = ""
+    highlight_font_weight: str = ""
+    highlight_font_size: int = 0
     # Additional styling and preset compatibility fields
     engine: str = "remotion"
     stylePreset: str = ""
@@ -568,7 +588,18 @@ class SubtitleStyleConfig:
     glow_enabled: bool = False
     glow_color: str = ""
     glow_radius: int = 0
+    gradient_enabled: bool = False
+    gradient_from: str = ""
+    gradient_to: str = ""
     active_scale: float = 1.0
+    bg_enabled: bool = False
+    bg_color: str = ""
+    bg_opacity: float = 0.0
+    bg_radius: int = 12
+    bg_padding: int = 24
+    bg_padding_x: int = 24
+    bg_padding_y: int = 14
+    bg_blur: bool = False
     box_enabled: bool = False
     box_color: str = ""
     box_opacity: float = 0.0
@@ -577,6 +608,9 @@ class SubtitleStyleConfig:
     box_corner_radius: int = 0
     box_padding_x: int = 0
     box_padding_y: int = 0
+    subject_aware_positioning: bool = False
+    safe_area_margin: int = 40
+    max_width_pct: int = 90
 
     @classmethod
     def from_dict(cls, data: dict | Any) -> SubtitleStyleConfig:
@@ -585,7 +619,56 @@ class SubtitleStyleConfig:
         if not isinstance(data, dict):
             return cls()
         known = {f.name for f in fields(cls)}
-        filtered = {k: v for k, v in data.items() if k in known}
+        # Map camelCase to snake_case
+        camel_map = {
+            "fontFamily": "font_family",
+            "fontSize": "font_size",
+            "fontWeight": "font_weight",
+            "letterSpacing": "letter_spacing",
+            "lineHeight": "line_spacing",
+            "highlightColor": "highlight_color",
+            "highlightScale": "highlight_scale",
+            "highlightBold": "highlight_bold",
+            "highlightStyle": "highlight_style",
+            "highlightGlow": "highlight_glow",
+            "highlightGlowColor": "highlight_glow_color",
+            "highlightWords": "highlight_words_list",
+            "dualStyleEnabled": "dual_style_enabled",
+            "highlightFontFamily": "highlight_font_family",
+            "highlightFontSize": "highlight_font_size",
+            "highlightFontWeight": "highlight_font_weight",
+            "bgEnabled": "bg_enabled",
+            "bgColor": "bg_color",
+            "bgOpacity": "bg_opacity",
+            "bgRadius": "bg_radius",
+            "bgPadding": "bg_padding",
+            "positionY": "position_y",
+            "strokeEnabled": "stroke_enabled",
+            "strokeColor": "stroke_color",
+            "strokeWidth": "stroke_width",
+            "shadowEnabled": "shadow_enabled",
+            "shadowColor": "shadow_color",
+            "shadowBlur": "shadow_blur",
+            "maxWordsPerLine": "max_words_per_line",
+            "wordSpacing": "word_spacing",
+            "animationStyle": "animation_style",
+            "animationSpeed": "animation_speed",
+            "lineTransition": "line_transition",
+            "glowEnabled": "glow_enabled",
+            "glowColor": "glow_color",
+            "gradientEnabled": "gradient_enabled",
+            "gradientFrom": "gradient_from",
+            "gradientTo": "gradient_to",
+            "subjectAwarePositioning": "subject_aware_positioning",
+            "safeAreaMargin": "safe_area_margin",
+            "maxWidthPct": "max_width_pct",
+        }
+        normalized = {}
+        for k, v in data.items():
+            mapped_k = camel_map.get(k, k)
+            normalized[mapped_k] = v
+
+        filtered = {k: v for k, v in normalized.items() if k in known}
         # map common aliases
         if "text_color" in data and "color" not in filtered:
             filtered["color"] = data["text_color"]

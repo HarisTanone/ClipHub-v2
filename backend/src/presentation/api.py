@@ -258,11 +258,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from src.presentation.routes.subtitle_ai import router as subtitle_ai_router
 # Routes
 app.include_router(auth_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 app.include_router(progress_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
+app.include_router(subtitle_ai_router, prefix="/api")
 app.include_router(preview_router, prefix="/api")
 app.include_router(brolls_router)
 app.include_router(monitoring_router)

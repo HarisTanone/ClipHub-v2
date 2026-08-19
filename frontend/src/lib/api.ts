@@ -820,6 +820,17 @@ export const subtitleStyles = {
   async get(engine: string, styleId: string): Promise<{ data: Record<string, any> }> {
     return request(`/api/style-presets/subtitle-styles/${engine}/${styleId}`);
   },
+  async generateWithAI(prompt: string, currentStyle?: any, videoContext?: string): Promise<{
+    ok: boolean;
+    subtitle_style: Record<string, any>;
+    explanation: string;
+    highlight_keywords: string[];
+  }> {
+    return request("/api/settings/subtitle-ai-generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt, current_style: currentStyle, video_context: videoContext }),
+    });
+  },
 };
 
 // ─── Models Status API ───────────────────────────────────────────────────────
