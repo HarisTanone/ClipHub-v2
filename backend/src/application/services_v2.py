@@ -431,8 +431,9 @@ class V2PipelineService:
                     f"broll_enabled={job.broll_enabled}, "
                     f"broll_count={len(analysis_result.broll_suggestions.get('1', []))}"
                 )
-            user_custom_clips = (job.clips_data or {}).get("custom_clips")
-            if user_custom_clips:
+            clips_data_dict = job.clips_data if isinstance(job.clips_data, dict) else {}
+            user_custom_clips = clips_data_dict.get("custom_clips") if isinstance(clips_data_dict, dict) else None
+            if isinstance(user_custom_clips, list) and user_custom_clips:
                 from src.domain.entities import HighlightCandidate, HighlightAnalysisResult
                 analysis_result = HighlightAnalysisResult(
                     clips=[
