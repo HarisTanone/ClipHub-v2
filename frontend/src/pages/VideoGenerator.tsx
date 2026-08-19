@@ -50,6 +50,7 @@ import {
   type HookStyle,
   type SubtitleStyle,
 } from "@/components/StyleEditorModal";
+import { ScheduleModal } from "@/components/ScheduleModal";
 import { API_BASE, getToken, presets as presetsApi, type Preset } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -844,7 +845,17 @@ function LiveVideoPreview({
   );
 }
 
-function VideoModal({ job, onClose }: { job: VideoJob; onClose: () => void }) {
+function VideoModal({
+  job,
+  onClose,
+  onDownload,
+  onPublishSocial,
+}: {
+  job: VideoJob;
+  onClose: () => void;
+  onDownload: (jobId: string) => void;
+  onPublishSocial: (job: VideoJob) => void;
+}) {
   const token = getToken();
   const streamUrl = `${API_BASE}/api/video-generator/jobs/${job.job_id}/stream?token=${encodeURIComponent(token || "")}`;
 
@@ -868,6 +879,30 @@ function VideoModal({ job, onClose }: { job: VideoJob; onClose: () => void }) {
         </div>
         <div className="aspect-[9/16] overflow-hidden rounded-2xl border border-zinc-700 bg-black shadow-2xl">
           <video src={streamUrl} controls autoPlay playsInline preload="metadata" className="h-full w-full object-contain" />
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="flex-1 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-300"
+            onClick={() => {
+              onClose();
+              onPublishSocial(job);
+            }}
+            icon={<Share2 className="h-4 w-4" />}
+          >
+            Post to Social
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onDownload(job.job_id)}
+            icon={<Download className="h-4 w-4" />}
+          >
+            Download
+          </Button>
         </div>
       </div>
     </div>
@@ -1332,6 +1367,7 @@ function VideoCard({
   job,
   onPlay,
   onDownload,
+  onPublishSocial,
   onRetry,
   onDelete,
   onOpenStudio,
@@ -1340,6 +1376,7 @@ function VideoCard({
   job: VideoJob;
   onPlay: (job: VideoJob) => void;
   onDownload: (jobId: string) => void;
+  onPublishSocial?: (job: VideoJob) => void;
   onRetry: (jobId: string) => void;
   onDelete: (jobId: string) => void;
   onOpenStudio: (job: VideoJob) => void;
@@ -1456,6 +1493,16 @@ function VideoCard({
                 >
                   Download
                 </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-300"
+                  onClick={() => onPublishSocial?.(job)}
+                  icon={<Share2 className="h-3 w-3" />}
+                >
+                  Post
+                </Button>
               </>
             )}
 
@@ -1548,6 +1595,7 @@ export function VideoGeneratorPage() {
 
   const [activeJob, setActiveJob] = useState<VideoJob | null>(null);
   const [studioJob, setStudioJob] = useState<VideoJob | null>(null);
+  const [publishJob, setPublishJob] = useState<VideoJob | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2416,6 +2464,7 @@ export function VideoGeneratorPage() {
                     job={job}
                     onPlay={setActiveJob}
                     onDownload={handleDownload}
+                    onPublishSocial={setPublishJob}
                     onRetry={handleRetry}
                     onDelete={handleDeleteJob}
                     onOpenStudio={setStudioJob}
@@ -2468,7 +2517,14 @@ export function VideoGeneratorPage() {
       </div>
 
       {/* Video Stream Modal */}
-      {activeJob && <VideoModal job={activeJob} onClose={() => setActiveJob(null)} />}
+      {activeJob && (
+        <VideoModal
+          job={activeJob}
+          onClose={() => setActiveJob(null)}
+          onDownload={handleDownload}
+          onPublishSocial={setPublishJob}
+        />
+      )}
 
       {/* Scene & Footage Studio Modal */}
       {studioJob && (
@@ -2477,6 +2533,19 @@ export function VideoGeneratorPage() {
           onClose={() => setStudioJob(null)}
           onStartRender={handleStartRenderWithSelected}
           onUpdateJob={handleUpdateStudioJob}
+        />
+      )}
+
+      {/* Schedule / Post to Social Media Modal */}
+      {publishJob && (
+        <ScheduleModal
+          open={!!publishJob}
+          onClose={() => setPublishJob(null)}
+          jobId={publishJob.job_id}
+          videoSource="video_generator"
+          defaultCaption={publishJob.topic || publishJob.title || ""}
+          hookText={publishJob.custom_hook || publishJob.title || publishJob.topic || ""}
+          itemLabel={`(${publishJob.title || publishJob.topic || "AI Video"})`}
         />
       )}
 

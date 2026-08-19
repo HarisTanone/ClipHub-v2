@@ -138,6 +138,45 @@ class TestSocialAutoPost(unittest.TestCase):
             self.assertEqual(res["scheduled_count"], 2)
             self.assertEqual(mock_repliz_post.call_count, 2)
 
+    @patch("src.presentation.routes.social.publish.repliz_post")
+    @patch("src.presentation.routes.social.publish.gdrive_uploader")
+    @patch("src.application.video_generator.get_video_generator")
+    def test_publish_video_generator_job(self, mock_get_vg, mock_gdrive, mock_repliz_post):
+        """Verify publish_clip endpoint handles video_generator jobs correctly."""
+        from src.presentation.routes.social.publish import publish_clip, PublishRequest
+
+        mock_vg = MagicMock()
+        mock_job = MagicMock()
+        mock_job.job_id = "vg_test_123"
+        mock_job.output_path = "/tmp/video_gen/vg_test_123/final.mp4"
+        mock_vg.get_job.return_value = mock_job
+        mock_get_vg.return_value = mock_vg
+
+        mock_gdrive.is_configured = True
+        mock_gdrive.upload_video.return_value = {"direct_link": "https://drive.google.com/videogen"}
+        mock_repliz_post.return_value = {"_id": "post_vg_1", "status": "scheduled"}
+
+        with patch("os.path.exists", return_value=True), \
+             patch("src.config.settings.REPLIZ_ACCESS_KEY", "key"), \
+             patch("src.config.settings.REPLIZ_SECRET_KEY", "secret"):
+            body = PublishRequest(
+                jobId="vg_test_123",
+                videoSource="video_generator",
+                accountIds=["acc_tt_1", "acc_ig_2"],
+                caption="AI Generated Video Content",
+                title="AI Video Title",
+                scheduleAt="2026-08-20T12:00:00Z",
+                type="video",
+            )
+
+            res = asyncio.run(publish_clip(body, _user={"id": "admin"}))
+            self.assertTrue(res["success"])
+            self.assertEqual(res["count"], 2)
+            mock_gdrive.upload_video.assert_called_once_with(
+                "/tmp/video_gen/vg_test_123/final.mp4",
+                filename="videogen_vg_test_123.mp4"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

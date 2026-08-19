@@ -113,7 +113,8 @@ async function fetchSocialAccounts(): Promise<any[]> {
 
 async function publishClip(payload: {
   jobId: string;
-  clipRank: number;
+  clipRank?: number;
+  videoSource?: string;
   accountIds: string[];
   caption: string;
   title: string;
@@ -149,17 +150,30 @@ interface ScheduleModalProps {
   onClose: () => void;
   /** Job ID */
   jobId: string;
-  /** Clip rank number */
-  clipRank: number;
+  /** Clip rank number (optional for video generator) */
+  clipRank?: number;
+  /** Video source type */
+  videoSource?: "clip" | "video_generator";
   /** Pre-filled caption from clip */
   defaultCaption?: string;
-  /** Clip hook text */
+  /** Clip hook text / Video title */
   hookText?: string;
+  /** Custom label for header */
+  itemLabel?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ScheduleModal({ open, onClose, jobId, clipRank, defaultCaption, hookText }: ScheduleModalProps) {
+export function ScheduleModal({
+  open,
+  onClose,
+  jobId,
+  clipRank,
+  videoSource,
+  defaultCaption,
+  hookText,
+  itemLabel,
+}: ScheduleModalProps) {
   const toast = useToast();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
@@ -259,7 +273,8 @@ export function ScheduleModal({ open, onClose, jobId, clipRank, defaultCaption, 
     try {
       const payload = {
         jobId,
-        clipRank,
+        clipRank: clipRank || 1,
+        videoSource: videoSource || (clipRank !== undefined ? "clip" : "video_generator"),
         accountIds: selectedAccountIds,
         caption,
         title: hookText || "",
@@ -305,7 +320,7 @@ export function ScheduleModal({ open, onClose, jobId, clipRank, defaultCaption, 
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                 Post to Social Media
                 <span className="text-[11px] font-normal text-zinc-400">
-                  (Clip #{clipRank})
+                  {itemLabel || (clipRank ? `(Clip #${clipRank})` : `(AI Generated Video)`)}
                 </span>
               </h2>
               <p className="text-[11px] text-zinc-500">

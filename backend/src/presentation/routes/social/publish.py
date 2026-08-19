@@ -19,9 +19,10 @@ publish_router = APIRouter(prefix="/publish", tags=["social-publish"])
 
 
 class PublishRequest(BaseModel):
-    """Request to publish a clip to social media (single or multiple accounts)."""
+    """Request to publish a clip or AI generated video to social media (single or multiple accounts)."""
     jobId: str
-    clipRank: int
+    clipRank: int | None = None
+    videoSource: str | None = None  # "clip" or "video_generator"
     accountId: str | None = None
     accountIds: list[str] | None = None
     caption: str = ""
@@ -32,7 +33,7 @@ class PublishRequest(BaseModel):
 
 @publish_router.post("")
 async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
-    """Upload clip to Google Drive once and schedule posts across all selected accounts via Repliz."""
+    """Upload clip or AI generated video to Google Drive once and schedule posts across all selected accounts via Repliz."""
     # Resolve target account IDs (support both accountIds list and legacy single accountId)
     target_account_ids: list[str] = []
     if body.accountIds:
@@ -55,22 +56,50 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     if not settings.REPLIZ_ACCESS_KEY or not settings.REPLIZ_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Repliz credentials not configured")
 
-    # Locate video file
-    output_dir = os.path.join(settings.OUTPUT_DIR, body.jobId)
-    if not os.path.isdir(output_dir):
-        raise HTTPException(status_code=404, detail="Job not found")
+    # Locate video file (from Video Generator or ClipHub clips)
+    video_file = None
+    upload_filename = ""
 
-    clip_final = find_final_clip(output_dir, body.clipRank)
-    if not clip_final:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Final video for clip #{body.clipRank} not found"
-        )
+    is_video_gen = body.videoSource == "video_generator" or body.jobId.startswith("vg_")
+    if not is_video_gen:
+        output_dir = os.path.join(settings.OUTPUT_DIR, body.jobId)
+        if not os.path.isdir(output_dir):
+            try:
+                from src.application.video_generator import get_video_generator
+                vg = get_video_generator()
+                if vg.get_job(body.jobId):
+                    is_video_gen = True
+            except Exception:
+                pass
+
+    if is_video_gen:
+        from src.application.video_generator import get_video_generator
+        vg = get_video_generator()
+        vg_job = vg.get_job(body.jobId)
+        if not vg_job:
+            raise HTTPException(status_code=404, detail="Video generator job not found")
+        if not vg_job.output_path or not os.path.exists(vg_job.output_path):
+            raise HTTPException(status_code=404, detail="Final generated video not found or not ready")
+        video_file = vg_job.output_path
+        upload_filename = f"videogen_{body.jobId}.mp4"
+    else:
+        output_dir = os.path.join(settings.OUTPUT_DIR, body.jobId)
+        if not os.path.isdir(output_dir):
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        clip_rank = body.clipRank or 1
+        clip_final = find_final_clip(output_dir, clip_rank)
+        if not clip_final:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Final video for clip #{clip_rank} not found"
+            )
+        video_file = clip_final
+        upload_filename = f"{body.jobId}_clip{clip_rank}.mp4"
 
     # Upload to Google Drive ONCE
     try:
-        filename = f"{body.jobId}_clip{body.clipRank}.mp4"
-        drive_result = gdrive_uploader.upload_video(clip_final, filename=filename)
+        drive_result = gdrive_uploader.upload_video(video_file, filename=upload_filename)
     except Exception as e:
         logger.error(f"Google Drive upload failed: {e}")
         raise HTTPException(status_code=502, detail=f"Google Drive upload failed: {str(e)}")
