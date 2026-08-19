@@ -108,7 +108,7 @@ def test_skia_subtitle_renderer_ffmpeg_fallback_invoked(tmp_path):
         "highlightColor": "#38BDF8",
     }
 
-    with patch("src.infrastructure.subtitle_renderer.SubtitleRenderer.render_subtitles") as mock_sub_render:
+    with patch("src.infrastructure.subtitle_renderer.SubtitleRenderer._render_line_only") as mock_sub_render:
         mock_sub_render.return_value = output_video
         result = renderer.render_subtitles(input_video, words, style, output_video)
         assert result == output_video

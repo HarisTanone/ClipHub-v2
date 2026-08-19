@@ -1892,8 +1892,8 @@ async def restyle_clip(
         if clip_reframe.get("layout"):
             enriched_sub_config["reframe_layout"] = clip_reframe.get("layout")
 
-        # ── 1-Pass Optimization when both hook and subtitle use direct FFmpeg ──
-        if hook_render_engine == "ffmpeg" and subtitle_render_engine == "ffmpeg":
+        # ── 1-Pass Optimization when no subtitles are present ──
+        if hook_render_engine == "ffmpeg" and subtitle_render_engine == "ffmpeg" and not render_words:
             from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
             fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
             compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
@@ -1904,7 +1904,7 @@ async def restyle_clip(
                 output_video=tmp_1pass,
                 hook_text=hook_text or "",
                 hook_style_config=hook_config,
-                words=render_words,
+                words=[],
                 subtitle_style_config=enriched_sub_config,
                 watermark_config=watermark_config,
             )
@@ -1920,8 +1920,8 @@ async def restyle_clip(
                     except OSError:
                         pass
 
-        # ── Direct (FFmpeg / Skia) Multi-Step Passes (Fallback / Skia) ──
-        if not (hook_render_engine == "ffmpeg" and subtitle_render_engine == "ffmpeg" and os.path.exists(staged_final_path)):
+        # ── Direct (FFmpeg / Skia) Multi-Step Passes (High-Fidelity) ──
+        if not (hook_render_engine == "ffmpeg" and subtitle_render_engine == "ffmpeg" and not render_words and os.path.exists(staged_final_path)):
             # Direct Hook Pass
             if hook_render_engine in ("ffmpeg", "skia") and hook_text:
                 tmp_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-hook.mp4"

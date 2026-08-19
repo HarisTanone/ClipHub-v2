@@ -80,6 +80,23 @@ class SubtitleRenderer(ISubtitleRenderer):
         offset = start_offset if start_offset > 0 else config.start_offset
         timing_adj = config.timing_offset
 
+        # Route through high-fidelity PIL rendering for exact 1:1 visual match to preview
+        try:
+            from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+            style_dict = style.to_dict() if hasattr(style, "to_dict") else dict(style) if isinstance(style, dict) else (config.__dict__ if hasattr(config, "__dict__") else {})
+            skia_renderer = SkiaSubtitleRenderer(font_dir=self._font_dir)
+            res = skia_renderer.render_subtitles(
+                video_path=video_path,
+                words=words,
+                style=style_dict,
+                output_path=output_path,
+                start_offset=offset,
+            )
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return res
+        except Exception as e:
+            logger.warning(f"subtitle_render: PIL high-fidelity render failed ({e}), falling back to drawtext")
+
         # Route to emphasis style if configured
         if config.line_transition == "emphasis":
             return self.render_emphasis_style(

@@ -2406,12 +2406,14 @@ class V2PipelineService:
                 clip_sub_config["reframe_layout"] = clip_reframe.get("layout")
 
             sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
+            words_raw = clips_with_words.get(clip.rank) or []
+            sub_min = hook_dur if clip.hook else 0.0
+            words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min) if sub_enabled else []
+
+            # 1-pass FFmpeg compositor for FFmpeg hook + subtitles
             if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
                 from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
                 compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
-                words_raw = clips_with_words.get(clip.rank) or []
-                sub_min = hook_dur if clip.hook else 0.0
-                words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min) if sub_enabled else []
                 watermark_cfg = (job.clips_data or {}).get("watermark_config") or {}
 
                 success = await compositor.render_single_pass(
@@ -2437,7 +2439,7 @@ class V2PipelineService:
                 else:
                     logger.warning(f"[{job_id}] 1-pass FFmpeg composite failed clip {clip.rank}; falling back to multi-step")
 
-            # ── Fallback / Skia Multi-Step Pipeline ──
+            # ── High-Fidelity Multi-Step Pipeline ──
             # ── Hook render (FFmpeg drawtext / Skia kinetic) ──
             hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
             if clip.hook:

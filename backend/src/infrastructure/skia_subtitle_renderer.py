@@ -3,14 +3,18 @@
 Renders subtitle frames matching the frontend Skia Canvas previews 1:1:
 - Glassmorphism: Frosted glass card with glossy border and glowing active word
 - Clean Editorial: Minimalist Swiss slate pill with underline tracking
-- Podcast Pro: Dark capsule with emerald MIC indicator dot and active speaker glow
+- Podcast Pro / Podcast Dialogue: Dark capsule with emerald MIC indicator dot and active speaker glow
 - Kinetic Word Box: Dynamic solid rounded badge encasing active word
-- Neon Tube: Hollow glowing neon text with multi-layer glow
-- Gradient Fill: Iridescent text gradient with drop shadow
-- Cinematic Slate: Hollywood serif framed by top and bottom gold rules
-- Modern Mono: Cyber terminal box with mini traffic light window header
+- Neon Tube / Neon Glow: Multi-pass cyan/magenta neon glow
+- Gradient Fill: Linear gradient text with drop shadow
+- Cinematic Slate / Cinematic Bar: Hollywood serif framed by top and bottom gold rules
+- Modern Mono / Tech Mono: Cyber terminal box with mini traffic light window header
 - Retro Chrome: 3D metallic/chrome text with heavy outline
 - Outline Stack: Multi-pass bold outline typography
+- Hormozi Pop: Center-screen heavy impact font with solid black stroke and lime active word
+- Bold Impact: Anton shorts punch with thick black outline and red/yellow active word
+- Devon Clean: Subtle dark pill with cyan active highlight
+- Classic Karaoke: Poppins bold with golden yellow active word highlight
 """
 import logging
 import math
@@ -21,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from src.infrastructure.subtitle_styles import SKIA_STYLES, get_skia_style
+from src.infrastructure.subtitle_styles import SKIA_STYLES, FFMPEG_STYLES, get_skia_style
 
 logger = logging.getLogger(__name__)
 
@@ -47,20 +51,37 @@ class SkiaSubtitleRenderer:
             or style.get("style_id")
             or "glassmorphism"
         )
-        base = dict(SKIA_STYLES.get(preset_id, {})) if preset_id in SKIA_STYLES else {}
+        base = {}
+        if preset_id in SKIA_STYLES:
+            base = dict(SKIA_STYLES[preset_id])
+        elif preset_id in FFMPEG_STYLES:
+            base = dict(FFMPEG_STYLES[preset_id])
 
         # Default font based on preset
         preset_default_fonts = {
             "glassmorphism": "Inter",
             "clean_editorial": "Inter",
             "podcast_pro": "Plus Jakarta Sans",
+            "podcast_dialogue": "Plus Jakarta Sans",
             "kinetic_word_box": "Plus Jakarta Sans",
             "neon_tube": "Montserrat",
+            "neon_glow": "Montserrat",
             "gradient_fill": "Poppins",
             "cinematic_slate": "Playfair Display",
+            "cinematic_bar": "Playfair Display",
             "modern_mono": "Space Grotesk",
+            "tech_mono": "Space Grotesk",
             "retro_chrome": "Bebas Neue",
             "outline_stack": "Anton",
+            "hormozi_pop": "Anton",
+            "bold_impact": "Anton",
+            "bold_impact_stroke": "Anton",
+            "devon_clean": "Inter",
+            "classic_karaoke": "Poppins",
+            "fire_emphasis": "Poppins",
+            "glass_blur": "Inter",
+            "gold_luxury": "Playfair Display",
+            "minimal_lower": "Inter",
         }
         default_font = preset_default_fonts.get(preset_id, "Inter")
 
@@ -75,12 +96,19 @@ class SkiaSubtitleRenderer:
         except (ValueError, TypeError):
             max_words_per_line = 4
 
+        # Font size
+        raw_font_size = int(
+            style.get("fontSize")
+            or style.get("font_size")
+            or base.get("font_size", 38)
+        )
+
         normalized = {
             "id": preset_id,
             "font_family": style.get("fontFamily") or style.get("font_family") or base.get("font_family", default_font),
-            "font_size": int(style.get("fontSize") or style.get("font_size") or base.get("font_size", 48)),
+            "font_size": raw_font_size,
             "font_weight": str(style.get("fontWeight") or style.get("font_weight") or base.get("font_weight", "Bold")),
-            "text_color": style.get("color") or style.get("text_color") or base.get("text_color", "#FFFFFF"),
+            "text_color": style.get("color") or style.get("text_color") or base.get("color") or base.get("text_color", "#FFFFFF"),
             "highlight_color": style.get("highlightColor") or style.get("highlight_color") or base.get("highlight_color", "#38BDF8"),
             "position_y_pct": float(style.get("positionY") or style.get("position_y_pct") or base.get("position_y_pct", 78)),
             "position_y": style.get("position_y") or style.get("positionY"),
@@ -91,35 +119,59 @@ class SkiaSubtitleRenderer:
             "max_words_per_line": max_words_per_line,
             "line_transition": style.get("lineTransition") or style.get("line_transition") or base.get("line_transition", "karaoke"),
             "uppercase": bool(style.get("uppercase", base.get("uppercase", False))),
+            "capitalize": bool(style.get("capitalize", False)),
             "enabled": style.get("enabled", True) is not False,
             "start_offset": float(style.get("start_offset", 0.0)),
+            "word_spacing": style.get("wordSpacing") or style.get("word_spacing"),
+            "highlight_bold": style.get("highlightBold", True),
+            "gradient_enabled": bool(style.get("gradientEnabled") or base.get("gradient_enabled")),
+            "gradient_from": style.get("gradientFrom") or "#6366F1",
+            "gradient_to": style.get("gradientTo") or "#EC4899",
         }
 
         # Background parameters
+        base_bg = base.get("background") if isinstance(base.get("background"), dict) else {}
+        bg_opacity = style.get("bgOpacity")
+        if bg_opacity is None:
+            bg_opacity = style.get("bg_opacity")
+        if bg_opacity is None:
+            bg_opacity = base.get("background_opacity") or base_bg.get("bg_opacity")
+
         bg_enabled = bool(
-            style.get("bgOpacity", 0) > 0
+            (bg_opacity is not None and float(bg_opacity) > 0)
+            or style.get("bgEnabled")
             or style.get("bg_enabled")
             or style.get("glassmorphism")
-            or (base.get("background") is not None)
-            or preset_id in ("glassmorphism", "clean_editorial", "podcast_pro", "modern_mono")
+            or bool(base_bg)
+            or preset_id in ("glassmorphism", "clean_editorial", "podcast_pro", "podcast_dialogue", "modern_mono", "tech_mono", "devon_clean", "glass_blur")
         )
-        base_bg = base.get("background") or {}
         normalized["bg_enabled"] = bg_enabled
-        normalized["bg_opacity"] = float(
-            style.get("bgOpacity")
-            or style.get("bg_opacity")
-            or (base_bg.get("bg_opacity", 0.55) if bg_enabled else 0.0)
+        normalized["bg_opacity"] = float(bg_opacity if bg_opacity is not None else (0.65 if bg_enabled else 0.0))
+        normalized["bg_color"] = (
+            style.get("bgColor")
+            or style.get("bg_color")
+            or base.get("background_color")
+            or base_bg.get("bg_color")
+            or ("#0F172A" if preset_id == "clean_editorial" else "#121216" if preset_id in ("podcast_pro", "podcast_dialogue") else "#1E293B")
         )
-        normalized["bg_color"] = style.get("bgColor") or style.get("bg_color") or base_bg.get("bg_color", "#1E293B")
-        normalized["bg_radius"] = int(style.get("bgRadius") or style.get("bg_radius") or base_bg.get("border_radius", 18))
-        normalized["bg_padding"] = int(style.get("bgPadding") or style.get("bg_padding") or base_bg.get("padding_x", 24))
+        normalized["bg_radius"] = int(
+            style.get("bgRadius")
+            or style.get("bg_radius")
+            or base.get("background_radius")
+            or base_bg.get("border_radius", 18)
+        )
+        normalized["bg_padding"] = int(
+            style.get("bgPadding")
+            or style.get("bg_padding")
+            or base_bg.get("padding_x", 24)
+        )
 
         # Glow parameters
         glow_enabled = bool(
             style.get("glowEnabled")
             or style.get("glow_enabled")
             or base.get("glow_enabled")
-            or preset_id in ("glassmorphism", "podcast_pro", "neon_tube", "modern_mono", "cinematic_slate")
+            or preset_id in ("glassmorphism", "podcast_pro", "neon_tube", "neon_glow", "modern_mono", "cinematic_slate", "fire_emphasis")
         )
         normalized["glow_enabled"] = glow_enabled
         normalized["glow_color"] = (
@@ -128,34 +180,48 @@ class SkiaSubtitleRenderer:
             or base.get("glow_color")
             or normalized["highlight_color"]
         )
-        normalized["glow_radius"] = int(style.get("glowSize") or style.get("glow_radius") or base.get("glow_radius", 14))
+        normalized["glow_radius"] = int(style.get("glowSize") or style.get("glow_radius") or base.get("glow_radius", 12))
 
         # Stroke / Border
-        base_stroke = base.get("stroke") or {}
+        base_stroke = base.get("stroke") if isinstance(base.get("stroke"), dict) else {}
         stroke_enabled = bool(
             style.get("strokeEnabled")
             or style.get("stroke_enabled")
             or bool(base_stroke)
-            or preset_id in ("neon_tube", "retro_chrome", "outline_stack")
+            or (base.get("stroke_width", 0) > 0)
+            or preset_id in ("neon_tube", "retro_chrome", "outline_stack", "hormozi_pop", "bold_impact", "bold_impact_stroke")
         )
         normalized["stroke_enabled"] = stroke_enabled
-        normalized["stroke_width"] = int(
+        raw_stroke_w = (
             style.get("strokeWidth")
             or style.get("stroke_width")
-            or (base_stroke.get("width", 3) if stroke_enabled else 0)
+            or base.get("stroke_width")
+            or base_stroke.get("width", 3 if stroke_enabled else 0)
         )
-        normalized["stroke_color"] = style.get("strokeColor") or style.get("stroke_color") or base_stroke.get("color", "#000000")
+        normalized["stroke_width"] = max(2, int(raw_stroke_w)) if stroke_enabled else 0
+        normalized["stroke_color"] = (
+            style.get("strokeColor")
+            or style.get("stroke_color")
+            or base.get("stroke_color")
+            or base_stroke.get("color", "#000000")
+        )
 
         # Shadow
-        base_shadow = base.get("shadow") or {}
+        base_shadow = base.get("shadow") if isinstance(base.get("shadow"), dict) else {}
         shadow_enabled = bool(
             style.get("shadowEnabled")
             or style.get("shadow_enabled")
             or bool(base_shadow)
-            or preset_id in ("clean_editorial", "podcast_pro", "kinetic_word_box", "gradient_fill", "retro_chrome")
+            or (base.get("shadow_x", 0) > 0 or base.get("shadow_y", 0) > 0)
+            or preset_id in ("clean_editorial", "podcast_pro", "kinetic_word_box", "gradient_fill", "retro_chrome", "hormozi_pop", "bold_impact", "classic_karaoke")
         )
         normalized["shadow_enabled"] = shadow_enabled
-        normalized["shadow_color"] = style.get("shadowColor") or style.get("shadow_color") or base_shadow.get("color", "#000000")
+        normalized["shadow_color"] = (
+            style.get("shadowColor")
+            or style.get("shadow_color")
+            or base.get("shadow_color")
+            or base_shadow.get("color", "#000000")
+        )
 
         return normalized
 
@@ -378,11 +444,17 @@ class SkiaSubtitleRenderer:
 
         preset_id = style.get("id") or style.get("style_preset", "glassmorphism")
         font_family = style.get("font_family", "Inter")
-        font_size = int(style.get("font_size", 48))
+        raw_font_size = int(style.get("font_size", 38))
+        base_font_size = int(raw_font_size * 1.42) if raw_font_size <= 44 else raw_font_size
         is_uppercase = style.get("uppercase", False)
         is_capitalize = style.get("capitalize", False)
+        is_word_pop = style.get("line_transition") == "word_pop"
 
-        font = self._load_pil_font(font_family, font_size)
+        # Load fonts for normal and active pop state
+        normal_font = self._load_pil_font(font_family, base_font_size)
+        active_scale = 1.12 if (style.get("highlight_bold") is not False or is_word_pop) else 1.0
+        active_font_size = int(base_font_size * active_scale)
+        active_font = self._load_pil_font(font_family, active_font_size)
 
         # Prepare word text and dimensions
         word_items = []
@@ -394,7 +466,9 @@ class SkiaSubtitleRenderer:
                 w_text = raw_w.capitalize()
             else:
                 w_text = raw_w
-            bbox = draw.textbbox((0, 0), w_text, font=font)
+            is_active = (idx == active_word_index)
+            f = active_font if is_active else normal_font
+            bbox = draw.textbbox((0, 0), w_text, font=f)
             w_width = max(1, bbox[2] - bbox[0])
             w_height = max(1, bbox[3] - bbox[1])
             word_items.append({
@@ -402,7 +476,8 @@ class SkiaSubtitleRenderer:
                 "text": w_text,
                 "width": w_width,
                 "height": w_height,
-                "is_active": (idx == active_word_index),
+                "is_active": is_active,
+                "font": f,
             })
 
         if not word_items:
@@ -410,18 +485,25 @@ class SkiaSubtitleRenderer:
             return
 
         user_spacing = style.get("word_spacing")
-        spacing = int(user_spacing * 2.5) if user_spacing is not None else max(16, int(font_size * 0.32))
+        spacing = int(user_spacing * 2.2) if user_spacing is not None else max(16, int(base_font_size * 0.28))
+        if preset_id == "kinetic_word_box":
+            spacing = max(spacing, 24)
+
         total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
 
-        # Auto-scale font if line exceeds safe margins (940px)
-        max_safe_width = 940
+        # Auto-scale font if line exceeds safe margins (960px)
+        max_safe_width = 960
         if total_text_width > max_safe_width:
-            scale = max_safe_width / total_text_width
-            font_size = max(24, int(font_size * scale))
-            font = self._load_pil_font(font_family, font_size)
-            spacing = int(spacing * scale)
+            scale_factor = max_safe_width / total_text_width
+            base_font_size = max(24, int(base_font_size * scale_factor))
+            normal_font = self._load_pil_font(font_family, base_font_size)
+            active_font_size = int(base_font_size * active_scale)
+            active_font = self._load_pil_font(font_family, active_font_size)
+            spacing = int(spacing * scale_factor)
             for item in word_items:
-                bbox = draw.textbbox((0, 0), item["text"], font=font)
+                f = active_font if item["is_active"] else normal_font
+                item["font"] = f
+                bbox = draw.textbbox((0, 0), item["text"], font=f)
                 item["width"] = max(1, bbox[2] - bbox[0])
                 item["height"] = max(1, bbox[3] - bbox[1])
             total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
@@ -445,82 +527,95 @@ class SkiaSubtitleRenderer:
         center_y = int(self._height * (pos_y_pct / 100.0))
         center_x = self._width // 2
 
-        start_x = center_x - total_text_width // 2
         line_height = max(item["height"] for item in word_items)
-        baseline_y = center_y - line_height // 2
 
         # ─── 1. Background / Card Shapes ──────────────────────────────────────
         user_pad = style.get("bg_padding")
-        card_pad_x = int(user_pad * 1.5) if user_pad is not None else int(style.get("bg_padding", 28))
-        card_pad_y = int(user_pad * 0.8) if user_pad is not None else max(14, int(font_size * 0.34))
-        card_left = max(30, start_x - card_pad_x)
-        card_right = min(self._width - 30, start_x + total_text_width + card_pad_x)
+        card_pad_x = int(user_pad * 1.5) if user_pad is not None else max(24, int(base_font_size * 0.45))
+        card_pad_y = int(user_pad * 0.8) if user_pad is not None else max(14, int(base_font_size * 0.32))
+
+        is_podcast = preset_id in ("podcast_pro", "podcast_dialogue")
+        mic_extra_width = 72 if is_podcast else 0
+
+        card_total_w = total_text_width + (card_pad_x * 2) + mic_extra_width
+        card_left = center_x - card_total_w // 2
+        card_right = card_left + card_total_w
         card_top = center_y - line_height // 2 - card_pad_y
         card_bottom = center_y + line_height // 2 + card_pad_y
 
+        # Word start x
+        start_x = card_left + card_pad_x + mic_extra_width if is_podcast else (center_x - total_text_width // 2)
+        baseline_y = center_y - line_height // 2
+
         if preset_id == "glassmorphism":
-            # Frosted glass card with glossy border & subtle inner shine
+            # Frosted glass card with glossy border & subtle top inner shine
+            glass_opacity = float(style.get("bg_opacity", 0.45))
             draw.rounded_rectangle(
                 [card_left, card_top, card_right, card_bottom],
-                radius=20,
-                fill=(30, 41, 59, int(255 * 0.72)),
+                radius=int(style.get("bg_radius", 20)),
+                fill=(30, 41, 59, int(255 * glass_opacity)),
                 outline=(255, 255, 255, 140),
                 width=2,
             )
+            # Top edge subtle highlight
+            draw.line([card_left + 16, card_top + 2, card_right - 16, card_top + 2], fill=(255, 255, 255, 60), width=1)
+
         elif preset_id == "clean_editorial":
             # Minimalist Swiss slate pill card with slim border
             draw.rounded_rectangle(
                 [card_left, card_top, card_right, card_bottom],
-                radius=14,
-                fill=(15, 23, 42, int(255 * 0.85)),
+                radius=int(style.get("bg_radius", 14)),
+                fill=(15, 23, 42, int(255 * float(style.get("bg_opacity", 0.75)))),
                 outline=(255, 255, 255, 45),
                 width=1,
             )
-        elif preset_id == "podcast_pro":
+
+        elif is_podcast:
             # Dark charcoal pill with emerald border & MIC dot
-            mic_extra_left = 64
-            c_left = max(30, card_left - mic_extra_left)
             draw.rounded_rectangle(
-                [c_left, card_top, card_right, card_bottom],
+                [card_left, card_top, card_right, card_bottom],
                 radius=999,
-                fill=(18, 18, 22, int(255 * 0.92)),
-                outline=(16, 185, 129, 150),
+                fill=(18, 18, 22, int(255 * float(style.get("bg_opacity", 0.85)))),
+                outline=(16, 185, 129, 160),
                 width=2,
             )
-            # Emerald MIC indicator dot
-            dot_cx = c_left + 26
+            # Emerald MIC indicator dot + text
+            dot_cx = card_left + card_pad_x + 10
             dot_cy = center_y
             draw.ellipse([dot_cx - 6, dot_cy - 6, dot_cx + 6, dot_cy + 6], fill=(16, 185, 129, 255))
-            mic_font = self._load_pil_font("Inter", 18)
-            draw.text((dot_cx + 12, dot_cy - 10), "MIC", font=mic_font, fill=(16, 185, 129, 230))
-        elif preset_id == "modern_mono":
+            mic_font = self._load_pil_font("Inter", max(14, int(base_font_size * 0.35)))
+            draw.text((dot_cx + 12, dot_cy - 9), "MIC", font=mic_font, fill=(16, 185, 129, 230))
+
+        elif preset_id in ("modern_mono", "tech_mono"):
             # Cyber Terminal window with mini header bar
-            header_h = 30
+            header_h = 32
             term_top = card_top - header_h
             draw.rounded_rectangle(
                 [card_left, term_top, card_right, card_bottom],
-                radius=10,
-                fill=(8, 12, 20, int(255 * 0.94)),
+                radius=int(style.get("bg_radius", 10)),
+                fill=(8, 12, 20, int(255 * float(style.get("bg_opacity", 0.9)))),
                 outline=(6, 182, 212, 220),
                 width=2,
             )
             # Traffic light window dots
-            draw.ellipse([card_left + 12, term_top + 9, card_left + 22, term_top + 19], fill=(239, 68, 68, 255))
-            draw.ellipse([card_left + 26, term_top + 9, card_left + 36, term_top + 19], fill=(234, 179, 8, 255))
-            draw.ellipse([card_left + 40, term_top + 9, card_left + 50, term_top + 19], fill=(34, 197, 94, 255))
-            term_font = self._load_pil_font("Space Grotesk", 14)
-            draw.text((card_left + 58, term_top + 6), "TERMINAL v2.0", font=term_font, fill=(6, 182, 212, 200))
+            draw.ellipse([card_left + 12, term_top + 10, card_left + 22, term_top + 20], fill=(239, 68, 68, 255))
+            draw.ellipse([card_left + 26, term_top + 10, card_left + 36, term_top + 20], fill=(234, 179, 8, 255))
+            draw.ellipse([card_left + 40, term_top + 10, card_left + 50, term_top + 20], fill=(34, 197, 94, 255))
+            term_font = self._load_pil_font("Space Grotesk", max(14, int(base_font_size * 0.35)))
+            draw.text((card_left + 58, term_top + 7), "TERMINAL v2.0", font=term_font, fill=(6, 182, 212, 210))
             draw.line([card_left, term_top + header_h, card_right, term_top + header_h], fill=(6, 182, 212, 80), width=1)
-        elif preset_id == "cinematic_slate":
+
+        elif preset_id in ("cinematic_slate", "cinematic_bar"):
             # Hollywood gold top & bottom rules
-            draw.line([card_left - 10, card_top - 4, card_right + 10, card_top - 4], fill=(252, 211, 77, 200), width=2)
-            draw.line([card_left - 10, card_bottom + 4, card_right + 10, card_bottom + 4], fill=(252, 211, 77, 200), width=2)
+            draw.line([card_left - 10, card_top - 4, card_right + 10, card_top - 4], fill=(252, 211, 77, 210), width=2)
+            draw.line([card_left - 10, card_bottom + 4, card_right + 10, card_bottom + 4], fill=(252, 211, 77, 210), width=2)
+
         elif style.get("bg_enabled"):
             # Generic customizable background pill
             bg_rgba = self._parse_rgba(style.get("bg_color", "#000000"), style.get("bg_opacity", 0.6))
             draw.rounded_rectangle(
                 [card_left, card_top, card_right, card_bottom],
-                radius=int(style.get("bg_radius", 16)),
+                radius=int(style.get("bg_radius", 14)),
                 fill=bg_rgba,
             )
 
@@ -533,53 +628,74 @@ class SkiaSubtitleRenderer:
             w_text = item["text"]
             w_w = item["width"]
             is_active = item["is_active"]
+            f = item["font"]
 
             word_x = cur_x
-            word_y = baseline_y
+            # Vertically center word inside baseline slot
+            word_y = center_y - item["height"] // 2
 
             if preset_id == "kinetic_word_box" and is_active:
                 # Solid rounded badge behind active word
-                badge_pad_x = 12
-                badge_pad_y = 6
+                badge_pad_x = max(10, int(base_font_size * 0.25))
+                badge_pad_y = max(6, int(base_font_size * 0.14))
                 badge_box = [
                     word_x - badge_pad_x,
                     word_y - badge_pad_y,
                     word_x + w_w + badge_pad_x,
                     word_y + item["height"] + badge_pad_y,
                 ]
-                draw.rounded_rectangle(badge_box, radius=8, fill=(255, 0, 85, 255))
+                badge_color = self._parse_rgba(style.get("highlight_color", "#FF0055"), 1.0)
+                draw.rounded_rectangle(badge_box, radius=8, fill=badge_color)
                 # Text inside badge is crisp white
-                draw.text((word_x, word_y), w_text, font=font, fill=(255, 255, 255, 255))
+                draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255))
 
-            elif preset_id == "neon_tube":
+            elif preset_id in ("neon_tube", "neon_glow"):
                 if is_active:
-                    # Hot pink multi-pass bold neon tube glow
-                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 0, 127, 80), stroke_width=10, stroke_fill=(255, 0, 127, 80))
-                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 0, 127, 180), stroke_width=5, stroke_fill=(255, 0, 127, 180))
-                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(255, 0, 127, 255))
+                    # Hot pink / cyan multi-pass bold neon tube glow
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 0, 127, 80), stroke_width=10, stroke_fill=(255, 0, 127, 80))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 0, 127, 180), stroke_width=5, stroke_fill=(255, 0, 127, 180))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(255, 0, 127, 255))
                 else:
-                    # Solid high-contrast cyan-white typography with dark outer shadow (never hollow!)
-                    draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 220), stroke_width=4, stroke_fill=(0, 0, 0, 220))
-                    draw.text((word_x, word_y), w_text, font=font, fill=(240, 253, 250, 255), stroke_width=3, stroke_fill=(6, 182, 212, 255))
+                    # Solid high-contrast cyan-white typography with dark outer shadow
+                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220), stroke_width=4, stroke_fill=(0, 0, 0, 220))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(240, 253, 250, 255), stroke_width=3, stroke_fill=(6, 182, 212, 255))
 
             elif preset_id == "retro_chrome":
-                # Heavy 3D shadow + outline
+                # Heavy 3D shadow + chrome / gold fill
                 if is_active:
-                    draw.text((word_x + 3, word_y + 4), w_text, font=font, fill=(0, 0, 0, 240))
-                    draw.text((word_x, word_y), w_text, font=font, fill=(251, 191, 36, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
+                    draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 240))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(251, 191, 36, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
                 else:
-                    draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 200))
-                    draw.text((word_x, word_y), w_text, font=font, fill=(226, 232, 240, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
+                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 200))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(226, 232, 240, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
+
+            elif preset_id == "hormozi_pop":
+                # Heavy impact center pop: solid black outline + lime active highlight
+                if is_active:
+                    draw.text((word_x + 4, word_y + 5), w_text, font=f, fill=(0, 0, 0, 255))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(0, 255, 102, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
+                else:
+                    draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 240))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
+
+            elif preset_id in ("bold_impact", "bold_impact_stroke"):
+                # Heavy Anton impact with thick outline
+                if is_active:
+                    draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 240))
+                    draw.text((word_x, word_y), w_text, font=f, fill=highlight_color, stroke_width=5, stroke_fill=(0, 0, 0, 255))
+                else:
+                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
+                    draw.text((word_x, word_y), w_text, font=f, fill=normal_color, stroke_width=4, stroke_fill=(0, 0, 0, 255))
 
             elif preset_id == "clean_editorial" and is_active:
                 # Active word with cyan underline bar
-                draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 180))
-                draw.text((word_x, word_y), w_text, font=font, fill=(56, 189, 248, 255))
+                draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 180))
+                draw.text((word_x, word_y), w_text, font=f, fill=(56, 189, 248, 255))
                 draw.line([word_x, word_y + item["height"] + 4, word_x + w_w, word_y + item["height"] + 4], fill=(56, 189, 248, 255), width=4)
 
             elif is_active:
                 # Glowing active word highlight with solid dark drop shadow
-                draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 240))
+                draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 240))
                 hl_color = highlight_color
                 if style.get("glow_enabled", True):
                     glow_color_str = style.get("glow_color")
@@ -588,18 +704,18 @@ class SkiaSubtitleRenderer:
                     else:
                         glow_c = (hl_color[0], hl_color[1], hl_color[2], 160)
                     glow_rad = max(4, int(style.get("glow_radius", 8)))
-                    draw.text((word_x, word_y), w_text, font=font, fill=glow_c, stroke_width=glow_rad, stroke_fill=glow_c)
+                    draw.text((word_x, word_y), w_text, font=f, fill=glow_c, stroke_width=glow_rad, stroke_fill=glow_c)
 
                 strk_width = max(2, int(style.get("stroke_width", 3))) if style.get("stroke_enabled", True) else 3
                 strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
-                draw.text((word_x, word_y), w_text, font=font, fill=hl_color, stroke_width=strk_width, stroke_fill=strk_c)
+                draw.text((word_x, word_y), w_text, font=f, fill=hl_color, stroke_width=strk_width, stroke_fill=strk_c)
 
             else:
                 # Normal inactive word - always ensure strong visibility and bold contrast
-                draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 220))
+                draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
                 strk_width = max(2, int(style.get("stroke_width", 3))) if style.get("stroke_enabled", True) else 2
                 strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
-                draw.text((word_x, word_y), w_text, font=font, fill=normal_color, stroke_width=strk_width, stroke_fill=strk_c)
+                draw.text((word_x, word_y), w_text, font=f, fill=normal_color, stroke_width=strk_width, stroke_fill=strk_c)
 
             cur_x += w_w + spacing
 
@@ -679,58 +795,61 @@ class SkiaSubtitleRenderer:
                         pass
         return ImageFont.load_default()
 
+    def _parse_rgba(self, color_str: str, opacity: float = 1.0) -> Tuple[int, int, int, int]:
+        """Convert CSS hex or rgba string into Pillow RGBA tuple (0-255)."""
+        if not color_str:
+            return (255, 255, 255, int(opacity * 255))
+        c = color_str.strip().lower()
+        if c.startswith("#"):
+            c = c.lstrip("#")
+            if len(c) == 3:
+                c = "".join([x * 2 for x in c])
+            if len(c) == 6:
+                r = int(c[0:2], 16)
+                g = int(c[2:4], 16)
+                b = int(c[4:6], 16)
+                return (r, g, b, int(opacity * 255))
+            if len(c) == 8:
+                r = int(c[0:2], 16)
+                g = int(c[2:4], 16)
+                b = int(c[4:6], 16)
+                a = int(c[6:8], 16)
+                return (r, g, b, int(a * opacity))
+        elif c.startswith("rgba"):
+            parts = c.replace("rgba(", "").replace(")", "").split(",")
+            if len(parts) >= 4:
+                return (
+                    int(parts[0].strip()),
+                    int(parts[1].strip()),
+                    int(parts[2].strip()),
+                    int(float(parts[3].strip()) * opacity * 255),
+                )
+        elif c.startswith("rgb"):
+            parts = c.replace("rgb(", "").replace(")", "").split(",")
+            if len(parts) >= 3:
+                return (
+                    int(parts[0].strip()),
+                    int(parts[1].strip()),
+                    int(parts[2].strip()),
+                    int(opacity * 255),
+                )
+        return (255, 255, 255, int(opacity * 255))
+
     def _probe_duration(self, video_path: str) -> float:
-        """Probe video duration in seconds via ffprobe."""
+        """Get duration of video in seconds."""
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path,
+        ]
         try:
-            cmd = [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                video_path,
-            ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if res.returncode == 0 and res.stdout.strip():
                 return float(res.stdout.strip())
         except Exception:
             pass
         return 0.0
-
-    @staticmethod
-    def _parse_rgba(color_val: Any, opacity: float = 1.0) -> Tuple[int, int, int, int]:
-        """Parse hex string, color name, or rgb into (R, G, B, A) tuple."""
-        if not color_val:
-            return 255, 255, 255, int(opacity * 255)
-
-        s = str(color_val).strip()
-        named_colors = {
-            "white": (255, 255, 255),
-            "black": (0, 0, 0),
-            "cyan": (6, 182, 212),
-            "gold": (252, 211, 77),
-            "emerald": (16, 185, 129),
-            "pink": (255, 0, 127),
-            "red": (239, 68, 68),
-            "slate": (148, 163, 184),
-        }
-        if s.lower() in named_colors:
-            r, g, b = named_colors[s.lower()]
-            return r, g, b, int(max(0.0, min(1.0, opacity)) * 255)
-
-        # Remove #
-        s = s.lstrip("#")
-        try:
-            if len(s) == 3:
-                s = "".join(2 * c for c in s)
-            if len(s) >= 6:
-                r = int(s[0:2], 16)
-                g = int(s[2:4], 16)
-                b = int(s[4:6], 16)
-                a = int(s[6:8], 16) if len(s) >= 8 else int(max(0.0, min(1.0, opacity)) * 255)
-                return r, g, b, a
-        except Exception:
-            pass
-
-        return 255, 255, 255, int(opacity * 255)
 
     def _ffmpeg_fallback(
         self,
@@ -740,27 +859,23 @@ class SkiaSubtitleRenderer:
         output_path: str,
         start_offset: float,
     ) -> str:
-        """Fallback: use FFmpeg drawtext with exact normalized style parameters."""
-        from src.infrastructure.subtitle_renderer import SubtitleRenderer
-        from src.domain.entities import SubtitleStyleConfig
-
-        config = SubtitleStyleConfig(
-            font_family=style.get("font_family", "Poppins"),
-            font_size=int(style.get("font_size", 34)),
-            font_weight=style.get("font_weight", "Bold"),
-            color=style.get("text_color", "#FFFFFF"),
-            highlight_color=style.get("highlight_color", "#38BDF8"),
-            highlight_words=True,
-            stroke_color=style.get("stroke_color", "#000000") if style.get("stroke_enabled") else "",
-            stroke_width=int(style.get("stroke_width", 0)) if style.get("stroke_enabled") else 0,
-            background_opacity=float(style.get("bg_opacity", 0.0)) if style.get("bg_enabled") else 0.0,
-            position="bottom",
-            padding_bottom=int(1920 * (1 - style.get("position_y_pct", 78) / 100)),
-            uppercase=style.get("uppercase", False),
-            max_words_per_line=int(style.get("max_words_per_line", 4)),
-            line_transition=style.get("line_transition", "karaoke"),
-            start_offset=start_offset,
-        )
-
-        renderer = SubtitleRenderer(font_dir=self._font_dir)
-        return renderer.render_subtitles(video_path, words, config, output_path)
+        """Graceful fallback to SubtitleRenderer if Pillow or FFmpeg overlay errors."""
+        try:
+            from src.infrastructure.subtitle_renderer import SubtitleRenderer
+            from src.domain.entities import SubtitleStyleConfig
+            renderer = SubtitleRenderer(font_dir=self._font_dir)
+            cfg = SubtitleStyleConfig.from_dict(style)
+            return renderer._render_line_only(
+                video_path=video_path,
+                words=words,
+                config=cfg,
+                output_path=output_path,
+                offset=start_offset,
+                timing_adj=0.0,
+            )
+        except Exception as e:
+            logger.error(f"skia_subtitle fallback failed: {e}")
+            if video_path != output_path and os.path.exists(video_path):
+                import shutil
+                shutil.copy2(video_path, output_path)
+            return output_path

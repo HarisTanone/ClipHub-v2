@@ -486,8 +486,8 @@ class UnifiedFFmpegCompositor:
             )
             cleanup_files.extend(wm_files)
 
-            # Assemble video filter chain
-            v_chain_elements = [*hook_filters, *sub_filters]
+            # Assemble video filter chain (hook + watermark in FFmpeg, subtitles via high-fidelity PIL compositor)
+            v_chain_elements = [*hook_filters]
 
             cmd = ["ffmpeg", "-y", "-i", input_video]
             if wm_inputs:
@@ -540,6 +540,24 @@ class UnifiedFFmpegCompositor:
             if not os.path.exists(output_video) or os.path.getsize(output_video) == 0:
                 logger.error(f"unified_compositor: rendered file missing or empty: {output_video}")
                 return False
+
+            # High-fidelity subtitle overlay for exact 1:1 match to preview modal
+            if words and (subtitle_style_config or {}).get("enabled", True) is not False:
+                try:
+                    from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+                    sub_renderer = SkiaSubtitleRenderer(font_dir=self._font_dir)
+                    tmp_sub_out = os.path.join(tmp_dir, "sub_composite_out.mp4")
+                    sub_renderer.render_subtitles(
+                        video_path=output_video,
+                        words=words,
+                        style=subtitle_style_config,
+                        output_path=tmp_sub_out,
+                        start_offset=hook_dur,
+                    )
+                    if os.path.exists(tmp_sub_out) and os.path.getsize(tmp_sub_out) > 0:
+                        os.replace(tmp_sub_out, output_video)
+                except Exception as e:
+                    logger.warning(f"unified_compositor: subtitle overlay failed ({e}), keeping base render")
 
             logger.info(f"unified_compositor: 1-pass render success → {output_video}")
             return True
