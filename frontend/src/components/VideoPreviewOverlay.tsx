@@ -193,11 +193,149 @@ export function VideoPreviewOverlay({
 
     // ─── ANIMATION-SPECIFIC RENDERING ──────────────────────────────────
     switch (hookStyle) {
+      case "news_viralin_badge": {
+        const progress = Math.min(1, t / 0.45);
+        const y = (1 - progress) * -60;
+        const scaleVal = 0.88 + progress * 0.12;
+        const cardBg = cfg?.boxColor || "#EAB308";
+        const badgeBg = cfg?.lineColor || "#1D4ED8";
+        const showBadge = cfg?.badgeEnabled !== false;
+        const badgeTitle = cfg?.badgeText || "#VIRALIN";
+        const badgeSub = (cfg as any)?.badgeSubText || "";
+
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div className="absolute left-[6%] right-[6%]" style={{ top: hookTop, transform: `translateY(calc(-50% + ${y}px)) scale(${scaleVal})` }}>
+              <div style={{ position: "absolute", inset: -4, background: "#FFFFFF", transform: "rotate(-3deg)", borderRadius: 8, boxShadow: "0 14px 30px rgba(0,0,0,0.45)" }} />
+              <div style={{ position: "relative", background: cardBg, padding: "28px 20px 20px 20px", borderRadius: 8, boxShadow: "0 16px 36px rgba(0,0,0,0.5)" }}>
+                {showBadge && (
+                  <div style={{ position: "absolute", top: -20, left: "50%", transform: "translateX(-50%) rotate(-3.5deg)", background: badgeBg, borderRadius: 6, padding: "4px 14px", boxShadow: "0 6px 16px rgba(0,0,0,0.4)", border: "1.5px solid rgba(255,255,255,0.2)", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <span style={{ color: "#FACC15", fontFamily: "'Montserrat', sans-serif", fontWeight: 900, fontSize: 13, fontStyle: "italic", lineHeight: 1.1, textTransform: "uppercase" }}>{badgeTitle}</span>
+                    {badgeSub ? <span style={{ color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontWeight: 700, fontSize: 8, lineHeight: 1 }}>{badgeSub}</span> : null}
+                  </div>
+                )}
+                <p style={{ ...baseTextStyle, color: cfg?.color || "#09090B", fontSize: Math.max(fontSize * 0.78, 12), fontWeight: 900, textAlign: "center", lineHeight: 1.2, marginTop: showBadge ? 4 : 0 }}>{textContent}</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case "news_portal_pantau": {
+        const progress = Math.min(1, t / 0.45);
+        const y = (1 - progress) * -50;
+        const scaleVal = 0.9 + progress * 0.1;
+        const cardBg = cfg?.boxColor || "#FFFFFF";
+        const accentColor = cfg?.lineColor || "#DC2626";
+        const categoryTag = cfg?.badgeText || "INTERNASIONAL";
+        const footerLabel = (cfg as any)?.footerText || "READ MORE AT chatgpt.com";
+        const showBadge = cfg?.badgeEnabled !== false;
+        const showFooter = (cfg as any)?.footerEnabled !== false;
+
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div className="absolute left-[6%] right-[6%]" style={{ top: hookTop, transform: `translateY(calc(-50% + ${y}px)) scale(${scaleVal})` }}>
+              <div style={{ position: "relative", background: cardBg, borderRadius: "10px 10px 0 0", padding: "18px 18px 14px 18px", boxShadow: "0 18px 40px rgba(0,0,0,0.5)", borderBottom: `4px solid ${accentColor}` }}>
+                {showBadge && (
+                  <div style={{ display: "inline-block", background: accentColor, color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 3, marginBottom: 8 }}>{categoryTag}</div>
+                )}
+                <p style={{ ...baseTextStyle, color: cfg?.color || "#09090B", fontSize: Math.max(fontSize * 0.76, 12), fontWeight: 900, textAlign: "left", lineHeight: 1.18, textTransform: "uppercase" }}>{textContent}</p>
+                {showFooter && (
+                  <div style={{ marginTop: 10, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)", color: "#71717A", fontSize: 8, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>{footerLabel}</div>
+                )}
+                <div style={{ position: "absolute", bottom: -12, right: 28, width: 0, height: 0, borderLeft: "10px solid transparent", borderRight: "10px solid transparent", borderTop: `12px solid ${accentColor}` }} />
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case "news_offset_box": {
+        const progress = Math.min(1, t / 0.45);
+        const y = (1 - progress) * -40;
+        const scaleVal = 0.92 + progress * 0.08;
+        const cardBg = cfg?.boxColor || "#DC2626";
+        const offsetColor = cfg?.lineColor || "#FFFFFF";
+
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div className="absolute left-[8%] right-[8%]" style={{ top: hookTop, transform: `translateY(calc(-50% + ${y}px)) scale(${scaleVal})` }}>
+              <div style={{ position: "absolute", top: -8, left: -8, width: "65%", height: "80%", borderTop: `3px solid ${offsetColor}`, borderLeft: `3px solid ${offsetColor}` }} />
+              <div style={{ position: "relative", background: cardBg, padding: "18px 18px", boxShadow: "0 16px 36px rgba(0,0,0,0.5)" }}>
+                <p style={{ ...baseTextStyle, color: cfg?.color || "#FFFFFF", fontSize: Math.max(fontSize * 0.78, 12), fontWeight: 900, textAlign: "center", lineHeight: 1.22 }}>{textContent}</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case "brutalist_bracket": {
+        const progress = Math.min(1, t / 0.45);
+        const x = (1 - progress) * -50;
+        const scaleVal = 0.92 + progress * 0.08;
+        const cardBg = cfg?.boxColor || "#FFFFFF";
+        const bracketColor = cfg?.lineColor || "#000000";
+
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div className="absolute left-[8%] right-[8%]" style={{ top: hookTop, transform: `translateY(-50%) translateX(${x}px) scale(${scaleVal})` }}>
+              <div style={{ position: "absolute", top: -10, left: -10, bottom: -10, width: 24, borderTop: `5px solid ${bracketColor}`, borderLeft: `5px solid ${bracketColor}`, borderBottom: `5px solid ${bracketColor}` }} />
+              <div style={{ position: "relative", background: cardBg, padding: "18px 20px", boxShadow: "0 16px 36px rgba(0,0,0,0.5)" }}>
+                <p style={{ ...baseTextStyle, color: cfg?.color || "#09090B", fontSize: Math.max(fontSize * 0.78, 12), fontWeight: 900, textAlign: "left", lineHeight: 1.2 }}>
+                  {textContent.split(/(!!+|!\s*!)/g).map((part, idx) => {
+                    if (part.includes("!")) return <span key={idx} style={{ color: "#EF4444", fontWeight: 900 }}> {part}</span>;
+                    return <span key={idx}>{part}</span>;
+                  })}
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case "quote_strip_tape": {
+        const progress = Math.min(1, t / 0.45);
+        const x = (1 - progress) * -50;
+        const quoteBg = cfg?.lineColor || "#0D9488";
+        const tapeBg = cfg?.boxColor || "#FFFFFF";
+        const words = textContent.split(/\s+/).filter(Boolean);
+        const lines: string[] = [];
+        let cur = "";
+        for (const w of words) {
+          if ((cur + " " + w).trim().split(" ").length > 3) {
+            lines.push(cur);
+            cur = w;
+          } else {
+            cur = cur ? `${cur} ${w}` : w;
+          }
+        }
+        if (cur) lines.push(cur);
+
+        return (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
+            <div className="absolute left-[8%] right-[8%] flex flex-col items-start" style={{ top: hookTop, transform: `translateY(-50%) translateX(${x}px)` }}>
+              <div style={{ background: quoteBg, color: "#FFFFFF", borderRadius: 3, padding: "4px 8px", marginBottom: 6, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: 14, fontWeight: 900, lineHeight: 1, fontFamily: "serif" }}>❝</span>
+              </div>
+              <div className="flex flex-col items-start gap-1.5">
+                {lines.map((line, lIdx) => (
+                  <span key={lIdx} style={{ background: tapeBg, color: cfg?.color || "#09090B", padding: "4px 12px", fontFamily, fontSize: Math.max(fontSize * 0.72, 11), fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em", boxShadow: "0 6px 16px rgba(0,0,0,0.4)" }}>
+                    {line}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       case "podcast_lower_third": {
         const progress = Math.min(1, t / 0.45);
         const y = (1 - progress) * 56;
         const accent = cfg?.lineColor || "#16F2B3";
         const dotOpacity = 0.35 + Math.abs(Math.sin(t * 9)) * 0.65;
+        const showBadge = cfg?.badgeEnabled !== false;
+        const badgeLabel = cfg?.badgeText || "ON AIR";
 
         return (
           <div className="absolute inset-0" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
@@ -205,7 +343,7 @@ export function VideoPreviewOverlay({
               className="absolute left-[7%] right-[7%] grid items-center"
               style={{
                 top: hookTop,
-                gridTemplateColumns: "54px 1fr",
+                gridTemplateColumns: showBadge ? "54px 1fr" : "1fr",
                 gap: 12,
                 transform: `translateY(calc(-50% + ${y}px))`,
                 padding: "14px 16px",
@@ -216,10 +354,12 @@ export function VideoPreviewOverlay({
                 boxShadow: `0 18px 38px rgba(0,0,0,0.38), 0 0 22px ${accent}33`,
               }}
             >
-              <div className="flex flex-col items-center gap-1.5">
-                <span style={{ width: 11, height: 11, borderRadius: 99, backgroundColor: accent, opacity: dotOpacity, boxShadow: `0 0 14px ${accent}` }} />
-                <span style={{ color: accent, fontSize: 10, fontWeight: 900, letterSpacing: 0 }}>ON AIR</span>
-              </div>
+              {showBadge && (
+                <div className="flex flex-col items-center gap-1.5">
+                  <span style={{ width: 11, height: 11, borderRadius: 99, backgroundColor: accent, opacity: dotOpacity, boxShadow: `0 0 14px ${accent}` }} />
+                  <span style={{ color: accent, fontSize: 10, fontWeight: 900, letterSpacing: 0 }}>{badgeLabel}</span>
+                </div>
+              )}
               <p style={{ ...baseTextStyle, color, textAlign: "left", lineHeight: 1.04, textShadow: textShadowParts.join(", ") || "0 4px 18px rgba(0,0,0,0.65)" }}>
                 {textContent}
               </p>
@@ -260,6 +400,8 @@ export function VideoPreviewOverlay({
         const waveColor = cfg?.glowColor || cfg?.gradientTo || color || "#14F1D9";
         const pulse = 1 + Math.sin(t * 5.4) * 0.035;
         const bars = Array.from({ length: 15 });
+        const showBadge = cfg?.badgeEnabled !== false;
+        const badgeLabel = cfg?.badgeText || "LIVE AUDIO";
         const waveTextStyle: React.CSSProperties = gradientEnabled
           ? {
             background: `linear-gradient(${gradientAngle}deg, ${gradientFrom}, ${gradientTo || waveColor})`,
@@ -272,6 +414,9 @@ export function VideoPreviewOverlay({
         return (
           <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
             <div style={{ textAlign: "center", transform: `scale(${pulse})`, width: "100%" }}>
+              {showBadge && (
+                <span style={{ color: waveColor, fontSize: 10, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 }}>{badgeLabel}</span>
+              )}
               <div className="flex items-center justify-center" style={{ gap: 5, height: 64, marginBottom: 12 }}>
                 {bars.map((_, i) => {
                   const h = 20 + Math.abs(Math.sin(t * 8 + i * 0.7)) * (24 + (i % 4) * 5);
@@ -288,6 +433,9 @@ export function VideoPreviewOverlay({
         const progress = Math.min(1, t / 0.35);
         const x = (1 - progress) * -120;
         const tapeColor = cfg?.boxColor || "#FFDD2D";
+        const showBadge = cfg?.badgeEnabled !== false;
+        const badgeLabel = cfg?.badgeText || "HOT TAKE";
+        const badgeColor = cfg?.lineColor || "#D71920";
 
         return (
           <div className="absolute inset-0" style={{ backgroundColor: overlayBg, opacity: hookAlpha }}>
@@ -304,7 +452,9 @@ export function VideoPreviewOverlay({
                 textAlign: "center",
               }}
             >
-              <span style={{ display: "block", color: "#D71920", fontSize: 12, fontWeight: 900, letterSpacing: 0, marginBottom: 4 }}>HOT TAKE</span>
+              {showBadge && (
+                <span style={{ display: "block", color: badgeColor, fontSize: 12, fontWeight: 900, letterSpacing: 0, marginBottom: 4 }}>{badgeLabel}</span>
+              )}
               <p style={{ ...baseTextStyle, color: cfg?.color || "#111111", lineHeight: 0.98, textShadow: "none" }}>{textContent}</p>
             </div>
           </div>

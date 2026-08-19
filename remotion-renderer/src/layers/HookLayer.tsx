@@ -497,7 +497,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               textAlign: "center",
             }}>
               {badgeEnabled && <div style={{
-                color: "#D71920",
+                color: config.lineColor || "#D71920",
                 fontFamily: "'Inter', sans-serif",
                 fontWeight: 900,
                 fontSize: 26,
@@ -771,7 +771,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
           <AbsoluteFill>
             <div style={{ position: "absolute", top: `${positionY}%`, left: "7%", right: "13%", transform: `translateY(calc(-50% + ${y}px))` }}>
               <div style={{ position: "relative", borderRadius: 28, padding: "34px 38px", background: hexToRgba(panel, config.boxOpacity ?? 0.98), boxShadow: "0 30px 72px rgba(0,0,0,.38)" }}>
-                <div style={{ color: hexToRgba(accent, 0.58), fontFamily: "'Inter', sans-serif", fontSize: 22, fontWeight: 700, marginBottom: 14 }}>{badgeText || "replying to @viewer"}</div>
+                {badgeEnabled && <div style={{ color: hexToRgba(accent, 0.58), fontFamily: "'Inter', sans-serif", fontSize: 22, fontWeight: 700, marginBottom: 14 }}>{badgeText || "replying to @viewer"}</div>}
                 <div style={{ color: config.color || "#18181B", fontFamily, fontSize, fontWeight, lineHeight: config.lineHeight || 1.14, textAlign: "left" }}>{renderedText}</div>
                 {decorativeElements && <div style={{ position: "absolute", left: 54, bottom: -20, width: 42, height: 42, background: panel, transform: "rotate(45deg)", borderRadius: 4 }} />}
               </div>
@@ -802,8 +802,8 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
         const ink = config.lineColor || "#111827";
         return (
           <AbsoluteFill>
-            <div style={{ position: "absolute", top: `${positionY}%`, left: "7%", right: "7%", transform: `translateY(-50%) scale(${Math.min(1, entrance)})`, display: "grid", gridTemplateColumns: "220px 1fr", overflow: "hidden", borderRadius: 26, border: `8px solid ${ink}`, boxShadow: `16px 16px 0 ${ink}` }}>
-              <div style={{ display: "grid", placeItems: "center", background: accent, color: ink, fontFamily: "'Archivo Black', sans-serif", fontSize: 104, fontWeight: 900 }}>{badgeText || "03"}</div>
+            <div style={{ position: "absolute", top: `${positionY}%`, left: "7%", right: "7%", transform: `translateY(-50%) scale(${Math.min(1, entrance)})`, display: "grid", gridTemplateColumns: badgeEnabled ? "220px 1fr" : "1fr", overflow: "hidden", borderRadius: 26, border: `8px solid ${ink}`, boxShadow: `16px 16px 0 ${ink}` }}>
+              {badgeEnabled && <div style={{ display: "grid", placeItems: "center", background: accent, color: ink, fontFamily: "'Archivo Black', sans-serif", fontSize: 104, fontWeight: 900 }}>{badgeText || "03"}</div>}
               <div style={{ color: config.color || ink, background: "#F8FAFC", padding: "48px 44px", fontFamily, fontSize, fontWeight, lineHeight: 1.04, textTransform: "uppercase", textAlign: "left" }}>{renderedText}</div>
             </div>
           </AbsoluteFill>
@@ -818,7 +818,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
         return (
           <AbsoluteFill>
             <div style={{ position: "absolute", top: `${positionY}%`, left: "8%", right: "8%", transform: `translateY(-50%) rotate(${rotate}deg) scale(${0.88 + Math.min(1, entrance) * 0.12})` }}>
-              <div style={{ display: "inline-block", marginBottom: 14, padding: "12px 24px", borderRadius: 12, background: accent, color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontSize: 30, fontWeight: 900, letterSpacing: 3 }}>{badgeText || "POV"}</div>
+              {badgeEnabled && <div style={{ display: "inline-block", marginBottom: 14, padding: "12px 24px", borderRadius: 12, background: accent, color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontSize: 30, fontWeight: 900, letterSpacing: 3 }}>{badgeText || "POV"}</div>}
               <div style={{ padding: "34px 40px", borderRadius: 18, border: `5px solid ${accent}`, background: "rgba(18,7,12,.8)", color, fontFamily, fontSize, fontWeight, fontStyle: config.italic ? "italic" : "normal", lineHeight: config.lineHeight || 1.08, textAlign: "left", textShadow: shadows.join(", ") || "0 6px 22px rgba(0,0,0,.5)" }}>{renderedText}</div>
             </div>
           </AbsoluteFill>
@@ -834,7 +834,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
         const badgeBg = config.lineColor || "#1D4ED8"; // Royal blue
         const textColor = config.color || "#09090B";
         const badgeTitle = badgeText || "#VIRALIN";
-        const badgeSub = (config as any).badgeSubText || (config as any).footerText || "by Akurat.co";
+        const badgeSub = (config as any).badgeSubText || "";
 
         return (
           <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
@@ -866,49 +866,51 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 zIndex: 2,
               }}>
                 {/* Tilted Blue Badge Header */}
-                <div style={{
-                  position: "absolute",
-                  top: -32,
-                  left: "50%",
-                  transform: "translateX(-50%) rotate(-3.5deg)",
-                  background: badgeBg,
-                  borderRadius: 6,
-                  padding: "10px 24px",
-                  boxShadow: "0 10px 25px rgba(0,0,0,0.4), inset 0 0 10px rgba(255,255,255,0.15)",
-                  border: "2px solid rgba(255,255,255,0.2)",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  zIndex: 3,
-                }}>
+                {badgeEnabled && (
                   <div style={{
-                    color: "#FACC15",
-                    fontFamily: "'Montserrat', 'Barlow Condensed', sans-serif",
-                    fontWeight: 900,
-                    fontSize: 28,
-                    fontStyle: "italic",
-                    letterSpacing: "0.05em",
-                    lineHeight: 1,
-                    textTransform: "uppercase",
-                    textShadow: "0 2px 4px rgba(0,0,0,0.4)",
+                    position: "absolute",
+                    top: -32,
+                    left: "50%",
+                    transform: "translateX(-50%) rotate(-3.5deg)",
+                    background: badgeBg,
+                    borderRadius: 6,
+                    padding: "10px 24px",
+                    boxShadow: "0 10px 25px rgba(0,0,0,0.4), inset 0 0 10px rgba(255,255,255,0.15)",
+                    border: "2px solid rgba(255,255,255,0.2)",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 3,
                   }}>
-                    {badgeTitle}
-                  </div>
-                  {badgeSub && (
                     <div style={{
-                      color: "#FFFFFF",
-                      fontFamily: "'Inter', sans-serif",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      letterSpacing: "0.02em",
-                      marginTop: 3,
-                      opacity: 0.95,
+                      color: "#FACC15",
+                      fontFamily: "'Montserrat', 'Barlow Condensed', sans-serif",
+                      fontWeight: 900,
+                      fontSize: 28,
+                      fontStyle: "italic",
+                      letterSpacing: "0.05em",
+                      lineHeight: 1,
+                      textTransform: "uppercase",
+                      textShadow: "0 2px 4px rgba(0,0,0,0.4)",
                     }}>
-                      {badgeSub}
+                      {badgeTitle}
                     </div>
-                  )}
-                </div>
+                    {badgeSub ? (
+                      <div style={{
+                        color: "#FFFFFF",
+                        fontFamily: "'Inter', sans-serif",
+                        fontWeight: 700,
+                        fontSize: 13,
+                        letterSpacing: "0.02em",
+                        marginTop: 3,
+                        opacity: 0.95,
+                      }}>
+                        {badgeSub}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
 
                 {/* Main Headline Text */}
                 <div style={{
@@ -937,7 +939,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
         const cardBg = config.boxColor || "#FFFFFF";
         const accentColor = config.lineColor || "#DC2626"; // Crimson Red
         const categoryTag = badgeText || "INTERNASIONAL";
-        const footerLabel = (config as any).footerText || (config as any).badgeSubText || "READ MORE AT PANTAU.COM";
+        const footerLabel = (config as any).footerText || (config as any).badgeSubText || "READ MORE AT chatgpt.com";
 
         return (
           <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>

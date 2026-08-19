@@ -300,7 +300,7 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
   badgeEnabled: true,
   badgeText: "ON AIR",
   footerEnabled: true,
-  footerText: "READ MORE AT PANTAU.COM",
+  footerText: "READ MORE AT chatgpt.com",
   decorativeElements: true,
   motionIntensity: 1.0,
   duration: 3.0,
@@ -565,7 +565,7 @@ function hookCapabilities(animation: string): HookCapabilities {
 
 const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = [
   { id: "news_viralin_badge_preset", name: "#VIRALIN Akurat Badge", style: { animation: "news_viralin_badge", color: "#09090B", boxColor: "#EAB308", lineColor: "#1D4ED8", fontSize: 46, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, badgeEnabled: true, badgeText: "#VIRALIN", position: "center", positionY: 48, decorativeElements: true, motionIntensity: 1.0 } },
-  { id: "news_portal_pantau_preset", name: "News Portal Speech Notch", style: { animation: "news_portal_pantau", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#DC2626", fontSize: 44, fontFamily: "Inter", fontWeight: "900", uppercase: true, badgeEnabled: true, badgeText: "INTERNASIONAL", footerEnabled: true, footerText: "READ MORE AT PANTAU.COM", position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "news_portal_pantau_preset", name: "News Portal Speech Notch", style: { animation: "news_portal_pantau", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#DC2626", fontSize: 44, fontFamily: "Inter", fontWeight: "900", uppercase: true, badgeEnabled: true, badgeText: "INTERNASIONAL", footerEnabled: true, footerText: "READ MORE AT chatgpt.com", position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
   { id: "news_offset_box_preset", name: "Detik Red Breaking Box", style: { animation: "news_offset_box", color: "#FFFFFF", boxColor: "#DC2626", lineColor: "#FFFFFF", fontSize: 44, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
   { id: "brutalist_bracket_preset", name: "Brutalist Bracket Frame", style: { animation: "brutalist_bracket", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#000000", fontSize: 46, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
   { id: "quote_strip_tape_preset", name: "Quote Tape Strips", style: { animation: "quote_strip_tape", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#0D9488", fontSize: 42, fontFamily: "Montserrat", fontWeight: "900", uppercase: true, position: "center", positionY: 52, decorativeElements: true, motionIntensity: 1.0 } },
@@ -1425,32 +1425,32 @@ function OtherTab({ hookStyle, textEmphasisStyle, onHookChange, onTextEmphasisCh
           {subTab === "watermark" ? "Dirender server-side via FFmpeg" : aiTextEnabled ? "Applied to preview & final render" : "Aktifkan AI Cinematic Text untuk mengatur AI Text"}
         </span>
       </div>
-        {subTab === "transition" ? (
-          <TransitionEditor
-            style={hookStyle}
-            onChange={onHookChange}
-            thumbnailUrl={thumbnailUrl}
-            aspectRatio={aspectRatio}
-            canvasBackground={canvasBackground}
-          />
-        ) : subTab === "ai_text" ? (
-          <TextEmphasisEditor
-            style={textEmphasisStyle}
-            onChange={onTextEmphasisChange}
-            thumbnailUrl={thumbnailUrl}
-            previewContext={aiTextPreviewContext}
-            aspectRatio={aspectRatio}
-            canvasBackground={canvasBackground}
-          />
-        ) : (
-          <WatermarkEditor
-            style={watermarkStyle}
-            onChange={onWatermarkChange}
-            thumbnailUrl={thumbnailUrl}
-            aspectRatio={aspectRatio}
-            canvasBackground={canvasBackground}
-          />
-        )}
+      {subTab === "transition" ? (
+        <TransitionEditor
+          style={hookStyle}
+          onChange={onHookChange}
+          thumbnailUrl={thumbnailUrl}
+          aspectRatio={aspectRatio}
+          canvasBackground={canvasBackground}
+        />
+      ) : subTab === "ai_text" ? (
+        <TextEmphasisEditor
+          style={textEmphasisStyle}
+          onChange={onTextEmphasisChange}
+          thumbnailUrl={thumbnailUrl}
+          previewContext={aiTextPreviewContext}
+          aspectRatio={aspectRatio}
+          canvasBackground={canvasBackground}
+        />
+      ) : (
+        <WatermarkEditor
+          style={watermarkStyle}
+          onChange={onWatermarkChange}
+          thumbnailUrl={thumbnailUrl}
+          aspectRatio={aspectRatio}
+          canvasBackground={canvasBackground}
+        />
+      )}
     </div>
   );
 }
@@ -1736,10 +1736,10 @@ function TransitionEditor({
   const update = (patch: Partial<HookStyle>) => onChange({ ...style, ...patch });
   const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
     ? buildCanvasConfig(aspectRatio, {
-        backgroundMode: canvasBackground?.mode || "template",
-        templateId: canvasBackground?.templateId || "dark-studio",
-        backgroundImageUrl: canvasBackground?.imageDataUrl || null,
-      })
+      backgroundMode: canvasBackground?.mode || "template",
+      templateId: canvasBackground?.templateId || "dark-studio",
+      backgroundImageUrl: canvasBackground?.imageDataUrl || null,
+    })
     : null;
 
   return (
@@ -1827,10 +1827,10 @@ function TextEmphasisEditor({
   const [previewLoading, setPreviewLoading] = useState(false);
   const canvas = (aspectRatio === "16:9" || aspectRatio === "1:1")
     ? buildCanvasConfig(aspectRatio, {
-        backgroundMode: canvasBackground?.mode || "template",
-        templateId: canvasBackground?.templateId || "dark-studio",
-        backgroundImageUrl: canvasBackground?.imageDataUrl || null,
-      })
+      backgroundMode: canvasBackground?.mode || "template",
+      templateId: canvasBackground?.templateId || "dark-studio",
+      backgroundImageUrl: canvasBackground?.imageDataUrl || null,
+    })
     : null;
 
   useEffect(() => {
@@ -2259,7 +2259,8 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
       const cardBg = style.boxColor || "#EAB308";
       const badgeBg = style.lineColor || "#1D4ED8";
       const badgeTitle = style.badgeText || "#VIRALIN";
-      const badgeSub = (style as any).badgeSubText || "by Akurat.co";
+      const badgeSub = (style as any).badgeSubText || "";
+      const showBadge = style.badgeEnabled !== false;
       return (
         <>
           <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
@@ -2269,11 +2270,13 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
             {/* Main yellow card */}
             <div style={{ position: "relative", background: cardBg, padding: "28px 20px 20px 20px", borderRadius: 8, boxShadow: "0 16px 36px rgba(0,0,0,0.5)" }}>
               {/* Tilted Blue Badge */}
-              <div style={{ position: "absolute", top: -20, left: "50%", transform: "translateX(-50%) rotate(-3.5deg)", background: badgeBg, borderRadius: 6, padding: "4px 14px", boxShadow: "0 6px 16px rgba(0,0,0,0.4)", border: "1.5px solid rgba(255,255,255,0.2)", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <span style={{ color: "#FACC15", fontFamily: "'Montserrat', sans-serif", fontWeight: 900, fontSize: 13, fontStyle: "italic", lineHeight: 1.1, textTransform: "uppercase" }}>{badgeTitle}</span>
-                <span style={{ color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontWeight: 700, fontSize: 8, lineHeight: 1 }}>{badgeSub}</span>
-              </div>
-              <p style={{ ...baseTextStyle, color: style.color || "#09090B", fontSize: Math.max(fontSize * 0.78, 12), fontWeight: 900, textAlign: "center", lineHeight: 1.2, marginTop: 4 }}>{text}</p>
+              {showBadge && (
+                <div style={{ position: "absolute", top: -20, left: "50%", transform: "translateX(-50%) rotate(-3.5deg)", background: badgeBg, borderRadius: 6, padding: "4px 14px", boxShadow: "0 6px 16px rgba(0,0,0,0.4)", border: "1.5px solid rgba(255,255,255,0.2)", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <span style={{ color: "#FACC15", fontFamily: "'Montserrat', sans-serif", fontWeight: 900, fontSize: 13, fontStyle: "italic", lineHeight: 1.1, textTransform: "uppercase" }}>{badgeTitle}</span>
+                  {badgeSub ? <span style={{ color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontWeight: 700, fontSize: 8, lineHeight: 1 }}>{badgeSub}</span> : null}
+                </div>
+              )}
+              <p style={{ ...baseTextStyle, color: style.color || "#09090B", fontSize: Math.max(fontSize * 0.78, 12), fontWeight: 900, textAlign: "center", lineHeight: 1.2, marginTop: showBadge ? 4 : 0 }}>{text}</p>
             </div>
           </div>
         </>
@@ -2284,7 +2287,7 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
       const cardBg = style.boxColor || "#FFFFFF";
       const accentColor = style.lineColor || "#DC2626";
       const categoryTag = style.badgeText || "INTERNASIONAL";
-      const footerLabel = style.footerText || "READ MORE AT PANTAU.COM";
+      const footerLabel = style.footerText || "READ MORE AT chatgpt.com";
       const showBadge = style.badgeEnabled !== false;
       const showFooter = style.footerEnabled !== false;
       return (
@@ -2383,13 +2386,15 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
 
     case "podcast_lower_third": {
       const accent = style.lineColor || "#16F2B3";
+      const showBadge = style.badgeEnabled !== false;
+      const badgeLabel = style.badgeText || "ON AIR";
       return (
         <>
           <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
           <div className="absolute left-3 right-3 animate-[podcastLowerPreview_2.8s_ease-out_infinite]" style={{ top: posTop, transform: "translateY(-50%)" }}>
             <div style={{
               display: "grid",
-              gridTemplateColumns: "auto 1fr",
+              gridTemplateColumns: showBadge ? "auto 1fr" : "1fr",
               gap: 8,
               alignItems: "center",
               background: "linear-gradient(90deg, rgba(6,17,31,0.94), rgba(20,28,44,0.78))",
@@ -2399,10 +2404,12 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
               boxShadow: `0 12px 30px rgba(0,0,0,0.35), 0 0 18px ${accent}33`,
               padding: "10px 12px",
             }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
-                <span style={{ width: 8, height: 8, borderRadius: 99, background: accent, boxShadow: `0 0 12px ${accent}`, animation: "podcastOnAirPulse_1s ease-in-out infinite" }} />
-                <span style={{ color: accent, fontSize: 8, fontWeight: 900, letterSpacing: 0 }}>ON AIR</span>
-              </div>
+              {showBadge && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 99, background: accent, boxShadow: `0 0 12px ${accent}`, animation: "podcastOnAirPulse_1s ease-in-out infinite" }} />
+                  <span style={{ color: accent, fontSize: 8, fontWeight: 900, letterSpacing: 0 }}>{badgeLabel}</span>
+                </div>
+              )}
               <p style={{ ...baseTextStyle, color: style.color, fontSize: Math.max(fontSize * 0.86, 12), textAlign: "left", lineHeight: 1.02, textShadow }}>{text}</p>
             </div>
           </div>
@@ -2436,10 +2443,15 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
     case "waveform_pulse": {
       const bars = Array.from({ length: 13 });
       const waveColor = style.glowColor || style.color || "#14F1D9";
+      const showBadge = style.badgeEnabled !== false;
+      const badgeLabel = style.badgeText || "LIVE AUDIO";
       return (
         <>
           <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
           <div className="absolute inset-x-0 flex flex-col items-center justify-center gap-3 px-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            {showBadge && (
+              <span style={{ color: waveColor, fontSize: 8, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>{badgeLabel}</span>
+            )}
             <div style={{ display: "flex", gap: 4, height: 34, alignItems: "center" }}>
               {bars.map((_, i) => (
                 <span key={i} style={{
@@ -2461,6 +2473,9 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
 
     case "breaking_tape": {
       const tapeColor = style.boxColor || "#FFDD2D";
+      const showBadge = style.badgeEnabled !== false;
+      const badgeLabel = style.badgeText || "HOT TAKE";
+      const badgeColor = style.lineColor || "#D71920";
       return (
         <>
           <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
@@ -2473,7 +2488,9 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
               padding: "11px 28px",
               textAlign: "center",
             }}>
-              <span style={{ display: "block", color: "#D71920", fontSize: 8, fontWeight: 900, letterSpacing: 0 }}>HOT TAKE</span>
+              {showBadge && (
+                <span style={{ display: "block", color: badgeColor, fontSize: 8, fontWeight: 900, letterSpacing: 0, marginBottom: 2 }}>{badgeLabel}</span>
+              )}
               <p style={{ ...baseTextStyle, color: style.color || "#111111", fontSize: Math.max(fontSize * 0.9, 14), lineHeight: 1, textShadow: "none" }}>{text}</p>
             </div>
           </div>
@@ -3755,17 +3772,17 @@ function SkiaSubtitleLivePreview({
                 border: presetId === "glassmorphism"
                   ? "1.5px solid rgba(255, 255, 255, 0.55)"
                   : presetId === "podcast_pro"
-                  ? "1.5px solid rgba(16, 185, 129, 0.5)"
-                  : presetId === "modern_mono"
-                  ? "1.5px solid #06B6D4"
-                  : "1px solid rgba(255, 255, 255, 0.12)",
+                    ? "1.5px solid rgba(16, 185, 129, 0.5)"
+                    : presetId === "modern_mono"
+                      ? "1.5px solid #06B6D4"
+                      : "1px solid rgba(255, 255, 255, 0.12)",
                 boxShadow: presetId === "glassmorphism"
                   ? "0 8px 32px 0 rgba(0, 0, 0, 0.45), inset 0 0 12px rgba(255, 255, 255, 0.25)"
                   : presetId === "podcast_pro"
-                  ? "0 0 16px rgba(16, 185, 129, 0.35)"
-                  : presetId === "modern_mono"
-                  ? "0 0 16px rgba(6, 182, 212, 0.35)"
-                  : "0 8px 24px rgba(0,0,0,0.5)",
+                    ? "0 0 16px rgba(16, 185, 129, 0.35)"
+                    : presetId === "modern_mono"
+                      ? "0 0 16px rgba(6, 182, 212, 0.35)"
+                      : "0 8px 24px rgba(0,0,0,0.5)",
                 borderRadius: `${bgRadius}px`,
                 padding: `${Math.round(bgPadding * 0.35)}px ${Math.round(bgPadding * 0.65)}px`,
               } : {}),
@@ -3809,14 +3826,14 @@ function SkiaSubtitleLivePreview({
                   const gradActive = style.gradientEnabled
                     ? `linear-gradient(135deg, ${style.gradientFrom || "#667EEA"} 0%, ${style.gradientTo || "#764BA2"} 100%)`
                     : presetId === "retro_chrome"
-                    ? "linear-gradient(180deg, #FFF9C4 0%, #FFFFFF 35%, #F57F17 50%, #FFD54F 60%, #E65100 100%)"
-                    : null;
+                      ? "linear-gradient(180deg, #FFF9C4 0%, #FFFFFF 35%, #F57F17 50%, #FFD54F 60%, #E65100 100%)"
+                      : null;
 
                   const gradInactive = style.gradientEnabled
                     ? `linear-gradient(135deg, ${style.gradientFrom || "#667EEA"}80 0%, ${style.gradientTo || "#764BA2"}80 100%)`
                     : presetId === "retro_chrome"
-                    ? "linear-gradient(180deg, #E0E0E0 0%, #FFFFFF 40%, #757575 50%, #BDBDBD 60%, #424242 100%)"
-                    : null;
+                      ? "linear-gradient(180deg, #E0E0E0 0%, #FFFFFF 40%, #757575 50%, #BDBDBD 60%, #424242 100%)"
+                      : null;
 
                   const grad = shouldHighlight ? gradActive : gradInactive;
 
@@ -4393,7 +4410,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                   </div>
                 </div>
 
-                {/* Footer / Source Bar Label (e.g. READ MORE AT PANTAU.COM) */}
+                {/* Footer / Source Bar Label (e.g. READ MORE AT chatgpt.com) */}
                 <div className="pt-2 border-t border-zinc-800/80">
                   <div className="space-y-2">
                     <Checkbox label="Show footer / source label" checked={style.footerEnabled !== false} onChange={(v) => update({ footerEnabled: v })} disabled={!capabilities.footer} />
@@ -4403,7 +4420,7 @@ function HookEditor({ style, onChange, aspectRatio, thumbnailUrl, canvasBackgrou
                         type="text"
                         value={style.footerText || ""}
                         onChange={(e) => update({ footerText: e.target.value })}
-                        placeholder="Footer text (mis: READ MORE AT PANTAU.COM, SWIPE UP FOR MORE)"
+                        placeholder="Footer text (mis: READ MORE AT chatgpt.com, SWIPE UP FOR MORE)"
                         className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
                       />
                     )}
@@ -4709,8 +4726,8 @@ export function SubtitleEditor({
             <div className="flex items-center gap-3">
               <div className={cn(
                 "w-9 h-9 rounded-lg flex items-center justify-center border transition-colors",
-                style.enabled !== false 
-                  ? "bg-purple-500/10 border-purple-500/30 text-purple-400" 
+                style.enabled !== false
+                  ? "bg-purple-500/10 border-purple-500/30 text-purple-400"
                   : "bg-zinc-800/80 border-zinc-700 text-zinc-500"
               )}>
                 {style.enabled !== false ? <Check className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
