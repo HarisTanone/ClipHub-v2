@@ -570,22 +570,22 @@ export function NewJob() {
               />
               {brollEnabled && (
                 <div className="ml-1 space-y-2 rounded-lg border border-zinc-800/80 bg-zinc-950/50 p-2.5">
-                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Jenis B-roll aktif</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Pilihan Jenis B-Roll</p>
                   <Toggle
-                    label="Image overlay"
-                    description="Kartu foto objek + label di atas footage (OpenCV)."
+                    label="Floating Object Card"
+                    description="Kartu visual glassmorphism + live indicator dot & label di pojok atas (OpenCV)."
                     checked={brollImageOverlay}
                     onChange={setBrollImageOverlay}
                   />
                   <Toggle
-                    label="Behind person video"
-                    description="Stock di belakang subject (top overlay, person tetap)."
+                    label="Behind Person 16:9"
+                    description="Stock footage 16:9 sinematik di belakang subjek dengan efek bottom gradient fade lembut."
                     checked={brollBehindPerson}
                     onChange={setBrollBehindPerson}
                   />
                   <Toggle
-                    label="Video footage"
-                    description="Full-frame splice: ganti frame dengan stock video."
+                    label="Full-Frame Cutaway"
+                    description="Transisi video stock relevan 2–4 detik dengan audio asli tetap mengalir utuh (L-Cut)."
                     checked={brollVideoFootage}
                     onChange={setBrollVideoFootage}
                   />
