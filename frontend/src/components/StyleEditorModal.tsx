@@ -444,6 +444,11 @@ const SUBTITLE_FONT_SUGGESTIONS = ["Montserrat", "Poppins", "Inter", "Anton", "B
 const HIGHLIGHT_FONT_SUGGESTIONS = ["Anton", "Archivo Black", "Bebas Neue", "Bungee", "Barlow Condensed", "Black Ops One"];
 
 const HOOK_ANIMATIONS = [
+  "news_viralin_badge",
+  "news_portal_pantau",
+  "news_offset_box",
+  "brutalist_bracket",
+  "quote_strip_tape",
   "podcast_lower_third",
   "quote_card",
   "waveform_pulse",
@@ -461,6 +466,11 @@ const HOOK_ANIMATIONS = [
 ];
 
 const HOOK_ANIMATION_META: Record<string, OptionMeta> = {
+  news_viralin_badge: { label: "#VIRALIN Badge", mood: "Akurat News", accent: "#EAB308", preview: "#VIRAL", desc: "Kartu kuning dengan badge miring #VIRALIN dan tumpukan kertas putih." },
+  news_portal_pantau: { label: "News Portal Notch", mood: "Breaking News", accent: "#DC2626", preview: "NEWS", desc: "Kartu berita putih dengan kategori merah dan speech bubble notch di bawah." },
+  news_offset_box: { label: "Detik Red Box", mood: "Urgent Alert", accent: "#DC2626", preview: "ALERT", desc: "Kotak merah tebal dengan frame putih bertingkat di sudut kiri atas." },
+  brutalist_bracket: { label: "Brutalist Bracket", mood: "Stop Frame", accent: "#000000", preview: "[ STOP ]", desc: "Kartu putih dengan sudut siku L hitam industrial dan aksen seru merah !!" },
+  quote_strip_tape: { label: "Quote Tape Strips", mood: "Interview Quote", accent: "#0D9488", preview: "❝ TAPE", desc: "Pita teks baris per baris dengan badge icon kutipan toska." },
   podcast_lower_third: { label: "On-Air Lower", mood: "Podcast live", accent: "#16F2B3", preview: "LIVE", desc: "Lower-third khas podcast dengan badge on-air." },
   quote_card: { label: "Quote Card", mood: "Editorial", accent: "#FF4D2D", preview: "QUOTE", desc: "Kartu quote untuk satu kalimat yang memorable." },
   waveform_pulse: { label: "Waveform", mood: "Audio pulse", accent: "#14F1D9", preview: "WAVE", desc: "Bar audio bergerak supaya terasa seperti momen suara." },
@@ -515,6 +525,11 @@ const DEFAULT_HOOK_CAPABILITIES: HookCapabilities = {
 };
 
 const HOOK_CAPABILITIES: Record<string, HookCapabilities> = {
+  news_viralin_badge: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
+  news_portal_pantau: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
+  news_offset_box: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
+  brutalist_bracket: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
+  quote_strip_tape: { badge: true, decorative: true, gradient: false, panel: true, outline: false },
   podcast_lower_third: { badge: true, decorative: true, gradient: false, panel: false, outline: false },
   quote_card: { badge: false, decorative: true, gradient: false, panel: true, outline: false },
   waveform_pulse: { badge: true, decorative: true, gradient: true, panel: false, outline: false },
@@ -536,6 +551,11 @@ function hookCapabilities(animation: string): HookCapabilities {
 }
 
 const HOOK_PRESETS: { id: string; name: string; style: Partial<HookStyle> }[] = [
+  { id: "news_viralin_badge_preset", name: "#VIRALIN Akurat Badge", style: { animation: "news_viralin_badge", color: "#09090B", boxColor: "#EAB308", lineColor: "#1D4ED8", fontSize: 46, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, badgeEnabled: true, badgeText: "#VIRALIN", position: "center", positionY: 48, decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "news_portal_pantau_preset", name: "News Portal Speech Notch", style: { animation: "news_portal_pantau", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#DC2626", fontSize: 44, fontFamily: "Inter", fontWeight: "900", uppercase: true, badgeEnabled: true, badgeText: "INTERNASIONAL", position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "news_offset_box_preset", name: "Detik Red Breaking Box", style: { animation: "news_offset_box", color: "#FFFFFF", boxColor: "#DC2626", lineColor: "#FFFFFF", fontSize: 44, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "brutalist_bracket_preset", name: "Brutalist Bracket Frame", style: { animation: "brutalist_bracket", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#000000", fontSize: 46, fontFamily: "Montserrat", fontWeight: "900", uppercase: false, position: "center", positionY: 50, decorativeElements: true, motionIntensity: 1.0 } },
+  { id: "quote_strip_tape_preset", name: "Quote Tape Strips", style: { animation: "quote_strip_tape", color: "#09090B", boxColor: "#FFFFFF", lineColor: "#0D9488", fontSize: 42, fontFamily: "Montserrat", fontWeight: "900", uppercase: true, position: "center", positionY: 52, decorativeElements: true, motionIntensity: 1.0 } },
   { id: "podcast_lower_third_preset", name: "On-Air Lower", style: { animation: "podcast_lower_third", color: "#F8FAFC", bgColor: "#06111F", bgOpacity: 0.42, fontSize: 46, fontFamily: "Barlow Condensed", fontWeight: "900", uppercase: true, position: "bottom", positionY: 78, shadowEnabled: true, shadowBlur: 18, lineEnabled: false, lineColor: "#16F2B3", badgeEnabled: true, badgeText: "ON AIR", decorativeElements: true, motionIntensity: 1.0 } },
   { id: "quote_card_preset", name: "Quote Card", style: { animation: "quote_card", color: "#171717", bgColor: "#0B0F14", bgOpacity: 0.32, boxColor: "#F5EFE1", boxOpacity: 0.96, fontSize: 44, fontFamily: "Playfair Display", fontWeight: "800", lineHeight: 1.18, position: "center", positionY: 50, shadowEnabled: true, shadowBlur: 22, shadowY: 8, lineColor: "#FF4D2D", badgeEnabled: false, badgeText: "QUOTE", decorativeElements: true, motionIntensity: 0.7 } },
   { id: "waveform_pulse_preset", name: "Waveform Pulse", style: { animation: "waveform_pulse", color: "#EAFDF7", bgColor: "#020617", bgOpacity: 0.58, fontSize: 50, fontFamily: "Montserrat", fontWeight: "900", uppercase: true, glowEnabled: true, glowColor: "#14F1D9", glowSize: 28, gradientEnabled: true, gradientFrom: "#FFFFFF", gradientTo: "#14F1D9", lineColor: "#14F1D9", badgeEnabled: true, badgeText: "LIVE AUDIO", decorativeElements: true, motionIntensity: 1.2 } },
@@ -2061,6 +2081,126 @@ function HookPreviewRenderer({ style }: { style: HookStyle }) {
   const posTop = `${style.positionY}%`;
 
   switch (style.animation) {
+    case "news_viralin_badge": {
+      const cardBg = style.boxColor || "#EAB308";
+      const badgeBg = style.lineColor || "#1D4ED8";
+      const badgeTitle = style.badgeText || "#VIRALIN";
+      const badgeSub = (style as any).badgeSubText || "by Akurat.co";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            {/* White paper rotated card behind */}
+            <div style={{ position: "absolute", inset: -4, background: "#FFFFFF", transform: "rotate(-3deg)", borderRadius: 8, boxShadow: "0 14px 30px rgba(0,0,0,0.45)" }} />
+            {/* Main yellow card */}
+            <div style={{ position: "relative", background: cardBg, padding: "28px 20px 20px 20px", borderRadius: 8, boxShadow: "0 16px 36px rgba(0,0,0,0.5)" }}>
+              {/* Tilted Blue Badge */}
+              <div style={{ position: "absolute", top: -20, left: "50%", transform: "translateX(-50%) rotate(-3.5deg)", background: badgeBg, borderRadius: 6, padding: "4px 14px", boxShadow: "0 6px 16px rgba(0,0,0,0.4)", border: "1.5px solid rgba(255,255,255,0.2)", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <span style={{ color: "#FACC15", fontFamily: "'Montserrat', sans-serif", fontWeight: 900, fontSize: 13, fontStyle: "italic", lineHeight: 1.1, textTransform: "uppercase" }}>{badgeTitle}</span>
+                <span style={{ color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontWeight: 700, fontSize: 8, lineHeight: 1 }}>{badgeSub}</span>
+              </div>
+              <p style={{ ...baseTextStyle, color: style.color || "#09090B", fontSize: Math.max(fontSize * 0.78, 12), fontWeight: 900, textAlign: "center", lineHeight: 1.2, marginTop: 4 }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "news_portal_pantau": {
+      const cardBg = style.boxColor || "#FFFFFF";
+      const accentColor = style.lineColor || "#DC2626";
+      const categoryTag = style.badgeText || "INTERNASIONAL";
+      const footerLabel = (style as any).footerText || "READ MORE AT PANTAU.COM";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-4 right-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ position: "relative", background: cardBg, borderRadius: "10px 10px 0 0", padding: "18px 18px 14px 18px", boxShadow: "0 18px 40px rgba(0,0,0,0.5)", borderBottom: `4px solid ${accentColor}` }}>
+              <div style={{ display: "inline-block", background: accentColor, color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 3, marginBottom: 8 }}>{categoryTag}</div>
+              <p style={{ ...baseTextStyle, color: style.color || "#09090B", fontSize: Math.max(fontSize * 0.76, 12), fontWeight: 900, textAlign: "left", lineHeight: 1.18, textTransform: "uppercase" }}>{text}</p>
+              <div style={{ marginTop: 10, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)", color: "#71717A", fontSize: 8, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>{footerLabel}</div>
+              {/* Bottom speech notch */}
+              <div style={{ position: "absolute", bottom: -12, right: 28, width: 0, height: 0, borderLeft: "10px solid transparent", borderRight: "10px solid transparent", borderTop: `12px solid ${accentColor}` }} />
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "news_offset_box": {
+      const cardBg = style.boxColor || "#DC2626";
+      const offsetColor = style.lineColor || "#FFFFFF";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-5 right-5" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            {/* White offset border sticking out top-left */}
+            <div style={{ position: "absolute", top: -8, left: -8, width: "65%", height: "80%", borderTop: `3px solid ${offsetColor}`, borderLeft: `3px solid ${offsetColor}` }} />
+            {/* Main red box */}
+            <div style={{ position: "relative", background: cardBg, padding: "18px 18px", boxShadow: "0 16px 36px rgba(0,0,0,0.5)" }}>
+              <p style={{ ...baseTextStyle, color: style.color || "#FFFFFF", fontSize: Math.max(fontSize * 0.78, 12), fontWeight: 900, textAlign: "center", lineHeight: 1.22 }}>{text}</p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "brutalist_bracket": {
+      const cardBg = style.boxColor || "#FFFFFF";
+      const bracketColor = style.lineColor || "#000000";
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-5 right-5" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            {/* Left bracket */}
+            <div style={{ position: "absolute", top: -10, left: -10, bottom: -10, width: 24, borderTop: `5px solid ${bracketColor}`, borderLeft: `5px solid ${bracketColor}`, borderBottom: `5px solid ${bracketColor}` }} />
+            <div style={{ position: "relative", background: cardBg, padding: "18px 20px", boxShadow: "0 16px 36px rgba(0,0,0,0.5)" }}>
+              <p style={{ ...baseTextStyle, color: style.color || "#09090B", fontSize: Math.max(fontSize * 0.78, 12), fontWeight: 900, textAlign: "left", lineHeight: 1.2 }}>
+                {text.split(/(!!+|!\s*!)/g).map((part, idx) => {
+                  if (part.includes("!")) return <span key={idx} style={{ color: "#EF4444", fontWeight: 900 }}> {part}</span>;
+                  return <span key={idx}>{part}</span>;
+                })}
+              </p>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    case "quote_strip_tape": {
+      const quoteBg = style.lineColor || "#0D9488";
+      const tapeBg = style.boxColor || "#FFFFFF";
+      const words = text.split(/\s+/).filter(Boolean);
+      const lines: string[] = [];
+      let cur = "";
+      for (const w of words) {
+        if ((cur + " " + w).trim().split(" ").length > 3) {
+          lines.push(cur);
+          cur = w;
+        } else {
+          cur = cur ? `${cur} ${w}` : w;
+        }
+      }
+      if (cur) lines.push(cur);
+      return (
+        <>
+          <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
+          <div className="absolute left-5 right-5 flex flex-col items-start" style={{ top: posTop, transform: "translateY(-50%)" }}>
+            <div style={{ background: quoteBg, color: "#FFFFFF", borderRadius: 3, padding: "4px 8px", marginBottom: 6, display: "inline-flex" }}>
+              <span style={{ fontSize: 14, fontWeight: 900, lineHeight: 1 }}>❝</span>
+            </div>
+            <div className="flex flex-col items-start gap-1.5">
+              {lines.map((line, lIdx) => (
+                <span key={lIdx} style={{ background: tapeBg, color: style.color || "#09090B", padding: "4px 12px", fontFamily, fontSize: Math.max(fontSize * 0.72, 11), fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em", boxShadow: "0 6px 16px rgba(0,0,0,0.4)" }}>
+                  {line}
+                </span>
+              ))}
+            </div>
+          </div>
+        </>
+      );
+    }
+
     case "podcast_lower_third": {
       const accent = style.lineColor || "#16F2B3";
       return (

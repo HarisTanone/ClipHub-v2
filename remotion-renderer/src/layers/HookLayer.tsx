@@ -47,6 +47,8 @@ interface HookConfig {
   strokeColor?: string;
   badgeEnabled?: boolean;
   badgeText?: string;
+  badgeSubText?: string;
+  footerText?: string;
   decorativeElements?: boolean;
   motionIntensity?: number;
   duration?: number;
@@ -175,7 +177,28 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const isGlitch = animation === "glitch";
   const glitchActive = isGlitch && frame % 8 < 2;
   const glitchX = Math.sin(frame * 0.7) * 4;
-  const customRenderAnimations = new Set(["bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse", "breaking_tape", "mic_drop", "split_panel", "kinetic_stack", "glass_flash", "marker_swipe", "signal_scan", "comment_reply", "search_prompt", "countdown_list", "pov_stamp"]);
+  const customRenderAnimations = new Set([
+    "bold_slam",
+    "podcast_lower_third",
+    "quote_card",
+    "waveform_pulse",
+    "breaking_tape",
+    "mic_drop",
+    "split_panel",
+    "kinetic_stack",
+    "glass_flash",
+    "marker_swipe",
+    "signal_scan",
+    "comment_reply",
+    "search_prompt",
+    "countdown_list",
+    "pov_stamp",
+    "news_viralin_badge",
+    "news_portal_pantau",
+    "news_offset_box",
+    "brutalist_bracket",
+    "quote_strip_tape",
+  ]);
 
   return (
     <AbsoluteFill style={{ opacity }}>
@@ -797,6 +820,404 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
             <div style={{ position: "absolute", top: `${positionY}%`, left: "8%", right: "8%", transform: `translateY(-50%) rotate(${rotate}deg) scale(${0.88 + Math.min(1, entrance) * 0.12})` }}>
               <div style={{ display: "inline-block", marginBottom: 14, padding: "12px 24px", borderRadius: 12, background: accent, color: "#FFFFFF", fontFamily: "'Inter', sans-serif", fontSize: 30, fontWeight: 900, letterSpacing: 3 }}>{badgeText || "POV"}</div>
               <div style={{ padding: "34px 40px", borderRadius: 18, border: `5px solid ${accent}`, background: "rgba(18,7,12,.8)", color, fontFamily, fontSize, fontWeight, fontStyle: config.italic ? "italic" : "normal", lineHeight: config.lineHeight || 1.08, textAlign: "left", textShadow: shadows.join(", ") || "0 6px 22px rgba(0,0,0,.5)" }}>{renderedText}</div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* 1. news_viralin_badge: Yellow card with tilted #VIRALIN blue badge and layered paper sheet */}
+      {animation === "news_viralin_badge" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 12, stiffness: 170, mass: 0.75 } });
+        const y = interpolate(Math.min(1, entrance), [0, 1], [-120, 0]);
+        const scaleVal = interpolate(Math.min(1, entrance), [0, 1], [0.85, 1]);
+        const cardBg = config.boxColor || "#EAB308"; // Akurat yellow
+        const badgeBg = config.lineColor || "#1D4ED8"; // Royal blue
+        const textColor = config.color || "#09090B";
+        const badgeTitle = badgeText || "#VIRALIN";
+        const badgeSub = (config as any).badgeSubText || (config as any).footerText || "by Akurat.co";
+
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "6%",
+              right: "6%",
+              transform: `translateY(calc(-50% + ${y}px)) scale(${scaleVal})`,
+            }}>
+              {/* White paper background layer tilted underneath */}
+              <div style={{
+                position: "absolute",
+                inset: -6,
+                background: "#FFFFFF",
+                transform: "rotate(-3deg)",
+                borderRadius: 8,
+                boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
+                zIndex: 1,
+              }} />
+
+              {/* Main Yellow Card */}
+              <div style={{
+                position: "relative",
+                background: cardBg,
+                padding: "48px 42px 36px 42px",
+                borderRadius: 8,
+                boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
+                zIndex: 2,
+              }}>
+                {/* Tilted Blue Badge Header */}
+                <div style={{
+                  position: "absolute",
+                  top: -32,
+                  left: "50%",
+                  transform: "translateX(-50%) rotate(-3.5deg)",
+                  background: badgeBg,
+                  borderRadius: 6,
+                  padding: "10px 24px",
+                  boxShadow: "0 10px 25px rgba(0,0,0,0.4), inset 0 0 10px rgba(255,255,255,0.15)",
+                  border: "2px solid rgba(255,255,255,0.2)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 3,
+                }}>
+                  <div style={{
+                    color: "#FACC15",
+                    fontFamily: "'Montserrat', 'Barlow Condensed', sans-serif",
+                    fontWeight: 900,
+                    fontSize: 28,
+                    fontStyle: "italic",
+                    letterSpacing: "0.05em",
+                    lineHeight: 1,
+                    textTransform: "uppercase",
+                    textShadow: "0 2px 4px rgba(0,0,0,0.4)",
+                  }}>
+                    {badgeTitle}
+                  </div>
+                  {badgeSub && (
+                    <div style={{
+                      color: "#FFFFFF",
+                      fontFamily: "'Inter', sans-serif",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      letterSpacing: "0.02em",
+                      marginTop: 3,
+                      opacity: 0.95,
+                    }}>
+                      {badgeSub}
+                    </div>
+                  )}
+                </div>
+
+                {/* Main Headline Text */}
+                <div style={{
+                  color: textColor,
+                  fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
+                  fontSize: Math.min(fontSize, 46),
+                  fontWeight: 900,
+                  lineHeight: 1.22,
+                  textAlign: "center",
+                  textShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  marginTop: 10,
+                }}>
+                  {renderedText}
+                </div>
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* 2. news_portal_pantau: Clean white news card with red category pill and speech bubble notch */}
+      {animation === "news_portal_pantau" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 14, stiffness: 180, mass: 0.7 } });
+        const y = interpolate(Math.min(1, entrance), [0, 1], [-100, 0]);
+        const scaleVal = interpolate(Math.min(1, entrance), [0, 1], [0.9, 1]);
+        const cardBg = config.boxColor || "#FFFFFF";
+        const accentColor = config.lineColor || "#DC2626"; // Crimson Red
+        const categoryTag = badgeText || "INTERNASIONAL";
+        const footerLabel = (config as any).footerText || (config as any).badgeSubText || "READ MORE AT PANTAU.COM";
+
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "6%",
+              right: "6%",
+              transform: `translateY(calc(-50% + ${y}px)) scale(${scaleVal})`,
+            }}>
+              <div style={{
+                position: "relative",
+                background: cardBg,
+                borderRadius: "14px 14px 0 0",
+                padding: "36px 40px 30px 40px",
+                boxShadow: "0 30px 70px rgba(0,0,0,0.55)",
+                borderBottom: `6px solid ${accentColor}`,
+              }}>
+                {/* Category Pill Tag */}
+                <div style={{
+                  display: "inline-block",
+                  background: accentColor,
+                  color: "#FFFFFF",
+                  fontFamily: "'Inter', 'Montserrat', sans-serif",
+                  fontWeight: 900,
+                  fontSize: 18,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  padding: "6px 14px",
+                  borderRadius: 4,
+                  marginBottom: 16,
+                  boxShadow: `0 4px 12px ${accentColor}66`,
+                }}>
+                  {categoryTag}
+                </div>
+
+                {/* Main News Headline */}
+                <div style={{
+                  color: config.color || "#09090B",
+                  fontFamily: fontFamily || "'Inter', 'Montserrat', sans-serif",
+                  fontSize: Math.min(fontSize, 46),
+                  fontWeight: 900,
+                  lineHeight: 1.18,
+                  textAlign: "left",
+                  textTransform: "uppercase",
+                  letterSpacing: "-0.01em",
+                }}>
+                  {renderedText}
+                </div>
+
+                {/* Footer Brand Bar */}
+                <div style={{
+                  marginTop: 22,
+                  paddingTop: 14,
+                  borderTop: "1px solid rgba(0,0,0,0.08)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}>
+                  <div style={{
+                    color: "#52525B",
+                    fontFamily: "'Inter', sans-serif",
+                    fontWeight: 800,
+                    fontSize: 13,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                  }}>
+                    {footerLabel}
+                  </div>
+                </div>
+
+                {/* Bottom Speech Notch Pointer */}
+                <div style={{
+                  position: "absolute",
+                  bottom: -22,
+                  right: 48,
+                  width: 0,
+                  height: 0,
+                  borderLeft: "16px solid transparent",
+                  borderRight: "16px solid transparent",
+                  borderTop: `22px solid ${accentColor}`,
+                  filter: "drop-shadow(0 4px 6px rgba(0,0,0,0.3))",
+                }} />
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* 3. news_offset_box: Detik-detik red breaking box with white offset border frame */}
+      {animation === "news_offset_box" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 11, stiffness: 190, mass: 0.7 } });
+        const y = interpolate(Math.min(1, entrance), [0, 1], [-80, 0]);
+        const scaleVal = interpolate(Math.min(1, entrance), [0, 1], [0.92, 1]);
+        const cardBg = config.boxColor || "#DC2626"; // Crimson Red
+        const offsetColor = config.lineColor || "#FFFFFF";
+
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "8%",
+              right: "8%",
+              transform: `translateY(calc(-50% + ${y}px)) scale(${scaleVal})`,
+            }}>
+              {/* White offset rectangular frame sticking out behind top-left */}
+              <div style={{
+                position: "absolute",
+                top: -14,
+                left: -14,
+                width: "65%",
+                height: "80%",
+                borderTop: `5px solid ${offsetColor}`,
+                borderLeft: `5px solid ${offsetColor}`,
+                zIndex: 1,
+                boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+              }} />
+
+              {/* Main Red Box */}
+              <div style={{
+                position: "relative",
+                background: cardBg,
+                padding: "36px 40px",
+                boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
+                zIndex: 2,
+              }}>
+                <div style={{
+                  color: config.color || "#FFFFFF",
+                  fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
+                  fontSize: Math.min(fontSize, 46),
+                  fontWeight: 900,
+                  lineHeight: 1.24,
+                  textAlign: "center",
+                  textShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                }}>
+                  {renderedText}
+                </div>
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* 4. brutalist_bracket: White box with industrial thick black L-bracket and red exclamation marks */}
+      {animation === "brutalist_bracket" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 13, stiffness: 180, mass: 0.75 } });
+        const x = interpolate(Math.min(1, entrance), [0, 1], [-90, 0]);
+        const scaleVal = interpolate(Math.min(1, entrance), [0, 1], [0.92, 1]);
+        const cardBg = config.boxColor || "#FFFFFF";
+        const bracketColor = config.lineColor || "#000000";
+        const accentColor = "#EF4444";
+
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "8%",
+              right: "8%",
+              transform: `translateY(-50%) translateX(${x}px) scale(${scaleVal})`,
+            }}>
+              {/* Outer Thick Black L-Bracket */}
+              <div style={{
+                position: "absolute",
+                top: -18,
+                left: -18,
+                bottom: -18,
+                width: 48,
+                borderTop: `8px solid ${bracketColor}`,
+                borderLeft: `8px solid ${bracketColor}`,
+                borderBottom: `8px solid ${bracketColor}`,
+                zIndex: 1,
+              }} />
+
+              {/* Main White Card */}
+              <div style={{
+                position: "relative",
+                background: cardBg,
+                padding: "36px 42px",
+                boxShadow: "0 25px 60px rgba(0,0,0,0.55)",
+                zIndex: 2,
+              }}>
+                <div style={{
+                  color: config.color || "#09090B",
+                  fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
+                  fontSize: Math.min(fontSize, 48),
+                  fontWeight: 900,
+                  lineHeight: 1.2,
+                  textAlign: "left",
+                }}>
+                  {renderedText.split(/(!!+|!\s*!)/g).map((part, idx) => {
+                    if (part.includes("!")) {
+                      return <span key={idx} style={{ color: accentColor, fontWeight: 900 }}> {part}</span>;
+                    }
+                    return <span key={idx}>{part}</span>;
+                  })}
+                </div>
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* 5. quote_strip_tape: Multi-line white tape bars with teal quote icon badge */}
+      {animation === "quote_strip_tape" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } });
+        const x = interpolate(Math.min(1, entrance), [0, 1], [-100, 0]);
+        const quoteBg = config.lineColor || "#0D9488"; // Teal quote badge
+        const tapeBg = config.boxColor || "#FFFFFF";
+        const textColor = config.color || "#09090B";
+
+        const words = renderedText.split(/\s+/).filter(Boolean);
+        const lines: string[] = [];
+        let cur = "";
+        for (const w of words) {
+          if ((cur + " " + w).trim().split(" ").length > 3) {
+            lines.push(cur);
+            cur = w;
+          } else {
+            cur = cur ? `${cur} ${w}` : w;
+          }
+        }
+        if (cur) lines.push(cur);
+
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "absolute",
+              top: `${positionY}%`,
+              left: "8%",
+              right: "8%",
+              transform: `translateY(-50%) translateX(${x}px)`,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+            }}>
+              {/* Teal Quotation Mark Badge Box */}
+              <div style={{
+                background: quoteBg,
+                color: "#FFFFFF",
+                borderRadius: 4,
+                padding: "8px 14px",
+                marginBottom: 10,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: `0 8px 20px ${quoteBg}66`,
+              }}>
+                <span style={{ fontSize: 24, fontWeight: 900, lineHeight: 1, fontFamily: "serif" }}>❝</span>
+              </div>
+
+              {/* Individual Tape Strips per Line */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+                {lines.map((line, lIdx) => {
+                  const lineEntrance = interpolate(frame, [lIdx * 3, lIdx * 3 + 12], [0, 1], { extrapolateRight: "clamp", extrapolateLeft: "clamp" });
+                  return (
+                    <div
+                      key={lIdx}
+                      style={{
+                        background: tapeBg,
+                        color: textColor,
+                        padding: "8px 20px",
+                        fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
+                        fontSize: Math.min(fontSize, 42),
+                        fontWeight: 900,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                        lineHeight: 1.15,
+                        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+                        transform: `scale(${0.88 + lineEntrance * 0.12})`,
+                        opacity: lineEntrance,
+                        transformOrigin: "left center",
+                      }}
+                    >
+                      {line}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </AbsoluteFill>
         );
