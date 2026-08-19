@@ -668,20 +668,41 @@ def _anchor_xy(
     card_h: int,
     position: str,
     margin_ratio: float,
+    speaker_cx: float | None = None,
+    event_index: int = 0,
 ) -> tuple[int, int]:
     m = int(min(frame_w, frame_h) * float(margin_ratio))
-    pos = (position or "top_right").lower()
+    pos = (position or "auto").lower()
+
+    # Dynamic/Auto placement: avoid speaker face & alternate sides smartly
+    if pos in ("auto", "dynamic", "smart"):
+        if speaker_cx is not None:
+            # If speaker is on the right half (>0.52), place card safely on top/center left
+            if speaker_cx > 0.52:
+                pos = "top_left" if (event_index % 2 == 0) else "center_left"
+            # If speaker is on the left half (<0.48), place card on top/center right
+            elif speaker_cx < 0.48:
+                pos = "top_right" if (event_index % 2 == 0) else "center_right"
+            else:
+                # Centered speaker: alternate between top_right and top_left
+                pos = "top_right" if (event_index % 2 == 0) else "top_left"
+        else:
+            # Alternate top_right and top_left between mentions
+            pos = "top_right" if (event_index % 2 == 0) else "top_left"
+
     if pos == "top_left":
         return m, m
+    if pos == "top_center":
+        return max(m, (frame_w - card_w) // 2), m
     if pos == "bottom_left":
-        # Keep above standard subtitle bottom boundary (min 260px)
-        return m, max(m, frame_h - card_h - max(m, 260))
+        # Keep above standard subtitle bottom boundary (min 280px)
+        return m, max(m, frame_h - card_h - max(m, 280))
     if pos == "bottom_right":
-        return frame_w - card_w - m, max(m, frame_h - card_h - max(m, 260))
+        return frame_w - card_w - m, max(m, frame_h - card_h - max(m, 280))
     if pos == "center_left":
-        return m, max(m, (frame_h - card_h) // 2)
+        return m, max(m, (frame_h - card_h) // 3)
     if pos == "center_right":
-        return frame_w - card_w - m, max(m, (frame_h - card_h) // 2)
+        return frame_w - card_w - m, max(m, (frame_h - card_h) // 3)
     # top_right default (safe from subtitle collisions)
     return frame_w - card_w - m, m
 

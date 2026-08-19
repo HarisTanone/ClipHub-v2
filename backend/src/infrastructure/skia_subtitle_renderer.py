@@ -513,14 +513,14 @@ class SkiaSubtitleRenderer:
 
             elif preset_id == "neon_tube":
                 if is_active:
-                    # Hot pink multi-pass neon tube glow
-                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 0, 127, 80), stroke_width=8, stroke_fill=(255, 0, 127, 80))
-                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 0, 127, 180), stroke_width=4, stroke_fill=(255, 0, 127, 180))
-                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 255, 255, 255), stroke_width=2, stroke_fill=(255, 0, 127, 255))
+                    # Hot pink multi-pass bold neon tube glow
+                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 0, 127, 80), stroke_width=10, stroke_fill=(255, 0, 127, 80))
+                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 0, 127, 180), stroke_width=5, stroke_fill=(255, 0, 127, 180))
+                    draw.text((word_x, word_y), w_text, font=font, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(255, 0, 127, 255))
                 else:
-                    # Cyan hollow gas tube
-                    draw.text((word_x, word_y), w_text, font=font, fill=(0, 255, 255, 60), stroke_width=5, stroke_fill=(0, 255, 255, 60))
-                    draw.text((word_x, word_y), w_text, font=font, fill=(0, 0, 0, 0), stroke_width=2, stroke_fill=(0, 255, 255, 230))
+                    # Solid high-contrast cyan-white typography with dark outer shadow (never hollow!)
+                    draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 220), stroke_width=4, stroke_fill=(0, 0, 0, 220))
+                    draw.text((word_x, word_y), w_text, font=font, fill=(240, 253, 250, 255), stroke_width=3, stroke_fill=(6, 182, 212, 255))
 
             elif preset_id == "retro_chrome":
                 # Heavy 3D shadow + outline
@@ -533,36 +533,33 @@ class SkiaSubtitleRenderer:
 
             elif preset_id == "clean_editorial" and is_active:
                 # Active word with cyan underline bar
+                draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 180))
                 draw.text((word_x, word_y), w_text, font=font, fill=(56, 189, 248, 255))
-                draw.line([word_x, word_y + item["height"] + 4, word_x + w_w, word_y + item["height"] + 4], fill=(56, 189, 248, 255), width=3)
+                draw.line([word_x, word_y + item["height"] + 4, word_x + w_w, word_y + item["height"] + 4], fill=(56, 189, 248, 255), width=4)
 
             elif is_active:
-                # Glowing active word highlight
+                # Glowing active word highlight with solid dark drop shadow
+                draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 240))
                 hl_color = highlight_color
                 if style.get("glow_enabled", True):
                     glow_color_str = style.get("glow_color")
                     if glow_color_str:
                         glow_c = self._parse_rgba(glow_color_str, 0.65)
                     else:
-                        glow_c = (hl_color[0], hl_color[1], hl_color[2], 140)
-                    glow_rad = max(4, int(style.get("glow_radius", 6)))
+                        glow_c = (hl_color[0], hl_color[1], hl_color[2], 160)
+                    glow_rad = max(4, int(style.get("glow_radius", 8)))
                     draw.text((word_x, word_y), w_text, font=font, fill=glow_c, stroke_width=glow_rad, stroke_fill=glow_c)
 
-                if style.get("stroke_enabled", False) and style.get("stroke_width", 0) > 0:
-                    strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
-                    draw.text((word_x, word_y), w_text, font=font, fill=hl_color, stroke_width=style["stroke_width"], stroke_fill=strk_c)
-                else:
-                    draw.text((word_x, word_y), w_text, font=font, fill=hl_color)
+                strk_width = max(2, int(style.get("stroke_width", 3))) if style.get("stroke_enabled", True) else 3
+                strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
+                draw.text((word_x, word_y), w_text, font=font, fill=hl_color, stroke_width=strk_width, stroke_fill=strk_c)
 
             else:
-                # Normal inactive word
-                if style.get("shadow_enabled", False):
-                    draw.text((word_x + 1, word_y + 2), w_text, font=font, fill=(0, 0, 0, 180))
-                if style.get("stroke_enabled", False) and style.get("stroke_width", 0) > 0:
-                    strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
-                    draw.text((word_x, word_y), w_text, font=font, fill=normal_color, stroke_width=style["stroke_width"], stroke_fill=strk_c)
-                else:
-                    draw.text((word_x, word_y), w_text, font=font, fill=normal_color)
+                # Normal inactive word - always ensure strong visibility and bold contrast
+                draw.text((word_x + 2, word_y + 3), w_text, font=font, fill=(0, 0, 0, 220))
+                strk_width = max(2, int(style.get("stroke_width", 3))) if style.get("stroke_enabled", True) else 2
+                strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
+                draw.text((word_x, word_y), w_text, font=font, fill=normal_color, stroke_width=strk_width, stroke_fill=strk_c)
 
             cur_x += w_w + spacing
 
@@ -607,24 +604,39 @@ class SkiaSubtitleRenderer:
     def _load_pil_font(self, font_family: str, font_size: int) -> ImageFont.FreeTypeFont:
         """Load requested Google Font with seamless fallback."""
         clean_name = font_family.replace(" ", "")
+        search_dirs = [
+            self._font_dir,
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts")),
+            os.path.abspath(os.path.join(os.getcwd(), "backend", "assets", "fonts")),
+            os.path.abspath(os.path.join(os.getcwd(), "assets", "fonts")),
+        ]
         candidates = [
             f"{font_family}-Bold.ttf",
-            f"{font_family}-Regular.ttf",
-            f"{font_family}-Variable.ttf",
+            f"{font_family}-Black.ttf",
+            f"{font_family}-ExtraBold.ttf",
             f"{clean_name}-Bold.ttf",
             f"{clean_name}-Regular.ttf",
             f"{clean_name}-Variable.ttf",
-            "Inter-Variable.ttf",
+            f"{font_family}-Regular.ttf",
+            f"{font_family}-Variable.ttf",
+            "Anton-Regular.ttf",
+            "ArchivoBlack-Regular.ttf",
+            "BebasNeue-Regular.ttf",
+            "Montserrat-Variable.ttf",
             "Poppins-Bold.ttf",
+            "Inter-Variable.ttf",
             "Roboto-Bold.ttf",
         ]
-        for name in candidates:
-            path = os.path.join(self._font_dir, name)
-            if os.path.exists(path):
-                try:
-                    return ImageFont.truetype(path, font_size)
-                except Exception:
-                    pass
+        for fdir in search_dirs:
+            if not fdir or not os.path.exists(fdir):
+                continue
+            for name in candidates:
+                path = os.path.join(fdir, name)
+                if os.path.exists(path):
+                    try:
+                        return ImageFont.truetype(path, font_size)
+                    except Exception:
+                        pass
         return ImageFont.load_default()
 
     def _probe_duration(self, video_path: str) -> float:

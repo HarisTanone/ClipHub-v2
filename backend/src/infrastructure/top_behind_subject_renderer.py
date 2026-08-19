@@ -1197,7 +1197,13 @@ def pick_top_overlay_suggestions(
     then remaining video assets not used for full-frame.
     Phrase-aware: when words given, snap at/duration to speech bounds.
     """
-    limit = max_per_clip if max_per_clip is not None else settings.TOP_OVERLAY_MAX_PER_CLIP
+    # Dynamic limit: let AI suggestions populate naturally based on clip length (not rigidly choked to 2)
+    if max_per_clip is not None:
+        limit = max(1, int(max_per_clip))
+    elif clip_duration > 0:
+        limit = max(4, int(clip_duration / 10.0))
+    else:
+        limit = int(getattr(settings, "TOP_OVERLAY_MAX_PER_CLIP", 6))
     blocked = list(blocked_ranges or [])
     scored = []
     for s in suggestions:

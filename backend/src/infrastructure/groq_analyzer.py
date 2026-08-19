@@ -630,14 +630,23 @@ OUTPUT RAW JSON only:
         duration: float,
         limit: int = 4,
     ) -> list[dict]:
-        """Offline: proper/long/highlight only — length gates, NO stop/domain lists."""
+        """Offline: concrete object/brand tokens only — strictly ignore abstract adjectives/verbs/conjunctions."""
+        abstract_stop_words = {
+            "nyaman", "mikir", "karena", "makanya", "tanpa", "seperti", "dengan", "selalu",
+            "kadang", "bisa", "harus", "punya", "orang", "mereka", "kita", "kamu", "saya",
+            "sudah", "masih", "sangat", "banget", "coba", "tapi", "akan", "dalam", "untuk",
+            "pada", "tentang", "mungkin", "bukan", "adalah", "menurut", "sebenarnya", "semua",
+            "sekarang", "kemarin", "besok", "setiap", "pernah", "waktu", "ketika", "kenapa",
+            "bagaimana", "dimana", "apakah", "begitu", "begini", "sendiri", "lainnya", "pokoknya",
+            "terus", "lagi", "kemudian", "akhirnya", "padahal", "walaupun", "meskipun",
+        }
         out: list[dict] = []
         seen: set[str] = set()
         for w in words or []:
             text = str(w.get("word") or "").strip().strip(".,!?;:\"'")
             clean = re.sub(r"[^\w\-]+", "", text, flags=re.UNICODE)
             low = clean.lower()
-            if len(clean) < 4 or low in seen:
+            if len(clean) < 4 or low in seen or low in abstract_stop_words:
                 continue
             try:
                 s = float(w.get("start", 0) or 0)

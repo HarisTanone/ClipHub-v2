@@ -294,38 +294,58 @@ class SkiaHookRenderer:
         return (r, g, b, a)
 
     def _resolve_font(self, font_family: str, font_weight: str = "Bold", size: int = 50) -> ImageFont.FreeTypeFont:
-        """Find best matching TrueType font file in font_dir."""
+        """Find best matching TrueType font file in font directories."""
         family_clean = font_family.replace(" ", "").replace("-", "").lower()
+        search_dirs = [
+            self._font_dir,
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts")),
+            os.path.abspath(os.path.join(os.getcwd(), "backend", "assets", "fonts")),
+            os.path.abspath(os.path.join(os.getcwd(), "assets", "fonts")),
+        ]
         candidates = []
 
-        if os.path.exists(self._font_dir):
-            for file_name in os.listdir(self._font_dir):
+        for fdir in search_dirs:
+            if not fdir or not os.path.exists(fdir):
+                continue
+            for file_name in os.listdir(fdir):
                 if not file_name.lower().endswith((".ttf", ".otf")):
                     continue
                 clean_name = file_name.replace(" ", "").replace("-", "").lower()
-                full_path = os.path.join(self._font_dir, file_name)
+                full_path = os.path.join(fdir, file_name)
 
                 # Direct match
                 if family_clean in clean_name:
                     if font_weight.lower() in clean_name:
-                        return ImageFont.truetype(full_path, size=size)
+                        try:
+                            return ImageFont.truetype(full_path, size=size)
+                        except Exception:
+                            pass
                     candidates.append(full_path)
 
         if candidates:
-            return ImageFont.truetype(candidates[0], size=size)
+            try:
+                return ImageFont.truetype(candidates[0], size=size)
+            except Exception:
+                pass
 
         # Fallback fonts in priority order
         fallbacks = [
             "Anton-Regular.ttf",
             "Poppins-Bold.ttf",
-            "Inter-Variable.ttf",
             "Montserrat-Variable.ttf",
+            "Inter-Variable.ttf",
             "Roboto-Bold.ttf",
         ]
-        for fb in fallbacks:
-            fb_path = os.path.join(self._font_dir, fb)
-            if os.path.exists(fb_path):
-                return ImageFont.truetype(fb_path, size=size)
+        for fdir in search_dirs:
+            if not fdir or not os.path.exists(fdir):
+                continue
+            for fb in fallbacks:
+                fb_path = os.path.join(fdir, fb)
+                if os.path.exists(fb_path):
+                    try:
+                        return ImageFont.truetype(fb_path, size=size)
+                    except Exception:
+                        pass
 
         # Standard PIL default
         try:
