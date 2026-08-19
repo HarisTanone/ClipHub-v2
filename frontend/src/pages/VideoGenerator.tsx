@@ -1088,7 +1088,7 @@ function SceneFootageStudioModal({
         className="flex flex-col h-[92vh] w-full max-w-5xl rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3.5 bg-zinc-900/60 shrink-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800 p-3 sm:px-5 sm:py-3.5 bg-zinc-900/60 shrink-0 gap-2.5">
           <div className="flex items-center gap-3 min-w-0">
             <div className="h-8 w-8 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-300 shrink-0">
               <Layers className="h-4 w-4" />
@@ -1103,7 +1103,7 @@ function SceneFootageStudioModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 flex-wrap shrink-0 justify-between sm:justify-end w-full sm:w-auto">
             <span className="text-xs text-zinc-400 bg-zinc-800/80 px-2.5 py-1 rounded-md tabular-nums">
               {selectedCount} / {scenes.length} selected
             </span>
@@ -1116,7 +1116,7 @@ function SceneFootageStudioModal({
             <button
               type="button"
               onClick={onClose}
-              className="p-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition"
+              className="p-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition ml-auto sm:ml-0"
             >
               <X className="h-5 w-5" />
             </button>
@@ -1225,7 +1225,7 @@ function SceneFootageStudioModal({
                           onKeyDown={(e) => {
                             if (e.key === "Enter") handleSearchCustomForScene(scene.id);
                           }}
-                          className="rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[11px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-700 w-52 sm:w-64"
+                          className="rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[11px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-700 w-full sm:w-64 flex-1 sm:flex-initial"
                         />
                         <Button
                           size="xs"
@@ -1915,20 +1915,20 @@ export function VideoGeneratorPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6 space-y-6">
-      <div className="mx-auto max-w-7xl space-y-6 pb-6">
+    <div className="h-full overflow-y-auto p-2 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
+      <div className="mx-auto max-w-7xl space-y-4 sm:space-y-6 pb-6">
         {/* Banner Header */}
-        <section className="relative overflow-hidden rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-950/40 via-zinc-950 to-zinc-950 p-5 sm:p-6">
+        <section className="relative overflow-hidden rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-950/40 via-zinc-950 to-zinc-950 p-4 sm:p-6">
           <div className="absolute -right-20 -top-24 h-56 w-56 rounded-full bg-fuchsia-500/15 blur-3xl" />
-          <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="relative flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300 border border-violet-500/30 shadow-inner">
+              <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300 border border-violet-500/30 shadow-inner">
                 <Sparkles className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-violet-300">AI Video Production Studio</p>
-                <h1 className="mt-1 text-xl font-semibold tracking-tight text-zinc-50">Video Generator</h1>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">
+                <h1 className="mt-1 text-lg sm:text-xl font-semibold tracking-tight text-zinc-50">Video Generator</h1>
+                <p className="mt-1 max-w-2xl text-xs sm:text-sm leading-5 sm:leading-6 text-zinc-400">
                   Generate full vertical 9:16 short-form videos with custom opening hooks, karaoke captions (1-6 words), multi-source footage selection, and voice synthesis.
                 </p>
               </div>
@@ -1941,7 +1941,7 @@ export function VideoGeneratorPage() {
 
         {/* Creation Form Studio */}
         <form onSubmit={handleQuickSubmit}>
-          <Card className="p-4 sm:p-6 space-y-6">
+          <Card className="p-3.5 sm:p-6 space-y-4 sm:space-y-6">
             {/* Form Top Bar: Title & Preset Selector */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/80 pb-4">
               <div className="flex items-center gap-2">
@@ -1950,13 +1950,13 @@ export function VideoGeneratorPage() {
               </div>
 
               {/* Preset Selector */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                 <Bookmark className="h-3.5 w-3.5 text-zinc-400" />
                 <span className="text-xs text-zinc-400 font-medium">Style Preset:</span>
                 <select
                   value={selectedPresetId}
                   onChange={(e) => handleSelectPreset(e.target.value)}
-                  className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-2.5 py-1.5 text-xs text-zinc-200 outline-none transition focus:border-violet-500/60"
+                  className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-2.5 py-1.5 text-xs text-zinc-200 outline-none transition focus:border-violet-500/60 flex-1 sm:flex-initial"
                 >
                   <option value="">Custom Styles</option>
                   {userPresets.map((p) => (
@@ -1978,7 +1978,7 @@ export function VideoGeneratorPage() {
             </div>
 
             {/* Studio Layout: Left Controls vs Right Visual Suite */}
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(340px,1fr)]">
+            <div className="grid gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(340px,1fr)]">
               {/* Left Column: Narrative, Audio, Format & Spec */}
               <div className="space-y-4">
                 {/* 1. Topic & Narrative Card */}
@@ -2457,7 +2457,7 @@ export function VideoGeneratorPage() {
             </Card>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
                 {jobs.map((job) => (
                   <VideoCard
                     key={job.job_id}

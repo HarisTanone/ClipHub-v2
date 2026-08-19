@@ -303,27 +303,27 @@ export function ScheduleModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-2.5 sm:p-4 animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg bg-zinc-900 border border-zinc-800/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-lg bg-zinc-900 border border-zinc-800/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh] sm:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/80 bg-zinc-900/50">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b border-zinc-800/80 bg-zinc-900/50">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
               <Share2 className="h-4 w-4" />
             </div>
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                Post to Social Media
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5 flex-wrap">
+                <span>Post to Social Media</span>
                 <span className="text-[11px] font-normal text-zinc-400">
                   {itemLabel || (clipRank ? `(Clip #${clipRank})` : `(AI Generated Video)`)}
                 </span>
               </h2>
-              <p className="text-[11px] text-zinc-500">
+              <p className="text-[11px] text-zinc-500 truncate">
                 Pilih satu atau beberapa akun untuk publikasi video
               </p>
             </div>
@@ -331,14 +331,14 @@ export function ScheduleModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors shrink-0 ml-2"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
+        <div className="px-4 py-3 sm:px-6 sm:py-4 space-y-3.5 sm:space-y-4 overflow-y-auto flex-1 custom-scrollbar">
           {/* Status Warnings */}
           {status && !status.repliz_configured && (
             <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300">
@@ -626,7 +626,7 @@ export function ScheduleModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-3.5 border-t border-zinc-800/80 bg-zinc-900/50">
+        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-3.5 border-t border-zinc-800/80 bg-zinc-900/50 flex-wrap gap-2">
           <div className="text-xs text-zinc-400">
             {selectedAccountIds.length > 0 ? (
               <span>

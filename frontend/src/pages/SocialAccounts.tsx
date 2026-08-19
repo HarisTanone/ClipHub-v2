@@ -802,7 +802,7 @@ export function SocialAccounts() {
   }, [accounts, statusFilter, searchQuery]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col space-y-3 p-4 sm:p-5 overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col space-y-3 p-2 sm:p-4 lg:p-5 overflow-y-auto">
       {/* Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-800/80 pb-3">
         <div className="flex items-center gap-2.5">
@@ -847,7 +847,7 @@ export function SocialAccounts() {
 
       {/* Stats row */}
       {count && (
-        <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
           <button
             type="button"
             onClick={() => setSelectedPlatform("all")}

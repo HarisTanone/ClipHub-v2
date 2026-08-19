@@ -114,6 +114,7 @@ export function Dashboard() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <ModelStatusBadge />
               <HealthPill status={health?.status} mode={health?.mode} />
               <Button variant="ghost" size="xs" onClick={loadData} icon={<RefreshCw className="h-3 w-3" />}>Refresh</Button>
               <Link to="/jobs/new"><Button size="sm" icon={<PlusCircle className="h-3.5 w-3.5" />}>New Job</Button></Link>
@@ -154,50 +155,53 @@ export function Dashboard() {
         </Card>
       </div>
 
-      {/* Model Status Badge - Small badge in top right corner */}
-      <div className="absolute top-4 right-4 z-10">
-        <ModelStatusBadge />
-      </div>
-
       {/* Toolbar */}
       <Card className="p-3 shrink-0">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3">
           {/* Search */}
-          <div className="relative flex-1 min-w-0 w-full sm:min-w-[200px]">
+          <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search title, URL, or job ID..."
-              className="w-full bg-zinc-950/70 border border-zinc-800 rounded-lg pl-9 pr-3 py-2.5 sm:py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
+              className="w-full bg-zinc-950/70 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
             />
           </div>
 
-          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as "all" | "youtube" | "upload")} className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 sm:py-2 text-[10px] text-zinc-300 outline-none w-full sm:w-auto">
-            <option value="all">All sources</option><option value="youtube">YouTube</option><option value="upload">Upload</option>
-          </select>
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as "all" | "youtube" | "upload")}
+              className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-[10px] text-zinc-300 outline-none flex-1 sm:flex-initial"
+            >
+              <option value="all">All sources</option>
+              <option value="youtube">YouTube</option>
+              <option value="upload">Upload</option>
+            </select>
 
-          {/* Status filter */}
-          <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 p-1 w-full sm:w-auto overflow-x-auto">
-            <SlidersHorizontal className="ml-1 h-3.5 w-3.5 text-zinc-600 shrink-0" />
-            {["all", "completed", "failed", "processing"].map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setStatusFilter(s === "processing" ? "processing" : s)}
-                className={cn(
-                  "px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors capitalize whitespace-nowrap",
-                  statusFilter === s ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300"
-                )}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+            {/* Status filter */}
+            <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 p-1 overflow-x-auto no-scrollbar max-w-full">
+              <SlidersHorizontal className="ml-1 h-3.5 w-3.5 text-zinc-600 shrink-0" />
+              {["all", "completed", "failed", "processing"].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStatusFilter(s === "processing" ? "processing" : s)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors capitalize whitespace-nowrap",
+                    statusFilter === s ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300"
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
 
-          <div className="ml-auto text-[10px] text-zinc-500">
-            {filtered.length} visible / {jobList.length} total
+            <div className="text-[10px] text-zinc-500 whitespace-nowrap hidden sm:block pl-1">
+              {filtered.length}/{jobList.length}
+            </div>
           </div>
         </div>
       </Card>

@@ -289,24 +289,24 @@ export function ClipViewer() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between shrink-0 mb-3 gap-2">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between shrink-0 mb-3 gap-2">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <Link to={`/jobs/${jobId}`} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors shrink-0">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-base font-semibold text-zinc-100">Clip #{clipRank}</h1>
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <h1 className="text-sm sm:text-base font-semibold text-zinc-100">Clip #{clipRank}</h1>
               {clip.score && <Badge variant="success" size="sm">Score: {clip.score}</Badge>}
               <Badge variant="default" size="sm">{formatDuration(clip.duration)}</Badge>
               {clip.virality?.score != null || clip.virality?.total != null ? (
                 <Badge variant="default" size="sm">viral {Math.round(Number(clip.virality.score ?? clip.virality.total))}</Badge>
               ) : null}
             </div>
-            {clip.hook && <p className="text-[11px] text-zinc-500 truncate max-w-[min(70vw,400px)]">{clip.hook}</p>}
+            {clip.hook && <p className="text-[11px] text-zinc-500 truncate max-w-[min(85vw,400px)]">{clip.hook}</p>}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
           <Button variant="primary" size="sm" onClick={() => setStyleModalOpen(true)} icon={<Wand2 className="h-3.5 w-3.5" />}>
             <span className="hidden sm:inline">Restyle</span>
             <span className="sm:hidden">Style</span>
@@ -373,10 +373,11 @@ export function ClipViewer() {
                         </div>
                         <div className="flex justify-end pr-1">
                           <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-red-500/40 bg-red-500/10 p-2 text-[9px] text-red-200 backdrop-blur-[2px]">
-                            <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
-                            <MessageSquare className="w-3.5 h-3.5 text-zinc-300" />
-                            <Share2 className="w-3.5 h-3.5 text-zinc-300" />
-                            <Music className="w-3.5 h-3.5 text-zinc-300" />
+                            <div className="h-6 w-6 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center text-[8px]">Avatar</div>
+                            <Heart className="h-3.5 w-3.5" />
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            <Share2 className="h-3.5 w-3.5" />
+                            <Music className="h-3.5 w-3.5" />
                           </div>
                         </div>
                         <div className="rounded-md border border-dashed border-red-500/40 bg-red-500/10 p-2 text-center text-[10px] text-red-200 backdrop-blur-[2px]">
@@ -425,33 +426,38 @@ export function ClipViewer() {
           </div>
 
           {/* Controls */}
-          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-            <ToggleBtn label={showRaw ? "RAW" : "FINAL"} active={showRaw} onClick={() => setShowRaw(!showRaw)} color="amber" />
-            <ToggleBtn label="Preview" active={previewMode} onClick={() => setPreviewMode(!previewMode)} icon={<Eye className="h-3 w-3" />} />
-            <ToggleBtn label="Hook" active={showHook} onClick={() => setShowHook(!showHook)} icon={<Type className="h-3 w-3" />} />
-            <ToggleBtn label="Sub" active={showSubtitles} onClick={() => setShowSubtitles(!showSubtitles)} icon={<Layers className="h-3 w-3" />} />
-            <ToggleBtn label="Safe Zone" active={showSafeZone} onClick={() => setShowSafeZone(!showSafeZone)} icon={<Shield className="h-3 w-3" />} />
-            <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[10px]">
-              {[0.75, 1, 1.25, 1.5, 2].map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => handleSpeedChange(s)}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors",
-                    playbackSpeed === s ? "bg-zinc-700 font-bold text-white" : "text-zinc-400 hover:text-zinc-200"
-                  )}
-                >
-                  {s}x
-                </button>
-              ))}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0">
+            {/* Toggles & Options */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <ToggleBtn label={showRaw ? "RAW" : "FINAL"} active={showRaw} onClick={() => setShowRaw(!showRaw)} color="amber" />
+              <ToggleBtn label="Preview" active={previewMode} onClick={() => setPreviewMode(!previewMode)} icon={<Eye className="h-3 w-3" />} />
+              <ToggleBtn label="Hook" active={showHook} onClick={() => setShowHook(!showHook)} icon={<Type className="h-3 w-3" />} />
+              <ToggleBtn label="Sub" active={showSubtitles} onClick={() => setShowSubtitles(!showSubtitles)} icon={<Layers className="h-3 w-3" />} />
+              <ToggleBtn label="Safe Zone" active={showSafeZone} onClick={() => setShowSafeZone(!showSafeZone)} icon={<Shield className="h-3 w-3" />} />
+              <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[10px]">
+                {[0.75, 1, 1.25, 1.5, 2].map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => handleSpeedChange(s)}
+                    className={cn(
+                      "rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors",
+                      playbackSpeed === s ? "bg-zinc-700 font-bold text-white" : "text-zinc-400 hover:text-zinc-200"
+                    )}
+                  >
+                    {s}x
+                  </button>
+                ))}
+              </div>
+              <QualitySelect
+                value={previewQuality}
+                onChange={handlePreviewQualityChange}
+                disabled={showRaw || !finalDownloadUrl}
+              />
             </div>
-            <QualitySelect
-              value={previewQuality}
-              onChange={handlePreviewQualityChange}
-              disabled={showRaw || !finalDownloadUrl}
-            />
-            <div className="ml-auto flex gap-1.5">
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-1.5 flex-wrap justify-end sm:ml-auto">
               {rawUrl && <a href={rawUrl} download><Button variant="outline" size="xs" icon={<Download className="h-3 w-3" />}>Raw</Button></a>}
               {finalDownloadUrl && <a href={jobs.getClipFinalUrl(jobId!, clipRank, previewQuality)} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final {previewQuality === "original" ? "" : `${previewQuality}p`}</Button></a>}
               {finalDownloadUrl && (
