@@ -357,8 +357,7 @@ class BRollInjector(IBRollInjector):
     ) -> str:
         """Build FFmpeg filter for video asset overlay with dynamic Ken Burns motion.
 
-        Scales video to max 720px width (66% of 1080), applies Ken Burns micro-zoom (1.00x -> 1.07x),
-        smooth alpha fade in/out, and enables between timestamps.
+        Supports full center framing and side_broll (floating upper PiP placement).
         """
         at_time = suggestion.at_time
         duration = max(0.5, suggestion.duration)
@@ -368,9 +367,14 @@ class BRollInjector(IBRollInjector):
         base = base_label.strip("[]")
         scaled_label = f"s{input_idx}"
 
+        placement = str(getattr(suggestion, "placement", "") or getattr(suggestion, "layout_mode", "")).lower()
+        is_side_broll = placement in ("side_broll", "side", "pip")
+
         # Ken Burns slow dynamic zoom: 1.00x -> 1.07x over duration
         zoom_expr = f"min(1.08,1.0+0.07*(t-{at_time:.3f})/{duration:.3f})"
-        scale_w = f"trunc(1080*{zoom_expr}/2)*2"
+        base_target_w = 960 if is_side_broll else 1080
+        scale_w = f"trunc({base_target_w}*{zoom_expr}/2)*2"
+        pos_y = "H*0.12" if is_side_broll else "(H-h)/2"
 
         filter_str = (
             f"[{input_idx}:v]trim=duration={duration:.3f},"
@@ -379,7 +383,7 @@ class BRollInjector(IBRollInjector):
             f"fade=t=in:st={at_time:.3f}:d={fade_dur:.3f}:alpha=1,"
             f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur:.3f}:alpha=1"
             f"[{scaled_label}];"
-            f"[{base}][{scaled_label}]overlay=(W-w)/2:(H-h)/2"
+            f"[{base}][{scaled_label}]overlay=(W-w)/2:{pos_y}"
             f":eof_action=pass:repeatlast=0"
             f":enable='between(t,{at_time:.3f},{end_time:.3f})'"
             f"[{out_label}]"
@@ -402,8 +406,13 @@ class BRollInjector(IBRollInjector):
         base = base_label.strip("[]")
         scaled_label = f"img{input_idx}"
 
+        placement = str(getattr(suggestion, "placement", "") or getattr(suggestion, "layout_mode", "")).lower()
+        is_side_broll = placement in ("side_broll", "side", "pip")
+
         zoom_expr = f"min(1.08,1.0+0.06*(t-{at_time:.3f})/{duration:.3f})"
-        scale_w = f"trunc(960*{zoom_expr}/2)*2"
+        base_target_w = 900 if is_side_broll else 960
+        scale_w = f"trunc({base_target_w}*{zoom_expr}/2)*2"
+        pos_y = "H*0.12" if is_side_broll else "(H-h)/2"
 
         filter_str = (
             f"[{input_idx}:v]loop=loop=-1:size=1:start=0,"
@@ -412,7 +421,7 @@ class BRollInjector(IBRollInjector):
             f"fade=t=in:st={at_time:.3f}:d={fade_dur:.3f}:alpha=1,"
             f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur:.3f}:alpha=1"
             f"[{scaled_label}];"
-            f"[{base}][{scaled_label}]overlay=(W-w)/2:(H-h)/2"
+            f"[{base}][{scaled_label}]overlay=(W-w)/2:{pos_y}"
             f":eof_action=pass:repeatlast=0"
             f":enable='between(t,{at_time:.3f},{end_time:.3f})'"
             f"[{out_label}]"

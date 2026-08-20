@@ -32,8 +32,11 @@ class FootageProcessor:
         output_dir: str,
         width: int = 1080,
         height: int = 1920,
+        crop_x: Optional[int] = None,
+        crop_y: Optional[int] = None,
+        layout_mode: Optional[str] = None,
     ) -> Optional[str]:
-        """Re-encode and trim footage to target format.
+        """Re-encode and trim footage to target format using AI-aware crop or PiP layout.
 
         Args:
             raw_path: Path to raw downloaded footage.
@@ -43,6 +46,9 @@ class FootageProcessor:
             output_dir: Directory to save processed footage.
             width: Output width (from resolution_for_aspect).
             height: Output height (from resolution_for_aspect).
+            crop_x: Optional AI-determined horizontal crop coordinate.
+            crop_y: Optional AI-determined vertical crop coordinate.
+            layout_mode: Optional placement mode ('behind_person', 'side_broll', 'full_broll').
 
         Returns:
             Path to processed footage file, or None on failure.
@@ -58,11 +64,32 @@ class FootageProcessor:
         output_path = os.path.join(output_dir, output_name)
         os.makedirs(output_dir, exist_ok=True)
 
-        vf_filter = (
-            f"scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h},"
-            "setsar=1"
-        )
+        if layout_mode == "side_broll":
+            # Side B-roll: Preserve 16:9 aspect inside 9:16 frame as floating PiP card
+            card_w = int(w * 0.90) // 2 * 2
+            card_h = int(card_w * 9 / 16) // 2 * 2
+            pad_top = int(h * 0.12)
+            vf_filter = (
+                f"scale={card_w}:{card_h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{h}:(ow-iw)/2:{pad_top}:color=black@0,"
+                "setsar=1"
+            )
+        elif crop_x is not None:
+            # AI-Aware smart crop centered on focal subject
+            cx = max(0, int(crop_x))
+            cy = max(0, int(crop_y or 0))
+            vf_filter = (
+                f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{h}:{cx}:{cy},"
+                "setsar=1"
+            )
+        else:
+            # Standard center crop fallback
+            vf_filter = (
+                f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{h},"
+                "setsar=1"
+            )
 
         cmd = [
             "ffmpeg", "-y",

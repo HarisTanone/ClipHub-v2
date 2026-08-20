@@ -23,6 +23,7 @@ from src.infrastructure.clipscout_client import (
 )
 from src.infrastructure.footage_downloader import FootageDownloader
 from src.infrastructure.footage_processor import FootageProcessor
+from src.infrastructure.broll_subject_analyzer import BrollSubjectAnalyzer
 from src.infrastructure.pexels_client import PexelsClient
 from src.infrastructure.pixabay_client import PixabayClient
 from src.infrastructure.iconify_client import IconifyClient
@@ -69,6 +70,7 @@ class AssetFetcher(IAssetFetcher):
         self._ai_selector = ClipScoutAISelector()
         self._downloader = FootageDownloader()
         self._processor = FootageProcessor()
+        self._subject_analyzer = BrollSubjectAnalyzer()
 
         # Client chains per category (first = primary, rest = fallbacks)
         self._client_chains: dict[str, list[IAssetClient]] = {
@@ -179,15 +181,9 @@ class AssetFetcher(IAssetFetcher):
                         source_id=asset.asset_id,
                         platform=asset.source_api,
                     )
-                    logger.info(
-                        "[AssetFetcher] Direct footage splice ready: '%s' -> %s",
-                        suggestion.keyword,
-                        asset.source_api,
-                    )
+            await asyncio.gather(*tasks, return_exceptions=True)
 
-        return suggestions
-
-    async def _fetch_via_clipscout(
+    async def _fetch_clipscout_footage(
         self,
         suggestions: list[BRollSuggestion],
         analisa_extra_queries: Optional[list[str]] = None,
@@ -206,8 +202,8 @@ class AssetFetcher(IAssetFetcher):
         if not segments:
             return
 
-        # Search ClipScout API (retry 2x internally)
-        raw_response = await self._clipscout.search(segments)
+        # Search ClipScout API (prioritizing landscape 16:9 for AI-aware reframing)
+        raw_response = await self._clipscout.search(segments, orientation="horizontal")
         candidates_by_segment = self._clipscout.parse_video_candidates(raw_response)
 
         if not candidates_by_segment:
@@ -244,7 +240,25 @@ class AssetFetcher(IAssetFetcher):
             if not raw_path:
                 continue
 
-            # Process to job resolution and trim
+            # Run AI Subject & Composition Analysis
+            target_w = getattr(self, "_target_w", 1080)
+            target_h = getattr(self, "_target_h", 1920)
+            analysis = self._subject_analyzer.analyze_video(
+                video_path=raw_path,
+                target_w=target_w,
+                target_h=target_h,
+                force_mode=getattr(suggestion, "placement", None) or None,
+            )
+
+            suggestion.smart_crop_x = analysis.smart_crop_x
+            suggestion.smart_crop_y = analysis.smart_crop_y
+            if not getattr(suggestion, "placement", ""):
+                suggestion.placement = analysis.recommended_mode.value
+            suggestion.layout_mode = analysis.recommended_mode.value
+            if analysis.primary_subject:
+                suggestion.subject_bbox = list(analysis.primary_subject.box)
+
+            # Process to job resolution and trim with AI-aware crop & layout
             output_dir = os.path.join(settings.OUTPUT_DIR, "broll_footage")
             processed_path = await self._processor.process(
                 raw_path=raw_path,
@@ -252,8 +266,11 @@ class AssetFetcher(IAssetFetcher):
                 clip_rank=0,  # Will be set properly by pipeline
                 index=i,
                 output_dir=output_dir,
-                width=getattr(self, "_target_w", 1080),
-                height=getattr(self, "_target_h", 1920),
+                width=target_w,
+                height=target_h,
+                crop_x=analysis.smart_crop_x,
+                crop_y=analysis.smart_crop_y,
+                layout_mode=suggestion.placement,
             )
 
             # Cleanup raw download

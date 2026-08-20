@@ -76,16 +76,18 @@ def parse_broll_suggestions(
             motion_style = LEGACY_TEMPLATE_TO_MOTION.get(template)
 
         placement = str(raw.get("placement") or "").strip().lower()
-        if placement in {"fullframe", "splice", "replace"}:
+        if placement in {"fullframe", "splice", "replace", "full_broll"}:
             placement = "full_frame"
-        elif placement in {"behind", "top_overlay", "overlay", "top"}:
+        elif placement in {"behind", "top_overlay", "overlay", "top", "behind_person"}:
             placement = "behind_person"
-        elif placement not in {"full_frame", "behind_person"}:
-            # Infer: footage video → full_frame; icon/image → behind_person
+        elif placement in {"side_broll", "side", "pip", "split", "split_panel"}:
+            placement = "side_broll"
+        elif placement not in {"full_frame", "behind_person", "side_broll"}:
+            # Infer: footage video → behind_person (subject-aware default) or full_frame
             if visual_cat in (VisualCategory.ICON, VisualCategory.MOTION_GRAPHIC):
                 placement = "behind_person"
             else:
-                placement = "full_frame"
+                placement = "behind_person"
 
         reason = " ".join(str(raw.get("reason") or "").split())[:200]
         parsed.append(BRollSuggestion(

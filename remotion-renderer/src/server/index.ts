@@ -181,6 +181,12 @@ app.post("/render", async (req, res) => {
           : item.path,
       })),
     }));
+    propsWithUrl.brollEvents = (propsWithUrl.brollEvents || []).map((event: any) => ({
+      ...event,
+      imagePath: typeof event.imagePath === "string" && event.imagePath.startsWith("/")
+        ? `http://localhost:${PORT}/media${event.imagePath}`
+        : event.imagePath,
+    }));
 
     console.log(`[remotion-server] Rendering: ${path.basename(request.outputPath)}`);
     console.log(`[remotion-server]   Video URL: ${propsWithUrl.videoPath}`);
@@ -334,6 +340,12 @@ app.post("/render-still", async (req, res) => {
           ? `http://localhost:${PORT}/media${item.path}`
           : item.path,
       })),
+    }));
+    propsWithUrl.brollEvents = (propsWithUrl.brollEvents || []).map((event: any) => ({
+      ...event,
+      imagePath: typeof event.imagePath === "string" && event.imagePath.startsWith("/")
+        ? `http://localhost:${PORT}/media${event.imagePath}`
+        : event.imagePath,
     }));
 
     const composition = await selectComposition({

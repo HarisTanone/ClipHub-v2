@@ -90,6 +90,13 @@ LEGACY_TEMPLATE_TO_MOTION = {
 }
 
 
+class BrollPlacementMode(str, Enum):
+    """3 B-Roll placement & compositing modes."""
+    BEHIND_PERSON = "behind_person"  # Subject-aware B-roll behind speaker cutout (top safe-zone)
+    SIDE_BROLL = "side_broll"        # Floating Picture-in-Picture card or split panel preserving 16:9
+    FULL_BROLL = "full_broll"        # Full cutaway scene change (speaker temporarily hidden)
+
+
 class VisualCategory(str, Enum):
     """Visual category for B-Roll asset resolution."""
     FOOTAGE = "footage"
@@ -120,10 +127,10 @@ class Subtitle:
 class BRollSuggestion:
     """B-Roll suggestion from AI analysis.
 
-    Two placement modes (auto-chosen by AI, not fixed templates):
-      full_frame     — timeline splice: clip → stock video → clip (person gone)
-      behind_person  — top ~50% stock image/video BEHIND person cutout (person stays)
-    Tracks must use different times so both can coexist on one clip.
+    Three placement modes (auto-chosen by AI or BrollSubjectAnalyzer):
+      behind_person  — stock image/video BEHIND person cutout with subject-aware offset (person stays)
+      side_broll     — floating Picture-in-Picture card or split preserving 16:9 context
+      full_frame / full_broll — timeline splice: clip → stock video → clip (person gone)
     """
     at_time: float
     keyword: str
@@ -137,8 +144,13 @@ class BRollSuggestion:
     # as a Remotion BrollLayer event (preview == final) instead of via the
     # legacy FFmpeg drawtext/overlay path.
     motion_style: Optional[BrollMotionStyle] = None
-    # full_frame | behind_person — empty = infer from visual_category/asset
+    # behind_person | side_broll | full_frame | full_broll
     placement: str = ""
+    # AI-aware composition metadata
+    subject_bbox: Optional[list[float]] = None  # [bx1, by1, bx2, by2] normalized
+    smart_crop_x: Optional[int] = None
+    smart_crop_y: Optional[int] = None
+    layout_mode: Optional[str] = None
 
 
 @dataclass
