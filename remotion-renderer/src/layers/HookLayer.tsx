@@ -829,7 +829,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
       {animation === "news_viralin_badge" && (() => {
         const entrance = spring({ frame, fps, config: { damping: 12, stiffness: 170, mass: 0.75 } });
         const y = interpolate(Math.min(1, entrance), [0, 1], [-120, 0]);
-        const scaleVal = interpolate(Math.min(1, entrance), [0, 1], [0.85, 1]);
+        const scaleVal = interpolate(Math.min(1, entrance), [0, 1], [0.88, 1]);
         const cardBg = config.boxColor || "#EAB308"; // Akurat yellow
         const badgeBg = config.lineColor || "#1D4ED8"; // Royal blue
         const textColor = config.color || "#09090B";
@@ -851,8 +851,8 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 inset: -6,
                 background: "#FFFFFF",
                 transform: "rotate(-3deg)",
-                borderRadius: 8,
-                boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
+                borderRadius: 12,
+                boxShadow: "0 24px 55px rgba(0,0,0,0.5)",
                 zIndex: 1,
               }} />
 
@@ -860,23 +860,23 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               <div style={{
                 position: "relative",
                 background: cardBg,
-                padding: "48px 42px 36px 42px",
-                borderRadius: 8,
-                boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
+                padding: "54px 44px 40px 44px",
+                borderRadius: 12,
+                boxShadow: "0 28px 65px rgba(0,0,0,0.6)",
                 zIndex: 2,
               }}>
                 {/* Tilted Blue Badge Header */}
                 {badgeEnabled && (
                   <div style={{
                     position: "absolute",
-                    top: -32,
+                    top: -36,
                     left: "50%",
                     transform: "translateX(-50%) rotate(-3.5deg)",
                     background: badgeBg,
-                    borderRadius: 6,
-                    padding: "10px 24px",
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.4), inset 0 0 10px rgba(255,255,255,0.15)",
-                    border: "2px solid rgba(255,255,255,0.2)",
+                    borderRadius: 8,
+                    padding: "10px 28px",
+                    boxShadow: "0 12px 28px rgba(0,0,0,0.45), inset 0 0 12px rgba(255,255,255,0.2)",
+                    border: "2px solid rgba(255,255,255,0.25)",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
@@ -887,10 +887,10 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                       color: "#FACC15",
                       fontFamily: "'Montserrat', 'Barlow Condensed', sans-serif",
                       fontWeight: 900,
-                      fontSize: 28,
+                      fontSize: 30,
                       fontStyle: "italic",
                       letterSpacing: "0.05em",
-                      lineHeight: 1,
+                      lineHeight: 1.1,
                       textTransform: "uppercase",
                       textShadow: "0 2px 4px rgba(0,0,0,0.4)",
                     }}>
@@ -901,7 +901,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                         color: "#FFFFFF",
                         fontFamily: "'Inter', sans-serif",
                         fontWeight: 700,
-                        fontSize: 13,
+                        fontSize: 14,
                         letterSpacing: "0.02em",
                         marginTop: 3,
                         opacity: 0.95,
@@ -916,12 +916,12 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                 <div style={{
                   color: textColor,
                   fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
-                  fontSize: Math.min(fontSize, 46),
+                  fontSize: config.fontSize || 56,
                   fontWeight: 900,
                   lineHeight: 1.22,
                   textAlign: "center",
                   textShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                  marginTop: 10,
+                  marginTop: badgeEnabled ? 8 : 0,
                 }}>
                   {renderedText}
                 </div>
@@ -953,34 +953,36 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               <div style={{
                 position: "relative",
                 background: cardBg,
-                borderRadius: "14px 14px 0 0",
-                padding: "36px 40px 30px 40px",
-                boxShadow: "0 30px 70px rgba(0,0,0,0.55)",
+                borderRadius: "16px 16px 0 0",
+                padding: "40px 44px 34px 44px",
+                boxShadow: "0 32px 75px rgba(0,0,0,0.55)",
                 borderBottom: `6px solid ${accentColor}`,
               }}>
                 {/* Category Pill Tag */}
-                <div style={{
-                  display: "inline-block",
-                  background: accentColor,
-                  color: "#FFFFFF",
-                  fontFamily: "'Inter', 'Montserrat', sans-serif",
-                  fontWeight: 900,
-                  fontSize: 18,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  padding: "6px 14px",
-                  borderRadius: 4,
-                  marginBottom: 16,
-                  boxShadow: `0 4px 12px ${accentColor}66`,
-                }}>
-                  {categoryTag}
-                </div>
+                {badgeEnabled && (
+                  <div style={{
+                    display: "inline-block",
+                    background: accentColor,
+                    color: "#FFFFFF",
+                    fontFamily: "'Inter', 'Montserrat', sans-serif",
+                    fontWeight: 900,
+                    fontSize: 22,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    padding: "6px 16px",
+                    borderRadius: 4,
+                    marginBottom: 16,
+                    boxShadow: `0 4px 14px ${accentColor}66`,
+                  }}>
+                    {categoryTag}
+                  </div>
+                )}
 
                 {/* Main News Headline */}
                 <div style={{
                   color: config.color || "#09090B",
-                  fontFamily: fontFamily || "'Inter', 'Montserrat', sans-serif",
-                  fontSize: Math.min(fontSize, 46),
+                  fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
+                  fontSize: config.fontSize || 56,
                   fontWeight: 900,
                   lineHeight: 1.18,
                   textAlign: "left",
@@ -1003,7 +1005,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                     color: "#52525B",
                     fontFamily: "'Inter', sans-serif",
                     fontWeight: 800,
-                    fontSize: 13,
+                    fontSize: 16,
                     letterSpacing: "0.08em",
                     textTransform: "uppercase",
                   }}>
@@ -1049,28 +1051,28 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               {/* White offset rectangular frame sticking out behind top-left */}
               <div style={{
                 position: "absolute",
-                top: -14,
-                left: -14,
+                top: -16,
+                left: -16,
                 width: "65%",
                 height: "80%",
-                borderTop: `5px solid ${offsetColor}`,
-                borderLeft: `5px solid ${offsetColor}`,
+                borderTop: `6px solid ${offsetColor}`,
+                borderLeft: `6px solid ${offsetColor}`,
                 zIndex: 1,
-                boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+                boxShadow: "0 12px 32px rgba(0,0,0,0.3)",
               }} />
 
               {/* Main Red Box */}
               <div style={{
                 position: "relative",
                 background: cardBg,
-                padding: "36px 40px",
-                boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
+                padding: "42px 46px",
+                boxShadow: "0 28px 65px rgba(0,0,0,0.6)",
                 zIndex: 2,
               }}>
                 <div style={{
                   color: config.color || "#FFFFFF",
                   fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
-                  fontSize: Math.min(fontSize, 46),
+                  fontSize: config.fontSize || 58,
                   fontWeight: 900,
                   lineHeight: 1.24,
                   textAlign: "center",
@@ -1119,14 +1121,14 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               <div style={{
                 position: "relative",
                 background: cardBg,
-                padding: "36px 42px",
-                boxShadow: "0 25px 60px rgba(0,0,0,0.55)",
+                padding: "42px 46px",
+                boxShadow: "0 28px 65px rgba(0,0,0,0.55)",
                 zIndex: 2,
               }}>
                 <div style={{
                   color: config.color || "#09090B",
                   fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
-                  fontSize: Math.min(fontSize, 48),
+                  fontSize: config.fontSize || 58,
                   fontWeight: 900,
                   lineHeight: 1.2,
                   textAlign: "left",
@@ -1181,19 +1183,19 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
               <div style={{
                 background: quoteBg,
                 color: "#FFFFFF",
-                borderRadius: 4,
-                padding: "8px 14px",
-                marginBottom: 10,
+                borderRadius: 6,
+                padding: "10px 16px",
+                marginBottom: 12,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                boxShadow: `0 8px 20px ${quoteBg}66`,
+                boxShadow: `0 8px 22px ${quoteBg}66`,
               }}>
-                <span style={{ fontSize: 24, fontWeight: 900, lineHeight: 1, fontFamily: "serif" }}>❝</span>
+                <span style={{ fontSize: 28, fontWeight: 900, lineHeight: 1, fontFamily: "serif" }}>❝</span>
               </div>
 
               {/* Individual Tape Strips per Line */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 10 }}>
                 {lines.map((line, lIdx) => {
                   const lineEntrance = interpolate(frame, [lIdx * 3, lIdx * 3 + 12], [0, 1], { extrapolateRight: "clamp", extrapolateLeft: "clamp" });
                   return (
@@ -1202,14 +1204,14 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                       style={{
                         background: tapeBg,
                         color: textColor,
-                        padding: "8px 20px",
+                        padding: "12px 24px",
                         fontFamily: fontFamily || "'Montserrat', 'Inter', sans-serif",
-                        fontSize: Math.min(fontSize, 42),
+                        fontSize: config.fontSize || 52,
                         fontWeight: 900,
                         textTransform: "uppercase",
                         letterSpacing: "0.04em",
                         lineHeight: 1.15,
-                        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+                        boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
                         transform: `scale(${0.88 + lineEntrance * 0.12})`,
                         opacity: lineEntrance,
                         transformOrigin: "left center",

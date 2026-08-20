@@ -30,8 +30,9 @@ function useRemotionFont(fontName: string | undefined) {
 
 function useHookConfig(creativeDirection: any, hookAnimation?: string) {
   const config = creativeDirection.hook_style_config || {};
+  const animation = config.animation || hookAnimation || "podcast_lower_third";
   return {
-    config: { ...config, animation: hookAnimation || config.animation },
+    config: { ...config, animation },
     duration: config.duration || 3.0,
     fontFamily: config.fontFamily || "Poppins",
   };

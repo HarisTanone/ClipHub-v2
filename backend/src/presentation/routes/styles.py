@@ -10,6 +10,26 @@ from src.infrastructure.database import StylePresetModel, HookAnimationModel, as
 router = APIRouter(prefix="/style-presets", tags=["Style Presets"])
 
 BUILTIN_HOOK_ANIMATIONS: tuple[dict[str, str], ...] = (
+    {"id": "news_viralin_badge", "name": "#VIRALIN Badge", "description": "Akurat yellow card with tilted #VIRALIN blue badge and layered paper sheet"},
+    {"id": "news_portal_pantau", "name": "News Portal Notch", "description": "Clean white news card with red category pill and speech bubble notch"},
+    {"id": "news_offset_box", "name": "Detik Red Box", "description": "Detik-detik red breaking box with white offset border frame"},
+    {"id": "brutalist_bracket", "name": "Brutalist Bracket", "description": "White box with industrial thick black L-bracket and red exclamation marks"},
+    {"id": "quote_strip_tape", "name": "Quote Tape Strips", "description": "Multi-line white tape bars with teal quote icon badge"},
+    {"id": "podcast_lower_third", "name": "On-Air Lower Third", "description": "Podcast-style lower third with live on-air badge"},
+    {"id": "quote_card", "name": "Quote Card", "description": "Editorial pull-quote card for memorable podcast lines"},
+    {"id": "waveform_pulse", "name": "Waveform Pulse", "description": "Audio waveform bars pulsing around the hook"},
+    {"id": "breaking_tape", "name": "Breaking Tape", "description": "Diagonal hot-take tape for spicy podcast moments"},
+    {"id": "mic_drop", "name": "Mic Drop", "description": "Impact badge drop with a bright hit line"},
+    {"id": "split_panel", "name": "Split Panel", "description": "Two-tone debate card with colored rail"},
+    {"id": "kinetic_stack", "name": "Kinetic Stack", "description": "Stacked word cards with alternating entrance"},
+    {"id": "glass_flash", "name": "Glass Flash", "description": "Glass panel with moving shine sweep"},
+    {"id": "marker_swipe", "name": "Marker Swipe", "description": "Marker stroke sweep behind headline text"},
+    {"id": "signal_scan", "name": "Signal Scan", "description": "Digital scanline panel with tech pulse"},
+    {"id": "comment_reply", "name": "Reply Comment", "description": "TikTok-native reply bubble as hook context"},
+    {"id": "search_prompt", "name": "Search Prompt", "description": "Discovery search bar prompt for intrigue"},
+    {"id": "countdown_list", "name": "Countdown List", "description": "Numbered listicle countdown badge"},
+    {"id": "pov_stamp", "name": "POV Stamp", "description": "Creator point-of-view stamp"},
+    {"id": "bold_slam", "name": "Bold Slam", "description": "Large impact card with a bounce entrance"},
     {"id": "fade_scale", "name": "Fade & Scale", "description": "Text fades in with a soft scale animation"},
     {"id": "slide_up", "name": "Slide Up", "description": "Text slides up from the bottom"},
     {"id": "glitch", "name": "Glitch Effect", "description": "Digital jitter with a glitch feel"},
@@ -19,12 +39,6 @@ BUILTIN_HOOK_ANIMATIONS: tuple[dict[str, str], ...] = (
     {"id": "cinematic_reveal", "name": "Cinematic Reveal", "description": "Letterbox reveal for dramatic moments"},
     {"id": "danger_bold", "name": "Danger Bold", "description": "Red alert typography with pulsing glow"},
     {"id": "slide_punch_framer", "name": "Slide Punch", "description": "Fast slide-in with a punchy stop"},
-    {"id": "bold_slam", "name": "Bold Slam", "description": "Large impact card with a bounce entrance"},
-    {"id": "podcast_lower_third", "name": "On-Air Lower Third", "description": "Podcast-style lower third with live on-air badge"},
-    {"id": "quote_card", "name": "Quote Card", "description": "Editorial pull-quote card for memorable podcast lines"},
-    {"id": "waveform_pulse", "name": "Waveform Pulse", "description": "Audio waveform bars pulsing around the hook"},
-    {"id": "breaking_tape", "name": "Breaking Tape", "description": "Diagonal hot-take tape for spicy podcast moments"},
-    {"id": "mic_drop", "name": "Mic Drop", "description": "Impact badge drop with a bright hit line"},
 )
 
 
