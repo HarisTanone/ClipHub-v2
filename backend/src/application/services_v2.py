@@ -857,7 +857,7 @@ class V2PipelineService:
                     out_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
                     crop_cmd = [
                         "ffmpeg", "-y", "-i", in_path,
-                        "-vf", "crop=ih*9/16:ih,scale=1080:1920",
+                        "-vf", "crop=ih*9/16:ih,scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1",
                         *encoder_args,
                         "-c:a", "copy", "-movflags", "+faststart",
                         out_path,

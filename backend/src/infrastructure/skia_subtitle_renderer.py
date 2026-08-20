@@ -412,6 +412,7 @@ class SkiaSubtitleRenderer:
                 f.write(f"file '{concat_entries[-1][0]}'\n")
 
             # FFmpeg single-pass concat overlay
+            from src.infrastructure.gpu_encoder import get_video_encoder_args
             cmd = [
                 "ffmpeg", "-y",
                 "-i", video_path,
@@ -419,9 +420,7 @@ class SkiaSubtitleRenderer:
                 "-filter_complex", "[0:v][1:v]overlay=x=0:y=0:shortest=1[outv]",
                 "-map", "[outv]",
                 "-map", "0:a?",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "18",
+                *get_video_encoder_args("medium"),
                 "-c:a", "copy",
                 "-movflags", "+faststart",
                 output_path,

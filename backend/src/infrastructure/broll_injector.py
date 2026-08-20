@@ -162,12 +162,13 @@ class BRollInjector(IBRollInjector):
 
         filter_chain = "setpts=PTS-STARTPTS," + ",".join(filter_parts)
 
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
         cmd = [
             "ffmpeg", "-y",
             "-i", clip_path,
             "-vf", filter_chain,
             "-af", "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            *get_video_encoder_args("medium"),
             "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
@@ -234,6 +235,7 @@ class BRollInjector(IBRollInjector):
         # Build filter_complex
         filter_complex = self._build_filter_complex(valid_assets, fallback_suggestions)
 
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
         cmd = [
             "ffmpeg", "-y",
             *inputs,
@@ -241,7 +243,7 @@ class BRollInjector(IBRollInjector):
             "-map", "[vout]",
             "-map", "0:a?",
             "-af", "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            *get_video_encoder_args("medium"),
             "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
@@ -368,12 +370,12 @@ class BRollInjector(IBRollInjector):
 
         # Ken Burns slow dynamic zoom: 1.00x -> 1.07x over duration
         zoom_expr = f"min(1.08,1.0+0.07*(t-{at_time:.3f})/{duration:.3f})"
-        scale_w = f"trunc(720*{zoom_expr}/2)*2"
+        scale_w = f"trunc(1080*{zoom_expr}/2)*2"
 
         filter_str = (
             f"[{input_idx}:v]trim=duration={duration:.3f},"
             f"setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
-            f"scale=w='{scale_w}':h=-2:eval=frame,format=yuva420p,"
+            f"scale=w='{scale_w}':h=-2:eval=frame:flags=lanczos,format=yuva420p,"
             f"fade=t=in:st={at_time:.3f}:d={fade_dur:.3f}:alpha=1,"
             f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur:.3f}:alpha=1"
             f"[{scaled_label}];"
@@ -401,12 +403,12 @@ class BRollInjector(IBRollInjector):
         scaled_label = f"img{input_idx}"
 
         zoom_expr = f"min(1.08,1.0+0.06*(t-{at_time:.3f})/{duration:.3f})"
-        scale_w = f"trunc(480*{zoom_expr}/2)*2"
+        scale_w = f"trunc(960*{zoom_expr}/2)*2"
 
         filter_str = (
             f"[{input_idx}:v]loop=loop=-1:size=1:start=0,"
             f"trim=duration={duration:.3f},setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
-            f"scale=w='{scale_w}':h=-2:eval=frame,format=yuva420p,"
+            f"scale=w='{scale_w}':h=-2:eval=frame:flags=lanczos,format=yuva420p,"
             f"fade=t=in:st={at_time:.3f}:d={fade_dur:.3f}:alpha=1,"
             f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur:.3f}:alpha=1"
             f"[{scaled_label}];"
@@ -436,7 +438,7 @@ class BRollInjector(IBRollInjector):
         filter_str = (
             f"[{input_idx}:v]trim=duration={duration:.3f},"
             f"setpts=PTS-STARTPTS+{at_time:.3f}/TB,"
-            f"scale=480:-2:force_original_aspect_ratio=decrease,format=yuva420p,"
+            f"scale=960:-2:force_original_aspect_ratio=decrease:flags=lanczos,format=yuva420p,"
             f"fade=t=in:st={at_time:.3f}:d={fade_dur:.3f}:alpha=1,"
             f"fade=t=out:st={end_time - fade_dur:.3f}:d={fade_dur:.3f}:alpha=1"
             f"[{scaled_label}];"

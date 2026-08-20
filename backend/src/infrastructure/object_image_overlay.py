@@ -1007,13 +1007,16 @@ class ObjectImageOverlayRenderer:
 
         # mux original audio
         try:
+            from src.infrastructure.gpu_encoder import get_video_encoder_args
             cmd = [
                 "ffmpeg", "-y",
                 "-i", tmp_video,
                 "-i", video_path,
                 "-map", "0:v:0", "-map", "1:a:0?",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                "-c:a", "aac", "-shortest",
+                *get_video_encoder_args("medium"),
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+                "-movflags", "+faststart",
                 output_path,
             ]
             subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)

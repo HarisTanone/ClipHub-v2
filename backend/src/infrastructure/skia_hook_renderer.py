@@ -906,6 +906,7 @@ class SkiaHookRenderer:
                 f"[0:v][hook]overlay=x=0:y=0:enable='between(t,0,{duration})'[outv]"
             )
 
+            from src.infrastructure.gpu_encoder import get_video_encoder_args
             cmd = [
                 "ffmpeg", "-y",
                 "-i", video_path,
@@ -915,9 +916,7 @@ class SkiaHookRenderer:
                 "-filter_complex", filter_complex,
                 "-map", "[outv]",
                 "-map", "0:a?",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "18",
+                *get_video_encoder_args("medium"),
                 "-c:a", "copy",
                 "-movflags", "+faststart",
                 output_path,

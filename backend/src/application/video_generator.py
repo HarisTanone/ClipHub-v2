@@ -1044,11 +1044,11 @@ class VideoGenerator:
                 "-i", footage_path,
                 "-t", str(duration),
                 "-vf", (
-                    "scale=1080:1920:force_original_aspect_ratio=increase,"
+                    "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
                     "crop=1080:1920,"
                     "setsar=1"
                 ),
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "17",
                 "-an",  # No audio from footage
                 "-r", "30",
                 "-pix_fmt", "yuv420p",
@@ -1075,7 +1075,7 @@ class VideoGenerator:
             "ffmpeg", "-y",
             "-f", "lavfi",
             "-i", f"color=c=black:s=1080x1920:d={duration}:r=30",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "17",
             "-pix_fmt", "yuv420p",
             clip_path,
         ]
@@ -1103,7 +1103,7 @@ class VideoGenerator:
                 "ffmpeg", "-y",
                 "-f", "lavfi",
                 "-i", "color=c=black:s=1080x1920:d=10:r=30",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "17",
                 "-pix_fmt", "yuv420p",
                 output_path,
             ]
@@ -1135,7 +1135,7 @@ class VideoGenerator:
             *inputs,
             "-filter_complex", filter_str,
             "-map", "[outv]",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "17",
             "-r", "30",
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
@@ -1236,7 +1236,7 @@ class VideoGenerator:
                 "ffmpeg", "-y",
                 "-f", "lavfi",
                 "-i", f"color=c=black:s=1080x1920:d={audio_duration}:r=30",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "17",
                 "-pix_fmt", "yuv420p",
                 video_path,
             ]
@@ -1342,7 +1342,7 @@ class VideoGenerator:
             "ffmpeg", "-y", *inputs,
             "-filter_complex", ";".join(filters),
             "-map", "[vout]", "-map", "[aout]",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "17",
             "-profile:v", "high", "-level:v", "4.1",
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
             "-r", "30", "-pix_fmt", "yuv420p",

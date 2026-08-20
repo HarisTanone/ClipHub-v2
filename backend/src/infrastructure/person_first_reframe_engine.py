@@ -731,9 +731,9 @@ class PersonFirstReframeEngine(IReframeEngine):
         vf = (
             f"setpts=PTS-STARTPTS,split=2[top][bot];"
             f"[top]crop={crop_w}:{crop_h}:{top_crop_x}:{top_y},"
-            f"scale=1080:{self.GRID_PANEL_HEIGHT},format=yuv420p[t];"
+            f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,format=yuv420p[t];"
             f"[bot]crop={crop_w}:{crop_h}:{bottom_crop_x}:{bottom_y},"
-            f"scale=1080:{self.GRID_PANEL_HEIGHT},format=yuv420p[b];"
+            f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,format=yuv420p[b];"
             f"[t][b]vstack=inputs=2,setsar=1[vout]"
         )
 

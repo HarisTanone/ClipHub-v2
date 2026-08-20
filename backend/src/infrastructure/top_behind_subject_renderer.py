@@ -1070,14 +1070,14 @@ class TopBehindSubjectRenderer:
 
     @staticmethod
     def _mux_audio(src_video: str, video_only: str, output_path: str) -> bool:
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
         cmd = [
             "ffmpeg", "-y",
             "-i", video_only,
             "-i", src_video,
             "-map", "0:v:0",
             "-map", "1:a:0?",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-            "-pix_fmt", "yuv420p",
+            *get_video_encoder_args("medium"),
             "-c:a", "copy",
             "-shortest",
             "-movflags", "+faststart",

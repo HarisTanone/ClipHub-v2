@@ -695,10 +695,11 @@ class JobService:
                     in_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
                     out_path = f"{output_dir}/clip_{clip.rank:02d}_reframed.mp4"
                     # Center crop to 9:16: crop center portion of 16:9, then scale to fill 1080x1920
+                    from src.infrastructure.gpu_encoder import get_video_encoder_args
                     crop_cmd = [
                         "ffmpeg", "-y", "-i", in_path,
-                        "-vf", "crop=ih*9/16:ih,scale=1080:1920",
-                        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                        "-vf", "crop=ih*9/16:ih,scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1",
+                        *get_video_encoder_args("medium"),
                         "-c:a", "copy",
                         "-movflags", "+faststart",
                         out_path,
