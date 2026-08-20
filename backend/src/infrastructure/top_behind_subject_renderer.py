@@ -9,14 +9,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
+import cv2
 import numpy as np
 
 from src.config import settings
+from src.infrastructure.gpu_encoder import get_video_encoder_args
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,51 @@ class TopOverlaySegment:
     asset_path: str
     keyword: str = ""
     source: str = ""
+
+
+def fast_guided_filter(
+    guide_gray: np.ndarray,
+    mask: np.ndarray,
+    r: int = 8,
+    eps: float = 1e-3,
+    subsample: int = 2,
+) -> np.ndarray:
+    """Fast Guided Filter: snaps low-res YOLO segmentation mask to high-res image edges.
+
+    Refines mask contours around hair, shoulders, clothing, and ears down to subpixel
+    accuracy using the image luminance gradient.
+    """
+    h, w = guide_gray.shape[:2]
+    if subsample > 1:
+        sw, sh = max(1, w // subsample), max(1, h // subsample)
+        small_guide = cv2.resize(guide_gray, (sw, sh), interpolation=cv2.INTER_AREA)
+        small_mask = cv2.resize(mask, (sw, sh), interpolation=cv2.INTER_AREA)
+        small_r = max(1, r // subsample)
+    else:
+        small_guide = guide_gray
+        small_mask = mask
+        small_r = r
+
+    mean_I = cv2.boxFilter(small_guide, cv2.CV_32F, (small_r, small_r))
+    mean_p = cv2.boxFilter(small_mask, cv2.CV_32F, (small_r, small_r))
+    mean_Ip = cv2.boxFilter(small_guide * small_mask, cv2.CV_32F, (small_r, small_r))
+    cov_Ip = mean_Ip - mean_I * mean_p
+
+    mean_II = cv2.boxFilter(small_guide * small_guide, cv2.CV_32F, (small_r, small_r))
+    var_I = mean_II - mean_I * mean_I
+
+    a = cov_Ip / (var_I + eps)
+    b = mean_p - a * mean_I
+
+    mean_a = cv2.boxFilter(a, cv2.CV_32F, (small_r, small_r))
+    mean_b = cv2.boxFilter(b, cv2.CV_32F, (small_r, small_r))
+
+    if subsample > 1:
+        mean_a = cv2.resize(mean_a, (w, h), interpolation=cv2.INTER_LINEAR)
+        mean_b = cv2.resize(mean_b, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    q = mean_a * guide_gray + mean_b
+    return np.clip(q, 0.0, 1.0)
 
 
 class TopBehindSubjectRenderer:
@@ -68,7 +116,6 @@ class TopBehindSubjectRenderer:
         model_path: str | None = None,
         det_model_path: str | None = None,
     ):
-
         self.split_ratio = float(
             split_ratio if split_ratio is not None else settings.TOP_OVERLAY_SPLIT_RATIO
         )
@@ -90,10 +137,8 @@ class TopBehindSubjectRenderer:
         self.mask_feather = int(
             mask_feather if mask_feather is not None else settings.TOP_OVERLAY_MASK_FEATHER
         )
-        self.mask_stride = max(
-            1,
-            int(mask_stride if mask_stride is not None else settings.TOP_OVERLAY_MASK_STRIDE),
-        )
+        self.mask_stride = 1 if mask_stride is None else max(1, int(mask_stride))
+
         self.outline_thickness = max(
             1,
             int(
@@ -200,95 +245,87 @@ class TopBehindSubjectRenderer:
         self._model = None
         self._det_model = None
         self._gradient_cache: dict[tuple[int, int], np.ndarray] = {}
-        # asset id → (cx, cy) normalized 0..1 in source image for smart crop reuse
         self._subject_cache: dict[int, tuple[float, float]] = {}
-        self._max_mask_components = 1
-        # Temporal mask EMA (per-instance; reset between clips by new renderer)
+        self._max_mask_components = 2
+
+        # Temporal smoothing state
         self._prev_clean_mask: np.ndarray | None = None
-        self._mask_ema = 0.65  # smooth weight on previous frame
-        # Speaker stickiness: prefer same person across frames (anti-flip)
         self._prev_mask_centroid: tuple[float, float] | None = None
 
-
-    # ─── Public frame compositor ────────────────────────────────────────────
+    # ─── Public Frame Compositor ────────────────────────────────────────────
 
     def render(
         self,
         frame: np.ndarray,
         person_mask: np.ndarray,
         overlay_frame: np.ndarray,
+        effective_opacity: float | None = None,
     ) -> np.ndarray:
-        """Composite one BGR frame with pristine foreground alpha matting.
-
-        Args:
-            frame: original BGR HxWx3 uint8 (speaker video)
-            person_mask: HxW float/uint8, person=foreground ( >0.5 or >127 )
-            overlay_frame: BGR HxWx3 already cover-cropped to frame size
-        """
-        import cv2
-
+        """Composite one BGR frame with pristine edge-snapped foreground alpha matting."""
         h, w = frame.shape[:2]
         if overlay_frame.shape[:2] != (h, w):
             overlay_frame = self.cover_resize(overlay_frame, w, h)
 
+        # 1. Normalize and clean mask with subpixel edge-guided matting
         p = self._normalize_person_mask(person_mask, h, w)
-        p = self._clean_person_mask(p)
-        # Temporal EMA on continuous alpha matte (kills edge jitter without hard binarizing)
+        p = self._clean_person_mask(p, guide_frame=frame)
+
+        # 2. Adaptive Motion-Aware Temporal EMA Smoothing
         if (
             self._prev_clean_mask is not None
             and self._prev_clean_mask.shape == p.shape
         ):
-            a = float(np.clip(self._mask_ema, 0.0, 0.85))
-            p = a * self._prev_clean_mask + (1.0 - a) * p
+            diff = np.abs(p - self._prev_clean_mask)
+            alpha_weight = np.where(diff < 0.12, 0.65, 0.15).astype(np.float32)
+            p = alpha_weight * self._prev_clean_mask + (1.0 - alpha_weight) * p
             p = np.clip(p, 0.0, 1.0)
         self._prev_clean_mask = p.copy()
 
-        # Person layout: default scale=1.0, shift=0.0 keeps natural original frame
+        # 3. Layout person (natural 1:1 original crispness)
         frame_f, p, layout = self._layout_person_supporting(frame, p)
 
-        # Top region alpha with soft bottom fade (0 = no overlay, 1 = full)
-        top_alpha = self._top_gradient(h, w) * float(np.clip(self.overlay_opacity, 0.0, 1.0))
+        # 4. Top region alpha with smoothstep bottom fade
+        opacity = self.overlay_opacity if effective_opacity is None else effective_opacity
+        top_alpha = self._top_gradient(h, w) * float(np.clip(opacity, 0.0, 1.0))
         top_alpha3 = top_alpha[:, :, None]
 
-        # 1) Background plate: B-roll in top band, smoothly blending into original frame below
+        # 5. Background plate: B-roll in upper region, blending into original frame below
         ov = overlay_frame.astype(np.float32)
-        # Subtle cinematic depth softening on background B-roll
         ov_soft = cv2.GaussianBlur(ov, (0, 0), 0.8)
-        ov = ov * 0.80 + ov_soft * 0.20
+        ov = ov * 0.82 + ov_soft * 0.18
 
         frame_float = frame_f.astype(np.float32)
         bg_plate = ov * top_alpha3 + frame_float * (1.0 - top_alpha3)
 
-        # Optional soft backdrop depth grade (if bg_black > 0) applied ONLY to top B-roll overlay
+        # Optional soft backdrop grade
         black_a = float(self.bg_black)
         if black_a > 0.01:
             yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
             dim_map = 1.0 - (black_a * 0.15 * np.clip((yy - 0.10) / 0.60, 0.0, 1.0))
             bg_plate = bg_plate * dim_map[:, :, None]
 
-        # 2) Optional contact drop shadow onto background plate ONLY (behind person)
+        # 6. Optional contact drop shadow behind person
         if self.person_shadow and p.max() > 0.01:
-            shadow = cv2.GaussianBlur(p, (21, 21), 0)
-            shadow_intensity = 0.18 * top_alpha
+            shadow = cv2.GaussianBlur(p, (25, 25), 0)
+            shadow_intensity = 0.20 * top_alpha
             bg_plate = bg_plate * (1.0 - (shadow * shadow_intensity)[:, :, None])
 
-        # 3) Foreground person composited over background plate
+        # 7. Foreground person composited over background plate
         p3 = p[:, :, None]
         out = frame_float * p3 + bg_plate * (1.0 - p3)
 
-        # 4) Optional stylized outline / glow if explicitly enabled
+        # 8. Optional stylized bust glow / outline
         if self.person_outline and p.max() > 0.01:
             out = self._draw_person_outline(out, p, top_alpha, layout=layout)
 
         return np.clip(out, 0, 255).astype(np.uint8)
-
 
     def _layout_person_supporting(
         self,
         frame: np.ndarray,
         p: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, dict]:
-        """Keep natural 1:1 person always: 100% original sharpness, zero shrink, zero shift, zero inpaint."""
+        """Keep natural 1:1 person always: 100% original sharpness, zero shrink, zero shift."""
         h, w = frame.shape[:2]
         layout = {
             "scale": 1.0,
@@ -311,8 +348,6 @@ class TopBehindSubjectRenderer:
             )
         return frame, p, layout
 
-
-
     def cover_resize(
         self,
         image: np.ndarray,
@@ -320,21 +355,11 @@ class TopBehindSubjectRenderer:
         target_h: int,
         subject_xy: tuple[float, float] | None = None,
     ) -> np.ndarray:
-        """object-fit: cover; pin subject into TOP visible band (behind-person).
-
-        Only top ~split_ratio of frame shows stock behind person. Subject must
-        land in that upper band — not frame center (would be hidden by body).
-        Prefer YOLO subject_xy; fall back to edge saliency.
-        """
-        import cv2
-
+        """object-fit: cover; pin subject into TOP visible band (behind-person)."""
         ih, iw = image.shape[:2]
         if ih <= 0 or iw <= 0:
             return np.zeros((target_h, target_w, 3), dtype=np.uint8)
 
-        # If target is portrait (9:16) and source footage is landscape/16:9:
-        # Fit the 16:9 width naturally to display full visual context without 2.2x over-zoom,
-        # placing it in the top band where the soft gradient smoothly fades into background.
         if target_h > target_w and iw >= ih:
             top_target_h = int(target_h * float(np.clip(self.split_ratio, 0.35, 0.65)))
             scale = max(target_w / iw, top_target_h / ih)
@@ -346,20 +371,17 @@ class TopBehindSubjectRenderer:
             out_frame[:copy_h, :target_w] = resized[:copy_h, x0 : x0 + target_w]
             return out_frame
 
-        # Standard cover crop for square/portrait sources
         scale = max(target_w / iw, target_h / ih) * 1.12
         nw, nh = max(1, int(round(iw * scale))), max(1, int(round(ih * scale)))
         resized = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_AREA)
         max_x = max(0, nw - target_w)
         max_y = max(0, nh - target_h)
 
-        # Default: horizontal center + strong top bias.
         x0 = max_x // 2
         y0 = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.28))))
 
         if max_x > 0 or max_y > 0:
             cx = cy = None
-            # 1) Detector subject (wallet/pump/etc.) — strongest signal
             if subject_xy is not None:
                 try:
                     sx, sy = float(subject_xy[0]), float(subject_xy[1])
@@ -368,7 +390,7 @@ class TopBehindSubjectRenderer:
                         cy = sy * nh
                 except (TypeError, ValueError):
                     cx = cy = None
-            # 2) Edge saliency fallback (top-weighted)
+
             if cx is None:
                 try:
                     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
@@ -394,10 +416,7 @@ class TopBehindSubjectRenderer:
                     cx = cy = None
 
             if cx is not None and cy is not None:
-                # Keep subject away from left/right chop (15% margin).
                 x0 = int(np.clip(cx - target_w * 0.5, 0, max_x))
-                # Visible stock sits in top ~split_ratio of portrait frame.
-                # Pin subject center near mid of that band (~28% of full H).
                 band_mid = float(np.clip(self.split_ratio * 0.42, 0.16, 0.28))
                 smart_y = int(np.clip(cy - target_h * band_mid, 0, max_y))
                 bias_y = int(round(max_y * float(np.clip(self.crop_bias_y, 0.0, 0.22))))
@@ -409,9 +428,7 @@ class TopBehindSubjectRenderer:
 
         return resized[y0 : y0 + target_h, x0 : x0 + target_w]
 
-
-
-    # ─── Clip-level apply ───────────────────────────────────────────────────
+    # ─── Clip-Level Pipeline ────────────────────────────────────────────────
 
     async def apply_to_clip(
         self,
@@ -420,7 +437,7 @@ class TopBehindSubjectRenderer:
         output_path: str,
         fps: float | None = None,
     ) -> Optional[str]:
-        """Bake top-behind overlays into a new mp4; audio stream-copied."""
+        """Bake top-behind overlays into video with lossless audio stream copy and HD pipeline."""
         if not segments or not os.path.exists(video_path):
             return None
         return await asyncio.to_thread(
@@ -434,8 +451,6 @@ class TopBehindSubjectRenderer:
         output_path: str,
         fps: float | None,
     ) -> Optional[str]:
-        import cv2
-
         segs = sorted(
             [s for s in segments if s.duration > 0.2 and os.path.exists(s.asset_path)],
             key=lambda s: s.at_time,
@@ -486,18 +501,36 @@ class TopBehindSubjectRenderer:
             return None
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-        tmp_video = output_path + ".novid.mp4"
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(tmp_video, fourcc, use_fps, (width, height))
-        if not writer.isOpened():
-            for _, handle, is_vid, _ in asset_handles:
-                if is_vid:
-                    handle.release()
-            cap.release()
-            return None
+
+        encoder_args = get_video_encoder_args("medium")
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-f", "rawvideo",
+            "-vcodec", "rawvideo",
+            "-s", f"{width}x{height}",
+            "-pix_fmt", "bgr24",
+            "-r", f"{use_fps:.4f}",
+            "-i", "-",
+            "-i", video_path,
+            "-map", "0:v:0",
+            "-map", "1:a:0?",
+            *encoder_args,
+            "-c:a", "copy",
+            "-shortest",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+        pipe = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
 
         last_mask = np.zeros((height, width), dtype=np.float32)
         frame_idx = 0
+
         try:
             while True:
                 ok, frame = cap.read()
@@ -505,62 +538,71 @@ class TopBehindSubjectRenderer:
                     break
                 t = frame_idx / use_fps
                 active = self._active_segment(asset_handles, t)
+
                 if active is None:
-                    writer.write(frame)
+                    pipe.stdin.write(frame.tobytes())
                     frame_idx += 1
+                    self._prev_clean_mask = None
                     continue
 
                 seg, handle, is_vid, asset_id = active
                 overlay = self._read_overlay(handle, is_vid, width, height, asset_id=asset_id)
                 if overlay is None:
-                    writer.write(frame)
+                    pipe.stdin.write(frame.tobytes())
                     frame_idx += 1
                     continue
+
+                fade_dur = min(0.35, seg.duration / 3.0)
+                t_in = min(1.0, max(0.0, (t - seg.at_time) / max(0.01, fade_dur)))
+                t_out = min(1.0, max(0.0, (seg.at_time + seg.duration - t) / max(0.01, fade_dur)))
+                raw_time_alpha = min(t_in, t_out)
+                smooth_time_alpha = raw_time_alpha * raw_time_alpha * (3.0 - 2.0 * raw_time_alpha)
 
                 if frame_idx % self.mask_stride == 0 or last_mask.max() < 0.01:
                     last_mask = self._predict_person_mask(model, frame, height, width)
 
-                composite = self.render(frame, last_mask, overlay)
-                writer.write(composite)
+                composite = self.render(
+                    frame=frame,
+                    person_mask=last_mask,
+                    overlay_frame=overlay,
+                    effective_opacity=self.overlay_opacity * smooth_time_alpha,
+                )
+
+                pipe.stdin.write(composite.tobytes())
                 frame_idx += 1
+
         finally:
-            writer.release()
             cap.release()
             for _, handle, is_vid, _ in asset_handles:
                 if is_vid:
                     handle.release()
+            if pipe.stdin:
+                pipe.stdin.close()
+            _, stderr = pipe.communicate()
 
-        if frame_idx == 0 or not os.path.exists(tmp_video):
+        if pipe.returncode != 0:
+            err_msg = stderr.decode(errors="ignore")[-400:] if stderr else "unknown"
+            logger.error(f"top_overlay: FFmpeg pipe failed: {err_msg}")
             return None
 
-        if not self._mux_audio(video_path, tmp_video, output_path):
-            # no audio / mux fail → use video-only
-            try:
-                os.replace(tmp_video, output_path)
-            except OSError:
-                return None
-        else:
-            try:
-                os.remove(tmp_video)
-            except OSError:
-                pass
+        if frame_idx == 0 or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            return None
 
         logger.info(
-            "top_overlay: wrote %s (%d frames, %d segments)",
+            "top_overlay: wrote %s (%d frames, %d segments, 100%% HD pipe)",
             output_path,
             frame_idx,
             len(asset_handles),
         )
         return output_path
 
-    # ─── Internals ──────────────────────────────────────────────────────────
+    # ─── Mask Processing & Guided Matting ────────────────────────────────────
 
     @staticmethod
     def _parse_bgr_color(value: tuple[int, int, int] | str | None) -> tuple[int, int, int]:
         """Parse 'R,G,B' or 'B,G,R' string / tuple into BGR for OpenCV draw."""
         if isinstance(value, (tuple, list)) and len(value) == 3:
             r, g, b = (int(value[0]), int(value[1]), int(value[2]))
-            # Config stores RGB; OpenCV wants BGR.
             return (b, g, r)
         text = str(value or "255,255,255").strip()
         parts = [p.strip() for p in text.replace(" ", ",").split(",") if p.strip()]
@@ -577,8 +619,6 @@ class TopBehindSubjectRenderer:
         )
 
     def _normalize_person_mask(self, person_mask: np.ndarray, h: int, w: int) -> np.ndarray:
-        import cv2
-
         if person_mask.dtype != np.float32 and person_mask.dtype != np.float64:
             p = person_mask.astype(np.float32)
             if p.max() > 1.5:
@@ -589,17 +629,15 @@ class TopBehindSubjectRenderer:
             p = cv2.resize(p, (w, h), interpolation=cv2.INTER_LINEAR)
         return np.clip(p, 0.0, 1.0)
 
-    def _clean_person_mask(self, p: np.ndarray) -> np.ndarray:
-        """High-precision anti-aliased matte: solid core + subpixel soft rim."""
-        import cv2
-
+    def _clean_person_mask(self, p: np.ndarray, guide_frame: np.ndarray | None = None) -> np.ndarray:
+        """High-precision anti-aliased matte with Fast Guided Matting edge snap."""
         if p.max() < 0.01:
             return p
 
         h, w = p.shape[:2]
-        binary = (p >= 0.45).astype(np.uint8) * 255
+        binary = (p >= 0.40).astype(np.uint8) * 255
 
-        # 1) Largest component = main speaker; dual_auto keeps top-2 if 2-shot
+        # 1. Connected components
         n, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
         if n > 1:
             areas = stats[1:, cv2.CC_STAT_AREA]
@@ -608,38 +646,32 @@ class TopBehindSubjectRenderer:
             if keep_n >= 2 and len(order) >= 2:
                 a0 = float(areas[order[0]])
                 a1 = float(areas[order[1]])
-                if a0 <= 0 or a1 / a0 < 0.35:
+                if a0 <= 0 or a1 / a0 < 0.25:
                     keep_n = 1
             keep_labels = {1 + int(order[i]) for i in range(keep_n)}
             binary = np.where(np.isin(labels, list(keep_labels)), 255, 0).astype(np.uint8)
 
-        # 2) Fill internal holes so B-roll never punches through torso/hair/cap/microphone
+        # 2. Fill internal holes
         flood = binary.copy()
         ff_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
         cv2.floodFill(flood, ff_mask, (0, 0), 128)
         holes = (flood != 128) & (binary == 0)
         binary[holes] = 255
 
-        # 3) Subtle smoothing close (small 3x3 ellipse) to avoid jagged polygon edges
+        # 3. Morphological close
         k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k3, iterations=1)
 
-        # 4) Subpixel anti-aliased matte feathering with frame-edge protection
-        feather = max(1, min(int(self.mask_feather), 7))
-        if feather > 1:
-            pad = feather + 4
-            padded = cv2.copyMakeBorder(binary, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
-            dist_in = cv2.distanceTransform(padded, cv2.DIST_L2, 3)[pad : pad + h, pad : pad + w]
-            dist_out = cv2.distanceTransform(255 - padded, cv2.DIST_L2, 3)[pad : pad + h, pad : pad + w]
-            signed_dist = dist_in - dist_out
-            band = float(feather)
-            alpha = np.clip((signed_dist + band * 0.5) / band, 0.0, 1.0)
-            # Smoothstep curve for natural edge falloff
-            clean = alpha * alpha * (3.0 - 2.0 * alpha)
-        else:
-            clean = (binary >= 128).astype(np.float32)
+        float_mask = (binary >= 128).astype(np.float32)
 
-        return clean.astype(np.float32)
+        # 4. Fast Guided Filter
+        if guide_frame is not None and guide_frame.shape[:2] == (h, w):
+            gray = cv2.cvtColor(guide_frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+            float_mask = fast_guided_filter(gray, float_mask, r=6, eps=1e-3, subsample=2)
+        else:
+            float_mask = cv2.GaussianBlur(float_mask, (5, 5), 0)
+
+        return np.clip(float_mask, 0.0, 1.0)
 
     def _draw_person_outline(
         self,
@@ -648,13 +680,7 @@ class TopBehindSubjectRenderer:
         top_alpha: np.ndarray,
         layout: dict | None = None,
     ) -> np.ndarray:
-        """Organic bust glow — head → neck → shoulder only.
-
-        Not full-body frame. Not frame-edge box. Stroke outside body.
-        Keeps natural person silhouette curves; kills only L/R/bottom FRAME lines.
-        """
-        import cv2
-
+        """Organic bust glow — head → neck → shoulder only."""
         binary = (p >= 0.50).astype(np.uint8) * 255
         if binary.max() == 0:
             return out
@@ -711,7 +737,6 @@ class TopBehindSubjectRenderer:
         if bust_bin.max() == 0:
             return out
 
-        # Soft organic mask — ellipse morph only, light blur (keep silhouette)
         k_org = max(3, int(round(min(h, w) * 0.010)))
         if k_org % 2 == 0:
             k_org += 1
@@ -739,7 +764,6 @@ class TopBehindSubjectRenderer:
             if area < 40:
                 continue
             x, y, bw, bh = cv2.boundingRect(cnt)
-            # Only reject near-full-frame boxes (frame edge artifacts)
             if bw > w * 0.90 and bh > h * 0.50:
                 continue
             if len(cnt) >= 10:
@@ -764,6 +788,7 @@ class TopBehindSubjectRenderer:
         region = np.clip(np.maximum(top_alpha, 0.55), 0.0, 1.0) * bust_w * edge_kill
         hard = np.zeros(out.shape[:2], dtype=np.uint8)
         line_type = cv2.LINE_AA
+
         if style == "comic":
             for cnt in contours:
                 pts = cnt.reshape(-1, 2)
@@ -781,13 +806,11 @@ class TopBehindSubjectRenderer:
             outer = cv2.dilate(hard, k_pad, iterations=1)
             hard = cv2.max(hard, outer)
 
-        # Zero stroke only on FRAME margins (not person silhouette sides)
         hard[:, :mx] = 0
         hard[:, w - mx :] = 0
         hard[h - my_bot :, :] = 0
         hard[int(end_y) + 1 :, :] = 0
 
-        # Kill residual full-height verticals ONLY near frame L/R (2*mx band)
         near = max(mx + 2, int(round(w * 0.08)))
         bust_rows = slice(max(0, py0 - 2), min(h, int(end_y) + 1))
         band_h = max(1, int(end_y) - py0 + 1)
@@ -796,7 +819,7 @@ class TopBehindSubjectRenderer:
         for c in np.where(col_sum > thr_col)[0]:
             if int(c) < near or int(c) >= w - near:
                 hard[bust_rows, int(c)] = 0
-        # Kill flat bottom bar only if it spans most of frame width
+
         thr_row = 255.0 * w * 0.70
         row_sum = hard.sum(axis=1).astype(np.float32)
         for r in range(max(0, int(end_y) - 4), min(h, int(end_y) + 2)):
@@ -865,10 +888,7 @@ class TopBehindSubjectRenderer:
             painted = painted * (1.0 - bloom[:, :, None]) + blue[None, None, :] * bloom[:, :, None]
         return painted
 
-
-
     def _top_gradient(self, h: int, w: int) -> np.ndarray:
-
         key = (h, w)
         cached = self._gradient_cache.get(key)
         if cached is not None:
@@ -881,13 +901,10 @@ class TopBehindSubjectRenderer:
         solid_end = max(0, split - fade)
         col[:solid_end] = 1.0
         if fade > 0 and solid_end < split:
-            # smoothstep fade solid → 0 across [solid_end, split]
             n = split - solid_end
             x = np.linspace(0.0, 1.0, n, dtype=np.float32)
-            # smoothstep: 1 at start → 0 at end
             s = x * x * (3.0 - 2.0 * x)
             col[solid_end:split] = 1.0 - s
-        # below split stays 0
         g = np.broadcast_to(col[:, None], (h, w)).copy()
         self._gradient_cache[key] = g
         return g
@@ -909,11 +926,7 @@ class TopBehindSubjectRenderer:
         return self._det_model
 
     def _detect_subject_xy(self, image: np.ndarray) -> tuple[float, float] | None:
-        """YOLO det on B-roll frame → subject center (normalized 0..1).
-
-        Prefers non-person COCO objects (wallet-ish bags, bottles, vehicles…);
-        falls back to largest non-person box. None if detector miss → saliency.
-        """
+        """YOLO det on B-roll frame → subject center (normalized 0..1)."""
         if image is None or image.size == 0:
             return None
         try:
@@ -931,8 +944,7 @@ class TopBehindSubjectRenderer:
             confs = boxes.conf.detach().cpu().numpy()
             clss = boxes.cls.detach().cpu().numpy().astype(int)
             ih, iw = image.shape[:2]
-            # COCO person=0 — skip people on stock (want object, not stock host)
-            best = None  # (score, cx, cy)
+            best = None
             for box, conf, cls_id in zip(xyxy, confs, clss):
                 if int(cls_id) == 0:
                     continue
@@ -940,7 +952,6 @@ class TopBehindSubjectRenderer:
                 bw = max(1.0, x2 - x1)
                 bh = max(1.0, y2 - y1)
                 area = bw * bh
-                # Prefer mid-size objects in upper 70% of frame
                 cy = (y1 + y2) * 0.5
                 upper_bonus = 1.25 if cy < ih * 0.70 else 0.85
                 score = float(conf) * area * upper_bonus
@@ -956,8 +967,6 @@ class TopBehindSubjectRenderer:
             return None
 
     def _predict_person_mask(self, model, frame: np.ndarray, h: int, w: int) -> np.ndarray:
-        import cv2
-
         try:
             results = model.predict(
                 source=frame,
@@ -972,7 +981,6 @@ class TopBehindSubjectRenderer:
             if masks.size == 0:
                 return np.zeros((h, w), dtype=np.float32)
 
-            # Resize each instance mask to frame size first.
             resized = []
             for m in masks:
                 mm = m.astype(np.float32)
@@ -980,50 +988,18 @@ class TopBehindSubjectRenderer:
                     mm = cv2.resize(mm, (w, h), interpolation=cv2.INTER_LINEAR)
                 resized.append(np.clip(mm, 0.0, 1.0))
 
-            mode = self.speaker_mask_mode
-            if mode == "largest":
-                areas = [float(m.sum()) for m in resized]
-                best = resized[int(np.argmax(areas))]
-                self._max_mask_components = 1
-                return best
+            if not resized:
+                return np.zeros((h, w), dtype=np.float32)
 
-            if mode == "dual_auto" and len(resized) >= 2:
-                # Keep top-2 by area if 2nd is real co-host (not fringe).
-                areas = [float(m.sum()) for m in resized]
-                order = np.argsort(areas)[::-1]
-                a0 = areas[int(order[0])]
-                a1 = areas[int(order[1])]
-                if a0 > 0 and a1 / a0 >= 0.35:
-                    self._max_mask_components = 2
-                    return np.clip(
-                        np.maximum(resized[int(order[0])], resized[int(order[1])]),
-                        0.0,
-                        1.0,
-                    )
-                # not true dual → fall through to active speaker (center)
+            combined = np.zeros((h, w), dtype=np.float32)
+            areas = [float(m.sum()) for m in resized]
+            max_area = max(areas) if areas else 0.0
 
-            # active / dual_auto: prefer sticky speaker (prev centroid), else face band
-            self._max_mask_components = 1
-            cx0, cy0 = w * 0.5, h * 0.42  # slightly upper (face band)
-            if self._prev_mask_centroid is not None:
-                cx0, cy0 = self._prev_mask_centroid
-            best_i, best_d = 0, 1e18
-            best_cxy: tuple[float, float] | None = None
             for i, m in enumerate(resized):
-                ys, xs = np.where(m >= 0.5)
-                if len(xs) == 0:
-                    continue
-                mx, my = float(xs.mean()), float(ys.mean())
-                d = (mx - cx0) ** 2 + (my - cy0) ** 2
-                # slight area bias so tiny fringe never wins
-                d = d / (1.0 + 0.00001 * float(m.sum()))
-                if d < best_d:
-                    best_d = d
-                    best_i = i
-                    best_cxy = (mx, my)
-            if best_cxy is not None:
-                self._prev_mask_centroid = best_cxy
-            return resized[best_i]
+                if areas[i] >= max_area * 0.15:
+                    combined = np.maximum(combined, m)
+
+            return np.clip(combined, 0.0, 1.0)
 
         except Exception as exc:
             logger.debug("top_overlay: mask fail: %s", exc)
@@ -1047,20 +1023,16 @@ class TopBehindSubjectRenderer:
     def _read_overlay(
         self, handle, is_vid: bool, w: int, h: int, asset_id: int = 0
     ) -> Optional[np.ndarray]:
-        import cv2
-
         if not is_vid:
-            return handle  # already cover-resized image
+            return handle
         ok, frame = handle.read()
         if not ok:
-            # loop overlay video
             handle.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ok, frame = handle.read()
             if not ok:
                 return None
         subject = None
         if self.smart_crop:
-            # Cache first successful detect per asset; re-detect every ~15 frames via cache miss key
             subject = self._subject_cache.get(asset_id)
             if subject is None:
                 subject = self._detect_subject_xy(frame)
@@ -1068,64 +1040,21 @@ class TopBehindSubjectRenderer:
                     self._subject_cache[asset_id] = subject
         return self.cover_resize(frame, w, h, subject_xy=subject)
 
-    @staticmethod
-    def _mux_audio(src_video: str, video_only: str, output_path: str) -> bool:
-        from src.infrastructure.gpu_encoder import get_video_encoder_args
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_only,
-            "-i", src_video,
-            "-map", "0:v:0",
-            "-map", "1:a:0?",
-            *get_video_encoder_args("medium"),
-            "-c:a", "copy",
-            "-shortest",
-            "-movflags", "+faststart",
-            output_path,
-        ]
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            return r.returncode == 0 and os.path.exists(output_path)
-        except Exception as exc:
-            logger.warning("top_overlay: mux failed: %s", exc)
-            return False
-
-
-def _resolve_top_overlay_asset(suggestion) -> tuple[str, str, str] | None:
-    """Return (path, format, source) from asset_result and/or splice_segment.
-
-    ClipScout often sets splice_segment only (no asset_result). Legacy path sets
-    asset_result. Both must feed top-behind-person overlay.
-    """
-    path = ""
-    fmt = ""
-    source = ""
-    asset = getattr(suggestion, "asset_result", None)
-    if asset and not getattr(asset, "is_fallback", True):
-        path = getattr(asset, "local_path", "") or ""
-        fmt = (getattr(asset, "asset_format", "") or "").lower()
-        source = getattr(asset, "source_api", "") or ""
-        if path and os.path.exists(path):
-            return path, fmt, source
-
-    seg = getattr(suggestion, "splice_segment", None)
-    if seg and getattr(seg, "footage_path", None) and os.path.exists(seg.footage_path):
-        return (
-            seg.footage_path,
-            fmt or "video",
-            source or getattr(seg, "platform", "") or "",
-        )
-    return None
-
 
 def _placement_of(suggestion) -> str:
-    """Normalize placement: full_frame | behind_person | ''."""
-    raw = (getattr(suggestion, "placement", "") or "").strip().lower()
-    if raw in {"full_frame", "fullframe", "splice"}:
-        return "full_frame"
-    if raw in {"behind_person", "behind", "top_overlay", "overlay"}:
-        return "behind_person"
-    return ""
+    val = getattr(suggestion, "placement", None)
+    if hasattr(val, "value"):
+        val = val.value
+    return str(val or "").strip().lower()
+
+
+def _is_still_asset(suggestion) -> bool:
+    asset = getattr(suggestion, "asset_result", None)
+    if asset and not getattr(asset, "is_fallback", True):
+        fmt = (getattr(asset, "asset_format", "") or "").lower()
+        if fmt in {"image", "photo", "png", "jpg", "jpeg", "svg", "gif"}:
+            return True
+    return False
 
 
 def snap_overlay_to_phrase(
@@ -1144,7 +1073,6 @@ def snap_overlay_to_phrase(
             dur = min(dur, max(0.4, clip_duration - at))
         return round(at, 3), round(max(0.4, dur), 3)
 
-    # Anchor: first word starting at/after at_time (or nearest within 0.6s)
     starts = []
     for w in words:
         try:
@@ -1156,17 +1084,14 @@ def snap_overlay_to_phrase(
     if not starts:
         return round(at, 3), round(dur, 3)
 
-    # Find phrase cluster around at: extend while gap < 0.35s, cap max_dur
     best = min(starts, key=lambda t: abs(t[0] - at))
     if abs(best[0] - at) > 0.8:
-        # far from speech — keep original, still clamp
         if clip_duration > 0:
             dur = min(dur, max(0.4, clip_duration - at))
         return round(at, 3), round(max(min_dur, min(max_dur, dur)), 3)
 
     phrase_start = best[0]
     phrase_end = best[1]
-    # extend forward
     for ws, we, _ in starts:
         if ws < phrase_start - 0.05:
             continue
@@ -1174,7 +1099,6 @@ def snap_overlay_to_phrase(
             phrase_end = max(phrase_end, we)
         if phrase_end - phrase_start >= max_dur:
             break
-    # slight pad
     phrase_start = max(0.0, phrase_start - 0.05)
     phrase_end = phrase_end + 0.12
     new_dur = float(np.clip(phrase_end - phrase_start, min_dur, max_dur))
@@ -1189,34 +1113,24 @@ def pick_top_overlay_suggestions(
     blocked_ranges: list[tuple[float, float]] | None = None,
     words: list[dict] | None = None,
     clip_duration: float = 0.0,
-) -> list:
-    """Pick BRollSuggestion rows for top-behind-person (prefer image; skip splice zones).
-
-    Never reuses a full_frame splice window — person is gone there, so behind-person
-    would be invisible. Prefer explicit placement=behind_person, then images/icons,
-    then remaining video assets not used for full-frame.
-    Phrase-aware: when words given, snap at/duration to speech bounds.
-    """
-    # Dynamic limit: let AI suggestions populate naturally based on clip length (not rigidly choked to 2)
-    if max_per_clip is not None:
-        limit = max(1, int(max_per_clip))
-    elif clip_duration > 0:
-        limit = max(4, int(clip_duration / 10.0))
-    else:
-        limit = int(getattr(settings, "TOP_OVERLAY_MAX_PER_CLIP", 6))
+) -> list[TopOverlaySegment]:
+    """Pick BRollSuggestion rows for top-behind-person."""
+    limit = max(1, max_per_clip) if max_per_clip is not None else 2
     blocked = list(blocked_ranges or [])
+    words = words or []
     scored = []
+
     for s in suggestions:
         placement = _placement_of(s)
-        # Explicit full_frame never goes to behind-person track
         if placement == "full_frame":
             continue
-        resolved = _resolve_top_overlay_asset(s)
-        if not resolved:
+
+        res = _resolve_top_overlay_asset(s)
+        if res is None:
             continue
-        path, fmt, source = resolved
-        is_still = fmt in {"png", "jpg", "jpeg", "webp", "gif", "svg", "image"}
-        # Score: lower = better. Prefer behind_person, then stills/icons, then video.
+        path, fmt, source = res
+
+        is_still = _is_still_asset(s)
         score = 0
         if placement != "behind_person":
             score += 2
@@ -1225,7 +1139,7 @@ def pick_top_overlay_suggestions(
         cat = getattr(s, "visual_category", None)
         cat_val = cat.value if hasattr(cat, "value") else str(cat or "")
         if cat_val in {"icon", "motion_graphic"}:
-            score -= 1  # good for behind-person
+            score -= 1
         at = float(getattr(s, "at_time", 0))
         dur = float(getattr(s, "duration", 2.0))
         at, dur = snap_overlay_to_phrase(at, dur, words, clip_duration=clip_duration)
@@ -1257,16 +1171,12 @@ def pick_top_overlay_suggestions(
 
 
 def pick_full_frame_suggestions(suggestions: list) -> list:
-    """Suggestions that should timeline-splice (person replaced by stock video).
-
-    Prefer placement=full_frame or video footage. Exclude explicit behind_person.
-    """
+    """Suggestions that should timeline-splice (person replaced by stock video)."""
     out = []
     for s in suggestions:
         placement = _placement_of(s)
         if placement == "behind_person":
             continue
-        # Need spliceable video
         has_splice = bool(
             getattr(s, "splice_segment", None)
             and getattr(getattr(s, "splice_segment", None), "footage_path", None)
@@ -1284,3 +1194,25 @@ def pick_full_frame_suggestions(suggestions: list) -> list:
             out.append(s)
     return out
 
+
+def _resolve_top_overlay_asset(suggestion) -> tuple[str, str, str] | None:
+    """Return (path, format, source) from asset_result and/or splice_segment."""
+    path = ""
+    fmt = ""
+    source = ""
+    asset = getattr(suggestion, "asset_result", None)
+    if asset and not getattr(asset, "is_fallback", True):
+        path = getattr(asset, "local_path", "") or ""
+        fmt = (getattr(asset, "asset_format", "") or "").lower()
+        source = getattr(asset, "source_api", "") or ""
+        if path and os.path.exists(path):
+            return path, fmt, source
+
+    seg = getattr(suggestion, "splice_segment", None)
+    if seg and getattr(seg, "footage_path", None) and os.path.exists(seg.footage_path):
+        return (
+            seg.footage_path,
+            fmt or "video",
+            getattr(seg, "platform", None) or getattr(seg, "source", "") or source or "splice",
+        )
+    return None
