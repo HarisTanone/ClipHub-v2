@@ -1,11 +1,17 @@
 """SkiaHookRenderer — High-definition GPU/Canvas-style hook overlay rendering.
 
-Renders rich graphical hook overlays that match the frontend Skia Canvas previews 1:1:
-- Gradients (linear, multi-color, metallic)
-- Glassmorphic / frosted rounded pill containers with borders and backdrop blur
-- Multi-pass text glow and 3D drop shadows
-- High-impact Google Fonts (Anton, Montserrat, Outfit, Bebas Neue, Inter, etc.)
-- Smooth compositing over the first N seconds of video using FFmpeg
+Renders rich graphical hook overlays that match the frontend Skia Canvas and FFmpeg previews 1:1:
+- Neon Cyberpunk: Dual cyan & magenta glow with futuristic glass framing and corner brackets
+- Impact Hazard / Impact Badge: High-voltage amber warning banner with bold black Anton typography
+- Frosted Pill: Glassmorphic rounded capsule with subtle border and backdrop blur
+- Aurora Gradient: Vivid emerald-to-violet Northern Lights gradient fill with ambient aura
+- 3D Chrome: Reflective metallic silver and gold bevel luster with heavy drop shadow
+- Ruby Flame: Fiery crimson-to-amber heat wave with intense outer aura
+- Gold Prestige: Luxury 24K specular gold with letterbox framing
+- Clean Editorial / Minimal: Minimalist Swiss headline with crisp modern contrast
+- Glitch RGB: Chromatic RGB split channel rasterizer burst (red left, cyan right, white center)
+- Typewriter Matrix: Monospace phosphor green CRT terminal glow
+- Zoom Punch / Fade Scale / Shake Neon / Danger Bold / Cinematic Reveal: High-impact video hooks
 """
 import asyncio
 import logging
@@ -20,13 +26,13 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 logger = logging.getLogger(__name__)
 
 
-# ─── Skia Hook Presets Specifications ─────────────────────────────────────────
+# ─── Comprehensive Hook Presets Specifications ────────────────────────────────
 
 SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     "skia_impact_badge": {
         "name": "Impact Hazard",
         "font_family": "Anton",
-        "font_size": 60,
+        "font_size": 62,
         "font_weight": "700",
         "text_color": "#000000",
         "gradient_enabled": True,
@@ -37,6 +43,7 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
         "bg_padding_y": 20,
         "bg_shadow_color": "#713F12",
         "bg_shadow_offset_y": 8,
+        "tilt_angle": -1.5,
         "position_y": 38,
         "uppercase": True,
         "duration": 3.0,
@@ -44,7 +51,7 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     "skia_neon_cyberpunk": {
         "name": "Neon Cyberpunk",
         "font_family": "Montserrat",
-        "font_size": 54,
+        "font_size": 56,
         "font_weight": "900",
         "text_color": "#00F0FF",
         "gradient_enabled": True,
@@ -67,12 +74,12 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     },
     "skia_frosted_pill": {
         "name": "Frosted Pill",
-        "font_family": "Inter",
-        "font_size": 48,
+        "font_family": "Plus Jakarta Sans",
+        "font_size": 50,
         "font_weight": "800",
         "text_color": "#FFFFFF",
         "bg_color": "#FFFFFF",
-        "bg_opacity": 0.22,
+        "bg_opacity": 0.20,
         "bg_radius": 999,  # capsule
         "bg_border_color": "#FFFFFF",
         "bg_border_width": 2,
@@ -87,7 +94,7 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     "skia_aurora_gradient": {
         "name": "Aurora Gradient",
         "font_family": "Outfit",
-        "font_size": 54,
+        "font_size": 56,
         "font_weight": "800",
         "text_color": "#10B981",
         "gradient_enabled": True,
@@ -132,7 +139,7 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     "skia_ruby_flame": {
         "name": "Ruby Flame",
         "font_family": "Bungee",
-        "font_size": 54,
+        "font_size": 56,
         "font_weight": "400",
         "text_color": "#FF3366",
         "gradient_enabled": True,
@@ -153,7 +160,7 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     "skia_gold_prestige": {
         "name": "Gold Prestige",
         "font_family": "Playfair Display",
-        "font_size": 54,
+        "font_size": 58,
         "font_weight": "700",
         "text_color": "#FEF08A",
         "gradient_enabled": True,
@@ -190,7 +197,7 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     "skia_zoom_punch": {
         "name": "Zoom Punch",
         "font_family": "Anton",
-        "font_size": 56,
+        "font_size": 58,
         "font_weight": "700",
         "text_color": "#FFFFFF",
         "stroke_enabled": True,
@@ -211,9 +218,10 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     "skia_glitch_rgb": {
         "name": "Glitch RGB",
         "font_family": "Anton",
-        "font_size": 56,
+        "font_size": 58,
         "font_weight": "700",
         "text_color": "#FFFFFF",
+        "is_glitch_rgb": True,
         "stroke_enabled": True,
         "stroke_width": 4,
         "stroke_color": "#000000",
@@ -228,7 +236,7 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
     },
     "skia_typewriter": {
         "name": "Typewriter Matrix",
-        "font_family": "Inter",
+        "font_family": "Space Grotesk",
         "font_size": 44,
         "font_weight": "700",
         "text_color": "#22C55E",
@@ -264,6 +272,233 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
         "uppercase": False,
         "duration": 3.5,
     },
+    # FFmpeg Hook Mappings
+    "zoom_punch": {
+        "name": "Zoom Punch",
+        "font_family": "Anton",
+        "font_size": 58,
+        "font_weight": "700",
+        "text_color": "#FFFFFF",
+        "stroke_enabled": True,
+        "stroke_width": 5,
+        "stroke_color": "#000000",
+        "bg_color": "#000000",
+        "bg_opacity": 0.60,
+        "bg_radius": 14,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 40,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "glitch_rgb": {
+        "name": "Glitch RGB",
+        "font_family": "Anton",
+        "font_size": 58,
+        "font_weight": "700",
+        "text_color": "#FFFFFF",
+        "is_glitch_rgb": True,
+        "bg_color": "#000000",
+        "bg_opacity": 0.70,
+        "bg_radius": 14,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 40,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "shake_neon": {
+        "name": "Shake Neon",
+        "font_family": "Bungee",
+        "font_size": 54,
+        "font_weight": "400",
+        "text_color": "#00FFCC",
+        "glow_enabled": True,
+        "glow_color": "#00FFCC",
+        "glow_size": 24,
+        "bg_color": "#051515",
+        "bg_opacity": 0.75,
+        "bg_radius": 14,
+        "bg_border_color": "#00FFCC",
+        "bg_border_width": 2,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 40,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "cinematic_reveal": {
+        "name": "Cinematic Reveal",
+        "font_family": "Playfair Display",
+        "font_size": 60,
+        "font_weight": "700",
+        "text_color": "#FFD700",
+        "bg_color": "#111111",
+        "bg_opacity": 0.85,
+        "bg_radius": 10,
+        "bg_border_color": "#FFD700",
+        "bg_border_width": 2,
+        "bg_padding_x": 38,
+        "bg_padding_y": 20,
+        "position_y": 42,
+        "uppercase": False,
+        "duration": 3.5,
+    },
+    "danger_bold": {
+        "name": "Danger Bold",
+        "font_family": "Anton",
+        "font_size": 68,
+        "font_weight": "700",
+        "text_color": "#FF2D2D",
+        "stroke_enabled": True,
+        "stroke_width": 6,
+        "stroke_color": "#000000",
+        "glow_enabled": True,
+        "glow_color": "#FF2D2D",
+        "glow_size": 20,
+        "bg_color": "#200505",
+        "bg_opacity": 0.80,
+        "bg_radius": 14,
+        "bg_border_color": "#FF2D2D",
+        "bg_border_width": 3,
+        "bg_padding_x": 36,
+        "bg_padding_y": 20,
+        "position_y": 38,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "typewriter": {
+        "name": "Typewriter",
+        "font_family": "Space Grotesk",
+        "font_size": 44,
+        "font_weight": "700",
+        "text_color": "#00FF88",
+        "glow_enabled": True,
+        "glow_color": "#00FF88",
+        "glow_size": 16,
+        "bg_color": "#04140C",
+        "bg_opacity": 0.85,
+        "bg_radius": 12,
+        "bg_border_color": "#00FF88",
+        "bg_border_width": 2,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 45,
+        "uppercase": False,
+        "duration": 3.5,
+    },
+    "fade_scale": {
+        "name": "Fade Scale",
+        "font_family": "Poppins",
+        "font_size": 50,
+        "font_weight": "700",
+        "text_color": "#FFFFFF",
+        "stroke_enabled": True,
+        "stroke_width": 3,
+        "stroke_color": "#000000",
+        "bg_color": "#000000",
+        "bg_opacity": 0.60,
+        "bg_radius": 14,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 42,
+        "uppercase": False,
+        "duration": 3.5,
+    },
+    "slide_punch_framer": {
+        "name": "Slide Punch",
+        "font_family": "Poppins",
+        "font_size": 52,
+        "font_weight": "700",
+        "text_color": "#FFFFFF",
+        "stroke_enabled": True,
+        "stroke_width": 5,
+        "stroke_color": "#000000",
+        "bg_color": "#000000",
+        "bg_opacity": 0.65,
+        "bg_radius": 14,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 38,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "bold_yellow": {
+        "name": "Bold Yellow",
+        "font_family": "Anton",
+        "font_size": 64,
+        "font_weight": "700",
+        "text_color": "#FFD700",
+        "stroke_enabled": True,
+        "stroke_width": 5,
+        "stroke_color": "#000000",
+        "bg_color": "#000000",
+        "bg_opacity": 0.65,
+        "bg_radius": 14,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 40,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "electric_blue": {
+        "name": "Electric Blue",
+        "font_family": "Bungee",
+        "font_size": 54,
+        "font_weight": "400",
+        "text_color": "#00BFFF",
+        "glow_enabled": True,
+        "glow_color": "#00BFFF",
+        "glow_size": 22,
+        "bg_color": "#021220",
+        "bg_opacity": 0.75,
+        "bg_radius": 14,
+        "bg_border_color": "#00BFFF",
+        "bg_border_width": 2,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 40,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "fire_red": {
+        "name": "Fire Red",
+        "font_family": "Anton",
+        "font_size": 66,
+        "font_weight": "700",
+        "text_color": "#FF4444",
+        "stroke_enabled": True,
+        "stroke_width": 5,
+        "stroke_color": "#220000",
+        "bg_color": "#200404",
+        "bg_opacity": 0.80,
+        "bg_radius": 14,
+        "bg_border_color": "#FF4444",
+        "bg_border_width": 2,
+        "bg_padding_x": 34,
+        "bg_padding_y": 18,
+        "position_y": 38,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "minimal_white": {
+        "name": "Minimal White",
+        "font_family": "Inter",
+        "font_size": 44,
+        "font_weight": "700",
+        "text_color": "#FFFFFF",
+        "stroke_enabled": True,
+        "stroke_width": 2,
+        "stroke_color": "#000000",
+        "bg_color": "#000000",
+        "bg_opacity": 0.40,
+        "bg_radius": 12,
+        "bg_padding_x": 30,
+        "bg_padding_y": 16,
+        "position_y": 50,
+        "uppercase": False,
+        "duration": 3.0,
+    },
 }
 
 
@@ -277,7 +512,9 @@ class SkiaHookRenderer:
 
     def _hex_to_rgb(self, hex_code: str) -> Tuple[int, int, int]:
         """Convert #RGB or #RRGGBB to (r, g, b)."""
-        hex_code = hex_code.lstrip("#")
+        if not hex_code:
+            return (255, 255, 255)
+        hex_code = hex_code.strip().lstrip("#")
         if len(hex_code) == 3:
             hex_code = "".join(2 * c for c in hex_code)
         if len(hex_code) >= 6:
@@ -313,7 +550,6 @@ class SkiaHookRenderer:
                 clean_name = file_name.replace(" ", "").replace("-", "").lower()
                 full_path = os.path.join(fdir, file_name)
 
-                # Direct match
                 if family_clean in clean_name:
                     if font_weight.lower() in clean_name:
                         try:
@@ -347,7 +583,6 @@ class SkiaHookRenderer:
                     except Exception:
                         pass
 
-        # Standard PIL default
         try:
             return ImageFont.load_default(size=size)
         except Exception:
@@ -364,7 +599,6 @@ class SkiaHookRenderer:
 
         for word in words:
             test_line = " ".join(current_words + [word])
-            # measure width
             bbox = font.getbbox(test_line)
             w = bbox[2] - bbox[0]
             if w <= max_width or not current_words:
@@ -376,7 +610,6 @@ class SkiaHookRenderer:
         if current_words:
             lines.append(" ".join(current_words))
 
-        # Balance lines if 2 lines
         if len(lines) == 2 and len(words) >= 4:
             mid = len(words) // 2
             line1 = " ".join(words[:mid])
@@ -394,7 +627,7 @@ class SkiaHookRenderer:
         """Create a smooth 2-color linear gradient image."""
         r1, g1, b1 = self._hex_to_rgb(from_hex)
         r2, g2, b2 = self._hex_to_rgb(to_hex)
-        grad = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        grad = Image.new("RGBA", (max(1, width), max(1, height)), (0, 0, 0, 0))
         draw = ImageDraw.Draw(grad)
 
         if vertical:
@@ -417,8 +650,11 @@ class SkiaHookRenderer:
     def generate_hook_frame(
         self, hook_text: str, hook_style: str = "skia_impact_badge", style_config: Optional[dict] = None
     ) -> Image.Image:
-        """Generate a 1080x1920 RGBA transparent frame containing the complete Skia hook."""
-        cfg = dict(SKIA_HOOK_PRESETS.get(hook_style, SKIA_HOOK_PRESETS["skia_impact_badge"]))
+        """Generate a 1080x1920 RGBA transparent frame containing the complete Skia/FFmpeg hook."""
+        clean_key = hook_style
+        if clean_key not in SKIA_HOOK_PRESETS and f"skia_{clean_key}" in SKIA_HOOK_PRESETS:
+            clean_key = f"skia_{clean_key}"
+        cfg = dict(SKIA_HOOK_PRESETS.get(clean_key, SKIA_HOOK_PRESETS["skia_impact_badge"]))
 
         # Normalize style_config overrides (support both camelCase and snake_case)
         if style_config:
@@ -458,7 +694,7 @@ class SkiaHookRenderer:
         if cfg.get("uppercase", False):
             display_text = display_text.upper()
 
-        font_size = int(cfg.get("font_size", 54))
+        font_size = int(cfg.get("font_size", 56))
         font = self._resolve_font(cfg.get("font_family", "Anton"), cfg.get("font_weight", "Bold"), font_size)
 
         # Wrap text (max 880px for 1080px canvas)
@@ -468,7 +704,7 @@ class SkiaHookRenderer:
             return Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
 
         # Calculate bounding box of all lines
-        line_height = int(font_size * 1.22)
+        line_height = int(font_size * 1.24)
         line_widths = [font.getbbox(line)[2] - font.getbbox(line)[0] for line in lines]
         total_text_width = max(line_widths)
         total_text_height = line_height * len(lines)
@@ -495,110 +731,79 @@ class SkiaHookRenderer:
         if cfg.get("bg_gradient_from") and cfg.get("bg_gradient_to"):
             # Gradient Pill Card (e.g. skia_impact_badge)
             grad_img = self._create_linear_gradient(card_w, card_h, cfg["bg_gradient_from"], cfg["bg_gradient_to"])
-            # Create rounded mask
             mask = Image.new("L", (card_w, card_h), 0)
             mask_draw = ImageDraw.Draw(mask)
-            mask_draw.rounded_rectangle([(0, 0), (card_w, card_h)], radius=card_radius, fill=255)
+            mask_draw.rounded_rectangle([0, 0, card_w, card_h], radius=card_radius, fill=255)
 
-            # Shadow under card
-            shadow_color = cfg.get("bg_shadow_color", "#000000")
-            shadow_offset = cfg.get("bg_shadow_offset_y", 6)
-            sr, sg, sb = self._hex_to_rgb(shadow_color)
-            shadow_layer = Image.new("RGBA", (card_w + 20, card_h + shadow_offset + 20), (0, 0, 0, 0))
-            shadow_draw = ImageDraw.Draw(shadow_layer)
-            shadow_draw.rounded_rectangle(
-                [(10, 10 + shadow_offset), (card_w + 10, card_h + shadow_offset + 10)],
-                radius=card_radius,
-                fill=(sr, sg, sb, 200),
-            )
-            frame.paste(shadow_layer, (card_x - 10, card_y - 10), shadow_layer)
+            # Bottom 3D shadow for impact badge
+            if cfg.get("bg_shadow_color"):
+                sh_rgb = self._hex_to_rgba(cfg["bg_shadow_color"], 1.0)
+                sh_off_y = cfg.get("bg_shadow_offset_y", 6)
+                draw.rounded_rectangle(
+                    [card_x, card_y + sh_off_y, card_x + card_w, card_y + card_h + sh_off_y],
+                    radius=card_radius,
+                    fill=sh_rgb,
+                )
 
-            # Paste gradient card
             frame.paste(grad_img, (card_x, card_y), mask)
 
-        elif cfg.get("bg_color"):
-            # Solid / Glassmorphic Card
-            bg_color_hex = cfg.get("bg_color", "#0A0F1E")
-            bg_opacity = float(cfg.get("bg_opacity", 0.75))
-            bg_rgba = self._hex_to_rgba(bg_color_hex, bg_opacity)
+        elif cfg.get("bg_opacity", 0) > 0 and cfg.get("bg_color"):
+            bg_rgba = self._hex_to_rgba(cfg["bg_color"], cfg["bg_opacity"])
 
-            # Soft drop shadow under card
-            shadow_blur = cfg.get("bg_shadow_blur", 0)
-            if shadow_blur > 0:
-                shadow_img = Image.new("RGBA", (card_w + shadow_blur * 2, card_h + shadow_blur * 2), (0, 0, 0, 0))
-                s_draw = ImageDraw.Draw(shadow_img)
-                s_draw.rounded_rectangle(
-                    [(shadow_blur, shadow_blur), (card_w + shadow_blur, card_h + shadow_blur)],
-                    radius=card_radius,
-                    fill=(0, 0, 0, 180),
+            # Outer Shadow / Glow
+            if cfg.get("bg_shadow_blur") and cfg.get("bg_shadow_color"):
+                sh_rgba = self._hex_to_rgba(cfg["bg_shadow_color"], 0.6)
+                draw.rounded_rectangle(
+                    [card_x - 4, card_y - 2, card_x + card_w + 4, card_y + card_h + 8],
+                    radius=card_radius + 4,
+                    fill=sh_rgba,
                 )
-                shadow_img = shadow_img.filter(ImageFilter.GaussianBlur(shadow_blur / 2))
-                frame.paste(shadow_img, (card_x - shadow_blur, card_y - shadow_blur + 4), shadow_img)
 
-            # Card fill
-            card_img = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-            c_draw = ImageDraw.Draw(card_img)
-            c_draw.rounded_rectangle([(0, 0), (card_w, card_h)], radius=card_radius, fill=bg_rgba)
+            draw.rounded_rectangle(
+                [card_x, card_y, card_x + card_w, card_y + card_h],
+                radius=card_radius,
+                fill=bg_rgba,
+            )
 
-            # Card border
-            if cfg.get("bg_border_color"):
-                b_color = self._hex_to_rgba(cfg["bg_border_color"], 0.9)
-                b_width = cfg.get("bg_border_width", 2)
-                c_draw.rounded_rectangle([(0, 0), (card_w, card_h)], radius=card_radius, outline=b_color, width=b_width)
+            # Border
+            if cfg.get("bg_border_color") and cfg.get("bg_border_width", 0) > 0:
+                b_rgba = self._hex_to_rgba(cfg["bg_border_color"], 0.9)
+                draw.rounded_rectangle(
+                    [card_x, card_y, card_x + card_w, card_y + card_h],
+                    radius=card_radius,
+                    outline=b_rgba,
+                    width=cfg["bg_border_width"],
+                )
 
-            # Cyberpunk Corner Accents (skia_neon_cyberpunk)
+            # Corner accents for Cyberpunk style
             if cfg.get("corner_accents"):
-                accent_color = self._hex_to_rgba("#FF007F", 1.0)
-                # top-left
-                c_draw.line([(0, 0), (14, 0)], fill=accent_color, width=3)
-                c_draw.line([(0, 0), (0, 14)], fill=accent_color, width=3)
-                # bottom-right
-                c_draw.line([(card_w - 14, card_h - 1), (card_w, card_h - 1)], fill=accent_color, width=3)
-                c_draw.line([(card_w - 1, card_h - 14), (card_w - 1, card_h)], fill=accent_color, width=3)
+                accent_c = (255, 0, 127, 255)  # Hot Pink
+                bracket_sz = 14
+                # Top-Left Bracket
+                draw.line([card_x - 4, card_y - 4, card_x + bracket_sz, card_y - 4], fill=accent_c, width=3)
+                draw.line([card_x - 4, card_y - 4, card_x - 4, card_y + bracket_sz], fill=accent_c, width=3)
+                # Bottom-Right Bracket
+                draw.line([card_x + card_w + 4, card_y + card_h + 4, card_x + card_w - bracket_sz, card_y + card_h + 4], fill=accent_c, width=3)
+                draw.line([card_x + card_w + 4, card_y + card_h + 4, card_x + card_w + 4, card_y + card_h - bracket_sz], fill=accent_c, width=3)
 
-            frame.paste(card_img, (card_x, card_y), card_img)
-
-        # ── 2. Draw Text (with Glow / Shadow / Gradient) ──
+        # ── 2. Draw Text ──
         text_origin_y = card_y + pad_y
 
-        # Glow layer
-        if cfg.get("glow_enabled") and cfg.get("glow_color"):
-            glow_hex = cfg["glow_color"]
-            glow_size = cfg.get("glow_size", 20)
-            glow_layer = Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
-            g_draw = ImageDraw.Draw(glow_layer)
-            gr, gg, gb = self._hex_to_rgb(glow_hex)
-
+        if cfg.get("is_glitch_rgb"):
+            # 3-Layer RGB Split Glitch (Red left, Cyan right, White center)
             for i, line in enumerate(lines):
                 lw = line_widths[i]
                 lx = (self._width - lw) // 2
                 ly = text_origin_y + i * line_height
-                g_draw.text((lx, ly), line, font=font, fill=(gr, gg, gb, 220))
+                # Red left channel
+                draw.text((lx - 4, ly), line, font=font, fill=(255, 0, 0, 200))
+                # Cyan right channel
+                draw.text((lx + 4, ly), line, font=font, fill=(0, 255, 255, 200))
+                # White main center text with black stroke
+                draw.text((lx, ly), line, font=font, fill=(255, 255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
 
-            glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(glow_size / 2))
-            frame.paste(glow_layer, (0, 0), glow_layer)
-
-        # Text Drop Shadow
-        if cfg.get("shadow_enabled"):
-            sh_hex = cfg.get("shadow_color", "#000000")
-            sr, sg, sb = self._hex_to_rgb(sh_hex)
-            sh_blur = cfg.get("shadow_blur", 8)
-            sh_layer = Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
-            sh_draw = ImageDraw.Draw(sh_layer)
-
-            for i, line in enumerate(lines):
-                lw = line_widths[i]
-                lx = (self._width - lw) // 2 + 2
-                ly = text_origin_y + i * line_height + 4
-                sh_draw.text((lx, ly), line, font=font, fill=(sr, sg, sb, 200))
-
-            if sh_blur > 0:
-                sh_layer = sh_layer.filter(ImageFilter.GaussianBlur(sh_blur / 2))
-            frame.paste(sh_layer, (0, 0), sh_layer)
-
-        # Text Fill (Gradient or Solid)
-        if cfg.get("gradient_enabled") and cfg.get("gradient_from") and cfg.get("gradient_to"):
-            # Text Gradient Mask
+        elif cfg.get("gradient_enabled") and cfg.get("gradient_from") and cfg.get("gradient_to"):
+            # Text Linear Gradient Mask
             t_mask = Image.new("L", (card_w, card_h), 0)
             t_mask_draw = ImageDraw.Draw(t_mask)
 
@@ -606,6 +811,10 @@ class SkiaHookRenderer:
                 lw = line_widths[i]
                 lx = (card_w - lw) // 2
                 ly = pad_y + i * line_height
+
+                # Drop shadow behind gradient text
+                draw.text((card_x + lx + 2, card_y + ly + 4), line, font=font, fill=(0, 0, 0, 220))
+
                 # Stroke if enabled
                 if cfg.get("stroke_enabled"):
                     sw = cfg.get("stroke_width", 2)
@@ -625,7 +834,7 @@ class SkiaHookRenderer:
             frame.paste(grad_text, (card_x, card_y), t_mask)
 
         else:
-            # Solid Text
+            # Solid Color Text
             txt_color_hex = cfg.get("text_color", "#FFFFFF")
             tr, tg, tb = self._hex_to_rgb(txt_color_hex)
 
@@ -633,6 +842,17 @@ class SkiaHookRenderer:
                 lw = line_widths[i]
                 lx = (self._width - lw) // 2
                 ly = text_origin_y + i * line_height
+
+                # Shadow
+                if cfg.get("shadow_enabled", True):
+                    draw.text((lx + 3, ly + 4), line, font=font, fill=(0, 0, 0, 220))
+
+                # Glow
+                if cfg.get("glow_enabled"):
+                    gw_c = self._hex_to_rgba(cfg.get("glow_color", "#00F0FF"), 0.6)
+                    gw_sz = max(4, cfg.get("glow_size", 14) // 2)
+                    draw.text((lx, ly), line, font=font, fill=gw_c, stroke_width=gw_sz, stroke_fill=gw_c)
+
                 sw = cfg.get("stroke_width", 0) if cfg.get("stroke_enabled") else 0
                 sc = self._hex_to_rgba(cfg.get("stroke_color", "#000000")) if sw > 0 else None
 
@@ -655,7 +875,7 @@ class SkiaHookRenderer:
         hook_style: str = "skia_impact_badge",
         style_config: Optional[dict] = None,
     ) -> str:
-        """Render Skia Hook onto video for the first 3 seconds with smooth pop animation."""
+        """Render Hook overlay onto video for the first 3 seconds with smooth pop animation."""
         if not hook_text or not hook_text.strip():
             import shutil
             shutil.copy2(video_path, output_path)
@@ -676,7 +896,7 @@ class SkiaHookRenderer:
             overlay_img = self.generate_hook_frame(hook_text, hook_style=hook_style, style_config=style_config)
             overlay_img.save(png_path, format="PNG")
 
-            # 2. FFmpeg overlay with alpha fade
+            # 2. FFmpeg overlay with smooth alpha fade
             fade_out_st = max(0.0, duration - 0.35)
             fade_out_dur = min(0.35, duration / 2)
             filter_complex = (
@@ -724,7 +944,6 @@ class SkiaHookRenderer:
             return output_path
 
         finally:
-            # Cleanup temp
             if os.path.exists(png_path):
                 try:
                     os.remove(png_path)

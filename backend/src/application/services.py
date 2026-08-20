@@ -1618,6 +1618,24 @@ class JobService:
 
         style = HOOK_STYLES.get(hook_style, HOOK_STYLES["zoom_punch"])
 
+        # Route through high-fidelity PIL frame renderer for exact 1:1 visual match to preview
+        try:
+            from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+            fonts_dir = getattr(self, "_fonts_dir", "assets/fonts")
+            skia_hook = SkiaHookRenderer(font_dir=fonts_dir)
+            await skia_hook.render_hook(
+                video_path=video_path,
+                hook_text=hook_text,
+                output_path=output_path,
+                hook_style=hook_style,
+                style_config=style_config,
+            )
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logger.info(f"Hook high-fidelity rendered: {os.path.basename(output_path)}")
+                return
+        except Exception as e:
+            logger.warning(f"Hook high-fidelity render failed ({e}), falling back to drawtext")
+
         # Try DB-driven style first (overrides hardcoded)
         try:
             from src.infrastructure.ffmpeg_styles_store import get_ffmpeg_hook_style
