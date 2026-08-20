@@ -422,6 +422,30 @@ class SubtitleRenderer(ISubtitleRenderer):
         if not words:
             return video_path
 
+        # Primary: delegate to high-fidelity Skia renderer for exact context+keyword layout
+        try:
+            from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+            style_dict = {
+                "font_family": font_family,
+                "font_size": normal_font_size + 4,
+                "highlight_color": emphasis_color,
+                "text_color": normal_color,
+                "line_transition": "emphasis",
+                "glow_enabled": glow_enabled,
+            }
+            skia_renderer = SkiaSubtitleRenderer(font_dir=self._font_dir)
+            res = skia_renderer.render_subtitles(
+                video_path=video_path,
+                words=words,
+                style=style_dict,
+                output_path=output_path,
+                start_offset=start_offset,
+            )
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return res
+        except Exception as e:
+            logger.warning(f"render_emphasis_style: Skia delegate failed ({e}), falling back to drawtext")
+
         # Group into lines
         lines = self._group_words_into_lines(words, max_per_line=3)
         if not lines:
@@ -429,11 +453,9 @@ class SubtitleRenderer(ISubtitleRenderer):
 
         font_path = self._resolve_font(font_family, "Bold")
         font_opt = f":fontfile={font_path}" if font_path else ""
-        y_pos = "h-text_h-120"  # Fixed bottom position, NEVER changes
+        y_pos = "h-text_h-120"
 
         filter_parts = []
-        emphasis_interval = 3
-        lines_since_emphasis = 0
 
         for line in lines:
             line_start = line[0]["start"] + start_offset
@@ -441,18 +463,6 @@ class SubtitleRenderer(ISubtitleRenderer):
             line_text = " ".join(w["word"] for w in line)
             escaped_line = self._escape_drawtext(line_text)
 
-            lines_since_emphasis += 1
-
-            # Detect if this line should have emphasis keyword
-            emphasis_idx = self._detect_emphasis_word(line)
-            emphasis_word = line[emphasis_idx]["word"] if emphasis_idx >= 0 else ""
-            should_emphasize = (
-                lines_since_emphasis >= emphasis_interval
-                and len(emphasis_word) > 4
-                and emphasis_word.lower() not in self.STOP_WORDS
-            )
-
-            # Layer 1: Base line text (all words, normal color, stroke)
             filter_parts.append(
                 f"drawtext=text='{escaped_line}'"
                 f":fontsize={normal_font_size + 4}"
@@ -463,57 +473,8 @@ class SubtitleRenderer(ISubtitleRenderer):
                 f":enable='between(t,{line_start:.3f},{line_end:.3f})'"
             )
 
-            # Layer 2: Active word highlight — overlay at SAME position as base line
-            # Renders on top of base text for in-place color switching
-            if emphasis_color and emphasis_color != normal_color:
-                for w_idx, w in enumerate(line):
-                    w_start = w["start"] + start_offset
-                    w_end = w["end"] + start_offset
-                    word_text = w["word"]
-                    escaped_word = self._escape_drawtext(word_text)
-
-                    is_emphasis = should_emphasize and w_idx == emphasis_idx
-
-                    if is_emphasis:
-                        lines_since_emphasis = 0
-                        # Emphasis keyword: glow + bigger, at SAME position as base line
-                        if glow_enabled:
-                            filter_parts.append(
-                                f"drawtext=text='{escaped_word}'"
-                                f":fontsize={normal_font_size + 8}"
-                                f"{font_opt}"
-                                f":fontcolor={emphasis_color}@0.4"
-                                f":borderw=8:bordercolor={emphasis_color}@0.2"
-                                f":x=(w-text_w)/2:y={y_pos}"
-                                f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
-                            )
-                        filter_parts.append(
-                            f"drawtext=text='{escaped_word}'"
-                            f":fontsize={normal_font_size + 8}"
-                            f"{font_opt}"
-                            f":fontcolor={emphasis_color}"
-                            f":borderw=1:bordercolor=black@0.5"
-                            f":x=(w-text_w)/2:y={y_pos}"
-                            f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
-                        )
-                    else:
-                        # Normal active word: highlight color, at SAME position as base line
-                        filter_parts.append(
-                            f"drawtext=text='{escaped_word}'"
-                            f":fontsize={normal_font_size + 4}"
-                            f"{font_opt}"
-                            f":fontcolor={emphasis_color}"
-                            f":borderw=1:bordercolor=black@0.5"
-                            f":x=(w-text_w)/2:y={y_pos}"
-                            f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
-                        )
-
         if not filter_parts:
             return video_path
-
-        # Safety: if too many filters, remove glow layers only
-        if len(filter_parts) > 200:
-            filter_parts = [f for f in filter_parts if "@0.4" not in f and "@0.2" not in f]
 
         filter_chain = ",".join(filter_parts)
 

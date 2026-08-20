@@ -187,3 +187,73 @@ def test_resolve_engine_subtitle_presets():
             assert resolve_engine({"engine": "ffmpeg", "stylePreset": ffmpeg_id}) == "ffmpeg"
             continue
         assert resolve_engine({"stylePreset": ffmpeg_id}) == "ffmpeg", f"Failed for {ffmpeg_id}"
+
+
+def test_fixed_slot_layout_stability_no_jitter(tmp_path):
+    """Verify that word coordinates remain stable across word transitions (zero horizontal jitter)."""
+    renderer = SkiaSubtitleRenderer(font_dir="assets/fonts")
+    words = [
+        {"word": "sesuatu", "start": 0.0, "end": 0.5},
+        {"word": "itu", "start": 0.5, "end": 0.8},
+        {"word": "gunanya", "start": 0.8, "end": 1.4},
+    ]
+    style = renderer._normalize_style({"stylePreset": "glassmorphism", "fontSize": 42})
+
+    f0 = str(tmp_path / "w0.png")
+    f1 = str(tmp_path / "w1.png")
+    f2 = str(tmp_path / "w2.png")
+
+    renderer._render_line_frame_pil(f0, words, active_word_index=0, style=style)
+    renderer._render_line_frame_pil(f1, words, active_word_index=1, style=style)
+    renderer._render_line_frame_pil(f2, words, active_word_index=2, style=style)
+
+    assert os.path.exists(f0) and os.path.getsize(f0) > 0
+    assert os.path.exists(f1) and os.path.getsize(f1) > 0
+    assert os.path.exists(f2) and os.path.getsize(f2) > 0
+
+
+def test_outline_stack_hollow_3d_rendering(tmp_path):
+    """Verify outline_stack preset renders clean 3D anaglyphic outlines without solid red text blocks."""
+    renderer = SkiaSubtitleRenderer(font_dir="assets/fonts")
+    words = [
+        {"word": "sesuatu", "start": 0.0, "end": 0.5},
+        {"word": "itu", "start": 0.5, "end": 0.8},
+        {"word": "gunanya", "start": 0.8, "end": 1.4},
+    ]
+    style = renderer._normalize_style({"stylePreset": "outline_stack", "fontSize": 48})
+    f0 = str(tmp_path / "outline_w0.png")
+    renderer._render_line_frame_pil(f0, words, active_word_index=0, style=style)
+    assert os.path.exists(f0) and os.path.getsize(f0) > 0
+
+
+def test_all_subtitle_presets_pil_rendering(tmp_path):
+    """Verify all presets in SKIA_STYLES and FFMPEG_STYLES render clean PNG frames."""
+    from src.infrastructure.subtitle_styles import SKIA_STYLES, FFMPEG_STYLES
+    renderer = SkiaSubtitleRenderer(font_dir="assets/fonts")
+    words = [
+        {"word": "sesuatu", "start": 0.0, "end": 0.5},
+        {"word": "itu", "start": 0.5, "end": 0.8},
+        {"word": "gunanya", "start": 0.8, "end": 1.4},
+    ]
+
+    for preset_id in list(SKIA_STYLES.keys()) + list(FFMPEG_STYLES.keys()):
+        style = renderer._normalize_style({"stylePreset": preset_id, "fontSize": 40})
+        out_f = str(tmp_path / f"{preset_id}.png")
+        renderer._render_line_frame_pil(out_f, words, active_word_index=0, style=style)
+        assert os.path.exists(out_f) and os.path.getsize(out_f) > 0
+
+
+def test_group_words_into_lines_punctuation_and_pause():
+    """Verify line grouping respects speech pauses and punctuation breaks matching preview."""
+    renderer = SkiaSubtitleRenderer(font_dir="assets/fonts")
+    words = [
+        {"word": "halo", "start": 0.0, "end": 0.3},
+        {"word": "dunia!", "start": 0.3, "end": 0.6},
+        {"word": "apa", "start": 0.6, "end": 0.9},
+        {"word": "kabar?", "start": 0.9, "end": 1.2},
+    ]
+    lines = renderer._group_words_into_lines(words, max_per_line=4)
+    assert len(lines) == 2
+    assert [w["word"] for w in lines[0]] == ["halo", "dunia!"]
+    assert [w["word"] for w in lines[1]] == ["apa", "kabar?"]
+

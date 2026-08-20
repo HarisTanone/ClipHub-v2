@@ -255,6 +255,16 @@ class SkiaSubtitleRenderer:
             or base_shadow.get("color", "#000000")
         )
 
+        # Active Word Badge (for kinetic_word_box, etc.)
+        base_badge = base.get("active_word_badge") if isinstance(base.get("active_word_badge"), dict) else {}
+        normalized["badge_bg_color"] = (
+            style.get("badgeBgColor")
+            or style.get("badge_bg_color")
+            or style.get("highlight_badge_color")
+            or base_badge.get("bg_color")
+            or "#FF0055"
+        )
+
         return normalized
 
     def _get_layout_at_time(self, layout_events: list[dict], time_sec: float) -> str:
@@ -465,7 +475,7 @@ class SkiaSubtitleRenderer:
         preset_id = style.get("id") or style.get("style_preset", "glassmorphism")
         font_family = style.get("font_family", "Inter")
         raw_font_size = int(style.get("font_size", 38))
-        base_font_size = int(raw_font_size * 1.42) if raw_font_size <= 44 else raw_font_size
+        base_font_size = raw_font_size
         is_uppercase = style.get("uppercase", False)
         is_capitalize = style.get("capitalize", False)
         line_transition = style.get("line_transition", "karaoke")
@@ -474,15 +484,8 @@ class SkiaSubtitleRenderer:
         is_line_reveal = (line_transition == "line_reveal")
         keyword_list = [k.lower() for k in style.get("highlight_words", [])]
 
-        # Load fonts for normal and active pop state
-        normal_font = self._load_pil_font(font_family, base_font_size)
-        active_scale = float(style.get("highlight_scale") or 1.15) if (style.get("highlight_bold") is not False or is_word_pop) else 1.0
-        active_font_size = int(base_font_size * active_scale)
-        active_font = self._load_pil_font(font_family, active_font_size)
-
         # ── Handle Emphasis Mode (Big Keyword + Small Context) ──
         if is_emphasis and len(words_line) > 1:
-            # Find emphasis word
             raw_words = [str(w.get("word", "")).strip() for w in words_line]
             emph_idx = 0
             best_len = 0
@@ -503,8 +506,8 @@ class SkiaSubtitleRenderer:
                 context_text = context_text.capitalize()
                 emph_text = emph_text.capitalize()
 
-            ctx_font_size = max(18, int(base_font_size * 0.52))
-            emph_font_size = int(base_font_size * 1.55)
+            ctx_font_size = max(18, int(base_font_size * 0.55))
+            emph_font_size = int(base_font_size * 1.35)
             ctx_font = self._load_pil_font(font_family, ctx_font_size)
             emph_font = self._load_pil_font(font_family, emph_font_size)
 
@@ -530,13 +533,16 @@ class SkiaSubtitleRenderer:
             draw.text((center_x - emph_w // 2 + 3, center_y - emph_h // 2 + 4), emph_text, font=emph_font, fill=(0, 0, 0, 255))
             # Glow if enabled
             if style.get("glow_enabled", True):
-                draw.text((center_x - emph_w // 2, center_y - emph_h // 2), emph_text, font=emph_font, fill=hl_color, stroke_width=10, stroke_fill=hl_color)
+                draw.text((center_x - emph_w // 2, center_y - emph_h // 2), emph_text, font=emph_font, fill=hl_color, stroke_width=8, stroke_fill=hl_color)
             # Outline & Main Text
             draw.text((center_x - emph_w // 2, center_y - emph_h // 2), emph_text, font=emph_font, fill=hl_color, stroke_width=4, stroke_fill=(0, 0, 0, 255))
             img.save(output_png, format="PNG")
             return
 
-        # Prepare word text and dimensions
+        # Prepare normal base font for consistent slot layout
+        normal_font = self._load_pil_font(font_family, base_font_size)
+
+        # Prepare word items with base measurements (FIXED SLOT LAYOUT)
         word_items = []
         for idx, w_dict in enumerate(words_line):
             raw_w = str(w_dict.get("word", "")).strip()
@@ -551,46 +557,53 @@ class SkiaSubtitleRenderer:
             is_keyword = raw_w.lower() in keyword_list
             should_highlight = is_active or is_keyword
 
-            f = active_font if should_highlight else normal_font
-            bbox = draw.textbbox((0, 0), w_text, font=f)
-            w_width = max(1, bbox[2] - bbox[0])
-            w_height = max(1, bbox[3] - bbox[1])
+            bbox = draw.textbbox((0, 0), w_text, font=normal_font)
+            base_w = max(1, bbox[2] - bbox[0])
+            base_h = max(1, bbox[3] - bbox[1])
             word_items.append({
                 "index": idx,
                 "text": w_text,
-                "width": w_width,
-                "height": w_height,
+                "base_w": base_w,
+                "base_h": base_h,
+                "bbox": bbox,
                 "is_active": should_highlight,
-                "font": f,
             })
 
         if not word_items:
             img.save(output_png, format="PNG")
             return
 
+        # Natural word spacing calculation
+        space_bbox = draw.textbbox((0, 0), " ", font=normal_font)
+        natural_space_w = max(14, space_bbox[2] - space_bbox[0])
         user_spacing = style.get("word_spacing")
-        spacing = int(user_spacing * 2.2) if user_spacing is not None else max(16, int(base_font_size * 0.28))
+        if user_spacing is not None:
+            spacing = int(user_spacing * 2.2)
+        else:
+            spacing = natural_space_w + max(16, int(base_font_size * 0.26))
         if preset_id == "kinetic_word_box":
-            spacing = max(spacing, 24)
+            spacing = max(spacing, 28)
 
-        total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
+        total_text_width = sum(item["base_w"] for item in word_items) + (len(word_items) - 1) * spacing
 
         # Auto-scale font if line exceeds safe margins (920px)
         max_safe_width = 920
         if total_text_width > max_safe_width:
             scale_factor = max_safe_width / total_text_width
-            base_font_size = max(24, int(base_font_size * scale_factor))
+            base_font_size = max(22, int(base_font_size * scale_factor))
             normal_font = self._load_pil_font(font_family, base_font_size)
-            active_font_size = int(base_font_size * active_scale)
-            active_font = self._load_pil_font(font_family, active_font_size)
-            spacing = int(spacing * scale_factor)
+            spacing = max(14, int(spacing * scale_factor))
             for item in word_items:
-                f = active_font if item["is_active"] else normal_font
-                item["font"] = f
-                bbox = draw.textbbox((0, 0), item["text"], font=f)
-                item["width"] = max(1, bbox[2] - bbox[0])
-                item["height"] = max(1, bbox[3] - bbox[1])
-            total_text_width = sum(item["width"] for item in word_items) + (len(word_items) - 1) * spacing
+                bbox = draw.textbbox((0, 0), item["text"], font=normal_font)
+                item["base_w"] = max(1, bbox[2] - bbox[0])
+                item["base_h"] = max(1, bbox[3] - bbox[1])
+                item["bbox"] = bbox
+            total_text_width = sum(item["base_w"] for item in word_items) + (len(word_items) - 1) * spacing
+
+        # Active font for highlights (scales outward around fixed slot centers)
+        active_scale = float(style.get("highlight_scale") or 1.15) if (style.get("highlight_bold") is not False or is_word_pop) else 1.0
+        active_font_size = int(base_font_size * active_scale)
+        active_font = self._load_pil_font(font_family, active_font_size)
 
         # Position calculation with Auto-Grid Dynamic Centering
         default_pos_y = float(style.get("position_y") if style.get("position_y") is not None else style.get("position_y_pct", 78))
@@ -600,7 +613,7 @@ class SkiaSubtitleRenderer:
         if autogrid_enabled and layout_events and time_sec is not None:
             active_layout = self._get_layout_at_time(layout_events, time_sec)
             if active_layout in ("double", "grid", "2-grid", "split"):
-                pos_y_pct = float(style.get("grid_position_y") or 50.0)  # Center at 2-grid intersection dividing line
+                pos_y_pct = float(style.get("grid_position_y") or 50.0)
             else:
                 pos_y_pct = default_pos_y
         elif autogrid_enabled and style.get("reframe_layout") in ("double", "grid", "2-grid", "split") and not layout_events:
@@ -610,12 +623,12 @@ class SkiaSubtitleRenderer:
 
         center_y = int(self._height * (pos_y_pct / 100.0))
         center_x = self._width // 2
-        line_height = max(item["height"] for item in word_items)
+        line_height = max(item["base_h"] for item in word_items)
 
-        # ─── 1. Background / Card Shapes ──────────────────────────────────────
+        # ─── 1. Background / Card Shapes (Fixed Dimensions Across Line) ────────
         user_pad = style.get("bg_padding")
-        card_pad_x = int(user_pad * 1.5) if user_pad is not None else max(24, int(base_font_size * 0.45))
-        card_pad_y = int(user_pad * 0.8) if user_pad is not None else max(14, int(base_font_size * 0.32))
+        card_pad_x = int(user_pad * 1.5) if user_pad is not None else max(32, int(base_font_size * 0.6))
+        card_pad_y = int(user_pad * 0.8) if user_pad is not None else max(16, int(base_font_size * 0.38))
 
         is_podcast = preset_id in ("podcast_pro", "podcast_dialogue")
         mic_extra_width = 72 if is_podcast else 0
@@ -627,6 +640,21 @@ class SkiaSubtitleRenderer:
         card_bottom = center_y + line_height // 2 + card_pad_y
 
         start_x = card_left + card_pad_x + mic_extra_width if is_podcast else (center_x - total_text_width // 2)
+
+        # Compute fixed slots for each word on this line
+        word_slots = []
+        curr_x = start_x
+        for item in word_items:
+            mid_x = curr_x + item["base_w"] / 2.0
+            word_slots.append({
+                "x": curr_x,
+                "mid_x": mid_x,
+                "base_w": item["base_w"],
+                "base_h": item["base_h"],
+                "bbox": item["bbox"],
+                "item": item,
+            })
+            curr_x += item["base_w"] + spacing
 
         if preset_id == "glassmorphism":
             # Frosted glass card with glossy border & top inner shine
@@ -655,17 +683,17 @@ class SkiaSubtitleRenderer:
             # Dark charcoal pill with emerald border & MIC dot
             draw.rounded_rectangle(
                 [card_left, card_top, card_right, card_bottom],
-                radius=999,
+                radius=min(card_total_w, card_bottom - card_top) // 2,
                 fill=(18, 18, 22, int(255 * float(style.get("bg_opacity", 0.85)))),
                 outline=(16, 185, 129, 160),
                 width=2,
             )
             # Emerald MIC indicator dot + text
-            dot_cx = card_left + card_pad_x + 10
+            dot_cx = card_left + 24
             dot_cy = center_y
-            draw.ellipse([dot_cx - 6, dot_cy - 6, dot_cx + 6, dot_cy + 6], fill=(16, 185, 129, 255))
-            mic_font = self._load_pil_font("Inter", max(14, int(base_font_size * 0.35)))
-            draw.text((dot_cx + 12, dot_cy - 9), "MIC", font=mic_font, fill=(16, 185, 129, 230))
+            draw.ellipse([dot_cx - 5, dot_cy - 5, dot_cx + 5, dot_cy + 5], fill=(16, 185, 129, 255))
+            mic_font = self._load_pil_font("Inter", max(13, int(base_font_size * 0.32)))
+            draw.text((dot_cx + 10, dot_cy - 8), "MIC", font=mic_font, fill=(16, 185, 129, 240))
 
         elif preset_id in ("modern_mono", "tech_mono"):
             # Cyber Terminal window with mini header bar
@@ -720,68 +748,80 @@ class SkiaSubtitleRenderer:
             # Top progress accent bar for line reveal
             draw.line([card_left + 10, card_top + 4, card_right - 10, card_top + 4], fill=self._parse_rgba(style.get("highlight_color", "#38BDF8"), 1.0), width=3)
 
-        # ─── 2. Draw Words with Highlights & Effects ───────────────────────────
-        cur_x = start_x
+        # ─── 2. Draw Words in Fixed Slots with In-Place Scaling ────────────────
         normal_color = self._parse_rgba(style.get("text_color", "#FFFFFF"), 1.0)
         highlight_color = self._parse_rgba(style.get("highlight_color", "#38BDF8"), 1.0)
 
-        for item in word_items:
+        for slot in word_slots:
+            item = slot["item"]
             w_text = item["text"]
-            w_w = item["width"]
             is_active = item["is_active"]
-            f = item["font"]
 
-            word_x = cur_x
-            word_y = center_y - item["height"] // 2
+            if is_active:
+                f = active_font
+                act_bbox = draw.textbbox((0, 0), w_text, font=f)
+                act_w = max(1, act_bbox[2] - act_bbox[0])
+                act_h = max(1, act_bbox[3] - act_bbox[1])
+                # Center active word symmetrically over its slot midpoint
+                word_x = int(slot["mid_x"] - act_w / 2.0) - act_bbox[0]
+                word_y = int(center_y - act_h / 2.0) - act_bbox[1]
+            else:
+                f = normal_font
+                act_w = slot["base_w"]
+                act_h = slot["base_h"]
+                base_bbox = slot["bbox"]
+                word_x = slot["x"] - base_bbox[0]
+                word_y = int(center_y - act_h / 2.0) - base_bbox[1]
 
             if preset_id == "kinetic_word_box" and is_active:
                 # Solid rounded badge behind active word
-                badge_pad_x = max(10, int(base_font_size * 0.25))
-                badge_pad_y = max(6, int(base_font_size * 0.14))
+                badge_pad_x = max(16, int(base_font_size * 0.35))
+                badge_pad_y = max(8, int(base_font_size * 0.20))
                 badge_box = [
-                    word_x - badge_pad_x,
-                    word_y - badge_pad_y,
-                    word_x + w_w + badge_pad_x,
-                    word_y + item["height"] + badge_pad_y,
+                    int(slot["mid_x"] - (act_w + badge_pad_x * 2) / 2.0),
+                    int(center_y - (act_h + badge_pad_y * 2) / 2.0),
+                    int(slot["mid_x"] + (act_w + badge_pad_x * 2) / 2.0),
+                    int(center_y + (act_h + badge_pad_y * 2) / 2.0),
                 ]
-                badge_color = self._parse_rgba(style.get("highlight_color", "#FF0055"), 1.0)
-                draw.rounded_rectangle(badge_box, radius=8, fill=badge_color)
-                # Text inside badge is crisp white
+                badge_color_hex = style.get("badge_bg_color") or style.get("highlight_badge_color") or "#FF0055"
+                badge_color = self._parse_rgba(badge_color_hex, 1.0)
+                draw.rounded_rectangle(badge_box, radius=10, fill=badge_color)
+                # Crisp white text inside badge
                 draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255))
 
             elif preset_id in ("neon_tube", "neon_glow"):
                 if is_active:
-                    # Hot pink / cyan multi-pass bold neon tube glow
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 0, 127, 80), stroke_width=10, stroke_fill=(255, 0, 127, 80))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 0, 127, 180), stroke_width=5, stroke_fill=(255, 0, 127, 180))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(255, 0, 127, 255))
+                    # Hot magenta multi-pass neon tube glow
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 0, 127, 40), stroke_width=12, stroke_fill=(255, 0, 127, 40))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 0, 127, 120), stroke_width=6, stroke_fill=(255, 0, 127, 120))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=2, stroke_fill=(255, 0, 127, 255))
                 else:
-                    # Solid high-contrast cyan-white typography with dark outer shadow
-                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220), stroke_width=4, stroke_fill=(0, 0, 0, 220))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(240, 253, 250, 255), stroke_width=3, stroke_fill=(6, 182, 212, 255))
+                    # Cyan outer stroke & crisp light typography
+                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(240, 253, 250, 255), stroke_width=2, stroke_fill=(6, 182, 212, 230))
 
             elif preset_id == "dual_layer":
-                # 3D depth with purple backlight layer behind white text
-                draw.text((word_x, word_y + 5), w_text, font=f, fill=(124, 58, 237, 200), stroke_width=6, stroke_fill=(124, 58, 237, 200))
+                # 3D depth with purple backlight layer behind sharp text
+                draw.text((word_x, word_y + 4), w_text, font=f, fill=(124, 58, 237, 160), stroke_width=5, stroke_fill=(124, 58, 237, 160))
                 if is_active:
                     draw.text((word_x, word_y), w_text, font=f, fill=(251, 191, 36, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
                 else:
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0, 240))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0, 230))
 
             elif preset_id == "outline_stack":
-                # 3D anaglyphic red and cyan offset outline stack
-                draw.text((word_x - 3, word_y - 2), w_text, font=f, fill=(255, 0, 0, 200), stroke_width=3, stroke_fill=(255, 0, 0, 200))
-                draw.text((word_x + 3, word_y + 2), w_text, font=f, fill=(0, 255, 255, 200), stroke_width=3, stroke_fill=(0, 255, 255, 200))
+                # 3D anaglyphic red and cyan offset outline stack (hollow outline layers, zero solid red fill)
+                draw.text((word_x - 3, word_y - 2), w_text, font=f, fill=(0, 0, 0, 0), stroke_width=2, stroke_fill=(255, 50, 50, 220))
+                draw.text((word_x + 3, word_y + 2), w_text, font=f, fill=(0, 0, 0, 0), stroke_width=2, stroke_fill=(0, 240, 255, 220))
                 if is_active:
                     draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
                 else:
-                    draw.text((word_x, word_y), w_text, font=f, fill=(0, 0, 0, 0), stroke_width=2, stroke_fill=(255, 255, 255, 255))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(240, 240, 240, 255), stroke_width=2, stroke_fill=(0, 0, 0, 230))
 
             elif preset_id == "retro_chrome":
-                # Heavy 3D shadow + chrome / gold fill
+                # Metallic chrome reflection with gold active word
                 if is_active:
                     draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 240))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(251, 191, 36, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(251, 191, 36, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
                 else:
                     draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 200))
                     draw.text((word_x, word_y), w_text, font=f, fill=(226, 232, 240, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
@@ -798,7 +838,7 @@ class SkiaSubtitleRenderer:
             elif preset_id == "fire_emphasis":
                 # Fiery orange-red highlight with warm glow
                 if is_active:
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 69, 0, 140), stroke_width=12, stroke_fill=(255, 69, 0, 140))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 69, 0, 140), stroke_width=10, stroke_fill=(255, 69, 0, 140))
                     draw.text((word_x, word_y), w_text, font=f, fill=(255, 69, 0, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
                 else:
                     draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
@@ -807,11 +847,11 @@ class SkiaSubtitleRenderer:
             elif preset_id == "hormozi_pop":
                 # Heavy impact center pop: solid black outline + lime active highlight
                 if is_active:
-                    draw.text((word_x + 4, word_y + 5), w_text, font=f, fill=(0, 0, 0, 255))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(0, 255, 102, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
+                    draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 255))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(0, 255, 102, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
                 else:
-                    draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 240))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
+                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 240))
+                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
 
             elif preset_id in ("bold_impact", "bold_impact_stroke"):
                 # Heavy Anton impact with thick outline
@@ -826,7 +866,7 @@ class SkiaSubtitleRenderer:
                 # Active word with cyan underline bar
                 draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 180))
                 draw.text((word_x, word_y), w_text, font=f, fill=(56, 189, 248, 255))
-                draw.line([word_x, word_y + item["height"] + 4, word_x + w_w, word_y + item["height"] + 4], fill=(56, 189, 248, 255), width=4)
+                draw.line([word_x, word_y + act_h + 4, word_x + act_w, word_y + act_h + 4], fill=(56, 189, 248, 255), width=4)
 
             elif is_active:
                 # Glowing active word highlight with solid dark drop shadow
@@ -852,18 +892,17 @@ class SkiaSubtitleRenderer:
                 strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
                 draw.text((word_x, word_y), w_text, font=f, fill=normal_color, stroke_width=strk_width, stroke_fill=strk_c)
 
-            cur_x += w_w + spacing
-
         img.save(output_png, format="PNG")
 
     def _group_words_into_lines(self, words: list, max_per_line: int) -> list[list[dict]]:
-        """Group words into lines respecting word count and natural speech pauses."""
-        max_chars = max(40, max_per_line * 16)
+        """Group words into lines respecting word count, punctuation, and natural speech pauses."""
+        import re
+        max_chars = max(28, max_per_line * 14)
         lines = []
         current_line = []
         current_chars = 0
 
-        for w in words:
+        for i, w in enumerate(words):
             word_text = str(w.get("word", "")).strip()
             if not word_text:
                 continue
@@ -875,7 +914,10 @@ class SkiaSubtitleRenderer:
             if current_line:
                 prev_end = float(current_line[-1].get("end", 0))
                 curr_start = float(w.get("start", 0))
-                if curr_start - prev_end > 0.75:
+                if curr_start - prev_end > 0.5:
+                    force_new = True
+                prev_word = str(current_line[-1].get("word", "")).strip()
+                if bool(re.search(r"[.!?;:]$", prev_word)) and len(current_line) >= 2:
                     force_new = True
 
             if force_new or word_count > max_per_line or (word_count > 1 and new_chars > max_chars):
