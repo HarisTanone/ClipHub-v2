@@ -205,9 +205,10 @@ def _get_configured_api_key(override_key: Optional[str] = None) -> str:
 
     try:
         from src.infrastructure.system_config_store import get_system_setting
-        db_key = get_system_setting("ELEVENLABS_API_KEY") or get_system_setting("ELEVEN_API_KEY")
-        if db_key and str(db_key).strip():
-            return str(db_key).strip()
+        for k in ["ELEVENLABS_API_KEY", "ELEVEN_API_KEY", "eleven_api_key", "elevenlabs_api_key"]:
+            db_key = get_system_setting(k)
+            if db_key and str(db_key).strip():
+                return str(db_key).strip()
     except Exception:
         pass
 
@@ -216,6 +217,8 @@ def _get_configured_api_key(override_key: Optional[str] = None) -> str:
         or getattr(settings, "ELEVEN_API_KEY", "")
         or os.getenv("ELEVENLABS_API_KEY", "")
         or os.getenv("ELEVEN_API_KEY", "")
+        or os.getenv("eleven_api_key", "")
+        or os.getenv("elevenlabs_api_key", "")
     ).strip()
 
 

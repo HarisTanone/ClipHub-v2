@@ -542,3 +542,15 @@ def test_all_style_editor_subtitle_presets():
         assert cfg["fontFamily"] is not None
 
 
+@pytest.mark.asyncio
+async def test_edge_tts_helper():
+    from src.infrastructure.edge_tts_helper import EdgeTTSHelper
+
+    helper = EdgeTTSHelper()
+    voice = helper._resolve_voice("", "Bumi berhenti berputar dalam sekejap.")
+    assert "id-ID" in voice
+
+    voice_en = helper._resolve_voice("", "What if the earth stopped spinning right now?")
+    assert "en-US" in voice_en
+
+

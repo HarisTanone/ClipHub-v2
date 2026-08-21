@@ -36,6 +36,26 @@ DEEPGRAM_VOICES = {
 DEFAULT_VOICE = "aura-2-thalia-en"
 
 
+def _get_deepgram_api_key(override_key: Optional[str] = None) -> str:
+    """Retrieve Deepgram API key from override, runtime system config DB, or settings."""
+    if override_key and override_key.strip():
+        return override_key.strip()
+
+    try:
+        from src.infrastructure.system_config_store import get_system_setting
+        for k in ["DEEPGRAM_API_KEY", "deepgram_api_key"]:
+            db_key = get_system_setting(k)
+            if db_key and str(db_key).strip():
+                return str(db_key).strip()
+    except Exception:
+        pass
+
+    return (
+        getattr(settings, "DEEPGRAM_API_KEY", "")
+        or os.getenv("DEEPGRAM_API_KEY", "")
+    ).strip()
+
+
 class DeepgramTTS:
     """Text-to-Speech via Deepgram Aura API.
 
@@ -43,11 +63,11 @@ class DeepgramTTS:
     the AI Video Generator pipeline — one call per scene narration.
     """
 
-    def __init__(self, output_dir: Optional[str] = None):
-        self._api_key = settings.DEEPGRAM_API_KEY
+    def __init__(self, output_dir: Optional[str] = None, api_key: Optional[str] = None):
+        self._api_key = _get_deepgram_api_key(api_key)
         self._base_url = "https://api.deepgram.com/v1/speak"
         self._output_dir = output_dir or os.path.join(settings.OUTPUT_DIR, "tts")
-        self._timeout = settings.DEEPGRAM_TTS_TIMEOUT
+        self._timeout = getattr(settings, "DEEPGRAM_TTS_TIMEOUT", 45)
 
     async def synthesize(
         self,

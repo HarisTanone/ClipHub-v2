@@ -1361,7 +1361,8 @@ class SkiaHookRenderer:
                 "-map", "[outv]",
                 "-map", "0:a?",
                 *get_video_encoder_args("medium"),
-                "-c:a", "copy",
+                "-c:a", "aac",
+                "-b:a", "192k",
                 "-movflags", "+faststart",
                 output_path,
             ]

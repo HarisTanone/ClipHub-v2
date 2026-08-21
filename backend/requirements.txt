@@ -68,3 +68,7 @@ google-auth>=2.23.0
 
 # Skia subtitle rendering (optional — falls back to FFmpeg if not installed)
 # skia-python>=87.0
+
+# Edge TTS (failproof zero-API-key fallback)
+edge-tts>=7.0.0
+

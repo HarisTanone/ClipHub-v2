@@ -880,17 +880,18 @@ class VideoGenerator:
     async def _step_generate_tts(
         self, scenes: list[dict], job: VideoGenJob, work_dir: str
     ) -> list[dict]:
-        """Step 4: Generate TTS audio per scene via ElevenLabs or Deepgram."""
+        """Step 4: Generate TTS audio per scene via ElevenLabs, Deepgram, or failproof EdgeTTS."""
         tts_dir = os.path.join(work_dir, "tts")
         os.makedirs(tts_dir, exist_ok=True)
 
         provider = (job.tts_provider or getattr(settings, "VIDEO_GEN_TTS_PROVIDER", "elevenlabs") or "elevenlabs").lower()
         if "deepgram" in provider or (job.voice and "aura" in job.voice.lower()):
-            provider = "deepgram"
+            primary_provider = "deepgram"
         else:
-            provider = "elevenlabs"
+            primary_provider = "elevenlabs"
 
-        if provider == "elevenlabs":
+        # ── 1. Try Primary Provider ──
+        if primary_provider == "elevenlabs":
             from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
             tts = ElevenLabsTTS(output_dir=tts_dir)
             voice_id = job.voice or getattr(settings, "ELEVENLABS_VOICE_ID", "rUOpAdbAl56KxO00wR5D")
@@ -907,7 +908,7 @@ class VideoGenerator:
                 logger.warning(f"video_gen: ElevenLabs synthesize_scenes failed ({exc}), falling back to individual calls")
                 for i, scene in enumerate(scenes):
                     narration = (scene.get("narration") or "").strip()
-                    if not narration:
+                    if not narration or scene.get("tts_path"):
                         continue
                     try:
                         audio_path = await tts.synthesize(
@@ -917,8 +918,8 @@ class VideoGenerator:
                             speed=job.speed,
                             output_path=os.path.join(tts_dir, f"tts_{i + 1}.mp3"),
                         )
-                        if audio_path:
-                            dur = await self._media_duration(audio_path)
+                        if audio_path and os.path.exists(audio_path):
+                            dur = await self._media_duration(audio_path, fallback=5.0)
                             scene["tts_path"] = audio_path
                             scene["tts_duration"] = dur
                     except Exception as e:
@@ -938,8 +939,8 @@ class VideoGenerator:
             except Exception as exc:
                 logger.warning(f"video_gen: Deepgram synthesize_scenes failed ({exc}), falling back to individual calls")
                 for i, scene in enumerate(scenes):
-                    narration = scene.get("narration", "")
-                    if not narration:
+                    narration = (scene.get("narration") or "").strip()
+                    if not narration or scene.get("tts_path"):
                         continue
                     try:
                         audio_path = await tts.synthesize(
@@ -948,12 +949,66 @@ class VideoGenerator:
                             speed=job.speed,
                             output_path=os.path.join(tts_dir, f"tts_{i + 1}.mp3"),
                         )
-                        if audio_path:
-                            duration = await self._media_duration(audio_path)
+                        if audio_path and os.path.exists(audio_path):
+                            duration = await self._media_duration(audio_path, fallback=5.0)
                             scene["tts_path"] = audio_path
                             scene["tts_duration"] = duration
                     except Exception as e:
                         logger.warning(f"video_gen: Deepgram TTS failed for scene {i + 1}: {e}")
+
+        # ── 2. Fallback to Secondary Provider for any failed scenes ──
+        missing_scenes = [s for s in scenes if not s.get("tts_path") and (s.get("narration") or "").strip()]
+        if missing_scenes:
+            sec_provider = "deepgram" if primary_provider == "elevenlabs" else "elevenlabs"
+            logger.info(f"video_gen: {len(missing_scenes)} scenes missing audio, attempting secondary provider '{sec_provider}'")
+            if sec_provider == "deepgram":
+                try:
+                    from src.infrastructure.deepgram_tts import DeepgramTTS
+                    sec_tts = DeepgramTTS(output_dir=tts_dir)
+                    for i, scene in enumerate(scenes):
+                        if not scene.get("tts_path") and (scene.get("narration") or "").strip():
+                            a_path = await sec_tts.synthesize(text=scene["narration"].strip(), speed=job.speed)
+                            if a_path and os.path.exists(a_path):
+                                dur = await self._media_duration(a_path, fallback=5.0)
+                                scene["tts_path"] = a_path
+                                scene["tts_duration"] = dur
+                except Exception as sec_err:
+                    logger.warning(f"video_gen: secondary Deepgram fallback failed: {sec_err}")
+            else:
+                try:
+                    from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
+                    sec_tts = ElevenLabsTTS(output_dir=tts_dir)
+                    for i, scene in enumerate(scenes):
+                        if not scene.get("tts_path") and (scene.get("narration") or "").strip():
+                            a_path = await sec_tts.synthesize(text=scene["narration"].strip(), speed=job.speed)
+                            if a_path and os.path.exists(a_path):
+                                dur = await self._media_duration(a_path, fallback=5.0)
+                                scene["tts_path"] = a_path
+                                scene["tts_duration"] = dur
+                except Exception as sec_err:
+                    logger.warning(f"video_gen: secondary ElevenLabs fallback failed: {sec_err}")
+
+        # ── 3. Failproof Tertiary Fallback: EdgeTTS (Free Neural TTS) ──
+        still_missing = [s for s in scenes if not s.get("tts_path") and (s.get("narration") or "").strip()]
+        if still_missing:
+            logger.info(f"video_gen: {len(still_missing)} scenes still missing audio, applying zero-quota EdgeTTS Neural fallback")
+            try:
+                from src.infrastructure.edge_tts_helper import EdgeTTSHelper
+                edge_helper = EdgeTTSHelper(output_dir=tts_dir)
+                for i, scene in enumerate(scenes):
+                    if not scene.get("tts_path") and (scene.get("narration") or "").strip():
+                        a_path = await edge_helper.synthesize(
+                            text=scene["narration"].strip(),
+                            speed=job.speed,
+                            output_path=os.path.join(tts_dir, f"edge_scene_{i + 1}.mp3"),
+                        )
+                        if a_path and os.path.exists(a_path):
+                            dur = await self._media_duration(a_path, fallback=5.0)
+                            scene["tts_path"] = a_path
+                            scene["tts_duration"] = dur
+                            logger.info(f"video_gen: scene {i + 1} rescued with EdgeTTS ({dur:.2f}s)")
+            except Exception as edge_err:
+                logger.error(f"video_gen: EdgeTTS fallback error: {edge_err}")
 
         # Ensure audio_path and audio_duration aliases
         for scene in scenes:
@@ -1339,7 +1394,7 @@ class VideoGenerator:
 
         for index, entry in enumerate(entries):
             duration = max(0.1, float(entry["duration"]))
-            audio_path = entry.get("tts_path")
+            audio_path = entry.get("tts_path") or entry.get("audio_path")
             if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
                 inputs.extend(["-i", audio_path])
             else:
@@ -1520,7 +1575,7 @@ class VideoGenerator:
         ]
         return await self._run_ffmpeg(cmd, timeout=300)
 
-    async def _media_duration(self, path: str, fallback: float) -> float:
+    async def _media_duration(self, path: str, fallback: float = 10.0) -> float:
         if not path or not os.path.exists(path):
             return fallback
         cmd = [
