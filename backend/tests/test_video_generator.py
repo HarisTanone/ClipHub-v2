@@ -501,3 +501,44 @@ async def test_ai_director_curation_pass():
     assert parsed["curation"][0]["chosen_option_index"] == 0
 
 
+def test_all_style_editor_hook_presets():
+    from src.infrastructure.skia_hook_renderer import SkiaHookRenderer, SKIA_HOOK_PRESETS
+
+    renderer = SkiaHookRenderer()
+    sample_text = "WHAT IF EARTH STOPPED SPINNING... RIGHT NOW?"
+
+    expected_hook_presets = [
+        "news_viralin_badge", "news_portal_pantau", "news_offset_box",
+        "brutalist_bracket", "quote_strip_tape", "podcast_lower_third",
+        "quote_card", "waveform_pulse", "breaking_tape", "mic_drop",
+        "split_panel", "kinetic_stack", "glass_flash", "marker_swipe",
+        "signal_scan", "comment_reply", "search_prompt", "countdown_list", "pov_stamp",
+        "skia_impact_badge", "skia_neon_cyberpunk", "skia_frosted_pill",
+    ]
+
+    for preset_id in expected_hook_presets:
+        assert preset_id in SKIA_HOOK_PRESETS
+        frame = renderer.generate_hook_frame(sample_text, hook_style=preset_id)
+        assert frame.size == (1080, 1920)
+        assert frame.mode == "RGBA"
+
+
+def test_all_style_editor_subtitle_presets():
+    from src.application.video_gen_captions import normalize_subtitle_style, ALL_SUBTITLE_PRESETS
+
+    presets_to_test = [
+        "hormozi_pop", "neon_glow", "devon_clean", "podcast_dialogue",
+        "cinematic_slate", "fire_emphasis", "tech_mono", "gold_luxury",
+        "glass_blur", "classic_karaoke", "bold_impact",
+    ]
+
+    for p in presets_to_test:
+        assert p in ALL_SUBTITLE_PRESETS
+        cfg = normalize_subtitle_style({"stylePreset": p, "fontSize": 56})
+        assert cfg["stylePreset"] == p
+        assert cfg["fontSize"] == 56
+        assert cfg["color"] is not None
+        assert cfg["highlightColor"] is not None
+        assert cfg["fontFamily"] is not None
+
+

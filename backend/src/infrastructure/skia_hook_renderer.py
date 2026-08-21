@@ -272,6 +272,345 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
         "uppercase": False,
         "duration": 3.5,
     },
+    # ─── 19 StyleEditorModal Hook Presets ────────────────────────────────────
+    "news_viralin_badge": {
+        "name": "#VIRALIN Badge",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#09090B",
+        "bg_color": "#EAB308",
+        "bg_opacity": 1.0,
+        "bg_radius": 14,
+        "bg_padding_x": 36,
+        "bg_padding_y": 20,
+        "badge_enabled": True,
+        "badge_text": "#VIRALIN",
+        "badge_bg": "#1D4ED8",
+        "badge_color": "#FFFFFF",
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "news_portal_pantau": {
+        "name": "News Portal Notch",
+        "font_family": "Inter",
+        "font_size": 46,
+        "font_weight": "900",
+        "text_color": "#09090B",
+        "bg_color": "#FFFFFF",
+        "bg_opacity": 1.0,
+        "bg_radius": 14,
+        "bg_padding_x": 36,
+        "bg_padding_y": 22,
+        "badge_enabled": True,
+        "badge_text": "NEWS",
+        "badge_bg": "#DC2626",
+        "badge_color": "#FFFFFF",
+        "position_y": 46,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "news_offset_box": {
+        "name": "Detik Red Box",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#FFFFFF",
+        "bg_color": "#DC2626",
+        "bg_opacity": 1.0,
+        "bg_radius": 8,
+        "bg_padding_x": 36,
+        "bg_padding_y": 20,
+        "bg_shadow_color": "#000000",
+        "bg_shadow_offset_y": 8,
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "brutalist_bracket": {
+        "name": "Brutalist Bracket",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#09090B",
+        "bg_color": "#FFFFFF",
+        "bg_opacity": 1.0,
+        "bg_radius": 6,
+        "corner_accents": True,
+        "bg_padding_x": 40,
+        "bg_padding_y": 22,
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "quote_strip_tape": {
+        "name": "Quote Tape Strips",
+        "font_family": "Montserrat",
+        "font_size": 44,
+        "font_weight": "900",
+        "text_color": "#09090B",
+        "is_tape_strips": True,
+        "box_color": "#FFFFFF",
+        "badge_enabled": True,
+        "badge_text": "“ QUOTE",
+        "badge_bg": "#0D9488",
+        "badge_color": "#FFFFFF",
+        "position_y": 45,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "podcast_lower_third": {
+        "name": "On-Air Lower",
+        "font_family": "Barlow Condensed",
+        "font_size": 46,
+        "font_weight": "900",
+        "text_color": "#F8FAFC",
+        "bg_color": "#06111F",
+        "bg_opacity": 0.85,
+        "bg_radius": 14,
+        "badge_enabled": True,
+        "badge_text": "ON AIR",
+        "badge_bg": "#16F2B3",
+        "badge_color": "#000000",
+        "position_y": 78,
+        "uppercase": True,
+        "duration": 3.5,
+    },
+    "quote_card": {
+        "name": "Quote Card",
+        "font_family": "Playfair Display",
+        "font_size": 46,
+        "font_weight": "800",
+        "text_color": "#171717",
+        "bg_color": "#F5EFE1",
+        "bg_opacity": 0.98,
+        "bg_radius": 16,
+        "bg_padding_x": 38,
+        "bg_padding_y": 24,
+        "badge_enabled": True,
+        "badge_text": "QUOTE",
+        "badge_bg": "#FF4D2D",
+        "badge_color": "#FFFFFF",
+        "position_y": 45,
+        "uppercase": False,
+        "duration": 3.5,
+    },
+    "waveform_pulse": {
+        "name": "Waveform Pulse",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#FFFFFF",
+        "gradient_enabled": True,
+        "gradient_from": "#FFFFFF",
+        "gradient_to": "#14F1D9",
+        "glow_enabled": True,
+        "glow_color": "#14F1D9",
+        "glow_size": 24,
+        "bg_color": "#020617",
+        "bg_opacity": 0.85,
+        "bg_radius": 16,
+        "badge_enabled": True,
+        "badge_text": "LIVE AUDIO",
+        "badge_bg": "#14F1D9",
+        "badge_color": "#000000",
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "breaking_tape": {
+        "name": "Breaking Tape",
+        "font_family": "Archivo Black",
+        "font_size": 50,
+        "font_weight": "900",
+        "text_color": "#111111",
+        "bg_color": "#FFDD2D",
+        "bg_opacity": 1.0,
+        "bg_radius": 10,
+        "badge_enabled": True,
+        "badge_text": "HOT TAKE",
+        "badge_bg": "#FF4D2D",
+        "badge_color": "#FFFFFF",
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "mic_drop": {
+        "name": "Mic Drop",
+        "font_family": "Anton",
+        "font_size": 56,
+        "font_weight": "900",
+        "text_color": "#FFFFFF",
+        "gradient_enabled": True,
+        "gradient_from": "#FFFFFF",
+        "gradient_to": "#FF4D7D",
+        "glow_enabled": True,
+        "glow_color": "#FF4D7D",
+        "glow_size": 24,
+        "bg_color": "#16050C",
+        "bg_opacity": 0.88,
+        "bg_radius": 16,
+        "badge_enabled": True,
+        "badge_text": "MIC DROP",
+        "badge_bg": "#FF4D7D",
+        "badge_color": "#FFFFFF",
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "split_panel": {
+        "name": "Split Panel",
+        "font_family": "Inter",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#F8FAFC",
+        "bg_color": "#0F172A",
+        "bg_opacity": 0.92,
+        "bg_border_color": "#38BDF8",
+        "bg_border_width": 3,
+        "bg_radius": 14,
+        "position_y": 46,
+        "uppercase": False,
+        "duration": 3.0,
+    },
+    "kinetic_stack": {
+        "name": "Kinetic Stack",
+        "font_family": "Archivo Black",
+        "font_size": 52,
+        "font_weight": "900",
+        "text_color": "#111827",
+        "bg_color": "#F97316",
+        "bg_opacity": 1.0,
+        "bg_radius": 12,
+        "position_y": 45,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "glass_flash": {
+        "name": "Glass Flash",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "800",
+        "text_color": "#F8FAFC",
+        "glow_enabled": True,
+        "glow_color": "#C084FC",
+        "glow_size": 20,
+        "bg_color": "#1E1528",
+        "bg_opacity": 0.85,
+        "bg_border_color": "#C084FC",
+        "bg_border_width": 2,
+        "bg_radius": 16,
+        "badge_enabled": True,
+        "badge_text": "FOCUS",
+        "badge_bg": "#C084FC",
+        "badge_color": "#000000",
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "marker_swipe": {
+        "name": "Marker Swipe",
+        "font_family": "Bebas Neue",
+        "font_size": 56,
+        "font_weight": "900",
+        "text_color": "#111827",
+        "bg_color": "#FDE047",
+        "bg_opacity": 0.96,
+        "bg_radius": 8,
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "signal_scan": {
+        "name": "Signal Scan",
+        "font_family": "Montserrat",
+        "font_size": 46,
+        "font_weight": "900",
+        "text_color": "#E0F2FE",
+        "glow_enabled": True,
+        "glow_color": "#22D3EE",
+        "glow_size": 20,
+        "bg_color": "#04141E",
+        "bg_opacity": 0.90,
+        "bg_border_color": "#22D3EE",
+        "bg_border_width": 2,
+        "bg_radius": 14,
+        "badge_enabled": True,
+        "badge_text": "SIGNAL",
+        "badge_bg": "#22D3EE",
+        "badge_color": "#000000",
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "comment_reply": {
+        "name": "Reply Comment",
+        "font_family": "Inter",
+        "font_size": 42,
+        "font_weight": "800",
+        "text_color": "#18181B",
+        "bg_color": "#FFFFFF",
+        "bg_opacity": 0.98,
+        "bg_radius": 18,
+        "badge_enabled": True,
+        "badge_text": "@viewer",
+        "badge_bg": "#E2E8F0",
+        "badge_color": "#334155",
+        "position_y": 26,
+        "uppercase": False,
+        "duration": 3.5,
+    },
+    "search_prompt": {
+        "name": "Search Prompt",
+        "font_family": "Inter",
+        "font_size": 42,
+        "font_weight": "800",
+        "text_color": "#F8FAFC",
+        "bg_color": "#0F172A",
+        "bg_opacity": 0.94,
+        "bg_border_color": "#38BDF8",
+        "bg_border_width": 2,
+        "bg_radius": 999,
+        "position_y": 24,
+        "uppercase": False,
+        "duration": 3.5,
+    },
+    "countdown_list": {
+        "name": "Countdown List",
+        "font_family": "Archivo Black",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#111827",
+        "bg_color": "#FACC15",
+        "bg_opacity": 1.0,
+        "bg_radius": 14,
+        "badge_enabled": True,
+        "badge_text": "03",
+        "badge_bg": "#111827",
+        "badge_color": "#FACC15",
+        "position_y": 45,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "pov_stamp": {
+        "name": "POV Stamp",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#FFFFFF",
+        "bg_color": "#FB7185",
+        "bg_opacity": 0.96,
+        "bg_radius": 12,
+        "badge_enabled": True,
+        "badge_text": "POV",
+        "badge_bg": "#881337",
+        "badge_color": "#FFFFFF",
+        "position_y": 44,
+        "uppercase": False,
+        "italic": True,
+        "duration": 3.0,
+    },
     # FFmpeg Hook Mappings
     "zoom_punch": {
         "name": "Zoom Punch",
@@ -682,7 +1021,7 @@ class SkiaHookRenderer:
         clean_key = hook_style
         if clean_key not in SKIA_HOOK_PRESETS and f"skia_{clean_key}" in SKIA_HOOK_PRESETS:
             clean_key = f"skia_{clean_key}"
-        cfg = dict(SKIA_HOOK_PRESETS.get(clean_key, SKIA_HOOK_PRESETS["skia_impact_badge"]))
+        cfg = dict(SKIA_HOOK_PRESETS.get(clean_key, SKIA_HOOK_PRESETS.get("news_viralin_badge", SKIA_HOOK_PRESETS["skia_impact_badge"])))
 
         # Normalize style_config overrides (support both camelCase and snake_case)
         if style_config:
@@ -692,6 +1031,26 @@ class SkiaHookRenderer:
                 cfg["font_family"] = str(style_config.get("fontFamily") or style_config.get("font_family"))
             if style_config.get("color") or style_config.get("text_color"):
                 cfg["text_color"] = str(style_config.get("color") or style_config.get("text_color"))
+            
+            # Custom box / background colors
+            custom_box = style_config.get("boxColor") or style_config.get("bgColor") or style_config.get("bg_color")
+            if custom_box:
+                cfg["bg_color"] = custom_box
+                cfg["box_color"] = custom_box
+                # If user explicitly specifies a box color, disable default preset gradient so they don't collide
+                if not style_config.get("gradientEnabled"):
+                    cfg.pop("bg_gradient_from", None)
+                    cfg.pop("bg_gradient_to", None)
+
+            if style_config.get("lineColor"):
+                cfg["line_color"] = style_config.get("lineColor")
+                cfg["badge_bg"] = style_config.get("lineColor")
+
+            if style_config.get("badgeEnabled") is not None:
+                cfg["badge_enabled"] = bool(style_config.get("badgeEnabled"))
+            if style_config.get("badgeText"):
+                cfg["badge_text"] = str(style_config.get("badgeText"))
+
             if style_config.get("gradientEnabled") is not None:
                 cfg["gradient_enabled"] = bool(style_config.get("gradientEnabled"))
             if style_config.get("gradientFrom"):
@@ -722,7 +1081,7 @@ class SkiaHookRenderer:
         if cfg.get("uppercase", False):
             display_text = display_text.upper()
 
-        font_size = int(cfg.get("font_size", 56))
+        font_size = int(cfg.get("font_size", 54))
         font = self._resolve_font(cfg.get("font_family", "Anton"), cfg.get("font_weight", "Bold"), font_size)
 
         # Wrap text (max 880px for 1080px canvas)
@@ -731,39 +1090,89 @@ class SkiaHookRenderer:
         if not lines:
             return Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
 
+        # Base 1080x1920 Canvas
+        frame = Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(frame)
+
         # Calculate bounding box of all lines
-        line_height = int(font_size * 1.24)
+        line_height = int(font_size * 1.28)
         line_widths = [font.getbbox(line)[2] - font.getbbox(line)[0] for line in lines]
         total_text_width = max(line_widths)
         total_text_height = line_height * len(lines)
 
-        # Padding & Card dimensions
+        pos_y_pct = cfg.get("position_y", 42)
+        center_y = int(self._height * (pos_y_pct / 100))
+
+        # ─────────────────────────────────────────────────────────────────────
+        # SPECIAL CASE: Tape Strips (`quote_strip_tape`)
+        # ─────────────────────────────────────────────────────────────────────
+        if cfg.get("is_tape_strips") or clean_key == "quote_strip_tape":
+            tape_pad_x = 28
+            tape_pad_y = 12
+            total_block_h = len(lines) * (line_height + 16)
+            start_y = center_y - total_block_h // 2
+
+            # 1. Floating Quote / Badge above first tape strip
+            if cfg.get("badge_enabled", True):
+                b_text = cfg.get("badge_text", "“ QUOTE")
+                b_font = self._resolve_font("Montserrat", "Bold", 24)
+                b_bbox = b_font.getbbox(b_text)
+                b_w = (b_bbox[2] - b_bbox[0]) + 32
+                b_h = 36
+                b_x = (self._width - b_w) // 2
+                b_y = start_y - b_h - 14
+                b_bg = self._hex_to_rgba(cfg.get("badge_bg", "#0D9488"), 1.0)
+                b_col = self._hex_to_rgba(cfg.get("badge_color", "#FFFFFF"), 1.0)
+                
+                # Draw badge pill shadow + pill
+                draw.rounded_rectangle([b_x, b_y + 4, b_x + b_w, b_y + b_h + 4], radius=18, fill=(0, 0, 0, 120))
+                draw.rounded_rectangle([b_x, b_y, b_x + b_w, b_y + b_h], radius=18, fill=b_bg)
+                draw.text((b_x + 16, b_y + 4), b_text, font=b_font, fill=b_col)
+
+            # 2. Draw each tape strip individually
+            tape_bg = self._hex_to_rgba(cfg.get("box_color", "#FFFFFF"), 1.0)
+            txt_col = self._hex_to_rgba(cfg.get("text_color", "#09090B"), 1.0)
+
+            for i, line in enumerate(lines):
+                lw = line_widths[i]
+                lx = (self._width - lw) // 2
+                ly = start_y + i * (line_height + 16)
+
+                strip_x1 = lx - tape_pad_x
+                strip_y1 = ly - tape_pad_y
+                strip_x2 = lx + lw + tape_pad_x
+                strip_y2 = ly + line_height + tape_pad_y
+
+                # Drop shadow
+                draw.rounded_rectangle([strip_x1, strip_y1 + 6, strip_x2, strip_y2 + 6], radius=10, fill=(0, 0, 0, 150))
+                # White tape strip
+                draw.rounded_rectangle([strip_x1, strip_y1, strip_x2, strip_y2], radius=10, fill=tape_bg)
+                # Text
+                draw.text((lx, ly), line, font=font, fill=txt_col)
+
+            return frame
+
+        # ─────────────────────────────────────────────────────────────────────
+        # STANDARD CARD / BADGE / CYBERPUNK / GLASS HOOKS
+        # ─────────────────────────────────────────────────────────────────────
         pad_x = cfg.get("bg_padding_x", 36)
-        pad_y = cfg.get("bg_padding_y", 20)
+        pad_y = cfg.get("bg_padding_y", 22)
         card_w = total_text_width + pad_x * 2
         card_h = total_text_height + pad_y * 2
         card_radius = cfg.get("bg_radius", 16)
         if card_radius >= 999:
             card_radius = card_h // 2
 
-        # Card center position
-        pos_y_pct = cfg.get("position_y", 38)
         card_x = (self._width - card_w) // 2
-        card_y = int(self._height * (pos_y_pct / 100) - card_h / 2)
+        card_y = center_y - card_h // 2
 
-        # Base 1080x1920 Canvas
-        frame = Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(frame)
-
-        # ── 1. Draw Card Background ──
+        # Draw Background Card
         if cfg.get("bg_gradient_from") and cfg.get("bg_gradient_to"):
-            # Gradient Pill Card (e.g. skia_impact_badge)
             grad_img = self._create_linear_gradient(card_w, card_h, cfg["bg_gradient_from"], cfg["bg_gradient_to"])
             mask = Image.new("L", (card_w, card_h), 0)
             mask_draw = ImageDraw.Draw(mask)
             mask_draw.rounded_rectangle([0, 0, card_w, card_h], radius=card_radius, fill=255)
 
-            # Bottom 3D shadow for impact badge
             if cfg.get("bg_shadow_color"):
                 sh_rgb = self._hex_to_rgba(cfg["bg_shadow_color"], 1.0)
                 sh_off_y = cfg.get("bg_shadow_offset_y", 6)
@@ -772,21 +1181,17 @@ class SkiaHookRenderer:
                     radius=card_radius,
                     fill=sh_rgb,
                 )
-
             frame.paste(grad_img, (card_x, card_y), mask)
 
         elif cfg.get("bg_opacity", 0) > 0 and cfg.get("bg_color"):
             bg_rgba = self._hex_to_rgba(cfg["bg_color"], cfg["bg_opacity"])
 
-            # Outer Shadow / Glow
-            if cfg.get("bg_shadow_blur") and cfg.get("bg_shadow_color"):
-                sh_rgba = self._hex_to_rgba(cfg["bg_shadow_color"], 0.6)
-                draw.rounded_rectangle(
-                    [card_x - 4, card_y - 2, card_x + card_w + 4, card_y + card_h + 8],
-                    radius=card_radius + 4,
-                    fill=sh_rgba,
-                )
-
+            # Outer Shadow
+            draw.rounded_rectangle(
+                [card_x, card_y + 6, card_x + card_w, card_y + card_h + 6],
+                radius=card_radius,
+                fill=(0, 0, 0, 160),
+            )
             draw.rounded_rectangle(
                 [card_x, card_y, card_x + card_w, card_y + card_h],
                 radius=card_radius,
@@ -803,35 +1208,44 @@ class SkiaHookRenderer:
                     width=cfg["bg_border_width"],
                 )
 
-            # Corner accents for Cyberpunk style
+            # Corner accents for Cyberpunk / Brutalist
             if cfg.get("corner_accents"):
-                accent_c = (255, 0, 127, 255)  # Hot Pink
-                bracket_sz = 14
-                # Top-Left Bracket
-                draw.line([card_x - 4, card_y - 4, card_x + bracket_sz, card_y - 4], fill=accent_c, width=3)
-                draw.line([card_x - 4, card_y - 4, card_x - 4, card_y + bracket_sz], fill=accent_c, width=3)
-                # Bottom-Right Bracket
-                draw.line([card_x + card_w + 4, card_y + card_h + 4, card_x + card_w - bracket_sz, card_y + card_h + 4], fill=accent_c, width=3)
-                draw.line([card_x + card_w + 4, card_y + card_h + 4, card_x + card_w + 4, card_y + card_h - bracket_sz], fill=accent_c, width=3)
+                accent_c = (255, 0, 127, 255) if "cyber" in clean_key else (0, 0, 0, 255)
+                bracket_sz = 16
+                draw.line([card_x - 4, card_y - 4, card_x + bracket_sz, card_y - 4], fill=accent_c, width=4)
+                draw.line([card_x - 4, card_y - 4, card_x - 4, card_y + bracket_sz], fill=accent_c, width=4)
+                draw.line([card_x + card_w + 4, card_y + card_h + 4, card_x + card_w - bracket_sz, card_y + card_h + 4], fill=accent_c, width=4)
+                draw.line([card_x + card_w + 4, card_y + card_h + 4, card_x + card_w + 4, card_y + card_h - bracket_sz], fill=accent_c, width=4)
 
-        # ── 2. Draw Text ──
+        # ── Floating Badge above Card ──
+        if cfg.get("badge_enabled") and cfg.get("badge_text"):
+            b_text = str(cfg["badge_text"])
+            b_font = self._resolve_font("Montserrat", "Bold", 24)
+            b_bbox = b_font.getbbox(b_text)
+            b_w = (b_bbox[2] - b_bbox[0]) + 32
+            b_h = 36
+            b_x = (self._width - b_w) // 2
+            b_y = card_y - b_h - 12
+            b_bg = self._hex_to_rgba(cfg.get("badge_bg", "#DC2626"), 1.0)
+            b_col = self._hex_to_rgba(cfg.get("badge_color", "#FFFFFF"), 1.0)
+
+            draw.rounded_rectangle([b_x, b_y + 3, b_x + b_w, b_y + b_h + 3], radius=18, fill=(0, 0, 0, 140))
+            draw.rounded_rectangle([b_x, b_y, b_x + b_w, b_y + b_h], radius=18, fill=b_bg)
+            draw.text((b_x + 16, b_y + 4), b_text, font=b_font, fill=b_col)
+
+        # ── Draw Text ──
         text_origin_y = card_y + pad_y
 
         if cfg.get("is_glitch_rgb"):
-            # 3-Layer RGB Split Glitch (Red left, Cyan right, White center)
             for i, line in enumerate(lines):
                 lw = line_widths[i]
                 lx = (self._width - lw) // 2
                 ly = text_origin_y + i * line_height
-                # Red left channel
                 draw.text((lx - 4, ly), line, font=font, fill=(255, 0, 0, 200))
-                # Cyan right channel
                 draw.text((lx + 4, ly), line, font=font, fill=(0, 255, 255, 200))
-                # White main center text with black stroke
                 draw.text((lx, ly), line, font=font, fill=(255, 255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
 
         elif cfg.get("gradient_enabled") and cfg.get("gradient_from") and cfg.get("gradient_to"):
-            # Text Linear Gradient Mask
             t_mask = Image.new("L", (card_w, card_h), 0)
             t_mask_draw = ImageDraw.Draw(t_mask)
 
@@ -840,17 +1254,14 @@ class SkiaHookRenderer:
                 lx = (card_w - lw) // 2
                 ly = pad_y + i * line_height
 
-                # Drop shadow behind gradient text
                 draw.text((card_x + lx + 2, card_y + ly + 4), line, font=font, fill=(0, 0, 0, 220))
 
-                # Glow Multi-stage Bloom behind gradient text
                 if cfg.get("glow_enabled"):
                     gw_c = self._hex_to_rgba(cfg.get("glow_color", cfg.get("gradient_from", "#00F0FF")), 0.75)
                     gw_sz = max(4, int(cfg.get("glow_size", 16)))
                     draw.text((card_x + lx, card_y + ly), line, font=font, fill=(gw_c[0], gw_c[1], gw_c[2], 65), stroke_width=gw_sz * 2, stroke_fill=(gw_c[0], gw_c[1], gw_c[2], 65))
                     draw.text((card_x + lx, card_y + ly), line, font=font, fill=gw_c, stroke_width=gw_sz, stroke_fill=gw_c)
 
-                # Stroke if enabled
                 if cfg.get("stroke_enabled"):
                     sw = cfg.get("stroke_width", 2)
                     sc_hex = cfg.get("stroke_color", "#000000")
@@ -869,7 +1280,6 @@ class SkiaHookRenderer:
             frame.paste(grad_text, (card_x, card_y), t_mask)
 
         else:
-            # Solid Color Text
             txt_color_hex = cfg.get("text_color", "#FFFFFF")
             tr, tg, tb = self._hex_to_rgb(txt_color_hex)
 
@@ -878,15 +1288,12 @@ class SkiaHookRenderer:
                 lx = (self._width - lw) // 2
                 ly = text_origin_y + i * line_height
 
-                # Shadow
                 if cfg.get("shadow_enabled", True):
                     draw.text((lx + 3, ly + 4), line, font=font, fill=(0, 0, 0, 220))
 
-                # Glow Multi-stage Bloom
                 if cfg.get("glow_enabled"):
                     gw_c = self._hex_to_rgba(cfg.get("glow_color", "#00F0FF"), 0.75)
                     gw_sz = max(4, int(cfg.get("glow_size", 16)))
-                    # Outer atmospheric aura + luminous core
                     draw.text((lx, ly), line, font=font, fill=(gw_c[0], gw_c[1], gw_c[2], 65), stroke_width=gw_sz * 2, stroke_fill=(gw_c[0], gw_c[1], gw_c[2], 65))
                     draw.text((lx, ly), line, font=font, fill=gw_c, stroke_width=gw_sz, stroke_fill=gw_c)
 

@@ -15,53 +15,100 @@ _ASS_COLOR = re.compile(r"^&H([0-9a-fA-F]{6}|[0-9a-fA-F]{8})&?$")
 _SAFE_FONT = re.compile(r"[^A-Za-z0-9 _.-]")
 
 
+ALL_SUBTITLE_PRESETS = {
+    # Classic / Standard
+    "classic", "classic_karaoke", "clean", "minimal", "bold",
+    # High-impact / Viral
+    "hormozi_pop", "meme_impact", "bold_impact", "bold_impact_stroke", "impact_badge",
+    # Neon & Glow
+    "neon_glow", "neon_pulse", "neon_tube",
+    # Clean & Editorial
+    "devon_clean", "minimal_clean", "clean_editorial",
+    # Podcast & Dialogue
+    "podcast_dialogue", "podcast_pro",
+    # Cinematic & Documentary
+    "cinematic_bar", "cinematic_slate", "documentary", "editorial_banner", "quote_box",
+    # Fire & Energy
+    "fire_emphasis", "fire_flame",
+    # Glassmorphism
+    "glass_blur", "glassmorphism", "gradient_glass",
+    # Tech & Monospace
+    "tech_mono", "modern_mono", "terminal_type",
+    # Luxury & Gold
+    "gold_luxury", "retro_chrome",
+    # Positioning & Minimal
+    "minimal_lower", "lower_third",
+    # Dual & Outline
+    "dual_pop", "spotlight_keyword", "outline_stack",
+    # Word Tiles & Boxes
+    "kinetic_word_box", "word_tiles", "caption_strip", "bubble_chat", "comic_burst", "breaking_tape",
+}
+
+
 def normalize_subtitle_style(raw_style: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Return a bounded FFmpeg/libass-compatible caption configuration."""
+    """Return a bounded FFmpeg/libass-compatible caption configuration supporting all Custom Style Editor presets."""
     raw = dict(raw_style or {})
-    preset = _choice(raw.get("stylePreset"), "classic", {
-        "classic", "dual_pop", "neon_pulse", "meme_impact", "editorial_banner",
-        "spotlight_keyword", "lower_third", "bubble_chat", "breaking_tape",
-        "quote_box", "minimal_clean", "documentary", "caption_strip", "word_tiles",
-        "gradient_glass", "comic_burst", "terminal_type",
-    })
+    raw_preset = str(raw.get("stylePreset") or "classic").strip()
+    preset = raw_preset if raw_preset in ALL_SUBTITLE_PRESETS else "classic"
+    
     position = _choice(raw.get("position"), "bottom", {"top", "center", "bottom"})
+    raw_transition = str(raw.get("lineTransition") or "word_pop")
+    if raw_transition == "karaoke":
+        raw_transition = "word_pop"
     line_transition = _choice(
-        raw.get("lineTransition"),
+        raw_transition,
         "word_pop",
         {"word_pop", "emphasis", "line_reveal"},
     )
     animation = _choice(raw.get("animationStyle"), "pop", {"pop", "fade", "slide", "none"})
 
-    default_font = settings.VIDEO_GEN_SUB_FONT_NAME
-    if preset == "terminal_type" and "fontFamily" not in raw:
-        default_font = "DejaVu Sans Mono"
+    default_font = settings.VIDEO_GEN_SUB_FONT_NAME or "Montserrat"
+    default_size = 48
 
-    default_size = max(36, int(settings.VIDEO_GEN_SUB_FONT_SIZE))
-    if preset == "meme_impact" and "fontSize" not in raw:
-        default_size = max(default_size, 64)
+    if preset in {"hormozi_pop", "meme_impact", "bold_impact", "bold_impact_stroke", "impact_badge", "bold"}:
+        default_font = "Montserrat"
+        default_size = 54
+    elif preset in {"neon_glow", "neon_pulse", "neon_tube"}:
+        default_font = "Montserrat"
+        default_size = 48
+    elif preset in {"tech_mono", "modern_mono", "terminal_type"}:
+        default_font = "Space Grotesk"
+        default_size = 42
+    elif preset in {"gold_luxury", "cinematic_slate"}:
+        default_font = "Playfair Display"
+        default_size = 46
+    elif preset in {"fire_emphasis", "fire_flame"}:
+        default_font = "Anton"
+        default_size = 52
+    elif preset in {"devon_clean", "clean_editorial", "podcast_dialogue", "podcast_pro", "clean"}:
+        default_font = "Inter"
+        default_size = 44
+
+    # Allow custom font override
+    chosen_font = _font_name(raw.get("fontFamily"), default_font)
 
     style = {
         "stylePreset": preset,
-        "fontFamily": _font_name(raw.get("fontFamily"), default_font),
-        "fontSize": _number(raw.get("fontSize"), default_size, 28, 140, integer=True),
-        "fontWeight": _number(raw.get("fontWeight"), 700, 400, 950, integer=True),
+        "fontFamily": chosen_font,
+        "fontSize": _number(raw.get("fontSize"), default_size, 24, 140, integer=True),
+        "fontWeight": _number(raw.get("fontWeight"), 800, 400, 950, integer=True),
         "letterSpacing": _number(raw.get("letterSpacing"), 0, -5, 12),
-        "color": _color(raw.get("color"), settings.VIDEO_GEN_SUB_PRIMARY_COLOR),
-        "highlightColor": _color(raw.get("highlightColor"), settings.VIDEO_GEN_SUB_HIGHLIGHT_COLOR),
-        "bgEnabled": _boolean(raw.get("bgEnabled"), settings.VIDEO_GEN_SUB_BORDER_STYLE == 3),
-        "bgColor": _color(raw.get("bgColor"), settings.VIDEO_GEN_SUB_BACK_COLOR),
+        "color": _color(raw.get("color"), settings.VIDEO_GEN_SUB_PRIMARY_COLOR or "#FFFFFF"),
+        "highlightColor": _color(raw.get("highlightColor"), settings.VIDEO_GEN_SUB_HIGHLIGHT_COLOR or "#FACC15"),
+        "bgEnabled": _boolean(raw.get("bgEnabled"), False),
+        "bgColor": _color(raw.get("bgColor"), settings.VIDEO_GEN_SUB_BACK_COLOR or "#000000"),
         "bgOpacity": _number(raw.get("bgOpacity"), settings.VIDEO_GEN_SUB_BG_OPACITY, 0, 1),
-        "bgPadding": _number(raw.get("bgPadding"), 12, 0, 40),
+        "bgPadding": _number(raw.get("bgPadding"), 14, 0, 40),
         "position": position,
         "positionY": _number(raw.get("positionY"), _default_position_y(position), 5, 95),
         "uppercase": _boolean(raw.get("uppercase"), False),
         "capitalize": _boolean(raw.get("capitalize"), False),
         "italic": _boolean(raw.get("italic"), False),
         "strokeEnabled": _boolean(raw.get("strokeEnabled"), True),
-        "strokeColor": _color(raw.get("strokeColor"), settings.VIDEO_GEN_SUB_OUTLINE_COLOR),
-        "strokeWidth": _number(raw.get("strokeWidth"), settings.VIDEO_GEN_SUB_OUTLINE, 0, 12),
+        "strokeColor": _color(raw.get("strokeColor"), settings.VIDEO_GEN_SUB_OUTLINE_COLOR or "#000000"),
+        "strokeWidth": _number(raw.get("strokeWidth"), settings.VIDEO_GEN_SUB_OUTLINE or 3.5, 0, 12),
         "shadowEnabled": _boolean(raw.get("shadowEnabled"), True),
-        "shadowColor": _color(raw.get("shadowColor"), settings.VIDEO_GEN_SUB_OUTLINE_COLOR),
+        "shadowColor": _color(raw.get("shadowColor"), settings.VIDEO_GEN_SUB_OUTLINE_COLOR or "#000000"),
         "shadowBlur": _number(raw.get("shadowBlur"), 8, 0, 36),
         "maxWordsPerLine": _number(raw.get("maxWordsPerLine"), 3, 1, 8, integer=True),
         "maxWidthPct": _number(raw.get("maxWidthPct"), 90, 45, 96),
@@ -69,26 +116,81 @@ def normalize_subtitle_style(raw_style: Mapping[str, Any] | None = None) -> dict
         "animationStyle": animation,
     }
 
-    # Only apply preset defaults if user did NOT explicitly override the field
-    if preset == "minimal_clean":
-        if "bgEnabled" not in raw:
-            style["bgEnabled"] = False
-        if "strokeEnabled" not in raw:
-            style["strokeEnabled"] = False
-    elif preset in {"meme_impact", "comic_burst"}:
+    # Apply signature preset defaults if not explicitly provided in raw
+    if preset in {"hormozi_pop", "bold_impact", "meme_impact", "bold"}:
         if "uppercase" not in raw:
             style["uppercase"] = True
-        if "fontSize" not in raw:
-            style["fontSize"] = max(style["fontSize"], 56)
+        if "highlightColor" not in raw:
+            style["highlightColor"] = "#00FF66"
+        if "strokeWidth" not in raw:
+            style["strokeWidth"] = 5.0
         if "maxWordsPerLine" not in raw:
-            style["maxWordsPerLine"] = min(style["maxWordsPerLine"], 3)
-    elif preset == "lower_third":
-        if "position" not in raw:
-            style["position"] = "bottom"
-        if "positionY" not in raw:
-            style["positionY"] = 78
-        if "maxWordsPerLine" not in raw:
-            style["maxWordsPerLine"] = max(style["maxWordsPerLine"], 4)
+            style["maxWordsPerLine"] = 2
+    elif preset in {"neon_glow", "neon_pulse"}:
+        if "color" not in raw:
+            style["color"] = "#00FFAA"
+        if "highlightColor" not in raw:
+            style["highlightColor"] = "#FF00FF"
+        if "bgEnabled" not in raw:
+            style["bgEnabled"] = True
+            style["bgColor"] = "#000000"
+            style["bgOpacity"] = 0.7
+        if "strokeWidth" not in raw:
+            style["strokeWidth"] = 4.0
+        if "uppercase" not in raw:
+            style["uppercase"] = True
+    elif preset in {"devon_clean", "clean_editorial", "clean"}:
+        if "bgEnabled" not in raw:
+            style["bgEnabled"] = True
+            style["bgColor"] = "#0F172A"
+            style["bgOpacity"] = 0.8
+        if "highlightColor" not in raw:
+            style["highlightColor"] = "#00F0FF"
+        if "strokeEnabled" not in raw:
+            style["strokeEnabled"] = False
+    elif preset in {"podcast_dialogue", "podcast_pro"}:
+        if "bgEnabled" not in raw:
+            style["bgEnabled"] = True
+            style["bgColor"] = "#18181B"
+            style["bgOpacity"] = 0.85
+        if "highlightColor" not in raw:
+            style["highlightColor"] = "#10B981"
+        if "strokeEnabled" not in raw:
+            style["strokeEnabled"] = False
+    elif preset in {"cinematic_bar", "cinematic_slate", "documentary"}:
+        if "bgEnabled" not in raw:
+            style["bgEnabled"] = True
+            style["bgColor"] = "#111827"
+            style["bgOpacity"] = 0.85
+        if "highlightColor" not in raw:
+            style["highlightColor"] = "#FFD700"
+        if "uppercase" not in raw:
+            style["uppercase"] = True
+    elif preset in {"fire_emphasis", "fire_flame"}:
+        if "highlightColor" not in raw:
+            style["highlightColor"] = "#FF4500"
+        if "uppercase" not in raw:
+            style["uppercase"] = True
+        if "strokeWidth" not in raw:
+            style["strokeWidth"] = 4.5
+    elif preset in {"tech_mono", "modern_mono", "terminal_type"}:
+        if "color" not in raw:
+            style["color"] = "#94A3B8"
+        if "highlightColor" not in raw:
+            style["highlightColor"] = "#06B6D4"
+        if "bgEnabled" not in raw:
+            style["bgEnabled"] = True
+            style["bgColor"] = "#050B14"
+            style["bgOpacity"] = 0.85
+        if "uppercase" not in raw:
+            style["uppercase"] = True
+    elif preset in {"gold_luxury", "retro_chrome"}:
+        if "color" not in raw:
+            style["color"] = "#CBD5E1"
+        if "highlightColor" not in raw:
+            style["highlightColor"] = "#FCD34D"
+        if "strokeWidth" not in raw:
+            style["strokeWidth"] = 3.0
 
     return style
 
