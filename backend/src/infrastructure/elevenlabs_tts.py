@@ -50,18 +50,147 @@ DEFAULT_ELEVENLABS_MODELS = [
     },
 ]
 
+def _map_country_and_flag(language: str = "", accent: str = "") -> tuple[str, str]:
+    """Map language/accent to standard country name and flag emoji."""
+    acc = (accent or "").lower()
+    lang = (language or "").lower()
+
+    if "indonesia" in acc or "indonesia" in lang or lang == "id":
+        return ("Indonesia", "🇮🇩")
+    if "british" in acc or "uk" in acc or "england" in acc or lang == "en-gb":
+        return ("United Kingdom", "🇬🇧")
+    if "australian" in acc or "australia" in acc or lang == "en-au":
+        return ("Australia", "🇦🇺")
+    if "american" in acc or "us" in acc or "usa" in acc or lang == "en-us":
+        return ("United States", "🇺🇸")
+    if "canadian" in acc or "canada" in acc or lang == "en-ca":
+        return ("Canada", "🇨🇦")
+    if "indian" in acc or "india" in acc or "hi" in lang:
+        return ("India", "🇮🇳")
+    if "japanese" in acc or "japan" in acc or "ja" in lang:
+        return ("Japan", "🇯🇵")
+    if "german" in acc or "germany" in acc or "de" in lang:
+        return ("Germany", "🇩🇪")
+    if "french" in acc or "france" in acc or "fr" in lang:
+        return ("France", "🇫🇷")
+    if "spanish" in acc or "spain" in acc or "es" in lang:
+        return ("Spain", "🇪🇸")
+    if "italian" in acc or "italy" in acc or "it" in lang:
+        return ("Italy", "🇮🇹")
+    if "korean" in acc or "korea" in acc or "ko" in lang:
+        return ("South Korea", "🇰🇷")
+    if "chinese" in acc or "china" in acc or "zh" in lang:
+        return ("China", "🇨🇳")
+    if "arabic" in acc or "arab" in acc or "ar" in lang:
+        return ("Middle East", "🇸🇦")
+    if "portuguese" in acc or "brazil" in acc or "pt" in lang:
+        return ("Brazil / Portugal", "🇧🇷")
+    if "filipino" in acc or "philippines" in acc or "fil" in lang:
+        return ("Philippines", "🇵🇭")
+    return ("Global / Multi", "🌐")
+
+
 # Fallback default voices if API is unreachable
 DEFAULT_ELEVENLABS_VOICES = [
-    {"voice_id": "rUOpAdbAl56KxO00wR5D", "name": "Indonesian / Studio Narrator", "category": "custom"},
-    {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel - Calm, Professional", "category": "premade"},
-    {"voice_id": "AZnzlk1XvdvUeBnXmlld", "name": "Domi - Strong, Engaging", "category": "premade"},
-    {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Bella - Expressive, Warm", "category": "premade"},
-    {"voice_id": "ErXwobaYiN019PkySvjV", "name": "Antoni - Confident, Storyteller", "category": "premade"},
-    {"voice_id": "MF3mGyEYCl7XYWbV9V6O", "name": "Elli - Clear, Youthful", "category": "premade"},
-    {"voice_id": "TxGEqnHWrfWFTfGW9XjX", "name": "Josh - Deep, Engaging", "category": "premade"},
-    {"voice_id": "VR6AewLTigWG4xSOukaG", "name": "Arnold - Powerful, Direct", "category": "premade"},
-    {"voice_id": "pNInz6obpgDQGcFmaJgB", "name": "Adam - Dominant, Firm", "category": "premade"},
-    {"voice_id": "yoZ06aMxZJJ28mfd3POQ", "name": "Sam - Casual, Natural", "category": "premade"},
+    {
+        "voice_id": "rUOpAdbAl56KxO00wR5D",
+        "name": "Indonesian / Studio Narrator",
+        "category": "custom",
+        "gender": "male",
+        "accent": "indonesian",
+        "language": "id",
+        "country": "Indonesia",
+        "flag": "🇮🇩",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/pNInz6obpgDQGcFmaJgB/d6905d7a-dd26-4187-bfff-1bd3a5ea7cac.mp3",
+    },
+    {
+        "voice_id": "21m00Tcm4TlvDq8ikWAM",
+        "name": "Rachel - Calm, Professional",
+        "category": "premade",
+        "gender": "female",
+        "accent": "american",
+        "language": "en",
+        "country": "United States",
+        "flag": "🇺🇸",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/21m00Tcm4TlvDq8ikWAM/b11eb610-c128-4420-ba31-744037eb89e1.mp3",
+    },
+    {
+        "voice_id": "AZnzlk1XvdvUeBnXmlld",
+        "name": "Domi - Strong, Engaging",
+        "category": "premade",
+        "gender": "female",
+        "accent": "american",
+        "language": "en",
+        "country": "United States",
+        "flag": "🇺🇸",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/AZnzlk1XvdvUeBnXmlld/507e1507-7590-482d-8472-7360c704f057.mp3",
+    },
+    {
+        "voice_id": "EXAVITQu4vr4xnSDxMaL",
+        "name": "Bella - Expressive, Warm",
+        "category": "premade",
+        "gender": "female",
+        "accent": "american",
+        "language": "en",
+        "country": "United States",
+        "flag": "🇺🇸",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/EXAVITQu4vr4xnSDxMaL/01d5ee4e-7255-46c5-ab1a-619ab5478440.mp3",
+    },
+    {
+        "voice_id": "ErXwobaYiN019PkySvjV",
+        "name": "Antoni - Confident, Storyteller",
+        "category": "premade",
+        "gender": "male",
+        "accent": "american",
+        "language": "en",
+        "country": "United States",
+        "flag": "🇺🇸",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/ErXwobaYiN019PkySvjV/38d8f8f0-0412-42c2-b52b-4e08bf60cb7d.mp3",
+    },
+    {
+        "voice_id": "MF3mGyEYCl7XYWbV9V6O",
+        "name": "Elli - Clear, Youthful",
+        "category": "premade",
+        "gender": "female",
+        "accent": "american",
+        "language": "en",
+        "country": "United States",
+        "flag": "🇺🇸",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/MF3mGyEYCl7XYWbV9V6O/d86c7104-e53b-4c55-83e9-38b4df568019.mp3",
+    },
+    {
+        "voice_id": "TxGEqnHWrfWFTfGW9XjX",
+        "name": "Josh - Deep, Engaging",
+        "category": "premade",
+        "gender": "male",
+        "accent": "american",
+        "language": "en",
+        "country": "United States",
+        "flag": "🇺🇸",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/TxGEqnHWrfWFTfGW9XjX/a0e5b746-13cb-4f81-a9c4-a5e2f75d5069.mp3",
+    },
+    {
+        "voice_id": "pNInz6obpgDQGcFmaJgB",
+        "name": "Adam - Dominant, Firm",
+        "category": "premade",
+        "gender": "male",
+        "accent": "american",
+        "language": "en",
+        "country": "United States",
+        "flag": "🇺🇸",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/pNInz6obpgDQGcFmaJgB/d6905d7a-dd26-4187-bfff-1bd3a5ea7cac.mp3",
+    },
+    {
+        "voice_id": "yoZ06aMxZJJ28mfd3POQ",
+        "name": "Sam - Casual, Natural",
+        "category": "premade",
+        "gender": "male",
+        "accent": "american",
+        "language": "en",
+        "country": "United States",
+        "flag": "🇺🇸",
+        "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/yoZ06aMxZJJ28mfd3POQ/c69e20a7-bc63-4ce2-a08b-626a427f71aa.mp3",
+    },
 ]
 
 # In-memory cache for models and voices
@@ -176,6 +305,9 @@ class ElevenLabsTTS:
                         preview_url = v.get("preview_url") or ""
                         gender = labels.get("gender") or ""
                         accent = labels.get("accent") or ""
+                        lang = labels.get("language") or ""
+                        country, flag = _map_country_and_flag(language=lang, accent=accent)
+
                         parsed_voices.append({
                             "voice_id": v.get("voice_id"),
                             "name": v.get("name"),
@@ -183,6 +315,9 @@ class ElevenLabsTTS:
                             "description": desc,
                             "gender": gender,
                             "accent": accent,
+                            "language": lang,
+                            "country": country,
+                            "flag": flag,
                             "preview_url": preview_url,
                         })
                     if parsed_voices:

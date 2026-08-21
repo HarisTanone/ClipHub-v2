@@ -98,6 +98,9 @@ class VoiceOption(BaseModel):
     category: Optional[str] = None
     gender: Optional[str] = None
     accent: Optional[str] = None
+    language: Optional[str] = None
+    country: Optional[str] = None
+    flag: Optional[str] = None
     preview_url: Optional[str] = None
 
 
@@ -552,6 +555,9 @@ async def list_voices(
                     category=v.get("category"),
                     gender=v.get("gender"),
                     accent=v.get("accent"),
+                    language=v.get("language"),
+                    country=v.get("country") or "Global / Multi",
+                    flag=v.get("flag") or "🌐",
                     preview_url=v.get("preview_url"),
                 )
             )
@@ -565,6 +571,13 @@ async def list_voices(
                     model=model,
                     provider="deepgram",
                     description=f"Deepgram Aura voice: {key.capitalize()}",
+                    category="aura",
+                    gender="female" if key in ["thalia", "asteria", "luna", "stella", "hera"] else "male",
+                    accent="american",
+                    language="en",
+                    country="United States",
+                    flag="🇺🇸",
+                    preview_url=None,
                 )
             )
 

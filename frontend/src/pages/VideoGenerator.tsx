@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -9,6 +9,7 @@ import {
   Download,
   ExternalLink,
   Film,
+  Globe,
   Layers,
   Loader2,
   Palette,
@@ -117,6 +118,9 @@ interface VoiceOption {
   category?: string;
   gender?: string;
   accent?: string;
+  language?: string;
+  country?: string;
+  flag?: string;
   preview_url?: string;
 }
 
@@ -1587,6 +1591,9 @@ export function VideoGeneratorPage() {
   const [ttsProviders, setTtsProviders] = useState<TTSProviderOption[]>([]);
   const [voice, setVoice] = useState("");
   const [customVoiceId, setCustomVoiceId] = useState("");
+  const [selectedCountry, setSelectedCountry] = useState<string>("All");
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
   const [speed, setSpeed] = useState(1);
   const [numScenes, setNumScenes] = useState(0);
   const [instructions, setInstructions] = useState("");
@@ -1629,6 +1636,80 @@ export function VideoGeneratorPage() {
   const [isPlanning, setIsPlanning] = useState(false);
   const [isRetrying, setIsRetrying] = useState<string | null>(null);
   const [loadError, setLoadError] = useState("");
+
+  const handleTogglePlayVoice = useCallback((voiceOpt?: VoiceOption | null) => {
+    if (!voiceOpt) return;
+
+    if (playingVoiceId === voiceOpt.model) {
+      if (audioPreviewRef.current) {
+        audioPreviewRef.current.pause();
+        audioPreviewRef.current.currentTime = 0;
+      }
+      setPlayingVoiceId(null);
+      return;
+    }
+
+    if (!voiceOpt.preview_url) {
+      toast.error("Audio preview belum tersedia untuk suara ini.");
+      return;
+    }
+
+    if (audioPreviewRef.current) {
+      audioPreviewRef.current.pause();
+    }
+
+    const audio = new Audio(voiceOpt.preview_url);
+    audioPreviewRef.current = audio;
+    setPlayingVoiceId(voiceOpt.model);
+
+    audio.play().catch(() => {
+      setPlayingVoiceId(null);
+      toast.error("Gagal memutar audio preview.");
+    });
+
+    audio.onended = () => {
+      setPlayingVoiceId(null);
+    };
+    audio.onerror = () => {
+      setPlayingVoiceId(null);
+    };
+  }, [playingVoiceId, toast]);
+
+  useEffect(() => {
+    return () => {
+      if (audioPreviewRef.current) {
+        audioPreviewRef.current.pause();
+      }
+    };
+  }, []);
+
+  const availableCountries = useMemo(() => {
+    const list = voices
+      .filter((v) => !v.provider || v.provider === ttsProvider)
+      .map((v) => v.country || "Global / Multi")
+      .filter(Boolean);
+    const unique = Array.from(new Set(list));
+    unique.sort((a, b) => {
+      if (a === "Indonesia") return -1;
+      if (b === "Indonesia") return 1;
+      return a.localeCompare(b);
+    });
+    return ["All", ...unique];
+  }, [voices, ttsProvider]);
+
+  const filteredVoices = useMemo(() => {
+    return voices.filter((v) => {
+      const matchProvider = !v.provider || v.provider === ttsProvider;
+      if (!matchProvider) return false;
+      if (selectedCountry === "All") return true;
+      return (v.country || "Global / Multi") === selectedCountry;
+    });
+  }, [voices, ttsProvider, selectedCountry]);
+
+  const activeVoiceOption = useMemo(() => {
+    if (customVoiceId) return null;
+    return voices.find((v) => v.model === voice && (!v.provider || v.provider === ttsProvider)) || filteredVoices[0] || null;
+  }, [voices, voice, customVoiceId, ttsProvider, filteredVoices]);
 
   const loadJobs = useCallback(async (targetPage = page) => {
     try {
@@ -2162,67 +2243,123 @@ export function VideoGeneratorPage() {
                     </div>
                   </div>
 
-                  {/* ElevenLabs Model & Voice Controls */}
+                  {/* ElevenLabs Model, Country Filter, and Voice Controls */}
                   {ttsProvider === "elevenlabs" ? (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {/* ElevenLabs Models (from GET /api/video-generator/models) */}
-                      <div>
-                        <label htmlFor="video-tts-model" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                          ElevenLabs Model
-                        </label>
-                        <select
-                          id="video-tts-model"
-                          value={ttsModel}
-                          onChange={(e) => setTtsModel(e.target.value)}
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
-                        >
-                          {ttsModels.map((m) => (
-                            <option key={m.model_id} value={m.model_id}>
-                              {m.name || m.model_id}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* ElevenLabs Voice List */}
-                      <div>
-                        <label htmlFor="video-voice" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                          ElevenLabs Voice
-                        </label>
-                        <select
-                          id="video-voice"
-                          value={customVoiceId ? "custom" : voice}
-                          onChange={(e) => {
-                            if (e.target.value === "custom") {
-                              setVoice("");
-                            } else {
-                              setCustomVoiceId("");
-                              setVoice(e.target.value);
-                            }
-                          }}
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
-                        >
-                          <option value="">Default Studio Voice (rUOpAdbAl56KxO00wR5D)</option>
-                          {voices
-                            .filter((v) => !v.provider || v.provider === "elevenlabs")
-                            .map((option) => (
-                              <option key={option.model || option.key} value={option.model}>
-                                {option.key} {option.accent ? `(${option.accent})` : ""}
+                    <div className="space-y-3">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {/* ElevenLabs Models */}
+                        <div>
+                          <label htmlFor="video-tts-model" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                            ElevenLabs Model
+                          </label>
+                          <select
+                            id="video-tts-model"
+                            value={ttsModel}
+                            onChange={(e) => setTtsModel(e.target.value)}
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                          >
+                            {ttsModels.map((m) => (
+                              <option key={m.model_id} value={m.model_id}>
+                                {m.name || m.model_id}
                               </option>
                             ))}
-                          <option value="custom">✏️ Enter custom Voice ID...</option>
-                        </select>
+                          </select>
+                        </div>
+
+                        {/* Country / Region Filter */}
+                        <div>
+                          <label htmlFor="video-country-filter" className="mb-1.5 flex items-center gap-1 text-xs font-medium text-zinc-300">
+                            <Globe className="h-3.5 w-3.5 text-violet-400" />
+                            Filter Negara / Aksen
+                          </label>
+                          <select
+                            id="video-country-filter"
+                            value={selectedCountry}
+                            onChange={(e) => setSelectedCountry(e.target.value)}
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                          >
+                            {availableCountries.map((c) => (
+                              <option key={c} value={c}>
+                                {c === "All" ? "🌐 Semua Negara / Bahasa" : c === "Indonesia" ? "🇮🇩 Indonesia" : c}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
 
-                      {/* Custom Voice ID write-in if desired */}
-                      <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          value={customVoiceId}
-                          onChange={(e) => setCustomVoiceId(e.target.value)}
-                          placeholder="Or paste custom ElevenLabs Voice ID (e.g. rUOpAdbAl56KxO00wR5D)"
-                          className="w-full rounded-lg border border-zinc-800/80 bg-zinc-900/50 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 font-mono"
-                        />
+                      {/* ElevenLabs Voice List & Preview Player */}
+                      <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/50 p-3 space-y-2.5">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex-1">
+                            <label htmlFor="video-voice" className="mb-1 block text-xs font-medium text-zinc-300">
+                              Karakter Suara / Voice ({filteredVoices.length} Suara)
+                            </label>
+                            <select
+                              id="video-voice"
+                              value={customVoiceId ? "custom" : voice}
+                              onChange={(e) => {
+                                if (e.target.value === "custom") {
+                                  setVoice("");
+                                } else {
+                                  setCustomVoiceId("");
+                                  setVoice(e.target.value);
+                                }
+                              }}
+                              className="w-full rounded-lg border border-zinc-800 bg-zinc-900/90 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                            >
+                              <option value="">Default Studio Voice (rUOpAdbAl56KxO00wR5D)</option>
+                              {filteredVoices.map((option) => (
+                                <option key={option.model || option.key} value={option.model}>
+                                  {option.flag || "🌐"} {option.key} {option.accent ? `(${option.accent})` : ""}
+                                </option>
+                              ))}
+                              <option value="custom">✏️ Gunakan Custom Voice ID sendiri...</option>
+                            </select>
+                          </div>
+
+                          {/* Audio Preview Button */}
+                          <div className="sm:pt-5">
+                            {activeVoiceOption?.preview_url ? (
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePlayVoice(activeVoiceOption)}
+                                className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition border ${
+                                  playingVoiceId === activeVoiceOption.model
+                                    ? "border-violet-400 bg-violet-600 text-white shadow-[0_0_15px_rgba(139,92,246,0.5)] animate-pulse"
+                                    : "border-violet-500/40 bg-violet-950/60 text-violet-200 hover:bg-violet-900/60 hover:border-violet-400"
+                                }`}
+                                title="Dengar contoh audio suara ini"
+                              >
+                                {playingVoiceId === activeVoiceOption.model ? (
+                                  <>
+                                    <Pause className="h-3.5 w-3.5 fill-current" />
+                                    <span>Berhenti</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="h-3.5 w-3.5 fill-current" />
+                                    <span>Dengar Suara</span>
+                                  </>
+                                )}
+                              </button>
+                            ) : customVoiceId ? (
+                              <span className="text-[11px] text-zinc-500 font-mono italic">Custom Voice</span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {/* Custom Voice ID write-in if desired */}
+                        {customVoiceId !== "" && (
+                          <div className="pt-1">
+                            <input
+                              type="text"
+                              value={customVoiceId}
+                              onChange={(e) => setCustomVoiceId(e.target.value)}
+                              placeholder="Ketik atau tempel ElevenLabs Voice ID (contoh: rUOpAdbAl56KxO00wR5D)"
+                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 font-mono"
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
