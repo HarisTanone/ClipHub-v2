@@ -60,6 +60,17 @@ class Settings(BaseSettings):
     DEEPGRAM_TTS_SPEED: float = 1.0
     DEEPGRAM_TTS_TIMEOUT: int = 30
 
+    # ─── ElevenLabs TTS ───────────────────────────────────────────────────
+    ELEVENLABS_API_KEY: str = ""
+    ELEVEN_API_KEY: str = ""
+    ELEVENLABS_VOICE_ID: str = "rUOpAdbAl56KxO00wR5D"
+    ELEVENLABS_MODEL_ID: str = "eleven_multilingual_v2"
+    ELEVENLABS_TTS_SPEED: float = 1.0
+    ELEVENLABS_TTS_TIMEOUT: int = 45
+
+    # ─── Video Generator TTS Provider ─────────────────────────────────────
+    VIDEO_GEN_TTS_PROVIDER: str = "elevenlabs"  # "elevenlabs" | "deepgram"
+
     # ─── AI Video Generator ───────────────────────────────────────────────
     VIDEO_GEN_ENABLED: bool = True
     VIDEO_GEN_TARGET_DURATION: int = 65       # target seconds

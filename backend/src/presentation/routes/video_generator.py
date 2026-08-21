@@ -8,7 +8,7 @@ GET  /video-generator/voices    — list available TTS voices
 """
 import os
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Any, Optional
@@ -25,7 +25,9 @@ router = APIRouter(prefix="/video-generator", tags=["video-generator"])
 class GenerateVideoRequest(BaseModel):
     topic: str = Field(..., min_length=3, max_length=500, description="Video topic")
     target_duration: int = Field(default=0, ge=0, le=120, description="Target duration in seconds (0=default)")
-    voice: str = Field(default="", max_length=100, description="TTS voice model (empty=default)")
+    tts_provider: Optional[str] = Field(default="elevenlabs", description="TTS provider: elevenlabs or deepgram")
+    tts_model: Optional[str] = Field(default="eleven_multilingual_v2", description="ElevenLabs model ID")
+    voice: str = Field(default="", max_length=100, description="TTS voice model/ID (empty=default)")
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="TTS speed multiplier")
     instructions: str = Field(default="", max_length=1000, description="Additional instructions for AI")
     num_scenes: int = Field(default=0, ge=0, le=25, description="Number of scenes (0=auto)")
@@ -57,6 +59,8 @@ class JobStatusResponse(BaseModel):
     progress: int
     step_label: str = ""
     target_duration: int
+    tts_provider: Optional[str] = "elevenlabs"
+    tts_model: Optional[str] = "eleven_multilingual_v2"
     voice: str
     speed: float = 1.0
     num_scenes: int = 0
@@ -89,6 +93,28 @@ class JobListResponse(BaseModel):
 class VoiceOption(BaseModel):
     key: str
     model: str
+    provider: str = "elevenlabs"
+    description: Optional[str] = None
+    category: Optional[str] = None
+    gender: Optional[str] = None
+    accent: Optional[str] = None
+    preview_url: Optional[str] = None
+
+
+class TTSModelOption(BaseModel):
+    model_id: str
+    name: str
+    description: Optional[str] = None
+    languages: Optional[list[str]] = None
+
+
+class TTSProviderOption(BaseModel):
+    id: str
+    name: str
+    description: str
+    is_configured: bool
+    default_model: str
+    default_voice: str
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -125,6 +151,8 @@ async def generate_video(
     job = vg.create_job(
         topic=req.topic,
         target_duration=target_duration,
+        tts_provider=req.tts_provider,
+        tts_model=req.tts_model,
         voice=req.voice,
         speed=req.speed,
         instructions=req.instructions,
@@ -167,6 +195,8 @@ async def plan_video(
     job = vg.create_job(
         topic=req.topic,
         target_duration=target_duration,
+        tts_provider=req.tts_provider,
+        tts_model=req.tts_model,
         voice=req.voice,
         speed=req.speed,
         instructions=req.instructions,
@@ -440,17 +470,105 @@ async def get_job_story(
     }
 
 
-@router.get("/voices", response_model=list[VoiceOption])
-async def list_voices(
+@router.get("/tts-providers", response_model=list[TTSProviderOption])
+async def list_tts_providers(
     user: CurrentUser = Depends(require_superadmin()),
 ):
-    """List available TTS voices."""
-    from src.infrastructure.deepgram_tts import DEEPGRAM_VOICES
+    """List available TTS providers and their configuration status."""
+    from src.infrastructure.system_config_store import get_system_setting
+
+    eleven_key = (
+        get_system_setting("ELEVENLABS_API_KEY")
+        or get_system_setting("ELEVEN_API_KEY")
+        or getattr(settings, "ELEVENLABS_API_KEY", "")
+        or getattr(settings, "ELEVEN_API_KEY", "")
+        or os.getenv("ELEVENLABS_API_KEY", "")
+        or os.getenv("ELEVEN_API_KEY", "")
+    )
+    deepgram_key = (
+        get_system_setting("DEEPGRAM_API_KEY")
+        or getattr(settings, "DEEPGRAM_API_KEY", "")
+        or os.getenv("DEEPGRAM_API_KEY", "")
+    )
 
     return [
-        VoiceOption(key=key, model=model)
-        for key, model in DEEPGRAM_VOICES.items()
+        TTSProviderOption(
+            id="elevenlabs",
+            name="ElevenLabs (Studio AI)",
+            description="Ultra-high fidelity multilingual voice synthesis with natural emotion & tone",
+            is_configured=bool(eleven_key and str(eleven_key).strip()),
+            default_model="eleven_multilingual_v2",
+            default_voice=getattr(settings, "ELEVENLABS_VOICE_ID", "rUOpAdbAl56KxO00wR5D"),
+        ),
+        TTSProviderOption(
+            id="deepgram",
+            name="Deepgram (Aura)",
+            description="Fast Aura voice models (optional)",
+            is_configured=bool(deepgram_key and str(deepgram_key).strip()),
+            default_model="aura-2-thalia-en",
+            default_voice=settings.DEEPGRAM_TTS_VOICE,
+        ),
     ]
+
+
+@router.get("/models", response_model=list[TTSModelOption])
+async def list_models(
+    user: CurrentUser = Depends(require_superadmin()),
+):
+    """Fetch available text-to-speech models from ElevenLabs (GET https://api.elevenlabs.io/v1/models)."""
+    from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
+
+    raw_models = await ElevenLabsTTS.fetch_models()
+    return [
+        TTSModelOption(
+            model_id=m.get("model_id"),
+            name=m.get("name") or m.get("model_id"),
+            description=m.get("description"),
+            languages=m.get("languages"),
+        )
+        for m in raw_models
+    ]
+
+
+@router.get("/voices", response_model=list[VoiceOption])
+async def list_voices(
+    provider: Optional[str] = Query(None, description="elevenlabs or deepgram"),
+    user: CurrentUser = Depends(require_superadmin()),
+):
+    """List available TTS voices for ElevenLabs and/or Deepgram."""
+    results: list[VoiceOption] = []
+    prov_clean = (provider or "").strip().lower()
+
+    if not prov_clean or prov_clean == "elevenlabs":
+        from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
+        eleven_voices = await ElevenLabsTTS.fetch_voices()
+        for v in eleven_voices:
+            results.append(
+                VoiceOption(
+                    key=v.get("name") or v.get("voice_id"),
+                    model=v.get("voice_id"),
+                    provider="elevenlabs",
+                    description=v.get("description"),
+                    category=v.get("category"),
+                    gender=v.get("gender"),
+                    accent=v.get("accent"),
+                    preview_url=v.get("preview_url"),
+                )
+            )
+
+    if not prov_clean or prov_clean == "deepgram":
+        from src.infrastructure.deepgram_tts import DEEPGRAM_VOICES
+        for key, model in DEEPGRAM_VOICES.items():
+            results.append(
+                VoiceOption(
+                    key=key,
+                    model=model,
+                    provider="deepgram",
+                    description=f"Deepgram Aura voice: {key.capitalize()}",
+                )
+            )
+
+    return results
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -500,6 +618,8 @@ def _job_to_response(job) -> JobStatusResponse:
         progress=job.progress,
         step_label=step_label,
         target_duration=job.target_duration,
+        tts_provider=job.tts_provider,
+        tts_model=job.tts_model,
         voice=job.voice,
         speed=job.speed,
         num_scenes=job.num_scenes,

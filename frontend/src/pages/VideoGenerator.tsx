@@ -112,6 +112,28 @@ export interface VideoJob {
 interface VoiceOption {
   key: string;
   model: string;
+  provider?: string;
+  description?: string;
+  category?: string;
+  gender?: string;
+  accent?: string;
+  preview_url?: string;
+}
+
+interface TTSModelOption {
+  model_id: string;
+  name: string;
+  description?: string;
+  languages?: string[];
+}
+
+interface TTSProviderOption {
+  id: string;
+  name: string;
+  description: string;
+  is_configured: boolean;
+  default_model: string;
+  default_voice: string;
 }
 
 interface JobListResponse {
@@ -1559,7 +1581,12 @@ export function VideoGeneratorPage() {
   // Basic narrative state
   const [topic, setTopic] = useState("");
   const [targetDuration, setTargetDuration] = useState(65);
+  const [ttsProvider, setTtsProvider] = useState<"elevenlabs" | "deepgram">("elevenlabs");
+  const [ttsModel, setTtsModel] = useState<string>("eleven_multilingual_v2");
+  const [ttsModels, setTtsModels] = useState<TTSModelOption[]>([]);
+  const [ttsProviders, setTtsProviders] = useState<TTSProviderOption[]>([]);
   const [voice, setVoice] = useState("");
+  const [customVoiceId, setCustomVoiceId] = useState("");
   const [speed, setSpeed] = useState(1);
   const [numScenes, setNumScenes] = useState(0);
   const [instructions, setInstructions] = useState("");
@@ -1621,9 +1648,39 @@ export function VideoGeneratorPage() {
   const loadVoices = useCallback(async () => {
     try {
       const response = await fetchApi<VoiceOption[]>("/api/video-generator/voices");
-      setVoices(response);
+      setVoices(response || []);
     } catch {
       setVoices([]);
+    }
+  }, []);
+
+  const loadTTSModels = useCallback(async () => {
+    try {
+      const response = await fetchApi<TTSModelOption[]>("/api/video-generator/models");
+      if (response && response.length > 0) {
+        setTtsModels(response);
+      } else {
+        setTtsModels([
+          { model_id: "eleven_multilingual_v2", name: "Eleven Multilingual v2", description: "Rich emotion, 29 languages" },
+          { model_id: "eleven_flash_v2_5", name: "Eleven Flash v2.5", description: "Ultra low latency, 32 languages" },
+          { model_id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5", description: "Fast high-quality, 32 languages" },
+        ]);
+      }
+    } catch {
+      setTtsModels([
+        { model_id: "eleven_multilingual_v2", name: "Eleven Multilingual v2", description: "Rich emotion, 29 languages" },
+        { model_id: "eleven_flash_v2_5", name: "Eleven Flash v2.5", description: "Ultra low latency, 32 languages" },
+        { model_id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5", description: "Fast high-quality, 32 languages" },
+      ]);
+    }
+  }, []);
+
+  const loadTTSProviders = useCallback(async () => {
+    try {
+      const response = await fetchApi<TTSProviderOption[]>("/api/video-generator/tts-providers");
+      setTtsProviders(response || []);
+    } catch {
+      setTtsProviders([]);
     }
   }, []);
 
@@ -1639,8 +1696,10 @@ export function VideoGeneratorPage() {
   useEffect(() => {
     void loadJobs();
     void loadVoices();
+    void loadTTSModels();
+    void loadTTSProviders();
     void loadUserPresets();
-  }, [loadJobs, loadVoices, loadUserPresets]);
+  }, [loadJobs, loadVoices, loadTTSModels, loadTTSProviders, loadUserPresets]);
 
   useEffect(() => {
     localStorage.setItem("autocliper_video_generator_hook_enabled", String(hookEnabled));
@@ -1745,12 +1804,15 @@ export function VideoGeneratorPage() {
 
     setIsSubmitting(true);
     try {
+      const selectedVoice = customVoiceId.trim() || voice;
       await fetchApi<VideoJob>("/api/video-generator/generate", {
         method: "POST",
         body: JSON.stringify({
           topic: topic.trim(),
           target_duration: targetDuration,
-          voice,
+          tts_provider: ttsProvider,
+          tts_model: ttsProvider === "elevenlabs" ? ttsModel : undefined,
+          voice: selectedVoice,
           speed,
           num_scenes: numScenes,
           instructions: instructions.trim(),
@@ -1781,12 +1843,15 @@ export function VideoGeneratorPage() {
 
     setIsPlanning(true);
     try {
+      const selectedVoice = customVoiceId.trim() || voice;
       const job = await fetchApi<VideoJob>("/api/video-generator/plan", {
         method: "POST",
         body: JSON.stringify({
           topic: topic.trim(),
           target_duration: targetDuration,
-          voice,
+          tts_provider: ttsProvider,
+          tts_model: ttsProvider === "elevenlabs" ? ttsModel : undefined,
+          voice: selectedVoice,
           speed,
           num_scenes: numScenes,
           instructions: instructions.trim(),
@@ -2041,48 +2106,193 @@ export function VideoGeneratorPage() {
                         Audio & Narration
                       </h3>
                     </div>
-                    <span className="text-[11px] text-zinc-500 font-mono">Deepgram Aura-2</span>
+                    <span className="text-[11px] text-zinc-400 font-medium">
+                      {ttsProvider === "elevenlabs" ? "ElevenLabs Studio TTS" : "Deepgram Aura TTS"}
+                    </span>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {/* Narrator Voice */}
-                    <div>
-                      <label htmlFor="video-voice" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                        Narrator voice
-                      </label>
-                      <select
-                        id="video-voice"
-                        value={voice}
-                        onChange={(event) => setVoice(event.target.value)}
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                  {/* TTS Provider Selector Toggle */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-medium text-zinc-400">
+                      TTS Engine Provider
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTtsProvider("elevenlabs");
+                          setVoice("");
+                        }}
+                        className={`flex items-center justify-between rounded-lg border p-2.5 text-left transition ${
+                          ttsProvider === "elevenlabs"
+                            ? "border-violet-500/60 bg-violet-950/40 text-violet-100 shadow-[0_0_12px_rgba(139,92,246,0.15)]"
+                            : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                        }`}
                       >
-                        <option value="">Default narrator</option>
-                        {voices.map((option) => (
-                          <option key={option.key} value={option.model}>
-                            {option.key} · {option.model}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                        <div>
+                          <div className="text-xs font-semibold">ElevenLabs</div>
+                          <div className="text-[10px] text-zinc-400">Studio AI · 29+ Languages</div>
+                        </div>
+                        <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[9px] font-bold text-violet-300">
+                          Recommended
+                        </span>
+                      </button>
 
-                    {/* Voice Pacing Dropdown */}
-                    <div>
-                      <label htmlFor="video-speed" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                        Pacing
-                      </label>
-                      <select
-                        id="video-speed"
-                        value={speed}
-                        onChange={(event) => setSpeed(Number(event.target.value))}
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTtsProvider("deepgram");
+                          setVoice("");
+                          setCustomVoiceId("");
+                        }}
+                        className={`flex items-center justify-between rounded-lg border p-2.5 text-left transition ${
+                          ttsProvider === "deepgram"
+                            ? "border-emerald-500/60 bg-emerald-950/40 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                            : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                        }`}
                       >
-                        <option value={0.85}>Calm · 0.85×</option>
-                        <option value={1}>Natural · 1.0×</option>
-                        <option value={1.15}>Energetic · 1.15×</option>
-                        <option value={1.3}>Fast · 1.3×</option>
-                      </select>
+                        <div>
+                          <div className="text-xs font-semibold">Deepgram</div>
+                          <div className="text-[10px] text-zinc-400">Aura · Ultra Fast</div>
+                        </div>
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] font-medium text-zinc-400">
+                          Optional
+                        </span>
+                      </button>
                     </div>
                   </div>
+
+                  {/* ElevenLabs Model & Voice Controls */}
+                  {ttsProvider === "elevenlabs" ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {/* ElevenLabs Models (from GET /api/video-generator/models) */}
+                      <div>
+                        <label htmlFor="video-tts-model" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                          ElevenLabs Model
+                        </label>
+                        <select
+                          id="video-tts-model"
+                          value={ttsModel}
+                          onChange={(e) => setTtsModel(e.target.value)}
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                        >
+                          {ttsModels.map((m) => (
+                            <option key={m.model_id} value={m.model_id}>
+                              {m.name || m.model_id}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* ElevenLabs Voice List */}
+                      <div>
+                        <label htmlFor="video-voice" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                          ElevenLabs Voice
+                        </label>
+                        <select
+                          id="video-voice"
+                          value={customVoiceId ? "custom" : voice}
+                          onChange={(e) => {
+                            if (e.target.value === "custom") {
+                              setVoice("");
+                            } else {
+                              setCustomVoiceId("");
+                              setVoice(e.target.value);
+                            }
+                          }}
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                        >
+                          <option value="">Default Studio Voice (rUOpAdbAl56KxO00wR5D)</option>
+                          {voices
+                            .filter((v) => !v.provider || v.provider === "elevenlabs")
+                            .map((option) => (
+                              <option key={option.model || option.key} value={option.model}>
+                                {option.key} {option.accent ? `(${option.accent})` : ""}
+                              </option>
+                            ))}
+                          <option value="custom">✏️ Enter custom Voice ID...</option>
+                        </select>
+                      </div>
+
+                      {/* Custom Voice ID write-in if desired */}
+                      <div className="sm:col-span-2">
+                        <input
+                          type="text"
+                          value={customVoiceId}
+                          onChange={(e) => setCustomVoiceId(e.target.value)}
+                          placeholder="Or paste custom ElevenLabs Voice ID (e.g. rUOpAdbAl56KxO00wR5D)"
+                          className="w-full rounded-lg border border-zinc-800/80 bg-zinc-900/50 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 font-mono"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    /* Deepgram Voice Controls */
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label htmlFor="video-voice" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                          Deepgram Aura Voice
+                        </label>
+                        <select
+                          id="video-voice"
+                          value={voice}
+                          onChange={(event) => setVoice(event.target.value)}
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                        >
+                          <option value="">Default (Thalia)</option>
+                          {voices
+                            .filter((v) => v.provider === "deepgram")
+                            .map((option) => (
+                              <option key={option.key} value={option.model}>
+                                {option.key.toUpperCase()} · {option.model}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {/* Pacing */}
+                      <div>
+                        <label htmlFor="video-speed" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                          Pacing
+                        </label>
+                        <select
+                          id="video-speed"
+                          value={speed}
+                          onChange={(event) => setSpeed(Number(event.target.value))}
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                        >
+                          <option value={0.85}>Calm · 0.85×</option>
+                          <option value={1}>Natural · 1.0×</option>
+                          <option value={1.15}>Energetic · 1.15×</option>
+                          <option value={1.3}>Fast · 1.3×</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pacing for ElevenLabs */}
+                  {ttsProvider === "elevenlabs" && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label htmlFor="video-speed" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                          Pacing
+                        </label>
+                        <select
+                          id="video-speed"
+                          value={speed}
+                          onChange={(event) => setSpeed(Number(event.target.value))}
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                        >
+                          <option value={0.85}>Calm · 0.85×</option>
+                          <option value={1}>Natural · 1.0×</option>
+                          <option value={1.15}>Energetic · 1.15×</option>
+                          <option value={1.3}>Fast · 1.3×</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center text-[11px] text-zinc-500 pt-5">
+                        ElevenLabs API Key is configured in Settings &gt; Database &amp; Env Config.
+                      </div>
+                    </div>
+                  )}
 
                   {/* Background Music Row */}
                   <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-3 space-y-2">
@@ -2190,7 +2400,9 @@ export function VideoGeneratorPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-3.5 py-2.5 text-[11px] text-zinc-400">
                   <span className="font-mono text-zinc-300">1080×1920 9:16</span>
                   <span className="text-zinc-700">•</span>
-                  <span>{voice ? voice.split("-")[2] || "Deepgram" : "Default"} ({speed}×)</span>
+                  <span>
+                    {ttsProvider === "elevenlabs" ? "ElevenLabs AI" : "Deepgram Aura"} ({speed}×)
+                  </span>
                   <span className="text-zinc-700">•</span>
                   <span className={hookEnabled ? "text-amber-300/90" : "text-zinc-600"}>
                     {hookEnabled ? "Hook Active" : "No Hook"}

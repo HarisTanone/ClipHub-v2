@@ -323,3 +323,68 @@ def test_video_generator_multi_worker_db_sync(tmp_path):
     assert fetched.output_path == "/tmp/final_video.mp4"
 
 
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_tts_models_and_voices():
+    from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
+
+    # Models fetching test with fallback
+    models = await ElevenLabsTTS.fetch_models(api_key="test-key")
+    assert len(models) > 0
+    assert any(m["model_id"] == "eleven_multilingual_v2" for m in models)
+
+    # Voices fetching test with fallback
+    voices = await ElevenLabsTTS.fetch_voices(api_key="test-key")
+    assert len(voices) > 0
+    assert any("rUOpAdbAl56KxO00wR5D" in str(v.get("voice_id")) for v in voices)
+
+
+def test_video_generator_tts_provider_persistence(tmp_path):
+    generator = VideoGenerator(output_dir=str(tmp_path))
+
+    job1 = generator.create_job(
+        topic="ElevenLabs Test",
+        tts_provider="elevenlabs",
+        tts_model="eleven_turbo_v2_5",
+        voice="rUOpAdbAl56KxO00wR5D",
+    )
+    assert job1.tts_provider == "elevenlabs"
+    assert job1.tts_model == "eleven_turbo_v2_5"
+    assert job1.voice == "rUOpAdbAl56KxO00wR5D"
+
+    # Verify DB persistence and retrieval
+    fetched1 = generator.get_job(job1.job_id)
+    assert fetched1 is not None
+    assert fetched1.tts_provider == "elevenlabs"
+    assert fetched1.tts_model == "eleven_turbo_v2_5"
+
+    job2 = generator.create_job(
+        topic="Deepgram Test",
+        tts_provider="deepgram",
+        voice="aura-2-thalia-en",
+    )
+    assert job2.tts_provider == "deepgram"
+    fetched2 = generator.get_job(job2.job_id)
+    assert fetched2 is not None
+    assert fetched2.tts_provider == "deepgram"
+
+
+def test_system_config_contains_elevenlabs_keys():
+    from src.infrastructure.system_config_store import SYSTEM_SETTINGS_METADATA, get_all_settings_for_role
+
+    keys = set(SYSTEM_SETTINGS_METADATA.keys())
+
+    assert "ELEVENLABS_API_KEY" in keys
+    assert "ELEVENLABS_VOICE_ID" in keys
+    assert "ELEVENLABS_MODEL_ID" in keys
+    assert "VIDEO_GEN_TTS_PROVIDER" in keys
+    assert "DEEPGRAM_API_KEY" in keys
+
+    settings_list = get_all_settings_for_role("superadmin")
+    rendered_keys = {item["key"] for item in settings_list}
+    assert "ELEVENLABS_API_KEY" in rendered_keys
+    assert "VIDEO_GEN_TTS_PROVIDER" in rendered_keys
+
+

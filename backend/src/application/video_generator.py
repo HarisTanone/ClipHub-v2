@@ -55,6 +55,8 @@ class VideoGenJob:
     status: VideoGenStatus = VideoGenStatus.QUEUED
     progress: int = 0  # 0-100
     target_duration: int = 65
+    tts_provider: str = "elevenlabs"
+    tts_model: str = "eleven_multilingual_v2"
     voice: str = ""
     speed: float = 1.0
     instructions: str = ""
@@ -141,6 +143,10 @@ class VideoGenerator:
                 cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN custom_hook TEXT")
             if "hook_style_json" not in cols:
                 cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN hook_style_json TEXT")
+            if "tts_provider" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN tts_provider TEXT DEFAULT 'elevenlabs'")
+            if "tts_model" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN tts_model TEXT DEFAULT 'eleven_multilingual_v2'")
             conn.commit()
             conn.close()
         except Exception as exc:
@@ -166,8 +172,9 @@ class VideoGenerator:
                     voice, speed, instructions, num_scenes, subtitles_enabled,
                     subtitle_style_json, hook_enabled, custom_hook, hook_style_json,
                     include_bgm, bgm_volume, title, story_json, scenes_json,
-                    timeline_json, output_path, error, created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    timeline_json, output_path, error, created_at, completed_at,
+                    tts_provider, tts_model
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     user_id=excluded.user_id,
                     topic=excluded.topic,
@@ -191,7 +198,9 @@ class VideoGenerator:
                     timeline_json=excluded.timeline_json,
                     output_path=excluded.output_path,
                     error=excluded.error,
-                    completed_at=excluded.completed_at
+                    completed_at=excluded.completed_at,
+                    tts_provider=excluded.tts_provider,
+                    tts_model=excluded.tts_model
             """, (
                 job.job_id,
                 job.user_id,
@@ -218,6 +227,8 @@ class VideoGenerator:
                 job.error,
                 job.created_at,
                 job.completed_at,
+                job.tts_provider,
+                job.tts_model,
             ))
             conn.commit()
             conn.close()
@@ -244,6 +255,8 @@ class VideoGenerator:
             if ("hook_style_json" in row.keys() and row["hook_style_json"])
             else {}
         )
+        tts_provider = row["tts_provider"] if ("tts_provider" in row.keys() and row["tts_provider"]) else "elevenlabs"
+        tts_model = row["tts_model"] if ("tts_model" in row.keys() and row["tts_model"]) else "eleven_multilingual_v2"
 
         return VideoGenJob(
             job_id=row["job_id"],
@@ -251,6 +264,8 @@ class VideoGenerator:
             status=status_val,
             progress=int(row["progress"] or 0),
             target_duration=int(row["target_duration"] or 65),
+            tts_provider=tts_provider,
+            tts_model=tts_model,
             voice=row["voice"] or "",
             speed=float(row["speed"] or 1.0),
             instructions=row["instructions"] or "",
@@ -277,6 +292,8 @@ class VideoGenerator:
         self,
         topic: str,
         target_duration: int = 0,
+        tts_provider: Optional[str] = None,
+        tts_model: Optional[str] = None,
         voice: str = "",
         speed: float = 1.0,
         instructions: str = "",
@@ -292,12 +309,24 @@ class VideoGenerator:
     ) -> VideoGenJob:
         """Create a new video generation job."""
         job_id = uuid4().hex[:12]
+        resolved_provider = (tts_provider or getattr(settings, "VIDEO_GEN_TTS_PROVIDER", "elevenlabs") or "elevenlabs").lower()
+        if "deepgram" in resolved_provider:
+            resolved_provider = "deepgram"
+            default_voice = settings.DEEPGRAM_TTS_VOICE
+        else:
+            resolved_provider = "elevenlabs"
+            default_voice = getattr(settings, "ELEVENLABS_VOICE_ID", "rUOpAdbAl56KxO00wR5D")
+
+        resolved_model = tts_model or getattr(settings, "ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+
         job = VideoGenJob(
             job_id=job_id,
             topic=topic,
             target_duration=target_duration or settings.VIDEO_GEN_TARGET_DURATION,
-            voice=voice or settings.DEEPGRAM_TTS_VOICE,
-            speed=speed or settings.DEEPGRAM_TTS_SPEED,
+            tts_provider=resolved_provider,
+            tts_model=resolved_model,
+            voice=voice or default_voice,
+            speed=speed or 1.0,
             instructions=instructions,
             num_scenes=num_scenes,
             subtitles_enabled=subtitles_enabled,
@@ -760,39 +789,80 @@ class VideoGenerator:
     async def _step_generate_tts(
         self, scenes: list[dict], job: VideoGenJob, work_dir: str
     ) -> list[dict]:
-        """Step 4: Generate TTS audio per scene via Deepgram."""
-        from src.infrastructure.deepgram_tts import DeepgramTTS
-
+        """Step 4: Generate TTS audio per scene via ElevenLabs or Deepgram."""
         tts_dir = os.path.join(work_dir, "tts")
         os.makedirs(tts_dir, exist_ok=True)
-        tts = DeepgramTTS(output_dir=tts_dir)
-        voice = job.voice or settings.DEEPGRAM_TTS_VOICE
 
-        try:
-            scenes = await tts.synthesize_scenes(
-                scenes=scenes,
-                voice=voice,
-                speed=job.speed,
-            )
-        except Exception as exc:
-            logger.warning(f"video_gen: synthesize_scenes failed ({exc}), falling back to individual calls")
-            for i, scene in enumerate(scenes):
-                narration = scene.get("narration", "")
-                if not narration:
-                    continue
-                try:
-                    audio_path = await tts.synthesize(
-                        text=narration,
-                        voice=voice,
-                        speed=job.speed,
-                        output_path=os.path.join(tts_dir, f"tts_{i + 1}.mp3"),
-                    )
-                    if audio_path:
-                        duration = await self._media_duration(audio_path)
-                        scene["tts_path"] = audio_path
-                        scene["tts_duration"] = duration
-                except Exception as e:
-                    logger.warning(f"video_gen: TTS failed for scene {i + 1}: {e}")
+        provider = (job.tts_provider or getattr(settings, "VIDEO_GEN_TTS_PROVIDER", "elevenlabs") or "elevenlabs").lower()
+        if "deepgram" in provider or (job.voice and "aura" in job.voice.lower()):
+            provider = "deepgram"
+        else:
+            provider = "elevenlabs"
+
+        if provider == "elevenlabs":
+            from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
+            tts = ElevenLabsTTS(output_dir=tts_dir)
+            voice_id = job.voice or getattr(settings, "ELEVENLABS_VOICE_ID", "rUOpAdbAl56KxO00wR5D")
+            model_id = job.tts_model or getattr(settings, "ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+
+            try:
+                scenes = await tts.synthesize_scenes(
+                    scenes=scenes,
+                    voice_id=voice_id,
+                    model_id=model_id,
+                    speed=job.speed,
+                )
+            except Exception as exc:
+                logger.warning(f"video_gen: ElevenLabs synthesize_scenes failed ({exc}), falling back to individual calls")
+                for i, scene in enumerate(scenes):
+                    narration = (scene.get("narration") or "").strip()
+                    if not narration:
+                        continue
+                    try:
+                        audio_path = await tts.synthesize(
+                            text=narration,
+                            voice_id=voice_id,
+                            model_id=model_id,
+                            speed=job.speed,
+                            output_path=os.path.join(tts_dir, f"tts_{i + 1}.mp3"),
+                        )
+                        if audio_path:
+                            dur = await self._media_duration(audio_path)
+                            scene["tts_path"] = audio_path
+                            scene["tts_duration"] = dur
+                    except Exception as e:
+                        logger.warning(f"video_gen: ElevenLabs TTS failed for scene {i + 1}: {e}")
+
+        else:
+            from src.infrastructure.deepgram_tts import DeepgramTTS
+            tts = DeepgramTTS(output_dir=tts_dir)
+            voice = job.voice or settings.DEEPGRAM_TTS_VOICE
+
+            try:
+                scenes = await tts.synthesize_scenes(
+                    scenes=scenes,
+                    voice=voice,
+                    speed=job.speed,
+                )
+            except Exception as exc:
+                logger.warning(f"video_gen: Deepgram synthesize_scenes failed ({exc}), falling back to individual calls")
+                for i, scene in enumerate(scenes):
+                    narration = scene.get("narration", "")
+                    if not narration:
+                        continue
+                    try:
+                        audio_path = await tts.synthesize(
+                            text=narration,
+                            voice=voice,
+                            speed=job.speed,
+                            output_path=os.path.join(tts_dir, f"tts_{i + 1}.mp3"),
+                        )
+                        if audio_path:
+                            duration = await self._media_duration(audio_path)
+                            scene["tts_path"] = audio_path
+                            scene["tts_duration"] = duration
+                    except Exception as e:
+                        logger.warning(f"video_gen: Deepgram TTS failed for scene {i + 1}: {e}")
 
         # Ensure audio_path and audio_duration aliases
         for scene in scenes:
