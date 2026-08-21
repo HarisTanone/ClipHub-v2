@@ -39,8 +39,8 @@ def _get_cookie_args() -> list[str]:
 
 
 def _get_extractor_args() -> list[str]:
-    """Extractor arguments to bypass YouTube 403 Forbidden on cloud/VPS servers."""
-    return ["--extractor-args", "youtube:player_client=android,web,web_creator,ios"]
+    """Extractor arguments to bypass YouTube 403 Forbidden and get maximum HD/4K streams."""
+    return ["--extractor-args", "youtube:player_client=web,web_creator,android,ios"]
 
 
 class YouTubeDownloader(IDownloader):
@@ -119,7 +119,7 @@ class YouTubeDownloader(IDownloader):
         return True, title, duration
 
     async def download_video(self, url: str, output_path: str) -> bool:
-        """Download video YouTube menggunakan yt-dlp (+ aria2c di production)."""
+        """Download video YouTube menggunakan yt-dlp (+ aria2c di production) dengan resolusi HD/4K tertinggi."""
         logger.info(f"Downloading video: {url} → {output_path}")
 
         ytdlp_cmd = _get_ytdlp_cmd()
@@ -134,6 +134,7 @@ class YouTubeDownloader(IDownloader):
             "--geo-bypass",
             *_get_extractor_args(),
             *_get_cookie_args(),
+            "--format-sort", "res:2160,fps:60,vcodec:av01,vcodec:vp9,vcodec:h264,br,size",
             "-f", "bestvideo[height<=2160]+bestaudio/bestvideo+bestaudio/best[height<=2160]/best",
             "--merge-output-format", "mp4",
             "--postprocessor-args", "merger:-c:v copy -c:a aac -b:a 192k",
@@ -180,8 +181,9 @@ class YouTubeDownloader(IDownloader):
                 retry_cmd = [
                     ytdlp_cmd,
                     "--geo-bypass",
-                    "--extractor-args", "youtube:player_client=ios,android",
+                    "--extractor-args", "youtube:player_client=ios,web,android",
                     *_get_cookie_args(),
+                    "--format-sort", "res:2160,fps:60,vcodec:av01,vcodec:vp9,vcodec:h264,br,size",
                     "-f", "bestvideo[height<=2160]+bestaudio/bestvideo+bestaudio/best[height<=2160]/best",
                     "--merge-output-format", "mp4",
                     "--postprocessor-args", "merger:-c:v copy -c:a aac -b:a 192k",

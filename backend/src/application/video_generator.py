@@ -1360,7 +1360,9 @@ class VideoGenerator:
 
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[height<=1080]/best[height<=1080]/best",
+            "--extractor-args", "youtube:player_client=web,web_creator,android,ios",
+            "--format-sort", "res:2160,fps:60,vcodec:av01,vcodec:vp9,vcodec:h264,br,size",
+            "-f", "bestvideo[height<=2160]+bestaudio/bestvideo+bestaudio/best[height<=2160]/best",
             "--download-sections", section,
             "--merge-output-format", "mp4",
             "--no-playlist",
@@ -1403,17 +1405,19 @@ class VideoGenerator:
 
         if footage_path and os.path.exists(footage_path):
             # Trim and scale footage to 1080x1920 (9:16)
+            from src.infrastructure.gpu_encoder import get_video_encoder_args
             cmd = [
                 "ffmpeg", "-y",
                 "-stream_loop", "-1",
                 "-i", footage_path,
                 "-t", str(duration),
                 "-vf", (
-                    "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
+                    "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
                     "crop=1080:1920,"
+                    "unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
                     "setsar=1"
                 ),
-                "-c:v", "libx264", "-preset", "medium", "-crf", "17",
+                *get_video_encoder_args("medium"),
                 "-an",  # No audio from footage
                 "-r", "30",
                 "-pix_fmt", "yuv420p",
@@ -1436,11 +1440,12 @@ class VideoGenerator:
             logger.info(f"video_gen: scene {scene_id} no footage, using black frame")
 
         # Fallback: generate black frame with matching duration
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
         cmd = [
             "ffmpeg", "-y",
             "-f", "lavfi",
             "-i", f"color=c=black:s=1080x1920:d={duration}:r=30",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "17",
+            *get_video_encoder_args("medium"),
             "-pix_fmt", "yuv420p",
             clip_path,
         ]

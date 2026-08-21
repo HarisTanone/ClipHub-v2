@@ -2892,7 +2892,9 @@ class PodcastReframeEngine(IReframeEngine):
         fps_value = max(1.0, float(fps))
         vf = (
             f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x_expr}:0,"
-            f"scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1,"
+            f"scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+            f"unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
+            f"format=yuv420p,setsar=1,"
             f"fps={fps_value:.6f},settb=AVTB"
         )
 
@@ -2992,21 +2994,26 @@ class PodcastReframeEngine(IReframeEngine):
             "[0:v]setpts=PTS-STARTPTS,split=3[single_src][top_src][bottom_src]",
             (
                 f"[single_src]crop={single_crop_w}:{height}:{single_x_expr}:0,"
-                f"scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1,"
+                f"scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+                f"unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
+                f"format=yuv420p,setsar=1,"
                 f"fps={fps_value:.6f},settb=AVTB,setpts=PTS-STARTPTS[single]"
             ),
             (
                 f"[top_src]crop={crop_w}:{crop_h}:{top_x}:{top_y},"
-                f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,"
+                f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+                f"unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
                 "format=yuv420p,setsar=1[top]"
             ),
             (
                 f"[bottom_src]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},"
-                f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,"
+                f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+                f"unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
                 "format=yuv420p,setsar=1[bottom]"
             ),
             (
-                f"[top][bottom]vstack=inputs=2,scale=1080:1920:flags=lanczos,"
+                f"[top][bottom]vstack=inputs=2,scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+                f"unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
                 f"format=yuv420p,setsar=1,fps={fps_value:.6f},"
                 "settb=AVTB,setpts=PTS-STARTPTS[grid]"
             ),
@@ -3296,7 +3303,9 @@ class PodcastReframeEngine(IReframeEngine):
 
         vf = (
             f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x}:0,"
-            "scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1"
+            "scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+            "unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
+            "format=yuv420p,setsar=1"
         )
 
         cmd = [
@@ -3399,8 +3408,8 @@ class PodcastReframeEngine(IReframeEngine):
 
         vf = (
             f"setpts=PTS-STARTPTS,split=2[top][bot];"
-            f"[top]crop={crop_w}:{crop_h}:{top_x}:{top_y},scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,format=yuv420p[t];"
-            f"[bot]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos,format=yuv420p[b];"
+            f"[top]crop={crop_w}:{crop_h}:{top_x}:{top_y},scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p[t];"
+            f"[bot]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p[b];"
             f"[t][b]vstack=inputs=2,setsar=1[vout]"
         )
 
@@ -3775,7 +3784,7 @@ class PodcastReframeEngine(IReframeEngine):
         """Center crop to 9:16."""
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
-            "-vf", "setpts=PTS-STARTPTS,crop=ih*9/16:ih,scale=1080:1920:flags=lanczos,format=yuv420p,setsar=1",
+            "-vf", "setpts=PTS-STARTPTS,crop=ih*9/16:ih,scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,format=yuv420p,setsar=1",
             "-af", self.AUDIO_FILTER,
             *get_video_encoder_args("medium"),
             "-c:a", "aac", "-b:a", "192k",

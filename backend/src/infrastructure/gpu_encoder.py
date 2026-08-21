@@ -60,38 +60,38 @@ def get_video_encoder_args(quality: str = "medium") -> list[str]:
     """
     if _nvenc_available:
         # NVENC presets: p1 (fastest) → p7 (slowest/best quality)
-        # CQ: lower = better quality (13-28 typical range)
+        # CQ: lower = better quality (12-28 typical range)
         presets = {
-            "low": ("p3", "19"),
-            "fast": ("p4", "17"),
-            "medium": ("p5", "15"),   # Ultra crisp 1080p studio HD
-            "high": ("p6", "13"),     # Near-lossless studio master
+            "low": ("p3", "18"),
+            "fast": ("p4", "16"),
+            "medium": ("p5", "14"),   # Ultra crisp 1080p studio HD master
+            "high": ("p6", "12"),     # Near-lossless studio master
         }
-        preset, cq = presets.get(quality, ("p5", "15"))
+        preset, cq = presets.get(quality, ("p5", "14"))
         return [
             "-c:v", "h264_nvenc",
             "-preset", preset,
             "-cq", cq,
             "-b:v", "0",
-            "-maxrate", "25M",
-            "-bufsize", "35M",
+            "-maxrate", "35M",
+            "-bufsize", "50M",
             "-pix_fmt", "yuv420p",
         ]
     else:
-        # libx264 fallback with pristine CRF and bitrate headroom
+        # libx264 fallback with pristine CRF and generous bitrate headroom
         presets = {
-            "low": ("veryfast", "18"),
-            "fast": ("fast", "16"),
-            "medium": ("medium", "15"),  # Sharp HD studio master
-            "high": ("slow", "13"),
+            "low": ("veryfast", "17"),
+            "fast": ("fast", "15"),
+            "medium": ("medium", "14"),  # Sharp HD studio master
+            "high": ("slow", "12"),
         }
-        preset, crf = presets.get(quality, ("medium", "15"))
+        preset, crf = presets.get(quality, ("medium", "14"))
         return [
             "-c:v", "libx264",
             "-preset", preset,
             "-crf", crf,
-            "-maxrate", "25M",
-            "-bufsize", "35M",
+            "-maxrate", "35M",
+            "-bufsize", "50M",
             "-pix_fmt", "yuv420p",
         ]
 

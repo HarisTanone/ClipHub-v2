@@ -230,24 +230,19 @@ class YouTubeSearch:
                     files = v.get("video_files", [])
                     best_file = None
 
-                    # Prioritize 720p / 1080p portrait HD files (< 1920 height to avoid 4K UHD download limits)
+                    # Prioritize 1080x1920 Full HD / 720p HD portrait files
                     portrait_hd = [
                         f for f in files
                         if f.get("link") and (
-                            (f.get("width", 0) <= 1080 and f.get("height", 0) <= 1920 and f.get("height", 0) >= 1200)
-                            or (f.get("quality") == "hd" and f.get("height", 0) <= 1920)
+                            (f.get("width", 0) <= 2160 and f.get("height", 0) >= 1080)
+                            or (f.get("quality") == "hd")
                         )
                     ]
                     if portrait_hd:
-                        # Pick highest resolution among <= 1080x1920
                         best_file = max(portrait_hd, key=lambda x: x.get("height", 0))
                     else:
-                        # Fallback to standard HD
                         hd_files = [f for f in files if f.get("link") and (f.get("quality") == "hd" or f.get("height", 0) >= 720)]
-                        if hd_files:
-                            best_file = hd_files[0]
-                        elif files:
-                            best_file = files[0]
+                        best_file = max(hd_files, key=lambda x: x.get("height", 0)) if hd_files else (files[0] if files else None)
 
                     if best_file and best_file.get("link"):
                         results.append({
@@ -296,7 +291,7 @@ class YouTubeSearch:
                 results = []
                 for v in data.get("hits", []):
                     videos = v.get("videos", {})
-                    chosen = videos.get("medium") or videos.get("large") or videos.get("small") or {}
+                    chosen = videos.get("large") or videos.get("medium") or videos.get("small") or {}
                     link = chosen.get("url")
                     if link:
                         results.append({

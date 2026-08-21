@@ -277,8 +277,8 @@ class YoloReframeEngine(IYoloReframeEngine):
                         # FIX: Added format=yuv420p and setsar=1 to prevent concat SAR error
                         video_filters.append(
                             f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,split=2[s{i}_a][s{i}_b];"
-                            f"[s{i}_a]crop={crop_w_double}:{height}:{X1}:0,scale=1080:960:flags=lanczos,format=yuv420p[s{i}_ta];"
-                            f"[s{i}_b]crop={crop_w_double}:{height}:{X2}:0,scale=1080:960:flags=lanczos,format=yuv420p[s{i}_tb];"
+                            f"[s{i}_a]crop={crop_w_double}:{height}:{X1}:0,scale=1080:960:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p[s{i}_ta];"
+                            f"[s{i}_b]crop={crop_w_double}:{height}:{X2}:0,scale=1080:960:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p[s{i}_tb];"
                             f"[s{i}_ta][s{i}_tb]vstack=inputs=2,setsar=1,format=yuv420p[{v_out}]"
                         )
 
@@ -287,10 +287,10 @@ class YoloReframeEngine(IYoloReframeEngine):
                 X = int(np.median(all_x)) if all_x else width // 2
                 crop_x = self._clamp_crop_x(X - crop_w_single / 2, crop_w_single, width)
 
-                # FIX: Added setsar=1,format=yuv420p
+                # FIX: Added setsar=1,format=yuv420p with Studio HD scaling
                 video_filters.append(
                     f"[0:v]trim={start_t}:{end_t},setpts=PTS-STARTPTS,"
-                    f"crop={crop_w_single}:{height}:{crop_x}:0,scale=1080:1920:flags=lanczos,setsar=1,format=yuv420p[{v_out}]"
+                    f"crop={crop_w_single}:{height}:{crop_x}:0,scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,setsar=1,format=yuv420p[{v_out}]"
                 )
 
             audio_filters.append(f"[0:a]atrim={start_t}:{end_t},asetpts=PTS-STARTPTS[{a_out}]")
@@ -357,8 +357,8 @@ class YoloReframeEngine(IYoloReframeEngine):
 
     async def _center_crop_fallback(self, input_path: str, output_path: str, target_aspect: str) -> bool:
         """Simple center crop when MediaPipe unavailable or no persons found."""
-        if target_aspect == "9:16": crop_filter = "crop=ih*9/16:ih,scale=1080:1920:flags=lanczos,format=yuv420p"
-        elif target_aspect == "1:1": crop_filter = "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080:flags=lanczos,format=yuv420p"
+        if target_aspect == "9:16": crop_filter = "crop=ih*9/16:ih,scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,format=yuv420p"
+        elif target_aspect == "1:1": crop_filter = "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p"
         else: shutil.copy2(input_path, output_path); return True
 
         cmd = ["ffmpeg", "-y", "-i", input_path, "-vf", crop_filter, *get_video_encoder_args("medium"), "-c:a", "copy", "-movflags", "+faststart", output_path]
