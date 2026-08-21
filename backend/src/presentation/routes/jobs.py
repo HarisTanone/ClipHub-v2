@@ -230,14 +230,14 @@ def _ensure_preview_quality_variant(final_path: str, quality: str) -> str:
 
     tmp_path = f"{variant_path}.tmp.{os.getpid()}"
     scale_expr = f"{target}:-2" if height >= width else f"-2:{target}"
-    crf = {"720": "24", "480": "27", "360": "30", "320": "31"}[quality]
+    crf = {"720": "20", "480": "22", "360": "24", "320": "26"}[quality]
 
     cmd = [
         "ffmpeg", "-y",
         "-i", final_path,
         "-vf", f"scale={scale_expr}:flags=lanczos,format=yuv420p",
         "-c:v", "libx264",
-        "-preset", "veryfast",
+        "-preset", "fast",
         "-crf", crf,
         "-c:a", "copy",
         "-movflags", "+faststart",

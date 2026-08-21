@@ -243,12 +243,14 @@ def _render_text_watermark(
         f":x={x_expr}"
         f":y={y_expr}"
     )
+    from src.infrastructure.gpu_encoder import get_video_encoder_args
+    encoder_args = get_video_encoder_args("high")
     cmd = [
         "ffmpeg", "-y", "-i", video_path,
         "-vf", drawtext,
         "-map", "0:v:0", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-        "-c:a", "copy", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        *encoder_args,
+        "-c:a", "copy", "-movflags", "+faststart",
         output_path,
     ]
     try:
@@ -309,14 +311,16 @@ def _render_image_watermark(
             f"[wm]format=rgba,lut=a='floor(val*{opacity:.2f})'[wm2];"
             f"[base][wm2]overlay=x={x_expr}:y={y_expr}:format=auto,setsar=1[v]"
         )
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
+        encoder_args = get_video_encoder_args("high")
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
             "-i", image_path,
             "-filter_complex", filter_complex,
             "-map", "[v]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-            "-c:a", "copy", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            *encoder_args,
+            "-c:a", "copy", "-movflags", "+faststart",
             output_path,
         ]
         try:

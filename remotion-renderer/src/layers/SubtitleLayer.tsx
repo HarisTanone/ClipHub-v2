@@ -612,7 +612,9 @@ function SubtitlePage({
                 overflowWrap: "anywhere",
                 textShadow: [
                   visualPreset === "spotlight_keyword" ? `0 0 30px ${hexToRgba(highlightColor, 0.65)}` : "",
-                  config.highlightGlow ? `0 0 16px ${config.highlightGlowColor || highlightColor}` : "",
+                  (config.highlightGlow || visualPreset === "neon_pulse")
+                    ? `0 0 8px ${config.highlightGlowColor || highlightColor}, 0 0 20px ${hexToRgba(config.highlightGlowColor || highlightColor, 0.85)}, 0 0 45px ${hexToRgba(config.highlightGlowColor || highlightColor, 0.6)}`
+                    : "",
                   (config.dualStyleEnabled ? config.highlightShadowEnabled : config.shadowEnabled) ? `0 0 ${config.dualStyleEnabled ? (config.highlightShadowBlur || 12) : (config.shadowBlur || 8)}px ${config.dualStyleEnabled ? (config.highlightShadowColor || "#000") : (config.shadowColor || "#000")}` : "",
                 ].filter(Boolean).join(", ") || undefined,
                 paintOrder: (config.dualStyleEnabled ? config.highlightStrokeEnabled : config.strokeEnabled) ? "stroke" : undefined,
@@ -654,16 +656,18 @@ function SubtitlePage({
               ? `'${config.highlightFontFamily || "Anton"}', sans-serif`
               : fontFamily;
 
-            // Shadows
+            // Shadows & Multi-tiered Glow Bloom
             const shadows: string[] = [];
             if (useDual ? config.highlightShadowEnabled : config.shadowEnabled === true) {
               shadows.push(`0 0 ${useDual ? (config.highlightShadowBlur || 12) : (config.shadowBlur || 8)}px ${useDual ? (config.highlightShadowColor || "#000") : (config.shadowColor || "#000")}`);
             }
-            if (shouldHighlight && config.highlightGlow) {
-              shadows.push(`0 0 12px ${config.highlightGlowColor || highlightColor}`);
-            }
-            if (shouldHighlight && visualPreset === "neon_pulse") {
-              shadows.push(`0 0 24px ${highlightColor}`);
+            if (shouldHighlight && (config.highlightGlow || visualPreset === "neon_pulse")) {
+              const glowTarget = config.highlightGlowColor || highlightColor;
+              shadows.push(
+                `0 0 8px ${glowTarget}`,
+                `0 0 20px ${hexToRgba(glowTarget, 0.85)}`,
+                `0 0 45px ${hexToRgba(glowTarget, 0.6)}`
+              );
             }
             if (isImpactPreset) {
               shadows.push(`0 7px 16px ${hexToRgba("#000000", 0.5)}`);

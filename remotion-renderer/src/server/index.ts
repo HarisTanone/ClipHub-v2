@@ -160,12 +160,12 @@ app.post("/render", async (req, res) => {
   const startTime = Date.now();
 
   try {
-    // Quality presets
+    // Studio HD Quality presets: Ultra-crisp 1080p, lossless frame capture
     const qualityConfig = {
-      low: { crf: 28, concurrency: 4 },
-      medium: { crf: 18, concurrency: 2 },
-      high: { crf: 12, concurrency: 1 },
-    }[request.quality];
+      low: { crf: 18, concurrency: 4, x264Preset: "fast" },
+      medium: { crf: 14, concurrency: 2, x264Preset: "medium" },
+      high: { crf: 10, concurrency: 1, x264Preset: "slow" },
+    }[request.quality] || { crf: 14, concurrency: 2, x264Preset: "medium" };
 
     // Convert local video path to HTTP URL served by this server
     const propsWithUrl = { ...request.props };
@@ -191,7 +191,7 @@ app.post("/render", async (req, res) => {
     console.log(`[remotion-server] Rendering: ${path.basename(request.outputPath)}`);
     console.log(`[remotion-server]   Video URL: ${propsWithUrl.videoPath}`);
     console.log(`[remotion-server]   Duration: ${request.durationInFrames} frames @ ${request.fps}fps`);
-    console.log(`[remotion-server]   Quality: ${request.quality} (crf=${qualityConfig.crf})`);
+    console.log(`[remotion-server]   Quality: ${request.quality} (crf=${qualityConfig.crf}, preset=${qualityConfig.x264Preset})`);
     console.log(`[remotion-server]   Hook: "${propsWithUrl.hookText?.slice(0, 40)}..." anim=${propsWithUrl.hookAnimation}`);
     console.log(`[remotion-server]   Hook config: color=${propsWithUrl.creativeDirection?.hook_style_config?.color || 'NOT SET'}, glow=${propsWithUrl.creativeDirection?.hook_style_config?.glowEnabled || false}`);
     console.log(`[remotion-server]   Words: ${propsWithUrl.words?.length || 0}, firstWord: ${propsWithUrl.words?.[0]?.start != null ? propsWithUrl.words[0].start.toFixed(1) : 'N/A'}s`);
@@ -219,7 +219,7 @@ app.post("/render", async (req, res) => {
       fs.mkdirSync(outputDir, { recursive: true });
     }
 
-    // Render
+    // Render with studio-grade lossless PNG frame capture and pristine CRF
     await renderMedia({
       composition: finalComposition,
       serveUrl: bundled,
@@ -229,6 +229,9 @@ app.post("/render", async (req, res) => {
       concurrency: request.concurrency || qualityConfig.concurrency,
       crf: qualityConfig.crf,
       pixelFormat: "yuv420p",
+      imageFormat: "png",
+      jpegQuality: 100,
+      x264Preset: qualityConfig.x264Preset as any,
       chromiumOptions: { gl: "swangle" },
       onProgress: ({ progress }) => {
         activeRenders.set(renderId, {

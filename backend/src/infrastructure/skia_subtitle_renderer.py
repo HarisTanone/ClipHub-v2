@@ -540,7 +540,8 @@ class SkiaSubtitleRenderer:
             return
 
         # Prepare normal base font for consistent slot layout
-        normal_font = self._load_pil_font(font_family, base_font_size)
+        font_weight = str(style.get("font_weight", "Bold"))
+        normal_font = self._load_pil_font(font_family, base_font_size, font_weight)
 
         # Prepare word items with base measurements (FIXED SLOT LAYOUT)
         word_items = []
@@ -591,7 +592,7 @@ class SkiaSubtitleRenderer:
         if total_text_width > max_safe_width:
             scale_factor = max_safe_width / total_text_width
             base_font_size = max(22, int(base_font_size * scale_factor))
-            normal_font = self._load_pil_font(font_family, base_font_size)
+            normal_font = self._load_pil_font(font_family, base_font_size, font_weight)
             spacing = max(14, int(spacing * scale_factor))
             for item in word_items:
                 bbox = draw.textbbox((0, 0), item["text"], font=normal_font)
@@ -603,7 +604,8 @@ class SkiaSubtitleRenderer:
         # Active font for highlights (scales outward around fixed slot centers)
         active_scale = float(style.get("highlight_scale") or 1.15) if (style.get("highlight_bold") is not False or is_word_pop) else 1.0
         active_font_size = int(base_font_size * active_scale)
-        active_font = self._load_pil_font(font_family, active_font_size)
+        active_weight = "Black" if (is_word_pop or style.get("highlight_bold") is not False) else font_weight
+        active_font = self._load_pil_font(font_family, active_font_size, active_weight)
 
         # Position calculation with Auto-Grid Dynamic Centering
         default_pos_y = float(style.get("position_y") if style.get("position_y") is not None else style.get("position_y_pct", 78))
@@ -872,13 +874,27 @@ class SkiaSubtitleRenderer:
                 # Glowing active word highlight with solid dark drop shadow
                 draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 240))
                 hl_color = highlight_color
-                if style.get("glow_enabled", True):
-                    glow_color_str = style.get("glow_color")
+                glow_on = (
+                    style.get("glow_enabled") is True
+                    or style.get("glowEnabled") is True
+                    or style.get("highlight_glow") is True
+                    or style.get("highlightGlow") is True
+                    or style.get("glow_enabled") is None  # default on for rich active words
+                )
+                if glow_on:
+                    glow_color_str = (
+                        style.get("glow_color")
+                        or style.get("glowColor")
+                        or style.get("highlight_glow_color")
+                        or style.get("highlightGlowColor")
+                    )
                     if glow_color_str:
-                        glow_c = self._parse_rgba(glow_color_str, 0.65)
+                        glow_c = self._parse_rgba(glow_color_str, 0.75)
                     else:
-                        glow_c = (hl_color[0], hl_color[1], hl_color[2], 160)
-                    glow_rad = max(4, int(style.get("glow_radius", 8)))
+                        glow_c = (hl_color[0], hl_color[1], hl_color[2], 180)
+                    glow_rad = max(4, int(style.get("glow_radius", style.get("glowSize", 10))))
+                    # Multi-pass glow bloom: wide atmospheric aura + vibrant core
+                    draw.text((word_x, word_y), w_text, font=f, fill=(glow_c[0], glow_c[1], glow_c[2], 65), stroke_width=glow_rad * 2, stroke_fill=(glow_c[0], glow_c[1], glow_c[2], 65))
                     draw.text((word_x, word_y), w_text, font=f, fill=glow_c, stroke_width=glow_rad, stroke_fill=glow_c)
 
                 strk_width = max(2, int(style.get("stroke_width", 3))) if style.get("stroke_enabled", True) else 3
@@ -934,32 +950,45 @@ class SkiaSubtitleRenderer:
 
         return lines
 
-    def _load_pil_font(self, font_family: str, font_size: int) -> ImageFont.FreeTypeFont:
-        """Load requested Google Font with seamless fallback."""
-        clean_name = font_family.replace(" ", "")
+    def _load_pil_font(self, font_family: str, font_size: int, font_weight: str = "Bold") -> ImageFont.FreeTypeFont:
+        """Load requested Google Font with seamless fallback and heavy weight prioritization."""
+        clean_name = font_family.replace(" ", "").replace("-", "").lower()
         search_dirs = [
             self._font_dir,
             os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts")),
             os.path.abspath(os.path.join(os.getcwd(), "backend", "assets", "fonts")),
             os.path.abspath(os.path.join(os.getcwd(), "assets", "fonts")),
         ]
-        candidates = [
-            f"{font_family}-Bold.ttf",
-            f"{font_family}-Black.ttf",
-            f"{font_family}-ExtraBold.ttf",
-            f"{clean_name}-Bold.ttf",
-            f"{clean_name}-Regular.ttf",
-            f"{clean_name}-Variable.ttf",
-            f"{font_family}-Regular.ttf",
-            f"{font_family}-Variable.ttf",
-            "Anton-Regular.ttf",
-            "ArchivoBlack-Regular.ttf",
-            "BebasNeue-Regular.ttf",
-            "Montserrat-Variable.ttf",
-            "Poppins-Bold.ttf",
-            "Inter-Variable.ttf",
-            "Roboto-Bold.ttf",
-        ]
+
+        is_heavy = str(font_weight).lower() in ("bold", "black", "extrabold", "heavy", "900", "800", "700")
+
+        # Specific font family candidates
+        candidates = []
+        if is_heavy:
+            candidates.extend([
+                f"{font_family}-Bold.ttf",
+                f"{font_family}-Black.ttf",
+                f"{font_family}-ExtraBold.ttf",
+                f"{font_family}Condensed-Bold.ttf",
+                f"{clean_name}-Bold.ttf",
+                f"{font_family}-Regular.ttf",  # e.g. Anton-Regular, ArchivoBlack-Regular are naturally heavy 900
+                "Anton-Regular.ttf",
+                "ArchivoBlack-Regular.ttf",
+                "Poppins-Bold.ttf",
+                "Roboto-Bold.ttf",
+                "Oswald-Bold.ttf",
+                "BarlowCondensed-Bold.ttf",
+                f"{font_family}-Variable.ttf",
+            ])
+        else:
+            candidates.extend([
+                f"{font_family}-Regular.ttf",
+                f"{font_family}-Variable.ttf",
+                f"{font_family}-Bold.ttf",
+                "Inter-Variable.ttf",
+                "Poppins-Bold.ttf",
+            ])
+
         for fdir in search_dirs:
             if not fdir or not os.path.exists(fdir):
                 continue
@@ -970,6 +999,22 @@ class SkiaSubtitleRenderer:
                         return ImageFont.truetype(path, font_size)
                     except Exception:
                         pass
+
+        # If font not found by candidate, search directory for matching family
+        for fdir in search_dirs:
+            if not fdir or not os.path.exists(fdir):
+                continue
+            for file_name in os.listdir(fdir):
+                if not file_name.lower().endswith((".ttf", ".otf")):
+                    continue
+                c_name = file_name.replace(" ", "").replace("-", "").lower()
+                if clean_name in c_name:
+                    try:
+                        return ImageFont.truetype(os.path.join(fdir, file_name), font_size)
+                    except Exception:
+                        pass
+
+        # Guaranteed fallback
         return ImageFont.load_default()
 
     def _parse_rgba(self, color_str: str, opacity: float = 1.0) -> Tuple[int, int, int, int]:

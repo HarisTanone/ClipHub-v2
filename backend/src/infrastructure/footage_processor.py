@@ -91,16 +91,14 @@ class FootageProcessor:
                 "setsar=1"
             )
 
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
         cmd = [
             "ffmpeg", "-y",
             "-i", raw_path,
             "-t", f"{target_duration:.3f}",
             "-vf", vf_filter,
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "20",
+            *get_video_encoder_args("medium"),
             "-r", "30",
-            "-pix_fmt", "yuv420p",
             "-an",
             "-movflags", "+faststart",
             output_path,

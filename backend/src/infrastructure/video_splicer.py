@@ -293,11 +293,9 @@ class VideoSplicer(IVideoSplicer):
             vcodec = ["-c:v", "copy"]
             timeout = 120.0
         else:
+            from src.infrastructure.gpu_encoder import get_video_encoder_args
             vcodec = [
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "18",
-                "-pix_fmt", "yuv420p",
+                *get_video_encoder_args("medium"),
                 "-r", str(_PART_FPS),
             ]
             timeout = 300.0
@@ -359,14 +357,14 @@ class VideoSplicer(IVideoSplicer):
             return False
 
         vf_filter = vf or _vf_normalize(_DEFAULT_W, _DEFAULT_H)
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
         cmd = [
             "ffmpeg", "-y",
             "-ss", f"{start:.3f}",
             "-i", clip_path,
             "-t", f"{duration:.3f}",
             "-vf", vf_filter,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-pix_fmt", "yuv420p",
+            *get_video_encoder_args("medium"),
             "-an",
             "-movflags", "+faststart",
             output_path,
@@ -382,45 +380,19 @@ class VideoSplicer(IVideoSplicer):
                 stderr=asyncio.subprocess.PIPE,
             )
             _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            ok = proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0
-            if not ok:
-                err = (stderr or b"").decode(errors="replace")[-300:]
-                logger.warning(
-                    "video_splicer: extract failed [%.1f-%.1f] rc=%s: %s",
-                    start,
-                    end,
-                    proc.returncode,
-                    err,
-                )
-                return False
-
-            # Sanity: part duration must be close to requested
-            tl = probe_media_timeline(output_path)
-            if tl is None or tl.video_duration < duration * 0.85:
-                logger.warning(
-                    "video_splicer: extract short [%.1f-%.1f] got=%.2fs want=%.2fs",
-                    start,
-                    end,
-                    tl.video_duration if tl else 0.0,
-                    duration,
-                )
-                return False
-            return True
+            if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return True
+            err = (stderr or b"").decode(errors="replace")[-400:]
+            logger.warning(f"video_splicer: extract failed rc={proc.returncode}: {err}")
+            return False
         except asyncio.TimeoutError:
             if proc is not None:
                 proc.kill()
                 await proc.communicate()
-            logger.warning(
-                "video_splicer: segment extract timed out after %.1fs [%.1f-%.1f]",
-                timeout,
-                start,
-                end,
-            )
+            logger.warning("video_splicer: extract timed out after %.0fs", timeout)
             return False
         except Exception as exc:
-            logger.warning(
-                f"video_splicer: segment extract failed [{start:.1f}-{end:.1f}]: {exc}"
-            )
+            logger.warning(f"video_splicer: extract error: {exc}")
             return False
 
     async def _normalize_video(
@@ -435,12 +407,12 @@ class VideoSplicer(IVideoSplicer):
             return False
 
         vf_filter = vf or _vf_normalize(_DEFAULT_W, _DEFAULT_H)
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
         cmd = [
             "ffmpeg", "-y",
             "-i", src_path,
             "-vf", vf_filter,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-pix_fmt", "yuv420p",
+            *get_video_encoder_args("medium"),
             "-an",
             "-movflags", "+faststart",
         ]
@@ -468,6 +440,8 @@ class VideoSplicer(IVideoSplicer):
             return False
         except Exception:
             return False
+
+    _normalize_stock_segment = _normalize_video
 
     def _validate_no_overlap(self, segments: list[SpliceSegment]) -> bool:
         """Ensure minimum 1s gap between segments."""

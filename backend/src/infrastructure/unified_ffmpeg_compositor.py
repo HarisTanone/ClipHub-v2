@@ -516,7 +516,7 @@ class UnifiedFFmpegCompositor:
                 cmd.extend(["-c:a", "copy"])
 
             # Hardware-accelerated GPU encoder or optimized libx264
-            encoder_args = get_video_encoder_args("fast")
+            encoder_args = get_video_encoder_args("medium")
             cmd.extend([*encoder_args, "-movflags", "+faststart", output_video])
 
             logger.info(

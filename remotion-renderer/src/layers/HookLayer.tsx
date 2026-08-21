@@ -162,15 +162,29 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
     shadows.push(`${config.shadowX || 0}px ${config.shadowY || 4}px ${config.shadowBlur || 12}px ${config.shadowColor || "#000000"}`);
   }
   if (config.glowEnabled) {
-    shadows.push(`0 0 ${config.glowSize || 20}px ${config.glowColor || "#FFCC00"}`);
+    const gc = config.glowColor || "#FFCC00";
+    const gs = config.glowSize || 20;
+    shadows.push(
+      `0 0 ${Math.max(4, Math.round(gs * 0.4))}px ${gc}`,
+      `0 0 ${gs}px ${hexToRgba(gc, 0.9)}`,
+      `0 0 ${Math.round(gs * 2.2)}px ${hexToRgba(gc, 0.6)}`
+    );
   }
-  // shake_neon: add neon glow to main text (matching preview behavior)
+  // shake_neon: add intense neon glow bloom to main text (matching preview behavior)
   if (animation === "shake_neon") {
-    shadows.push(`0 0 10px ${color}`, `0 0 20px ${color}`, `0 0 40px ${color}`);
+    shadows.push(
+      `0 0 8px ${color}`,
+      `0 0 20px ${hexToRgba(color, 0.9)}`,
+      `0 0 45px ${hexToRgba(color, 0.65)}`
+    );
   }
-  // danger_bold: add red glow to main text
+  // danger_bold: add red alert glow to main text
   if (animation === "danger_bold") {
-    shadows.push(`0 0 10px #FF0000`, `0 0 20px rgba(255,0,0,0.5)`);
+    shadows.push(
+      `0 0 8px #FF0000`,
+      `0 0 22px rgba(255, 0, 0, 0.85)`,
+      `0 0 50px rgba(255, 0, 0, 0.5)`
+    );
   }
 
   // Glitch effect
@@ -202,8 +216,10 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
 
   return (
     <AbsoluteFill style={{ opacity }}>
-      {/* Background overlay */}
-      <AbsoluteFill style={{ backgroundColor: hexToRgba(bgColor, bgOpacity) }} />
+      {/* Background overlay (only for standard centered animations without built-in card backgrounds) */}
+      {!customRenderAnimations.has(animation) && bgOpacity > 0 && (
+        <AbsoluteFill style={{ backgroundColor: hexToRgba(bgColor, bgOpacity) }} />
+      )}
 
       {/* Glitch RGB layers (legacy glitch animation) */}
       {glitchActive && (

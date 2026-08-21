@@ -254,7 +254,7 @@ export const AITextLayer: React.FC<{
       : `${Number(style.strokeWidth ?? 3)}px ${style.strokeColor || "#0A0A0B"}`,
     textShadow: chromaticTextShadow
       || (animation === "glow"
-        ? `0 0 ${neonGlow}px ${accent}, 0 0 ${neonGlow * 2}px ${accent}, 0 6px ${Number(style.shadowBlur ?? 28)}px ${style.shadowColor || "#000000"}`
+        ? `0 0 ${neonGlow}px ${accent}, 0 0 ${neonGlow * 2.2}px ${accent}, 0 0 ${neonGlow * 4}px ${hexToRgba(accent, 0.65)}, 0 6px ${Number(style.shadowBlur ?? 28)}px ${style.shadowColor || "#000000"}`
         : style.shadowEnabled === false
           ? undefined
           : `0 10px ${Number(style.shadowBlur ?? 28)}px ${style.shadowColor || "#000000"}`),

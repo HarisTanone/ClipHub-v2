@@ -539,8 +539,36 @@ class SkiaHookRenderer:
             os.path.abspath(os.path.join(os.getcwd(), "backend", "assets", "fonts")),
             os.path.abspath(os.path.join(os.getcwd(), "assets", "fonts")),
         ]
-        candidates = []
 
+        is_heavy = str(font_weight).lower() in ("bold", "black", "extrabold", "heavy", "900", "800", "700")
+
+        # 1. Prioritize bold/heavy weights first
+        if is_heavy:
+            preferred = [
+                f"{font_family}-Bold.ttf",
+                f"{font_family}-Black.ttf",
+                f"{font_family}-ExtraBold.ttf",
+                f"{font_family}Condensed-Bold.ttf",
+                f"{family_clean}-bold.ttf",
+                "Anton-Regular.ttf",
+                "ArchivoBlack-Regular.ttf",
+                "Poppins-Bold.ttf",
+                "Roboto-Bold.ttf",
+                "Oswald-Bold.ttf",
+                "BarlowCondensed-Bold.ttf",
+            ]
+            for fdir in search_dirs:
+                if not fdir or not os.path.exists(fdir):
+                    continue
+                for fname in preferred:
+                    p = os.path.join(fdir, fname)
+                    if os.path.exists(p):
+                        try:
+                            return ImageFont.truetype(p, size=size)
+                        except Exception:
+                            pass
+
+        candidates = []
         for fdir in search_dirs:
             if not fdir or not os.path.exists(fdir):
                 continue
@@ -567,19 +595,19 @@ class SkiaHookRenderer:
         # Fallback fonts in priority order
         fallbacks = [
             "Anton-Regular.ttf",
+            "ArchivoBlack-Regular.ttf",
             "Poppins-Bold.ttf",
-            "Montserrat-Variable.ttf",
-            "Inter-Variable.ttf",
             "Roboto-Bold.ttf",
+            "Inter-Variable.ttf",
         ]
         for fdir in search_dirs:
             if not fdir or not os.path.exists(fdir):
                 continue
             for fb in fallbacks:
-                fb_path = os.path.join(fdir, fb)
-                if os.path.exists(fb_path):
+                path = os.path.join(fdir, fb)
+                if os.path.exists(path):
                     try:
-                        return ImageFont.truetype(fb_path, size=size)
+                        return ImageFont.truetype(path, size=size)
                     except Exception:
                         pass
 
@@ -815,6 +843,13 @@ class SkiaHookRenderer:
                 # Drop shadow behind gradient text
                 draw.text((card_x + lx + 2, card_y + ly + 4), line, font=font, fill=(0, 0, 0, 220))
 
+                # Glow Multi-stage Bloom behind gradient text
+                if cfg.get("glow_enabled"):
+                    gw_c = self._hex_to_rgba(cfg.get("glow_color", cfg.get("gradient_from", "#00F0FF")), 0.75)
+                    gw_sz = max(4, int(cfg.get("glow_size", 16)))
+                    draw.text((card_x + lx, card_y + ly), line, font=font, fill=(gw_c[0], gw_c[1], gw_c[2], 65), stroke_width=gw_sz * 2, stroke_fill=(gw_c[0], gw_c[1], gw_c[2], 65))
+                    draw.text((card_x + lx, card_y + ly), line, font=font, fill=gw_c, stroke_width=gw_sz, stroke_fill=gw_c)
+
                 # Stroke if enabled
                 if cfg.get("stroke_enabled"):
                     sw = cfg.get("stroke_width", 2)
@@ -847,10 +882,12 @@ class SkiaHookRenderer:
                 if cfg.get("shadow_enabled", True):
                     draw.text((lx + 3, ly + 4), line, font=font, fill=(0, 0, 0, 220))
 
-                # Glow
+                # Glow Multi-stage Bloom
                 if cfg.get("glow_enabled"):
-                    gw_c = self._hex_to_rgba(cfg.get("glow_color", "#00F0FF"), 0.6)
-                    gw_sz = max(4, cfg.get("glow_size", 14) // 2)
+                    gw_c = self._hex_to_rgba(cfg.get("glow_color", "#00F0FF"), 0.75)
+                    gw_sz = max(4, int(cfg.get("glow_size", 16)))
+                    # Outer atmospheric aura + luminous core
+                    draw.text((lx, ly), line, font=font, fill=(gw_c[0], gw_c[1], gw_c[2], 65), stroke_width=gw_sz * 2, stroke_fill=(gw_c[0], gw_c[1], gw_c[2], 65))
                     draw.text((lx, ly), line, font=font, fill=gw_c, stroke_width=gw_sz, stroke_fill=gw_c)
 
                 sw = cfg.get("stroke_width", 0) if cfg.get("stroke_enabled") else 0
