@@ -199,7 +199,6 @@ function loadSubtitleStyle(): SubtitleStyle {
       positionY: 84,
       maxWordsPerLine: 3,
       ...(saved ? JSON.parse(saved) : {}),
-      engine: "ffmpeg",
     } as SubtitleStyle;
   } catch {
     return {
@@ -209,7 +208,6 @@ function loadSubtitleStyle(): SubtitleStyle {
       fontWeight: "800",
       positionY: 84,
       maxWordsPerLine: 3,
-      engine: "ffmpeg",
     };
   }
 }
@@ -416,7 +414,7 @@ function LiveVideoPreview({
           className={cn(
             "flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition",
             previewMode === "full"
-              ? "bg-violet-600/30 text-violet-200 border border-violet-500/40 shadow-xs"
+              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
               : "text-zinc-400 hover:text-zinc-200"
           )}
         >
@@ -428,11 +426,11 @@ function LiveVideoPreview({
           className={cn(
             "flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition",
             previewMode === "hook"
-              ? "bg-amber-500/20 text-amber-200 border border-amber-500/40 shadow-xs"
+              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
               : "text-zinc-400 hover:text-zinc-200"
           )}
         >
-          <Sparkles className="h-3 w-3 text-amber-400" /> Hook (0-3s)
+          <Sparkles className="h-3 w-3 text-violet-400" /> Hook (0-3s)
         </button>
         <button
           type="button"
@@ -599,7 +597,7 @@ function LiveVideoPreview({
           size="xs"
           variant="outline"
           onClick={onCustomizeHook}
-          icon={<Sparkles className="h-3 w-3 text-amber-400" />}
+          icon={<Sparkles className="h-3 w-3 text-violet-400" />}
         >
           Hook Style
         </Button>
@@ -618,7 +616,7 @@ function LiveVideoPreview({
           className="flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition"
           title="Play/Pause live karaoke preview"
         >
-          {isPlaying ? <Pause className="h-3 w-3 text-emerald-400" /> : <Play className="h-3 w-3 text-zinc-400" />}
+          {isPlaying ? <Pause className="h-3 w-3 text-zinc-300" /> : <Play className="h-3 w-3 text-zinc-400" />}
           {isPlaying ? "Playing" : "Paused"}
         </button>
       </div>
@@ -666,7 +664,7 @@ function VideoModal({
             type="button"
             size="sm"
             variant="outline"
-            className="flex-1 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-300"
+            className="flex-1 text-violet-400 border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-300"
             onClick={() => {
               onClose();
               onPublishSocial(job);
@@ -1795,23 +1793,22 @@ export function VideoGeneratorPage() {
     <div className="h-full overflow-y-auto p-2 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
       <div className="mx-auto max-w-7xl space-y-4 sm:space-y-6 pb-6">
         {/* Banner Header */}
-        <section className="relative overflow-hidden rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-950/40 via-zinc-950 to-zinc-950 p-4 sm:p-6">
-          <div className="absolute -right-20 -top-24 h-56 w-56 rounded-full bg-fuchsia-500/15 blur-3xl" />
+        <section className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 sm:p-6 backdrop-blur-xs">
           <div className="relative flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300 border border-violet-500/30 shadow-inner">
+              <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-400 border border-violet-500/20 shadow-xs">
                 <Sparkles className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-violet-300">AI Video Production Studio</p>
-                <h1 className="mt-1 text-lg sm:text-xl font-semibold tracking-tight text-zinc-50">Video Generator</h1>
+                <p className="text-xs font-semibold uppercase tracking-wider text-violet-400">AI Video Production Studio</p>
+                <h1 className="mt-1 text-lg sm:text-xl font-semibold tracking-tight text-zinc-100">Video Generator</h1>
                 <p className="mt-1 max-w-2xl text-xs sm:text-sm leading-5 sm:leading-6 text-zinc-400">
-                  Generate full vertical 9:16 short-form videos with custom opening hooks, karaoke captions (1-6 words), multi-source footage selection, and voice synthesis.
+                  Generate full vertical 9:16 short-form videos with customizable opening hooks, karaoke captions (1-6 words), multi-source footage selection, and voice synthesis.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 self-start rounded-lg border border-zinc-800 bg-black/40 px-3 py-2 text-xs text-zinc-300 sm:self-auto backdrop-blur-xs">
-              <Film className="h-3.5 w-3.5 text-violet-300" /> 9:16 · 1080 × 1920 · Skia Hook & ASS Subtitles
+            <div className="flex items-center gap-2 self-start rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-xs text-zinc-300 sm:self-auto">
+              <Film className="h-3.5 w-3.5 text-violet-400" /> 9:16 · 1080 × 1920 · Multi-Engine Hook & Subtitles
             </div>
           </div>
         </section>
@@ -1822,7 +1819,7 @@ export function VideoGeneratorPage() {
             {/* Form Top Bar: Title & Preset Selector */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/80 pb-4">
               <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-violet-300" />
+                <Sparkles className="h-4 w-4 text-violet-400" />
                 <h2 className="text-sm font-semibold text-zinc-100">Video Studio & Configuration</h2>
               </div>
 
@@ -1833,7 +1830,7 @@ export function VideoGeneratorPage() {
                 <select
                   value={selectedPresetId}
                   onChange={(e) => handleSelectPreset(e.target.value)}
-                  className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-2.5 py-1.5 text-xs text-zinc-200 outline-none transition focus:border-violet-500/60 flex-1 sm:flex-initial"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900/80 px-2.5 py-1.5 text-xs text-zinc-200 outline-none transition focus:border-violet-500/60 flex-1 sm:flex-initial"
                 >
                   <option value="">Custom Styles</option>
                   {userPresets.map((p) => (
@@ -1847,7 +1844,7 @@ export function VideoGeneratorPage() {
                   size="xs"
                   variant="outline"
                   onClick={() => openEditorFor("presets")}
-                  icon={<Palette className="h-3 w-3 text-violet-300" />}
+                  icon={<Palette className="h-3 w-3 text-violet-400" />}
                 >
                   Presets
                 </Button>
@@ -1859,9 +1856,9 @@ export function VideoGeneratorPage() {
               {/* Left Column: Narrative, Audio, Format & Spec */}
               <div className="space-y-4">
                 {/* 1. Topic & Narrative Card */}
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-3">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">
-                    <label htmlFor="video-topic" className="text-xs font-medium uppercase tracking-wider text-zinc-300">
+                    <label htmlFor="video-topic" className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
                       Video Topic & Subject
                     </label>
                     <span className="text-[11px] tabular-nums text-zinc-500 font-mono">{topic.length}/500</span>
@@ -1885,7 +1882,7 @@ export function VideoGeneratorPage() {
                         key={idx}
                         type="button"
                         onClick={() => setTopic(idea)}
-                        className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-violet-500/40 hover:text-zinc-200 transition truncate max-w-[210px]"
+                        className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 transition truncate max-w-[210px]"
                         title={idea}
                       >
                         {idea.length > 30 ? `${idea.slice(0, 28)}...` : idea}
@@ -1894,14 +1891,14 @@ export function VideoGeneratorPage() {
                   </div>
 
                   {/* Directorial Tone Chips */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-zinc-900">
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-zinc-800/60">
                     <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-0.5">Tone:</span>
                     {CREATIVE_TONES.map((t) => (
                       <button
                         key={t.label}
                         type="button"
                         onClick={() => setInstructions((prev) => (prev ? `${prev}. ${t.prompt}` : t.prompt))}
-                        className="rounded-md border border-zinc-800/70 bg-zinc-950 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 transition"
+                        className="rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 transition"
                       >
                         {t.label}
                       </button>
@@ -1910,10 +1907,10 @@ export function VideoGeneratorPage() {
                 </div>
 
                 {/* 2. Audio & Narration Card */}
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-3.5">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Volume2 className="h-4 w-4 text-emerald-400" />
+                      <Volume2 className="h-4 w-4 text-violet-400" />
                       <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
                         Audio & Narration
                       </h3>
@@ -1937,12 +1934,12 @@ export function VideoGeneratorPage() {
                         }}
                         className={`flex items-center justify-between rounded-lg border p-2.5 text-left transition ${
                           ttsProvider === "elevenlabs"
-                            ? "border-violet-500/60 bg-violet-950/40 text-violet-100 shadow-[0_0_12px_rgba(139,92,246,0.15)]"
+                            ? "border-violet-500/60 bg-violet-500/10 text-zinc-100 shadow-xs"
                             : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                         }`}
                       >
                         <div>
-                          <div className="text-xs font-semibold">ElevenLabs</div>
+                          <div className="text-xs font-semibold text-zinc-100">ElevenLabs</div>
                           <div className="text-[10px] text-zinc-400">Studio AI · 29+ Languages</div>
                         </div>
                         <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[9px] font-bold text-violet-300">
@@ -1959,12 +1956,12 @@ export function VideoGeneratorPage() {
                         }}
                         className={`flex items-center justify-between rounded-lg border p-2.5 text-left transition ${
                           ttsProvider === "deepgram"
-                            ? "border-emerald-500/60 bg-emerald-950/40 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                            ? "border-violet-500/60 bg-violet-500/10 text-zinc-100 shadow-xs"
                             : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                         }`}
                       >
                         <div>
-                          <div className="text-xs font-semibold">Deepgram</div>
+                          <div className="text-xs font-semibold text-zinc-100">Deepgram</div>
                           <div className="text-[10px] text-zinc-400">Aura · Ultra Fast</div>
                         </div>
                         <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] font-medium text-zinc-400">
@@ -2056,8 +2053,8 @@ export function VideoGeneratorPage() {
                                 onClick={() => handleTogglePlayVoice(activeVoiceOption)}
                                 className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition border ${
                                   playingVoiceId === activeVoiceOption.model
-                                    ? "border-violet-400 bg-violet-600 text-white shadow-[0_0_15px_rgba(139,92,246,0.5)] animate-pulse"
-                                    : "border-violet-500/40 bg-violet-950/60 text-violet-200 hover:bg-violet-900/60 hover:border-violet-400"
+                                    ? "border-violet-400 bg-violet-600 text-white shadow-xs animate-pulse"
+                                    : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
                                 }`}
                                 title="Dengar contoh audio suara ini"
                               >
@@ -2188,10 +2185,10 @@ export function VideoGeneratorPage() {
                 </div>
 
                 {/* 3. Format & Scene Pacing Card */}
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-3.5">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Film className="h-4 w-4 text-sky-400" />
+                      <Film className="h-4 w-4 text-violet-400" />
                       <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
                         Video Format & Pacing
                       </h3>
@@ -2203,7 +2200,7 @@ export function VideoGeneratorPage() {
                   <div>
                     <div className="mb-1.5 flex items-center justify-between">
                       <label className="text-xs font-medium text-zinc-300">Target duration</label>
-                      <span className="text-xs text-violet-300 font-medium">{targetDuration}s</span>
+                      <span className="text-xs text-violet-400 font-medium">{targetDuration}s</span>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5">
                       {[45, 60, 90, 120].map((d) => (
@@ -2214,7 +2211,7 @@ export function VideoGeneratorPage() {
                           className={cn(
                             "rounded-lg border py-2 text-xs font-medium transition text-center",
                             targetDuration === d
-                              ? "border-violet-400/60 bg-violet-500/15 text-violet-100"
+                              ? "border-violet-500/60 bg-violet-500/15 text-zinc-100"
                               : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                           )}
                         >
@@ -2265,28 +2262,28 @@ export function VideoGeneratorPage() {
                 </div>
 
                 {/* 4. Subtle Specs Bar */}
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-3.5 py-2.5 text-[11px] text-zinc-400">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3.5 py-2.5 text-[11px] text-zinc-400">
                   <span className="font-mono text-zinc-300">1080×1920 9:16</span>
                   <span className="text-zinc-700">•</span>
                   <span>
                     {ttsProvider === "elevenlabs" ? "ElevenLabs AI" : "Deepgram Aura"} ({speed}×)
                   </span>
                   <span className="text-zinc-700">•</span>
-                  <span className={hookEnabled ? "text-amber-300/90" : "text-zinc-600"}>
+                  <span className={hookEnabled ? "text-violet-300" : "text-zinc-600"}>
                     {hookEnabled ? "Hook Active" : "No Hook"}
                   </span>
                   <span className="text-zinc-700">•</span>
-                  <span className={subtitlesEnabled ? "text-violet-300/90" : "text-zinc-600"}>
+                  <span className={subtitlesEnabled ? "text-violet-300" : "text-zinc-600"}>
                     {subtitlesEnabled ? `${subtitleStyle.maxWordsPerLine || 3}w Captions` : "No Captions"}
                   </span>
                 </div>
               </div>
 
               {/* Right Column: Visual Studio (Live 9:16 Preview + Hook + Subtitles Controls) */}
-              <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+              <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
                 <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
                   <div className="flex items-center gap-2">
-                    <SlidersHorizontal className="h-4 w-4 text-violet-300" />
+                    <SlidersHorizontal className="h-4 w-4 text-violet-400" />
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">Visual & Audio Studio</h3>
                   </div>
                   <span className="text-[11px] text-zinc-400 font-mono bg-zinc-900/80 border border-zinc-800 px-2 py-0.5 rounded-md">1080×1920 · 9:16</span>
@@ -2307,14 +2304,14 @@ export function VideoGeneratorPage() {
                 </div>
 
                 {/* Custom Style Studio Launchpad Card */}
-                <div className="rounded-xl border border-violet-500/30 bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-4 space-y-3.5 shadow-lg">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-3.5">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="h-8 w-8 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300 shrink-0">
+                      <div className="h-8 w-8 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400 shrink-0">
                         <Palette className="h-4 w-4" />
                       </div>
                       <div className="min-w-0">
-                        <h4 className="text-xs font-bold text-zinc-100 uppercase tracking-wider">Custom Style Editor</h4>
+                        <h4 className="text-xs font-semibold text-zinc-100 uppercase tracking-wider">Custom Style Editor</h4>
                         <p className="text-[11px] text-zinc-400 truncate">19 Hook Animations & 24 Subtitle Styles</p>
                       </div>
                     </div>
@@ -2325,7 +2322,6 @@ export function VideoGeneratorPage() {
                       variant="primary"
                       onClick={() => openEditorFor("presets")}
                       icon={<Palette className="h-3.5 w-3.5" />}
-                      className="bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold text-xs shadow-md shrink-0"
                     >
                       Edit Styles
                     </Button>
@@ -2334,14 +2330,14 @@ export function VideoGeneratorPage() {
                   {/* Summary Badges Grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                     {/* Hook Badge Card */}
-                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5 flex items-center justify-between gap-2 hover:border-amber-500/40 transition">
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-2.5 flex items-center justify-between gap-2 hover:border-zinc-700 transition">
                       <div className="flex items-center gap-2 min-w-0">
                         <Toggle checked={hookEnabled} onChange={setHookEnabled} />
                         <div className="min-w-0 cursor-pointer" onClick={() => openEditorFor("hook")}>
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">Hook</span>
-                            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
-                            <span className="text-xs font-bold text-zinc-200 truncate">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-400">Hook</span>
+                            <span className="h-1.5 w-1.5 rounded-full bg-violet-400 shrink-0" />
+                            <span className="text-xs font-medium text-zinc-200 truncate">
                               {(hookStyle.animation || "impact_badge").replace(/^(skia_|hf_)/, "").replace(/_/g, " ").toUpperCase()}
                             </span>
                           </div>
@@ -2355,14 +2351,14 @@ export function VideoGeneratorPage() {
                         size="xs"
                         variant="ghost"
                         onClick={() => openEditorFor("hook")}
-                        icon={<Sparkles className="h-3 w-3 text-amber-400" />}
+                        icon={<Sparkles className="h-3 w-3 text-zinc-400" />}
                       >
                         Edit
                       </Button>
                     </div>
 
                     {/* Subtitle Badge Card */}
-                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5 flex items-center justify-between gap-2 hover:border-violet-500/40 transition">
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-2.5 flex items-center justify-between gap-2 hover:border-zinc-700 transition">
                       <div className="flex items-center gap-2 min-w-0">
                         <Toggle checked={subtitlesEnabled} onChange={setSubtitlesEnabled} />
                         <div className="min-w-0 cursor-pointer" onClick={() => openEditorFor("subtitle")}>
@@ -2372,7 +2368,7 @@ export function VideoGeneratorPage() {
                               className="h-1.5 w-1.5 rounded-full shrink-0"
                               style={{ backgroundColor: subtitleStyle.highlightColor || "#FACC15" }}
                             />
-                            <span className="text-xs font-bold text-zinc-200 truncate">
+                            <span className="text-xs font-medium text-zinc-200 truncate">
                               {(subtitleStyle.stylePreset || "classic").replace(/_/g, " ").toUpperCase()}
                             </span>
                           </div>
@@ -2386,7 +2382,7 @@ export function VideoGeneratorPage() {
                         size="xs"
                         variant="ghost"
                         onClick={() => openEditorFor("subtitle")}
-                        icon={<Palette className="h-3 w-3 text-violet-400" />}
+                        icon={<Palette className="h-3 w-3 text-zinc-400" />}
                       >
                         Edit
                       </Button>
@@ -2403,7 +2399,7 @@ export function VideoGeneratorPage() {
                         <button
                           type="button"
                           onClick={() => openEditorFor("hook")}
-                          className="text-[10px] text-amber-400 hover:underline flex items-center gap-1"
+                          className="text-[10px] text-violet-400 hover:underline flex items-center gap-1"
                         >
                           <Sparkles className="h-2.5 w-2.5" /> Customize Animation
                         </button>
@@ -2425,7 +2421,7 @@ export function VideoGeneratorPage() {
             {/* Action Buttons Bar */}
             <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-zinc-800/80 pt-4">
               <p className="text-xs leading-5 text-zinc-400">
-                Choose <span className="text-violet-300 font-medium">Studio Plan</span> to curate footage 1-by-1 in Footage Studio, or <span className="text-zinc-200 font-medium">Generate video</span> for 1-click auto.
+                Choose <span className="text-zinc-200 font-medium">Studio Plan</span> to curate footage 1-by-1 in Footage Studio, or <span className="text-zinc-200 font-medium">Generate video</span> for 1-click auto.
               </p>
 
               <div className="flex flex-wrap items-center gap-2.5">
@@ -2436,7 +2432,7 @@ export function VideoGeneratorPage() {
                   disabled={isPlanning || isSubmitting || !topic.trim()}
                   loading={isPlanning}
                   onClick={handleStudioPlan}
-                  icon={<Layers className="h-4 w-4 text-violet-400" />}
+                  icon={<Layers className="h-4 w-4 text-zinc-300" />}
                 >
                   {isPlanning ? "Planning scenes..." : "Studio Plan & Select Footage"}
                 </Button>
@@ -2605,7 +2601,7 @@ export function VideoGeneratorPage() {
         hookStyle={hookStyle}
         subtitleStyle={subtitleStyle}
         onHookChange={setHookStyle}
-        onSubtitleChange={(style) => setSubtitleStyle({ ...style, engine: "ffmpeg" })}
+        onSubtitleChange={setSubtitleStyle}
         activeTab={activeStyleTab}
         aspectRatio="9:16"
         isSuperadmin={user?.is_superadmin}

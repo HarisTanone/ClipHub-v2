@@ -48,6 +48,28 @@ backend/data/
 *.sqlite
 *.db
 
+# ─── Scratch, Test Frames & Generated Images ──────────────────────────────────
+scratch/
+**/scratch/
+test_frames/
+**/test_frames/
+test_hook_renders/
+**/test_hook_renders/
+e2e_showcase/
+**/e2e_showcase/
+test_output/
+**/test_output/
+backend/tests/render_output/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+!frontend/src/assets/**
+!frontend/public/**
+!assets/**
+!backend/assets/**
+
 # ─── Frontend Build Artifacts ─────────────────────────────────────────────────
 frontend/dist/
 frontend/test-results/

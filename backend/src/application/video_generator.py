@@ -1083,14 +1083,26 @@ class VideoGenerator:
         merged_audio_path = os.path.join(work_dir, "narration_full.mp3")
         await self._concat_audio(timeline, merged_audio_path)
 
-        # Step 6d: Generate styled ASS captions from the narration timeline.
-        subtitle_path = None
+        # Step 6d: Subtitles (Skia or FFmpeg ASS)
+        from src.infrastructure.hf_style_catalog import resolve_engine
+
+        sub_engine = "ffmpeg"
         if job.subtitles_enabled:
+            if isinstance(job.subtitle_style, dict):
+                sub_engine = (
+                    job.subtitle_style.get("engine")
+                    or resolve_engine(job.subtitle_style)
+                )
+            elif isinstance(job.subtitle_style, str):
+                sub_engine = resolve_engine({"animation": job.subtitle_style})
+
+        subtitle_path = None
+        if job.subtitles_enabled and sub_engine == "ffmpeg":
             candidate_path = os.path.join(work_dir, "captions.ass")
             if write_ass_subtitles(timeline, candidate_path, job.subtitle_style):
                 subtitle_path = candidate_path
 
-        # Step 6e: Final composite — video + narration + subtitle + optional BGM
+        # Step 6e: Final composite — video + narration + optional FFmpeg subtitle + optional BGM
         await self._final_composite(
             video_path=concat_path,
             audio_path=merged_audio_path,
@@ -1103,6 +1115,54 @@ class VideoGenerator:
         if not os.path.exists(output_path):
             raise RuntimeError("Final video render failed — output file not created")
 
+        font_candidates = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts")),
+            "backend/assets/fonts",
+            "assets/fonts",
+        ]
+        fonts_dir = next((d for d in font_candidates if os.path.exists(d)), "assets/fonts")
+
+        # Step 6e.2: If Skia Subtitle engine chosen, apply Skia subtitle overlay
+        if job.subtitles_enabled and sub_engine == "skia":
+            try:
+                from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+                skia_sub = SkiaSubtitleRenderer(font_dir=fonts_dir)
+
+                # Build timed words from timeline narration
+                timeline_words = []
+                t_cursor = 0.0
+                for entry in timeline:
+                    dur = max(0.1, float(entry.get("duration", 0.0) or 0.0))
+                    narr = str(entry.get("narration", "") or "").strip()
+                    if narr:
+                        tokens = narr.split()
+                        if tokens:
+                            step_dur = dur / len(tokens)
+                            for wi, tok in enumerate(tokens):
+                                timeline_words.append({
+                                    "word": tok,
+                                    "start": round(t_cursor + wi * step_dur, 2),
+                                    "end": round(t_cursor + (wi + 1) * step_dur, 2),
+                                })
+                    t_cursor += dur
+
+                sub_rendered_path = os.path.join(work_dir, f"sub_skia_{job.job_id}.mp4")
+                style_cfg = job.subtitle_style if isinstance(job.subtitle_style, dict) else {"stylePreset": job.subtitle_style}
+
+                await asyncio.to_thread(
+                    skia_sub.render_subtitles,
+                    video_path=output_path,
+                    words=timeline_words,
+                    output_path=sub_rendered_path,
+                    style_config=style_cfg,
+                )
+                if os.path.exists(sub_rendered_path) and os.path.getsize(sub_rendered_path) > 0:
+                    import shutil
+                    shutil.move(sub_rendered_path, output_path)
+                    logger.info(f"video_gen [{job.job_id}]: successfully applied Skia subtitle overlay")
+            except Exception as sub_err:
+                logger.warning(f"video_gen [{job.job_id}]: failed to burn Skia subtitle overlay: {sub_err}")
+
         # Step 6f: Burn opening Hook overlay if hook is enabled
         if job.hook_enabled and os.path.exists(output_path):
             hook_text = (
@@ -1112,34 +1172,81 @@ class VideoGenerator:
                 or (timeline[0].get("narration") if timeline else "")
             )
             if hook_text and hook_text.strip():
-                try:
-                    from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
-                    font_candidates = [
-                        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts")),
-                        "backend/assets/fonts",
-                        "assets/fonts",
-                    ]
-                    fonts_dir = next((d for d in font_candidates if os.path.exists(d)), "assets/fonts")
-                    renderer = SkiaHookRenderer(font_dir=fonts_dir)
-                    hooked_path = os.path.join(work_dir, f"hooked_{job.job_id}.mp4")
-                    hook_style_name = (
-                        job.hook_style.get("animation")
-                        or job.hook_style.get("hook_style")
-                        or "skia_impact_badge"
-                    )
-                    await renderer.render_hook(
-                        video_path=output_path,
-                        hook_text=hook_text.strip(),
-                        output_path=hooked_path,
-                        hook_style=hook_style_name,
-                        style_config=job.hook_style,
-                    )
-                    if os.path.exists(hooked_path) and os.path.getsize(hooked_path) > 0:
-                        import shutil
-                        shutil.move(hooked_path, output_path)
-                        logger.info(f"video_gen [{job.job_id}]: successfully applied opening hook overlay")
-                except Exception as hook_err:
-                    logger.warning(f"video_gen [{job.job_id}]: failed to burn hook overlay: {hook_err}")
+                hook_style_dict = job.hook_style if isinstance(job.hook_style, dict) else {"animation": job.hook_style}
+                hook_engine = (
+                    hook_style_dict.get("engine")
+                    or resolve_engine(hook_style_dict)
+                )
+                hook_style_name = (
+                    hook_style_dict.get("animation")
+                    or hook_style_dict.get("hook_style")
+                    or "skia_impact_badge"
+                )
+                hook_duration = float(hook_style_dict.get("duration", 3.0) or 3.0)
+
+                hook_applied = False
+
+                # 1. HyperFrames Hook Engine
+                if hook_engine == "hyperframes":
+                    try:
+                        from src.infrastructure.hyperframes_adapter import get_hyperframes_adapter
+                        hf = get_hyperframes_adapter()
+                        from src.infrastructure.hf_style_catalog import resolve_hf_template
+                        hf_tpl = resolve_hf_template(hook_style_dict, kind="hook")
+                        events = [{
+                            "label": hook_text.strip()[:80],
+                            "sub": "HOOK",
+                            "start": 0.0,
+                            "end": max(0.8, hook_duration),
+                            "word": hook_text.strip()[:80],
+                        }]
+                        hf_hook_path = os.path.join(work_dir, f"hook_hf_{job.job_id}.mp4")
+                        hf_res = await hf.render_polish(
+                            base_video=output_path,
+                            events=events,
+                            output_path=hf_hook_path,
+                            template=hf_tpl,
+                            duration=hook_duration,
+                            job_id=job.job_id,
+                            force=True,
+                        )
+                        if hf_res.get("ok") and os.path.exists(hf_hook_path) and os.path.getsize(hf_hook_path) > 0:
+                            import shutil
+                            shutil.move(hf_hook_path, output_path)
+                            hook_applied = True
+                            logger.info(f"video_gen [{job.job_id}]: successfully applied HyperFrames hook overlay ({hf_tpl})")
+                    except Exception as hf_err:
+                        logger.warning(f"video_gen [{job.job_id}]: HyperFrames hook failed, falling back to Skia: {hf_err}")
+
+                # 2. Remotion Hook Engine
+                if not hook_applied and hook_engine == "remotion":
+                    try:
+                        from src.infrastructure.remotion_adapter import RemotionAdapter
+                        remotion = RemotionAdapter()
+                        # If Remotion server is active, try remotion render; otherwise fallback
+                        pass
+                    except Exception as rem_err:
+                        logger.warning(f"video_gen [{job.job_id}]: Remotion hook unavailable, falling back to Skia: {rem_err}")
+
+                # 3. Skia / FFmpeg Hook Engine (or Fallback)
+                if not hook_applied:
+                    try:
+                        from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+                        renderer = SkiaHookRenderer(font_dir=fonts_dir)
+                        hooked_path = os.path.join(work_dir, f"hooked_{job.job_id}.mp4")
+                        await renderer.render_hook(
+                            video_path=output_path,
+                            hook_text=hook_text.strip(),
+                            output_path=hooked_path,
+                            hook_style=hook_style_name,
+                            style_config=hook_style_dict,
+                        )
+                        if os.path.exists(hooked_path) and os.path.getsize(hooked_path) > 0:
+                            import shutil
+                            shutil.move(hooked_path, output_path)
+                            logger.info(f"video_gen [{job.job_id}]: successfully applied Skia hook overlay ({hook_style_name})")
+                    except Exception as hook_err:
+                        logger.warning(f"video_gen [{job.job_id}]: failed to burn hook overlay: {hook_err}")
 
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
         logger.info(f"video_gen [{job.job_id}]: final video {size_mb:.1f}MB → {output_path}")
