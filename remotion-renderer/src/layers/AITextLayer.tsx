@@ -8,6 +8,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import type { TextEmphasisEvent, TextEmphasisStyleConfig } from "../types";
+import { hexToRgba } from "../utils/hexToRgba";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
