@@ -388,3 +388,66 @@ def test_system_config_contains_elevenlabs_keys():
     assert "VIDEO_GEN_TTS_PROVIDER" in rendered_keys
 
 
+def test_story_agent_minimum_six_scenes():
+    from src.infrastructure.story_agent import StoryAgent
+
+    agent = StoryAgent()
+    # Mock story with only 2 long scenes
+    short_story = {
+        "title": "Ocean Depths",
+        "hook": "Deep ocean creatures live in extreme dark.",
+        "scenes": [
+            {
+                "id": 1,
+                "narration": "Deep below the surface lies a world where sunlight never reaches. Creatures have evolved bizarre glowing bioluminescence to hunt and communicate.",
+                "visual": "Bioluminescent anglerfish swimming in pitch black ocean water",
+                "search_queries": ["bioluminescent anglerfish dark ocean 4k", "deep sea creatures abyss"],
+            },
+            {
+                "id": 2,
+                "narration": "Massive pressures could crush a submarine in seconds. Yet flexible cell membranes allow these deep sea dwellers to thrive in the Mariana Trench.",
+                "visual": "Mariana trench floor with extreme pressure submersible camera exploration",
+                "search_queries": ["mariana trench sea floor 4k", "submarine underwater exploration"],
+            },
+        ],
+    }
+
+    fixed = agent._validate_and_fix(short_story, target_duration=60)
+    assert len(fixed["scenes"]) >= 6
+    for i, sc in enumerate(fixed["scenes"]):
+        assert sc["id"] == i + 1
+        assert len(sc["narration"]) > 0
+        assert len(sc["search_queries"]) > 0
+
+
+def test_video_generator_semantic_scoring(tmp_path):
+    generator = VideoGenerator(output_dir=str(tmp_path))
+    scene = {
+        "visual": "Cyberpunk neon reflection in human eye",
+        "narration": "Can artificial intelligence truly develop genuine human emotions and consciousness?",
+        "search_queries": ["cyberpunk neon human eye reflection", "ai consciousness digital brain 4k"],
+        "duration_estimate": 6.5,
+    }
+
+    cand_relevant = {
+        "title": "Macro Close Up Eye Glowing Smartphone Screen Reflection Cinematic",
+        "query": "cyberpunk neon reflection human pupil vertical",
+        "platform": "pexels",
+        "duration_seconds": 12,
+        "view_count": 50000,
+    }
+
+    cand_irrelevant = {
+        "title": "How to bake chocolate cake easy recipe",
+        "query": "baking cake kitchen",
+        "platform": "youtube",
+        "duration_seconds": 300,
+        "view_count": 1000,
+    }
+
+    score_rel = generator._score_candidate(cand_relevant, scene)
+    score_irrel = generator._score_candidate(cand_irrelevant, scene)
+    assert score_rel > score_irrel
+    assert score_rel > 5.0
+
+

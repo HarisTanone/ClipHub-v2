@@ -485,6 +485,65 @@ class StoryAgent:
             if scene["narration"] or scene["visual"]:
                 valid_scenes.append(scene)
 
+        # Enforce minimum 6 scenes (for 45-120s final videos) by splitting long scenes into distinct visual beats
+        if len(valid_scenes) < 6 and valid_scenes:
+            expanded: list[dict] = []
+            for sc in valid_scenes:
+                narr = sc.get("narration", "").strip()
+                sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', narr) if s.strip()]
+                if len(sentences) >= 2 and (len(expanded) + len(valid_scenes) - len(expanded)) < 8:
+                    mid = len(sentences) // 2
+                    p1_narr = " ".join(sentences[:mid]).strip()
+                    p2_narr = " ".join(sentences[mid:]).strip()
+
+                    sq = sc.get("search_queries", [])
+                    sq1 = [sq[0]] if sq else [sc.get("visual", "")]
+                    sq2 = sq[1:] if len(sq) > 1 else [f"cinematic detail {sc.get('visual', '')[:50]}"]
+
+                    sc1 = dict(sc)
+                    sc1["narration"] = p1_narr
+                    sc1["search_queries"] = sq1
+                    sc1["duration_estimate"] = max(3.0, round(len(p1_narr.split()) / 2.3, 1))
+
+                    sc2 = dict(sc)
+                    sc2["narration"] = p2_narr
+                    sc2["search_queries"] = sq2
+                    sc2["visual"] = f"Close up / dynamic angle of {sc.get('visual', '')[:60]}"
+                    sc2["duration_estimate"] = max(3.0, round(len(p2_narr.split()) / 2.3, 1))
+
+                    expanded.append(sc1)
+                    expanded.append(sc2)
+                else:
+                    expanded.append(sc)
+
+            # If still < 6, split longest scenes by word count
+            while len(expanded) < 6 and expanded:
+                longest_idx = max(range(len(expanded)), key=lambda idx: len(expanded[idx].get("narration", "").split()))
+                target = expanded[longest_idx]
+                words = target.get("narration", "").split()
+                if len(words) >= 6:
+                    mid = len(words) // 2
+                    w1 = " ".join(words[:mid])
+                    w2 = " ".join(words[mid:])
+
+                    s1 = dict(target)
+                    s1["narration"] = w1
+                    s1["duration_estimate"] = max(2.5, round(len(w1.split()) / 2.3, 1))
+
+                    s2 = dict(target)
+                    s2["narration"] = w2
+                    s2["visual"] = f"Cinematic perspective cut: {target.get('visual', '')[:50]}"
+                    s2["search_queries"] = [f"cinematic broll {w2[:30]}", target.get("visual", "")[:50]]
+                    s2["duration_estimate"] = max(2.5, round(len(w2.split()) / 2.3, 1))
+
+                    expanded = expanded[:longest_idx] + [s1, s2] + expanded[longest_idx + 1:]
+                else:
+                    break
+
+            for idx, sc in enumerate(expanded):
+                sc["id"] = idx + 1
+            valid_scenes = expanded
+
         story["scenes"] = valid_scenes
 
         # Calculate estimated total duration
