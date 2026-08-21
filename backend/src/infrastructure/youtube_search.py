@@ -24,6 +24,37 @@ YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
+def simplify_stock_query(query: str) -> str:
+    """Simplify query to 2-3 core physical nouns/actions by stripping filler terms.
+
+    Stock APIs (Pexels, Pixabay) index primarily by 1-3 simple concrete tags.
+    Removing filmmaking adjectives (4k, cinematic, slow motion) drastically
+    improves match hit rate and relevance.
+    """
+    if not query:
+        return ""
+    import re
+
+    fillers = [
+        r"\bcinematic\b", r"\b4k\b", r"\b8k\b", r"\bhd\b", r"\buhd\b", r"\b60fps\b",
+        r"\bultra\b", r"\bfootage\b", r"\bb-roll\b", r"\bbroll\b", r"\bstock\b",
+        r"\bvideo\b", r"\bclip\b", r"\bhigh\s+quality\b", r"\bvertical\b",
+        r"\b9:16\b", r"\bhyper-realistic\b", r"\brealistic\b", r"\bslow\s+motion\b",
+        r"\bmacro\b", r"\bclose\s+up\b", r"\bextreme\b", r"\bwide\s+shot\b",
+        r"\bdrone\s+shot\b", r"\bdrone\b", r"\baerial\b", r"\btracking\s+shot\b",
+        r"\bcamera\b", r"\bshot\b", r"\bscene\b", r"\bbackground\b",
+    ]
+    cleaned = query.lower()
+    for f in fillers:
+        cleaned = re.sub(f, " ", cleaned, flags=re.IGNORECASE)
+
+    words = [w for w in re.findall(r'[a-zA-Z0-9]+', cleaned) if len(w) >= 3]
+    if not words:
+        words = [w for w in re.findall(r'[a-zA-Z0-9]+', query) if len(w) >= 3]
+
+    return " ".join(words[:3]) if words else query.strip()
+
+
 @dataclass
 class YouTubeResult:
     """A single YouTube search result with metadata."""
@@ -182,12 +213,14 @@ class YouTubeSearch:
         if not api_key:
             return []
 
+        clean_q = simplify_stock_query(query) or query
+
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(
                     "https://api.pexels.com/videos/search",
                     headers={"Authorization": api_key},
-                    params={"query": query, "orientation": "portrait", "per_page": min(max_results, 10)},
+                    params={"query": clean_q, "orientation": "portrait", "per_page": min(max_results, 10)},
                 )
                 if resp.status_code != 200:
                     return []
@@ -219,13 +252,13 @@ class YouTubeSearch:
                     if best_file and best_file.get("link"):
                         results.append({
                             "video_id": f"pexels_{v['id']}",
-                            "title": f"Pexels Stock: {query.title()}",
+                            "title": f"Pexels Stock: {clean_q.title()}",
                             "url": best_file["link"],
                             "thumbnail_url": v.get("image", ""),
                             "duration_seconds": v.get("duration", 0),
                             "view_count": 50000,
                             "channel": v.get("user", {}).get("name", "Pexels Creator"),
-                            "query": query,
+                            "query": clean_q,
                             "platform": "pexels",
                         })
                 return results
@@ -243,13 +276,15 @@ class YouTubeSearch:
         if not api_key:
             return []
 
+        clean_q = simplify_stock_query(query) or query
+
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(
                     "https://pixabay.com/api/videos/",
                     params={
                         "key": api_key,
-                        "q": query,
+                        "q": clean_q,
                         "video_type": "film",
                         "min_width": 720,
                         "per_page": min(max_results, 10),
@@ -266,13 +301,13 @@ class YouTubeSearch:
                     if link:
                         results.append({
                             "video_id": f"pixabay_{v['id']}",
-                            "title": f"Pixabay Stock: {v.get('tags', query).title()}",
+                            "title": f"Pixabay Stock: {v.get('tags', clean_q).title()}",
                             "url": link,
                             "thumbnail_url": v.get("userImageURL") or chosen.get("thumbnail") or "",
                             "duration_seconds": v.get("duration", 0),
                             "view_count": v.get("views", 10000),
                             "channel": v.get("user", "Pixabay Creator"),
-                            "query": query,
+                            "query": clean_q,
                             "platform": "pixabay",
                         })
                 return results

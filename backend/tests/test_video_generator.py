@@ -451,3 +451,53 @@ def test_video_generator_semantic_scoring(tmp_path):
     assert score_rel > 5.0
 
 
+def test_simplify_stock_query():
+    from src.infrastructure.youtube_search import simplify_stock_query
+
+    # Verifies stripping of filmmaking filler buzzwords
+    raw_query = "slow motion cybernetic digital face scan tracking data 4k"
+    simplified = simplify_stock_query(raw_query)
+    assert "4k" not in simplified
+    assert "slow" not in simplified
+    assert "motion" not in simplified
+    assert "cybernetic" in simplified or "digital" in simplified or "face" in simplified
+
+    raw_query2 = "macro close up deep ocean submarine abyss cinematic b-roll"
+    simplified2 = simplify_stock_query(raw_query2)
+    assert "cinematic" not in simplified2
+    assert "b-roll" not in simplified2
+    assert "submarine" in simplified2 or "ocean" in simplified2
+
+
+@pytest.mark.asyncio
+async def test_ai_director_curation_pass():
+    from src.infrastructure.story_agent import StoryAgent
+
+    agent = StoryAgent()
+    scenes = [
+        {
+            "id": 1,
+            "narration": "Deep sea exploration in the Mariana Trench.",
+            "visual": "Submarine in dark ocean water",
+            "footage_candidates": [
+                {
+                    "video_id": "pexels_101",
+                    "title": "Submarine diving in dark deep ocean water",
+                    "platform": "pexels",
+                },
+                {
+                    "video_id": "pexels_102",
+                    "title": "Woman surfing on sunny beach",
+                    "platform": "pexels",
+                },
+            ],
+        }
+    ]
+
+    # Test parsing curation JSON response
+    mock_curation = '{"curation": [{"scene_id": 1, "chosen_option_index": 0, "reason": "Accurate submarine ocean shot"}]}'
+    parsed = agent._parse_curation_response(mock_curation)
+    assert len(parsed.get("curation", [])) == 1
+    assert parsed["curation"][0]["chosen_option_index"] == 0
+
+

@@ -496,24 +496,36 @@ class VideoGenerator:
             job.progress = 20
             self._persist_job(job)
             scenes = await self._step_search_footage(story, work_dir)
+
+            # Step 2b: AI Video Director Curation Pass (LLM evaluates real candidates)
+            from src.infrastructure.story_agent import StoryAgent
+            story_agent = StoryAgent()
+            scenes = await story_agent.curate_scene_footages(scenes)
             job.scenes_with_footage = scenes
             job.progress = 35
             self._persist_job(job)
 
-            # Step 3: Download footage
+            # Step 3 & 4: Parallel Execution of TTS Generation and Footage Download
             job.status = VideoGenStatus.DOWNLOADING
             job.progress = 40
             self._persist_job(job)
-            scenes = await self._step_download_footage(scenes, work_dir)
-            job.scenes_with_footage = scenes
-            job.progress = 55
-            self._persist_job(job)
 
-            # Step 4: Generate TTS
-            job.status = VideoGenStatus.GENERATING_TTS
-            job.progress = 60
-            self._persist_job(job)
-            scenes = await self._step_generate_tts(scenes, job, work_dir)
+            tts_task = self._step_generate_tts(scenes, job, work_dir)
+            dl_task = self._step_download_footage(scenes, work_dir)
+            scenes_tts, scenes_dl = await asyncio.gather(tts_task, dl_task)
+
+            # Merge TTS audio metadata and downloaded footage paths into unified scenes
+            for i, scene in enumerate(scenes):
+                if i < len(scenes_tts):
+                    scene["tts_path"] = scenes_tts[i].get("tts_path")
+                    scene["tts_duration"] = scenes_tts[i].get("tts_duration")
+                    scene["audio_path"] = scenes_tts[i].get("audio_path")
+                    scene["audio_duration"] = scenes_tts[i].get("audio_duration")
+                if i < len(scenes_dl):
+                    scene["footage_path"] = scenes_dl[i].get("footage_path")
+                    scene["selected_footage"] = scenes_dl[i].get("selected_footage")
+                    scene["footage_source"] = scenes_dl[i].get("footage_source")
+
             job.scenes_with_footage = scenes
             job.progress = 70
             self._persist_job(job)
@@ -580,12 +592,18 @@ class VideoGenerator:
             self._persist_job(job)
             scenes = await self._step_search_footage(story, work_dir)
 
-            # Pre-select top candidate for each scene
+            # AI Video Director Curation Pass for initial selection
+            from src.infrastructure.story_agent import StoryAgent
+            story_agent = StoryAgent()
+            scenes = await story_agent.curate_scene_footages(scenes)
+
+            # Pre-select top candidate for any unassigned scenes
             for scene in scenes:
                 candidates = scene.get("footage_candidates", [])
                 if candidates and not scene.get("selected_footage"):
                     best = self._pick_best_candidate(candidates, scene) or candidates[0]
                     scene["selected_footage"] = best
+                    scene["footage_source"] = best
 
             job.scenes_with_footage = scenes
             job.status = VideoGenStatus.AWAITING_SELECTION

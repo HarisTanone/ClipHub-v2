@@ -564,6 +564,99 @@ class StoryAgent:
 
         return story
 
+    async def curate_scene_footages(self, scenes: list[dict]) -> list[dict]:
+        """AI Video Director Curation Pass: evaluate candidate footage options per scene and pick the most contextually relevant video.
+
+        Args:
+            scenes: List of scene dictionaries with 'narration', 'visual', and 'footage_candidates'.
+
+        Returns:
+            Updated scenes list with 'selected_footage' set to the AI-curated best match.
+        """
+        if not scenes:
+            return scenes
+
+        curation_payload = []
+        for s in scenes:
+            cands = s.get("footage_candidates", [])
+            if not cands:
+                continue
+            cand_summaries = []
+            for idx, c in enumerate(cands[:6]):
+                cand_summaries.append({
+                    "option_index": idx,
+                    "video_id": c.get("video_id"),
+                    "title": c.get("title", "")[:80],
+                    "platform": c.get("platform", ""),
+                    "query": c.get("query", ""),
+                })
+            curation_payload.append({
+                "scene_id": s.get("id"),
+                "narration": s.get("narration", "")[:120],
+                "visual_goal": s.get("visual", "")[:120],
+                "options": cand_summaries,
+            })
+
+        if not curation_payload:
+            return scenes
+
+        prompt = (
+            "You are an award-winning video director and documentary film editor.\n"
+            "Evaluate the candidate stock videos for each scene and pick the ONE option that best matches "
+            "the visual goal, narrative context, and mood of that scene.\n\n"
+            f"Scenes and Candidates:\n{json.dumps(curation_payload, indent=2)}\n\n"
+            "Output JSON mapping scene_id to the chosen option_index and reasoning:\n"
+            '{\n  "curation": [\n    {"scene_id": 1, "chosen_option_index": 0, "reason": "Accurately depicts dark ocean submarine"}\n  ]\n}'
+        )
+
+        try:
+            raw_response = self._call_llm(prompt, attempt=0)
+            parsed = self._parse_curation_response(raw_response)
+            choice_map = {
+                item["scene_id"]: item["chosen_option_index"]
+                for item in parsed.get("curation", [])
+                if isinstance(item, dict) and "scene_id" in item and "chosen_option_index" in item
+            }
+
+            for s in scenes:
+                s_id = s.get("id")
+                cands = s.get("footage_candidates", [])
+                if s_id in choice_map and cands:
+                    chosen_idx = choice_map[s_id]
+                    if isinstance(chosen_idx, int) and 0 <= chosen_idx < len(cands):
+                        s["selected_footage"] = cands[chosen_idx]
+                        s["footage_source"] = cands[chosen_idx]
+                        logger.info(
+                            f"story_agent (AI Director): Curated scene {s_id} -> '{cands[chosen_idx].get('title', '')[:50]}'"
+                        )
+
+        except Exception as cur_err:
+            logger.warning(f"story_agent: AI Director curation pass fallback ({cur_err})")
+
+        return scenes
+
+    def _parse_curation_response(self, raw: str) -> dict:
+        """Parse AI curation JSON response."""
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:])
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+        try:
+            return json.loads(text)
+        except Exception:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1:
+                try:
+                    return json.loads(text[start : end + 1])
+                except Exception:
+                    pass
+        return {}
+
 
 class StoryGenerationError(Exception):
     """Raised when story generation fails."""
