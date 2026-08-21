@@ -48,6 +48,8 @@ import {
   DEFAULT_HOOK_STYLE,
   DEFAULT_SUBTITLE_STYLE,
   StyleEditorModal,
+  HookPreviewRenderer,
+  useGoogleFont,
   type HookStyle,
   type SubtitleStyle,
 } from "@/components/StyleEditorModal";
@@ -148,211 +150,7 @@ interface JobListResponse {
   total_pages: number;
 }
 
-interface CaptionPreset {
-  id: string;
-  name: string;
-  description: string;
-  accent: string;
-  patch: Partial<SubtitleStyle>;
-}
 
-interface HookPreset {
-  id: string;
-  name: string;
-  description: string;
-  accent: string;
-  patch: Partial<HookStyle>;
-}
-
-const HOOK_PRESETS: HookPreset[] = [
-  {
-    id: "impact_badge",
-    name: "Impact Hazard",
-    description: "Yellow caution pill",
-    accent: "#FACC15",
-    patch: {
-      animation: "skia_impact_badge",
-      fontFamily: "Anton",
-      fontSize: 54,
-      fontWeight: "800",
-      color: "#000000",
-      bgColor: "#FACC15",
-      bgOpacity: 1,
-      boxEnabled: true,
-      boxRadius: 14,
-      boxColor: "#FACC15",
-      position: "top",
-      positionY: 15,
-      uppercase: true,
-    },
-  },
-  {
-    id: "neon_cyber",
-    name: "Neon Cyber",
-    description: "Cyan glow frame",
-    accent: "#00F0FF",
-    patch: {
-      animation: "skia_neon_cyberpunk",
-      fontFamily: "Montserrat",
-      fontSize: 50,
-      fontWeight: "900",
-      color: "#00F0FF",
-      bgColor: "#0A0F1E",
-      bgOpacity: 0.85,
-      boxEnabled: true,
-      boxRadius: 16,
-      strokeEnabled: true,
-      strokeColor: "#00F0FF",
-      strokeWidth: 3,
-      glowEnabled: true,
-      glowColor: "#00F0FF",
-      position: "top",
-      positionY: 15,
-      uppercase: true,
-    },
-  },
-  {
-    id: "frosted_pill",
-    name: "Frosted Glass",
-    description: "Modern capsule blur",
-    accent: "#FFFFFF",
-    patch: {
-      animation: "skia_frosted_pill",
-      fontFamily: "Inter",
-      fontSize: 46,
-      fontWeight: "800",
-      color: "#FFFFFF",
-      bgColor: "#FFFFFF",
-      bgOpacity: 0.22,
-      boxEnabled: true,
-      boxRadius: 999,
-      strokeEnabled: true,
-      strokeColor: "#FFFFFF",
-      strokeWidth: 2,
-      position: "top",
-      positionY: 15,
-      uppercase: false,
-    },
-  },
-  {
-    id: "aurora",
-    name: "Aurora Glow",
-    description: "Emerald gradient",
-    accent: "#10B981",
-    patch: {
-      animation: "skia_aurora_gradient",
-      fontFamily: "Outfit",
-      fontSize: 50,
-      fontWeight: "800",
-      color: "#10B981",
-      gradientEnabled: true,
-      gradientFrom: "#10B981",
-      gradientTo: "#8B5CF6",
-      bgColor: "#050F0A",
-      bgOpacity: 0.82,
-      boxEnabled: true,
-      boxRadius: 16,
-      position: "top",
-      positionY: 15,
-      uppercase: false,
-    },
-  },
-];
-
-const CAPTION_PRESETS: CaptionPreset[] = [
-  {
-    id: "classic",
-    name: "Classic",
-    description: "Karaoke clean",
-    accent: "#FACC15",
-    patch: {
-      stylePreset: "classic",
-      fontFamily: "Montserrat",
-      fontSize: 54,
-      fontWeight: "800",
-      color: "#FFFFFF",
-      highlightColor: "#FACC15",
-      bgEnabled: true,
-      bgColor: "#000000",
-      bgOpacity: 0.42,
-      position: "bottom",
-      positionY: 84,
-      maxWordsPerLine: 3,
-      lineTransition: "word_pop",
-    },
-  },
-  {
-    id: "impact",
-    name: "Impact",
-    description: "Bold short-form",
-    accent: "#FB3B4E",
-    patch: {
-      stylePreset: "meme_impact",
-      fontFamily: "Anton",
-      fontSize: 62,
-      fontWeight: "900",
-      color: "#FFFFFF",
-      highlightColor: "#FB3B4E",
-      bgEnabled: false,
-      uppercase: true,
-      strokeEnabled: true,
-      strokeColor: "#000000",
-      strokeWidth: 4,
-      position: "bottom",
-      positionY: 82,
-      maxWordsPerLine: 2,
-      lineTransition: "word_pop",
-    },
-  },
-  {
-    id: "neon",
-    name: "Neon",
-    description: "Dark tech glow",
-    accent: "#22D3EE",
-    patch: {
-      stylePreset: "neon_pulse",
-      fontFamily: "Montserrat",
-      fontSize: 56,
-      fontWeight: "900",
-      color: "#ECFEFF",
-      highlightColor: "#22D3EE",
-      bgEnabled: true,
-      bgColor: "#020617",
-      bgOpacity: 0.76,
-      strokeEnabled: true,
-      strokeColor: "#0F172A",
-      strokeWidth: 2,
-      shadowEnabled: true,
-      shadowBlur: 16,
-      position: "bottom",
-      positionY: 84,
-      maxWordsPerLine: 3,
-      lineTransition: "word_pop",
-    },
-  },
-  {
-    id: "minimal",
-    name: "Minimal",
-    description: "Editorial clean",
-    accent: "#F8FAFC",
-    patch: {
-      stylePreset: "minimal_clean",
-      fontFamily: "Inter",
-      fontSize: 48,
-      fontWeight: "700",
-      color: "#F8FAFC",
-      highlightColor: "#FFFFFF",
-      bgEnabled: false,
-      strokeEnabled: false,
-      shadowEnabled: true,
-      shadowBlur: 10,
-      position: "bottom",
-      positionY: 84,
-      maxWordsPerLine: 4,
-      lineTransition: "line_reveal",
-    },
-  },
-];
 
 function loadHookStyle(): HookStyle {
   try {
@@ -529,11 +327,25 @@ function LiveVideoPreview({
   const [previewMode, setPreviewMode] = useState<"full" | "hook" | "subtitles">("full");
   const [isPlaying, setIsPlaying] = useState(true);
 
+  // Load Google Fonts for preview
+  useGoogleFont(subtitleStyle.fontFamily || "Inter");
+  useGoogleFont(hookStyle.fontFamily || "Montserrat");
+  useGoogleFont("Inter");
+  useGoogleFont("Montserrat");
+  useGoogleFont("Anton");
+  useGoogleFont("Archivo Black");
+  useGoogleFont("Playfair Display");
+  useGoogleFont("Space Grotesk");
+  useGoogleFont("Barlow Condensed");
+  useGoogleFont("Bebas Neue");
+  useGoogleFont("Plus Jakarta Sans");
+  useGoogleFont("Outfit");
+
   const hookText =
     customHook.trim() ||
-    (topic.trim() ? topic.trim().slice(0, 48).toUpperCase() : "CAN AI REPLACE PROGRAMMERS?");
+    (topic.trim() ? topic.trim().slice(0, 52).toUpperCase() : "CAN AI REPLACE PROGRAMMERS?");
 
-  const wordsCount = Math.max(1, Math.min(6, subtitleStyle.maxWordsPerLine || 3));
+  const wordsCount = Math.max(1, Math.min(8, subtitleStyle.maxWordsPerLine || 3));
 
   // Dynamic sample words adapted from topic if available
   const sampleWords = useMemo(() => {
@@ -541,18 +353,17 @@ function LiveVideoPreview({
       const clean = topic
         .trim()
         .replace(/[^\w\s]/gi, "")
-        .toUpperCase()
         .split(/\s+/)
         .filter(Boolean);
       if (clean.length >= wordsCount) {
         return clean.slice(0, wordsCount);
       }
       if (clean.length > 0) {
-        const fillers = ["IN", "THIS", "EXCLUSIVE", "STORY", "NOW"];
+        const fillers = ["in", "this", "exclusive", "story", "now", "today", "deep", "mind"];
         return [...clean, ...fillers].slice(0, wordsCount);
       }
     }
-    return ["UNVEILING", "THE", "HIDDEN", "TRUTH", "RIGHT", "NOW"].slice(0, wordsCount);
+    return ["Unveiling", "the", "hidden", "truth", "right", "now", "today", "here"].slice(0, wordsCount);
   }, [topic, wordsCount]);
 
   // Animate karaoke active word cycle
@@ -560,87 +371,40 @@ function LiveVideoPreview({
     if (!isPlaying) return;
     const timer = setInterval(() => {
       setActiveWordIdx((prev) => (prev + 1) % wordsCount);
-    }, 650);
+    }, 600);
     return () => clearInterval(timer);
   }, [isPlaying, wordsCount]);
 
-  // Hook preset style mapping
-  const isImpact = hookStyle.animation === "skia_impact_badge";
-  const isNeon = hookStyle.animation === "skia_neon_cyberpunk";
-  const isFrosted = hookStyle.animation === "skia_frosted_pill";
-  const isAurora = hookStyle.animation === "skia_aurora_gradient";
+  // Subtitle styling calculations
+  const subPosTop = `${subtitleStyle.positionY ?? (subtitleStyle.position === "top" ? 18 : subtitleStyle.position === "center" ? 50 : 80)}%`;
+  const isWordPop = subtitleStyle.lineTransition === "word_pop";
+  const displayWords = isWordPop ? [sampleWords[activeWordIdx % sampleWords.length]] : sampleWords;
 
-  const hookBoxStyle = useMemo(() => {
-    if (isImpact) {
-      return {
-        backgroundColor: "#FACC15",
-        color: "#000000",
-        fontFamily: "Anton, Impact, sans-serif",
-        border: "2px solid #000000",
-        boxShadow: "0 4px 14px rgba(0, 0, 0, 0.8), 0 0 0 1px #FACC15",
-        borderRadius: "10px",
-        padding: "6px 12px",
-      };
-    }
-    if (isNeon) {
-      return {
-        backgroundColor: "rgba(10, 15, 30, 0.9)",
-        color: "#00F0FF",
-        fontFamily: "Montserrat, sans-serif",
-        border: "2px solid #00F0FF",
-        boxShadow: "0 0 16px rgba(0, 240, 255, 0.6), inset 0 0 8px rgba(0, 240, 255, 0.3)",
-        borderRadius: "12px",
-        padding: "6px 12px",
-      };
-    }
-    if (isFrosted) {
-      return {
-        backgroundColor: "rgba(255, 255, 255, 0.2)",
-        backdropFilter: "blur(12px)",
-        color: "#FFFFFF",
-        fontFamily: "Inter, sans-serif",
-        border: "1.5px solid rgba(255, 255, 255, 0.7)",
-        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
-        borderRadius: "999px",
-        padding: "5px 14px",
-      };
-    }
-    if (isAurora) {
-      return {
-        background: "linear-gradient(135deg, rgba(16,185,129,0.35) 0%, rgba(139,92,246,0.35) 100%)",
-        backdropFilter: "blur(10px)",
-        color: "#10B981",
-        fontFamily: "Outfit, sans-serif",
-        border: "1.5px solid #10B981",
-        boxShadow: "0 0 18px rgba(16, 185, 129, 0.4)",
-        borderRadius: "12px",
-        padding: "6px 12px",
-      };
-    }
-    const hookBg = hookStyle.boxEnabled ? (hookStyle.bgColor || "#FACC15") : "transparent";
-    const hookOpacity = hookStyle.boxEnabled ? (hookStyle.bgOpacity ?? 1) : 1;
-    return {
-      backgroundColor: hookBg,
-      opacity: hookOpacity,
-      color: hookStyle.color || "#000000",
-      borderRadius: `${Math.min(16, hookStyle.boxRadius || 12)}px`,
-      padding: "5px 8px",
-      fontFamily: hookStyle.fontFamily || "Anton",
-      border: hookStyle.strokeEnabled ? `${hookStyle.strokeWidth || 1}px solid ${hookStyle.strokeColor || "#000"}` : undefined,
-      boxShadow: hookStyle.shadowEnabled ? `0 3px ${hookStyle.shadowBlur || 6}px ${hookStyle.shadowColor || "#000000"}` : undefined,
-    };
-  }, [isImpact, isNeon, isFrosted, isAurora, hookStyle]);
+  const hasSubBg = subtitleStyle.bgEnabled || Boolean(subtitleStyle.bgColor && subtitleStyle.bgOpacity > 0);
+  const subBgHex = subtitleStyle.bgColor || "#000000";
+  const subBgOpacity = subtitleStyle.bgOpacity ?? 0.75;
+  const subBgAlpha = Math.round(Math.max(0, Math.min(1, subBgOpacity)) * 255).toString(16).padStart(2, "0");
+  const subBgRadius = subtitleStyle.bgRadius ?? 10;
+  const subBgPadding = subtitleStyle.bgPadding ?? 14;
 
-  const subBg = subtitleStyle.bgEnabled
-    ? `${subtitleStyle.bgColor}${Math.round(Math.max(0, Math.min(subtitleStyle.bgOpacity, 1)) * 255).toString(16).padStart(2, "0")}`
-    : "transparent";
-
-  const positionClass =
-    subtitleStyle.position === "top"
-      ? "top-14"
-      : subtitleStyle.position === "center"
-      ? "top-1/2 -translate-y-1/2"
-      : "bottom-14";
+  const subContainerStyle: React.CSSProperties = {
+    display: "flex",
+    flexWrap: isWordPop ? "nowrap" : "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    maxWidth: "92%",
+    gap: isWordPop ? 0 : "4px 8px",
+    ...(hasSubBg
+      ? {
+          backgroundColor: `${subBgHex}${subBgAlpha}`,
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          borderRadius: `${subBgRadius}px`,
+          padding: `${Math.round(subBgPadding * 0.35)}px ${Math.round(subBgPadding * 0.65)}px`,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+        }
+      : {}),
+  };
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -760,78 +524,69 @@ function LiveVideoPreview({
           </div>
         </div>
 
-        {/* Opening Hook Overlay */}
+        {/* Opening Hook Overlay (100% Visual match with StyleEditorModal) */}
         {hookEnabled && (previewMode === "full" || previewMode === "hook") ? (
           <div
             onClick={onCustomizeHook}
-            className="absolute left-3 right-10 top-10 z-20 cursor-pointer transition-all hover:scale-[1.03]"
-            title="Click to customize opening hook"
+            className="absolute inset-0 z-20 cursor-pointer transition-all hover:scale-[1.02]"
+            title="Click to customize opening hook in Style Editor"
           >
-            <div
-              className="text-center transition-all mx-auto leading-snug break-words"
-              style={{
-                ...hookBoxStyle,
-                fontSize: "11px",
-                fontWeight: Number(hookStyle.fontWeight) || 800,
-                textTransform: hookStyle.uppercase ? "uppercase" : "none",
-                letterSpacing: `${hookStyle.letterSpacing || 0.5}px`,
-              }}
-            >
-              {hookText}
-            </div>
-            <div className="mt-1 flex items-center justify-center gap-1 text-[8px] font-medium uppercase tracking-wider text-amber-300 drop-shadow-md">
-              <Sparkles className="h-2.5 w-2.5 text-amber-400" /> Opening Hook (0–3s)
-            </div>
+            <HookPreviewRenderer style={hookStyle} customText={hookText} scale={0.88} />
           </div>
         ) : null}
 
-        {/* Karaoke Subtitles Overlay */}
+        {/* Karaoke Subtitles Overlay (100% Visual match with StyleEditorModal) */}
         {subtitlesEnabled && (previewMode === "full" || previewMode === "subtitles") ? (
           <div
             onClick={onCustomizeSubtitle}
-            className={cn("absolute left-3 right-10 z-20 cursor-pointer transition-all hover:scale-[1.03]", positionClass)}
-            title="Click to customize captions"
+            className="absolute left-0 right-0 z-20 flex justify-center px-3 cursor-pointer transition-all hover:scale-[1.03]"
+            style={{ top: subPosTop, transform: "translateY(-50%)" }}
+            title="Click to customize captions in Style Editor"
           >
-            <div
-              className="text-center transition-all mx-auto leading-snug flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1"
-              style={{
-                backgroundColor: subBg,
-                borderRadius: subtitleStyle.bgEnabled ? `${Math.min(subtitleStyle.bgRadius || 8, 12)}px` : undefined,
-                padding: subtitleStyle.bgEnabled ? "4px 8px" : "2px 4px",
-                fontFamily: subtitleStyle.fontFamily || "Montserrat, sans-serif",
-                fontSize: `${Math.max(10, Math.min(16, (subtitleStyle.fontSize || 54) * 0.22))}px`,
-                fontWeight: Number(subtitleStyle.fontWeight) || 800,
-                fontStyle: subtitleStyle.italic ? "italic" : "normal",
-                textTransform: subtitleStyle.uppercase ? "uppercase" : "none",
-                textShadow: subtitleStyle.strokeEnabled || subtitleStyle.shadowEnabled
-                  ? `0 1px ${Math.max(2, (subtitleStyle.shadowBlur || 8) * 0.3)}px ${subtitleStyle.strokeColor || "#000000"}`
-                  : undefined,
-              }}
-            >
-              {sampleWords.map((word, idx) => {
-                const isActive = idx === activeWordIdx;
+            <div style={subContainerStyle}>
+              {displayWords.map((w, idx) => {
+                const isActive = isWordPop ? true : idx === activeWordIdx % sampleWords.length;
+                const textFormatted = subtitleStyle.uppercase
+                  ? w.toUpperCase()
+                  : subtitleStyle.capitalize
+                  ? w.charAt(0).toUpperCase() + w.slice(1)
+                  : w;
+
+                const fontSize = Math.min(Math.max((subtitleStyle.fontSize || 48) * 0.23, 11), 18);
+                const fontWeight = isActive ? 900 : Number(subtitleStyle.fontWeight || 800);
+                const textColor = isActive ? subtitleStyle.highlightColor || "#FACC15" : subtitleStyle.color || "#FFFFFF";
+
+                const textShadow =
+                  subtitleStyle.strokeEnabled || subtitleStyle.shadowEnabled
+                    ? `0 1.5px ${Math.max(2, (subtitleStyle.shadowBlur || 8) * 0.3)}px ${subtitleStyle.strokeColor || "#000000"}`
+                    : undefined;
+
                 return (
                   <span
                     key={idx}
                     className={cn(
                       "transition-all duration-150 inline-block",
-                      isActive
-                        ? "scale-110 font-black drop-shadow-[0_2px_8px_rgba(250,204,21,0.6)]"
-                        : "opacity-90"
+                      isActive && "scale-110 drop-shadow-[0_2px_10px_rgba(250,204,21,0.6)]"
                     )}
                     style={{
-                      color: isActive
-                        ? subtitleStyle.highlightColor || "#FACC15"
-                        : subtitleStyle.color || "#FFFFFF",
+                      fontFamily: subtitleStyle.fontFamily
+                        ? `'${subtitleStyle.fontFamily}', sans-serif`
+                        : "Montserrat, sans-serif",
+                      fontSize: `${fontSize}px`,
+                      fontWeight,
+                      fontStyle: subtitleStyle.italic ? "italic" : "normal",
+                      color: textColor,
+                      textShadow,
+                      WebkitTextStroke: subtitleStyle.strokeEnabled
+                        ? `${Math.max(0.6, (subtitleStyle.strokeWidth || 3.5) * 0.22)}px ${subtitleStyle.strokeColor || "#000000"}`
+                        : undefined,
+                      letterSpacing: `${subtitleStyle.letterSpacing || 0}px`,
                     }}
                   >
-                    {word}
+                    {textFormatted}
                   </span>
                 );
               })}
-            </div>
-            <div className="mt-1 flex items-center justify-center gap-1 text-[8px] font-medium uppercase tracking-wider text-violet-300 drop-shadow-md">
-              <Type className="h-2.5 w-2.5 text-violet-400" /> {wordsCount} {wordsCount === 1 ? "word" : "words"} / line (Karaoke Sync)
             </div>
           </div>
         ) : null}
@@ -846,7 +601,7 @@ function LiveVideoPreview({
           onClick={onCustomizeHook}
           icon={<Sparkles className="h-3 w-3 text-amber-400" />}
         >
-          Hook
+          Hook Style
         </Button>
         <Button
           type="button"
@@ -855,7 +610,7 @@ function LiveVideoPreview({
           onClick={onCustomizeSubtitle}
           icon={<Palette className="h-3 w-3 text-violet-400" />}
         >
-          Subtitles
+          Subtitle Style
         </Button>
         <button
           type="button"
@@ -1854,30 +1609,6 @@ export function VideoGeneratorPage() {
     }
   };
 
-  const applyCaptionPreset = (preset: CaptionPreset) => {
-    setSubtitleStyle((current) => ({
-      ...current,
-      ...preset.patch,
-      engine: "ffmpeg",
-    } as SubtitleStyle));
-  };
-
-  const applyHookPreset = (preset: HookPreset) => {
-    setHookStyle((current) => ({
-      ...current,
-      ...preset.patch,
-    } as HookStyle));
-  };
-
-  // Words per line change handler
-  const handleWordsPerLineChange = (words: number) => {
-    setSubtitleStyle((prev) => ({
-      ...prev,
-      maxWordsPerLine: words,
-      engine: "ffmpeg",
-    }));
-  };
-
   // One-click quick generation (Auto mode)
   const handleQuickSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -2575,147 +2306,116 @@ export function VideoGeneratorPage() {
                   />
                 </div>
 
-                {/* Opening Hook Overlay Section */}
-                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3.5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Toggle
-                      checked={hookEnabled}
-                      onChange={setHookEnabled}
-                      label="Opening Hook Title"
-                      description="Burn an attention-grabbing hook overlay in the first 3 seconds."
-                    />
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      onClick={() => openEditorFor("hook")}
-                      icon={<Palette className="h-3 w-3 text-amber-400" />}
-                    >
-                      Style
-                    </Button>
-                  </div>
-
-                  {hookEnabled && (
-                    <div className="space-y-2.5 pt-1">
-                      <div>
-                        <label className="text-[11px] font-medium text-zinc-400 mb-1 block">
-                          Custom Hook Text <span className="text-zinc-600 font-normal">(empty = AI generated)</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={customHook}
-                          onChange={(e) => setCustomHook(e.target.value)}
-                          placeholder="e.g. THE SECRET OF DEEP OCEAN"
-                          maxLength={100}
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-amber-500/60"
-                        />
+                {/* Custom Style Studio Launchpad Card */}
+                <div className="rounded-xl border border-violet-500/30 bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-4 space-y-3.5 shadow-lg">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="h-8 w-8 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300 shrink-0">
+                        <Palette className="h-4 w-4" />
                       </div>
-
-                      {/* Hook Quick Presets */}
-                      <div>
-                        <span className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5 block">Hook Style Presets:</span>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          {HOOK_PRESETS.map((preset) => (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              onClick={() => applyHookPreset(preset)}
-                              className={cn(
-                                "rounded-lg border px-2.5 py-2 text-left transition text-xs",
-                                hookStyle.animation === preset.patch.animation
-                                  ? "border-amber-400/60 bg-amber-500/15 text-amber-100 shadow-xs"
-                                  : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                              )}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: preset.accent }} />
-                                <span className="font-medium truncate">{preset.name}</span>
-                              </div>
-                              <div className="text-[10px] text-zinc-500 truncate mt-0.5">{preset.description}</div>
-                            </button>
-                          ))}
-                        </div>
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-bold text-zinc-100 uppercase tracking-wider">Custom Style Editor</h4>
+                        <p className="text-[11px] text-zinc-400 truncate">19 Hook Animations & 24 Subtitle Styles</p>
                       </div>
                     </div>
-                  )}
-                </div>
 
-                {/* Subtitles & Words-Per-Line Section */}
-                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3.5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Toggle
-                      checked={subtitlesEnabled}
-                      onChange={setSubtitlesEnabled}
-                      label="Karaoke Subtitles"
-                      description="Render styled ASS captions synced with narration."
-                    />
                     <Button
                       type="button"
-                      size="xs"
-                      variant="outline"
-                      onClick={() => openEditorFor("subtitle")}
-                      icon={<Palette className="h-3 w-3 text-violet-400" />}
+                      size="sm"
+                      variant="primary"
+                      onClick={() => openEditorFor("presets")}
+                      icon={<Palette className="h-3.5 w-3.5" />}
+                      className="bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold text-xs shadow-md shrink-0"
                     >
-                      Style
+                      Edit Styles
                     </Button>
                   </div>
 
-                  {subtitlesEnabled && (
-                    <div className="space-y-3 pt-1">
-                      {/* Words Per Line Selector (1 to 6 words) */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <label className="text-[11px] font-medium text-zinc-300">
-                            Words displayed per line:
-                          </label>
-                          <span className="text-xs font-semibold text-violet-300">
-                            {subtitleStyle.maxWordsPerLine || 3} {Number(subtitleStyle.maxWordsPerLine) === 1 ? "word" : "words"}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-6 gap-1">
-                          {[1, 2, 3, 4, 5, 6].map((w) => (
-                            <button
-                              key={w}
-                              type="button"
-                              onClick={() => handleWordsPerLineChange(w)}
-                              className={cn(
-                                "rounded-md border py-1.5 text-xs font-medium transition text-center",
-                                (subtitleStyle.maxWordsPerLine || 3) === w
-                                  ? "border-violet-400/60 bg-violet-500/25 text-violet-200 shadow-xs"
-                                  : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                              )}
-                            >
-                              {w}
-                            </button>
-                          ))}
+                  {/* Summary Badges Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                    {/* Hook Badge Card */}
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5 flex items-center justify-between gap-2 hover:border-amber-500/40 transition">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Toggle checked={hookEnabled} onChange={setHookEnabled} />
+                        <div className="min-w-0 cursor-pointer" onClick={() => openEditorFor("hook")}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">Hook</span>
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                            <span className="text-xs font-bold text-zinc-200 truncate">
+                              {(hookStyle.animation || "impact_badge").replace(/^(skia_|hf_)/, "").replace(/_/g, " ").toUpperCase()}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-zinc-500 truncate">
+                            {hookStyle.fontFamily || "Anton"} · {hookStyle.fontSize || 54}px
+                          </p>
                         </div>
                       </div>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => openEditorFor("hook")}
+                        icon={<Sparkles className="h-3 w-3 text-amber-400" />}
+                      >
+                        Edit
+                      </Button>
+                    </div>
 
-                      {/* Subtitle Quick Presets */}
-                      <div>
-                        <span className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5 block">Caption Presets:</span>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          {CAPTION_PRESETS.map((preset) => (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              onClick={() => applyCaptionPreset(preset)}
-                              className={cn(
-                                "rounded-lg border px-2.5 py-2 text-left transition text-xs",
-                                subtitleStyle.stylePreset === preset.patch.stylePreset
-                                  ? "border-violet-400/60 bg-violet-500/15 text-violet-100 shadow-xs"
-                                  : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                              )}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: preset.accent }} />
-                                <span className="font-medium truncate">{preset.name}</span>
-                              </div>
-                              <div className="text-[10px] text-zinc-500 truncate mt-0.5">{preset.description}</div>
-                            </button>
-                          ))}
+                    {/* Subtitle Badge Card */}
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5 flex items-center justify-between gap-2 hover:border-violet-500/40 transition">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Toggle checked={subtitlesEnabled} onChange={setSubtitlesEnabled} />
+                        <div className="min-w-0 cursor-pointer" onClick={() => openEditorFor("subtitle")}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-400">Captions</span>
+                            <span
+                              className="h-1.5 w-1.5 rounded-full shrink-0"
+                              style={{ backgroundColor: subtitleStyle.highlightColor || "#FACC15" }}
+                            />
+                            <span className="text-xs font-bold text-zinc-200 truncate">
+                              {(subtitleStyle.stylePreset || "classic").replace(/_/g, " ").toUpperCase()}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-zinc-500 truncate">
+                            {subtitleStyle.maxWordsPerLine || 3} words/line · {subtitleStyle.fontFamily || "Montserrat"}
+                          </p>
                         </div>
                       </div>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => openEditorFor("subtitle")}
+                        icon={<Palette className="h-3 w-3 text-violet-400" />}
+                      >
+                        Edit
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Optional Custom Hook Text */}
+                  {hookEnabled && (
+                    <div className="pt-1">
+                      <label className="text-[11px] font-medium text-zinc-400 mb-1 flex items-center justify-between">
+                        <span>
+                          Custom Hook Text <span className="text-zinc-600 font-normal">(empty = AI generated)</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openEditorFor("hook")}
+                          className="text-[10px] text-amber-400 hover:underline flex items-center gap-1"
+                        >
+                          <Sparkles className="h-2.5 w-2.5" /> Customize Animation
+                        </button>
+                      </label>
+                      <input
+                        type="text"
+                        value={customHook}
+                        onChange={(e) => setCustomHook(e.target.value)}
+                        placeholder="e.g. WHAT IF EARTH STOPPED SPINNING?"
+                        maxLength={100}
+                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-violet-500/60"
+                      />
                     </div>
                   )}
                 </div>

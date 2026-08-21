@@ -37,7 +37,7 @@ const PAGINATION_PAGE_SIZE = 6;
 
 type SubtitleVisualPreset = string;
 
-function useGoogleFont(fontFamily: string) {
+export function useGoogleFont(fontFamily: string) {
   useEffect(() => {
     if (!fontFamily || fontFamily === "monospace") return;
     const id = `gfont-${fontFamily.replace(/\s/g, "")}`;
@@ -2216,12 +2216,20 @@ function PresetsTab({ hookStyle, subtitleStyle, textEmphasisStyle, onHookChange,
 
 // ─── Hook Preview Renderer (matches Remotion output visually) ────────────────
 
-function HookPreviewRenderer({ style }: { style: HookStyle }) {
-  const text = style.text || getHookPreviewSample(style.animation);
-  const fontSize = Math.max(style.fontSize * 0.32, 12);
+export function HookPreviewRenderer({
+  style,
+  customText,
+  scale = 1.0,
+}: {
+  style: HookStyle;
+  customText?: string;
+  scale?: number;
+}) {
+  const text = customText || style.text || getHookPreviewSample(style.animation);
+  const fontSize = Math.max(style.fontSize * 0.32 * scale, 10);
   const fontFamily = style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`;
   const fontWeight = Number(style.fontWeight);
-  const fontStyle = style.italic ? "italic" as const : "normal" as const;
+  const fontStyle = style.italic ? ("italic" as const) : ("normal" as const);
 
   const baseTextStyle: React.CSSProperties = {
     fontSize,
