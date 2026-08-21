@@ -659,20 +659,28 @@ class VideoGenerator:
         os.makedirs(work_dir, exist_ok=True)
 
         try:
-            # Step 3: Download chosen footage
+            # Step 3 & 4: Parallel Execution of TTS Generation and Footage Download
             job.status = VideoGenStatus.DOWNLOADING
-            job.progress = 20
-            self._persist_job(job)
-            scenes = await self._step_download_footage(job.scenes_with_footage or [], work_dir)
-            job.scenes_with_footage = scenes
-            job.progress = 50
+            job.progress = 25
             self._persist_job(job)
 
-            # Step 4: Generate TTS
-            job.status = VideoGenStatus.GENERATING_TTS
-            job.progress = 60
-            self._persist_job(job)
-            scenes = await self._step_generate_tts(scenes, job, work_dir)
+            scenes_input = list(job.scenes_with_footage or [])
+            tts_task = self._step_generate_tts(scenes_input, job, work_dir)
+            dl_task = self._step_download_footage(scenes_input, work_dir)
+            scenes_tts, scenes_dl = await asyncio.gather(tts_task, dl_task)
+
+            for i, scene in enumerate(scenes_input):
+                if i < len(scenes_tts):
+                    scene["tts_path"] = scenes_tts[i].get("tts_path")
+                    scene["tts_duration"] = scenes_tts[i].get("tts_duration")
+                    scene["audio_path"] = scenes_tts[i].get("audio_path")
+                    scene["audio_duration"] = scenes_tts[i].get("audio_duration")
+                if i < len(scenes_dl):
+                    scene["footage_path"] = scenes_dl[i].get("footage_path")
+                    scene["selected_footage"] = scenes_dl[i].get("selected_footage")
+                    scene["footage_source"] = scenes_dl[i].get("footage_source")
+
+            scenes = scenes_input
             job.scenes_with_footage = scenes
             job.progress = 75
             self._persist_job(job)
@@ -1106,7 +1114,12 @@ class VideoGenerator:
             if hook_text and hook_text.strip():
                 try:
                     from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
-                    fonts_dir = "backend/assets/fonts" if os.path.exists("backend/assets/fonts") else "assets/fonts"
+                    font_candidates = [
+                        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts")),
+                        "backend/assets/fonts",
+                        "assets/fonts",
+                    ]
+                    fonts_dir = next((d for d in font_candidates if os.path.exists(d)), "assets/fonts")
                     renderer = SkiaHookRenderer(font_dir=fonts_dir)
                     hooked_path = os.path.join(work_dir, f"hooked_{job.job_id}.mp4")
                     hook_style_name = (
