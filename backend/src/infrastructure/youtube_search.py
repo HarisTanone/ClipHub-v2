@@ -196,12 +196,25 @@ class YouTubeSearch:
                 for v in data.get("videos", []):
                     files = v.get("video_files", [])
                     best_file = None
-                    for f in files:
-                        if f.get("quality") == "hd" or (f.get("width", 0) >= 720 and f.get("height", 0) >= 1280):
-                            best_file = f
-                            break
-                    if not best_file and files:
-                        best_file = files[0]
+
+                    # Prioritize 720p / 1080p portrait HD files (< 1920 height to avoid 4K UHD download limits)
+                    portrait_hd = [
+                        f for f in files
+                        if f.get("link") and (
+                            (f.get("width", 0) <= 1080 and f.get("height", 0) <= 1920 and f.get("height", 0) >= 1200)
+                            or (f.get("quality") == "hd" and f.get("height", 0) <= 1920)
+                        )
+                    ]
+                    if portrait_hd:
+                        # Pick highest resolution among <= 1080x1920
+                        best_file = max(portrait_hd, key=lambda x: x.get("height", 0))
+                    else:
+                        # Fallback to standard HD
+                        hd_files = [f for f in files if f.get("link") and (f.get("quality") == "hd" or f.get("height", 0) >= 720)]
+                        if hd_files:
+                            best_file = hd_files[0]
+                        elif files:
+                            best_file = files[0]
 
                     if best_file and best_file.get("link"):
                         results.append({

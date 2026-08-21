@@ -2474,8 +2474,8 @@ export function VideoGeneratorPage() {
                       <label className="text-xs font-medium text-zinc-300">Target duration</label>
                       <span className="text-xs text-violet-300 font-medium">{targetDuration}s</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[50, 65, 90].map((d) => (
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[45, 60, 90, 120].map((d) => (
                         <button
                           key={d}
                           type="button"
@@ -2487,7 +2487,7 @@ export function VideoGeneratorPage() {
                               : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                           )}
                         >
-                          {d}s {d === 50 ? "Quick" : d === 65 ? "Standard" : "Extended"}
+                          {d}s {d === 45 ? "Short" : d === 60 ? "Reel" : d === 90 ? "Story" : "Full"}
                         </button>
                       ))}
                     </div>

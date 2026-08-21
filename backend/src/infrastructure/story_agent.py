@@ -31,22 +31,25 @@ The video will be rendered as a vertical (9:16) short-form video with:
 - Subtitles auto-generated from narration
 - Background music
 
-Rules for High Retention & Dynamic Visual Pacing:
+Rules for High Retention & Target Duration Compliance:
 1. THE HOOK (first 3 seconds): Must be punchy, curiosity-inducing, and visually explosive.
-2. DYNAMIC & ASYMMETRICAL PACING: Do NOT make every scene identical in duration. Master editors vary the rhythm organically:
+2. DYNAMIC & ASYMMETRICAL PACING: Vary the rhythm organically:
    - Use rapid 2.5s - 4.0s punchy cuts for the opening hook, fast action, and sudden twists.
-   - Use medium 4.5s - 6.5s cuts for regular progression and character/subject focus.
-   - Use immersive 7.0s - 10.0s shots for deep storytelling, technical explanations, or cinematic wide vistas.
-3. HIGH VISUAL DIVERSITY: Never repeat visual styles across adjacent scenes. Alternate between wide drone shots, macro close-ups, high-energy subject action, dramatic camera angles, cinematic slow-motion, and vivid environments.
-4. SPECIFIC SEARCH QUERIES: Provide 3 distinct, highly descriptive visual search queries per scene targeting exact b-roll footage.
-5. NATURAL NARRATIVE FLOW: Narration should sound natural, conversational, and energetic.
+   - Use medium 4.5s - 7.5s cuts for regular progression and character/subject focus.
+   - Use immersive 8.0s - 12.0s shots for deep storytelling, technical explanations, or cinematic wide vistas.
+3. TOTAL DURATION & NARRATION DENSITY (CRITICAL):
+   - Spoken English/Indonesian speed is ~2.3 - 2.5 words per second.
+   - The total word count across all scenes MUST reach the requested target word count so the final video matches the requested duration. Do not generate ultra-short 1-sentence summaries.
+4. SPECIFIC VISUAL SEARCH QUERIES IN ENGLISH:
+   - Provide 3 distinct, highly descriptive English visual search queries per scene (e.g. "bioluminescent jellyfish underwater abyss dark ocean 4k", "deep sea submersible robotics camera cinematic") even if the script narration is in Indonesian. Stock video engines index primarily in English.
+5. HIGH VISUAL DIVERSITY: Never repeat visual concepts across adjacent scenes. Alternate between wide drone shots, macro close-ups, high-energy action, dramatic angles, and vivid environments.
 6. SCENE COUNT: Generate {num_scenes} distinct scenes matching the target duration.
 7. STRICT RULE: NEVER include generic subscribe, like, follow, or channel CTA. The final scene MUST be an insightful, memorable takeaway directly related to the topic."""
 
-STORY_USER_PROMPT = """Create a dynamic, organically paced vertical video script about: "{topic}"
+STORY_USER_PROMPT = """Create a dynamic, rich vertical video script about: "{topic}"
 
 Target duration: {target_duration} seconds (approximately {word_count} words of narration total)
-Number of scenes to generate: {num_scenes} scenes (with varied lengths from 3s quick cuts up to 10s storytelling moments)
+Number of scenes to generate: {num_scenes} scenes
 
 Additional instructions: {instructions}
 
@@ -59,28 +62,24 @@ Output this exact JSON structure:
   "scenes": [
     {{
       "id": 1,
-      "narration": "The spoken narration for this scene (length varies based on scene pace: 6 words for quick 3s cuts, up to 24 words for deep 10s shots)",
+      "narration": "The spoken narration for this scene (rich and descriptive, approximately {words_per_scene} words to maintain pacing)",
       "visual": "Concrete description of the exact visual footage and camera movement to display",
       "search_queries": [
-        "cinematic 4k specific visual query",
-        "action motion drone footage query",
-        "stock b-roll subject query"
+        "cinematic 4k specific visual query in English",
+        "action motion drone stock b-roll query in English",
+        "subject macro footage query in English"
       ],
-      "duration_estimate": 3.5,
+      "duration_estimate": 6.5,
       "transition": "cut|zoom|fade"
     }}
   ]
 }}
 
 Important Guidelines:
-- Organic Pacing Variation: Intentionally vary the shot lengths and word counts across scenes (e.g. Scene 1 = 3s hook, Scene 2 = 8s context, Scene 3 = 4s reveal, Scene 4 = 9s breakdown, Scene 5 = 3.5s climax, Scene 6 = 5s conclusion).
-- Average speaking rate is ~2.5 words per second. Set duration_estimate to match the word count naturally.
-- search_queries MUST be highly concrete and visual:
-  * Use specific visual nouns with adjectives: "glowing jellyfish deep ocean abyss 4k", NOT "jellyfish"
-  * Include camera motion or format: "drone shot mountain peak clouds cinematic", "macro extreme close up circuit board glowing"
-  * Provide 3 varied queries per scene so the footage engine can find diverse candidates.
+- Narration Volume: To meet the {target_duration}s duration, ensure all {num_scenes} scenes have complete, engaging storytelling sentences (total ~{word_count} words across the script).
+- Search Queries: MUST always be in descriptive English keywords for stock video indexing (Pexels, Pixabay, YouTube).
 - First scene is the opening HOOK.
-- Final scene is a punchy, thought-provoking conclusion or takeaway. No like/subscribe CTAs."""
+- Final scene is a punchy, thought-provoking conclusion or takeaway. No CTAs."""
 
 
 class StoryAgent:
@@ -119,18 +118,20 @@ class StoryAgent:
             target_duration = settings.VIDEO_GEN_TARGET_DURATION
 
         if not num_scenes:
-            # Auto-calculate: dynamic organic pacing averaging ~4.5 - 5.5s per cut
-            calculated_scenes = max(7, min(settings.VIDEO_GEN_MAX_SCENES, int(round(target_duration / 5.0))))
+            # Auto-calculate: minimum 6 scenes for 45-120s target videos with balanced pacing (~6.5 - 8.0s per scene)
+            calculated_scenes = max(6, min(16, int(round(target_duration / 7.0))))
             num_scenes = calculated_scenes
 
-        # Approximate word count for target duration (2.5 words/sec)
-        word_count = int(target_duration * 2.5)
+        # Approximate word count for target duration (2.3 words/sec)
+        word_count = max(50, int(target_duration * 2.3))
+        words_per_scene = max(12, int(word_count / max(1, num_scenes)))
 
         prompt = STORY_USER_PROMPT.format(
             topic=topic,
             target_duration=target_duration,
             word_count=word_count,
             num_scenes=num_scenes,
+            words_per_scene=words_per_scene,
             instructions=instructions or "None — use your best judgment",
         )
 
@@ -196,7 +197,7 @@ class StoryAgent:
                     model=settings.get_nine_router("NINE_ROUTER_PASS2_MODEL")
                     or settings.nine_router_model,
                     temperature=temp,
-                    max_tokens=4096,
+                    max_tokens=8192,
                     response_format={"type": "json_object"},
                 )
             except Exception as e:

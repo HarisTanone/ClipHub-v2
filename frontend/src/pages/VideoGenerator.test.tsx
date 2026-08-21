@@ -109,7 +109,7 @@ describe("VideoGeneratorPage", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /voice/i }), { target: { value: "aura-2-orion-en" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Pacing" }), { target: { value: "1.15" } });
     fireEvent.change(screen.getByRole("combobox", { name: /footage pacing & cuts/i }), { target: { value: "8" } });
-    fireEvent.click(screen.getByRole("button", { name: /65s/i }));
+    fireEvent.click(screen.getByRole("button", { name: /60s/i }));
     fireEvent.click(screen.getByRole("button", { name: "Generate video" }));
 
     await waitFor(() => {
@@ -120,7 +120,7 @@ describe("VideoGeneratorPage", () => {
       const payload = JSON.parse(call?.[1]?.body as string);
       expect(payload).toMatchObject({
         topic: "Black holes",
-        target_duration: 65,
+        target_duration: 60,
         voice: "aura-2-orion-en",
         speed: 1.15,
         num_scenes: 8,

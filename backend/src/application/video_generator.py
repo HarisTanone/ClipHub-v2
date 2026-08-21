@@ -742,47 +742,120 @@ class VideoGenerator:
     async def _step_download_footage(
         self, scenes: list[dict], work_dir: str
     ) -> list[dict]:
-        """Step 3: Download top candidate for each scene via yt-dlp."""
+        """Step 3: Download top candidate for each scene via yt-dlp / direct stock downloader with multi-candidate fallback."""
         from src.infrastructure.footage_downloader import FootageDownloader
 
         downloader = FootageDownloader(output_dir=os.path.join(work_dir, "footage"))
 
         for i, scene in enumerate(scenes):
-            # If user already selected a footage candidate (Studio mode), respect it!
             selected = scene.get("selected_footage") or scene.get("footage_source")
-            best = selected if selected else self._pick_best_candidate(scene.get("footage_candidates", []), scene)
-            if not best:
-                logger.warning(f"video_gen: no candidate for scene {i + 1}")
-                continue
+            raw_cands = scene.get("footage_candidates", []) or []
 
-            scene["selected_footage"] = best
-            scene["footage_source"] = best
+            # Prioritize candidates list: selected candidate first, then rest sorted by score
+            ordered_candidates: list[dict] = []
+            if selected:
+                ordered_candidates.append(selected)
 
-            try:
-                # If already downloaded local file exists, reuse
-                if best.get("local_path") and os.path.exists(best["local_path"]):
-                    scene["footage_path"] = best["local_path"]
+            scored = []
+            for c in raw_cands:
+                if not isinstance(c, dict):
                     continue
+                if selected and (
+                    (c.get("video_id") and c.get("video_id") == selected.get("video_id"))
+                    or (c.get("url") and c.get("url") == selected.get("url"))
+                ):
+                    continue
+                score = self._score_candidate(c, scene)
+                scored.append((score, c))
 
-                video_url = best.get("url", "")
-                if not video_url and best.get("video_id"):
-                    video_url = f"https://www.youtube.com/watch?v={best['video_id']}"
+            scored.sort(key=lambda x: x[0], reverse=True)
+            ordered_candidates.extend([c for _, c in scored])
+
+            downloaded_path = None
+            used_source = None
+
+            # Try candidate options in order until a valid footage file is successfully downloaded
+            for cand_idx, cand in enumerate(ordered_candidates):
+                # If already downloaded local file exists, reuse
+                if cand.get("local_path") and os.path.exists(cand["local_path"]) and os.path.getsize(cand["local_path"]) > 0:
+                    downloaded_path = cand["local_path"]
+                    used_source = cand
+                    break
+
+                video_url = cand.get("url", "")
+                if not video_url and cand.get("video_id"):
+                    video_url = f"https://www.youtube.com/watch?v={cand['video_id']}"
 
                 if not video_url:
                     continue
 
-                logger.info(f"video_gen: downloading footage for scene {i + 1}: {best.get('title', '')[:50]}")
-                local_path = await downloader.download_segment(
-                    url=video_url,
-                    start_time=float(best.get("start_timestamp") or 0.0),
-                    duration=max(10.0, float(scene.get("duration_estimate", 7)) + 4.0),
-                    scene_id=scene.get("id", i + 1),
-                    platform=best.get("platform"),
-                    video_id=best.get("video_id"),
-                )
-                scene["footage_path"] = local_path
-            except Exception as e:
-                logger.warning(f"video_gen: failed to download footage for scene {i + 1}: {e}")
+                try:
+                    logger.info(
+                        f"video_gen: downloading footage for scene {i + 1} "
+                        f"(candidate {cand_idx + 1}/{len(ordered_candidates)}): {cand.get('title', '')[:50]}"
+                    )
+                    local_path = await downloader.download_segment(
+                        url=video_url,
+                        start_time=float(cand.get("start_timestamp") or 0.0),
+                        duration=max(10.0, float(scene.get("duration_estimate", 7)) + 4.0),
+                        scene_id=scene.get("id", i + 1),
+                        platform=cand.get("platform"),
+                        video_id=cand.get("video_id"),
+                    )
+                    if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+                        downloaded_path = local_path
+                        used_source = cand
+                        break
+                except Exception as dl_err:
+                    logger.warning(f"video_gen: candidate {cand_idx + 1} download failed for scene {i + 1}: {dl_err}")
+
+            # Dynamic query fallback if all initial candidates failed
+            if not downloaded_path:
+                logger.warning(f"video_gen: all {len(ordered_candidates)} candidates failed for scene {i + 1}, trying dynamic query fallback...")
+                try:
+                    from src.infrastructure.youtube_search import YouTubeSearch
+                    yt = YouTubeSearch()
+                    fallback_queries = list(scene.get("search_queries", []))
+                    if scene.get("visual"):
+                        fallback_queries.append(scene["visual"][:80])
+
+                    for fq in fallback_queries:
+                        if not fq:
+                            continue
+                        fb_cands = await yt.search_for_single_scene(scene, custom_query=fq, results_per_query=3)
+                        for fb_c in fb_cands:
+                            fb_url = fb_c.get("url") or (f"https://www.youtube.com/watch?v={fb_c['video_id']}" if fb_c.get("video_id") else None)
+                            if not fb_url:
+                                continue
+                            fb_path = await downloader.download_segment(
+                                url=fb_url,
+                                start_time=float(fb_c.get("start_timestamp") or 0.0),
+                                duration=max(10.0, float(scene.get("duration_estimate", 7)) + 4.0),
+                                scene_id=scene.get("id", i + 1),
+                                platform=fb_c.get("platform"),
+                                video_id=fb_c.get("video_id"),
+                            )
+                            if fb_path and os.path.exists(fb_path) and os.path.getsize(fb_path) > 0:
+                                downloaded_path = fb_path
+                                used_source = fb_c
+                                break
+                        if downloaded_path:
+                            break
+                except Exception as fb_err:
+                    logger.warning(f"video_gen: dynamic fallback search failed for scene {i + 1}: {fb_err}")
+
+            # Adjacent scene borrowing fallback: NEVER leave scene with black screen if other scenes have footage
+            if not downloaded_path:
+                for other_scene in scenes:
+                    if other_scene.get("footage_path") and os.path.exists(other_scene["footage_path"]):
+                        downloaded_path = other_scene["footage_path"]
+                        used_source = other_scene.get("footage_source") or other_scene.get("selected_footage")
+                        logger.info(f"video_gen: scene {i + 1} borrowing footage from scene {other_scene.get('id', '?')} to prevent black frame")
+                        break
+
+            scene["footage_path"] = downloaded_path
+            scene["selected_footage"] = used_source
+            scene["footage_source"] = used_source
 
         return scenes
 
@@ -989,67 +1062,74 @@ class VideoGenerator:
 
     # ─── Helper Methods ────────────────────────────────────────────────────────
 
-    def _pick_best_candidate(self, candidates: list[dict], scene: dict) -> Optional[dict]:
-        """Score and pick the best footage candidate for a scene.
-
-        Scoring factors:
-        - Title/query relevance to visual description (highest weight)
-        - View count (popularity signal)
-        - Duration (prefer videos with enough content)
-        """
-        if not candidates:
-            return None
+    def _score_candidate(self, candidate: dict, scene: dict) -> float:
+        """Calculate deep semantic relevance score for a footage candidate."""
+        if not candidate or not isinstance(candidate, dict):
+            return 0.0
 
         target_duration = scene.get("duration_estimate", 7)
-
-        # Build search terms from visual description + queries for matching
         search_terms = set()
         visual = scene.get("visual", "")
         for word in visual.lower().split():
-            if len(word) > 3:  # Skip short words
+            if len(word) > 3:
                 search_terms.add(word)
         for q in scene.get("search_queries", []):
             for word in q.lower().split():
                 if len(word) > 3:
                     search_terms.add(word)
+        for word in scene.get("narration", "").lower().split():
+            if len(word) > 4:
+                search_terms.add(word)
 
-        scored = []
-        for c in candidates:
-            score = 0.0
+        score = 0.0
 
-            # Title keyword overlap (highest weight)
-            title_words = set(w.lower() for w in c.get("title", "").split() if len(w) > 3)
-            overlap = len(search_terms & title_words)
-            score += overlap * 2.0  # 2 points per matching word
+        # Title & query keyword overlap (highest weight)
+        title_words = set(w.lower() for w in candidate.get("title", "").split() if len(w) > 3)
+        cand_query_words = set(w.lower() for w in candidate.get("query", "").split() if len(w) > 3)
+        overlap = len(search_terms & (title_words | cand_query_words))
+        score += overlap * 2.5
 
-            # View count bonus (log scale)
-            views = c.get("view_count", 0)
-            if views > 1000000:
-                score += 2.0
-            elif views > 100000:
-                score += 1.5
-            elif views > 10000:
-                score += 1.0
-            elif views > 1000:
-                score += 0.5
+        # Platform preference: direct stock footage (Pexels / Pixabay) has high visual quality & portrait framing
+        platform = candidate.get("platform", "").lower()
+        if platform in ["pexels", "pixabay"]:
+            score += 3.0
 
-            # Duration: prefer videos longer than needed (more to work with)
-            dur = c.get("duration_seconds", 0)
-            if dur >= target_duration:
-                score += 1.5
-            elif dur >= target_duration * 0.7:
-                score += 0.8
+        # View count bonus (log scale)
+        views = candidate.get("view_count", 0)
+        if views > 1000000:
+            score += 2.0
+        elif views > 100000:
+            score += 1.5
+        elif views > 10000:
+            score += 1.0
+        elif views > 1000:
+            score += 0.5
 
-            # Bonus for footage/cinematic/drone in title (stock-like content)
-            title_lower = c.get("title", "").lower()
-            stock_keywords = ["footage", "cinematic", "drone", "4k", "stock", "timelapse", "b-roll", "broll"]
-            for kw in stock_keywords:
-                if kw in title_lower:
-                    score += 1.0
-                    break
+        # Duration preference: prefer videos with enough footage for full scene length
+        dur = candidate.get("duration_seconds", 0)
+        if dur >= target_duration:
+            score += 1.5
+        elif dur >= target_duration * 0.7:
+            score += 0.8
 
-            scored.append((score, c))
+        # Stock keywords bonus (cinematic, 4k, macro, drone, timelapse, etc.)
+        title_lower = candidate.get("title", "").lower()
+        stock_keywords = [
+            "footage", "cinematic", "drone", "4k", "stock", "timelapse",
+            "b-roll", "broll", "macro", "slow motion", "4k 60fps", "close up"
+        ]
+        for kw in stock_keywords:
+            if kw in title_lower:
+                score += 1.2
 
+        return score
+
+    def _pick_best_candidate(self, candidates: list[dict], scene: dict) -> Optional[dict]:
+        """Score and pick the best footage candidate for a scene."""
+        if not candidates:
+            return None
+
+        scored = [(self._score_candidate(c, scene), c) for c in candidates if isinstance(c, dict)]
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[0][1] if scored else None
 
@@ -1060,8 +1140,9 @@ class VideoGenerator:
         filename = f"footage_scene_{scene_id}_{uuid4().hex[:6]}.mp4"
         output_path = os.path.join(output_dir, filename)
 
-        # Download first N seconds (enough for our scene)
-        section = f"*0-{int(duration_needed) + 5}"
+        # Skip first 2 seconds intro buffer for long videos to capture active content
+        start_sec = 2
+        section = f"*{start_sec}-{int(duration_needed) + start_sec + 5}"
 
         cmd = [
             "yt-dlp",

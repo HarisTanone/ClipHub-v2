@@ -35,7 +35,9 @@ class FootageDownloader:
 
     def __init__(self, output_dir: Optional[str] = None):
         self._output_dir = output_dir or settings.OUTPUT_DIR
-        self._max_size_bytes = settings.BROLL_MAX_FOOTAGE_SIZE_MB * 1024 * 1024
+        # Allow up to 150MB footage chunks to avoid aborting high-quality 1080p/4k stock video
+        max_mb = max(150, getattr(settings, "BROLL_MAX_FOOTAGE_SIZE_MB", 50))
+        self._max_size_bytes = max_mb * 1024 * 1024
 
     async def download_segment(
         self,
