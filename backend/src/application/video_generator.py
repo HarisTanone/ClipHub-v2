@@ -1142,32 +1142,53 @@ class VideoGenerator:
 
         target_duration = scene.get("duration_estimate", 7)
         search_terms = set()
+        entity_terms = set()
+
         visual = scene.get("visual", "")
         for word in visual.lower().split():
-            if len(word) > 3:
-                search_terms.add(word)
+            clean_w = "".join(c for c in word if c.isalnum())
+            if len(clean_w) > 3:
+                search_terms.add(clean_w)
+
         for q in scene.get("search_queries", []):
-            for word in q.lower().split():
-                if len(word) > 3:
+            q_words = [("".join(c for c in w if c.isalnum())) for w in q.lower().split()]
+            for word in q_words:
+                if len(word) > 2:
                     search_terms.add(word)
+            # First query is typically the specific entity query (e.g. "Salatiga aerial drone")
+            if q == scene.get("search_queries", [""])[0]:
+                for word in q_words:
+                    if len(word) > 3:
+                        entity_terms.add(word)
+
         for word in scene.get("narration", "").lower().split():
-            if len(word) > 4:
-                search_terms.add(word)
+            clean_w = "".join(c for c in word if c.isalnum())
+            if len(clean_w) > 4:
+                search_terms.add(clean_w)
 
         score = 0.0
+        title_lower = candidate.get("title", "").lower()
+        title_words = set("".join(c for c in w if c.isalnum()) for w in title_lower.split() if len(w) > 2)
+        cand_query_words = set("".join(c for c in w if c.isalnum()) for w in candidate.get("query", "").lower().split() if len(w) > 2)
 
-        # Title & query keyword overlap (highest weight)
-        title_words = set(w.lower() for w in candidate.get("title", "").split() if len(w) > 3)
-        cand_query_words = set(w.lower() for w in candidate.get("query", "").split() if len(w) > 3)
+        # 1. Named Entity Exact Match Bonus (e.g. "Salatiga" or "Jawa Tengah" in YouTube title)
+        entity_overlap = len(entity_terms & title_words)
+        if entity_overlap > 0:
+            score += entity_overlap * 5.0
+
+        # 2. General Keyword Overlap
         overlap = len(search_terms & (title_words | cand_query_words))
         score += overlap * 2.5
 
-        # Platform preference: direct stock footage (Pexels / Pixabay) has high visual quality & portrait framing
+        # 3. Platform preference
         platform = candidate.get("platform", "").lower()
         if platform in ["pexels", "pixabay"]:
             score += 3.0
+        elif platform == "youtube" and entity_overlap > 0:
+            # High-value real local documentary/drone footage on YouTube
+            score += 4.0
 
-        # View count bonus (log scale)
+        # 4. View count bonus (log scale)
         views = candidate.get("view_count", 0)
         if views > 1000000:
             score += 2.0
@@ -1178,18 +1199,18 @@ class VideoGenerator:
         elif views > 1000:
             score += 0.5
 
-        # Duration preference: prefer videos with enough footage for full scene length
+        # 5. Duration preference: prefer videos with enough footage for full scene length
         dur = candidate.get("duration_seconds", 0)
         if dur >= target_duration:
             score += 1.5
         elif dur >= target_duration * 0.7:
             score += 0.8
 
-        # Stock keywords bonus (cinematic, 4k, macro, drone, timelapse, etc.)
-        title_lower = candidate.get("title", "").lower()
+        # 6. Stock & Documentary keywords bonus
         stock_keywords = [
             "footage", "cinematic", "drone", "4k", "stock", "timelapse",
-            "b-roll", "broll", "macro", "slow motion", "4k 60fps", "close up"
+            "b-roll", "broll", "macro", "slow motion", "4k 60fps", "close up",
+            "aerial", "sejarah", "history", "vintage", "archive", "colonial"
         ]
         for kw in stock_keywords:
             if kw in title_lower:
