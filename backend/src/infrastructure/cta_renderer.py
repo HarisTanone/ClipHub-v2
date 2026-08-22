@@ -70,36 +70,72 @@ def _is_enabled(value) -> bool:
     return bool(value)
 
 
+def _resolve_font_path(font_family: str, fonts_dir: str = "assets/fonts") -> Optional[str]:
+    """Find TTF/OTF font file across assets and system fonts."""
+    search_dirs = [
+        fonts_dir,
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../assets/fonts")),
+        os.path.abspath("assets/fonts"),
+        os.path.abspath("backend/assets/fonts"),
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts",
+        "/opt/homebrew/share/fonts",
+        "/Library/Fonts",
+    ]
+    family_clean = (font_family or "Poppins").replace(" ", "")
+    candidates = [
+        f"{family_clean}-Bold.ttf",
+        f"{family_clean}-Regular.ttf",
+        f"{family_clean}-Variable.ttf",
+        f"{family_clean}.ttf",
+        f"{font_family}-Bold.ttf",
+        f"{font_family}-Regular.ttf",
+        f"{font_family}.ttf",
+    ]
+    for d in search_dirs:
+        if d and os.path.isdir(d):
+            for cand in candidates:
+                p = os.path.join(d, cand)
+                if os.path.exists(p):
+                    return p
+    return None
+
+
 def normalise_cta_config(config: Optional[dict]) -> dict:
-    """Coerce raw CTA config dictionary into safe, validated dict."""
+    """Coerce raw CTA config dictionary into safe, validated dict supporting camelCase & snake_case."""
     cfg = config or {}
     try:
-        dur = float(cfg.get("duration") if cfg.get("duration") is not None else cfg.get("duration_sec", 3.0))
+        dur = float(
+            cfg.get("duration")
+            if cfg.get("duration") is not None
+            else (cfg.get("duration_sec") if cfg.get("duration_sec") is not None else 3.0)
+        )
     except (TypeError, ValueError):
         dur = 3.0
     dur = max(1.0, min(6.0, dur))
 
     try:
-        font_size = int(cfg.get("fontSize") or 28)
+        font_size = int(cfg.get("fontSize") or cfg.get("font_size") or 28)
     except (TypeError, ValueError):
         font_size = 28
     font_size = max(16, min(60, font_size))
 
     try:
-        bg_opacity = int(cfg.get("bgOpacity") if cfg.get("bgOpacity") is not None else 90)
+        raw_opacity = cfg.get("bgOpacity") if cfg.get("bgOpacity") is not None else cfg.get("bg_opacity")
+        bg_opacity = int(raw_opacity if raw_opacity is not None else 90)
     except (TypeError, ValueError):
         bg_opacity = 90
     bg_opacity = max(0, min(100, bg_opacity))
 
-    cta_type = str(cfg.get("ctaType") or cfg.get("mode") or "card").strip().lower()
+    cta_type = str(cfg.get("ctaType") or cfg.get("cta_type") or cfg.get("mode") or "card").strip().lower()
     if cta_type not in ("card", "text", "both"):
         cta_type = "card"
 
     text_msg = str(cfg.get("text") or cfg.get("headline") or DEFAULT_CTA_CONFIG["text"]).strip()
     headline = str(cfg.get("headline") or cfg.get("text") or DEFAULT_CTA_CONFIG["headline"]).strip()
     subhead = str(cfg.get("subhead") or "").strip()
-    button_text = str(cfg.get("buttonText") or DEFAULT_CTA_CONFIG["buttonText"]).strip()
-    social_handle = str(cfg.get("socialHandle") or cfg.get("handle") or "").strip()
+    button_text = str(cfg.get("buttonText") or cfg.get("button_text") or DEFAULT_CTA_CONFIG["buttonText"]).strip()
+    social_handle = str(cfg.get("socialHandle") or cfg.get("social_handle") or cfg.get("handle") or "").strip()
 
     template = str(cfg.get("template") or "follow_badge")
     if template not in ("follow_badge", "like_share", "link_bio", "subscribe_pill", "comment_prompt", "custom_card"):
@@ -113,11 +149,11 @@ def normalise_cta_config(config: Optional[dict]) -> dict:
     if animation not in ("slide_up", "pop_in", "fade_bounce", "glow_pulse", "glitch"):
         animation = "slide_up"
 
-    selected_icon = str(cfg.get("selectedIcon") or "tiktok")
+    selected_icon = str(cfg.get("selectedIcon") or cfg.get("selected_icon") or "tiktok")
     if selected_icon not in ("tiktok", "instagram", "youtube", "bell", "link", "share", "message", "zap", "user_plus", "heart", "star"):
         selected_icon = "tiktok"
 
-    bg_box = cfg.get("bgBox")
+    bg_box = cfg.get("bgBox") if cfg.get("bgBox") is not None else cfg.get("bg_box")
     if bg_box is not None:
         bg_box = _is_enabled(bg_box)
     else:
@@ -133,21 +169,21 @@ def normalise_cta_config(config: Optional[dict]) -> dict:
         "subhead": subhead,
         "buttonText": button_text,
         "selectedIcon": selected_icon,
-        "socialPlatform": str(cfg.get("socialPlatform") or cfg.get("type") or "tiktok"),
+        "socialPlatform": str(cfg.get("socialPlatform") or cfg.get("social_platform") or cfg.get("type") or "tiktok"),
         "socialHandle": social_handle,
         "position": position,
         "bgBox": bg_box,
         "animation": animation,
-        "primaryColor": str(cfg.get("primaryColor") or "#10B981"),
-        "textColor": str(cfg.get("textColor") or "#FFFFFF"),
-        "backgroundColor": str(cfg.get("backgroundColor") or "#0F172A"),
+        "primaryColor": str(cfg.get("primaryColor") or cfg.get("primary_color") or "#10B981"),
+        "textColor": str(cfg.get("textColor") or cfg.get("text_color") or "#FFFFFF"),
+        "backgroundColor": str(cfg.get("backgroundColor") or cfg.get("background_color") or "#0F172A"),
         "bgOpacity": bg_opacity,
         "fontSize": font_size,
-        "fontFamily": str(cfg.get("fontFamily") or "Poppins"),
-        "fontWeight": str(cfg.get("fontWeight") or "700"),
-        "showIcon": bool(cfg.get("showIcon", True)),
-        "showArrow": bool(cfg.get("showArrow", True)),
-        "avatarUrl": cfg.get("avatarUrl") or None,
+        "fontFamily": str(cfg.get("fontFamily") or cfg.get("font_family") or "Poppins"),
+        "fontWeight": str(cfg.get("fontWeight") or cfg.get("font_weight") or "700"),
+        "showIcon": bool(cfg.get("showIcon", cfg.get("show_icon", True))),
+        "showArrow": bool(cfg.get("showArrow", cfg.get("show_arrow", True))),
+        "avatarUrl": cfg.get("avatarUrl") or cfg.get("avatar_url") or None,
     }
 
 
@@ -282,15 +318,7 @@ def apply_cta(
         return False
 
     duration = _probe_duration(input_video)
-    font_path = None
-    if fonts_dir and os.path.isdir(fonts_dir):
-        candidate = os.path.join(fonts_dir, f"{cfg['fontFamily']}-Bold.ttf")
-        if os.path.exists(candidate):
-            font_path = candidate
-        else:
-            cand_regular = os.path.join(fonts_dir, f"{cfg['fontFamily']}.ttf")
-            if os.path.exists(cand_regular):
-                font_path = cand_regular
+    font_path = _resolve_font_path(cfg["fontFamily"], fonts_dir=fonts_dir)
 
     filters = build_cta_drawtext_filters(cfg, duration, font_path)
     if not filters:
@@ -312,9 +340,11 @@ def apply_cta(
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        if proc.returncode != 0:
+            logger.warning("cta_renderer: ffmpeg failed (rc=%s): %s", proc.returncode, proc.stderr[-300:] if proc.stderr else "")
         return proc.returncode == 0 and os.path.exists(output_video) and os.path.getsize(output_video) > 0
     except Exception as e:
-        logger.warning("cta_renderer: ffmpeg failed: %s", e)
+        logger.warning("cta_renderer: ffmpeg exception: %s", e)
         return False
 
 
@@ -330,16 +360,22 @@ async def apply_cta_if_configured(
     import asyncio
     cfg = normalise_cta_config(config)
     if not cfg["enabled"]:
+        logger.debug("[%s] CTA disabled for clip %s", job_id, clip_rank)
         return
 
+    logger.info(
+        "[%s] Applying CTA end-card to clip %s: headline='%s', template=%s, dur=%.1fs",
+        job_id, clip_rank, cfg.get("headline"), cfg.get("template"), cfg.get("duration")
+    )
     tmp = f"{output_dir}/clip_{clip_rank:02d}_cta_tmp.mp4"
     try:
         ok = await asyncio.to_thread(apply_cta, final_path, cfg, tmp, fonts_dir)
         if ok and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
             os.replace(tmp, final_path)
-            logger.info("[%s] CTA applied clip %s", job_id, clip_rank)
+            logger.info("[%s] CTA applied successfully to clip %s -> %s", job_id, clip_rank, final_path)
         elif os.path.exists(tmp):
             os.remove(tmp)
+            logger.warning("[%s] CTA render returned false for clip %s", job_id, clip_rank)
     except Exception as e:
         logger.warning("[%s] CTA application failed clip %s: %s", job_id, clip_rank, e)
         try:

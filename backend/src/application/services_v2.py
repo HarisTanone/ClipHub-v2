@@ -2271,6 +2271,8 @@ class V2PipelineService:
                             or sub_eng in ("hyperframes", "ffmpeg", "skia")
                         )
                         if not has_pending_pass:
+                            # CTA End-Card (FFmpeg overlay/drawtext)
+                            await self._apply_cta(job, clip.rank, output_dir, out_path, job_id)
                             # Watermark (FFmpeg overlay/drawtext) — final pass
                             await self._apply_watermark(job, clip.rank, output_dir, out_path, job_id)
                             mark_clip_ready(output_dir, clip.rank)
@@ -2516,6 +2518,8 @@ class V2PipelineService:
                 import shutil
                 shutil.copy2(hooked_path, final_path)
 
+            # CTA End-Card (FFmpeg overlay/drawtext)
+            await self._apply_cta(job, clip.rank, output_dir, final_path, job_id)
             # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything
             await self._apply_watermark(job, clip.rank, output_dir, final_path, job_id)
             final_dir_clip = f"{output_dir}/final/clip_{clip.rank:02d}.mp4"

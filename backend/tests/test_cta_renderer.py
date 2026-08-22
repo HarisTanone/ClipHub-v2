@@ -127,3 +127,42 @@ async def test_apply_cta_if_configured_disabled_is_noop():
         clip_rank=1,
         final_path="/tmp/non_existent.mp4",
     )
+
+
+def test_normalise_cta_snake_case():
+    raw = {
+        "enabled": True,
+        "cta_type": "card",
+        "duration_sec": 4.5,
+        "button_text": "JOIN NOW",
+        "social_handle": "@myuser",
+        "bg_opacity": 85,
+        "font_size": 32,
+        "font_family": "Montserrat",
+        "primary_color": "#FF5500",
+        "text_color": "#EEEEEE",
+        "background_color": "#111111",
+        "bg_box": True,
+        "show_icon": True,
+        "show_arrow": False,
+    }
+    cfg = normalise_cta_config(raw)
+    assert cfg["enabled"] is True
+    assert cfg["ctaType"] == "card"
+    assert cfg["duration"] == 4.5
+    assert cfg["buttonText"] == "JOIN NOW"
+    assert cfg["socialHandle"] == "@myuser"
+    assert cfg["bgOpacity"] == 85
+    assert cfg["fontSize"] == 32
+    assert cfg["fontFamily"] == "Montserrat"
+    assert cfg["primaryColor"] == "#FF5500"
+    assert cfg["textColor"] == "#EEEEEE"
+    assert cfg["backgroundColor"] == "#111111"
+    assert cfg["showArrow"] is False
+
+
+def test_font_resolver():
+    from src.infrastructure.cta_renderer import _resolve_font_path
+    font_p = _resolve_font_path("Poppins", fonts_dir="assets/fonts")
+    assert font_p is not None
+    assert "Poppins" in font_p
