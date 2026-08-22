@@ -96,11 +96,11 @@ def _get_cookie_args() -> list[str]:
 
 
 def _get_extractor_args(has_cookies: bool = False) -> list[str]:
-    """Extractor arguments. When cookies are present, default web client unlocks 1080p DASH streams.
-    When no cookies are present, fallback to android/web client."""
+    """Extractor arguments.
+    web_embedded reliably delivers full 1080p/720p DASH streams (itags 137, 399, 140) without 403 or SABR issues even on headless Linux VPS."""
     if has_cookies:
         return []
-    return ["--extractor-args", "youtube:player_client=android,web,web_creator,ios"]
+    return ["--extractor-args", "youtube:player_client=web_embedded,web"]
 
 
 class YouTubeDownloader(IDownloader):
@@ -286,7 +286,7 @@ class YouTubeDownloader(IDownloader):
                 retry_cmd = [
                     ytdlp_cmd,
                     "--geo-bypass",
-                    "--extractor-args", "youtube:player_client=ios,web,android",
+                    "--extractor-args", "youtube:player_client=web_embedded,android_vr",
                     *_get_cookie_args(),
                     "--format-sort", YOUTUBE_FORMAT_SORT,
                     "-f", YOUTUBE_FORMAT_SELECTOR,
