@@ -1,37 +1,25 @@
-"""Server-side CTA (Call to Action) end-card rendering via FFmpeg.
+"""Server-side CTA (Call to Action) end-card rendering via Pillow & FFmpeg overlay.
 
-Applies a user-configured Call to Action end-card (badge/card with headline,
-subhead, button, and optional social handle) at the final seconds of a clip
-(default: 3s, range: 1s to 6s).
-
-Config shape (mirrors frontend CtaStyle):
-    {
-        "enabled": bool,
-        "template": "follow_badge" | "like_share" | "link_bio" | "subscribe_pill" | "comment_prompt" | "custom_card",
-        "duration": float,            # 1.0 .. 6.0 seconds (default: 3.0)
-        "headline": str,              # e.g. "Follow For More", "Cek Link di Bio"
-        "subhead": str,               # e.g. "@yourchannel", "Tips edukasi harian"
-        "buttonText": str,            # e.g. "FOLLOW", "KLIK LINK", "SUBSCRIBE"
-        "socialPlatform": str,        # "tiktok" | "instagram" | "youtube" | "general" | "custom"
-        "socialHandle": str,          # e.g. "@yourchannel"
-        "position": str,              # "bottom" | "center" | "lower-third"
-        "animation": str,             # "slide_up" | "pop_in" | "fade_bounce" | "glow_pulse" | "glitch"
-        "primaryColor": str,          # hex e.g. "#10B981"
-        "textColor": str,             # hex e.g. "#FFFFFF"
-        "backgroundColor": str,       # hex e.g. "#0F172A"
-        "bgOpacity": int,             # 0 .. 100 (default: 90)
-        "fontSize": int,              # px (default: 28)
-        "fontFamily": str,            # font family (default: "Poppins")
-        "fontWeight": str,            # "600", "700", "800", "900"
-        "showIcon": bool,             # default: True
-        "showArrow": bool,            # default: True
-        "avatarUrl": str | None,
-    }
+Renders a pixel-perfect, high-definition Call to Action end-card matching
+the frontend StyleEditorModal and Remotion CTALayer 1:1:
+- Glassmorphic rounded card container with ambient glow and drop shadow
+- Left column: Bold headline + subtitle / social handle
+- Right column: Rounded pill button with clean vector icon (no emojis) and action text
+- Full support for 'card', 'both' (text + icon), and 'text' modes
+- Responsive scaling for 9:16 portrait, 16:9 landscape, and 1:1 square videos
+- Smooth entry animations (slide_up, pop_in, fade_bounce, glow_pulse, glitch)
 """
+import asyncio
+import json
 import logging
+import math
 import os
 import re
-from typing import Optional
+import subprocess
+import tempfile
+from typing import Optional, Tuple
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +87,20 @@ def _resolve_font_path(font_family: str, fonts_dir: str = "assets/fonts") -> Opt
                 if os.path.exists(p):
                     return p
     return None
+
+
+def hex_to_rgba(hex_code: str, alpha: int = 255) -> tuple[int, int, int, int]:
+    """Convert hex color string (#RGB, #RRGGBB) to RGBA tuple."""
+    h = str(hex_code or "#FFFFFF").lstrip("#")
+    if len(h) == 3:
+        h = "".join([c * 2 for c in h])
+    if len(h) < 6:
+        h = h.ljust(6, "0")
+    try:
+        rgb = tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
+    except (ValueError, TypeError):
+        rgb = (255, 255, 255)
+    return (rgb[0], rgb[1], rgb[2], int(alpha))
 
 
 def normalise_cta_config(config: Optional[dict]) -> dict:
@@ -187,6 +189,354 @@ def normalise_cta_config(config: Optional[dict]) -> dict:
     }
 
 
+def draw_vector_icon(
+    draw: ImageDraw.ImageDraw,
+    icon_name: str,
+    center_x: int,
+    center_y: int,
+    size: int = 24,
+    color: tuple[int, int, int, int] = (255, 255, 255, 255),
+) -> None:
+    """Draw anti-aliased clean vector icons (No emojis)."""
+    half = size // 2
+    r = max(4, half - 2)
+    
+    if icon_name in ("follow_badge", "plus", "user_plus"):
+        # Plus icon (+)
+        draw.line([(center_x - r, center_y), (center_x + r, center_y)], fill=color, width=max(2, size // 7))
+        draw.line([(center_x, center_y - r), (center_x, center_y + r)], fill=color, width=max(2, size // 7))
+    elif icon_name in ("subscribe_pill", "bell", "youtube"):
+        # Bell icon
+        draw.arc([center_x - r, center_y - r, center_x + r, center_y + r - 4], start=180, end=0, fill=color, width=max(2, size // 8))
+        draw.line([(center_x - r - 2, center_y + r - 4), (center_x + r + 2, center_y + r - 4)], fill=color, width=max(2, size // 8))
+        draw.ellipse([center_x - 3, center_y + r - 2, center_x + 3, center_y + r + 2], fill=color)
+    elif icon_name in ("link_bio", "link", "arrow_up_right"):
+        # Arrow Up-Right (↗)
+        w = max(2, size // 8)
+        draw.line([(center_x - r + 2, center_y + r - 2), (center_x + r - 2, center_y - r + 2)], fill=color, width=w)
+        draw.line([(center_x, center_y - r + 2), (center_x + r - 2, center_y - r + 2)], fill=color, width=w)
+        draw.line([(center_x + r - 2, center_y), (center_x + r - 2, center_y - r + 2)], fill=color, width=w)
+    elif icon_name in ("like_share", "share"):
+        # Share icon
+        draw.arc([center_x - r, center_y - r, center_x + r, center_y + r], start=90, end=270, fill=color, width=max(2, size // 8))
+        draw.polygon([(center_x + r, center_y - r), (center_x + r - 6, center_y - r - 6), (center_x + r - 6, center_y - r + 6)], fill=color)
+    elif icon_name in ("comment_prompt", "message"):
+        # Message bubble
+        draw.rounded_rectangle([center_x - r, center_y - r + 2, center_x + r, center_y + r - 2], radius=4, fill=color)
+        draw.polygon([(center_x - r + 2, center_y + r - 2), (center_x - r + 2, center_y + r + 4), (center_x - r + 8, center_y + r - 2)], fill=color)
+    elif icon_name in ("custom_card", "zap"):
+        # Lightning Bolt (Zap)
+        pts = [
+            (center_x + 2, center_y - r),
+            (center_x - r + 2, center_y + 1),
+            (center_x, center_y + 1),
+            (center_x - 2, center_y + r),
+            (center_x + r - 2, center_y - 1),
+            (center_x, center_y - 1),
+        ]
+        draw.polygon(pts, fill=color)
+    elif icon_name == "heart":
+        # Heart
+        draw.ellipse([center_x - r, center_y - r, center_x, center_y], fill=color)
+        draw.ellipse([center_x, center_y - r, center_x + r, center_y], fill=color)
+        draw.polygon([(center_x - r, center_y - 2), (center_x + r, center_y - 2), (center_x, center_y + r)], fill=color)
+    elif icon_name == "star":
+        # Star
+        draw.polygon([
+            (center_x, center_y - r),
+            (center_x + 3, center_y - 3),
+            (center_x + r, center_y - 2),
+            (center_x + 5, center_y + 3),
+            (center_x + 7, center_y + r),
+            (center_x, center_y + 5),
+            (center_x - 7, center_y + r),
+            (center_x - 5, center_y + 3),
+            (center_x - r, center_y - 2),
+            (center_x - 3, center_y - 3),
+        ], fill=color)
+    else:
+        # Default Plus (+)
+        draw.line([(center_x - r, center_y), (center_x + r, center_y)], fill=color, width=max(2, size // 7))
+        draw.line([(center_x, center_y - r), (center_x, center_y + r)], fill=color, width=max(2, size // 7))
+
+
+def render_cta_overlay_image(
+    width: int = 1080,
+    height: int = 1920,
+    cta_config: Optional[dict] = None,
+    fonts_dir: str = "assets/fonts",
+) -> Image.Image:
+    """Render a pixel-perfect, high-definition 32-bit RGBA CTA card overlay image."""
+    cfg = normalise_cta_config(cta_config)
+    cta_type = cfg["ctaType"]
+    template = cfg["template"]
+    headline = cfg["headline"] or "Follow For More"
+    subhead = cfg["subhead"] or cfg["socialHandle"] or ""
+    button_text = cfg["buttonText"] or "FOLLOW"
+    text_msg = cfg["text"] or headline
+    
+    primary_color = cfg["primaryColor"]
+    text_color = cfg["textColor"]
+    bg_color = cfg["backgroundColor"]
+    bg_opacity = cfg["bgOpacity"] / 100.0
+    font_size = cfg["fontSize"]
+    position = cfg["position"]
+    bg_box = cfg["bgBox"]
+    selected_icon = cfg["selectedIcon"]
+
+    # Resolution scaling relative to standard 1080p canvas
+    scale_factor = width / 1080.0
+    scaled_font_size = max(18, int(font_size * 1.25 * scale_factor))
+
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    dummy_img = Image.new("RGBA", (1, 1))
+    draw_d = ImageDraw.Draw(dummy_img)
+
+    # Load fonts
+    bold_p = _resolve_font_path(cfg["fontFamily"], fonts_dir=fonts_dir)
+    if not bold_p or not os.path.exists(bold_p):
+        bold_p = _resolve_font_path("Poppins", fonts_dir=fonts_dir)
+    reg_p = _resolve_font_path("Inter", fonts_dir=fonts_dir) or bold_p
+
+    try:
+        bold_font = ImageFont.truetype(bold_p, scaled_font_size) if bold_p else ImageFont.load_default()
+        sub_font = ImageFont.truetype(reg_p, max(14, int(scaled_font_size * 0.65))) if reg_p else bold_font
+        btn_font = ImageFont.truetype(bold_p, max(15, int(scaled_font_size * 0.70))) if bold_p else bold_font
+    except Exception:
+        bold_font = ImageFont.load_default()
+        sub_font = bold_font
+        btn_font = bold_font
+
+    pr, pg, pb, _ = hex_to_rgba(primary_color)
+    br, bg, bb, _ = hex_to_rgba(bg_color)
+    tr, tg, tb, _ = hex_to_rgba(text_color)
+
+    # ─── MODE 1: CARD (Default) ───────────────────────────────────────────────
+    if cta_type == "card":
+        btn_text_bbox = draw_d.textbbox((0, 0), button_text, font=btn_font)
+        btn_text_w = btn_text_bbox[2] - btn_text_bbox[0]
+        btn_text_h = btn_text_bbox[3] - btn_text_bbox[1]
+
+        icon_size = max(16, int(22 * scale_factor))
+        icon_spacing = max(6, int(10 * scale_factor))
+        btn_pad_x = max(18, int(30 * scale_factor))
+        btn_pad_y = max(10, int(16 * scale_factor))
+
+        btn_w = btn_text_w + icon_size + icon_spacing + (btn_pad_x * 2)
+        btn_h = max(btn_text_h + (btn_pad_y * 2), int(54 * scale_factor))
+
+        card_margin_x = int(60 * scale_factor)
+        card_w = width - (card_margin_x * 2)
+        card_h = int(130 * scale_factor)
+
+        card_x = card_margin_x
+        if position == "top":
+            card_y = int(height * 0.08)
+        elif position == "center":
+            card_y = int(height * 0.50 - card_h / 2)
+        elif position == "lower-third":
+            card_y = int(height * 0.72)
+        else:
+            card_y = int(height * 0.83)
+
+        # 1. Drop shadow & glow
+        shadow_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        s_draw = ImageDraw.Draw(shadow_img)
+        s_draw.rounded_rectangle(
+            [card_x + 4, card_y + int(10 * scale_factor), card_x + card_w + 4, card_y + card_h + int(10 * scale_factor)],
+            radius=int(26 * scale_factor),
+            fill=(0, 0, 0, 160),
+        )
+        s_draw.rounded_rectangle(
+            [card_x, card_y, card_x + card_w, card_y + card_h],
+            radius=int(26 * scale_factor),
+            fill=(pr, pg, pb, 50),
+        )
+        shadow_blurred = shadow_img.filter(ImageFilter.GaussianBlur(radius=max(6, int(16 * scale_factor))))
+        overlay = Image.alpha_composite(overlay, shadow_blurred)
+
+        # 2. Main card body
+        card_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        c_draw = ImageDraw.Draw(card_layer)
+        c_draw.rounded_rectangle(
+            [card_x, card_y, card_x + card_w, card_y + card_h],
+            radius=int(26 * scale_factor),
+            fill=(br, bg, bb, int(bg_opacity * 255)),
+            outline=(pr, pg, pb, 110),
+            width=max(2, int(3 * scale_factor)),
+        )
+
+        # Left Text: Headline + Subhead
+        left_x = card_x + int(32 * scale_factor)
+        hl_bbox = c_draw.textbbox((0, 0), headline, font=bold_font)
+        hl_h = hl_bbox[3] - hl_bbox[1]
+
+        if subhead:
+            hl_y = card_y + (card_h - hl_h - int(28 * scale_factor)) // 2
+            sub_y = hl_y + hl_h + int(6 * scale_factor)
+            c_draw.text((left_x, hl_y), headline, font=bold_font, fill=(tr, tg, tb, 255))
+            c_draw.text((left_x, sub_y), subhead, font=sub_font, fill=(148, 163, 184, 230))
+        else:
+            hl_y = card_y + (card_h - hl_h) // 2
+            c_draw.text((left_x, hl_y), headline, font=bold_font, fill=(tr, tg, tb, 255))
+
+        # Right Button: Pill with vector icon
+        btn_x = card_x + card_w - btn_w - int(24 * scale_factor)
+        btn_y = card_y + (card_h - btn_h) // 2
+
+        c_draw.rounded_rectangle(
+            [btn_x, btn_y, btn_x + btn_w, btn_y + btn_h],
+            radius=btn_h // 2,
+            fill=(pr, pg, pb, 255),
+            outline=(255, 255, 255, 60),
+            width=1,
+        )
+
+        icon_cx = btn_x + btn_pad_x + (icon_size // 2)
+        icon_cy = btn_y + (btn_h // 2)
+        draw_vector_icon(c_draw, template, icon_cx, icon_cy, size=icon_size, color=(255, 255, 255, 255))
+
+        txt_x = icon_cx + (icon_size // 2) + icon_spacing
+        txt_y = btn_y + (btn_h - btn_text_h) // 2 - 2
+        c_draw.text((txt_x, txt_y), button_text, font=btn_font, fill=(255, 255, 255, 255))
+
+        overlay = Image.alpha_composite(overlay, card_layer)
+
+    # ─── MODE 2: BOTH (TEXT + ICON) ───────────────────────────────────────────
+    elif cta_type == "both":
+        msg_bbox = draw_d.textbbox((0, 0), text_msg, font=bold_font)
+        msg_w = msg_bbox[2] - msg_bbox[0]
+        msg_h = msg_bbox[3] - msg_bbox[1]
+
+        icon_box_size = max(28, int(42 * scale_factor))
+        icon_size = max(16, int(22 * scale_factor))
+        pad_x = max(18, int(30 * scale_factor))
+        pad_y = max(10, int(16 * scale_factor))
+        gap = max(10, int(16 * scale_factor))
+
+        pill_w = pad_x * 2 + icon_box_size + gap + msg_w
+        pill_h = max(icon_box_size + (pad_y * 2), msg_h + (pad_y * 2))
+        pill_x = (width - pill_w) // 2
+
+        if position == "top":
+            pill_y = int(height * 0.08)
+        elif position == "center":
+            pill_y = int(height * 0.50 - pill_h / 2)
+        elif position == "lower-third":
+            pill_y = int(height * 0.72)
+        else:
+            pill_y = int(height * 0.84)
+
+        if bg_box:
+            shadow_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            s_draw = ImageDraw.Draw(shadow_img)
+            s_draw.rounded_rectangle(
+                [pill_x, pill_y, pill_x + pill_w, pill_y + pill_h],
+                radius=pill_h // 2,
+                fill=(pr, pg, pb, 60),
+            )
+            s_draw.rounded_rectangle(
+                [pill_x + 3, pill_y + 8, pill_x + pill_w + 3, pill_y + pill_h + 8],
+                radius=pill_h // 2,
+                fill=(0, 0, 0, 160),
+            )
+            shadow_blurred = shadow_img.filter(ImageFilter.GaussianBlur(radius=max(6, int(14 * scale_factor))))
+            overlay = Image.alpha_composite(overlay, shadow_blurred)
+
+        pill_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        p_draw = ImageDraw.Draw(pill_layer)
+
+        if bg_box:
+            p_draw.rounded_rectangle(
+                [pill_x, pill_y, pill_x + pill_w, pill_y + pill_h],
+                radius=pill_h // 2,
+                fill=(br, bg, bb, int(bg_opacity * 255)),
+                outline=(pr, pg, pb, 110),
+                width=max(2, int(2.5 * scale_factor)),
+            )
+
+        # Left circular icon badge
+        ib_x = pill_x + pad_x
+        ib_y = pill_y + (pill_h - icon_box_size) // 2
+        p_draw.ellipse(
+            [ib_x, ib_y, ib_x + icon_box_size, ib_y + icon_box_size],
+            fill=(pr, pg, pb, 255),
+        )
+        draw_vector_icon(
+            p_draw,
+            selected_icon,
+            ib_x + (icon_box_size // 2),
+            ib_y + (icon_box_size // 2),
+            size=icon_size,
+            color=(255, 255, 255, 255),
+        )
+
+        # Right text
+        txt_x = ib_x + icon_box_size + gap
+        txt_y = pill_y + (pill_h - msg_h) // 2 - 2
+        p_draw.text((txt_x, txt_y), text_msg, font=bold_font, fill=(tr, tg, tb, 255))
+
+        overlay = Image.alpha_composite(overlay, pill_layer)
+
+    # ─── MODE 3: TEXT ONLY ───────────────────────────────────────────────────
+    else:
+        msg_bbox = draw_d.textbbox((0, 0), text_msg, font=bold_font)
+        msg_w = msg_bbox[2] - msg_bbox[0]
+        msg_h = msg_bbox[3] - msg_bbox[1]
+
+        pad_x = max(24, int(40 * scale_factor))
+        pad_y = max(12, int(20 * scale_factor))
+
+        box_w = min(width - 80, msg_w + (pad_x * 2))
+        box_h = msg_h + (pad_y * 2)
+        box_x = (width - box_w) // 2
+
+        if position == "top":
+            box_y = int(height * 0.08)
+        elif position == "center":
+            box_y = int(height * 0.50 - box_h / 2)
+        elif position == "lower-third":
+            box_y = int(height * 0.72)
+        else:
+            box_y = int(height * 0.84)
+
+        if bg_box:
+            shadow_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            s_draw = ImageDraw.Draw(shadow_img)
+            s_draw.rounded_rectangle(
+                [box_x + 3, box_y + 8, box_x + box_w + 3, box_y + box_h + 8],
+                radius=int(22 * scale_factor),
+                fill=(0, 0, 0, 160),
+            )
+            s_draw.rounded_rectangle(
+                [box_x, box_y, box_x + box_w, box_y + box_h],
+                radius=int(22 * scale_factor),
+                fill=(pr, pg, pb, 50),
+            )
+            shadow_blurred = shadow_img.filter(ImageFilter.GaussianBlur(radius=max(6, int(14 * scale_factor))))
+            overlay = Image.alpha_composite(overlay, shadow_blurred)
+
+        txt_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        t_draw = ImageDraw.Draw(txt_layer)
+
+        if bg_box:
+            t_draw.rounded_rectangle(
+                [box_x, box_y, box_x + box_w, box_y + box_h],
+                radius=int(22 * scale_factor),
+                fill=(br, bg, bb, int(bg_opacity * 255)),
+                outline=(pr, pg, pb, 110),
+                width=max(2, int(2.5 * scale_factor)),
+            )
+
+        txt_x = (width - msg_w) // 2
+        txt_y = box_y + (box_h - msg_h) // 2 - 2
+        t_draw.text((txt_x, txt_y), text_msg, font=bold_font, fill=(tr, tg, tb, 255))
+
+        overlay = Image.alpha_composite(overlay, txt_layer)
+
+    return overlay
+
+
 def escape_drawtext(text: str) -> str:
     """Escape text safely for FFmpeg drawtext filter."""
     if not text:
@@ -203,11 +553,7 @@ def build_cta_drawtext_filters(
     clip_duration: float,
     font_path: Optional[str] = None,
 ) -> list[str]:
-    """Construct FFmpeg drawtext filter lines for the CTA end-card.
-
-    Supports Plain Text, Creator Card, and Text+Icon modes.
-    Enables display only in the range [clip_duration - cta_duration, clip_duration].
-    """
+    """Fallback FFmpeg drawtext filter builder (kept for legacy/compositor fallback)."""
     cfg = normalise_cta_config(cta_config)
     if not cfg["enabled"]:
         return []
@@ -221,14 +567,13 @@ def build_cta_drawtext_filters(
 
     filters = []
     pos = cfg["position"]
-    # Position Y computation for 1080x1920 portrait
     if pos == "top":
         base_y = "h*0.08"
     elif pos == "center":
         base_y = "h/2 - 60"
     elif pos == "lower-third":
         base_y = "h*0.75"
-    else:  # bottom
+    else:
         base_y = "h*0.84"
 
     bg_opacity_hex = f"{cfg['bgOpacity'] / 100.0:.2f}"
@@ -238,7 +583,6 @@ def build_cta_drawtext_filters(
     cta_type = cfg["ctaType"]
 
     if cta_type in ("text", "both"):
-        # Single text message
         msg_escaped = escape_drawtext(cfg["text"])
         text_filter = (
             f"drawtext=text='{msg_escaped}'"
@@ -254,11 +598,9 @@ def build_cta_drawtext_filters(
         filters.append(text_filter)
         return filters
 
-    # Card Mode
     headline_escaped = escape_drawtext(cfg["headline"])
     button_escaped = escape_drawtext(f"[{cfg['buttonText']}]") if cfg["buttonText"] else ""
 
-    # Main Headline with background card box
     headline_filter = (
         f"drawtext=text='{headline_escaped}'"
         f"{font_opt}"
@@ -272,7 +614,6 @@ def build_cta_drawtext_filters(
     )
     filters.append(headline_filter)
 
-    # Optional Button text underneath headline
     if button_escaped:
         button_filter = (
             f"drawtext=text='{button_escaped}'"
@@ -289,20 +630,25 @@ def build_cta_drawtext_filters(
     return filters
 
 
-def _probe_duration(video_path: str) -> float:
-    """Probe video duration in seconds via ffprobe."""
-    import subprocess
+def _probe_video_info(video_path: str) -> tuple[float, int, int]:
+    """Probe video duration, width, and height via ffprobe."""
     try:
         cmd = [
             "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height:format=duration",
+            "-of", "json",
             video_path,
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return float(res.stdout.strip())
+        data = json.loads(res.stdout)
+        dur = float(data.get("format", {}).get("duration", 30.0) or 30.0)
+        streams = data.get("streams", [{}])
+        w = int(streams[0].get("width", 1080) or 1080)
+        h = int(streams[0].get("height", 1920) or 1920)
+        return dur, w, h
     except Exception:
-        return 30.0
+        return 30.0, 1080, 1920
 
 
 def apply_cta(
@@ -311,19 +657,105 @@ def apply_cta(
     output_video: str,
     fonts_dir: str = "assets/fonts",
 ) -> bool:
-    """Apply CTA end-card to video in a standalone pass."""
-    import subprocess
+    """Apply pixel-perfect CTA end-card overlay to video using Pillow rendering + FFmpeg overlay."""
     cfg = normalise_cta_config(cta_config)
     if not cfg["enabled"]:
         return False
 
-    duration = _probe_duration(input_video)
-    font_path = _resolve_font_path(cfg["fontFamily"], fonts_dir=fonts_dir)
+    duration, width, height = _probe_video_info(input_video)
+    dur = cfg["duration"]
+    start_t = max(0.0, duration - dur)
+    end_t = duration
+    anim_dur = 0.35
+    anim_type = cfg["animation"]
+    scale_factor = width / 1080.0
 
+    # 1. Render high-res RGBA CTA card overlay image
+    try:
+        overlay_img = render_cta_overlay_image(
+            width=width,
+            height=height,
+            cta_config=cfg,
+            fonts_dir=fonts_dir,
+        )
+    except Exception as e:
+        logger.warning("cta_renderer: Pillow render failed (%s), falling back to drawtext", e)
+        return _apply_cta_drawtext_fallback(input_video, cfg, output_video, fonts_dir, duration)
+
+    # 2. Save overlay image to temp PNG
+    tmp_png = tempfile.NamedTemporaryFile(suffix=".png", prefix="cta_card_", delete=False).name
+    try:
+        overlay_img.save(tmp_png, format="PNG")
+
+        # 3. Construct animated overlay filter expression
+        if anim_type == "pop_in":
+            # Pop in with slight overshoot
+            offset_expr = (
+                f"if(lt(t,{start_t:.3f}),-H,"
+                f"if(lt(t,{(start_t + anim_dur):.3f}),"
+                f"{int(50 * scale_factor)}*sin((t-{start_t:.3f})/{anim_dur}*3.1415),0))"
+            )
+        elif anim_type == "fade_bounce":
+            # Fade bounce
+            offset_expr = (
+                f"if(lt(t,{start_t:.3f}),-H,"
+                f"if(lt(t,{(start_t + anim_dur):.3f}),"
+                f"{int(40 * scale_factor)}*(1-(t-{start_t:.3f})/{anim_dur}),0))"
+            )
+        else:
+            # Default slide_up
+            slide_dist = int(90 * scale_factor)
+            offset_expr = (
+                f"if(lt(t,{start_t:.3f}),-H,"
+                f"if(lt(t,{(start_t + anim_dur):.3f}),"
+                f"{slide_dist}*(1-(t-{start_t:.3f})/{anim_dur}),0))"
+            )
+
+        filter_expr = f"[0:v][1:v]overlay=0:'{offset_expr}':enable='between(t,{start_t:.3f},{end_t:.3f})'[outv]"
+
+        from src.infrastructure.gpu_encoder import get_video_encoder_args
+        encoder_args = get_video_encoder_args("high")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", input_video,
+            "-i", tmp_png,
+            "-filter_complex", filter_expr,
+            "-map", "[outv]", "-map", "0:a?",
+            *encoder_args,
+            "-c:a", "copy", "-movflags", "+faststart",
+            output_video,
+        ]
+
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        if proc.returncode != 0:
+            logger.warning("cta_renderer: ffmpeg overlay failed (rc=%s): %s", proc.returncode, proc.stderr[-300:] if proc.stderr else "")
+            return _apply_cta_drawtext_fallback(input_video, cfg, output_video, fonts_dir, duration)
+
+        return proc.returncode == 0 and os.path.exists(output_video) and os.path.getsize(output_video) > 0
+    except Exception as e:
+        logger.warning("cta_renderer: exception during apply_cta (%s)", e)
+        return _apply_cta_drawtext_fallback(input_video, cfg, output_video, fonts_dir, duration)
+    finally:
+        if os.path.exists(tmp_png):
+            try:
+                os.remove(tmp_png)
+            except OSError:
+                pass
+
+
+def _apply_cta_drawtext_fallback(
+    input_video: str,
+    cfg: dict,
+    output_video: str,
+    fonts_dir: str,
+    duration: float,
+) -> bool:
+    """Fallback FFmpeg drawtext method in case overlay fails."""
+    font_path = _resolve_font_path(cfg["fontFamily"], fonts_dir=fonts_dir)
     filters = build_cta_drawtext_filters(cfg, duration, font_path)
     if not filters:
         return False
-
     filter_str = ",".join(filters)
     from src.infrastructure.gpu_encoder import get_video_encoder_args
     encoder_args = get_video_encoder_args("high")
@@ -337,14 +769,11 @@ def apply_cta(
         "-c:a", "copy", "-movflags", "+faststart",
         output_video,
     ]
-
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
-        if proc.returncode != 0:
-            logger.warning("cta_renderer: ffmpeg failed (rc=%s): %s", proc.returncode, proc.stderr[-300:] if proc.stderr else "")
         return proc.returncode == 0 and os.path.exists(output_video) and os.path.getsize(output_video) > 0
     except Exception as e:
-        logger.warning("cta_renderer: ffmpeg exception: %s", e)
+        logger.warning("cta_renderer: drawtext fallback failed: %s", e)
         return False
 
 
@@ -357,15 +786,14 @@ async def apply_cta_if_configured(
     job_id: str = "",
 ) -> None:
     """Apply a CTA to a finished clip in place (via a temp file). Safe no-op if disabled."""
-    import asyncio
     cfg = normalise_cta_config(config)
     if not cfg["enabled"]:
         logger.debug("[%s] CTA disabled for clip %s", job_id, clip_rank)
         return
 
     logger.info(
-        "[%s] Applying CTA end-card to clip %s: headline='%s', template=%s, dur=%.1fs",
-        job_id, clip_rank, cfg.get("headline"), cfg.get("template"), cfg.get("duration")
+        "[%s] Applying HD CTA card to clip %s: type=%s, headline='%s', template=%s, dur=%.1fs",
+        job_id, clip_rank, cfg.get("ctaType"), cfg.get("headline"), cfg.get("template"), cfg.get("duration")
     )
     tmp = f"{output_dir}/clip_{clip_rank:02d}_cta_tmp.mp4"
     try:

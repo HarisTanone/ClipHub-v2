@@ -1,4 +1,5 @@
 """Unit & Integration tests for CTA (Call to Action) End-Card Renderer & Compositor."""
+import os
 import pytest
 from src.infrastructure.cta_renderer import (
     normalise_cta_config,
@@ -166,3 +167,76 @@ def test_font_resolver():
     font_p = _resolve_font_path("Poppins", fonts_dir="assets/fonts")
     assert font_p is not None
     assert "Poppins" in font_p
+
+
+def test_render_cta_overlay_image_modes():
+    from src.infrastructure.cta_renderer import render_cta_overlay_image
+    
+    # 1. Card mode
+    img_card = render_cta_overlay_image(
+        width=1080, height=1920,
+        cta_config={
+            "enabled": True, "ctaType": "card",
+            "headline": "Follow For More", "subhead": "@channel",
+            "buttonText": "FOLLOW", "primaryColor": "#10B981"
+        },
+        fonts_dir="assets/fonts",
+    )
+    assert img_card.size == (1080, 1920)
+    assert img_card.mode == "RGBA"
+
+    # 2. Both mode (text + icon)
+    img_both = render_cta_overlay_image(
+        width=1080, height=1920,
+        cta_config={
+            "enabled": True, "ctaType": "both",
+            "text": "Subscribe Now", "selectedIcon": "bell",
+            "primaryColor": "#EF4444"
+        },
+        fonts_dir="assets/fonts",
+    )
+    assert img_both.size == (1080, 1920)
+
+    # 3. Text mode
+    img_text = render_cta_overlay_image(
+        width=1080, height=1920,
+        cta_config={
+            "enabled": True, "ctaType": "text",
+            "text": "Save video ini!", "primaryColor": "#3B82F6"
+        },
+        fonts_dir="assets/fonts",
+    )
+    assert img_text.size == (1080, 1920)
+
+
+def test_apply_cta_overlay_video(tmp_path):
+    import subprocess
+    from src.infrastructure.cta_renderer import apply_cta
+    
+    in_video = str(tmp_path / "in.mp4")
+    out_video = str(tmp_path / "out.mp4")
+    
+    # Create 3s dummy video
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=720x1280:d=3:r=30",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "3",
+        "-c:v", "libx264", "-c:a", "aac", in_video
+    ], capture_output=True, check=True)
+    
+    ok = apply_cta(
+        in_video,
+        cta_config={
+            "enabled": True,
+            "ctaType": "card",
+            "template": "follow_badge",
+            "headline": "Follow Us",
+            "buttonText": "FOLLOW",
+            "duration": 2.0,
+            "animation": "slide_up",
+        },
+        output_video=out_video,
+        fonts_dir="assets/fonts",
+    )
+    assert ok is True
+    assert os.path.exists(out_video)
+    assert os.path.getsize(out_video) > 0
