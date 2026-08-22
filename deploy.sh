@@ -150,6 +150,7 @@ MISSING=""
 command -v ffmpeg &>/dev/null || MISSING="$MISSING ffmpeg"
 command -v node &>/dev/null || MISSING="$MISSING nodejs"
 command -v python3 &>/dev/null || MISSING="$MISSING python3"
+command -v aria2c &>/dev/null || MISSING="$MISSING aria2"
 
 if [ -z "$MISSING" ]; then
     echo "  [OK] All system dependencies present"
@@ -165,6 +166,11 @@ else
     # FFmpeg
     if ! command -v ffmpeg &>/dev/null; then
         sudo apt-get install -y ffmpeg 2>/dev/null
+    fi
+
+    # aria2 (high-speed parallel download engine)
+    if ! command -v aria2c &>/dev/null; then
+        sudo apt-get install -y aria2 2>/dev/null || true
     fi
 
     # Node.js 20 (via nodesource)
@@ -191,6 +197,12 @@ else
     echo "  [OK] System packages installed"
 fi
 
+# Always ensure aria2 is installed
+if ! command -v aria2c &>/dev/null; then
+    echo "  Installing aria2..."
+    sudo apt-get install -y aria2 2>/dev/null || true
+fi
+
 # Always ensure FFmpeg dev libs + build tools are present (needed by PyAV/faster-whisper)
 # This runs even if ffmpeg binary already exists, because dev headers may be missing
 if ! pkg-config --exists libavformat 2>/dev/null; then
@@ -207,6 +219,7 @@ fi
 echo "  Python: $($PYTHON_BIN --version 2>/dev/null)"
 echo "  Node:   $(node --version 2>/dev/null)"
 echo "  FFmpeg: $(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f3)"
+echo "  aria2c: $(aria2c --version 2>/dev/null | head -1 | cut -d' ' -f3 || echo 'not found')"
 
 # ─── Step 2.5: 9router CLI ──────────────────────────────────────────────────
 echo ""
@@ -310,12 +323,18 @@ fi
 # Create directories
 mkdir -p data data/asset_cache tmp/output tmp/downloads tmp/video_gen models
 
-# Ensure yt-dlp is available (required for Video Generator + B-roll YouTube download)
-if ! command -v yt-dlp &>/dev/null && ! ./venv/bin/python -c "import yt_dlp" 2>/dev/null; then
-    echo "  Installing yt-dlp..."
-    ./venv/bin/pip install yt-dlp -q 2>/dev/null || sudo pip3 install yt-dlp -q 2>/dev/null || true
-fi
+# Ensure yt-dlp is up-to-date (critical for YouTube cipher extraction & 1080p stream resolution)
+echo "  Ensuring latest yt-dlp..."
+./venv/bin/pip install --upgrade yt-dlp -q 2>/dev/null || true
 echo "  yt-dlp: $(./venv/bin/python -c 'import yt_dlp; print(yt_dlp.version.__version__)' 2>/dev/null || yt-dlp --version 2>/dev/null || echo 'not found')"
+
+# Set permissions on cookies.txt if present
+if [ -f "$PROJECT_DIR/cookies.txt" ]; then
+    chmod 644 "$PROJECT_DIR/cookies.txt" 2>/dev/null || true
+fi
+if [ -f "$BACKEND_DIR/cookies.txt" ]; then
+    chmod 644 "$BACKEND_DIR/cookies.txt" 2>/dev/null || true
+fi
 
 echo "  [OK] Backend ready"
 
