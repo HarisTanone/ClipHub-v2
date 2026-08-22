@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2, Loader2, Quote, Megaphone, Bell, Share2, ThumbsUp, Link2, MessageSquare, ArrowUpRight, UserPlus, Plus, Clock, Info, Heart, Star } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2, Loader2, Quote, Megaphone, Bell, Share2, ThumbsUp, Link2, MessageSquare, ArrowUpRight, UserPlus, Plus, Clock, Info, Heart, Star, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -2198,6 +2198,28 @@ function CtaEditor({
   };
 
   const SelectedIconComp = CTA_ICON_OPTIONS.find((i) => i.id === style.selectedIcon)?.icon || UserPlus;
+  const [replayKey, setReplayKey] = useState(0);
+
+  useEffect(() => {
+    setReplayKey((k) => k + 1);
+  }, [style.animation, style.position, style.template, style.ctaType, style.primaryColor]);
+
+  const getCtaAnimStyle = (anim: string): React.CSSProperties => {
+    switch (anim) {
+      case "slide_up":
+        return { animation: "ctaSlideUpPreview 0.75s cubic-bezier(0.16, 1, 0.3, 1) both" };
+      case "pop_in":
+        return { animation: "ctaPopInPreview 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) both" };
+      case "fade_bounce":
+        return { animation: "ctaFadeBouncePreview 0.7s cubic-bezier(0.22, 1, 0.36, 1) both" };
+      case "glow_pulse":
+        return { animation: "ctaGlowPulsePreview 2.2s ease-in-out infinite" };
+      case "glitch":
+        return { animation: "ctaGlitchCyberPreview 2.8s ease-in-out infinite" };
+      default:
+        return { animation: "ctaSlideUpPreview 0.75s cubic-bezier(0.16, 1, 0.3, 1) both" };
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 h-full min-h-0 overflow-hidden">
@@ -2634,6 +2656,44 @@ function CtaEditor({
           className="relative w-full max-w-[240px] max-h-[64vh] bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 shrink-0 shadow-2xl flex flex-col justify-between"
           style={{ aspectRatio: outerAspect }}
         >
+          {/* Inject Dynamic Keyframes for CTA Preview Animations */}
+          <style>{`
+            @keyframes ctaSlideUpPreview {
+              0% { transform: translateY(45px) scale(0.9); opacity: 0; }
+              65% { transform: translateY(-4px) scale(1.02); opacity: 1; }
+              100% { transform: translateY(0) scale(1); opacity: 1; }
+            }
+            @keyframes ctaPopInPreview {
+              0% { transform: scale(0.15); opacity: 0; }
+              55% { transform: scale(1.16); opacity: 1; }
+              75% { transform: scale(0.94); opacity: 1; }
+              100% { transform: scale(1); opacity: 1; }
+            }
+            @keyframes ctaFadeBouncePreview {
+              0% { transform: scale(0.85) translateY(12px); opacity: 0; }
+              65% { transform: scale(1.04) translateY(-2px); opacity: 1; }
+              100% { transform: scale(1) translateY(0); opacity: 1; }
+            }
+            @keyframes ctaGlowPulsePreview {
+              0%, 100% {
+                transform: scale(0.97);
+                box-shadow: 0 8px 25px rgba(0,0,0,0.6), 0 0 8px ${style.primaryColor}55;
+              }
+              50% {
+                transform: scale(1.03);
+                box-shadow: 0 12px 32px rgba(0,0,0,0.7), 0 0 22px ${style.primaryColor}cc, 0 0 35px ${style.primaryColor}66;
+              }
+            }
+            @keyframes ctaGlitchCyberPreview {
+              0%, 100% { transform: translate(0, 0); filter: none; clip-path: none; }
+              12% { transform: translate(-3px, 1px); clip-path: inset(15% 0 45% 0); filter: drop-shadow(-2px 0 #00ffff) drop-shadow(2px 0 #ff0055); }
+              24% { transform: translate(3px, -2px); clip-path: inset(50% 0 10% 0); filter: drop-shadow(2px 0 #00ffff) drop-shadow(-2px 0 #ff0055); }
+              36% { transform: translate(-2px, -1px); clip-path: inset(25% 0 35% 0); }
+              48% { transform: translate(1px, 2px); clip-path: none; filter: drop-shadow(-2px 0 #00ffff); }
+              75% { transform: translate(0, 0); clip-path: none; filter: none; }
+            }
+          `}</style>
+
           {/* Background Canvas / Thumbnail */}
           {canvas ? (
             <div className="absolute inset-0" style={{ background: gradientCss(canvas.background) }}>
@@ -2675,19 +2735,31 @@ function CtaEditor({
           {/* Vignette overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none" />
 
-          {/* Top Timing Indicator */}
-          <div className="relative z-10 m-2 flex items-center justify-between">
+          {/* Top Timing & Replay Indicator */}
+          <div className="relative z-10 m-2 flex items-center justify-between gap-1">
             <span className="rounded bg-black/60 backdrop-blur-md px-2 py-0.5 text-[8px] font-medium text-zinc-300 border border-white/10 flex items-center gap-1">
               <Clock className="h-2.5 w-2.5 text-emerald-400" />
               {style.enabled ? `Muncul di ${style.duration.toFixed(1)}s terakhir` : "CTA Nonaktif"}
             </span>
+            {style.enabled && (
+              <button
+                type="button"
+                onClick={() => setReplayKey((k) => k + 1)}
+                title="Putar Ulang Animasi"
+                className="rounded bg-black/60 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/30 backdrop-blur-md px-1.5 py-0.5 text-[8px] font-medium text-zinc-400 border border-white/10 flex items-center gap-1 transition-all"
+              >
+                <RotateCcw className="h-2.5 w-2.5 text-emerald-400" />
+                <span>Replay</span>
+              </button>
+            )}
           </div>
 
           {/* Animated CTA Preview based on Mode */}
           {style.enabled && (
             <div
+              key={replayKey}
               className={cn(
-                "absolute left-3 right-3 z-20 transition-all duration-300",
+                "absolute left-3 right-3 z-20",
                 style.position === "top"
                   ? "top-10"
                   : style.position === "center"
@@ -2696,6 +2768,7 @@ function CtaEditor({
                       ? "bottom-14"
                       : "bottom-4"
               )}
+              style={getCtaAnimStyle(style.animation)}
             >
               {/* Card Mode Preview */}
               {style.ctaType === "card" && (
