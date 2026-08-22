@@ -314,6 +314,7 @@ async def create_job(
         subtitle_style_config=request.subtitle_style_config,
         text_emphasis_style_config=request.text_emphasis_style_config,
         watermark_config=request.watermark_config,
+        cta_config=request.cta_config,
         background_mode=request.background_mode,
         background_template_id=request.background_template_id,
         background_image_data_url=request.background_image_data_url,
@@ -449,6 +450,7 @@ async def create_job_from_upload(
             subtitle_style_config=options.subtitle_style_config,
             text_emphasis_style_config=options.text_emphasis_style_config,
             watermark_config=options.watermark_config,
+            cta_config=options.cta_config,
             background_mode=options.background_mode,
             background_template_id=options.background_template_id,
             background_image_data_url=options.background_image_data_url,
@@ -1542,6 +1544,7 @@ class RestyleRequest(BaseModel):
     subtitle_style_config: Opt[dict] = None
     text_emphasis_style_config: Opt[dict] = None
     watermark_config: Opt[dict] = None  # optional per-restyle watermark override
+    cta_config: Opt[dict] = None  # optional per-restyle CTA override
     subtitle_enabled: bool = True
     broll_enabled: bool = True
 
@@ -1762,6 +1765,10 @@ async def restyle_clip(
                                   or {})
                         ),
                     }
+                    cta_cfg = (
+                        body.cta_config if body and body.cta_config is not None
+                        else (clip_data.get("cta_config") or root_style_data.get("cta_config"))
+                    )
                     result = await remotion_adapter.render_clip(
                         scene_graph={
                             "clip_rank": clip_rank,
@@ -1777,6 +1784,7 @@ async def restyle_clip(
                         hook_text=remotion_hook_text,
                         hook_style=hook_style,
                         text_emphasis_events=clip_data.get("text_emphasis_events", []),
+                        cta=cta_cfg,
                     )
                     remotion_rendered = bool(result.success and os.path.exists(staged_final_path))
                     if remotion_rendered:
@@ -1880,6 +1888,13 @@ async def restyle_clip(
             or {}
         )
 
+        # CTA config
+        cta_config = (
+            body.cta_config if body and body.cta_config is not None
+            else root_style_data.get("cta_config")
+            or {}
+        )
+
         # Enrich subtitle_config with Auto-Grid layout events & autogrid status
         clip_reframe = (getattr(job, "clips_data", {}) or {}).get("reframe_data", {}).get(clip_rank) or {}
         clip_layout_events = clip_reframe.get("layout_events") or []
@@ -1910,6 +1925,7 @@ async def restyle_clip(
                 words=[],
                 subtitle_style_config=enriched_sub_config,
                 watermark_config=watermark_config,
+                cta_config=cta_config,
             )
             if success and os.path.exists(tmp_1pass):
                 os.replace(tmp_1pass, staged_final_path)
@@ -1992,6 +2008,20 @@ async def restyle_clip(
                 except Exception as e:
                     logger.warning(f"[restyle] {subtitle_render_engine} subtitle failed clip {clip_rank}: {e}")
 
+            # CTA (FFmpeg drawtext)
+            try:
+                from src.infrastructure.cta_renderer import apply_cta_if_configured
+                await apply_cta_if_configured(
+                    cta_config,
+                    output_dir,
+                    clip_rank,
+                    staged_final_path,
+                    fonts_dir=getattr(service, "_fonts_dir", "assets/fonts"),
+                    job_id=job_id,
+                )
+            except Exception as e:
+                logger.warning(f"[restyle] CTA failed clip {clip_rank}: {e}")
+
             # Watermark (FFmpeg overlay/drawtext) — final pass on top of everything.
             try:
                 from src.infrastructure.watermark_renderer import apply_watermark_if_configured
@@ -2044,6 +2074,9 @@ async def restyle_clip(
         if body and body.watermark_config is not None:
             # Persist at job level so the whole pipeline renders the same watermark.
             root_style_data["watermark_config"] = body.watermark_config
+        if body and body.cta_config is not None:
+            # Persist at job level so the whole pipeline renders the same CTA.
+            root_style_data["cta_config"] = body.cta_config
         if body and body.hook_text:
             clip_data["hook"] = body.hook_text
 

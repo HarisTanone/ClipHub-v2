@@ -2238,11 +2238,15 @@ class V2PipelineService:
                         if peak.time > hook_dur
                     ]
 
-                try:
-                    from src.infrastructure.clip_quality_helpers import suggest_cta
-                    clip_cta = suggest_cta(clip_hook or "", getattr(clip, "reason", "") or "", clip.rank)
-                except Exception:
-                    clip_cta = None
+                job_cta = (job.clips_data or {}).get("cta_config") or getattr(job, "cta_config", None)
+                if job_cta:
+                    clip_cta = job_cta
+                else:
+                    try:
+                        from src.infrastructure.clip_quality_helpers import suggest_cta
+                        clip_cta = suggest_cta(clip_hook or "", getattr(clip, "reason", "") or "", clip.rank)
+                    except Exception:
+                        clip_cta = None
 
                 try:
                     result = await self._remotion_adapter.render_clip(
@@ -2348,6 +2352,15 @@ class V2PipelineService:
             job_id=job_id,
         )
 
+    async def _apply_cta(self, job, clip_rank: int, output_dir: str, final_path: str, job_id: str) -> None:
+        """Apply user-configured CTA end-card (FFmpeg) to a finished clip, in place."""
+        from src.infrastructure.cta_renderer import apply_cta_for_job
+        await apply_cta_for_job(
+            job, clip_rank, output_dir, final_path,
+            fonts_dir=getattr(self, "_fonts_dir", "assets/fonts"),
+            job_id=job_id,
+        )
+
     async def _render_via_direct_engines(
         self,
         job,
@@ -2415,6 +2428,7 @@ class V2PipelineService:
                 from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
                 compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
                 watermark_cfg = (job.clips_data or {}).get("watermark_config") or {}
+                cta_cfg = (job.clips_data or {}).get("cta_config") or getattr(job, "cta_config", None)
 
                 success = await compositor.render_single_pass(
                     input_video=base_path,
@@ -2424,6 +2438,7 @@ class V2PipelineService:
                     words=words,
                     subtitle_style_config=clip_sub_config,
                     watermark_config=watermark_cfg,
+                    cta_config=cta_cfg,
                 )
                 if success and os.path.exists(final_path):
                     logger.info(f"[{job_id}] 1-pass FFmpeg composite rendered clip {clip.rank}")
@@ -2587,6 +2602,8 @@ class V2PipelineService:
                     sub_min = hook_dur if clip.hook else 0.0
                     words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
                     tmp_composite = f"{output_dir}/clip_{clip.rank:02d}_direct_composite.mp4"
+                    watermark_cfg = (job.clips_data or {}).get("watermark_config") or {}
+                    cta_cfg = (job.clips_data or {}).get("cta_config") or getattr(job, "cta_config", None)
 
                     success = await compositor.render_single_pass(
                         input_video=final,
@@ -2595,6 +2612,8 @@ class V2PipelineService:
                         hook_style_config=hook_style_config,
                         words=words,
                         subtitle_style_config=subtitle_style_config,
+                        watermark_config=watermark_cfg,
+                        cta_config=cta_cfg,
                     )
                     if success and os.path.exists(tmp_composite):
                         os.replace(tmp_composite, final)
@@ -2676,6 +2695,8 @@ class V2PipelineService:
                         except OSError:
                             pass
 
+                # CTA End-Card (FFmpeg overlay/drawtext)
+                await self._apply_cta(job, clip.rank, output_dir, final, job_id)
                 # Watermark (FFmpeg overlay/drawtext) — final pass
                 await self._apply_watermark(job, clip.rank, output_dir, final, job_id)
                 final_dir_clip = f"{output_dir}/final/clip_{clip.rank:02d}.mp4"

@@ -24,6 +24,10 @@ from src.infrastructure.watermark_renderer import (
     _overlay_x_expr,
     _overlay_y_expr,
 )
+from src.infrastructure.cta_renderer import (
+    normalise_cta_config,
+    build_cta_drawtext_filters,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +445,31 @@ class UnifiedFFmpegCompositor:
 
         return None, [], []
 
+    # ─── CTA Filter Builder ───────────────────────────────────────────────────
+
+    def _get_video_duration(self, video_path: str) -> float:
+        """Probe video duration via ffprobe safely."""
+        try:
+            cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
+            out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=10).decode().strip()
+            return float(out)
+        except Exception:
+            return 30.0
+
+    def build_cta_filter_chain(
+        self,
+        cta_config: dict | None,
+        clip_duration: float,
+    ) -> list[str]:
+        """Construct CTA end-card filter chain."""
+        if not cta_config:
+            return []
+        cfg = normalise_cta_config(cta_config)
+        if not cfg.get("enabled"):
+            return []
+        font_path = self._resolve_font(cfg["fontFamily"], cfg["fontWeight"])
+        return build_cta_drawtext_filters(cfg, clip_duration, font_path)
+
     # ─── 1-Pass Render Execution ───────────────────────────────────────────────
 
     async def render_single_pass(
@@ -453,6 +482,7 @@ class UnifiedFFmpegCompositor:
         words: list[dict] | None = None,
         subtitle_style_config: dict | None = None,
         watermark_config: dict | None = None,
+        cta_config: dict | None = None,
         audio_normalize: bool = False,
     ) -> bool:
         """Execute all video and audio filters in a single FFmpeg encode pass."""
@@ -486,8 +516,17 @@ class UnifiedFFmpegCompositor:
             )
             cleanup_files.extend(wm_files)
 
-            # Assemble video filter chain (hook + watermark in FFmpeg, subtitles via high-fidelity PIL compositor)
+            # Video duration for CTA calculation
+            clip_dur = self._get_video_duration(input_video)
+            cta_filters = self.build_cta_filter_chain(
+                cta_config=cta_config,
+                clip_duration=clip_dur,
+            )
+
+            # Assemble video filter chain (hook + watermark + CTA in FFmpeg)
             v_chain_elements = [*hook_filters]
+            if cta_filters:
+                v_chain_elements.extend(cta_filters)
 
             cmd = ["ffmpeg", "-y", "-i", input_video]
             if wm_inputs:

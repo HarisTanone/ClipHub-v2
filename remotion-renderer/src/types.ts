@@ -208,12 +208,8 @@ export interface BrollStyleConfig {
   backdropBlur?: number; // px
 }
 
-export interface CTAProps {
-  text?: string;
-  type?: string;
-  duration_sec?: number;
-  position?: string;
-}
+import type { CTAProps } from "./layers/CTALayer";
+export type { CTAProps };
 
 /** Props for the main ClipComposition */
 export interface ClipCompositionProps {

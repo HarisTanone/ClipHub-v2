@@ -223,6 +223,7 @@ class JobService:
         subtitle_style_config: Optional[dict] = None,
         text_emphasis_style_config: Optional[dict] = None,
         watermark_config: Optional[dict] = None,
+        cta_config: Optional[dict] = None,
         # Canvas background (16:9 / 1:1 only)
         background_mode: Optional[str] = None,
         background_template_id: Optional[str] = None,
@@ -285,6 +286,8 @@ class JobService:
             initial_clips_data["subtitle_style_config"] = subtitle_style_config
         if watermark_config:
             initial_clips_data["watermark_config"] = watermark_config
+        if cta_config:
+            initial_clips_data["cta_config"] = cta_config
         # Persist explicit false as well. This makes retries deterministic and
         # preserves the opt-in contract even when defaults change later.
         initial_clips_data["text_emphasis_enabled"] = bool(text_emphasis_enabled)

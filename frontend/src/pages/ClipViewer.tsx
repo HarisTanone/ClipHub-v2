@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
 import { ScheduleModal } from "@/components/ScheduleModal";
-import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle } from "@/components/StyleEditorModal";
+import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, DEFAULT_CTA_STYLE, normaliseTextEmphasisStyle, normaliseCtaStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle, type CtaStyle } from "@/components/StyleEditorModal";
 import { jobs, API_BASE, getToken, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
 
@@ -70,6 +70,11 @@ export function ClipViewer() {
   const [watermarkStyleConfig, setWatermarkStyleConfig] = useState<WatermarkStyle>(() => {
     try { const s = localStorage.getItem("autocliper_watermark_style"); return s ? { ...DEFAULT_WATERMARK_STYLE, ...JSON.parse(s) } : DEFAULT_WATERMARK_STYLE; } catch { return DEFAULT_WATERMARK_STYLE; }
   });
+  const [ctaStyleConfig, setCtaStyleConfig] = useState<CtaStyle>(() => {
+    try { const s = localStorage.getItem("autocliper_cta_style"); return s ? normaliseCtaStyle(JSON.parse(s)) : DEFAULT_CTA_STYLE; } catch { return DEFAULT_CTA_STYLE; }
+  });
+
+  useEffect(() => { localStorage.setItem("autocliper_cta_style", JSON.stringify(ctaStyleConfig)); }, [ctaStyleConfig]);
   const [isRestyling, setIsRestyling] = useState(false);
   const [restyleProgress, setRestyleProgress] = useState<{ stage: string; percentage: number } | null>(null);
   const [videoRevision, setVideoRevision] = useState(0);
@@ -136,6 +141,9 @@ export function ClipViewer() {
       }
       if (clipRes.data.text_emphasis_style_config && Object.keys(clipRes.data.text_emphasis_style_config).length > 0) {
         setTextEmphasisStyleConfig(normaliseTextEmphasisStyle(clipRes.data.text_emphasis_style_config));
+      }
+      if (clipRes.data.cta_config && Object.keys(clipRes.data.cta_config).length > 0) {
+        setCtaStyleConfig(normaliseCtaStyle(clipRes.data.cta_config));
       }
       // Set other clips (exclude current)
       const allClips = detailRes.data.clips || [];
@@ -248,6 +256,7 @@ export function ClipViewer() {
         subtitle_style_config: subtitleStyleConfig,
         text_emphasis_style_config: textEmphasisStyleConfig,
         watermark_config: watermarkStyleConfig,
+        cta_config: ctaStyleConfig,
         subtitle_enabled: true,
       });
       setShowRaw(false);
@@ -818,6 +827,8 @@ export function ClipViewer() {
         onTextEmphasisChange={setTextEmphasisStyleConfig}
         watermarkStyle={watermarkStyleConfig}
         onWatermarkChange={setWatermarkStyleConfig}
+        ctaStyle={ctaStyleConfig}
+        onCtaChange={setCtaStyleConfig}
         aspectRatio="9:16"
         isSuperadmin={user?.is_superadmin}
         userFeatures={user?.features}

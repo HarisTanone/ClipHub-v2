@@ -27,6 +27,7 @@ def _ensure_presets_table():
                 subtitle_style JSON NOT NULL DEFAULT '{}',
                 text_emphasis_style JSON NOT NULL DEFAULT '{}',
                 watermark_style JSON NOT NULL DEFAULT '{}',
+                cta_style JSON NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
@@ -36,6 +37,8 @@ def _ensure_presets_table():
             conn.execute("ALTER TABLE user_presets ADD COLUMN text_emphasis_style JSON NOT NULL DEFAULT '{}'")
         if "watermark_style" not in columns:
             conn.execute("ALTER TABLE user_presets ADD COLUMN watermark_style JSON NOT NULL DEFAULT '{}'")
+        if "cta_style" not in columns:
+            conn.execute("ALTER TABLE user_presets ADD COLUMN cta_style JSON NOT NULL DEFAULT '{}'")
         conn.commit()
     finally:
         conn.close()
@@ -51,6 +54,7 @@ class CreatePresetRequest(BaseModel):
     subtitle_style: dict = {}
     text_emphasis_style: dict = {}
     watermark_style: dict = {}
+    cta_style: dict = {}
 
 class PresetResponse(BaseModel):
     id: int
@@ -59,6 +63,7 @@ class PresetResponse(BaseModel):
     subtitle_style: dict
     text_emphasis_style: dict
     watermark_style: dict
+    cta_style: dict = {}
     created_at: Optional[str] = None
 
 
@@ -81,6 +86,7 @@ async def list_presets(user: CurrentUser = Depends(get_current_user)):
         rows = cur.fetchall()
         presets = []
         for row in rows:
+            raw_cta = row["cta_style"] if "cta_style" in row.keys() else "{}"
             preset = {
                 "id": row["id"],
                 "name": row["name"],
@@ -88,6 +94,7 @@ async def list_presets(user: CurrentUser = Depends(get_current_user)):
                 "subtitle_style": json.loads(row["subtitle_style"]) if isinstance(row["subtitle_style"], str) else row["subtitle_style"],
                 "text_emphasis_style": json.loads(row["text_emphasis_style"]) if isinstance(row["text_emphasis_style"], str) else row["text_emphasis_style"],
                 "watermark_style": json.loads(row["watermark_style"]) if isinstance(row["watermark_style"], str) else row["watermark_style"],
+                "cta_style": json.loads(raw_cta) if isinstance(raw_cta, str) else (raw_cta or {}),
                 "created_at": row["created_at"],
             }
             if user.is_superadmin:
@@ -109,8 +116,8 @@ async def create_preset(body: CreatePresetRequest, user: CurrentUser = Depends(g
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO user_presets (user_id, name, hook_style, subtitle_style, text_emphasis_style, watermark_style) VALUES (?, ?, ?, ?, ?, ?)",
-            (user.id, body.name.strip(), json.dumps(body.hook_style), json.dumps(body.subtitle_style), json.dumps(body.text_emphasis_style), json.dumps(body.watermark_style)),
+            "INSERT INTO user_presets (user_id, name, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user.id, body.name.strip(), json.dumps(body.hook_style), json.dumps(body.subtitle_style), json.dumps(body.text_emphasis_style), json.dumps(body.watermark_style), json.dumps(body.cta_style)),
         )
         conn.commit()
         return {"success": True, "id": cur.lastrowid, "message": f"Preset '{body.name}' saved"}
