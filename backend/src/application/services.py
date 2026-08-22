@@ -245,6 +245,9 @@ class JobService:
     ) -> tuple[Job, bool]:
         """Create job and start pipeline in background."""
         is_upload_source = source_type == "upload"
+        if not is_upload_source:
+            from src.infrastructure.downloader import get_canonical_youtube_url
+            youtube_url = get_canonical_youtube_url(youtube_url) or str(youtube_url).strip()
 
         # ─── Determine pipeline version (V1 Gemini or V2 Groq) ────────
         from src.infrastructure.pipeline_router import PipelineRouter

@@ -287,8 +287,11 @@ async def create_job(
     Jika force_reprocess=False (default), URL deduplication akan return cached result.
     Jika force_reprocess=True, skip dedup dan proses ulang dari awal.
     """
+    from src.infrastructure.downloader import get_canonical_youtube_url
+    clean_url = get_canonical_youtube_url(request.youtube_url) or request.youtube_url.strip()
+
     job, is_cached = await service.create_job(
-        request.youtube_url,
+        clean_url,
         force_reprocess=request.force_reprocess,
         style_preset=request.style_preset,
         target_aspect_ratio=request.target_aspect_ratio,

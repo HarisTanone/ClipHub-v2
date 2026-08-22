@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, normaliseTextEmphasisStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle } from "@/components/StyleEditorModal";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { jobs, preview, presets as presetsApi, analyze, type VideoPreview, type Preset, type AnalyzeResponse, API_BASE } from "@/lib/api";
-import { cn, formatDuration } from "@/lib/utils";
+import { cn, formatDuration, extractCleanYouTubeUrl, extractVideoId } from "@/lib/utils";
 import { BackgroundTemplateSection, type BackgroundMode } from "@/components/BackgroundTemplateSection";
 import { ClipTimelineEditor, type EditableClip } from "@/components/ClipTimelineEditor";
 
@@ -122,8 +122,8 @@ export function NewJob() {
 
   function validateUrl(value: string): boolean {
     if (!value.trim()) { setUrlError("URL required"); return false; }
-    const pattern = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)[a-zA-Z0-9_-]+/;
-    if (!pattern.test(value)) { setUrlError("Enter a valid YouTube URL"); return false; }
+    const videoId = extractVideoId(value);
+    if (!videoId) { setUrlError("Enter a valid YouTube URL"); return false; }
     setUrlError("");
     return true;
   }
@@ -148,11 +148,12 @@ export function NewJob() {
     if (urlError) validateUrl(value);
     if (previewTimeout.current) clearTimeout(previewTimeout.current);
     setVideoMeta(null);
-    const pattern = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)[a-zA-Z0-9_-]{11}/;
-    if (pattern.test(value)) {
+    const videoId = extractVideoId(value);
+    if (videoId) {
+      const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
       previewTimeout.current = window.setTimeout(async () => {
         setIsLoadingPreview(true);
-        try { setVideoMeta(await preview.fetchMetadata(value.trim())); } catch { }
+        try { setVideoMeta(await preview.fetchMetadata(cleanUrl)); } catch { }
         finally { setIsLoadingPreview(false); }
       }, 600);
     }
@@ -163,12 +164,7 @@ export function NewJob() {
     setIsAnalyzing(true);
     setAnalyzeStep("analyzing");
     try {
-      let submitUrl = url.trim();
-      if (!submitUrl.startsWith("http")) {
-        submitUrl = "https://www." + submitUrl;
-      } else if (submitUrl.startsWith("http://")) {
-        submitUrl = submitUrl.replace("http://", "https://");
-      }
+      const submitUrl = extractCleanYouTubeUrl(url);
       const result = await analyze.analyzeOnly(submitUrl);
       setAnalyzeResult(result);
       const sortedClips = [...(result.clips || [])].sort((a, b) => a.start - b.start);
@@ -269,12 +265,7 @@ export function NewJob() {
           setUploadProgress(pct);
         });
       } else {
-        let submitUrl = url.trim();
-        if (!submitUrl.startsWith("http")) {
-          submitUrl = "https://www." + submitUrl;
-        } else if (submitUrl.startsWith("http://")) {
-          submitUrl = submitUrl.replace("http://", "https://");
-        }
+        const submitUrl = extractCleanYouTubeUrl(url);
         res = await jobs.create({ youtube_url: submitUrl, ...jobOptions });
       }
       toast.success(`Job created: ${res.job_id}`);

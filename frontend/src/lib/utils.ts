@@ -40,16 +40,29 @@ export function formatDate(dateStr: string | null): string {
 }
 
 export function extractVideoId(url: string): string | null {
+  if (!url) return null;
+  const raw = url.trim();
   const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
-    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
-    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+    /([a-zA-Z0-9_-]{11})/,
   ];
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) return match[1];
-  }
+  const match = raw.match(patterns[0]);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9_-]{11}$/.test(raw)) return raw;
   return null;
+}
+
+export function extractCleanYouTubeUrl(input: string): string {
+  if (!input) return "";
+  const vid = extractVideoId(input);
+  if (vid) {
+    return `https://www.youtube.com/watch?v=${vid}`;
+  }
+  const trimmed = input.trim();
+  if (trimmed && !trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    return `https://${trimmed}`;
+  }
+  return trimmed;
 }
 
 export function getStatusColor(status: string): string {

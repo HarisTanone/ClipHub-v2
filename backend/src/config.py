@@ -1,5 +1,6 @@
 """Application configuration — environment-based (local M1 vs production server)."""
 import os
+import shutil
 from typing import Any, Optional
 
 from pydantic import field_validator
@@ -146,7 +147,7 @@ class Settings(BaseSettings):
     WHISPER_COREML_MODEL_PATH: str = ""
 
     # === Download ===
-    USE_ARIA2C: bool = False if PIPELINE_ENV == "local" else True
+    USE_ARIA2C: bool = bool(shutil.which("aria2c")) or (PIPELINE_ENV != "local")
 
     # Cleanup
     CLEANUP_MAX_AGE_DAYS: int = 7

@@ -27,19 +27,9 @@ logger = logging.getLogger(__name__)
 @router.get("/preview")
 async def get_video_preview(url: str = Query(..., description="YouTube URL")):
     """Fetch YouTube video metadata for preview (title, thumbnail, duration)."""
-    import re
+    from src.infrastructure.downloader import extract_youtube_video_id
     
-    # Extract video ID
-    patterns = [
-        r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})',
-    ]
-    video_id = None
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            video_id = match.group(1)
-            break
-    
+    video_id = extract_youtube_video_id(url)
     if not video_id:
         raise HTTPException(status_code=400, detail="Invalid YouTube URL")
     
@@ -80,12 +70,23 @@ async def get_video_preview(url: str = Query(..., description="YouTube URL")):
     except Exception as e:
         logger.warning(f"yt-dlp metadata failed: {e}")
     
+    # Fallback to oEmbed for title
+    oembed_title = f"YouTube Video ({video_id})"
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json")
+            if resp.status_code == 200:
+                oembed_title = resp.json().get("title", oembed_title)
+    except Exception:
+        pass
+
     # Fallback: return basic info from video ID
     return {
         "success": True,
         "data": {
             "video_id": video_id,
-            "title": f"YouTube Video ({video_id})",
+            "title": oembed_title,
             "channel": "",
             "channel_url": "",
             "duration": 0,
