@@ -100,10 +100,10 @@ def _get_cookie_args() -> list[str]:
 
 def _get_extractor_args(has_cookies: bool = False) -> list[str]:
     """Extractor arguments.
-    web,web_embedded,android_sdkless,tv delivers full 1080p/720p HD streams without requiring GVS PO Token."""
+    visionos,web_safari,android_sdkless,mweb,tv delivers full 4K/1080p/720p HD streams without requiring GVS PO Token or login."""
     if has_cookies:
         return []
-    return ["--extractor-args", "youtube:player_client=web,web_embedded,android_sdkless,tv"]
+    return ["--extractor-args", "youtube:player_client=visionos,web_safari,android_sdkless,mweb,tv"]
 
 
 class YouTubeDownloader(IDownloader):
@@ -287,10 +287,11 @@ class YouTubeDownloader(IDownloader):
             err = stderr.decode().strip()
             # If 403 / SABR / unavailable / bot challenge occurs, retry with alternative client tiers
             client_tiers = [
-                "youtube:player_client=web_embedded,android_sdkless",
-                "youtube:player_client=tv,android_sdkless",
+                "youtube:player_client=visionos,web_safari",
+                "youtube:player_client=web_safari,mweb",
                 "youtube:player_client=android_creator,web_embedded",
-                "youtube:player_client=web_embedded,android_vr",
+                "youtube:player_client=tv,android_sdkless",
+                "youtube:player_client=mweb,tv_embedded",
             ]
             for client_arg in client_tiers:
                 logger.warning(f"[AutoCliper Downloader] Mencoba download fallback dengan {client_arg}...")
