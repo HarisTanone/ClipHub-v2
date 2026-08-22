@@ -3,7 +3,8 @@ import {
   Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield,
   Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot,
   Send, Key, Eye, EyeOff, Radio, Bell, Video, Copy, Check, MessageSquare, Palette,
-  SlidersHorizontal, UserCheck, Layers, Lock, Activity, Globe, Info, HelpCircle, HardDrive, CheckSquare
+  SlidersHorizontal, UserCheck, Layers, Lock, Activity, Globe, Info, HelpCircle, HardDrive, CheckSquare,
+  Upload, FileText, ExternalLink, ShieldCheck
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -13,7 +14,7 @@ import { RangeSlider } from "@/components/ui/RangeSlider";
 import { useToast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
-import { system, storage, systemConfig, type SystemConfigItem, API_BASE, getToken } from "@/lib/api";
+import { system, storage, systemConfig, youtubeCookies, type YouTubeCookiesStatus, type SystemConfigItem, API_BASE, getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SectionDescription } from "@/components/reframe/SectionDescription";
 import { ImagePreviewPanel } from "@/components/reframe/ImagePreviewPanel";
@@ -458,7 +459,7 @@ export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram" | "system_config">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram" | "system_config" | "youtube_cookies">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -541,10 +542,143 @@ export function Settings() {
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const [telegramSocialAccounts, setTelegramSocialAccounts] = useState<any[]>([]);
 
+  // YouTube Cookies State (Anti-Block)
+  const [cookieStatus, setCookieStatus] = useState<YouTubeCookiesStatus | null>(null);
+  const [isLoadingCookies, setIsLoadingCookies] = useState(false);
+  const [isSavingCookies, setIsSavingCookies] = useState(false);
+  const [isDeletingCookies, setIsDeletingCookies] = useState(false);
+  const [isTestingCookies, setIsTestingCookies] = useState(false);
+  const [cookieContent, setCookieContent] = useState("");
+  const [cookieTestResult, setCookieTestResult] = useState<{ success: boolean; message: string; title?: string; formats_count?: number } | null>(null);
+
+  async function loadCookieStatus() {
+    setIsLoadingCookies(true);
+    try {
+      const res = await youtubeCookies.getStatus();
+      if (res.success && res.data) {
+        setCookieStatus(res.data);
+      }
+    } catch (e: any) {
+      console.error("Failed loading YouTube cookies status", e);
+    } finally {
+      setIsLoadingCookies(false);
+    }
+  }
+
+  async function handleSaveCookies() {
+    if (!cookieContent.trim()) {
+      toast.error("Isi konten cookies tidak boleh kosong");
+      return;
+    }
+    setIsSavingCookies(true);
+    try {
+      const res = await youtubeCookies.saveCookies(cookieContent);
+      if (res.success) {
+        toast.success(res.message);
+        await loadCookieStatus();
+      } else {
+        toast.error(res.message || "Gagal menyimpan cookies");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Error saat menyimpan cookies");
+    } finally {
+      setIsSavingCookies(false);
+    }
+  }
+
+  async function handleDeleteCookies() {
+    const ok = await confirmDialog({
+      title: "Hapus YouTube Cookies?",
+      message: "Server akan kembali menggunakan mode Guest Publik tanpa otentikasi akun.",
+      confirmText: "Hapus",
+      danger: true,
+    });
+    if (!ok) return;
+
+    setIsDeletingCookies(true);
+    try {
+      const res = await youtubeCookies.deleteCookies();
+      if (res.success) {
+        toast.success(res.message);
+        setCookieContent("");
+        setCookieTestResult(null);
+        await loadCookieStatus();
+      } else {
+        toast.error(res.message);
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Gagal menghapus cookies");
+    } finally {
+      setIsDeletingCookies(false);
+    }
+  }
+
+  async function handleTestCookies() {
+    setIsTestingCookies(true);
+    setCookieTestResult(null);
+    try {
+      const res = await youtubeCookies.testCookies();
+      setCookieTestResult(res);
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    } catch (e: any) {
+      const errRes = { success: false, message: e?.message || "Gagal menguji koneksi cookies" };
+      setCookieTestResult(errRes);
+      toast.error(errRes.message);
+    } finally {
+      setIsTestingCookies(false);
+    }
+  }
+
+  const [isAutoExtracting, setIsAutoExtracting] = useState(false);
+  const [selectedBrowser, setSelectedBrowser] = useState("auto");
+
+  async function handleAutoExtractCookies(browserToUse: string = selectedBrowser) {
+    setIsAutoExtracting(true);
+    try {
+      toast.info("Sedang mengekstrak cookies otomatis dari browser...");
+      const res = await youtubeCookies.autoExtract(browserToUse);
+      if (res.success) {
+        toast.success(res.message);
+        if (res.data) setCookieStatus(res.data);
+        await loadCookieStatus();
+      } else {
+        toast.error(res.message || "Gagal mengekstrak cookies otomatis");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Gagal mengekstrak cookies dari browser");
+    } finally {
+      setIsAutoExtracting(false);
+    }
+  }
+
+  function handleCookieFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        setCookieContent(text);
+        const lines = text.split("\n");
+        const count = lines.filter((l) => l.trim() && !l.trim().startsWith("#")).length;
+        toast.success(`File ${file.name} berhasil dibaca (${count} cookies terdeteksi). Klik "Simpan ke Server" untuk menerapkan.`);
+      }
+    };
+    reader.onerror = () => {
+      toast.error("Gagal membaca file cookies");
+    };
+    reader.readAsText(file);
+  }
+
   useEffect(() => {
     system.health().then(setHealth).catch(() => null);
     fetchSettings().then((d) => { if (d) setSettings((p) => ({ ...p, ...d })); });
     fetchUsers().then(setUsers);
+    loadCookieStatus();
     fetchReframeTuning().then((d) => {
       if (d) {
         const normalized = normalizeReframeTuning(d);
@@ -1055,6 +1189,7 @@ export function Settings() {
   const tabs = [
     { id: "general" as const, label: "General", icon: <SlidersHorizontal className="h-3.5 w-3.5" />, group: "Preferences", badge: "All Users" },
     { id: "render" as const, label: "Render Engine", icon: <Film className="h-3.5 w-3.5" />, group: "Preferences", badge: "All Users" },
+    { id: "youtube_cookies" as const, label: "YouTube Auth & Cookies", icon: <Key className="h-3.5 w-3.5" />, group: "Preferences", badge: "Anti-Block" },
     { id: "reframe" as const, label: "Reframe Tuning", icon: <Cpu className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
     { id: "hyperframes" as const, label: "HyperFrames Hook", icon: <Sparkles className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
     { id: "object" as const, label: "Object Overlay", icon: <Palette className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
@@ -1100,7 +1235,12 @@ export function Settings() {
           </div>
 
           <div className="flex items-center gap-2">
-            {tab === "users" || tab === "testing" ? null : tab === "hyperframes" ? (
+            {tab === "users" || tab === "testing" ? null : tab === "youtube_cookies" ? (
+              <div className="flex items-center gap-2">
+                <Button onClick={handleTestCookies} loading={isTestingCookies} disabled={!cookieStatus?.exists && !cookieContent} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5 text-amber-400" />}>Test Connection</Button>
+                <Button onClick={handleSaveCookies} loading={isSavingCookies} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save Cookies</Button>
+              </div>
+            ) : tab === "hyperframes" ? (
               <div className="flex items-center gap-2">
                 {hfDirty && <span className="text-[10px] text-amber-400 font-medium mr-1 animate-pulse">Unsaved changes</span>}
                 <Button onClick={handleRestoreHfDefaults} loading={isResettingHf} size="sm" variant="outline">Restore Defaults</Button>
@@ -3003,6 +3143,243 @@ export function Settings() {
                   })}
               </div>
             )}
+          </div>
+        )}
+
+        {tab === "youtube_cookies" && (
+          <div className="space-y-5 max-w-4xl">
+            {/* Status Hero Card */}
+            <div className="rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-950 via-zinc-900/60 to-zinc-950 p-5 shadow-xl">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className={cn(
+                    "h-12 w-12 rounded-2xl flex items-center justify-center border shadow-inner shrink-0",
+                    cookieStatus?.exists
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                      : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                  )}>
+                    {cookieStatus?.exists ? <ShieldCheck className="h-6 w-6" /> : <AlertTriangle className="h-6 w-6" />}
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-sm font-bold text-zinc-100">YouTube Session & Cookies Manager</h2>
+                      {cookieStatus?.exists ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Cookies Aktif di Server
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                          Mode Tamu (Tanpa Cookies)
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      Bypass blokir IP datacenter & bot detection YouTube secara otomatis dengan autentikasi akun browser.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                  <Button
+                    onClick={handleTestCookies}
+                    loading={isTestingCookies}
+                    disabled={!cookieStatus?.exists && !cookieContent}
+                    size="sm"
+                    variant="outline"
+                    icon={<Zap className="h-3.5 w-3.5 text-amber-400" />}
+                  >
+                    Test Koneksi
+                  </Button>
+                  {cookieStatus?.exists && (
+                    <Button
+                      onClick={handleDeleteCookies}
+                      loading={isDeletingCookies}
+                      size="sm"
+                      variant="danger"
+                      icon={<Trash2 className="h-3.5 w-3.5" />}
+                    >
+                      Hapus
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Status details pills */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-4 pt-4 border-t border-zinc-800/80">
+                <div className="bg-zinc-900/70 border border-zinc-800/60 rounded-xl p-2.5">
+                  <span className="text-[10px] text-zinc-500 block uppercase font-medium">Status Otentikasi</span>
+                  <span className="text-xs font-semibold text-zinc-200 mt-0.5 block">
+                    {cookieStatus?.exists ? "Terautentikasi (Active)" : "Tidak Aktif"}
+                  </span>
+                </div>
+                <div className="bg-zinc-900/70 border border-zinc-800/60 rounded-xl p-2.5">
+                  <span className="text-[10px] text-zinc-500 block uppercase font-medium">Jumlah Cookies</span>
+                  <span className="text-xs font-semibold text-zinc-200 mt-0.5 block">
+                    {cookieStatus?.cookie_count ?? 0} entri terdeteksi
+                  </span>
+                </div>
+                <div className="bg-zinc-900/70 border border-zinc-800/60 rounded-xl p-2.5">
+                  <span className="text-[10px] text-zinc-500 block uppercase font-medium">Ukuran File</span>
+                  <span className="text-xs font-semibold text-zinc-200 mt-0.5 block">
+                    {cookieStatus?.size_bytes ? `${(cookieStatus.size_bytes / 1024).toFixed(1)} KB` : "0 KB"}
+                  </span>
+                </div>
+                <div className="bg-zinc-900/70 border border-zinc-800/60 rounded-xl p-2.5">
+                  <span className="text-[10px] text-zinc-500 block uppercase font-medium">Terakhir Diperbarui</span>
+                  <span className="text-xs font-semibold text-zinc-200 mt-0.5 block truncate">
+                    {cookieStatus?.last_modified
+                      ? new Date(cookieStatus.last_modified * 1000).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" })
+                      : "-"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Test Connection Alert Box if result exists */}
+              {cookieTestResult && (
+                <div className={cn(
+                  "mt-4 p-3.5 rounded-xl border flex items-start gap-3 transition-all",
+                  cookieTestResult.success
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                    : "bg-red-500/10 border-red-500/30 text-red-300"
+                )}>
+                  {cookieTestResult.success ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                  )}
+                  <div className="text-xs min-w-0 flex-1">
+                    <p className="font-semibold">{cookieTestResult.message}</p>
+                    {cookieTestResult.title && (
+                      <p className="text-[11px] opacity-80 mt-1">Uji Probe: {cookieTestResult.title}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 1-Click Auto-Extract from Browser Card */}
+            <div className="rounded-2xl border border-violet-500/30 bg-gradient-to-r from-violet-950/30 via-zinc-900/60 to-zinc-900/60 p-5 space-y-3 shadow-lg">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-violet-500/10 border border-violet-500/30 flex items-center justify-center text-violet-400 shrink-0">
+                    <Zap className="h-5 w-5 fill-current" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-violet-200 uppercase tracking-wider">Otomatis Ambil Cookies dari Browser (1-Klik)</h3>
+                    <p className="text-[11px] text-zinc-300 mt-0.5 leading-relaxed">
+                      Sistem akan langsung membaca sesi login YouTube dari browser di komputer/server secara otomatis tanpa memerlukan ekstensi atau file manual.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                  <select
+                    value={selectedBrowser}
+                    onChange={(e) => setSelectedBrowser(e.target.value)}
+                    className="bg-zinc-950 border border-zinc-700 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-violet-500 font-medium"
+                  >
+                    <option value="auto">⚡ Otomatis (Cari Semua Browser)</option>
+                    <option value="chrome">Google Chrome</option>
+                    <option value="brave">Brave Browser</option>
+                    <option value="edge">Microsoft Edge</option>
+                    <option value="firefox">Mozilla Firefox</option>
+                    <option value="safari">Apple Safari</option>
+                  </select>
+
+                  <Button
+                    onClick={() => handleAutoExtractCookies()}
+                    loading={isAutoExtracting}
+                    size="sm"
+                    className="bg-violet-600 hover:bg-violet-500 text-white font-bold shadow-md"
+                    icon={<Zap className="h-3.5 w-3.5 fill-current" />}
+                  >
+                    Ambil Otomatis
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Upload & Editor Form */}
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-bold text-zinc-200 uppercase tracking-wider">Metode Alternatif: Upload File / Paste cookies.txt</h3>
+                  <p className="text-[11px] text-zinc-400">
+                    Pilih file langsung dari perangkat Anda atau paste teks format Netscape cookies.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 text-xs font-semibold transition-all">
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>Upload File .txt</span>
+                    <input
+                      type="file"
+                      accept=".txt,text/plain"
+                      onChange={handleCookieFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  <Button
+                    onClick={handleSaveCookies}
+                    loading={isSavingCookies}
+                    size="sm"
+                    icon={<Save className="h-3.5 w-3.5" />}
+                  >
+                    Simpan ke Server
+                  </Button>
+                </div>
+              </div>
+
+              {/* Textarea for Cookies Content */}
+              <div className="relative">
+                <textarea
+                  rows={9}
+                  value={cookieContent}
+                  onChange={(e) => setCookieContent(e.target.value)}
+                  placeholder={`# Netscape HTTP Cookie File\n# http://curl.haxx.se/rfc/cookie_spec.html\n# Upload file cookies.txt atau paste isinya di sini...\n.youtube.com\tTRUE\t/\tTRUE\t1787432761\tSID\txxxxxxxxxxxxx\n.youtube.com\tTRUE\t/\tTRUE\t1787432761\tHSID\txxxxxxxxxxxxx`}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 text-xs text-zinc-200 font-mono focus:outline-none focus:border-violet-500 transition-colors resize-y leading-relaxed"
+                />
+                {cookieContent && (
+                  <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-md px-2 py-1 rounded text-[10px] text-zinc-400 border border-white/10 flex items-center gap-2">
+                    <span>{cookieContent.split("\n").length} baris</span>
+                    <span>•</span>
+                    <span>{cookieContent.split("\n").filter(l => l.trim() && !l.trim().startsWith("#")).length} cookies</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Quick 3-Step Guide */}
+            <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/40 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <HelpCircle className="h-4 w-4 text-violet-400" />
+                <h4 className="text-xs font-semibold text-zinc-200">Panduan 3 Langkah Mudah Ekspor Cookies YouTube</h4>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-3 space-y-1.5">
+                  <div className="h-5 w-5 rounded-full bg-violet-500/20 text-violet-400 flex items-center justify-center text-[10px] font-bold">1</div>
+                  <p className="text-xs font-semibold text-zinc-200">Install Ekstensi Browser</p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Install ekstensi <strong className="text-zinc-300">"Get cookies.txt LOCALLY"</strong> di Chrome / Edge / Firefox browser Anda.
+                  </p>
+                </div>
+                <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-3 space-y-1.5">
+                  <div className="h-5 w-5 rounded-full bg-violet-500/20 text-violet-400 flex items-center justify-center text-[10px] font-bold">2</div>
+                  <p className="text-xs font-semibold text-zinc-200">Buka YouTube & Export</p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Buka <strong className="text-zinc-300">youtube.com</strong> saat sudah login akun. Klik icon ekstensi lalu klik tombol <strong className="text-zinc-300">"Export"</strong>.
+                  </p>
+                </div>
+                <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-3 space-y-1.5">
+                  <div className="h-5 w-5 rounded-full bg-violet-500/20 text-violet-400 flex items-center justify-center text-[10px] font-bold">3</div>
+                  <p className="text-xs font-semibold text-zinc-200">Upload ke Panel Ini</p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Klik tombol <strong className="text-zinc-300">"Upload File .txt"</strong> di atas lalu klik <strong className="text-zinc-300">"Simpan ke Server"</strong>. Selesai!
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

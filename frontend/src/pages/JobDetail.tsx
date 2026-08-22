@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo, Lock, LoaderCircle, Download, Copy, Check } from "lucide-react";
+import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo, Lock, LoaderCircle, Download, Copy, Check, Zap } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -8,7 +8,7 @@ import { ProgressBar, StepProgress } from "@/components/ui/Progress";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
-import { jobs, preview, type JobDetailResponse, type VideoPreview, type ClipInfo } from "@/lib/api";
+import { jobs, preview, youtubeCookies, type JobDetailResponse, type VideoPreview, type ClipInfo } from "@/lib/api";
 import { useProgress } from "@/hooks/useProgress";
 import { formatDuration, formatDate, cn } from "@/lib/utils";
 
@@ -105,6 +105,36 @@ export function JobDetail() {
       navigate(`/jobs/${next.job_id}`);
     } catch (e: any) { toast.error(e.message || "Could not reprocess job"); }
     finally { setIsReprocessing(false); }
+  }
+
+  const [isAutoFixingCookies, setIsAutoFixingCookies] = useState(false);
+
+  async function handleAutoFixCookiesAndReprocess() {
+    if (!jobId) return;
+    setIsAutoFixingCookies(true);
+    try {
+      toast.info("Sedang mengambil cookies YouTube otomatis dari browser...");
+      const cookieRes = await youtubeCookies.autoExtract("auto");
+      if (!cookieRes.success) {
+        toast.error(cookieRes.message || "Gagal mengambil cookies otomatis");
+        setIsAutoFixingCookies(false);
+        return;
+      }
+      toast.success(cookieRes.message);
+
+      toast.info("Memulai proses ulang video dengan sesi cookies baru...");
+      const next = await jobs.reprocess(jobId);
+      toast.success("Proses ulang berhasil dijalankan!");
+      if (next?.job_id && next.job_id !== jobId) {
+        navigate(`/jobs/${next.job_id}`);
+      } else {
+        loadDetail();
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Gagal memproses ulang dengan cookies");
+    } finally {
+      setIsAutoFixingCookies(false);
+    }
   }
 
   if (isLoading && !data) {
@@ -222,12 +252,51 @@ export function JobDetail() {
       )}
 
       {data.error_message && (
-        <Card className="p-4 border-red-500/20 bg-red-950/20">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
-            <p className="text-sm text-red-300">{data.error_message}</p>
-          </div>
-        </Card>
+        <div className="space-y-3">
+          <Card className="p-4 border-red-500/20 bg-red-950/20">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+              <p className="text-sm text-red-300">{data.error_message}</p>
+            </div>
+          </Card>
+
+          {/* Smart Auto-Fix Suggestion for YouTube Bot Block / Unavailable */}
+          {(data.error_message.toLowerCase().includes("tidak tersedia") ||
+            data.error_message.toLowerCase().includes("unavailable") ||
+            data.error_message.toLowerCase().includes("private") ||
+            data.error_message.toLowerCase().includes("bot") ||
+            data.error_message.toLowerCase().includes("sign in") ||
+            data.error_message.toLowerCase().includes("403") ||
+            data.error_message.toLowerCase().includes("verifikasi")) && !isUploadSource && (
+            <Card className="p-4 border-amber-500/40 bg-gradient-to-r from-amber-950/50 via-zinc-900/80 to-zinc-900/80 shadow-xl">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                    <Zap className="h-5 w-5 fill-current" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-amber-200 uppercase tracking-wider">Saran: Ambil Cookies YouTube Otomatis (1-Klik)</h4>
+                    <p className="text-[11px] text-zinc-300 mt-0.5 leading-relaxed">
+                      YouTube mendeteksi IP server dan memerlukan autentikasi browser. Klik tombol di samping agar sistem <strong className="text-amber-300">langsung mengambil cookies browser otomatis tanpa ekstensi</strong> dan memproses ulang video ini.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                  <Button
+                    onClick={handleAutoFixCookiesAndReprocess}
+                    loading={isAutoFixingCookies}
+                    size="sm"
+                    className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold border-none shadow-md"
+                    icon={<Zap className="h-3.5 w-3.5 fill-current" />}
+                  >
+                    Ambil Cookies & Proses Ulang
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
       )}
 
       <Card className="p-0 overflow-hidden">

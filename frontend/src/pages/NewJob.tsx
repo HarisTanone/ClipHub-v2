@@ -10,7 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, DEFAULT_CTA_STYLE, normaliseTextEmphasisStyle, normaliseCtaStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle, type CtaStyle } from "@/components/StyleEditorModal";
-import { jobs, preview, presets as presetsApi, analyze, type VideoPreview, type Preset, type AnalyzeResponse, API_BASE } from "@/lib/api";
+import { jobs, preview, presets as presetsApi, analyze, youtubeCookies, type VideoPreview, type Preset, type AnalyzeResponse, API_BASE } from "@/lib/api";
 import { cn, formatDuration, extractCleanYouTubeUrl, extractVideoId } from "@/lib/utils";
 import { BackgroundTemplateSection, type BackgroundMode } from "@/components/BackgroundTemplateSection";
 import { ClipTimelineEditor, type EditableClip } from "@/components/ClipTimelineEditor";
@@ -164,6 +164,31 @@ export function NewJob() {
     }
   }
 
+  const [isAutoExtractingCookies, setIsAutoExtractingCookies] = useState(false);
+  const [youtubeAuthSuggestion, setYoutubeAuthSuggestion] = useState(false);
+
+  async function handleAutoExtractCookiesInNewJob() {
+    setIsAutoExtractingCookies(true);
+    try {
+      toast.info("Sedang mengambil cookies otomatis dari browser...");
+      const res = await youtubeCookies.autoExtract("auto");
+      if (res.success) {
+        toast.success(res.message);
+        setYoutubeAuthSuggestion(false);
+        setUrlError("");
+        if (url.trim()) {
+          handleUrlChange(url);
+        }
+      } else {
+        toast.error(res.message || "Gagal mengekstrak cookies otomatis");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Gagal mengekstrak cookies");
+    } finally {
+      setIsAutoExtractingCookies(false);
+    }
+  }
+
   async function handleAnalyze() {
     if (!validateUrl(url)) return;
     setIsAnalyzing(true);
@@ -184,7 +209,16 @@ export function NewJob() {
       );
       setAnalyzeStep("review");
     } catch (e: any) {
-      toast.error(e.message || "Analysis failed");
+      const msg = e.message || "Analysis failed";
+      toast.error(msg);
+      if (
+        msg.toLowerCase().includes("tidak tersedia") ||
+        msg.toLowerCase().includes("unavailable") ||
+        msg.toLowerCase().includes("bot") ||
+        msg.toLowerCase().includes("cookies")
+      ) {
+        setYoutubeAuthSuggestion(true);
+      }
       setAnalyzeStep("input");
     } finally {
       setIsAnalyzing(false);
@@ -383,6 +417,34 @@ export function NewJob() {
             {sourceMode === "youtube" ? (
               <>
                 <Input label="YouTube URL" placeholder="https://youtube.com/watch?v=..." type="url" value={url} onChange={(e) => handleUrlChange(e.target.value)} error={urlError} />
+
+                {(youtubeAuthSuggestion || urlError.toLowerCase().includes("tidak tersedia") || urlError.toLowerCase().includes("bot")) && (
+                  <div className="mt-2.5 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-950/40 via-zinc-900/80 to-zinc-900/80 p-3 shadow-lg">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <div className="h-7 w-7 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                          <Zap className="h-3.5 w-3.5 fill-current" />
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold text-amber-200">Perlu Sesi Autentikasi YouTube?</p>
+                          <p className="text-[10px] text-zinc-400">
+                            Ambil cookies browser otomatis dengan 1-klik untuk mengatasi proteksi bot YouTube.
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleAutoExtractCookiesInNewJob}
+                        loading={isAutoExtractingCookies}
+                        className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold border-none"
+                        icon={<Zap className="h-3 w-3 fill-current" />}
+                      >
+                        Ambil Cookies Otomatis
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 {(isLoadingPreview || videoMeta) && (
                   <div className="mt-2 rounded-lg border border-zinc-800/60 bg-zinc-900/50 overflow-hidden">
                     {isLoadingPreview && !videoMeta ? (

@@ -1182,3 +1182,294 @@ async def reset_system_config_endpoint(
     }
 
 
+# ─── YouTube Cookies Management Endpoints ─────────────────────────────────────
+
+class YouTubeCookiesUpdateRequest(BaseModel):
+    content: str = Field(..., description="Raw cookies.txt content in Netscape format")
+
+
+@router.get("/youtube-cookies")
+async def get_youtube_cookies_status(user: CurrentUser = Depends(get_current_user)):
+    """Get current status and metadata of YouTube cookies.txt on the server."""
+    backend_dir_cookies = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../cookies.txt")
+    )
+    backend_cookies = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../../cookies.txt")
+    )
+    root_cookies = os.path.abspath("cookies.txt")
+
+    target_path = None
+    for p in [backend_dir_cookies, backend_cookies, root_cookies]:
+        if os.path.exists(p) and os.path.getsize(p) > 0:
+            target_path = p
+            break
+
+    if not target_path or not os.path.exists(target_path):
+        return {
+            "success": True,
+            "data": {
+                "exists": False,
+                "size_bytes": 0,
+                "line_count": 0,
+                "cookie_count": 0,
+                "last_modified": None,
+                "path": backend_dir_cookies,
+            }
+        }
+
+    try:
+        stat = os.stat(target_path)
+        with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+
+        cookie_count = sum(1 for l in lines if l.strip() and not l.strip().startswith("#"))
+
+        return {
+            "success": True,
+            "data": {
+                "exists": True,
+                "size_bytes": stat.st_size,
+                "line_count": len(lines),
+                "cookie_count": cookie_count,
+                "last_modified": stat.st_mtime,
+                "path": target_path,
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error reading youtube cookies status: {e}")
+        return {
+            "success": True,
+            "data": {
+                "exists": False,
+                "error": str(e),
+                "path": backend_dir_cookies,
+            }
+        }
+
+
+@router.post("/youtube-cookies")
+async def save_youtube_cookies(
+    req: YouTubeCookiesUpdateRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Save raw cookies.txt content to server cookies file."""
+    if not req.content or not req.content.strip():
+        raise HTTPException(status_code=400, detail="Cookies content cannot be empty")
+
+    cleaned_content = req.content.strip() + "\n"
+
+    # Save to backend/cookies.txt and root cookies.txt
+    backend_dir_cookies = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../cookies.txt")
+    )
+    backend_cookies = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../../cookies.txt")
+    )
+    root_cookies = os.path.abspath("cookies.txt")
+
+    for p in [backend_dir_cookies, backend_cookies, root_cookies]:
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(cleaned_content)
+            try:
+                os.chmod(p, 0o644)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f"Failed writing cookies to {p}: {e}")
+
+    lines = cleaned_content.splitlines()
+    cookie_count = sum(1 for l in lines if l.strip() and not l.strip().startswith("#"))
+
+    return {
+        "success": True,
+        "message": f"YouTube cookies berhasil disimpan ke server ({cookie_count} cookies aktif)",
+        "data": {
+            "exists": True,
+            "size_bytes": len(cleaned_content.encode("utf-8")),
+            "line_count": len(lines),
+            "cookie_count": cookie_count,
+        }
+    }
+
+
+@router.delete("/youtube-cookies")
+async def delete_youtube_cookies(user: CurrentUser = Depends(get_current_user)):
+    """Delete cookies.txt from the server."""
+    backend_dir_cookies = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../cookies.txt")
+    )
+    backend_cookies = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../../cookies.txt")
+    )
+    root_cookies = os.path.abspath("cookies.txt")
+
+    deleted = False
+    for p in [backend_dir_cookies, backend_cookies, root_cookies]:
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+                deleted = True
+            except Exception as e:
+                logger.warning(f"Failed deleting cookies from {p}: {e}")
+
+    return {
+        "success": True,
+        "message": "YouTube cookies berhasil dihapus dari server" if deleted else "Tidak ada file cookies yang aktif",
+    }
+
+
+@router.post("/youtube-cookies/test")
+async def test_youtube_cookies(user: CurrentUser = Depends(get_current_user)):
+    """Test YouTube cookies by probing a video with yt-dlp."""
+    import asyncio
+    from src.infrastructure.downloader import _get_ytdlp_cmd, _get_cookie_args
+
+    cookie_args = _get_cookie_args()
+    if not cookie_args:
+        return {
+            "success": False,
+            "message": "Tidak ada file cookies.txt yang aktif di server. Silakan upload cookies terlebih dahulu.",
+        }
+
+    ytdlp_cmd = _get_ytdlp_cmd()
+    test_url = "https://www.youtube.com/watch?v=0CXYYF4V9WM"
+
+    cmd = [
+        ytdlp_cmd,
+        "--geo-bypass",
+        *cookie_args,
+        "--dump-json",
+        "--no-download",
+        "--no-warnings",
+        test_url,
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
+
+        if proc.returncode == 0:
+            data = json.loads(stdout.decode())
+            title = data.get("title", "YouTube Video")
+            formats = len(data.get("formats", []))
+            return {
+                "success": True,
+                "message": f"Koneksi YouTube berhasil diverifikasi dengan cookies! ({formats} format video HD terdeteksi)",
+                "title": title,
+                "formats_count": formats,
+            }
+        else:
+            err = stderr.decode().strip()
+            return {
+                "success": False,
+                "message": f"Uji coba koneksi gagal: {err[:200]}",
+            }
+    except asyncio.TimeoutError:
+        return {
+            "success": False,
+            "message": "Uji coba timeout (20 detik). Server YouTube lambat merespons.",
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Error saat menguji cookies: {str(e)}",
+        }
+
+
+class AutoExtractCookiesRequest(BaseModel):
+    browser: Optional[str] = Field(default="auto", description="Browser to extract from: auto, chrome, brave, edge, firefox, safari")
+
+
+@router.post("/youtube-cookies/auto-extract")
+async def auto_extract_youtube_cookies(
+    req: AutoExtractCookiesRequest = AutoExtractCookiesRequest(),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Automatically extract YouTube cookies from installed browsers using yt-dlp without any extension."""
+    import asyncio
+    from src.infrastructure.downloader import _get_ytdlp_cmd
+
+    ytdlp_cmd = _get_ytdlp_cmd()
+
+    backend_dir_cookies = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../cookies.txt")
+    )
+    root_cookies = os.path.abspath("cookies.txt")
+
+    # Priority list of browsers to probe
+    requested_browser = (req.browser or "auto").lower().strip()
+    if requested_browser == "auto":
+        browsers_to_try = ["chrome", "brave", "edge", "firefox", "safari", "chromium", "opera"]
+    else:
+        browsers_to_try = [requested_browser]
+
+    test_url = "https://www.youtube.com/watch?v=0CXYYF4V9WM"
+    success_browser = None
+    last_err = ""
+
+    for b in browsers_to_try:
+        logger.info(f"Attempting auto-extracting YouTube cookies from browser: {b}")
+        cmd = [
+            ytdlp_cmd,
+            "--cookies-from-browser", b,
+            "--cookies", backend_dir_cookies,
+            "--dump-json",
+            "--no-download",
+            "--no-warnings",
+            test_url,
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+
+            if proc.returncode == 0 and os.path.exists(backend_dir_cookies) and os.path.getsize(backend_dir_cookies) > 0:
+                success_browser = b
+                try:
+                    import shutil
+                    shutil.copy2(backend_dir_cookies, root_cookies)
+                    os.chmod(backend_dir_cookies, 0o644)
+                    os.chmod(root_cookies, 0o644)
+                except Exception:
+                    pass
+                break
+            else:
+                last_err = stderr.decode().strip()
+        except Exception as e:
+            last_err = str(e)
+            logger.debug(f"Auto-extract from {b} failed: {e}")
+
+    if not success_browser or not os.path.exists(backend_dir_cookies):
+        return {
+            "success": False,
+            "message": f"Gagal mengekstrak cookies otomatis dari browser ({requested_browser}): {last_err[:200] if last_err else 'Tidak ada browser aktif dengan login YouTube'}. Anda dapat mengunggah file cookies.txt secara manual.",
+        }
+
+    stat = os.stat(backend_dir_cookies)
+    with open(backend_dir_cookies, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+    cookie_count = sum(1 for l in lines if l.strip() and not l.strip().startswith("#"))
+
+    return {
+        "success": True,
+        "message": f"Berhasil mengambil {cookie_count} cookies otomatis dari browser {success_browser.capitalize()}! YouTube session kini aktif.",
+        "browser_used": success_browser,
+        "data": {
+            "exists": True,
+            "size_bytes": stat.st_size,
+            "line_count": len(lines),
+            "cookie_count": cookie_count,
+            "last_modified": stat.st_mtime,
+            "path": backend_dir_cookies,
+        }
+    }

@@ -17,25 +17,28 @@ YOUTUBE_PATTERN = re.compile(
     r"(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/shorts/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})"
 )
 
-# Hierarchical format preference:
+# Hierarchical format preference enforcing >= 720p HD quality (never below 720p):
 # Layer 1: 1080p H.264 (avc1) + AAC (mp4a) -> Primary target for optimal decode/encode speed & HD quality
 # Layer 2: 1080p AV1 (av01) + AAC
-# Layer 3: 1080p VP9 + AAC
-# Layer 4: 1080p any codec + any audio
-# Layer 5: 720p H.264 (avc1) + AAC
-# Layer 6: 720p any codec
-# Layer 7: Best available under 1080p
-# Layer 8: Best available stream
+# Layer 3: 1080p VP9 + AAC / Opus
+# Layer 4: 1080p any codec + audio
+# Layer 5: Higher than 1080p (1440p / 2160p) + bestaudio
+# Layer 6: 720p H.264 (avc1) + AAC
+# Layer 7: 720p AV1 / VP9 + audio
+# Layer 8: Any stream with height >= 720
 YOUTUBE_FORMAT_SELECTOR = (
-    "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height<=1080][vcodec^=av01]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height<=1080][vcodec^=vp9]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height<=1080]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height<=1080]+bestaudio/"
-    "bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height<=720]+bestaudio/"
-    "best[height<=1080]/"
-    "best"
+    "bestvideo[height=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=1080][vcodec^=av01]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=1080][vcodec^=vp9]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=1080]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=1080]+bestaudio/"
+    "bestvideo[height>=1080]+bestaudio/"
+    "bestvideo[height>=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height>=720][vcodec^=av01]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height>=720]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height>=720]+bestaudio/"
+    "best[height>=720]/"
+    "bestvideo+bestaudio/best"
 )
 YOUTUBE_FORMAT_SORT = "res:1080,fps:60,vcodec:avc1,vcodec:av01,vcodec:vp9,br,size"
 
@@ -97,10 +100,10 @@ def _get_cookie_args() -> list[str]:
 
 def _get_extractor_args(has_cookies: bool = False) -> list[str]:
     """Extractor arguments.
-    web_embedded reliably delivers full 1080p/720p DASH streams (itags 137, 399, 140) without 403 or SABR issues even on headless Linux VPS."""
+    web,web_embedded,android_sdkless,tv delivers full 1080p/720p HD streams without requiring GVS PO Token."""
     if has_cookies:
         return []
-    return ["--extractor-args", "youtube:player_client=web_embedded,web"]
+    return ["--extractor-args", "youtube:player_client=web,web_embedded,android_sdkless,tv"]
 
 
 class YouTubeDownloader(IDownloader):
@@ -162,16 +165,18 @@ class YouTubeDownloader(IDownloader):
 
         if proc.returncode != 0:
             err = stderr.decode().strip()
+
+            # YouTube datacenter IP challenge (BotGuard) often causes yt-dlp to report "Video unavailable"
+            # Always verify with official YouTube oEmbed API first before rejecting!
+            oembed_ok, title = await self._validate_via_oembed(video_id)
+            if oembed_ok:
+                logger.info(f"validate_url: yt-dlp challenged on VPS, successfully verified via official oEmbed: {title}")
+                return True, title, min(120.0, float(settings.MAX_VIDEO_DURATION))
+
             if "Private video" in err or "private" in err.lower():
                 return False, "Video bersifat private dan tidak dapat diakses", None
             if "unavailable" in err.lower() or "not available" in err.lower():
-                return False, "Video tidak tersedia", None
-
-            # Fallback to oEmbed if yt-dlp was challenged by bot verification
-            oembed_ok, title = await self._validate_via_oembed(video_id)
-            if oembed_ok:
-                logger.info(f"validate_url: yt-dlp exit non-zero, successfully validated via oEmbed: {title}")
-                return True, title, min(120.0, float(settings.MAX_VIDEO_DURATION))
+                return False, "Video tidak tersedia atau telah dihapus dari YouTube", None
 
             return False, f"Video tidak dapat diverifikasi: {err[:200]}", None
 
@@ -280,13 +285,19 @@ class YouTubeDownloader(IDownloader):
 
         if proc.returncode != 0:
             err = stderr.decode().strip()
-            # If 403 / SABR occurs on first attempt, retry once with fallback format and ios client
-            if "403" in err or "Forbidden" in err or "SABR" in err:
-                logger.warning("[AutoCliper Downloader] 403 Forbidden/SABR terdeteksi; mencoba fallback dengan ios player client...")
+            # If 403 / SABR / unavailable / bot challenge occurs, retry with alternative client tiers
+            client_tiers = [
+                "youtube:player_client=web_embedded,android_sdkless",
+                "youtube:player_client=tv,android_sdkless",
+                "youtube:player_client=android_creator,web_embedded",
+                "youtube:player_client=web_embedded,android_vr",
+            ]
+            for client_arg in client_tiers:
+                logger.warning(f"[AutoCliper Downloader] Mencoba download fallback dengan {client_arg}...")
                 retry_cmd = [
                     ytdlp_cmd,
                     "--geo-bypass",
-                    "--extractor-args", "youtube:player_client=web_embedded,android_vr",
+                    "--extractor-args", client_arg,
                     *_get_cookie_args(),
                     "--format-sort", YOUTUBE_FORMAT_SORT,
                     "-f", YOUTUBE_FORMAT_SELECTOR,
@@ -296,20 +307,23 @@ class YouTubeDownloader(IDownloader):
                     "--no-warnings",
                     clean_url,
                 ]
-                retry_proc = await asyncio.create_subprocess_exec(
-                    *retry_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=env,
-                )
-                r_stdout, r_stderr = await asyncio.wait_for(
-                    retry_proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
-                )
-                if retry_proc.returncode == 0:
-                    logger.info("[AutoCliper Downloader] Fallback download berhasil!")
-                    await self._validate_media_file(output_path)
-                    return True
-                err = r_stderr.decode().strip()
+                try:
+                    retry_proc = await asyncio.create_subprocess_exec(
+                        *retry_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        env=env,
+                    )
+                    r_stdout, r_stderr = await asyncio.wait_for(
+                        retry_proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
+                    )
+                    if retry_proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                        logger.info(f"[AutoCliper Downloader] Fallback download berhasil dengan {client_arg}!")
+                        await self._validate_media_file(output_path)
+                        return True
+                    err = r_stderr.decode().strip()
+                except Exception as ex:
+                    logger.debug(f"[AutoCliper Downloader] Retry {client_arg} error: {ex}")
 
             logger.error(f"[AutoCliper Downloader] Gagal mengunduh: {err[:300]}")
             raise RuntimeError(f"Download gagal: {err[:300]}")

@@ -919,3 +919,46 @@ export const systemConfig = {
     });
   },
 };
+
+export interface YouTubeCookiesStatus {
+  exists: boolean;
+  size_bytes: number;
+  line_count: number;
+  cookie_count: number;
+  last_modified: number | null;
+  path: string;
+  error?: string;
+}
+
+export const youtubeCookies = {
+  async getStatus(): Promise<{ success: boolean; data: YouTubeCookiesStatus }> {
+    return request<{ success: boolean; data: YouTubeCookiesStatus }>("/api/settings/youtube-cookies");
+  },
+  async saveCookies(content: string): Promise<{ success: boolean; message: string; data?: Partial<YouTubeCookiesStatus> }> {
+    return request("/api/settings/youtube-cookies", {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  },
+  async deleteCookies(): Promise<{ success: boolean; message: string }> {
+    return request("/api/settings/youtube-cookies", {
+      method: "DELETE",
+    });
+  },
+  async testCookies(): Promise<{ success: boolean; message: string; title?: string; formats_count?: number }> {
+    return request("/api/settings/youtube-cookies/test", {
+      method: "POST",
+    });
+  },
+  async autoExtract(browser: string = "auto"): Promise<{
+    success: boolean;
+    message: string;
+    browser_used?: string;
+    data?: YouTubeCookiesStatus;
+  }> {
+    return request("/api/settings/youtube-cookies/auto-extract", {
+      method: "POST",
+      body: JSON.stringify({ browser }),
+    });
+  },
+};

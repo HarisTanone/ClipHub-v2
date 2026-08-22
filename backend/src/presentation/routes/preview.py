@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 @router.get("/preview")
 async def get_video_preview(url: str = Query(..., description="YouTube URL")):
     """Fetch YouTube video metadata for preview (title, thumbnail, duration)."""
-    from src.infrastructure.downloader import extract_youtube_video_id
+    from src.infrastructure.downloader import (
+        extract_youtube_video_id,
+        _get_ytdlp_cmd,
+        _get_extractor_args,
+        _get_cookie_args,
+    )
     
     video_id = extract_youtube_video_id(url)
     if not video_id:
@@ -40,8 +45,14 @@ async def get_video_preview(url: str = Query(..., description="YouTube URL")):
     try:
         import subprocess
         import json
+        ytdlp_cmd = _get_ytdlp_cmd()
+        cookie_args = _get_cookie_args()
+        extractor_args = _get_extractor_args(has_cookies=bool(cookie_args))
         cmd = [
-            "yt-dlp",
+            ytdlp_cmd,
+            "--geo-bypass",
+            *extractor_args,
+            *cookie_args,
             "--dump-json",
             "--no-download",
             "--no-warnings",
