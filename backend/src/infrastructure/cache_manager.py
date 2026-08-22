@@ -150,6 +150,24 @@ class CacheManager:
 
     # ─── Invalidate ───────────────────────────────────────────────────────────
 
+    def invalidate(self, video_id: str) -> None:
+        """Remove all cached files for a given video_id."""
+        if not video_id:
+            return
+        paths = [
+            self._video_path(video_id),
+            self._transcript_path(video_id),
+            self._analysis_path(video_id, "v1"),
+            self._analysis_path(video_id, "v2"),
+        ]
+        for p in paths:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                    logger.info(f"cache: invalidated {p}")
+                except Exception as e:
+                    logger.warning(f"cache: failed to remove {p}: {e}")
+
     def cleanup_expired_analyze_sessions(self, max_age_seconds: int = 86400) -> int:
         """Clean up temporary analyze session video files older than max_age_seconds."""
         import time
