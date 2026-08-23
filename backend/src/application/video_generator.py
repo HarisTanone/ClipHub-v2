@@ -55,9 +55,9 @@ class VideoGenJob:
     status: VideoGenStatus = VideoGenStatus.QUEUED
     progress: int = 0  # 0-100
     target_duration: int = 65
-    tts_provider: str = "elevenlabs"
-    tts_model: str = "eleven_multilingual_v2"
-    voice: str = ""
+    tts_provider: str = "gemini"
+    tts_model: str = "gemini-3.1-flash-tts-preview"
+    voice: str = "Kore"
     speed: float = 1.0
     instructions: str = ""
     num_scenes: int = 0
@@ -255,8 +255,8 @@ class VideoGenerator:
             if ("hook_style_json" in row.keys() and row["hook_style_json"])
             else {}
         )
-        tts_provider = row["tts_provider"] if ("tts_provider" in row.keys() and row["tts_provider"]) else "elevenlabs"
-        tts_model = row["tts_model"] if ("tts_model" in row.keys() and row["tts_model"]) else "eleven_multilingual_v2"
+        tts_provider = row["tts_provider"] if ("tts_provider" in row.keys() and row["tts_provider"]) else "gemini"
+        tts_model = row["tts_model"] if ("tts_model" in row.keys() and row["tts_model"]) else "gemini-3.1-flash-tts-preview"
 
         return VideoGenJob(
             job_id=row["job_id"],
@@ -266,7 +266,7 @@ class VideoGenerator:
             target_duration=int(row["target_duration"] or 65),
             tts_provider=tts_provider,
             tts_model=tts_model,
-            voice=row["voice"] or "",
+            voice=row["voice"] or "Kore",
             speed=float(row["speed"] or 1.0),
             instructions=row["instructions"] or "",
             num_scenes=int(row["num_scenes"]) if "num_scenes" in row.keys() and row["num_scenes"] is not None else 0,
@@ -309,15 +309,17 @@ class VideoGenerator:
     ) -> VideoGenJob:
         """Create a new video generation job."""
         job_id = uuid4().hex[:12]
-        resolved_provider = (tts_provider or getattr(settings, "VIDEO_GEN_TTS_PROVIDER", "elevenlabs") or "elevenlabs").lower()
+        resolved_provider = (tts_provider or getattr(settings, "VIDEO_GEN_TTS_PROVIDER", "gemini") or "gemini").lower()
         if "deepgram" in resolved_provider:
             resolved_provider = "deepgram"
             default_voice = settings.DEEPGRAM_TTS_VOICE
+            default_model = "aura-2-thalia-en"
         else:
-            resolved_provider = "elevenlabs"
-            default_voice = getattr(settings, "ELEVENLABS_VOICE_ID", "rUOpAdbAl56KxO00wR5D")
+            resolved_provider = "gemini"
+            default_voice = getattr(settings, "GEMINI_TTS_VOICE", "Kore")
+            default_model = getattr(settings, "GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 
-        resolved_model = tts_model or getattr(settings, "ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+        resolved_model = tts_model or default_model
 
         job = VideoGenJob(
             job_id=job_id,
@@ -888,22 +890,22 @@ class VideoGenerator:
     async def _step_generate_tts(
         self, scenes: list[dict], job: VideoGenJob, work_dir: str
     ) -> list[dict]:
-        """Step 4: Generate TTS audio per scene via ElevenLabs, Deepgram, or failproof EdgeTTS."""
+        """Step 4: Generate TTS audio per scene via Gemini TTS (default), Deepgram, or failproof EdgeTTS."""
         tts_dir = os.path.join(work_dir, "tts")
         os.makedirs(tts_dir, exist_ok=True)
 
-        provider = (job.tts_provider or getattr(settings, "VIDEO_GEN_TTS_PROVIDER", "elevenlabs") or "elevenlabs").lower()
+        provider = (job.tts_provider or getattr(settings, "VIDEO_GEN_TTS_PROVIDER", "gemini") or "gemini").lower()
         if "deepgram" in provider or (job.voice and "aura" in job.voice.lower()):
             primary_provider = "deepgram"
         else:
-            primary_provider = "elevenlabs"
+            primary_provider = "gemini"
 
         # ── 1. Try Primary Provider ──
-        if primary_provider == "elevenlabs":
-            from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
-            tts = ElevenLabsTTS(output_dir=tts_dir)
-            voice_id = job.voice or getattr(settings, "ELEVENLABS_VOICE_ID", "rUOpAdbAl56KxO00wR5D")
-            model_id = job.tts_model or getattr(settings, "ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+        if primary_provider == "gemini":
+            from src.infrastructure.gemini_tts import GeminiTTS
+            tts = GeminiTTS(output_dir=tts_dir)
+            voice_id = job.voice or getattr(settings, "GEMINI_TTS_VOICE", "Kore")
+            model_id = job.tts_model or getattr(settings, "GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 
             try:
                 scenes = await tts.synthesize_scenes(
@@ -913,7 +915,7 @@ class VideoGenerator:
                     speed=job.speed,
                 )
             except Exception as exc:
-                logger.warning(f"video_gen: ElevenLabs synthesize_scenes failed ({exc}), falling back to individual calls")
+                logger.warning(f"video_gen: GeminiTTS synthesize_scenes failed ({exc}), falling back to individual calls")
                 for i, scene in enumerate(scenes):
                     narration = (scene.get("narration") or "").strip()
                     if not narration or scene.get("tts_path"):
@@ -931,7 +933,7 @@ class VideoGenerator:
                             scene["tts_path"] = audio_path
                             scene["tts_duration"] = dur
                     except Exception as e:
-                        logger.warning(f"video_gen: ElevenLabs TTS failed for scene {i + 1}: {e}")
+                        logger.warning(f"video_gen: Gemini TTS failed for scene {i + 1}: {e}")
 
         else:
             from src.infrastructure.deepgram_tts import DeepgramTTS
@@ -967,7 +969,7 @@ class VideoGenerator:
         # ── 2. Fallback to Secondary Provider for any failed scenes ──
         missing_scenes = [s for s in scenes if not s.get("tts_path") and (s.get("narration") or "").strip()]
         if missing_scenes:
-            sec_provider = "deepgram" if primary_provider == "elevenlabs" else "elevenlabs"
+            sec_provider = "deepgram" if primary_provider == "gemini" else "gemini"
             logger.info(f"video_gen: {len(missing_scenes)} scenes missing audio, attempting secondary provider '{sec_provider}'")
             if sec_provider == "deepgram":
                 try:
@@ -984,8 +986,8 @@ class VideoGenerator:
                     logger.warning(f"video_gen: secondary Deepgram fallback failed: {sec_err}")
             else:
                 try:
-                    from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
-                    sec_tts = ElevenLabsTTS(output_dir=tts_dir)
+                    from src.infrastructure.gemini_tts import GeminiTTS
+                    sec_tts = GeminiTTS(output_dir=tts_dir)
                     for i, scene in enumerate(scenes):
                         if not scene.get("tts_path") and (scene.get("narration") or "").strip():
                             a_path = await sec_tts.synthesize(text=scene["narration"].strip(), speed=job.speed)
@@ -994,7 +996,7 @@ class VideoGenerator:
                                 scene["tts_path"] = a_path
                                 scene["tts_duration"] = dur
                 except Exception as sec_err:
-                    logger.warning(f"video_gen: secondary ElevenLabs fallback failed: {sec_err}")
+                    logger.warning(f"video_gen: secondary Gemini TTS fallback failed: {sec_err}")
 
         # ── 3. Failproof Tertiary Fallback: EdgeTTS (Free Neural TTS) ──
         still_missing = [s for s in scenes if not s.get("tts_path") and (s.get("narration") or "").strip()]

@@ -25,9 +25,10 @@ router = APIRouter(prefix="/video-generator", tags=["video-generator"])
 class GenerateVideoRequest(BaseModel):
     topic: str = Field(..., min_length=3, max_length=500, description="Video topic")
     target_duration: int = Field(default=0, ge=0, le=120, description="Target duration in seconds (0=default)")
-    tts_provider: Optional[str] = Field(default="elevenlabs", description="TTS provider: elevenlabs or deepgram")
-    tts_model: Optional[str] = Field(default="eleven_multilingual_v2", description="ElevenLabs model ID")
-    voice: str = Field(default="", max_length=100, description="TTS voice model/ID (empty=default)")
+    tts_provider: Optional[str] = Field(default="gemini", description="TTS provider: gemini or deepgram")
+    tts_model: Optional[str] = Field(default="gemini-3.1-flash-tts-preview", description="Gemini TTS model ID")
+    voice: str = Field(default="Kore", max_length=100, description="TTS voice model/ID (empty=default)")
+    voice_style: Optional[str] = Field(default="", max_length=100, description="Voice style or regional accent (e.g. id_jakarta, id_formal, id_jawa)")
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="TTS speed multiplier")
     instructions: str = Field(default="", max_length=1000, description="Additional instructions for AI")
     num_scenes: int = Field(default=0, ge=0, le=25, description="Number of scenes (0=auto)")
@@ -59,9 +60,10 @@ class JobStatusResponse(BaseModel):
     progress: int
     step_label: str = ""
     target_duration: int
-    tts_provider: Optional[str] = "elevenlabs"
-    tts_model: Optional[str] = "eleven_multilingual_v2"
-    voice: str
+    tts_provider: Optional[str] = "gemini"
+    tts_model: Optional[str] = "gemini-3.1-flash-tts-preview"
+    voice: str = "Kore"
+    voice_style: Optional[str] = ""
     speed: float = 1.0
     num_scenes: int = 0
     subtitles_enabled: bool = True
@@ -93,7 +95,7 @@ class JobListResponse(BaseModel):
 class VoiceOption(BaseModel):
     key: str
     model: str
-    provider: str = "elevenlabs"
+    provider: str = "gemini"
     description: Optional[str] = None
     category: Optional[str] = None
     gender: Optional[str] = None
@@ -102,12 +104,15 @@ class VoiceOption(BaseModel):
     country: Optional[str] = None
     flag: Optional[str] = None
     preview_url: Optional[str] = None
+    voice_id: Optional[str] = None
+    style_id: Optional[str] = None
 
 
 class TTSModelOption(BaseModel):
     model_id: str
     name: str
     description: Optional[str] = None
+    free_tier: Optional[bool] = True
     languages: Optional[list[str]] = None
 
 
@@ -480,13 +485,10 @@ async def list_tts_providers(
     """List available TTS providers and their configuration status."""
     from src.infrastructure.system_config_store import get_system_setting
 
-    eleven_key = (
-        get_system_setting("ELEVENLABS_API_KEY")
-        or get_system_setting("ELEVEN_API_KEY")
-        or getattr(settings, "ELEVENLABS_API_KEY", "")
-        or getattr(settings, "ELEVEN_API_KEY", "")
-        or os.getenv("ELEVENLABS_API_KEY", "")
-        or os.getenv("ELEVEN_API_KEY", "")
+    gemini_key = (
+        get_system_setting("GEMINI_API_KEY")
+        or getattr(settings, "GEMINI_API_KEY", "")
+        or os.getenv("GEMINI_API_KEY", "")
     )
     deepgram_key = (
         get_system_setting("DEEPGRAM_API_KEY")
@@ -496,17 +498,17 @@ async def list_tts_providers(
 
     return [
         TTSProviderOption(
-            id="elevenlabs",
-            name="ElevenLabs (Studio AI)",
-            description="Ultra-high fidelity multilingual voice synthesis with natural emotion & tone",
-            is_configured=bool(eleven_key and str(eleven_key).strip()),
-            default_model="eleven_multilingual_v2",
-            default_voice=getattr(settings, "ELEVENLABS_VOICE_ID", "rUOpAdbAl56KxO00wR5D"),
+            id="gemini",
+            name="Google Gemini (Flash TTS)",
+            description="⭐ Native Indonesian & English speech synthesis with rich expressive regional styles (Free Tier & Pro)",
+            is_configured=bool(gemini_key and str(gemini_key).strip()),
+            default_model="gemini-3.1-flash-tts-preview",
+            default_voice="Kore",
         ),
         TTSProviderOption(
             id="deepgram",
             name="Deepgram (Aura)",
-            description="Fast Aura voice models (optional)",
+            description="Fast Aura voice models (optional fallback)",
             is_configured=bool(deepgram_key and str(deepgram_key).strip()),
             default_model="aura-2-thalia-en",
             default_voice=settings.DEEPGRAM_TTS_VOICE,
@@ -518,15 +520,16 @@ async def list_tts_providers(
 async def list_models(
     user: CurrentUser = Depends(require_superadmin()),
 ):
-    """Fetch available text-to-speech models from ElevenLabs (GET https://api.elevenlabs.io/v1/models)."""
-    from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
+    """Fetch available text-to-speech models from Gemini TTS."""
+    from src.infrastructure.gemini_tts import GeminiTTS
 
-    raw_models = await ElevenLabsTTS.fetch_models()
+    raw_models = await GeminiTTS.fetch_models()
     return [
         TTSModelOption(
             model_id=m.get("model_id"),
             name=m.get("name") or m.get("model_id"),
             description=m.get("description"),
+            free_tier=m.get("free_tier", True),
             languages=m.get("languages"),
         )
         for m in raw_models
@@ -535,30 +538,33 @@ async def list_models(
 
 @router.get("/voices", response_model=list[VoiceOption])
 async def list_voices(
-    provider: Optional[str] = Query(None, description="elevenlabs or deepgram"),
+    provider: Optional[str] = Query(None, description="gemini or deepgram"),
+    language: Optional[str] = Query(None, description="id, en, or all"),
     user: CurrentUser = Depends(require_superadmin()),
 ):
-    """List available TTS voices for ElevenLabs and/or Deepgram."""
+    """List available TTS voices for Gemini and/or Deepgram."""
     results: list[VoiceOption] = []
     prov_clean = (provider or "").strip().lower()
 
-    if not prov_clean or prov_clean == "elevenlabs":
-        from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
-        eleven_voices = await ElevenLabsTTS.fetch_voices()
-        for v in eleven_voices:
+    if not prov_clean or prov_clean == "gemini":
+        from src.infrastructure.gemini_tts import GeminiTTS
+        gemini_voices = await GeminiTTS.fetch_voices(language=language)
+        for v in gemini_voices:
             results.append(
                 VoiceOption(
-                    key=v.get("name") or v.get("voice_id"),
-                    model=v.get("voice_id"),
-                    provider="elevenlabs",
+                    key=v.get("key"),
+                    model=v.get("model"),
+                    provider="gemini",
                     description=v.get("description"),
                     category=v.get("category"),
                     gender=v.get("gender"),
                     accent=v.get("accent"),
                     language=v.get("language"),
-                    country=v.get("country") or "Global / Multi",
-                    flag=v.get("flag") or "🌐",
+                    country=v.get("country") or "Indonesia / Global",
+                    flag=v.get("flag") or "🇮🇩",
                     preview_url=v.get("preview_url"),
+                    voice_id=v.get("voice_id"),
+                    style_id=v.get("style_id"),
                 )
             )
 
@@ -578,6 +584,8 @@ async def list_voices(
                     country="United States",
                     flag="🇺🇸",
                     preview_url=None,
+                    voice_id=key,
+                    style_id=None,
                 )
             )
 

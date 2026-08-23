@@ -130,6 +130,7 @@ interface TTSModelOption {
   model_id: string;
   name: string;
   description?: string;
+  free_tier?: boolean;
   languages?: string[];
 }
 
@@ -1338,11 +1339,11 @@ export function VideoGeneratorPage() {
   // Basic narrative state
   const [topic, setTopic] = useState("");
   const [targetDuration, setTargetDuration] = useState(65);
-  const [ttsProvider, setTtsProvider] = useState<"elevenlabs" | "deepgram">("elevenlabs");
-  const [ttsModel, setTtsModel] = useState<string>("eleven_multilingual_v2");
+  const [ttsProvider, setTtsProvider] = useState<"gemini" | "deepgram">("gemini");
+  const [ttsModel, setTtsModel] = useState<string>("gemini-3.1-flash-tts-preview");
   const [ttsModels, setTtsModels] = useState<TTSModelOption[]>([]);
   const [ttsProviders, setTtsProviders] = useState<TTSProviderOption[]>([]);
-  const [voice, setVoice] = useState("");
+  const [voice, setVoice] = useState("Kore");
   const [customVoiceId, setCustomVoiceId] = useState("");
   const [selectedCountry, setSelectedCountry] = useState<string>("All");
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
@@ -1495,16 +1496,16 @@ export function VideoGeneratorPage() {
         setTtsModels(response);
       } else {
         setTtsModels([
-          { model_id: "eleven_multilingual_v2", name: "Eleven Multilingual v2", description: "Rich emotion, 29 languages" },
-          { model_id: "eleven_flash_v2_5", name: "Eleven Flash v2.5", description: "Ultra low latency, 32 languages" },
-          { model_id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5", description: "Fast high-quality, 32 languages" },
+          { model_id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", description: "⭐ Model terbaru, sangat ekspresif, respons cepat & intonasi natural (Free Tier)", free_tier: true },
+          { model_id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS", description: "Cepat, efisien, optimal untuk batch & volume tinggi (Free Tier)", free_tier: true },
+          { model_id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS", description: "Kualitas studio audio tinggi, podcast & narasi mendalam", free_tier: false },
         ]);
       }
     } catch {
       setTtsModels([
-        { model_id: "eleven_multilingual_v2", name: "Eleven Multilingual v2", description: "Rich emotion, 29 languages" },
-        { model_id: "eleven_flash_v2_5", name: "Eleven Flash v2.5", description: "Ultra low latency, 32 languages" },
-        { model_id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5", description: "Fast high-quality, 32 languages" },
+        { model_id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", description: "⭐ Model terbaru, sangat ekspresif, respons cepat & intonasi natural (Free Tier)", free_tier: true },
+        { model_id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS", description: "Cepat, efisien, optimal untuk batch & volume tinggi (Free Tier)", free_tier: true },
+        { model_id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS", description: "Kualitas studio audio tinggi, podcast & narasi mendalam", free_tier: false },
       ]);
     }
   }, []);
@@ -1621,7 +1622,7 @@ export function VideoGeneratorPage() {
           topic: topic.trim(),
           target_duration: targetDuration,
           tts_provider: ttsProvider,
-          tts_model: ttsProvider === "elevenlabs" ? ttsModel : undefined,
+          tts_model: ttsProvider === "gemini" ? ttsModel : undefined,
           voice: selectedVoice,
           speed,
           num_scenes: numScenes,
@@ -1660,7 +1661,7 @@ export function VideoGeneratorPage() {
           topic: topic.trim(),
           target_duration: targetDuration,
           tts_provider: ttsProvider,
-          tts_model: ttsProvider === "elevenlabs" ? ttsModel : undefined,
+          tts_model: ttsProvider === "gemini" ? ttsModel : undefined,
           voice: selectedVoice,
           speed,
           num_scenes: numScenes,
@@ -1916,7 +1917,7 @@ export function VideoGeneratorPage() {
                       </h3>
                     </div>
                     <span className="text-[11px] text-zinc-400 font-medium">
-                      {ttsProvider === "elevenlabs" ? "ElevenLabs Studio TTS" : "Deepgram Aura TTS"}
+                      {ttsProvider === "gemini" ? "Google Gemini Flash TTS" : "Deepgram Aura TTS"}
                     </span>
                   </div>
 
@@ -1929,18 +1930,18 @@ export function VideoGeneratorPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          setTtsProvider("elevenlabs");
-                          setVoice("");
+                          setTtsProvider("gemini");
+                          setVoice("Kore");
                         }}
                         className={`flex items-center justify-between rounded-lg border p-2.5 text-left transition ${
-                          ttsProvider === "elevenlabs"
+                          ttsProvider === "gemini"
                             ? "border-violet-500/60 bg-violet-500/10 text-zinc-100 shadow-xs"
                             : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
                         }`}
                       >
                         <div>
-                          <div className="text-xs font-semibold text-zinc-100">ElevenLabs</div>
-                          <div className="text-[10px] text-zinc-400">Studio AI · 29+ Languages</div>
+                          <div className="text-xs font-semibold text-zinc-100">Google Gemini</div>
+                          <div className="text-[10px] text-zinc-400">Flash TTS · Native ID & EN</div>
                         </div>
                         <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[9px] font-bold text-violet-300">
                           Recommended
@@ -1971,14 +1972,14 @@ export function VideoGeneratorPage() {
                     </div>
                   </div>
 
-                  {/* ElevenLabs Model, Country Filter, and Voice Controls */}
-                  {ttsProvider === "elevenlabs" ? (
+                  {/* Gemini TTS Model, Region/Style Filter, and Voice Controls */}
+                  {ttsProvider === "gemini" ? (
                     <div className="space-y-3">
                       <div className="grid gap-3 sm:grid-cols-2">
-                        {/* ElevenLabs Models */}
+                        {/* Gemini Models */}
                         <div>
                           <label htmlFor="video-tts-model" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                            ElevenLabs Model
+                            Model Gemini TTS
                           </label>
                           <select
                             id="video-tts-model"
@@ -1988,7 +1989,7 @@ export function VideoGeneratorPage() {
                           >
                             {ttsModels.map((m) => (
                               <option key={m.model_id} value={m.model_id}>
-                                {m.name || m.model_id}
+                                {m.name || m.model_id} {m.free_tier ? "· [Free Tier]" : "· [Pro]"}
                               </option>
                             ))}
                           </select>
@@ -1998,7 +1999,7 @@ export function VideoGeneratorPage() {
                         <div>
                           <label htmlFor="video-country-filter" className="mb-1.5 flex items-center gap-1 text-xs font-medium text-zinc-300">
                             <Globe className="h-3.5 w-3.5 text-violet-400" />
-                            Filter Negara / Aksen
+                            Filter Bahasa &amp; Gaya Daerah
                           </label>
                           <select
                             id="video-country-filter"
@@ -2008,19 +2009,19 @@ export function VideoGeneratorPage() {
                           >
                             {availableCountries.map((c) => (
                               <option key={c} value={c}>
-                                {c === "All" ? "🌐 Semua Negara / Bahasa" : c === "Indonesia" ? "🇮🇩 Indonesia" : c}
+                                {c === "All" ? "🌐 Semua Bahasa & Gaya" : c === "Indonesia" ? "🇮🇩 Bahasa Indonesia (Semua Gaya Daerah)" : c}
                               </option>
                             ))}
                           </select>
                         </div>
                       </div>
 
-                      {/* ElevenLabs Voice List & Preview Player */}
+                      {/* Gemini Voice List & Details */}
                       <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/50 p-3 space-y-2.5">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex-1">
                             <label htmlFor="video-voice" className="mb-1 block text-xs font-medium text-zinc-300">
-                              Karakter Suara / Voice ({filteredVoices.length} Suara)
+                              Karakter Suara &amp; Gaya Bicara ({filteredVoices.length} Variasi)
                             </label>
                             <select
                               id="video-voice"
@@ -2035,44 +2036,14 @@ export function VideoGeneratorPage() {
                               }}
                               className="w-full rounded-lg border border-zinc-800 bg-zinc-900/90 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
                             >
-                              <option value="">Default Studio Voice (rUOpAdbAl56KxO00wR5D)</option>
+                              <option value="Kore">✨ Kore · Default Native Voice</option>
                               {filteredVoices.map((option) => (
                                 <option key={option.model || option.key} value={option.model}>
-                                  {option.flag || "🌐"} {option.key} {option.accent ? `(${option.accent})` : ""}
+                                  {option.key} {option.gender ? `(${option.gender})` : ""}
                                 </option>
                               ))}
-                              <option value="custom">✏️ Gunakan Custom Voice ID sendiri...</option>
+                              <option value="custom">✏️ Gunakan Prebuilt Voice Name custom...</option>
                             </select>
-                          </div>
-
-                          {/* Audio Preview Button */}
-                          <div className="sm:pt-5">
-                            {activeVoiceOption?.preview_url ? (
-                              <button
-                                type="button"
-                                onClick={() => handleTogglePlayVoice(activeVoiceOption)}
-                                className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition border ${
-                                  playingVoiceId === activeVoiceOption.model
-                                    ? "border-violet-400 bg-violet-600 text-white shadow-xs animate-pulse"
-                                    : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-                                }`}
-                                title="Dengar contoh audio suara ini"
-                              >
-                                {playingVoiceId === activeVoiceOption.model ? (
-                                  <>
-                                    <Pause className="h-3.5 w-3.5 fill-current" />
-                                    <span>Berhenti</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play className="h-3.5 w-3.5 fill-current" />
-                                    <span>Dengar Suara</span>
-                                  </>
-                                )}
-                              </button>
-                            ) : customVoiceId ? (
-                              <span className="text-[11px] text-zinc-500 font-mono italic">Custom Voice</span>
-                            ) : null}
                           </div>
                         </div>
 
@@ -2083,11 +2054,34 @@ export function VideoGeneratorPage() {
                               type="text"
                               value={customVoiceId}
                               onChange={(e) => setCustomVoiceId(e.target.value)}
-                              placeholder="Ketik atau tempel ElevenLabs Voice ID (contoh: rUOpAdbAl56KxO00wR5D)"
+                              placeholder="Ketik nama voice Gemini (contoh: Kore, Puck, Fenrir, Aoede, Charon, Leda, Zephyr, Orus)"
                               className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60 font-mono"
                             />
                           </div>
                         )}
+                      </div>
+
+                      {/* Pacing & Info */}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <label htmlFor="video-speed" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                            Pacing / Kecepatan Bicara
+                          </label>
+                          <select
+                            id="video-speed"
+                            value={speed}
+                            onChange={(event) => setSpeed(Number(event.target.value))}
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                          >
+                            <option value={0.85}>Calm · 0.85×</option>
+                            <option value={1}>Natural · 1.0×</option>
+                            <option value={1.15}>Energetic · 1.15×</option>
+                            <option value={1.3}>Fast · 1.3×</option>
+                          </select>
+                        </div>
+                        <div className="flex items-center text-[11px] text-zinc-400 pt-5">
+                          ✨ Google Gemini TTS Audio API terhubung dari Settings &gt; Database &amp; Env Config.
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -2130,31 +2124,6 @@ export function VideoGeneratorPage() {
                           <option value={1.15}>Energetic · 1.15×</option>
                           <option value={1.3}>Fast · 1.3×</option>
                         </select>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Pacing for ElevenLabs */}
-                  {ttsProvider === "elevenlabs" && (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <label htmlFor="video-speed" className="mb-1.5 block text-xs font-medium text-zinc-300">
-                          Pacing
-                        </label>
-                        <select
-                          id="video-speed"
-                          value={speed}
-                          onChange={(event) => setSpeed(Number(event.target.value))}
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
-                        >
-                          <option value={0.85}>Calm · 0.85×</option>
-                          <option value={1}>Natural · 1.0×</option>
-                          <option value={1.15}>Energetic · 1.15×</option>
-                          <option value={1.3}>Fast · 1.3×</option>
-                        </select>
-                      </div>
-                      <div className="flex items-center text-[11px] text-zinc-500 pt-5">
-                        ElevenLabs API Key is configured in Settings &gt; Database &amp; Env Config.
                       </div>
                     </div>
                   )}
@@ -2266,7 +2235,7 @@ export function VideoGeneratorPage() {
                   <span className="font-mono text-zinc-300">1080×1920 9:16</span>
                   <span className="text-zinc-700">•</span>
                   <span>
-                    {ttsProvider === "elevenlabs" ? "ElevenLabs AI" : "Deepgram Aura"} ({speed}×)
+                    {ttsProvider === "gemini" ? "Google Gemini TTS" : "Deepgram Aura"} ({speed}×)
                   </span>
                   <span className="text-zinc-700">•</span>
                   <span className={hookEnabled ? "text-violet-300" : "text-zinc-600"}>

@@ -327,38 +327,41 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_tts_models_and_voices():
-    from src.infrastructure.elevenlabs_tts import ElevenLabsTTS
+async def test_gemini_tts_models_and_voices():
+    from src.infrastructure.gemini_tts import GeminiTTS
 
-    # Models fetching test with fallback
-    models = await ElevenLabsTTS.fetch_models(api_key="test-key")
-    assert len(models) > 0
-    assert any(m["model_id"] == "eleven_multilingual_v2" for m in models)
+    # Models fetching test
+    models = await GeminiTTS.fetch_models()
+    assert len(models) >= 3
+    assert any(m["model_id"] == "gemini-3.1-flash-tts-preview" for m in models)
+    assert any(m["model_id"] == "gemini-2.5-flash-preview-tts" for m in models)
 
-    # Voices fetching test with fallback
-    voices = await ElevenLabsTTS.fetch_voices(api_key="test-key")
+    # Voices fetching test with Indonesian and English styles
+    voices = await GeminiTTS.fetch_voices()
     assert len(voices) > 0
-    assert any("rUOpAdbAl56KxO00wR5D" in str(v.get("voice_id")) for v in voices)
+    assert any(v.get("voice_id") == "Kore" for v in voices)
+    assert any(v.get("language") == "id" for v in voices)
+    assert any(v.get("language") == "en" for v in voices)
 
 
 def test_video_generator_tts_provider_persistence(tmp_path):
     generator = VideoGenerator(output_dir=str(tmp_path))
 
     job1 = generator.create_job(
-        topic="ElevenLabs Test",
-        tts_provider="elevenlabs",
-        tts_model="eleven_turbo_v2_5",
-        voice="rUOpAdbAl56KxO00wR5D",
+        topic="Gemini TTS Test",
+        tts_provider="gemini",
+        tts_model="gemini-3.1-flash-tts-preview",
+        voice="Kore",
     )
-    assert job1.tts_provider == "elevenlabs"
-    assert job1.tts_model == "eleven_turbo_v2_5"
-    assert job1.voice == "rUOpAdbAl56KxO00wR5D"
+    assert job1.tts_provider == "gemini"
+    assert job1.tts_model == "gemini-3.1-flash-tts-preview"
+    assert job1.voice == "Kore"
 
     # Verify DB persistence and retrieval
     fetched1 = generator.get_job(job1.job_id)
     assert fetched1 is not None
-    assert fetched1.tts_provider == "elevenlabs"
-    assert fetched1.tts_model == "eleven_turbo_v2_5"
+    assert fetched1.tts_provider == "gemini"
+    assert fetched1.tts_model == "gemini-3.1-flash-tts-preview"
 
     job2 = generator.create_job(
         topic="Deepgram Test",
@@ -371,20 +374,19 @@ def test_video_generator_tts_provider_persistence(tmp_path):
     assert fetched2.tts_provider == "deepgram"
 
 
-def test_system_config_contains_elevenlabs_keys():
+def test_system_config_contains_gemini_tts_keys():
     from src.infrastructure.system_config_store import SYSTEM_SETTINGS_METADATA, get_all_settings_for_role
 
     keys = set(SYSTEM_SETTINGS_METADATA.keys())
 
-    assert "ELEVENLABS_API_KEY" in keys
-    assert "ELEVENLABS_VOICE_ID" in keys
-    assert "ELEVENLABS_MODEL_ID" in keys
+    assert "GEMINI_TTS_MODEL" in keys
+    assert "GEMINI_TTS_VOICE" in keys
     assert "VIDEO_GEN_TTS_PROVIDER" in keys
     assert "DEEPGRAM_API_KEY" in keys
 
     settings_list = get_all_settings_for_role("superadmin")
     rendered_keys = {item["key"] for item in settings_list}
-    assert "ELEVENLABS_API_KEY" in rendered_keys
+    assert "GEMINI_TTS_MODEL" in rendered_keys
     assert "VIDEO_GEN_TTS_PROVIDER" in rendered_keys
 
 
