@@ -620,22 +620,24 @@ class StoryAgent:
         try:
             raw_response = self._call_llm(prompt, attempt=0)
             parsed = self._parse_curation_response(raw_response)
-            choice_map = {
-                item["scene_id"]: item["chosen_option_index"]
-                for item in parsed.get("curation", [])
-                if isinstance(item, dict) and "scene_id" in item and "chosen_option_index" in item
-            }
+            choice_map: dict[str, int] = {}
+            for item in parsed.get("curation", []):
+                if isinstance(item, dict) and "scene_id" in item and "chosen_option_index" in item:
+                    try:
+                        choice_map[str(item["scene_id"])] = int(item["chosen_option_index"])
+                    except (ValueError, TypeError):
+                        pass
 
             for s in scenes:
-                s_id = s.get("id")
+                s_id_str = str(s.get("id"))
                 cands = s.get("footage_candidates", [])
-                if s_id in choice_map and cands:
-                    chosen_idx = choice_map[s_id]
-                    if isinstance(chosen_idx, int) and 0 <= chosen_idx < len(cands):
+                if s_id_str in choice_map and cands:
+                    chosen_idx = choice_map[s_id_str]
+                    if 0 <= chosen_idx < len(cands):
                         s["selected_footage"] = cands[chosen_idx]
                         s["footage_source"] = cands[chosen_idx]
                         logger.info(
-                            f"story_agent (AI Director): Curated scene {s_id} -> '{cands[chosen_idx].get('title', '')[:50]}'"
+                            f"story_agent (AI Director): Curated scene {s.get('id')} -> '{cands[chosen_idx].get('title', '')[:50]}'"
                         )
 
         except Exception as cur_err:

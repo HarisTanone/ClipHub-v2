@@ -1088,7 +1088,7 @@ class VideoGenerator:
         # Step 6d: Subtitles (Skia or FFmpeg ASS)
         from src.infrastructure.hf_style_catalog import resolve_engine
 
-        sub_engine = "ffmpeg"
+        sub_engine = "skia"
         if job.subtitles_enabled:
             if isinstance(job.subtitle_style, dict):
                 sub_engine = (
@@ -1097,6 +1097,19 @@ class VideoGenerator:
                 )
             elif isinstance(job.subtitle_style, str):
                 sub_engine = resolve_engine({"animation": job.subtitle_style})
+
+            # In VideoGenerator pipeline, remotion/hyperframes subtitle engines map to Skia or FFmpeg
+            if sub_engine not in ("skia", "ffmpeg"):
+                preset = ""
+                if isinstance(job.subtitle_style, dict):
+                    preset = str(job.subtitle_style.get("stylePreset") or job.subtitle_style.get("preset") or "").lower()
+                elif isinstance(job.subtitle_style, str):
+                    preset = job.subtitle_style.lower()
+
+                if preset in ("classic", "classic_karaoke"):
+                    sub_engine = "ffmpeg"
+                else:
+                    sub_engine = "skia"
 
         subtitle_path = None
         if job.subtitles_enabled and sub_engine == "ffmpeg":
@@ -1124,8 +1137,8 @@ class VideoGenerator:
         ]
         fonts_dir = next((d for d in font_candidates if os.path.exists(d)), "assets/fonts")
 
-        # Step 6e.2: If Skia Subtitle engine chosen, apply Skia subtitle overlay
-        if job.subtitles_enabled and sub_engine == "skia":
+        # Step 6e.2: If Skia Subtitle engine chosen (or FFmpeg ASS subtitle was not attached), apply Skia subtitle overlay
+        if job.subtitles_enabled and (sub_engine == "skia" or not subtitle_path):
             try:
                 from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
                 skia_sub = SkiaSubtitleRenderer(font_dir=fonts_dir)
@@ -1148,20 +1161,21 @@ class VideoGenerator:
                                 })
                     t_cursor += dur
 
-                sub_rendered_path = os.path.join(work_dir, f"sub_skia_{job.job_id}.mp4")
-                style_cfg = job.subtitle_style if isinstance(job.subtitle_style, dict) else {"stylePreset": job.subtitle_style}
+                if timeline_words:
+                    sub_rendered_path = os.path.join(work_dir, f"sub_skia_{job.job_id}.mp4")
+                    style_cfg = job.subtitle_style if isinstance(job.subtitle_style, dict) else {"stylePreset": job.subtitle_style}
 
-                await asyncio.to_thread(
-                    skia_sub.render_subtitles,
-                    video_path=output_path,
-                    words=timeline_words,
-                    output_path=sub_rendered_path,
-                    style_config=style_cfg,
-                )
-                if os.path.exists(sub_rendered_path) and os.path.getsize(sub_rendered_path) > 0:
-                    import shutil
-                    shutil.move(sub_rendered_path, output_path)
-                    logger.info(f"video_gen [{job.job_id}]: successfully applied Skia subtitle overlay")
+                    await asyncio.to_thread(
+                        skia_sub.render_subtitles,
+                        video_path=output_path,
+                        words=timeline_words,
+                        output_path=sub_rendered_path,
+                        style_config=style_cfg,
+                    )
+                    if os.path.exists(sub_rendered_path) and os.path.getsize(sub_rendered_path) > 0:
+                        import shutil
+                        shutil.move(sub_rendered_path, output_path)
+                        logger.info(f"video_gen [{job.job_id}]: successfully applied Skia subtitle overlay")
             except Exception as sub_err:
                 logger.warning(f"video_gen [{job.job_id}]: failed to burn Skia subtitle overlay: {sub_err}")
 
