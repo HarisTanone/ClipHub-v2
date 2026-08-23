@@ -536,6 +536,91 @@ async def list_models(
     ]
 
 
+VOICE_PREVIEW_SCRIPTS = {
+    "id_jakarta": "Halo! Ini contoh suara saya dengan gaya santai dan luwes. Cocok banget buat video TikTok dan Reels kamu!",
+    "id_formal": "Selamat datang. Ini adalah contoh artikulasi suara formal dan berwibawa untuk video dokumenter Anda.",
+    "id_storytelling": "Bayangkan sebuah kisah yang tak pernah kamu dengar sebelumnya. Dengarkan intonasi cerita ini dengan seksama.",
+    "id_jawa": "Sugeng rawuh. Iki conto suara aksen Jawa sing medok, ramah, lan sumeh kanggo video panjenengan.",
+    "id_sunda": "Sampurasun! Ieu conto sora Sunda anu lemes, riang, tur darehdeh kanggo pidio anjeun.",
+    "id_batak": "Horas! Ini contoh suara gaya Medan yang tegas, bertenaga, dan penuh percaya diri untuk video kamu!",
+    "id_timur": "Halo semua! Ini contoh suara dengan dialek Indonesia Timur yang ceria dan penuh semangat!",
+    "en_us_story": "Hello! This is a natural sample of my voice for engaging storytelling and captivating content.",
+    "en_us_energetic": "Hey there! Check out this high-energy voice delivery tailored for viral short-form videos!",
+    "en_uk_documentary": "Good day. This is a refined British voice sample designed for sophisticated documentary explainers.",
+    "en_aus_casual": "G'day! Here's a relaxed and friendly Australian voice sample for your video.",
+}
+DEFAULT_PREVIEW_SCRIPT_ID = "Halo! Ini adalah contoh pratinjau kualitas suara saya untuk video Anda."
+DEFAULT_PREVIEW_SCRIPT_EN = "Hello! This is a preview sample of my voice for your video."
+
+
+@router.get("/voices/preview")
+async def preview_voice(
+    voice: str = Query(..., description="Voice model or combined key (e.g. Kore__id_jakarta or Kore)"),
+    provider: str = Query("gemini", description="gemini or deepgram"),
+    model: Optional[str] = Query(None, description="TTS model ID"),
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Generate and stream a voice preview sample on the fly (cached)."""
+    from src.infrastructure.auth import decode_access_token, is_superadmin
+
+    # Support either Bearer header or token query param (for HTML Audio elements)
+    jwt_token = token
+    if not jwt_token and authorization and authorization.startswith("Bearer "):
+        jwt_token = authorization.split("Bearer ")[1].strip()
+
+    if not jwt_token:
+        raise HTTPException(status_code=401, detail="Authentication token required (?token=)")
+
+    payload = decode_access_token(jwt_token)
+    if not payload or not is_superadmin(payload.get("role", "")):
+        raise HTTPException(status_code=403, detail="Superadmin access required")
+
+    cache_dir = os.path.join(getattr(settings, "VIDEO_GEN_OUTPUT_DIR", "tmp/video_generator"), "voice_previews")
+    os.makedirs(cache_dir, exist_ok=True)
+
+    safe_voice_key = "".join(c if c.isalnum() or c in "_-" else "_" for c in voice)
+    cache_path = os.path.join(cache_dir, f"preview_{provider}_{safe_voice_key}.mp3")
+
+    if not os.path.exists(cache_path) or os.path.getsize(cache_path) == 0:
+        actual_voice = voice
+        actual_style = None
+        if "__" in voice:
+            parts = voice.split("__", 1)
+            actual_voice = parts[0]
+            actual_style = parts[1]
+
+        if provider.lower() == "deepgram":
+            from src.infrastructure.deepgram_tts import DeepgramTTS
+            tts = DeepgramTTS(output_dir=cache_dir)
+            sample_text = DEFAULT_PREVIEW_SCRIPT_EN
+            out_file = await tts.synthesize(text=sample_text, voice=actual_voice, output_path=cache_path)
+            if not out_file or not os.path.exists(out_file):
+                raise HTTPException(status_code=500, detail="Failed to synthesize Deepgram preview")
+        else:
+            from src.infrastructure.gemini_tts import GeminiTTS
+            tts = GeminiTTS(output_dir=cache_dir)
+            sample_text = VOICE_PREVIEW_SCRIPTS.get(
+                actual_style or "",
+                DEFAULT_PREVIEW_SCRIPT_ID if (actual_style and "id" in actual_style) else DEFAULT_PREVIEW_SCRIPT_EN
+            )
+            out_file = await tts.synthesize(
+                text=sample_text,
+                voice_id=actual_voice,
+                model_id=model or "gemini-3.1-flash-tts-preview",
+                voice_style=actual_style,
+                output_path=cache_path,
+            )
+            if not out_file or not os.path.exists(out_file):
+                raise HTTPException(status_code=500, detail="Failed to synthesize Gemini voice preview")
+
+    return FileResponse(
+        cache_path,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @router.get("/voices", response_model=list[VoiceOption])
 async def list_voices(
     provider: Optional[str] = Query(None, description="gemini or deepgram"),
@@ -550,10 +635,11 @@ async def list_voices(
         from src.infrastructure.gemini_tts import GeminiTTS
         gemini_voices = await GeminiTTS.fetch_voices(language=language)
         for v in gemini_voices:
+            model_key = v.get("model") or v.get("voice_id")
             results.append(
                 VoiceOption(
                     key=v.get("key"),
-                    model=v.get("model"),
+                    model=model_key,
                     provider="gemini",
                     description=v.get("description"),
                     category=v.get("category"),
@@ -562,7 +648,7 @@ async def list_voices(
                     language=v.get("language"),
                     country=v.get("country") or "Indonesia / Global",
                     flag=v.get("flag") or "🇮🇩",
-                    preview_url=v.get("preview_url"),
+                    preview_url=f"/api/video-generator/voices/preview?voice={model_key}&provider=gemini",
                     voice_id=v.get("voice_id"),
                     style_id=v.get("style_id"),
                 )
@@ -583,7 +669,7 @@ async def list_voices(
                     language="en",
                     country="United States",
                     flag="🇺🇸",
-                    preview_url=None,
+                    preview_url=f"/api/video-generator/voices/preview?voice={model}&provider=deepgram",
                     voice_id=key,
                     style_id=None,
                 )

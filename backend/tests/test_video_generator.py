@@ -344,6 +344,32 @@ async def test_gemini_tts_models_and_voices():
     assert any(v.get("language") == "en" for v in voices)
 
 
+@pytest.mark.asyncio
+async def test_video_generator_voice_preview_route():
+    from unittest.mock import AsyncMock, patch
+    from src.presentation.routes.video_generator import list_voices, preview_voice
+
+    mock_user = {"sub": "admin", "role": "superadmin"}
+    voice_list = await list_voices(provider="gemini", language="all", user=mock_user)
+    assert len(voice_list) > 0
+    assert all(v.preview_url is not None for v in voice_list)
+    assert any("/api/video-generator/voices/preview" in v.preview_url for v in voice_list)
+
+    with patch("src.infrastructure.gemini_tts.GeminiTTS.synthesize", new_callable=AsyncMock) as mock_synth:
+        with patch("src.infrastructure.auth.decode_access_token", return_value={"sub": "admin", "role": "superadmin"}):
+            with patch("os.path.exists", return_value=True):
+                with patch("os.path.getsize", return_value=1024):
+                    mock_synth.return_value = "/tmp/test.mp3"
+                    response = await preview_voice(
+                        voice="Kore__id_jakarta",
+                        provider="gemini",
+                        model="gemini-3.1-flash-tts-preview",
+                        token="fake-jwt-token",
+                    )
+                    assert response is not None
+                    assert response.media_type == "audio/mpeg"
+
+
 def test_video_generator_tts_provider_persistence(tmp_path):
     generator = VideoGenerator(output_dir=str(tmp_path))
 

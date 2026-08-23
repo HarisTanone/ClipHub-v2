@@ -1412,7 +1412,16 @@ export function VideoGeneratorPage() {
       audioPreviewRef.current.pause();
     }
 
-    const audio = new Audio(voiceOpt.preview_url);
+    const token = getToken();
+    const rawUrl = voiceOpt.preview_url;
+    let fullUrl = rawUrl.startsWith("http") ? rawUrl : `${API_BASE}${rawUrl}`;
+    if (token) {
+      fullUrl = fullUrl.includes("?")
+        ? `${fullUrl}&token=${encodeURIComponent(token)}`
+        : `${fullUrl}?token=${encodeURIComponent(token)}`;
+    }
+
+    const audio = new Audio(fullUrl);
     audioPreviewRef.current = audio;
     setPlayingVoiceId(voiceOpt.model);
 
@@ -2045,6 +2054,34 @@ export function VideoGeneratorPage() {
                               <option value="custom">✏️ Gunakan Prebuilt Voice Name custom...</option>
                             </select>
                           </div>
+
+                          {/* Audio Preview Button */}
+                          <div className="sm:pt-5">
+                            {activeVoiceOption?.preview_url ? (
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePlayVoice(activeVoiceOption)}
+                                className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition border ${
+                                  playingVoiceId === activeVoiceOption.model
+                                    ? "border-violet-400 bg-violet-600 text-white shadow-xs animate-pulse"
+                                    : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                                }`}
+                                title="Dengar contoh audio suara ini"
+                              >
+                                {playingVoiceId === activeVoiceOption.model ? (
+                                  <>
+                                    <Pause className="h-3.5 w-3.5 fill-current" />
+                                    <span>Berhenti</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="h-3.5 w-3.5 fill-current" />
+                                    <span>Dengar Suara</span>
+                                  </>
+                                )}
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
 
                         {/* Custom Voice ID write-in if desired */}
@@ -2091,21 +2128,41 @@ export function VideoGeneratorPage() {
                         <label htmlFor="video-voice" className="mb-1.5 block text-xs font-medium text-zinc-300">
                           Deepgram Aura Voice
                         </label>
-                        <select
-                          id="video-voice"
-                          value={voice}
-                          onChange={(event) => setVoice(event.target.value)}
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
-                        >
-                          <option value="">Default (Thalia)</option>
-                          {voices
-                            .filter((v) => v.provider === "deepgram")
-                            .map((option) => (
-                              <option key={option.key} value={option.model}>
-                                {option.key.toUpperCase()} · {option.model}
-                              </option>
-                            ))}
-                        </select>
+                        <div className="flex items-center gap-2">
+                          <select
+                            id="video-voice"
+                            value={voice}
+                            onChange={(event) => setVoice(event.target.value)}
+                            className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                          >
+                            <option value="">Default (Thalia)</option>
+                            {voices
+                              .filter((v) => v.provider === "deepgram")
+                              .map((option) => (
+                                <option key={option.key} value={option.model}>
+                                  {option.key.toUpperCase()} · {option.model}
+                                </option>
+                              ))}
+                          </select>
+                          {activeVoiceOption?.preview_url ? (
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePlayVoice(activeVoiceOption)}
+                              className={`flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium transition border ${
+                                playingVoiceId === activeVoiceOption.model
+                                  ? "border-violet-400 bg-violet-600 text-white shadow-xs animate-pulse"
+                                  : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                              }`}
+                              title="Dengar contoh audio suara Deepgram ini"
+                            >
+                              {playingVoiceId === activeVoiceOption.model ? (
+                                <Pause className="h-3.5 w-3.5 fill-current" />
+                              ) : (
+                                <Play className="h-3.5 w-3.5 fill-current" />
+                              )}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
 
                       {/* Pacing */}
