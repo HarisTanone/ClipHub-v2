@@ -584,9 +584,12 @@ class TopBehindSubjectRenderer:
             for _, handle, is_vid, _ in asset_handles:
                 if is_vid:
                     handle.release()
-            if pipe.stdin:
-                pipe.stdin.close()
-            _, stderr = pipe.communicate()
+            try:
+                _, stderr = pipe.communicate()
+            except ValueError:
+                # If stdin was already closed, wait for process completion
+                pipe.wait()
+                stderr = pipe.stderr.read() if pipe.stderr else b""
 
         if pipe.returncode != 0:
             err_msg = stderr.decode(errors="ignore")[-400:] if stderr else "unknown"
