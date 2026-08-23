@@ -100,10 +100,10 @@ def _get_cookie_args() -> list[str]:
 
 def _get_extractor_args(has_cookies: bool = False) -> list[str]:
     """Extractor arguments.
-    android_creator,web_safari,android,mweb delivers full 4K/1080p/720p HD streams without triggering bot page reload challenges or GVS PO Token blocks."""
+    visionos,web_creator,web_safari,mweb delivers full 4K/1080p/720p HD streams without triggering GVS 360p caps or bot challenge lockouts."""
     if has_cookies:
-        return ["--extractor-args", "youtube:player_client=web_safari,mweb,tv,ios"]
-    return ["--extractor-args", "youtube:player_client=android_creator,android,web_safari,mweb"]
+        return ["--extractor-args", "youtube:player_client=web_creator,web_safari,mweb,ios"]
+    return ["--extractor-args", "youtube:player_client=visionos,web_safari,mweb,web"]
 
 
 class YouTubeDownloader(IDownloader):
@@ -250,19 +250,20 @@ class YouTubeDownloader(IDownloader):
             "--fragment-retries", "10",
         ]
 
-        # Check aria2c multi-connection download engine
+        # Check aria2c multi-connection download engine (using 4 connections to avoid CDN 403 blocks)
         aria2c_cmd = _get_aria2c_cmd()
         if settings.USE_ARIA2C and aria2c_cmd:
-            logger.info(f"[AutoCliper Downloader] Menggunakan aria2c accelerator ({aria2c_cmd}) dengan 16 koneksi paralel.")
+            logger.info(f"[AutoCliper Downloader] Menggunakan aria2c accelerator ({aria2c_cmd}) dengan 4 koneksi paralel.")
             cmd.extend([
                 "--downloader", "aria2c",
-                "--downloader-args", "aria2c:-x 16 -s 16 -k 1M -j 16 --max-tries=10 --retry-wait=5 --summary-interval=0",
+                "--downloader-args", "aria2c:-x 4 -s 4 -k 1M -j 4 --max-tries=5 --retry-wait=2 --summary-interval=0",
             ])
         else:
-            cmd.extend(["--concurrent-fragments", "16"])
+            cmd.extend(["--concurrent-fragments", "8"])
 
         cmd.append(clean_url)
 
+        initial_success = False
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -273,6 +274,11 @@ class YouTubeDownloader(IDownloader):
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
             )
+            if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                h = await self._validate_media_file(output_path)
+                if h and h >= 720:
+                    return True
+                logger.warning(f"[AutoCliper Downloader] Initial download dihasilkan di bawah 720p ({h}p). Mencoba fallback HD tier...")
         except asyncio.TimeoutError:
             logger.error(f"[AutoCliper Downloader] Timeout setelah {settings.DOWNLOAD_TIMEOUT}s")
             try:
@@ -282,61 +288,69 @@ class YouTubeDownloader(IDownloader):
             raise TimeoutError(
                 f"Download timeout setelah {settings.DOWNLOAD_TIMEOUT // 60} menit"
             )
+        except Exception as e:
+            logger.debug(f"[AutoCliper Downloader] Primary download error: {e}")
 
-        if proc.returncode != 0:
-            err = stderr.decode().strip()
-            # If 403 / SABR / unavailable / bot challenge / ffmpeg code 183 occurs, retry with alternative client tiers
-            # Tier A uses cookies, Tier B drops cookies (critical bypass if cookies cause IP-lockout 403 or HLS segment failure)
-            client_tiers = [
-                ("youtube:player_client=web_safari,mweb,tv,ios", _get_cookie_args()),
-                ("youtube:player_client=android_creator,android,web_safari", _get_cookie_args()),
-                ("youtube:player_client=android_creator,android,web_safari", []),
-                ("youtube:player_client=android_creator,android,android_sdkless", []),
-                ("youtube:player_client=visionos,web_safari", []),
-                ("youtube:player_client=tv_embedded,mweb", []),
+        # Alternative HD client tiers (prioritizing 1080p and 720p HD streams)
+        client_tiers = [
+            ("youtube:player_client=web_creator,web_safari,mweb", _get_cookie_args()),
+            ("youtube:player_client=visionos,web_safari,mweb", []),
+            ("youtube:player_client=visionos,web", []),
+            ("youtube:player_client=web_safari,mweb,ios", _get_cookie_args()),
+            ("youtube:player_client=tv,mweb", []),
+            ("youtube:player_client=web,mweb", _get_cookie_args()),
+            ("youtube:player_client=android_creator,android", []),  # Last resort only
+        ]
+
+        err = ""
+        for client_arg, active_cookie_args in client_tiers:
+            cookie_label = "with cookies" if active_cookie_args else "without cookies"
+            logger.warning(f"[AutoCliper Downloader] Mencoba download fallback dengan {client_arg} ({cookie_label})...")
+            retry_cmd = [
+                ytdlp_cmd,
+                "--geo-bypass",
+                "--extractor-args", client_arg,
+                *active_cookie_args,
+                "--format-sort", YOUTUBE_FORMAT_SORT,
+                "-f", YOUTUBE_FORMAT_SELECTOR,
+                "--merge-output-format", "mp4",
+                "--postprocessor-args", "merger:-c:v copy -c:a aac -b:a 192k",
+                "-o", output_path,
+                "--no-warnings",
+                "--retries", "5",
+                "--fragment-retries", "5",
+                "--concurrent-fragments", "8",
+                clean_url,
             ]
-            for client_arg, active_cookie_args in client_tiers:
-                cookie_label = "with cookies" if active_cookie_args else "without cookies"
-                logger.warning(f"[AutoCliper Downloader] Mencoba download fallback dengan {client_arg} ({cookie_label})...")
-                retry_cmd = [
-                    ytdlp_cmd,
-                    "--geo-bypass",
-                    "--extractor-args", client_arg,
-                    *active_cookie_args,
-                    "--format-sort", YOUTUBE_FORMAT_SORT,
-                    "-f", YOUTUBE_FORMAT_SELECTOR,
-                    "--merge-output-format", "mp4",
-                    "--postprocessor-args", "merger:-c:v copy -c:a aac -b:a 192k",
-                    "-o", output_path,
-                    "--no-warnings",
-                    clean_url,
-                ]
-                try:
-                    retry_proc = await asyncio.create_subprocess_exec(
-                        *retry_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        env=env,
-                    )
-                    r_stdout, r_stderr = await asyncio.wait_for(
-                        retry_proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
-                    )
-                    if retry_proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                        logger.info(f"[AutoCliper Downloader] Fallback download berhasil dengan {client_arg} ({cookie_label})!")
-                        await self._validate_media_file(output_path)
+            try:
+                retry_proc = await asyncio.create_subprocess_exec(
+                    *retry_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+                r_stdout, r_stderr = await asyncio.wait_for(
+                    retry_proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
+                )
+                if retry_proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    h = await self._validate_media_file(output_path)
+                    if h and h >= 720:
+                        logger.info(f"[AutoCliper Downloader] Fallback download HD berhasil dengan {client_arg} ({cookie_label}) — Resolusi: {h}p!")
                         return True
-                    err = r_stderr.decode().strip()
-                except Exception as ex:
-                    logger.debug(f"[AutoCliper Downloader] Retry {client_arg} error: {ex}")
+                    logger.warning(f"[AutoCliper Downloader] Fallback {client_arg} menghasilkan {h}p (<720p). Melanjutkan tier berikutnya...")
+                err = r_stderr.decode().strip()
+            except Exception as ex:
+                logger.debug(f"[AutoCliper Downloader] Retry {client_arg} error: {ex}")
 
-            logger.error(f"[AutoCliper Downloader] Gagal mengunduh: {err[:300]}")
-            raise RuntimeError(f"Download gagal: {err[:300]}")
+        # If a video was downloaded but lower than 720p, accept as last resort if exists
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            await self._validate_media_file(output_path)
+            return True
 
-        # Layer 3 & 4 Validation: Verify output video specs with ffprobe
-        await self._validate_media_file(output_path)
-        return True
+        logger.error(f"[AutoCliper Downloader] Gagal mengunduh: {err[:300]}")
+        raise RuntimeError(f"Download gagal: {err[:300]}")
 
-    async def _validate_media_file(self, file_path: str) -> None:
+    async def _validate_media_file(self, file_path: str) -> Optional[int]:
         """Memverifikasi file hasil unduhan dengan ffprobe (resolusi, codec, durasi, bitrate)."""
         if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
             raise RuntimeError(f"File hasil unduhan tidak ditemukan atau kosong: {file_path}")
@@ -369,5 +383,7 @@ class YouTubeDownloader(IDownloader):
                         f"[AutoCliper Downloader] Verifikasi Sukses: {w}x{h} @ {fps}fps "
                         f"(Codec: {codec}, Ukuran: {size_mb} MB, Durasi: {dur}s) → {file_path}"
                     )
+                    return int(h) if h else None
         except Exception as e:
             logger.debug(f"[AutoCliper Downloader] ffprobe validation non-fatal error: {e}")
+        return None
