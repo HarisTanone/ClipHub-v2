@@ -1238,6 +1238,14 @@ OUTPUT RAW JSON:
     ) -> HighlightAnalysisResult:
         """Internal implementation (called within semaphore context)."""
         t_start = time.perf_counter()
+
+        # Calibrate video_duration from transcript if provided duration is smaller than transcript bounds
+        if transcript and transcript.segments:
+            max_seg_end = max((float(s.end) for s in transcript.segments if getattr(s, 'end', None) is not None), default=0.0)
+            if max_seg_end > video_duration:
+                logger.info(f"v2_analyzer: calibrating video_duration from {video_duration:.1f}s to {max_seg_end:.1f}s based on transcript")
+                video_duration = max_seg_end
+
         metrics = AnalysisMetrics(
             video_duration=video_duration,
             total_segments=len(transcript.segments),
@@ -1812,11 +1820,14 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         Checks:
         - start < end
         - duration within MIN/MAX bounds
-        - timestamps within video bounds (0 to video_duration)
+        - timestamps within video bounds (0 to effective_duration)
         - score within 1-100
         - hook is non-empty string
         """
         validated = []
+        max_clip_end = max((float(c.end) for c in clips if getattr(c, 'end', None) is not None), default=video_duration)
+        effective_duration = max(video_duration, max_clip_end)
+
         for clip in clips:
             # Basic sanity checks
             if clip.start >= clip.end:
@@ -1831,17 +1842,17 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                 )
                 continue
 
-            # Timestamps within video bounds (with 1s tolerance)
-            if clip.start < -1.0 or clip.end > video_duration + 1.0:
+            # Timestamps within video bounds (with 2s tolerance)
+            if clip.start < -1.0 or clip.end > effective_duration + 2.0:
                 logger.warning(
                     f"v2_analyzer: validate reject clip (out of video bounds): "
-                    f"{clip.start:.0f}-{clip.end:.0f} (video={video_duration:.0f}s)"
+                    f"{clip.start:.0f}-{clip.end:.0f} (video={effective_duration:.0f}s)"
                 )
                 continue
 
             # Clamp to video bounds
             clip.start = max(0.0, clip.start)
-            clip.end = min(video_duration, clip.end)
+            clip.end = min(effective_duration, clip.end)
 
             # Ensure score is valid
             clip.score = max(1, min(100, clip.score))

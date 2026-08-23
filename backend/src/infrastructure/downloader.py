@@ -158,7 +158,7 @@ class YouTubeDownloader(IDownloader):
             # Fallback to oEmbed validation on timeout
             oembed_ok, title = await self._validate_via_oembed(video_id)
             if oembed_ok:
-                return True, title, min(120.0, float(settings.MAX_VIDEO_DURATION))
+                return True, title, float(settings.MAX_VIDEO_DURATION)
             return False, "Timeout saat memverifikasi video (30 detik)", None
         except FileNotFoundError:
             return False, "yt-dlp tidak ditemukan di sistem", None
@@ -171,7 +171,7 @@ class YouTubeDownloader(IDownloader):
             oembed_ok, title = await self._validate_via_oembed(video_id)
             if oembed_ok:
                 logger.info(f"validate_url: yt-dlp challenged on VPS, successfully verified via official oEmbed: {title}")
-                return True, title, min(120.0, float(settings.MAX_VIDEO_DURATION))
+                return True, title, float(settings.MAX_VIDEO_DURATION)
 
             if "Private video" in err or "private" in err.lower():
                 return False, "Video bersifat private dan tidak dapat diakses", None
@@ -188,7 +188,7 @@ class YouTubeDownloader(IDownloader):
             # Fallback to oEmbed
             oembed_ok, o_title = await self._validate_via_oembed(video_id)
             if oembed_ok:
-                return True, o_title, min(120.0, float(settings.MAX_VIDEO_DURATION))
+                return True, o_title, float(settings.MAX_VIDEO_DURATION)
             return False, "Gagal membaca durasi video", None
 
         if duration > settings.MAX_VIDEO_DURATION:

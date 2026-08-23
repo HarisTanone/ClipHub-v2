@@ -196,6 +196,31 @@ class JobService:
             return await self._retry_handler.execute_with_retry(_rate_limited)
         return await _rate_limited()
 
+    def _probe_local_duration(self, video_path: str) -> float:
+        import subprocess
+        import json
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "json",
+                    video_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout or "{}")
+                duration = float((data.get("format") or {}).get("duration") or 0)
+                if duration > 0:
+                    return duration
+        except Exception:
+            pass
+        return 0.0
+
     # ─── Public API ───────────────────────────────────────────────────────────
 
     async def create_job(
@@ -470,6 +495,14 @@ class JobService:
                 if video_id and os.path.exists(video_path):
                     cache.save_video(video_id, video_path)
                 self._emit(job_id, 2, "download", "complete")
+
+            # Calibrate duration to actual downloaded video file
+            if os.path.exists(video_path):
+                probed_duration = self._probe_local_duration(video_path)
+                if probed_duration > 0:
+                    duration = probed_duration
+                    job.video_duration = duration
+                    logger.info(f"[{job_id}] Video duration calibrated via ffprobe: {duration:.1f}s")
 
             # ═══ Step 3: Gemini Analysis (SKIP if custom_clips or cached) ═══
             user_custom_clips = (job.clips_data or {}).get("custom_clips")

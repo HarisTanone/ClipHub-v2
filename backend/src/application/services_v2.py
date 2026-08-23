@@ -214,25 +214,27 @@ class V2PipelineService:
         return self._source_info(job).get("type") == "upload"
 
     def _probe_local_duration(self, video_path: str) -> float:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "json",
-                video_path,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr[-300:] or "ffprobe failed")
-        data = json.loads(result.stdout or "{}")
-        duration = float((data.get("format") or {}).get("duration") or 0)
-        if duration <= 0:
-            raise RuntimeError("durasi video tidak terbaca")
-        return duration
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "json",
+                    video_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout or "{}")
+                duration = float((data.get("format") or {}).get("duration") or 0)
+                if duration > 0:
+                    return duration
+        except Exception:
+            pass
+        return 0.0
 
     async def _prepare_uploaded_video(self, job: Job, video_path: str) -> tuple[str, float]:
         source = self._source_info(job)
@@ -360,6 +362,14 @@ class V2PipelineService:
                     cache.save_video(video_id, video_path)
                 self._emit(job_id, 2, "download", "complete")
 
+            # Calibrate duration to actual downloaded video file
+            if os.path.exists(video_path):
+                probed_duration = self._probe_local_duration(video_path)
+                if probed_duration > 0:
+                    duration = probed_duration
+                    job.video_duration = duration
+                    logger.info(f"[{job_id}] Video duration calibrated via ffprobe: {duration:.1f}s")
+
             # ═══ Step 3: TAHAP 1 — YouTube API / Groq Whisper Transcript ═══
             cached_transcript = cache.load_transcript(video_id) if video_id else None
             if cached_transcript and cached_transcript.get("segments"):
@@ -405,6 +415,14 @@ class V2PipelineService:
                     f"source={transcript_result.source}, lang={transcript_result.language}"
                 )
                 self._emit(job_id, 3, "v2_transcript", "complete")
+
+            # Ensure duration is at least as large as the latest transcript segment
+            if transcript_result and transcript_result.segments:
+                max_seg = max((float(s.end) for s in transcript_result.segments if getattr(s, 'end', None) is not None), default=0.0)
+                if max_seg > duration:
+                    duration = max_seg
+                    job.video_duration = duration
+                    logger.info(f"[{job_id}] Video duration updated from transcript bounds: {duration:.1f}s")
 
             # ═══ Step 4: TAHAP 2 — Groq LLM Chunked Highlight Analysis ═══
             direct_mode = is_upload_source and (job.clips_data or {}).get("processing_mode") == "direct"
