@@ -420,7 +420,7 @@ class GroqTranscriber(IGroqTranscriber):
         cmd = [
             "yt-dlp",
             "--geo-bypass",
-            "--extractor-args", "youtube:player_client=android,web,web_creator,ios",
+            "--extractor-args", "youtube:player_client=android_creator,android,web_safari,mweb",
             *cookie_args,
             "--extract-audio",
             "--audio-format", "mp3",
@@ -438,8 +438,26 @@ class GroqTranscriber(IGroqTranscriber):
                 timeout=180,  # 3 min max for download
             )
             if result.returncode != 0:
-                logger.error(f"yt-dlp audio download failed: {result.stderr[:200]}")
-                return None
+                logger.warning(f"yt-dlp audio download failed with cookies/primary client ({result.stderr[:150]}), retrying without cookies...")
+                retry_cmd = [
+                    "yt-dlp",
+                    "--geo-bypass",
+                    "--extractor-args", "youtube:player_client=android_creator,android,android_sdkless",
+                    "--extract-audio",
+                    "--audio-format", "mp3",
+                    "--audio-quality", "5",
+                    "--no-playlist",
+                    "--no-warnings",
+                    "-o", output_template,
+                    youtube_url,
+                ]
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(None, self._run_subprocess, retry_cmd),
+                    timeout=180,
+                )
+                if result.returncode != 0:
+                    logger.error(f"yt-dlp audio retry failed: {result.stderr[:200]}")
+                    return None
         except asyncio.TimeoutError:
             logger.error("yt-dlp audio download timed out (180s)")
             return None

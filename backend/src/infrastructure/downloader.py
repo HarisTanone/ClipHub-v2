@@ -100,10 +100,10 @@ def _get_cookie_args() -> list[str]:
 
 def _get_extractor_args(has_cookies: bool = False) -> list[str]:
     """Extractor arguments.
-    visionos,web_safari,android_sdkless,mweb,tv delivers full 4K/1080p/720p HD streams without requiring GVS PO Token or login."""
+    android_creator,web_safari,android,mweb delivers full 4K/1080p/720p HD streams without triggering bot page reload challenges or GVS PO Token blocks."""
     if has_cookies:
-        return []
-    return ["--extractor-args", "youtube:player_client=visionos,web_safari,android_sdkless,mweb,tv"]
+        return ["--extractor-args", "youtube:player_client=web_safari,mweb,tv,ios"]
+    return ["--extractor-args", "youtube:player_client=android_creator,android,web_safari,mweb"]
 
 
 class YouTubeDownloader(IDownloader):
@@ -285,21 +285,24 @@ class YouTubeDownloader(IDownloader):
 
         if proc.returncode != 0:
             err = stderr.decode().strip()
-            # If 403 / SABR / unavailable / bot challenge occurs, retry with alternative client tiers
+            # If 403 / SABR / unavailable / bot challenge / ffmpeg code 183 occurs, retry with alternative client tiers
+            # Tier A uses cookies, Tier B drops cookies (critical bypass if cookies cause IP-lockout 403 or HLS segment failure)
             client_tiers = [
-                "youtube:player_client=visionos,web_safari",
-                "youtube:player_client=web_safari,mweb",
-                "youtube:player_client=android_creator,web_embedded",
-                "youtube:player_client=tv,android_sdkless",
-                "youtube:player_client=mweb,tv_embedded",
+                ("youtube:player_client=web_safari,mweb,tv,ios", _get_cookie_args()),
+                ("youtube:player_client=android_creator,android,web_safari", _get_cookie_args()),
+                ("youtube:player_client=android_creator,android,web_safari", []),
+                ("youtube:player_client=android_creator,android,android_sdkless", []),
+                ("youtube:player_client=visionos,web_safari", []),
+                ("youtube:player_client=tv_embedded,mweb", []),
             ]
-            for client_arg in client_tiers:
-                logger.warning(f"[AutoCliper Downloader] Mencoba download fallback dengan {client_arg}...")
+            for client_arg, active_cookie_args in client_tiers:
+                cookie_label = "with cookies" if active_cookie_args else "without cookies"
+                logger.warning(f"[AutoCliper Downloader] Mencoba download fallback dengan {client_arg} ({cookie_label})...")
                 retry_cmd = [
                     ytdlp_cmd,
                     "--geo-bypass",
                     "--extractor-args", client_arg,
-                    *_get_cookie_args(),
+                    *active_cookie_args,
                     "--format-sort", YOUTUBE_FORMAT_SORT,
                     "-f", YOUTUBE_FORMAT_SELECTOR,
                     "--merge-output-format", "mp4",
@@ -319,7 +322,7 @@ class YouTubeDownloader(IDownloader):
                         retry_proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
                     )
                     if retry_proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                        logger.info(f"[AutoCliper Downloader] Fallback download berhasil dengan {client_arg}!")
+                        logger.info(f"[AutoCliper Downloader] Fallback download berhasil dengan {client_arg} ({cookie_label})!")
                         await self._validate_media_file(output_path)
                         return True
                     err = r_stderr.decode().strip()

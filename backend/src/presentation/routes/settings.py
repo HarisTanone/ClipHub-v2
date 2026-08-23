@@ -1188,6 +1188,20 @@ class YouTubeCookiesUpdateRequest(BaseModel):
     content: str = Field(..., description="Raw cookies.txt content in Netscape format")
 
 
+def _count_valid_cookies(lines: list[str]) -> int:
+    """Accurately count active cookies in Netscape format including HttpOnly entries."""
+    count = 0
+    for l in lines:
+        s = l.strip()
+        if not s:
+            continue
+        if s.startswith("#HttpOnly_"):
+            count += 1
+        elif not s.startswith("#") and ("\t" in s or " " in s):
+            count += 1
+    return count
+
+
 @router.get("/youtube-cookies")
 async def get_youtube_cookies_status(user: CurrentUser = Depends(get_current_user)):
     """Get current status and metadata of YouTube cookies.txt on the server."""
@@ -1223,7 +1237,7 @@ async def get_youtube_cookies_status(user: CurrentUser = Depends(get_current_use
         with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
 
-        cookie_count = sum(1 for l in lines if l.strip() and not l.strip().startswith("#"))
+        cookie_count = _count_valid_cookies(lines)
 
         return {
             "success": True,
@@ -1281,7 +1295,7 @@ async def save_youtube_cookies(
             logger.warning(f"Failed writing cookies to {p}: {e}")
 
     lines = cleaned_content.splitlines()
-    cookie_count = sum(1 for l in lines if l.strip() and not l.strip().startswith("#"))
+    cookie_count = _count_valid_cookies(lines)
 
     return {
         "success": True,
@@ -1340,6 +1354,7 @@ async def test_youtube_cookies(user: CurrentUser = Depends(get_current_user)):
     cmd = [
         ytdlp_cmd,
         "--geo-bypass",
+        "--extractor-args", "youtube:player_client=web_safari,mweb,tv,ios",
         *cookie_args,
         "--dump-json",
         "--no-download",
@@ -1353,7 +1368,7 @@ async def test_youtube_cookies(user: CurrentUser = Depends(get_current_user)):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=25)
 
         if proc.returncode == 0:
             data = json.loads(stdout.decode())
