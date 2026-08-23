@@ -1640,7 +1640,7 @@ export function VideoGeneratorPage() {
           custom_hook: customHook.trim() || undefined,
           hook_style_config: hookStyle,
           subtitles_enabled: subtitlesEnabled,
-          subtitle_style_config: { ...subtitleStyle, engine: "ffmpeg" },
+          subtitle_style_config: { ...subtitleStyle, engine: subtitleStyle.engine || "skia" },
           include_bgm: includeBgm,
           bgm_volume: bgmVolume,
         }),
@@ -1679,7 +1679,7 @@ export function VideoGeneratorPage() {
           custom_hook: customHook.trim() || undefined,
           hook_style_config: hookStyle,
           subtitles_enabled: subtitlesEnabled,
-          subtitle_style_config: { ...subtitleStyle, engine: "ffmpeg" },
+          subtitle_style_config: { ...subtitleStyle, engine: subtitleStyle.engine || "skia" },
           include_bgm: includeBgm,
           bgm_volume: bgmVolume,
         }),
@@ -1702,6 +1702,13 @@ export function VideoGeneratorPage() {
       body: JSON.stringify({
         job_id: jobId,
         selected_scenes: updatedScenes,
+        hook_enabled: hookEnabled,
+        custom_hook: customHook.trim() || undefined,
+        hook_style_config: hookStyle,
+        subtitles_enabled: subtitlesEnabled,
+        subtitle_style_config: { ...subtitleStyle, engine: subtitleStyle.engine || "skia" },
+        include_bgm: includeBgm,
+        bgm_volume: bgmVolume,
       }),
     });
     setPage(1);

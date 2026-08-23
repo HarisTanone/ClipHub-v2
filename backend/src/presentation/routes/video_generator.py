@@ -51,6 +51,13 @@ class SearchSceneRequest(BaseModel):
 class RenderSelectedRequest(BaseModel):
     job_id: str
     selected_scenes: list[dict[str, Any]] = Field(default_factory=list)
+    hook_enabled: Optional[bool] = None
+    custom_hook: Optional[str] = None
+    hook_style_config: Optional[dict[str, Any]] = None
+    subtitles_enabled: Optional[bool] = None
+    subtitle_style_config: Optional[dict[str, Any]] = None
+    include_bgm: Optional[bool] = None
+    bgm_volume: Optional[float] = None
 
 
 class JobStatusResponse(BaseModel):
@@ -254,6 +261,23 @@ async def render_selected(
     job = vg.get_job(req.job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if req.hook_enabled is not None:
+        job.hook_enabled = req.hook_enabled
+    if req.custom_hook is not None:
+        job.custom_hook = req.custom_hook
+    if req.hook_style_config is not None:
+        job.hook_style = req.hook_style_config
+    if req.subtitles_enabled is not None:
+        job.subtitles_enabled = req.subtitles_enabled
+    if req.subtitle_style_config is not None:
+        job.subtitle_style = req.subtitle_style_config
+    if req.include_bgm is not None:
+        job.include_bgm = req.include_bgm
+    if req.bgm_volume is not None:
+        job.bgm_volume = req.bgm_volume
+
+    vg._persist_job(job)
 
     background_tasks.add_task(vg.render_with_selected_scenes, req.job_id, req.selected_scenes)
     return _job_to_response(job)

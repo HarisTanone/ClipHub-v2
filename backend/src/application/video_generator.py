@@ -1118,7 +1118,7 @@ class VideoGenerator:
                 subtitle_path = candidate_path
 
         # Step 6e: Final composite — video + narration + optional FFmpeg subtitle + optional BGM
-        await self._final_composite(
+        subtitle_burned = await self._final_composite(
             video_path=concat_path,
             audio_path=merged_audio_path,
             subtitle_path=subtitle_path,
@@ -1137,19 +1137,28 @@ class VideoGenerator:
         ]
         fonts_dir = next((d for d in font_candidates if os.path.exists(d)), "assets/fonts")
 
-        # Step 6e.2: If Skia Subtitle engine chosen (or FFmpeg ASS subtitle was not attached), apply Skia subtitle overlay
-        if job.subtitles_enabled and (sub_engine == "skia" or not subtitle_path):
+        # Step 6e.2: If subtitles enabled and NOT yet burned (e.g. Skia engine or FFmpeg ASS pass skipped/failed), apply Skia subtitle overlay
+        if job.subtitles_enabled and not subtitle_burned:
             try:
                 from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
                 skia_sub = SkiaSubtitleRenderer(font_dir=fonts_dir)
 
-                # Build timed words from timeline narration
+                # Build timed words from timeline narration & scene word timestamps
                 timeline_words = []
                 t_cursor = 0.0
                 for entry in timeline:
-                    dur = max(0.1, float(entry.get("duration", 0.0) or 0.0))
+                    dur = max(0.1, float(entry.get("duration", 0.0) or entry.get("tts_duration", 0.0) or entry.get("audio_duration", 0.0) or 0.0))
                     narr = str(entry.get("narration", "") or "").strip()
-                    if narr:
+                    entry_words = entry.get("words")
+                    if entry_words and isinstance(entry_words, list) and len(entry_words) > 0:
+                        for w in entry_words:
+                            if isinstance(w, dict) and "word" in w:
+                                timeline_words.append({
+                                    "word": str(w["word"]),
+                                    "start": round(t_cursor + float(w.get("start", 0)), 2),
+                                    "end": round(t_cursor + float(w.get("end", 0.1)), 2),
+                                })
+                    elif narr:
                         tokens = narr.split()
                         if tokens:
                             step_dur = dur / len(tokens)
@@ -1169,15 +1178,40 @@ class VideoGenerator:
                         skia_sub.render_subtitles,
                         video_path=output_path,
                         words=timeline_words,
+                        style=style_cfg,
                         output_path=sub_rendered_path,
-                        style_config=style_cfg,
                     )
                     if os.path.exists(sub_rendered_path) and os.path.getsize(sub_rendered_path) > 0:
                         import shutil
                         shutil.move(sub_rendered_path, output_path)
-                        logger.info(f"video_gen [{job.job_id}]: successfully applied Skia subtitle overlay")
+                        subtitle_burned = True
+                        logger.info(f"video_gen [{job.job_id}]: successfully applied Skia subtitle overlay ({len(timeline_words)} words)")
             except Exception as sub_err:
-                logger.warning(f"video_gen [{job.job_id}]: failed to burn Skia subtitle overlay: {sub_err}")
+                logger.warning(f"video_gen [{job.job_id}]: Skia subtitle overlay error: {sub_err}, attempting fallback ASS...")
+
+            # Emergency Fallback: If still not burned, burn via FFmpeg ASS subtitles filter
+            if not subtitle_burned:
+                try:
+                    ass_fallback = os.path.join(work_dir, "captions_fallback.ass")
+                    if write_ass_subtitles(timeline, ass_fallback, job.subtitle_style):
+                        fb_sub_path = os.path.join(work_dir, f"sub_fb_{job.job_id}.mp4")
+                        cmd = [
+                            "ffmpeg", "-y",
+                            "-i", output_path,
+                            "-vf", ffmpeg_subtitle_filter(ass_fallback, fonts_dir),
+                            "-c:v", "libx264", "-preset", "fast", "-crf", "17",
+                            "-c:a", "copy",
+                            "-movflags", "+faststart",
+                            fb_sub_path,
+                        ]
+                        succeeded, _ = await self._run_ffmpeg(cmd, timeout=120)
+                        if succeeded and os.path.exists(fb_sub_path) and os.path.getsize(fb_sub_path) > 0:
+                            import shutil
+                            shutil.move(fb_sub_path, output_path)
+                            subtitle_burned = True
+                            logger.info(f"video_gen [{job.job_id}]: successfully applied emergency fallback ASS subtitles")
+                except Exception as fb_err:
+                    logger.warning(f"video_gen [{job.job_id}]: fallback ASS subtitle burning failed: {fb_err}")
 
         # Step 6f: Burn opening Hook overlay if hook is enabled
         if job.hook_enabled and os.path.exists(output_path):
@@ -1260,12 +1294,15 @@ class VideoGenerator:
                         if os.path.exists(hooked_path) and os.path.getsize(hooked_path) > 0:
                             import shutil
                             shutil.move(hooked_path, output_path)
+                            hook_applied = True
                             logger.info(f"video_gen [{job.job_id}]: successfully applied Skia hook overlay ({hook_style_name})")
                     except Exception as hook_err:
                         logger.warning(f"video_gen [{job.job_id}]: failed to burn hook overlay: {hook_err}")
 
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
-        logger.info(f"video_gen [{job.job_id}]: final video {size_mb:.1f}MB → {output_path}")
+        logger.info(
+            f"video_gen [{job.job_id}]: final video {size_mb:.1f}MB (Subtitles={job.subtitles_enabled}, Hook={job.hook_enabled}) → {output_path}"
+        )
 
         return output_path
 
@@ -1610,8 +1647,11 @@ class VideoGenerator:
         output_path: str,
         job: VideoGenJob,
         work_dir: str,
-    ) -> None:
-        """Render a delivery-ready MP4 with caption, narration, and optional BGM."""
+    ) -> bool:
+        """Render a delivery-ready MP4 with caption, narration, and optional BGM.
+
+        Returns True if captions were successfully burned into output_path during this pass.
+        """
         if not os.path.exists(video_path):
             logger.warning("video_gen: concat video missing, generating placeholder")
             audio_duration = "10"
@@ -1631,6 +1671,7 @@ class VideoGenerator:
                 logger.error("video_gen: placeholder render failed: %s", error)
                 raise RuntimeError("Concat video missing and placeholder generation failed")
 
+        subtitle_burned = False
         rendered, error = await self._render_final_pass(
             video_path=video_path,
             audio_path=audio_path,
@@ -1639,8 +1680,10 @@ class VideoGenerator:
             include_bgm=job.include_bgm,
             bgm_volume=job.bgm_volume,
         )
-        if not rendered and subtitle_path:
-            logger.warning("video_gen: caption render failed, retrying without captions: %s", error)
+        if rendered and subtitle_path:
+            subtitle_burned = True
+        elif not rendered and subtitle_path:
+            logger.warning("video_gen: caption render pass failed (%s), retrying base composite...", error)
             rendered, error = await self._render_final_pass(
                 video_path=video_path,
                 audio_path=audio_path,
@@ -1649,11 +1692,17 @@ class VideoGenerator:
                 include_bgm=job.include_bgm,
                 bgm_volume=job.bgm_volume,
             )
+            subtitle_burned = False
+
         if not rendered:
             logger.warning("video_gen: enhanced composite failed, using fallback: %s", error)
             rendered = await self._fallback_render(video_path, audio_path, output_path)
+            subtitle_burned = False
+
         if not rendered or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             raise RuntimeError(f"Final video render failed: {error}")
+
+        return subtitle_burned
 
     async def _fallback_render(
         self, video_path: str, audio_path: str, output_path: str

@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY: str = ""
     YOUTUBE_COOKIES_PATH: str = ""
 
+    # VidKraken Video Downloader API
+    VIDKRAKEN_API_KEY: str = "ce1bcba1-b808-470f-987c-072ca2d35488"
+    VIDKRAKEN_BASE_URL: str = "https://vidkraken.com/api/v2"
+    VIDKRAKEN_ENABLED: bool = True
+    VIDKRAKEN_TIMEOUT: int = 180
+
     # ─── Deepgram TTS ─────────────────────────────────────────────────────
     DEEPGRAM_API_KEY: str = ""
     DEEPGRAM_TTS_VOICE: str = "aura-2-thalia-en"

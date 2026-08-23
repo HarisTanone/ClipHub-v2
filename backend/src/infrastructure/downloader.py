@@ -219,12 +219,27 @@ class YouTubeDownloader(IDownloader):
 
     async def download_video(self, url: str, output_path: str) -> bool:
         """
-        Download video YouTube dengan arsitektur 4-layer (yt-dlp + aria2c + FFmpeg normalization).
-        Target utama: 1080p H.264 (AVC1) + AAC untuk proses pipeline tercepat dan kualitas HD optimal.
+        Download video YouTube dengan VidKraken API v2 sebagai engine utama (1080p -> 720p).
+        Jika VidKraken gagal, otomatis fallback ke yt-dlp + aria2c.
         """
         clean_url = get_canonical_youtube_url(url) or url.strip()
         logger.info(f"[AutoCliper Downloader] Memulai download: {clean_url} → {output_path}")
 
+        # ─── 1. Primary Downloader: VidKraken API v2 (1080p -> 720p) ──────
+        try:
+            from src.infrastructure.vidkraken_client import VidKrakenClient
+            vk_client = VidKrakenClient()
+            if vk_client.is_enabled:
+                logger.info(f"[AutoCliper Downloader] Menggunakan VidKraken API v2 sebagai engine utama: {clean_url}")
+                vk_success = await vk_client.download_video(clean_url, output_path)
+                if vk_success and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    await self._validate_media_file(output_path)
+                    logger.info(f"[AutoCliper Downloader] Download via VidKraken API SUKSES! → {output_path}")
+                    return True
+        except Exception as vk_err:
+            logger.warning(f"[AutoCliper Downloader] VidKraken downloader gagal ({vk_err}). Melanjutkan fallback ke yt-dlp...")
+
+        # ─── 2. Fallback Downloader: yt-dlp Multi-Tier Engine ─────────────
         ytdlp_cmd = _get_ytdlp_cmd()
 
         env = os.environ.copy()

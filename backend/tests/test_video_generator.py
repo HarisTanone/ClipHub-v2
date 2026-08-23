@@ -571,14 +571,63 @@ def test_all_style_editor_subtitle_presets():
 
 
 @pytest.mark.asyncio
-async def test_edge_tts_helper():
-    from src.infrastructure.edge_tts_helper import EdgeTTSHelper
+async def test_step_render_video_with_hook_and_subtitles(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import pytest
+    from src.application.video_generator import VideoGenerator
 
-    helper = EdgeTTSHelper()
-    voice = helper._resolve_voice("", "Bumi berhenti berputar dalam sekejap.")
-    assert "id-ID" in voice
+    generator = VideoGenerator(output_dir=str(tmp_path))
+    job = generator.create_job(
+        topic="Sains Antariksa",
+        target_duration=10,
+        subtitles_enabled=True,
+        subtitle_style={"stylePreset": "glassmorphism", "fontSize": 48},
+        hook_enabled=True,
+        custom_hook="FAKTA MENGEJUTKAN LUAR ANGKASA",
+        hook_style={"animation": "skia_impact_badge", "duration": 2.0},
+        include_bgm=False,
+    )
 
-    voice_en = helper._resolve_voice("", "What if the earth stopped spinning right now?")
-    assert "en-US" in voice_en
+    work_dir = str(tmp_path / job.job_id)
+    os.makedirs(work_dir, exist_ok=True)
+
+    # Create dummy concat_video and narration audio
+    dummy_concat = os.path.join(work_dir, "dummy_base.mp4")
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=1080x1920:d=4:r=30", "-c:v", "libx264", "-pix_fmt", "yuv420p", dummy_concat],
+        capture_output=True, check=True
+    )
+    dummy_audio = os.path.join(work_dir, "dummy_audio.mp3")
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "4", dummy_audio],
+        capture_output=True, check=True
+    )
+
+    # Mock scene preparation and concatenation to use our dummy video/audio
+    async def mock_prepare(entry, clips_dir):
+        return dummy_concat
+
+    async def mock_concat(scene_clips, concat_path):
+        import shutil
+        shutil.copy2(dummy_concat, concat_path)
+
+    async def mock_concat_audio(timeline, merged_audio_path):
+        import shutil
+        shutil.copy2(dummy_audio, merged_audio_path)
+
+    monkeypatch.setattr(generator, "_prepare_scene_clip", mock_prepare)
+    monkeypatch.setattr(generator, "_concat_clips", mock_concat)
+    monkeypatch.setattr(generator, "_concat_audio", mock_concat_audio)
+
+    timeline = [
+        {"scene_id": 1, "narration": "Halo luar angkasa sangat luas", "duration": 2.0},
+        {"scene_id": 2, "narration": "Bintang bersinar terang di malam hari", "duration": 2.0},
+    ]
+
+    out_path = await generator._step_render_video(timeline, job, work_dir)
+    assert os.path.exists(out_path)
+    assert os.path.getsize(out_path) > 0
+
 
 

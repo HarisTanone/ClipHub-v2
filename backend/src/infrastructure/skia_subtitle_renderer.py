@@ -309,11 +309,12 @@ class SkiaSubtitleRenderer:
         self,
         video_path: str,
         words: list,
-        style: Any,
-        output_path: str,
+        style: Any = None,
+        output_path: str = "",
         start_offset: float = 0.0,
         layout_events: list[dict] | None = None,
         autogrid_enabled: bool = True,
+        style_config: Any = None,
     ) -> str:
         """Render subtitles with rich Skia effects and Auto-Grid dynamic recentering."""
         if not os.path.exists(video_path):
@@ -327,7 +328,8 @@ class SkiaSubtitleRenderer:
                 shutil.copy2(video_path, output_path)
             return output_path
 
-        norm_style = self._normalize_style(style)
+        effective_style = style if style is not None else style_config
+        norm_style = self._normalize_style(effective_style)
         if layout_events is not None:
             norm_style["layout_events"] = list(layout_events)
         if autogrid_enabled is not None:

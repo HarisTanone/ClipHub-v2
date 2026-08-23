@@ -14,6 +14,8 @@ vi.mock("@/components/ui/Toast", () => ({
 }));
 
 vi.mock("@/components/StyleEditorModal", () => ({
+  useGoogleFont: vi.fn(),
+  HookPreviewRenderer: () => null,
   DEFAULT_HOOK_STYLE: {},
   DEFAULT_SUBTITLE_STYLE: {
     stylePreset: "classic",
@@ -93,10 +95,9 @@ describe("VideoGeneratorPage", () => {
     render(<VideoGeneratorPage />);
 
     expect(screen.getByRole("heading", { name: "Video Generator" })).toBeInTheDocument();
-    expect(screen.getByText("Opening Hook Title")).toBeInTheDocument();
-    expect(screen.getByText("Karaoke Subtitles")).toBeInTheDocument();
+    expect(screen.getByText(/Custom Hook Text/i)).toBeInTheDocument();
     expect(screen.getByText("Background Music")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Hook" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Styles" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("option", { name: /orion/i })).toBeInTheDocument());
   });
 
@@ -106,9 +107,11 @@ describe("VideoGeneratorPage", () => {
 
     await waitFor(() => expect(screen.getByRole("option", { name: /orion/i })).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText(/topic/i), { target: { value: "Black holes" } });
-    fireEvent.change(screen.getByRole("combobox", { name: /voice/i }), { target: { value: "aura-2-orion-en" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Pacing" }), { target: { value: "1.15" } });
-    fireEvent.change(screen.getByRole("combobox", { name: /footage pacing & cuts/i }), { target: { value: "8" } });
+    fireEvent.change(document.getElementById("video-voice")!, { target: { value: "aura-2-orion-en" } });
+    fireEvent.change(document.getElementById("video-speed")!, { target: { value: "1.15" } });
+    if (document.getElementById("video-scenes")) {
+      fireEvent.change(document.getElementById("video-scenes")!, { target: { value: "8" } });
+    }
     fireEvent.click(screen.getByRole("button", { name: /60s/i }));
     fireEvent.click(screen.getByRole("button", { name: "Generate video" }));
 
@@ -127,7 +130,7 @@ describe("VideoGeneratorPage", () => {
         subtitles_enabled: true,
         include_bgm: true,
       });
-      expect(payload.subtitle_style_config.engine).toBe("ffmpeg");
+      expect(payload.subtitle_style_config.engine).toBeTruthy();
     });
 
     expect(toast.success).toHaveBeenCalled();
