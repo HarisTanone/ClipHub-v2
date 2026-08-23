@@ -148,6 +148,21 @@ class SubtitleRenderer(ISubtitleRenderer):
                     box_opt = f":box=1:boxcolor=black@{config.background_opacity}:boxborderw=10" if config.background_opacity > 0 else ""
                     active_stroke_w = (config.stroke_width + 1) if (config.stroke_width and config.stroke_width > 0) else 0
                     active_stroke_opt = f":borderw={active_stroke_w}:bordercolor={stroke_color}" if active_stroke_w > 0 else ""
+
+                    # Atmospheric glow underlayer if glow shader enabled
+                    if getattr(config, "glow_enabled", False) or getattr(config, "highlight_glow", False):
+                        glow_c = getattr(config, "glow_color", None) or getattr(config, "highlight_glow_color", None) or config.highlight_color or "#00FFFF"
+                        filter_parts.append(
+                            f"drawtext=text='{escaped_word}'"
+                            f":fontsize={int(config.font_size * 1.2)}"
+                            f"{font_file_opt}"
+                            f":fontcolor={glow_c}@0.6"
+                            f":borderw={max(6, (config.stroke_width or 3) + 8)}:bordercolor={glow_c}@0.4"
+                            f":shadowx=0:shadowy=0:shadowcolor={glow_c}@0.8"
+                            f":x=(w-text_w)/2:y={y_pos}"
+                            f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
+                        )
+
                     filter_parts.append(
                         f"drawtext=text='{escaped_word}'"
                         f":fontsize={int(config.font_size * 1.2)}"

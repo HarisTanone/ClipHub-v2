@@ -146,13 +146,31 @@ class SkiaSubtitleRenderer:
             "highlight_bold": style.get("highlightBold", True),
             "highlight_scale": float(style.get("highlightScale") or 1.15),
             "highlight_words": [w.lower().strip() for w in (style.get("highlightWords") or style.get("highlight_words") or []) if w],
-            "gradient_enabled": bool(style.get("gradientEnabled") or base.get("gradient_enabled") or preset_id in ("gradient_fill", "retro_chrome")),
-            "gradient_from": style.get("gradientFrom") or "#6366F1",
-            "gradient_to": style.get("gradientTo") or "#EC4899",
-            "dual_layer": bool(style.get("dualLayer") or base.get("dual_layer") or preset_id == "dual_layer"),
-            "retro_chrome": bool(style.get("retroChrome") or base.get("retro_chrome") or preset_id == "retro_chrome"),
-            "outline_stack": bool(style.get("outlineStack") or base.get("outline_stack") or preset_id == "outline_stack"),
         }
+
+        # Gradient parameters
+        gradient_enabled = bool(
+            style.get("gradientEnabled")
+            or style.get("gradient_enabled")
+            or base.get("gradient_enabled")
+            or preset_id in ("gradient_fill", "retro_chrome")
+        )
+        normalized["gradient_enabled"] = gradient_enabled
+        normalized["gradient_from"] = (
+            style.get("gradientFrom")
+            or style.get("gradient_from")
+            or base.get("gradient_from")
+            or "#00F0FF"
+        )
+        normalized["gradient_to"] = (
+            style.get("gradientTo")
+            or style.get("gradient_to")
+            or base.get("gradient_to")
+            or "#FF007F"
+        )
+        normalized["dual_layer"] = bool(style.get("dualLayer") or base.get("dual_layer") or preset_id == "dual_layer")
+        normalized["retro_chrome"] = bool(style.get("retroChrome") or base.get("retro_chrome") or preset_id == "retro_chrome")
+        normalized["outline_stack"] = bool(style.get("outlineStack") or base.get("outline_stack") or preset_id == "outline_stack")
 
         # Background parameters
         base_bg = base.get("background") if isinstance(base.get("background"), dict) else {}
@@ -196,11 +214,12 @@ class SkiaSubtitleRenderer:
             or base_bg.get("padding_x", 24)
         )
 
-        # Glow parameters
+        # Glow parameters (GPU effects & Glow Shader)
         glow_enabled = bool(
             style.get("glowEnabled")
             or style.get("glow_enabled")
             or style.get("highlightGlow")
+            or style.get("highlight_glow")
             or base.get("glow_enabled")
             or preset_id in ("glassmorphism", "podcast_pro", "neon_tube", "neon_glow", "modern_mono", "cinematic_slate", "fire_emphasis")
         )
@@ -209,10 +228,17 @@ class SkiaSubtitleRenderer:
             style.get("glowColor")
             or style.get("glow_color")
             or style.get("highlightGlowColor")
+            or style.get("highlight_glow_color")
             or base.get("glow_color")
             or normalized["highlight_color"]
         )
-        normalized["glow_radius"] = int(style.get("glowSize") or style.get("glow_radius") or base.get("glow_radius", 12))
+        normalized["glow_radius"] = int(
+            style.get("glowSize")
+            or style.get("glow_size")
+            or style.get("glowRadius")
+            or style.get("glow_radius")
+            or base.get("glow_radius", 16)
+        )
 
         # Stroke / Border
         base_stroke = base.get("stroke") if isinstance(base.get("stroke"), dict) else {}
@@ -750,10 +776,11 @@ class SkiaSubtitleRenderer:
             # Top progress accent bar for line reveal
             draw.line([card_left + 10, card_top + 4, card_right - 10, card_top + 4], fill=self._parse_rgba(style.get("highlight_color", "#38BDF8"), 1.0), width=3)
 
-        # ─── 2. Draw Words in Fixed Slots with In-Place Scaling ────────────────
+        # ─── 2. Calculate Word Geometry and Positions ─────────────────────────
         normal_color = self._parse_rgba(style.get("text_color", "#FFFFFF"), 1.0)
         highlight_color = self._parse_rgba(style.get("highlight_color", "#38BDF8"), 1.0)
 
+        slots_info = []
         for slot in word_slots:
             item = slot["item"]
             w_text = item["text"]
@@ -764,7 +791,6 @@ class SkiaSubtitleRenderer:
                 act_bbox = draw.textbbox((0, 0), w_text, font=f)
                 act_w = max(1, act_bbox[2] - act_bbox[0])
                 act_h = max(1, act_bbox[3] - act_bbox[1])
-                # Center active word symmetrically over its slot midpoint
                 word_x = int(slot["mid_x"] - act_w / 2.0) - act_bbox[0]
                 word_y = int(center_y - act_h / 2.0) - act_bbox[1]
             else:
@@ -774,6 +800,73 @@ class SkiaSubtitleRenderer:
                 base_bbox = slot["bbox"]
                 word_x = slot["x"] - base_bbox[0]
                 word_y = int(center_y - act_h / 2.0) - base_bbox[1]
+
+            slots_info.append({
+                "slot": slot,
+                "item": item,
+                "text": w_text,
+                "is_active": is_active,
+                "font": f,
+                "act_w": act_w,
+                "act_h": act_h,
+                "word_x": word_x,
+                "word_y": word_y,
+            })
+
+        # ─── 3. Atmospheric Glow Bloom Pass (Dual-stage Gaussian Blur) ────────
+        glow_on = bool(
+            style.get("glow_enabled")
+            or style.get("glowEnabled")
+            or style.get("highlight_glow")
+            or style.get("highlightGlow")
+            or preset_id in ("neon_tube", "neon_glow", "glassmorphism", "podcast_pro", "modern_mono", "cinematic_slate", "fire_emphasis")
+        )
+        if glow_on:
+            glow_color_str = (
+                style.get("glow_color")
+                or style.get("glowColor")
+                or style.get("highlight_glow_color")
+                or style.get("highlightGlowColor")
+                or style.get("highlight_color")
+                or "#00FFFF"
+            )
+            glow_c = self._parse_rgba(glow_color_str, 1.0)
+            glow_rad = max(6, int(style.get("glow_radius") or style.get("glowSize") or style.get("glow_size") or 16))
+
+            glow_layer = Image.new("RGBA", (self._width, self._height), (0, 0, 0, 0))
+            g_draw = ImageDraw.Draw(glow_layer)
+
+            has_glow_items = False
+            for s in slots_info:
+                if s["is_active"]:
+                    g_draw.text((s["word_x"], s["word_y"]), s["text"], font=s["font"], fill=glow_c, stroke_width=glow_rad * 2, stroke_fill=glow_c)
+                    has_glow_items = True
+                elif preset_id in ("neon_tube", "neon_glow"):
+                    cyan_c = (6, 182, 212, 180)
+                    g_draw.text((s["word_x"], s["word_y"]), s["text"], font=s["font"], fill=cyan_c, stroke_width=8, stroke_fill=cyan_c)
+                    has_glow_items = True
+
+            if has_glow_items:
+                wide_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_rad))
+                core_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=max(3, glow_rad // 2)))
+                img = Image.alpha_composite(img, wide_glow)
+                img = Image.alpha_composite(img, core_glow)
+                draw = ImageDraw.Draw(img)
+
+        # ─── 4. Word Drawing Pass (Drop Shadows, Strokes, Fills & Gradients) ──
+        gradient_on = bool(style.get("gradient_enabled") or style.get("gradientEnabled") or preset_id in ("gradient_fill", "retro_chrome"))
+        grad_from = style.get("gradient_from") or style.get("gradientFrom") or "#00F0FF"
+        grad_to = style.get("gradient_to") or style.get("gradientTo") or "#FF007F"
+
+        for s in slots_info:
+            w_text = s["text"]
+            is_active = s["is_active"]
+            f = s["font"]
+            word_x = s["word_x"]
+            word_y = s["word_y"]
+            act_w = s["act_w"]
+            act_h = s["act_h"]
+            slot = s["slot"]
 
             if preset_id == "kinetic_word_box" and is_active:
                 # Solid rounded badge behind active word
@@ -788,126 +881,43 @@ class SkiaSubtitleRenderer:
                 badge_color_hex = style.get("badge_bg_color") or style.get("highlight_badge_color") or "#FF0055"
                 badge_color = self._parse_rgba(badge_color_hex, 1.0)
                 draw.rounded_rectangle(badge_box, radius=10, fill=badge_color)
-                # Crisp white text inside badge
                 draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255))
+                continue
 
-            elif preset_id in ("neon_tube", "neon_glow"):
-                if is_active:
-                    # Hot magenta multi-pass neon tube glow
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 0, 127, 40), stroke_width=12, stroke_fill=(255, 0, 127, 40))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 0, 127, 120), stroke_width=6, stroke_fill=(255, 0, 127, 120))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=2, stroke_fill=(255, 0, 127, 255))
-                else:
-                    # Cyan outer stroke & crisp light typography
-                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(240, 253, 250, 255), stroke_width=2, stroke_fill=(6, 182, 212, 230))
-
-            elif preset_id == "dual_layer":
+            if preset_id == "dual_layer":
                 # 3D depth with purple backlight layer behind sharp text
                 draw.text((word_x, word_y + 4), w_text, font=f, fill=(124, 58, 237, 160), stroke_width=5, stroke_fill=(124, 58, 237, 160))
-                if is_active:
-                    draw.text((word_x, word_y), w_text, font=f, fill=(251, 191, 36, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
-                else:
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0, 230))
 
             elif preset_id == "outline_stack":
-                # 3D anaglyphic red and cyan offset outline stack (hollow outline layers, zero solid red fill)
+                # 3D anaglyphic red and cyan offset outline stack
                 draw.text((word_x - 3, word_y - 2), w_text, font=f, fill=(0, 0, 0, 0), stroke_width=2, stroke_fill=(255, 50, 50, 220))
                 draw.text((word_x + 3, word_y + 2), w_text, font=f, fill=(0, 0, 0, 0), stroke_width=2, stroke_fill=(0, 240, 255, 220))
-                if is_active:
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
-                else:
-                    draw.text((word_x, word_y), w_text, font=f, fill=(240, 240, 240, 255), stroke_width=2, stroke_fill=(0, 0, 0, 230))
-
-            elif preset_id == "retro_chrome":
-                # Metallic chrome reflection with gold active word
-                if is_active:
-                    draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 240))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(251, 191, 36, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
-                else:
-                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 200))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(226, 232, 240, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
-
-            elif preset_id == "gradient_fill":
-                # Multi-stop linear gradient text
-                if is_active:
-                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(245, 87, 108, 255), stroke_width=3, stroke_fill=(255, 154, 118, 255))
-                else:
-                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 200))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(99, 102, 241, 255), stroke_width=2, stroke_fill=(236, 72, 153, 255))
-
-            elif preset_id == "fire_emphasis":
-                # Fiery orange-red highlight with warm glow
-                if is_active:
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 69, 0, 140), stroke_width=10, stroke_fill=(255, 69, 0, 140))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 69, 0, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
-                else:
-                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
-
-            elif preset_id == "hormozi_pop":
-                # Heavy impact center pop: solid black outline + lime active highlight
-                if is_active:
-                    draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 255))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(0, 255, 102, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
-                else:
-                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 240))
-                    draw.text((word_x, word_y), w_text, font=f, fill=(255, 255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
-
-            elif preset_id in ("bold_impact", "bold_impact_stroke"):
-                # Heavy Anton impact with thick outline
-                if is_active:
-                    draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 240))
-                    draw.text((word_x, word_y), w_text, font=f, fill=highlight_color, stroke_width=5, stroke_fill=(0, 0, 0, 255))
-                else:
-                    draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
-                    draw.text((word_x, word_y), w_text, font=f, fill=normal_color, stroke_width=4, stroke_fill=(0, 0, 0, 255))
 
             elif preset_id in ("clean_editorial", "devon_clean") and is_active:
                 # Active word with cyan underline bar
-                draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 180))
-                draw.text((word_x, word_y), w_text, font=f, fill=(56, 189, 248, 255))
-                draw.line([word_x, word_y + act_h + 4, word_x + act_w, word_y + act_h + 4], fill=(56, 189, 248, 255), width=4)
+                draw.line([word_x, word_y + act_h + 4, word_x + act_w, word_y + act_h + 4], fill=self._parse_rgba(style.get("highlight_color", "#38BDF8"), 1.0), width=4)
 
+            # 1. Drop shadow
+            shadow_enabled = style.get("shadow_enabled", True)
+            if shadow_enabled:
+                draw.text((word_x + 3, word_y + 4), w_text, font=f, fill=(0, 0, 0, 240))
+
+            # 2. Text Stroke / Outline
+            strk_enabled = style.get("stroke_enabled", True)
+            if strk_enabled or preset_id in ("bold_impact", "bold_impact_stroke", "hormozi_pop", "fire_emphasis", "neon_tube", "neon_glow"):
+                raw_w = style.get("stroke_width")
+                strk_width = max(2, int(raw_w)) if raw_w is not None and int(raw_w) > 0 else (5 if is_active else 4)
+                strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
+                draw.text((word_x, word_y), w_text, font=f, fill=(0, 0, 0, 0), stroke_width=strk_width, stroke_fill=strk_c)
+
+            # 3. Text Fill (Gradient or Solid Color)
+            if is_active and gradient_on:
+                grad_img, offset = self._create_gradient_text(w_text, f, grad_from=grad_from, grad_to=grad_to)
+                img.paste(grad_img, (word_x + offset[0], word_y + offset[1]), grad_img)
             elif is_active:
-                # Glowing active word highlight with solid dark drop shadow
-                draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 240))
-                hl_color = highlight_color
-                glow_on = (
-                    style.get("glow_enabled") is True
-                    or style.get("glowEnabled") is True
-                    or style.get("highlight_glow") is True
-                    or style.get("highlightGlow") is True
-                    or style.get("glow_enabled") is None  # default on for rich active words
-                )
-                if glow_on:
-                    glow_color_str = (
-                        style.get("glow_color")
-                        or style.get("glowColor")
-                        or style.get("highlight_glow_color")
-                        or style.get("highlightGlowColor")
-                    )
-                    if glow_color_str:
-                        glow_c = self._parse_rgba(glow_color_str, 0.75)
-                    else:
-                        glow_c = (hl_color[0], hl_color[1], hl_color[2], 180)
-                    glow_rad = max(4, int(style.get("glow_radius", style.get("glowSize", 10))))
-                    # Multi-pass glow bloom: wide atmospheric aura + vibrant core
-                    draw.text((word_x, word_y), w_text, font=f, fill=(glow_c[0], glow_c[1], glow_c[2], 65), stroke_width=glow_rad * 2, stroke_fill=(glow_c[0], glow_c[1], glow_c[2], 65))
-                    draw.text((word_x, word_y), w_text, font=f, fill=glow_c, stroke_width=glow_rad, stroke_fill=glow_c)
-
-                strk_width = max(2, int(style.get("stroke_width", 3))) if style.get("stroke_enabled", True) else 3
-                strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
-                draw.text((word_x, word_y), w_text, font=f, fill=hl_color, stroke_width=strk_width, stroke_fill=strk_c)
-
+                draw.text((word_x, word_y), w_text, font=f, fill=highlight_color)
             else:
-                # Normal inactive word - always ensure strong visibility and bold contrast
-                draw.text((word_x + 2, word_y + 3), w_text, font=f, fill=(0, 0, 0, 220))
-                strk_width = max(2, int(style.get("stroke_width", 3))) if style.get("stroke_enabled", True) else 2
-                strk_c = self._parse_rgba(style.get("stroke_color", "#000000"), 1.0)
-                draw.text((word_x, word_y), w_text, font=f, fill=normal_color, stroke_width=strk_width, stroke_fill=strk_c)
-
+                draw.text((word_x, word_y), w_text, font=f, fill=normal_color)
         img.save(output_png, format="PNG")
 
     def _group_words_into_lines(self, words: list, max_per_line: int) -> list[list[dict]]:
@@ -1056,6 +1066,51 @@ class SkiaSubtitleRenderer:
                     int(opacity * 255),
                 )
         return (255, 255, 255, int(opacity * 255))
+
+    def _create_gradient_text(
+        self,
+        text: str,
+        font: ImageFont.FreeTypeFont,
+        grad_from: str = "#00F0FF",
+        grad_to: str = "#FF007F",
+        direction: str = "vertical",
+    ) -> Tuple[Image.Image, Tuple[int, int]]:
+        """Generate a linear gradient text RGBA image and alignment offset."""
+        dummy = Image.new("RGBA", (1, 1))
+        d = ImageDraw.Draw(dummy)
+        bbox = d.textbbox((0, 0), text, font=font)
+        text_w = max(1, bbox[2] - bbox[0])
+        text_h = max(1, bbox[3] - bbox[1])
+
+        grad_img = Image.new("RGBA", (text_w, text_h))
+        c1 = self._parse_rgba(grad_from, 1.0)
+        c2 = self._parse_rgba(grad_to, 1.0)
+        g_draw = ImageDraw.Draw(grad_img)
+
+        if direction == "vertical":
+            for y in range(text_h):
+                t = y / float(text_h - 1) if text_h > 1 else 0
+                r = int(c1[0] * (1 - t) + c2[0] * t)
+                g = int(c1[1] * (1 - t) + c2[1] * t)
+                b = int(c1[2] * (1 - t) + c2[2] * t)
+                a = int(c1[3] * (1 - t) + c2[3] * t)
+                g_draw.line([(0, y), (text_w, y)], fill=(r, g, b, a))
+        else:
+            for x in range(text_w):
+                t = x / float(text_w - 1) if text_w > 1 else 0
+                r = int(c1[0] * (1 - t) + c2[0] * t)
+                g = int(c1[1] * (1 - t) + c2[1] * t)
+                b = int(c1[2] * (1 - t) + c2[2] * t)
+                a = int(c1[3] * (1 - t) + c2[3] * t)
+                g_draw.line([(x, 0), (x, text_h)], fill=(r, g, b, a))
+
+        mask_img = Image.new("L", (text_w, text_h), 0)
+        m_draw = ImageDraw.Draw(mask_img)
+        m_draw.text((-bbox[0], -bbox[1]), text, font=font, fill=255)
+
+        out_img = Image.new("RGBA", (text_w, text_h), (0, 0, 0, 0))
+        out_img.paste(grad_img, (0, 0), mask_img)
+        return out_img, (bbox[0], bbox[1])
 
     def _probe_duration(self, video_path: str) -> float:
         """Get duration of video in seconds."""

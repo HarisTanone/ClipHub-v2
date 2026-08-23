@@ -163,3 +163,83 @@ async def test_render_clips_fallback_when_remotion_offline(tmp_path):
     )
 
     assert service._render_via_direct_engines.called
+
+
+def test_skia_subtitle_renderer_glow_and_gradient_frame(tmp_path):
+    from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+    from PIL import Image
+
+    renderer = SkiaSubtitleRenderer(font_dir="backend/assets/fonts")
+    words_line = [
+        {"word": "SUPER", "start": 0.0, "end": 0.5},
+        {"word": "GLOW", "start": 0.5, "end": 1.0},
+        {"word": "SUBTITLE", "start": 1.0, "end": 1.5},
+    ]
+    style = {
+        "style_preset": "bold_impact_stroke",
+        "fontSize": 48,
+        "glowEnabled": True,
+        "glowColor": "#14F1D9",
+        "glowSize": 24,
+        "gradientEnabled": True,
+        "gradientFrom": "#FFFFFF",
+        "gradientTo": "#FF007F",
+    }
+    norm_style = renderer._normalize_style(style)
+    assert norm_style["glow_enabled"] is True
+    assert norm_style["glow_color"] == "#14F1D9"
+    assert norm_style["gradient_enabled"] is True
+    assert norm_style["gradient_from"] == "#FFFFFF"
+    assert norm_style["gradient_to"] == "#FF007F"
+
+    out_png = str(tmp_path / "frame_glow.png")
+    renderer._render_line_frame_pil(
+        output_png=out_png,
+        words_line=words_line,
+        active_word_index=1,
+        style=norm_style,
+    )
+    assert os.path.exists(out_png)
+    assert os.path.getsize(out_png) > 0
+    img = Image.open(out_png)
+    assert img.size == (1080, 1920)
+    assert img.mode == "RGBA"
+
+
+def test_skia_subtitle_renderer_full_video_with_glow(tmp_path):
+    import subprocess
+    from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
+
+    in_video = str(tmp_path / "in.mp4")
+    out_video = str(tmp_path / "out_glow.mp4")
+
+    # Generate 3s synthetic MP4
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=720x1280:d=3:r=30",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "3",
+        "-c:v", "libx264", "-c:a", "aac", in_video
+    ], capture_output=True, check=True)
+
+    renderer = SkiaSubtitleRenderer(font_dir="backend/assets/fonts")
+    words = [
+        {"word": "RAHASIA", "start": 0.2, "end": 0.8},
+        {"word": "SUKSES", "start": 0.8, "end": 1.6},
+        {"word": "BISNIS", "start": 1.6, "end": 2.4},
+    ]
+    style = {
+        "style_preset": "neon_glow",
+        "glowEnabled": True,
+        "glowColor": "#00FFFF",
+        "gradientEnabled": True,
+        "gradientFrom": "#00FFFF",
+        "gradientTo": "#FF007F",
+    }
+    res = renderer.render_subtitles(
+        video_path=in_video,
+        words=words,
+        style=style,
+        output_path=out_video,
+        start_offset=0.0,
+    )
+    assert os.path.exists(out_video)
+    assert os.path.getsize(out_video) > 0
