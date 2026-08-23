@@ -1433,6 +1433,8 @@ async def auto_extract_youtube_cookies(
         logger.info(f"Attempting auto-extracting YouTube cookies from browser: {b}")
         cmd = [
             ytdlp_cmd,
+            "--geo-bypass",
+            "--extractor-args", "youtube:player_client=web_safari,mweb,tv,ios",
             "--cookies-from-browser", b,
             "--cookies", backend_dir_cookies,
             "--dump-json",
@@ -1467,13 +1469,13 @@ async def auto_extract_youtube_cookies(
     if not success_browser or not os.path.exists(backend_dir_cookies):
         return {
             "success": False,
-            "message": f"Gagal mengekstrak cookies otomatis dari browser ({requested_browser}): {last_err[:200] if last_err else 'Tidak ada browser aktif dengan login YouTube'}. Anda dapat mengunggah file cookies.txt secara manual.",
+            "message": f"Ekstrak otomatis browser ({requested_browser}) tidak menemukan database browser di server host ({last_err[:180] if last_err else 'Tidak ada browser desktop yang terpasang di VPS'}). Silakan gunakan fitur Upload atau Paste Cookies.txt secara manual.",
         }
 
     stat = os.stat(backend_dir_cookies)
     with open(backend_dir_cookies, "r", encoding="utf-8", errors="ignore") as f:
         lines = f.readlines()
-    cookie_count = sum(1 for l in lines if l.strip() and not l.strip().startswith("#"))
+    cookie_count = _count_valid_cookies(lines)
 
     return {
         "success": True,
