@@ -439,12 +439,12 @@ ATURAN (WAJIB):
 5. label = label kartu singkat.
 6. entity_type = salah satu kategori di atas.
 7. priority = 1–10 integer.
-8. query_id = stock ID 2-8 kata konkret.
-9. query_en = stock EN 2-8 kata. ASR salah eja merek → PERBAIKI di query saja (word tetap ucapan).
+8. query_id = stock ID 2-8 kata konkret (contoh: tepung terigu, rokok kretek, obat kapsul).
+9. query_en = stock EN 2-8 kata konkret. Kata bahasa Indonesia berulang/majemuk (contoh: 'tepung-tepungan' → 'wheat flour baking dough', 'sayur-sayuran' → 'fresh green vegetables', 'buah-buahan' → 'fresh fruits assortment', 'obat-obatan' → 'medicine pills capsules pharmacy', 'goreng-gorengan' → 'fried snacks food', 'kacang-kacangan' → 'peanuts nuts legumes') WAJIB diterjemahkan ke kata benda konkret bahasa Inggris agar API foto stock internasional (Pexels/Pixabay) menemukan foto yang tepat, BUKAN salah foto serangga/hewan. ASR salah eja merek → PERBAIKI di query saja (word tetap ucapan).
 10. search_queries = 3–6 variasi BERBEDA mencakup:
     - bare entity + product close-up
     - ACTION jika relevan (merokok → person smoking, cigarette smoke)
-    - sinonim/konsep terkait (rokok → cigarette, tobacco; IQOS → heated tobacco device)
+    - sinonim/konsep terkait (rokok → cigarette, tobacco; IQOS → heated tobacco device; tepung-tepungan → flour, wheat flour, baking powder)
     - adjective compound jika ada (rokok elektrik → electric cigarette)
     Campur ID+EN. Bukan copy query_en 4x.
 11. Target ideal 4–{max_objects} jika transkrip kaya; objects:[] hanya jika benar-benar kosong.

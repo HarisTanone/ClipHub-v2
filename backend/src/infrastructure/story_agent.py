@@ -84,7 +84,9 @@ Output this exact JSON structure:
 
 Important Guidelines:
 - Follow the Creative Direction meticulously in scene breakdown, narration tone, and visual cues.
-- Search Queries: Include exact location/entity names in Query 1, and descriptive English keywords in Query 2-4.
+- Search Queries: 
+  * Query 1: Exact location or primary entity in Indonesian/English (e.g. Salatiga aerial drone Jawa Tengah, rokok kretek rokok).
+  * Query 2-4: Concrete, high-accuracy universal ENGLISH visual stock keywords for Pexels & Pixabay (e.g. wheat flour baking dough powder, fresh green vegetables market, human brain neurons synapse, vintage dutch colonial architecture). Translate any local terms or food/objects into standard English nouns so stock footage matches 100%.
 - Narration Volume: Ensure all {num_scenes} scenes have complete, engaging storytelling sentences (total ~{word_count} words across the script).
 - First scene is the opening HOOK.
 - Final scene is a punchy, thought-provoking conclusion or takeaway. No CTAs."""

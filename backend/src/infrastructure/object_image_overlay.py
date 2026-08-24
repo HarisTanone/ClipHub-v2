@@ -88,13 +88,122 @@ def load_object_overlay_style(user_id: int | None = None) -> dict[str, Any]:
     return base
 
 
+# Indonesian entity normalization map for common reduplicated & everyday terms
+INDONESIAN_ENTITY_MAP: dict[str, tuple[str, str, str]] = {
+    # Indonesian root / stem -> (Base Indonesian word, High precision English query, English search tags)
+    "tepung": ("tepung", "wheat flour baking powder", "flour baking dough powder"),
+    "tepung-tepungan": ("tepung", "wheat flour baking powder", "flour baking dough powder"),
+    "sayur": ("sayuran", "fresh green vegetables", "healthy green vegetables food"),
+    "sayuran": ("sayuran", "fresh green vegetables", "healthy green vegetables food"),
+    "sayur-sayuran": ("sayuran", "fresh green vegetables", "healthy green vegetables food"),
+    "buah": ("buah-buahan", "colorful fresh fruits", "fresh fruits healthy food"),
+    "buahan": ("buah-buahan", "colorful fresh fruits", "fresh fruits healthy food"),
+    "buah-buahan": ("buah-buahan", "colorful fresh fruits", "fresh fruits healthy food"),
+    "kacang": ("kacang", "peanuts almonds nuts", "peanuts almonds nuts legumes"),
+    "kacangan": ("kacang", "peanuts almonds nuts", "peanuts almonds nuts legumes"),
+    "kacang-kacangan": ("kacang", "peanuts almonds nuts", "peanuts almonds nuts legumes"),
+    "gorengan": ("gorengan", "fried snacks food", "asian fried snacks food street"),
+    "goreng-gorengan": ("gorengan", "fried snacks food", "asian fried snacks food street"),
+    "obat": ("obat", "medicine pills capsules", "medical pills capsules pharmacy"),
+    "obatan": ("obat", "medicine pills capsules", "medical pills capsules pharmacy"),
+    "obat-obatan": ("obat", "medicine pills capsules", "medical pills capsules pharmacy"),
+    "minuman": ("minuman", "refreshing beverage drink", "cold drink iced beverage glass"),
+    "minum-minuman": ("minuman", "refreshing beverage drink", "cold drink iced beverage glass"),
+    "manisan": ("makanan manis", "sweet dessert pastry", "sweet desserts sugar cookies cake"),
+    "manis-manisan": ("makanan manis", "sweet dessert pastry", "sweet desserts sugar cookies cake"),
+    "daging": ("daging", "raw fresh beef steak", "beef meat raw steak butcher"),
+    "daging-dagingan": ("daging", "fresh meat steak", "beef meat raw steak butcher"),
+    "ikan": ("ikan", "fresh fish seafood", "fresh fish seafood market cooking"),
+    "ikan-ikanan": ("ikan", "fresh fish seafood", "fresh fish seafood market cooking"),
+    "biji": ("biji-bijian", "seeds grains cereals", "chia seeds cereal grains superfood"),
+    "bijian": ("biji-bijian", "seeds grains cereals", "chia seeds cereal grains superfood"),
+    "biji-bijian": ("biji-bijian", "seeds grains cereals", "chia seeds cereal grains superfood"),
+    "rokok": ("rokok", "cigarette pack smoking", "cigarette pack smoking tobacco"),
+    "rokok-rokokan": ("rokok", "cigarette pack smoking", "cigarette pack smoking tobacco"),
+    "merokok": ("merokok", "smoking cigarette tobacco", "person smoking cigarette tobacco ash"),
+    "makan": ("makanan", "eating delicious food", "eating food meal dish"),
+    "minum": ("minuman", "drinking beverage glass", "person drinking water beverage glass"),
+    "tidur": ("tidur", "sleeping in bed", "person sleeping bed bedroom"),
+    "gula": ("gula", "white sugar sweetener", "refined white sugar bowl sweet"),
+    "garam": ("garam", "sea salt seasoning", "white sea salt crystals kitchen"),
+    "nasi": ("nasi", "cooked white rice bowl", "steamed white rice bowl asian food"),
+    "beras": ("beras", "raw rice grains", "uncooked white rice grains raw"),
+    "roti": ("roti", "fresh bakery bread", "bakery bread loaf sliced wheat"),
+    "mie": ("mie", "noodles ramen bowl", "noodles ramen soup bowl food"),
+    "minyak": ("minyak goreng", "cooking olive oil bottle", "cooking olive oil golden bottle"),
+    "susu": ("susu", "fresh milk glass bottle", "fresh cow milk glass bottle dairy"),
+    "kopi": ("kopi", "coffee cup espresso beans", "fresh hot coffee cup roasted beans"),
+    "teh": ("teh", "hot tea cup teapot", "hot green tea cup herbal teapot"),
+    "telur": ("telur", "chicken eggs carton", "raw fresh chicken eggs carton"),
+    "ayam": ("daging ayam", "fresh chicken meat cooking", "raw fresh chicken meat poultry"),
+    "keju": ("keju", "cheese block slice", "cheddar cheese block dairy food"),
+    "madu": ("madu", "pure honey jar dipper", "organic pure honey jar golden"),
+    "cokelat": ("cokelat", "chocolate bar dark sweet", "dark chocolate bar sweet dessert"),
+    "coklat": ("cokelat", "chocolate bar dark sweet", "dark chocolate bar sweet dessert"),
+    "kentang": ("kentang", "fresh potato vegetables", "raw fresh potato tubers market"),
+    "tomat": ("tomat", "fresh red tomatoes", "ripe red tomatoes fresh vegetable"),
+    "cabai": ("cabai", "red hot chili peppers", "fresh red spicy chili peppers"),
+    "cabe": ("cabai", "red hot chili peppers", "fresh red spicy chili peppers"),
+    "bawang": ("bawang", "fresh red onion garlic", "fresh onion garlic bulb kitchen"),
+    "pisang": ("pisang", "fresh yellow bananas", "ripe yellow bananas bunch fruit"),
+    "jeruk": ("jeruk", "fresh orange citrus fruit", "fresh orange citrus fruits slice"),
+    "apel": ("apel", "fresh red apple fruit", "crisp red apple fruit orchard"),
+}
+
+
+def normalize_indonesian_entity(raw_text: str | None) -> tuple[str, str, str]:
+    """Extract clean base root word and accurate English stock query for Indonesian terms (e.g. reduplications)."""
+    if not raw_text:
+        return "", "", ""
+    clean = re.sub(r"[^\w\-]+", " ", str(raw_text).lower()).strip()
+    if clean in INDONESIAN_ENTITY_MAP:
+        return INDONESIAN_ENTITY_MAP[clean]
+
+    # Handle reduplications like kata-kataan or kata-kata (e.g., tepung-tepung, tepung-tepungan)
+    match_redup = re.match(r"^([a-z]+)-\1(an)?$", clean)
+    if match_redup:
+        stem = match_redup.group(1)
+        if stem in INDONESIAN_ENTITY_MAP:
+            return INDONESIAN_ENTITY_MAP[stem]
+        return stem, f"{stem} product close up", stem
+
+    # Handle prefix me-/ber-
+    if clean.startswith("me") and len(clean) > 4:
+        stem = clean[2:]
+        if stem in INDONESIAN_ENTITY_MAP:
+            return INDONESIAN_ENTITY_MAP[stem]
+    if clean.startswith("ber") and len(clean) > 5:
+        stem = clean[3:]
+        if stem in INDONESIAN_ENTITY_MAP:
+            return INDONESIAN_ENTITY_MAP[stem]
+
+    # Handle suffix -an (e.g. gorengan -> goreng, makanan -> makan)
+    if clean.endswith("an") and len(clean) > 4:
+        stem = clean[:-2]
+        if stem in INDONESIAN_ENTITY_MAP:
+            return INDONESIAN_ENTITY_MAP[stem]
+
+    return clean, "", ""
+
+
 def bilingual_queries(entity: dict | str | None) -> tuple[str, str, str]:
-    """(id_query, en_query, label) from AI entity dict — no domain lexicon."""
+    """(id_query, en_query, label) from AI entity dict — with intelligent Indonesian normalization."""
     if isinstance(entity, dict):
         word = str(entity.get("word") or entity.get("label") or "").strip()
         label = str(entity.get("label") or word or "Object").strip() or "Object"
         id_q = " ".join(str(entity.get("query_id") or "").split())
         en_q = " ".join(str(entity.get("query_en") or "").split())
+
+        # Check normalization for Indonesian terms & reduplications
+        norm_id, norm_en, _ = normalize_indonesian_entity(word)
+        if norm_en:
+            clean_en = re.sub(r"[^\w]+", "", en_q.lower())
+            clean_word = re.sub(r"[^\w]+", "", word.lower())
+            if not en_q or clean_en == clean_word or "object close up" in en_q.lower() or len(en_q) < 3:
+                en_q = norm_en
+            if not id_q or id_q == word or "close up" in id_q.lower():
+                id_q = norm_id
+
         if not en_q:
             sq = entity.get("search_queries") or []
             en_q = " ".join(str(sq[0] if sq else word).split())
@@ -103,10 +212,12 @@ def bilingual_queries(entity: dict | str | None) -> tuple[str, str, str]:
         if not en_q:
             en_q = id_q or f"{word} object close up"
         return id_q[:80], en_q[:80], label[:40]
+
     clean = re.sub(r"[^\w\-]+", "", str(entity or ""), flags=re.UNICODE)
     label = clean[:1].upper() + clean[1:] if clean else str(entity or "Object")
-    id_q = f"{clean} close up" if clean else "object close up"
-    en_q = f"{clean} object close up" if clean else "object close up"
+    norm_id, norm_en, _ = normalize_indonesian_entity(clean)
+    id_q = norm_id or (f"{clean} close up" if clean else "object close up")
+    en_q = norm_en or (f"{clean} object close up" if clean else "object close up")
     return id_q, en_q, label
 
 
@@ -304,20 +415,34 @@ def score_image_relevance(
     clip_reason: str = "",
     search_queries: list[str] | None = None,
 ) -> float:
-    """Cheap local relevance 0..1.
+    """Accurate semantic relevance scoring (0..1) with cross-category conflict filtering.
 
-    Core = word/label/query_en/matched search query (tight).
-    Extra = long query_id / search_queries (half weight) — avoids diluting EN hits
-    with many unused ID tokens from long prompts.
-    Hook/reason = soft only (never sole reason to accept).
+    Prevents wrong stock matches (e.g. insect photos for food/flour queries).
     """
-    # Score ONLY photo evidence — never the search query itself (self-match inflate)
     blob = " ".join([
         str(photo_meta.get("alt") or ""),
         str(photo_meta.get("url") or ""),
         str(photo_meta.get("photographer") or ""),
         " ".join(str(t) for t in (photo_meta.get("tags") or [])),
     ]).lower()
+
+    # 1. Semantic Category Conflict Disqualification (Hard Rejections)
+    FOOD_KEYWORDS = {
+        "tepung", "flour", "makanan", "food", "sayur", "vegetable", "buah", "fruit",
+        "kacang", "nut", "snack", "bread", "roti", "rice", "nasi", "sugar", "gula",
+        "meat", "daging", "drink", "beverage", "minuman", "diet", "nutrition", "baking", "dough",
+    }
+    INSECT_KEYWORDS = {
+        "wasp", "bee", "hornet", "insect", "bug", "beetle", "pest", "grasshopper",
+        "locust", "spider", "fly", "caterpillar", "worm", "reptile", "snake", "lizard",
+    }
+    entity_text = f"{word} {label} {query_en} {query_id} {' '.join(search_queries or [])}".lower()
+    is_food_query = any(k in entity_text for k in FOOD_KEYWORDS)
+    is_insect_photo = any(k in blob for k in INSECT_KEYWORDS)
+    if is_food_query and is_insect_photo:
+        # HARD REJECT: Food entity matched with insect/pest photo
+        return 0.0
+
     generic = {
         "the", "and", "for", "with", "close", "product", "object", "image",
         "photo", "stock", "up", "isolated", "showing", "menunjukkan", "tanggal",
@@ -330,31 +455,30 @@ def score_image_relevance(
             out.update(re.findall(r"[a-z0-9]{3,}", str(part or "").lower()))
         return out - generic
 
-    # Core: spoken entity + EN query + the specific API query that returned this hit
+    # Include normalized English tokens if available
+    norm_id, norm_en, _ = normalize_indonesian_entity(word or label)
     matched_q = str(photo_meta.get("query") or "")
-    core = _toks(word, label, query_en, matched_q)
-    extra = _toks(query_id, *list(search_queries or [])) - core
+    core = _toks(word, label, query_en, norm_en, matched_q)
+    extra = _toks(query_id, norm_id, *list(search_queries or [])) - core
     soft = _toks(clip_hook, clip_reason) - core - extra
+
     if not core and not extra and not soft:
-        return 0.15 if blob else 0.05
+        return 0.10 if blob else 0.0
+
     c_hits = sum(1 for t in core if t in blob)
     e_hits = sum(1 for t in extra if t in blob)
     s_hits = sum(1 for t in soft if t in blob)
-    # API already filtered by entity query (ID bare word) but alt often EN-only
-    entity_stems = {t for t in _toks(word, label) if len(t) >= 4}
-    mq = matched_q.lower()
-    api_trusted = bool(mq) and any(t in mq for t in entity_stems)
-    # No entity hit on alt AND query wasn't the spoken entity → weak (junk reuse)
-    if (core or extra) and c_hits == 0 and e_hits == 0 and not api_trusted:
-        return max(0.0, min(1.0, 0.08 + 0.04 * min(2, s_hits)))
+
+    # If no core tokens and no extra tokens match between entity and photo blob:
+    if (core or extra) and c_hits == 0 and e_hits == 0:
+        # STRICT: Do not artificially inflate score just because API returned a hit!
+        return max(0.0, min(0.12, 0.04 * min(2, s_hits)))
+
     denom = max(2.0, min(4.0, float(len(core) or 1)))
     score = (c_hits / denom) + 0.12 * min(3, e_hits) + 0.04 * min(2, s_hits)
-    if api_trusted and c_hits == 0:
-        # Cross-lang floor: stock hit for entity query, alt in another language.
-        # Must clear default OBJECT_OVERLAY_MIN_RELEVANCE (0.35).
-        score = max(score, 0.38)
+
     for bonus in ("hand", "pack", "device", "macro", "cigarette", "smoke",
-                  "calendar", "hookah", "vape", "tobacco", "ash"):
+                  "calendar", "hookah", "vape", "tobacco", "ash", "baking", "flour", "food"):
         if bonus in blob:
             score += 0.05
     for bad in ("landscape", "skyline", "sunset beach", "mountain", "crowd people",
@@ -410,8 +534,19 @@ def _photo_queries(
         seen.add(low)
         out.append(q)
 
-    for q in (query_en, *(search_queries or []), label, query_id):
+    # Normalize entity word (Indonesian reduplication / slang to clean English & root word)
+    norm_id, norm_en, extra_tags = normalize_indonesian_entity(word or label)
+    if norm_en:
+        _add(norm_en)
+    _add(query_en)
+    if extra_tags:
+        _add(extra_tags)
+    for q in (search_queries or []):
         _add(q)
+    _add(label)
+    if norm_id:
+        _add(norm_id)
+    _add(query_id)
     return out[:6]
 
 

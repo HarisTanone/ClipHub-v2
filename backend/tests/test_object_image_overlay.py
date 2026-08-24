@@ -356,3 +356,57 @@ def test_api_trusted_clears_default_min_relevance():
         },
     )
     assert sc >= 0.35  # must pass default OBJECT_OVERLAY_MIN_RELEVANCE
+
+
+def test_tepung_tepungan_normalization_and_queries():
+    from src.infrastructure.object_image_overlay import bilingual_queries, _photo_queries, normalize_indonesian_entity
+
+    norm_id, norm_en, extra = normalize_indonesian_entity("tepung-tepungan")
+    assert norm_id == "tepung"
+    assert "flour" in norm_en.lower()
+
+    id_q, en_q, label = bilingual_queries({"word": "tepung-tepungan", "label": "TEPUNG-TEPUNGAN"})
+    assert "tepung" in id_q.lower()
+    assert "flour" in en_q.lower()
+    assert label == "TEPUNG-TEPUNGAN"
+
+    queries = _photo_queries(id_q, en_q, ["flour", "wheat flour"], word="tepung-tepungan", label="TEPUNG-TEPUNGAN")
+    assert any("flour" in q.lower() for q in queries)
+    # English queries should be prioritized in stock photo API search
+    assert "flour" in queries[0].lower() or "wheat" in queries[0].lower()
+
+
+def test_food_vs_insect_conflict_rejection():
+    from src.infrastructure.object_image_overlay import score_image_relevance
+
+    # When user talks about tepung-tepungan but stock photo API returns a wasp/insect
+    score_insect = score_image_relevance(
+        word="tepung-tepungan",
+        label="TEPUNG-TEPUNGAN",
+        query_id="tepung terigu",
+        query_en="wheat flour baking powder",
+        photo_meta={
+            "alt": "wasp hornet insect macro photography nature animal",
+            "url": "https://images.pexels.com/wasp.jpg",
+            "tags": ["wasp", "insect", "yellow jacket", "nature", "pest"],
+            "query": "tepung-tepungan",
+        },
+    )
+    # MUST BE 0.0 (Hard rejected due to category conflict!)
+    assert score_insect == 0.0
+
+    # When photo is valid flour/baking
+    score_flour = score_image_relevance(
+        word="tepung-tepungan",
+        label="TEPUNG-TEPUNGAN",
+        query_id="tepung terigu",
+        query_en="wheat flour baking powder",
+        photo_meta={
+            "alt": "white wheat flour bowl baking powder kitchen cooking dough",
+            "url": "https://images.pexels.com/flour.jpg",
+            "tags": ["flour", "baking", "wheat", "dough", "kitchen"],
+            "query": "wheat flour baking powder",
+        },
+    )
+    assert score_flour >= 0.50
+

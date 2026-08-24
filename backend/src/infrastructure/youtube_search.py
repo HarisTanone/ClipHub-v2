@@ -25,15 +25,26 @@ YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
 def simplify_stock_query(query: str) -> str:
-    """Simplify query to 2-3 core physical nouns/actions by stripping filler terms.
+    """Simplify query to 2-3 core physical nouns/actions by stripping filler terms and normalizing Indonesian terms to English.
 
-    Stock APIs (Pexels, Pixabay) index primarily by 1-3 simple concrete tags.
-    Removing filmmaking adjectives (4k, cinematic, slow motion) drastically
-    improves match hit rate and relevance.
+    Stock APIs (Pexels, Pixabay) index primarily by 1-3 simple concrete English tags.
+    Removing filmmaking adjectives (4k, cinematic, slow motion) and translating
+    Indonesian terms (e.g. tepung-tepungan -> flour) drastically improves match hit rate and relevance.
     """
     if not query:
         return ""
     import re
+
+    # 1. Normalize Indonesian entity/reduplications if present (e.g. tepung-tepungan -> flour baking)
+    try:
+        from src.infrastructure.object_image_overlay import normalize_indonesian_entity
+        for token in query.lower().split():
+            clean_tok = re.sub(r"[^\w\-]+", "", token)
+            norm_id, norm_en, _ = normalize_indonesian_entity(clean_tok)
+            if norm_en:
+                query = query.lower().replace(token, norm_en)
+    except Exception:
+        pass
 
     fillers = [
         r"\bcinematic\b", r"\b4k\b", r"\b8k\b", r"\bhd\b", r"\buhd\b", r"\b60fps\b",
@@ -43,6 +54,7 @@ def simplify_stock_query(query: str) -> str:
         r"\bmacro\b", r"\bclose\s+up\b", r"\bextreme\b", r"\bwide\s+shot\b",
         r"\bdrone\s+shot\b", r"\bdrone\b", r"\baerial\b", r"\btracking\s+shot\b",
         r"\bcamera\b", r"\bshot\b", r"\bscene\b", r"\bbackground\b",
+        r"\byang\b", r"\bdan\b", r"\batau\b", r"\buntuk\b", r"\bdengan\b",
     ]
     cleaned = query.lower()
     for f in fillers:
@@ -52,7 +64,7 @@ def simplify_stock_query(query: str) -> str:
     if not words:
         words = [w for w in re.findall(r'[a-zA-Z0-9]+', query) if len(w) >= 3]
 
-    return " ".join(words[:3]) if words else query.strip()
+    return " ".join(words[:4]) if words else query.strip()
 
 
 @dataclass
