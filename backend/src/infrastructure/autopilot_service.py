@@ -444,11 +444,16 @@ class AutopilotService:
             "target_aspect_ratio": "9:16",
             "style_preset": preset_slug,
             "force_reprocess": False,
-            "use_remotion": True,
+            "use_remotion": resolved_preset.get("hook_engine", "remotion") == "remotion" if resolved_preset else True,
             "ai_layer_enabled": True,
-            "broll_enabled": False,
+            # B-roll & Auto-Grid layers from resolved preset
+            "broll_enabled": resolved_preset.get("broll_enabled", False) if resolved_preset else False,
+            "broll_image_overlay": resolved_preset.get("broll_image_overlay", True) if resolved_preset else True,
+            "broll_behind_person": resolved_preset.get("broll_behind_person", True) if resolved_preset else True,
+            "broll_video_footage": resolved_preset.get("broll_video_footage", True) if resolved_preset else True,
+            "autogrid_enabled": resolved_preset.get("autogrid_enabled", False) if resolved_preset else False,
+            # Text & Hook & Subtitle layers from resolved preset
             "text_emphasis_enabled": resolved_preset.get("text_emphasis_enabled", True) if resolved_preset else True,
-            # Pass all 5 visual style layers from resolved preset
             "hook_style_config": resolved_preset.get("hook_style_config", {}) if resolved_preset else {},
             "subtitle_style_config": resolved_preset.get("subtitle_style_config", {}) if resolved_preset else {},
             "text_emphasis_style_config": resolved_preset.get("text_emphasis_style_config", {}) if resolved_preset else {},
