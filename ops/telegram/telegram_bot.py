@@ -505,18 +505,44 @@ class KB:
                 InlineKeyboardButton("Submit URL",   callback_data="menu_submit"),
             ],
             [
+                InlineKeyboardButton("🤖 Hermes Autopilot", callback_data="menu_autopilot"),
+                InlineKeyboardButton("Auto-Post Sosmed", callback_data="menu_autopost"),
+            ],
+            [
                 InlineKeyboardButton("Job Terbaru",  callback_data="act_jobs"),
                 InlineKeyboardButton("Cek Status",   callback_data="menu_status"),
             ],
             [
-                InlineKeyboardButton("Auto-Post Sosmed", callback_data="menu_autopost"),
                 InlineKeyboardButton("Model LLM",    callback_data="menu_model"),
-            ],
-            [
-                InlineKeyboardButton("My ID",        callback_data="act_myid"),
                 InlineKeyboardButton("Bantuan",      callback_data="act_help"),
             ],
         ])
+
+    @staticmethod
+    def autopilot_menu(is_enabled: bool, can_run: bool, quota_str: str) -> InlineKeyboardMarkup:
+        """Interactive keyboard for Hermes Autopilot."""
+        rows = [
+            [
+                InlineKeyboardButton(
+                    f"{'🟢 Autopilot: AKTIF' if is_enabled else '🔴 Autopilot: NONAKTIF'}",
+                    callback_data="act_autopilot_toggle"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{'🚀 Jalankan Hari Ini (1 Video)' if can_run else '⏳ Kuota Hari Ini Terpenuhi'}",
+                    callback_data="act_autopilot_run_now"
+                )
+            ],
+            [
+                InlineKeyboardButton("⚙️ Auto-Post Sosmed", callback_data="menu_autopost"),
+                InlineKeyboardButton("🎨 Daftar Preset", callback_data="menu_presets"),
+            ],
+            [
+                InlineKeyboardButton("Menu Utama", callback_data="act_back")
+            ],
+        ]
+        return InlineKeyboardMarkup(rows)
 
     @staticmethod
     def autopost_menu(is_enabled: bool, selected_platforms: list[str], mode: str = "ai") -> InlineKeyboardMarkup:
@@ -1469,6 +1495,90 @@ async def cmd_autopost(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _show_autopost_menu(update.message)
 
 
+# ─── /autopilot ───────────────────────────────────────────────────────────────
+
+async def _show_autopilot_menu(target, toast: str = ""):
+    """Render the interactive Hermes Autopilot menu."""
+    from src.infrastructure.autopilot_service import autopilot_service
+    
+    settings = autopilot_service.get_settings(user_id=1)
+    is_enabled = settings.get("enabled", False)
+    can_run, reason, quota = autopilot_service.can_run_today(user_id=1)
+    
+    niche = settings.get("niche_query", "podcast bisnis")
+    preset = settings.get("preset_slug", "default")
+    run_time = settings.get("run_time", "08:00")
+    platforms = settings.get("target_platforms", "tiktok,instagram,youtube")
+    today_runs = quota.get("today_runs", 0)
+    max_daily = quota.get("max_daily_videos", 1)
+    last_vid = settings.get("last_video_title") or "Belum ada video diproses"
+
+    text = (
+        f"🤖 <b>Hermes Autopilot Automation (1 Video/Hari)</b>\n\n"
+        f"Status: <b>{'🟢 [AKTIF]' if is_enabled else '🔴 [NONAKTIF]'}</b>\n"
+        f"🎯 <b>Niche Pencarian:</b> <code>{niche}</code>\n"
+        f"🎨 <b>Preset Visual:</b> <code>{preset}</code>\n"
+        f"📱 <b>Target Sosmed:</b> <code>{platforms}</code>\n"
+        f"⏰ <b>Jadwal Harian:</b> <code>{run_time} WIB</code>\n"
+        f"📊 <b>Kuota Hari Ini:</b> <b>{today_runs}/{max_daily} Video</b>\n"
+        f"💡 <b>Kesiapan:</b> <i>{reason}</i>\n\n"
+        f"🎬 <b>Video Terakhir:</b> {last_vid}\n\n"
+        f"<i>Hermes akan mencari video YouTube viral setiap hari, memotong klip dengan preset 5 layer visual Anda, dan otomatis menjadwalkan ke akun media sosial Anda!</i>"
+    )
+    if toast:
+        text = f"<i>{toast}</i>\n\n" + text
+
+    kb = KB.autopilot_menu(is_enabled, can_run, f"{today_runs}/{max_daily}")
+    if hasattr(target, "edit_message_text"):
+        await edit_or_reply(target, text, kb)
+    elif hasattr(target, "reply_text"):
+        await target.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    elif hasattr(target, "message") and hasattr(target.message, "reply_text"):
+        await target.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def cmd_autopilot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Command handler for /autopilot [on|off|run|status]."""
+    if not is_allowed(update.effective_user.id if update.effective_user else None):
+        return await deny_access(update)
+
+    from src.infrastructure.autopilot_service import autopilot_service
+
+    if ctx.args:
+        arg = ctx.args[0].lower()
+        if arg in ("on", "enable", "start", "1"):
+            autopilot_service.update_settings(user_id=1, data={"enabled": 1})
+            await update.message.reply_text(
+                "🟢 <b>Hermes Autopilot telah diaktifkan!</b> (Jadwal: 1 Video/Hari)",
+                parse_mode=ParseMode.HTML,
+            )
+        elif arg in ("off", "disable", "stop", "0"):
+            autopilot_service.update_settings(user_id=1, data={"enabled": 0})
+            await update.message.reply_text(
+                "🔴 <b>Hermes Autopilot telah dinonaktifkan.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+        elif arg in ("run", "now", "trigger"):
+            await update.message.reply_text(
+                "🚀 <b>Memulai siklus Autopilot...</b>\n<i>Hermes sedang mencari video YouTube viral & memproses klip...</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            res = await autopilot_service.run_autopilot_step(
+                user_id=1,
+                force=False,
+                trigger_source="telegram",
+                notify_telegram=True,
+            )
+            if not res.get("success"):
+                await update.message.reply_text(
+                    f"⚠️ {res.get('message')}",
+                    parse_mode=ParseMode.HTML,
+                )
+            return
+
+    await _show_autopilot_menu(update.message)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CALLBACK QUERY HANDLER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1502,6 +1612,37 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ── Help ───────────────────────────────────────────────────────────────────
     elif data == "act_help":
         await edit_or_reply(query, Msg.help_short(), KB.back())
+
+    # ── Hermes Autopilot Menu & Actions ────────────────────────────────────────
+    elif data == "menu_autopilot":
+        await _show_autopilot_menu(query)
+
+    elif data == "act_autopilot_toggle":
+        from src.infrastructure.autopilot_service import autopilot_service
+        settings = autopilot_service.get_settings(user_id=1)
+        new_val = 0 if settings.get("enabled") else 1
+        autopilot_service.update_settings(user_id=1, data={"enabled": new_val})
+        await _show_autopilot_menu(query, toast=f"Hermes Autopilot {'diaktifkan' if new_val else 'dinonaktifkan'}!")
+
+    elif data == "act_autopilot_run_now":
+        from src.infrastructure.autopilot_service import autopilot_service
+        can_run, reason, _ = autopilot_service.can_run_today(user_id=1)
+        if not can_run:
+            await _show_autopilot_menu(query, toast=f"⚠️ {reason}")
+            return
+
+        await edit_or_reply(
+            query,
+            "🚀 <b>Memulai siklus Autopilot...</b>\n<i>Hermes sedang mencari video YouTube viral & menyiapkan klip...</i>",
+        )
+        res = await autopilot_service.run_autopilot_step(
+            user_id=1,
+            force=False,
+            trigger_source="telegram_button",
+            notify_telegram=True,
+        )
+        toast = f"✅ Job #{res.get('job_id')} berhasil disubmit!" if res.get("success") else f"⚠️ {res.get('message')}"
+        await _show_autopilot_menu(query, toast=toast)
 
     # ── Auto-Post Sosmed Menu ──────────────────────────────────────────────────
     elif data == "menu_autopost":
@@ -1871,8 +2012,35 @@ async def error_handler(update: object, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# POST-INIT
+# POST-INIT & AUTOPILOT WORKER
 # ═══════════════════════════════════════════════════════════════════════════════
+
+async def _autopilot_daily_worker():
+    """Background loop that checks every 60s for scheduled daily autopilot run."""
+    import datetime as _dt
+    logger.info("Hermes Autopilot daily worker active (checking schedule every 60s)...")
+    while True:
+        try:
+            from src.infrastructure.autopilot_service import autopilot_service
+            settings = autopilot_service.get_settings(user_id=1)
+            if settings.get("enabled"):
+                now_str = _dt.datetime.now().strftime("%H:%M")
+                sched_str = str(settings.get("run_time", "08:00")).strip()
+                can_run, _, _ = autopilot_service.can_run_today(user_id=1)
+                if now_str == sched_str and can_run:
+                    logger.info(f"Triggering scheduled daily Hermes Autopilot at {now_str}...")
+                    await autopilot_service.run_autopilot_step(
+                        user_id=1,
+                        force=False,
+                        trigger_source="cron",
+                        notify_telegram=True,
+                    )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Autopilot background worker check: {e}")
+        await asyncio.sleep(60)
+
 
 async def post_init(app: Application):
     """Called after bot is initialized."""
@@ -1884,19 +2052,24 @@ async def post_init(app: Application):
     logger.info("  Hermes timeout: %ss", CONFIG.hermes_timeout)
     logger.info("  Tool timeout:   %ss", CONFIG.tool_timeout)
 
+    # Start background daily autopilot worker task
+    asyncio.create_task(_autopilot_daily_worker())
+
     # Set bot commands for Telegram UI
     from telegram import BotCommand
     await app.bot.set_my_commands([
-        BotCommand("start",   "Mulai / tampilkan menu"),
-        BotCommand("help",    "Panduan lengkap"),
-        BotCommand("viral",   "Cari video viral"),
-        BotCommand("submit",  "Submit YouTube URL"),
-        BotCommand("presets", "Daftar style presets"),
-        BotCommand("status",  "Cek status job"),
-        BotCommand("jobs",    "List job terbaru"),
-        BotCommand("model",   "Ganti model LLM"),
-        BotCommand("id",      "Tampilkan Telegram ID"),
-        BotCommand("cancel",  "Batalkan operasi"),
+        BotCommand("start",     "Mulai / tampilkan menu"),
+        BotCommand("help",      "Panduan lengkap"),
+        BotCommand("autopilot", "Hermes Autopilot (1 Video/Hari)"),
+        BotCommand("viral",     "Cari video viral"),
+        BotCommand("submit",    "Submit YouTube URL"),
+        BotCommand("presets",   "Daftar style presets"),
+        BotCommand("status",    "Cek status job"),
+        BotCommand("jobs",      "List job terbaru"),
+        BotCommand("model",     "Ganti model LLM"),
+        BotCommand("autopost",  "Auto-Post Sosmed Settings"),
+        BotCommand("id",        "Tampilkan Telegram ID"),
+        BotCommand("cancel",    "Batalkan operasi"),
     ])
 
 
@@ -1926,18 +2099,19 @@ def main():
     )
 
     # ── Command handlers ───────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("start",    cmd_start))
-    app.add_handler(CommandHandler("help",     cmd_help))
-    app.add_handler(CommandHandler("id",       cmd_id))
-    app.add_handler(CommandHandler("viral",    cmd_viral))
-    app.add_handler(CommandHandler("submit",   cmd_submit))
-    app.add_handler(CommandHandler("presets",  cmd_presets))
-    app.add_handler(CommandHandler("status",   cmd_status))
-    app.add_handler(CommandHandler("jobs",     cmd_jobs))
-    app.add_handler(CommandHandler("model",    cmd_model))
-    app.add_handler(CommandHandler("autopost", cmd_autopost))
-    app.add_handler(CommandHandler("social",   cmd_autopost))
-    app.add_handler(CommandHandler("cancel",   cmd_cancel))
+    app.add_handler(CommandHandler("start",     cmd_start))
+    app.add_handler(CommandHandler("help",      cmd_help))
+    app.add_handler(CommandHandler("id",        cmd_id))
+    app.add_handler(CommandHandler("autopilot", cmd_autopilot))
+    app.add_handler(CommandHandler("viral",     cmd_viral))
+    app.add_handler(CommandHandler("submit",    cmd_submit))
+    app.add_handler(CommandHandler("presets",   cmd_presets))
+    app.add_handler(CommandHandler("status",    cmd_status))
+    app.add_handler(CommandHandler("jobs",      cmd_jobs))
+    app.add_handler(CommandHandler("model",     cmd_model))
+    app.add_handler(CommandHandler("autopost",  cmd_autopost))
+    app.add_handler(CommandHandler("social",    cmd_autopost))
+    app.add_handler(CommandHandler("cancel",    cmd_cancel))
 
     # ── Callback query handler ────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_callback))

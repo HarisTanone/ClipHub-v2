@@ -193,3 +193,33 @@ tools:
         - "--list"
         - "${list_models}"
 
+  - name: autocliper_autopilot
+    display_name: Hermes Autopilot Manager
+    description: |
+      Kelola dan jalankan siklus otonom Hermes Autopilot.
+      Autopilot secara otomatis: mencari video YouTube viral sesuai niche,
+      memilih 1 video terbaik yang belum pernah diproses (maksimal 1 video/hari),
+      memotong klip dengan preset 5 layer visual lengkap, dan menjadwalkan
+      auto-post ke akun media sosial (TikTok, Instagram, YouTube).
+    input_schema:
+      type: object
+      properties:
+        action:
+          type: string
+          description: "'status' untuk mengecek kuota & konfigurasi, 'run' untuk menjalankan 1 siklus video hari ini"
+          enum: ["status", "run"]
+          default: "status"
+        force:
+          type: boolean
+          description: "Paksa jalan meskipun kuota 1 video hari ini sudah tercapai (default: false)"
+          default: false
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_autopilot.py"
+        - "--action"
+        - "${action}"
+        - "--force"
+        - "${force}"
+

@@ -779,6 +779,8 @@ export const presets = {
   },
 };
 
+export const presetsApi = presets;
+
 // ─── Social Accounts API ─────────────────────────────────────────────────────
 
 export interface PlatformAccountInfo {
@@ -1002,3 +1004,76 @@ export const youtubeCookies = {
     });
   },
 };
+
+// ─── Autopilot API ────────────────────────────────────────────────────────────
+
+export interface AutopilotSettings {
+  id?: number;
+  user_id?: number;
+  enabled: boolean;
+  niche_query: string;
+  preset_slug: string;
+  target_platforms: string;
+  target_account_ids: string[];
+  schedule_mode: string;
+  custom_schedule_time?: string;
+  run_time: string;
+  min_duration_sec: number;
+  max_duration_sec: number;
+  max_daily_videos: number;
+  last_run_at?: string | null;
+  last_job_id?: string | null;
+  last_video_url?: string | null;
+  last_video_title?: string | null;
+  updated_at?: string;
+}
+
+export interface AutopilotQuotaInfo {
+  today_date: string;
+  today_runs: number;
+  max_daily_videos: number;
+  last_run?: Record<string, any> | null;
+}
+
+export interface AutopilotStatusResponse {
+  success: boolean;
+  data: AutopilotSettings;
+  quota: AutopilotQuotaInfo;
+  can_run_today: boolean;
+  status_message?: string;
+}
+
+export const autopilotApi = {
+  async getSettings(): Promise<AutopilotStatusResponse> {
+    return request<AutopilotStatusResponse>("/api/autopilot/settings");
+  },
+  async updateSettings(data: Partial<AutopilotSettings>): Promise<AutopilotStatusResponse> {
+    return request<AutopilotStatusResponse>("/api/autopilot/settings", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  async triggerRun(force: boolean = false): Promise<{
+    success: boolean;
+    status: string;
+    job_id?: string;
+    video?: {
+      title: string;
+      url: string;
+      virality_score: number;
+      duration_sec: number;
+      views: number;
+    };
+    preset_slug?: string;
+    message?: string;
+  }> {
+    return request("/api/autopilot/run", {
+      method: "POST",
+      body: JSON.stringify({ force }),
+    });
+  },
+  async getHistory(limit: number = 20): Promise<{ success: boolean; data: any[] }> {
+    return request<{ success: boolean; data: any[] }>(`/api/autopilot/history?limit=${limit}`);
+  },
+};
+

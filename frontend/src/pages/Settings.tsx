@@ -14,7 +14,7 @@ import { RangeSlider } from "@/components/ui/RangeSlider";
 import { useToast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
-import { system, storage, systemConfig, type SystemConfigItem, API_BASE, getToken } from "@/lib/api";
+import { system, storage, systemConfig, autopilotApi, presetsApi, socialApi, type AutopilotSettings, type AutopilotQuotaInfo, type SystemConfigItem, API_BASE, getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SectionDescription } from "@/components/reframe/SectionDescription";
 import { ImagePreviewPanel } from "@/components/reframe/ImagePreviewPanel";
@@ -459,9 +459,20 @@ export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram" | "system_config">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram" | "autopilot" | "system_config">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Hermes Autopilot State
+  const [autopilotSettings, setAutopilotSettings] = useState<AutopilotSettings | null>(null);
+  const [autopilotQuota, setAutopilotQuota] = useState<AutopilotQuotaInfo | null>(null);
+  const [autopilotCanRun, setAutopilotCanRun] = useState<boolean>(true);
+  const [autopilotPresets, setAutopilotPresets] = useState<any[]>([]);
+  const [autopilotPlatforms, setAutopilotPlatforms] = useState<any[]>([]);
+  const [autopilotHistory, setAutopilotHistory] = useState<any[]>([]);
+  const [isLoadingAutopilot, setIsLoadingAutopilot] = useState<boolean>(false);
+  const [isSavingAutopilot, setIsSavingAutopilot] = useState<boolean>(false);
+  const [isRunningAutopilot, setIsRunningAutopilot] = useState<boolean>(false);
 
   // Dynamic Database System Config
   const [sysConfigItems, setSysConfigItems] = useState<SystemConfigItem[]>([]);
@@ -941,7 +952,70 @@ export function Settings() {
     if (tab === "system_config") {
       loadSystemConfig(sysConfigUnmask);
     }
+    if (tab === "autopilot") {
+      loadAutopilotData();
+    }
   }, [isSuperadmin, tab, sysConfigUnmask]);
+
+  async function loadAutopilotData() {
+    setIsLoadingAutopilot(true);
+    try {
+      const [res, presetsRes, platsRes, histRes] = await Promise.all([
+        autopilotApi.getSettings(),
+        presetsApi.list().catch(() => ({ presets: [] })),
+        socialApi.getPlatformsStatus().catch(() => ({ platforms: [] })),
+        autopilotApi.getHistory(15).catch(() => ({ data: [] })),
+      ]);
+      if (res && res.data) {
+        setAutopilotSettings(res.data);
+        setAutopilotQuota(res.quota);
+        setAutopilotCanRun(res.can_run_today);
+      }
+      setAutopilotPresets((presetsRes as any)?.presets || (presetsRes as any)?.data || []);
+      setAutopilotPlatforms((platsRes as any)?.platforms || []);
+      setAutopilotHistory(histRes?.data || []);
+    } catch (e: any) {
+      toast.error("Gagal memuat pengaturan Autopilot: " + (e?.message || ""));
+    } finally {
+      setIsLoadingAutopilot(false);
+    }
+  }
+
+  async function handleSaveAutopilot() {
+    if (!autopilotSettings) return;
+    setIsSavingAutopilot(true);
+    try {
+      const res = await autopilotApi.updateSettings(autopilotSettings);
+      if (res && res.data) {
+        setAutopilotSettings(res.data);
+        setAutopilotQuota(res.quota);
+        setAutopilotCanRun(res.can_run_today);
+        toast.success("Pengaturan Hermes Autopilot berhasil disimpan!");
+      }
+    } catch (e: any) {
+      toast.error("Gagal menyimpan Autopilot: " + (e?.message || ""));
+    } finally {
+      setIsSavingAutopilot(false);
+    }
+  }
+
+  async function handleTriggerAutopilot(force: boolean = false) {
+    setIsRunningAutopilot(true);
+    try {
+      toast.info("Memulai Hermes Autopilot discovery & submission...");
+      const res = await autopilotApi.triggerRun(force);
+      if (res.success) {
+        toast.success(`Autopilot berhasil! Video '${res.video?.title}' disubmit (Job #${res.job_id})`);
+        loadAutopilotData();
+      } else {
+        toast.error(res.message || "Autopilot gagal dijalankan");
+      }
+    } catch (e: any) {
+      toast.error("Error menjalankan Autopilot: " + (e?.message || ""));
+    } finally {
+      setIsRunningAutopilot(false);
+    }
+  }
 
   async function loadSystemConfig(unmask: boolean = false) {
     setIsLoadingSysConfig(true);
@@ -1055,6 +1129,7 @@ export function Settings() {
 
   const tabs = [
     { id: "general" as const, label: "General", icon: <SlidersHorizontal className="h-3.5 w-3.5" />, group: "Preferences", badge: "All Users" },
+    { id: "autopilot" as const, label: "Hermes Autopilot", icon: <Bot className="h-3.5 w-3.5" />, group: "Automation", badge: "1 Video/Hari" },
     { id: "render" as const, label: "Render Engine", icon: <Film className="h-3.5 w-3.5" />, group: "Preferences", badge: "All Users" },
     { id: "reframe" as const, label: "Reframe Tuning", icon: <Cpu className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
     { id: "hyperframes" as const, label: "HyperFrames Hook", icon: <Sparkles className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
@@ -1101,7 +1176,21 @@ export function Settings() {
           </div>
 
           <div className="flex items-center gap-2">
-            {tab === "users" || tab === "testing" ? null : tab === "hyperframes" ? (
+            {tab === "users" || tab === "testing" ? null : tab === "autopilot" ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => handleTriggerAutopilot(false)}
+                  loading={isRunningAutopilot}
+                  disabled={!autopilotCanRun}
+                  size="sm"
+                  variant="outline"
+                  icon={<Play className="h-3.5 w-3.5" />}
+                >
+                  {autopilotCanRun ? "Jalankan Hari Ini (1 Video)" : "Kuota Hari Ini Terpenuhi"}
+                </Button>
+                <Button onClick={handleSaveAutopilot} loading={isSavingAutopilot} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+              </div>
+            ) : tab === "hyperframes" ? (
               <div className="flex items-center gap-2">
                 {hfDirty && <span className="text-[10px] text-amber-400 font-medium mr-1 animate-pulse">Unsaved changes</span>}
                 <Button onClick={handleRestoreHfDefaults} loading={isResettingHf} size="sm" variant="outline">Restore Defaults</Button>
@@ -2816,6 +2905,385 @@ export function Settings() {
               )}
             </Card>
           </div>
+          </div>
+        )}
+
+        {tab === "autopilot" && (
+          <div className="max-w-6xl space-y-4">
+            {/* Header info banner */}
+            <div className="rounded-xl border border-violet-500/30 bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-zinc-900/60 p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/30 flex items-center justify-center text-violet-300">
+                  <Bot className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                    Hermes Autopilot — Autonomous Video Discovery &amp; Auto-Post
+                    <Badge variant="default" className="text-[9px] uppercase font-bold text-violet-300 border-violet-500/30 bg-violet-500/10">
+                      Maks. 1 Video/Hari
+                    </Badge>
+                  </h2>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                    Hermes AI mencari video YouTube viral setiap hari sesuai niche Anda, merender klip dengan preset 5 layer visual lengkap, dan otomatis menjadwalkan ke akun media sosial.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant={autopilotCanRun ? "success" : "warning"}
+                  className="px-3 py-1 text-xs font-semibold"
+                >
+                  {autopilotQuota ? `${autopilotQuota.today_runs}/${autopilotQuota.max_daily_videos} Video Hari Ini` : "Kuota Harian: 1 Video"}
+                </Badge>
+              </div>
+            </div>
+
+            {isLoadingAutopilot ? (
+              <Card className="p-8 text-center">
+                <RefreshCw className="h-6 w-6 text-violet-400 animate-spin mx-auto mb-2" />
+                <p className="text-xs text-zinc-400">Memuat pengaturan Hermes Autopilot...</p>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                {/* Left Column: Configuration */}
+                <div className="lg:col-span-7 space-y-4">
+                  {/* Master Switch Card */}
+                  <Card className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "h-10 w-10 rounded-xl flex items-center justify-center transition-colors border",
+                          autopilotSettings?.enabled
+                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                            : "bg-zinc-800/80 border-zinc-700 text-zinc-500"
+                        )}>
+                          <Zap className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-zinc-100">Hermes Autopilot Daemon</span>
+                            <Badge variant={autopilotSettings?.enabled ? "success" : "default"}>
+                              {autopilotSettings?.enabled ? "AKTIF" : "NONAKTIF"}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-zinc-400 mt-0.5">
+                            {autopilotSettings?.enabled
+                              ? `Berjalan otomatis setiap hari pada jam ${autopilotSettings.run_time || "08:00"} WIB`
+                              : "Otomasi nonaktif. Aktifkan sakelar untuk menjalankan pencarian dan posting harian otomatis."}
+                          </p>
+                        </div>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={autopilotSettings?.enabled || false}
+                          onChange={(e) => {
+                            if (autopilotSettings) {
+                              setAutopilotSettings({ ...autopilotSettings, enabled: e.target.checked });
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                      </label>
+                    </div>
+                  </Card>
+
+                  {/* Niche & Search Settings */}
+                  <Card className="p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Film className="h-4 w-4 text-violet-400" />
+                      <h3 className="text-xs font-semibold text-zinc-200">1. Niche &amp; Topik Pencarian YouTube Viral</h3>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] text-zinc-400 block mb-1">Keywords / Niche Query</label>
+                      <Input
+                        value={autopilotSettings?.niche_query || ""}
+                        onChange={(e) => {
+                          if (autopilotSettings) {
+                            setAutopilotSettings({ ...autopilotSettings, niche_query: e.target.value });
+                          }
+                        }}
+                        placeholder="Contoh: podcast bisnis, motivasi indonesia, tips trading crypto"
+                      />
+                    </div>
+
+                    {/* Quick Niche Pills */}
+                    <div>
+                      <span className="text-[10px] text-zinc-500 block mb-1.5">Rekomendasi Niche Cepat:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          "podcast bisnis",
+                          "motivasi hidup",
+                          "tips investasi saham",
+                          "gym motivation",
+                          "ai tech news",
+                          "self improvement",
+                        ].map((niche) => (
+                          <button
+                            key={niche}
+                            type="button"
+                            onClick={() => {
+                              if (autopilotSettings) {
+                                setAutopilotSettings({ ...autopilotSettings, niche_query: niche });
+                              }
+                            }}
+                            className={cn(
+                              "px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
+                              autopilotSettings?.niche_query === niche
+                                ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
+                                : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-zinc-200"
+                            )}
+                          >
+                            + {niche}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Visual Style Preset Selection */}
+                  <Card className="p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Palette className="h-4 w-4 text-violet-400" />
+                      <h3 className="text-xs font-semibold text-zinc-200">2. Preset Style Visual Rendering (5 Layer)</h3>
+                    </div>
+                    <p className="text-[11px] text-zinc-400">
+                      Preset memuat otomatis format Subtitle, Hook Animation, AI Cinematic Text 3D, Watermark, dan End-Card CTA.
+                    </p>
+
+                    <div>
+                      <Select
+                        value={autopilotSettings?.preset_slug || "default"}
+                        onChange={(e) => {
+                          if (autopilotSettings) {
+                            setAutopilotSettings({ ...autopilotSettings, preset_slug: e.target.value });
+                          }
+                        }}
+                        options={[
+                          { value: "default", label: "Default Style (Built-in)" },
+                          { value: "bold_black", label: "Bold Black & Yellow Accent" },
+                          { value: "minimal_clean", label: "Minimal Clean White" },
+                          { value: "viral_red", label: "Viral Red & High Punch" },
+                          ...autopilotPresets.map((p: any) => ({
+                            value: p.slug || p.name,
+                            label: `${p.name} (${p.slug || `#${p.id}`})`,
+                          })),
+                        ]}
+                      />
+                    </div>
+                  </Card>
+
+                  {/* Social Media Target & Schedule Time */}
+                  <Card className="p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4 text-violet-400" />
+                      <h3 className="text-xs font-semibold text-zinc-200">3. Target Platform Auto-Post &amp; Waktu Jalan</h3>
+                    </div>
+
+                    {/* Platform Checkboxes */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                      {[
+                        { id: "tiktok", name: "TikTok" },
+                        { id: "instagram", name: "Instagram Reels" },
+                        { id: "youtube", name: "YouTube Shorts" },
+                        { id: "facebook", name: "Facebook" },
+                        { id: "threads", name: "Threads" },
+                        { id: "linkedin", name: "LinkedIn" },
+                      ].map((plat) => {
+                        const currentPlats = (autopilotSettings?.target_platforms || "").toLowerCase().split(",").map(p => p.trim());
+                        const isChecked = currentPlats.includes(plat.id);
+                        const statusObj = autopilotPlatforms.find((p: any) => p.platform === plat.id);
+                        const isConnected = statusObj?.is_connected || false;
+
+                        return (
+                          <label
+                            key={plat.id}
+                            className={cn(
+                              "flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-all",
+                              isChecked
+                                ? "bg-violet-950/30 border-violet-500/40 text-violet-200"
+                                : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (!autopilotSettings) return;
+                                let updated: string[];
+                                if (e.target.checked) {
+                                  updated = Array.from(new Set([...currentPlats, plat.id]));
+                                } else {
+                                  updated = currentPlats.filter(p => p !== plat.id);
+                                }
+                                setAutopilotSettings({
+                                  ...autopilotSettings,
+                                  target_platforms: updated.filter(Boolean).join(","),
+                                });
+                              }}
+                              className="rounded border-zinc-700 text-violet-600 focus:ring-violet-500 h-3.5 w-3.5"
+                            />
+                            <span className="truncate">{plat.name}</span>
+                            {isConnected && (
+                              <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Akun Terhubung" />
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
+                        <Input
+                          type="time"
+                          value={autopilotSettings?.run_time || "08:00"}
+                          onChange={(e) => {
+                            if (autopilotSettings) {
+                              setAutopilotSettings({ ...autopilotSettings, run_time: e.target.value });
+                            }
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Mode Jadwal Post</label>
+                        <Select
+                          value={autopilotSettings?.schedule_mode || "ai"}
+                          onChange={(e) => {
+                            if (autopilotSettings) {
+                              setAutopilotSettings({ ...autopilotSettings, schedule_mode: e.target.value });
+                            }
+                          }}
+                          options={[
+                            { value: "ai", label: "AI Smart Peak Hours (11:30, 15:00, 18:30, 20:30)" },
+                            { value: "instant", label: "Instant Post (Langsung tayang saat render selesai)" },
+                            { value: "custom", label: "Custom Schedule Time" },
+                          ]}
+                        />
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+
+                {/* Right Column: Today's Status & History */}
+                <div className="lg:col-span-5 space-y-4">
+                  {/* Today Run Trigger Card */}
+                  <Card className="p-4 border-violet-500/20 bg-gradient-to-b from-violet-950/20 to-zinc-900/60">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Activity className="h-3.5 w-3.5 text-violet-400" />
+                        Status Kuota Hari Ini
+                      </span>
+                      <Badge variant={autopilotCanRun ? "success" : "default"}>
+                        {autopilotQuota ? `${autopilotQuota.today_runs}/${autopilotQuota.max_daily_videos} Video` : "1 Video/Hari"}
+                      </Badge>
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 space-y-2 mb-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-zinc-400">Status Kesiapan:</span>
+                        <span className={cn("font-medium", autopilotCanRun ? "text-emerald-400" : "text-amber-400")}>
+                          {autopilotCanRun ? "✅ Siap Eksekusi" : "⏳ Kuota Hari Ini Terpenuhi"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-zinc-400">Jadwal Harian:</span>
+                        <span className="text-zinc-200">{autopilotSettings?.run_time || "08:00"} WIB</span>
+                      </div>
+                      {autopilotSettings?.last_video_title && (
+                        <div className="pt-1 border-t border-zinc-800/80">
+                          <span className="text-[10px] text-zinc-500 block mb-0.5">Video Terakhir:</span>
+                          <p className="text-xs text-zinc-300 line-clamp-2 font-medium">
+                            {autopilotSettings.last_video_title}
+                          </p>
+                          {autopilotSettings.last_job_id && (
+                            <span className="text-[10px] text-violet-400 font-mono mt-0.5 block">
+                              Job #{autopilotSettings.last_job_id}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Button
+                        onClick={() => handleTriggerAutopilot(false)}
+                        loading={isRunningAutopilot}
+                        disabled={!autopilotCanRun}
+                        className="w-full"
+                        variant="primary"
+                        icon={<Play className="h-4 w-4" />}
+                      >
+                        {autopilotCanRun ? "Jalankan Autopilot Hari Ini (1 Video)" : "Kuota Hari Ini Selesai"}
+                      </Button>
+
+                      {!autopilotCanRun && (
+                        <Button
+                          onClick={() => handleTriggerAutopilot(true)}
+                          loading={isRunningAutopilot}
+                          className="w-full text-xs text-zinc-400 hover:text-zinc-200"
+                          variant="ghost"
+                          size="sm"
+                        >
+                          Paksa Jalankan Ulang (Force Run)
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+
+                  {/* Recent Autopilot Runs */}
+                  <Card className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Film className="h-3.5 w-3.5 text-zinc-400" />
+                        Riwayat Eksekusi Harian
+                      </span>
+                      <Button
+                        onClick={loadAutopilotData}
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
+                        icon={<RefreshCw className="h-2.5 w-2.5" />}
+                      >
+                        Refresh
+                      </Button>
+                    </div>
+
+                    {autopilotHistory.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-zinc-500">
+                        Belum ada riwayat eksekusi Autopilot.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                        {autopilotHistory.map((run: any) => (
+                          <div
+                            key={run.id}
+                            className="p-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 text-xs space-y-1"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-zinc-200 text-[11px] truncate max-w-[200px]" title={run.video_title}>
+                                {run.video_title || "YouTube Video"}
+                              </span>
+                              <Badge variant={run.status === "completed" ? "success" : run.status === "submitted" ? "warning" : "error"} className="text-[9px]">
+                                {run.status}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                              <span>Tanggal: {run.run_date}</span>
+                              <span className="text-violet-400 font-mono">Job #{run.job_id}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
