@@ -738,6 +738,7 @@ export interface Preset {
   watermark_style?: Record<string, any>;
   cta_style?: Record<string, any>;
   broll_style?: Record<string, any>;
+  autopost_style?: Record<string, any>;
   created_at: string | null;
   owner_email?: string;
   owner_name?: string;
@@ -768,7 +769,8 @@ export const presets = {
     watermark_style: Record<string, any> = {},
     cta_style: Record<string, any> = {},
     slug?: string,
-    broll_style: Record<string, any> = {}
+    broll_style: Record<string, any> = {},
+    autopost_style: Record<string, any> = {}
   ): Promise<{ success: boolean; id: number; slug: string; message: string }> {
     return request("/api/presets", {
       method: "POST",
@@ -781,6 +783,7 @@ export const presets = {
         watermark_style,
         cta_style,
         broll_style,
+        autopost_style,
       }),
     });
   },

@@ -87,6 +87,7 @@ def resolve_preset(
             watermark_style = _parse_json(r_dict.get("watermark_style"))
             cta_style = _parse_json(r_dict.get("cta_style"))
             broll_style = _parse_json(r_dict.get("broll_style"))
+            autopost_style = _parse_json(r_dict.get("autopost_style"))
 
             has_text_emphasis = bool(
                 text_emphasis_style
@@ -115,6 +116,12 @@ def resolve_preset(
                 "transition_style": hook_style.get("transitionStyle", "cut") if isinstance(hook_style, dict) else "cut",
                 "hook_engine": hook_style.get("engine", "remotion") if isinstance(hook_style, dict) else "remotion",
                 "subtitle_engine": subtitle_style.get("engine", "remotion") if isinstance(subtitle_style, dict) else "remotion",
+                "autopost_config": autopost_style,
+                "auto_post_social": bool(autopost_style.get("enabled", False)) if autopost_style else False,
+                "auto_post_platforms": autopost_style.get("platforms", "tiktok,instagram,youtube") if autopost_style else "tiktok,instagram,youtube",
+                "auto_post_account_ids": autopost_style.get("account_ids", []) if autopost_style else [],
+                "auto_post_schedule_mode": autopost_style.get("schedule_mode", "ai") if autopost_style else "ai",
+                "auto_post_custom_time": autopost_style.get("custom_time") if autopost_style else None,
             }
 
         # 5. Search system style_presets table

@@ -125,9 +125,23 @@ export function NewJob() {
   function loadPreset(preset: Preset) {
     setHookStyleConfig({ ...DEFAULT_HOOK_STYLE, ...preset.hook_style } as HookStyle);
     setSubtitleStyleConfig({ ...DEFAULT_SUBTITLE_STYLE, ...preset.subtitle_style } as SubtitleStyle);
-    if (preset.text_emphasis_style) setTextEmphasisStyleConfig(normaliseTextEmphasisStyle(preset.text_emphasis_style));
+    
+    // AI Cinematic Text toggle & style sync
+    if (preset.text_emphasis_style) {
+      const normText = normaliseTextEmphasisStyle(preset.text_emphasis_style);
+      setTextEmphasisStyleConfig(normText);
+      const rawMode = (preset.text_emphasis_style as any)?.effectMode;
+      const isEnabled = Boolean(
+        rawMode !== "off" &&
+        (preset.text_emphasis_style as any)?.enabled !== false
+      );
+      setTextEmphasisEnabled(isEnabled);
+    }
+
     if (preset.watermark_style) setWatermarkStyleConfig({ ...DEFAULT_WATERMARK_STYLE, ...preset.watermark_style } as WatermarkStyle);
     if (preset.cta_style) setCtaStyleConfig(normaliseCtaStyle(preset.cta_style));
+
+    // B-Roll and Auto-Grid toggle & style sync
     if (preset.broll_style) {
       if (preset.broll_style.enabled !== undefined) setBrollEnabled(Boolean(preset.broll_style.enabled));
       if (preset.broll_style.image_overlay !== undefined) setBrollImageOverlay(Boolean(preset.broll_style.image_overlay));
@@ -135,6 +149,27 @@ export function NewJob() {
       if (preset.broll_style.video_footage !== undefined) setBrollVideoFootage(Boolean(preset.broll_style.video_footage));
       if (preset.broll_style.autogrid_enabled !== undefined) setAutogridEnabled(Boolean(preset.broll_style.autogrid_enabled));
     }
+
+    // AI Auto-Post Social toggle & config sync
+    if (preset.autopost_style) {
+      if (preset.autopost_style.enabled !== undefined) setAutoPostSocial(Boolean(preset.autopost_style.enabled));
+      if (preset.autopost_style.platforms) {
+        const plats = Array.isArray(preset.autopost_style.platforms)
+          ? preset.autopost_style.platforms
+          : String(preset.autopost_style.platforms).split(",").map((s) => s.trim()).filter(Boolean);
+        setAutoPostPlatforms(plats);
+      }
+      if (preset.autopost_style.account_ids) {
+        setAutoPostAccountIds(preset.autopost_style.account_ids);
+      }
+      if (preset.autopost_style.schedule_mode) {
+        setAutoPostScheduleMode(preset.autopost_style.schedule_mode);
+      }
+      if (preset.autopost_style.custom_time) {
+        setAutoPostCustomTime(preset.autopost_style.custom_time);
+      }
+    }
+
     setActivePresetId(preset.id);
     toast.success(`Loaded preset: ${preset.name} (${preset.slug || `preset-${preset.id}`})`);
   }
@@ -150,15 +185,28 @@ export function NewJob() {
         video_footage: brollVideoFootage,
         autogrid_enabled: autogridEnabled,
       };
+      const autopostStyleConfig = {
+        enabled: autoPostSocial,
+        platforms: autoPostPlatforms,
+        account_ids: autoPostAccountIds,
+        schedule_mode: autoPostScheduleMode,
+        custom_time: autoPostCustomTime,
+      };
+      const textStyleToSave = {
+        ...textEmphasisStyleConfig,
+        enabled: textEmphasisEnabled,
+        effectMode: textEmphasisEnabled ? (textEmphasisStyleConfig.effectMode || "auto") : "off",
+      };
       const res = await presetsApi.create(
         presetName.trim(),
         hookStyleConfig,
         subtitleStyleConfig,
-        textEmphasisStyleConfig,
+        textStyleToSave,
         watermarkStyleConfig,
         ctaStyleConfig,
         presetSlug.trim() || undefined,
-        brollStyleConfig
+        brollStyleConfig,
+        autopostStyleConfig
       );
       toast.success(`Preset "${presetName}" saved (slug: ${res.slug || presetName})`);
       setPresetName("");

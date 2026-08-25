@@ -3488,6 +3488,7 @@ function PresetsTab({
               const hasCta = p.cta_style && p.cta_style.enabled;
               const hasBroll = p.broll_style && p.broll_style.enabled;
               const hasAutoGrid = p.broll_style && p.broll_style.autogrid_enabled;
+              const hasAutopost = p.autopost_style && p.autopost_style.enabled;
 
               return (
                 <div key={p.id} className={cn("relative group rounded-xl border p-3.5 transition-all flex flex-col justify-between",
@@ -3526,6 +3527,7 @@ function PresetsTab({
                         {hasCta && <span className="text-[8px] bg-purple-500/10 text-purple-400 px-1 py-0.2 rounded border border-purple-500/20">CTA</span>}
                         {hasBroll && <span className="text-[8px] bg-amber-500/10 text-amber-400 px-1 py-0.2 rounded border border-amber-500/20">B-roll</span>}
                         {hasAutoGrid && <span className="text-[8px] bg-cyan-500/10 text-cyan-400 px-1 py-0.2 rounded border border-cyan-500/20">Auto-Grid</span>}
+                        {hasAutopost && <span className="text-[8px] bg-rose-500/10 text-rose-400 px-1 py-0.2 rounded border border-rose-500/20">Auto-Post</span>}
                       </div>
                       {p.owner_email && <p className="text-[9px] text-zinc-500 pt-0.5">By: {p.owner_name || p.owner_email}</p>}
                     </div>

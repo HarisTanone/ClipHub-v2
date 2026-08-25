@@ -58,6 +58,7 @@ def _ensure_presets_table():
                 watermark_style JSON NOT NULL DEFAULT '{}',
                 cta_style JSON NOT NULL DEFAULT '{}',
                 broll_style JSON NOT NULL DEFAULT '{}',
+                autopost_style JSON NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
@@ -80,6 +81,8 @@ def _ensure_presets_table():
             conn.execute("ALTER TABLE user_presets ADD COLUMN cta_style JSON NOT NULL DEFAULT '{}'")
         if "broll_style" not in columns:
             conn.execute("ALTER TABLE user_presets ADD COLUMN broll_style JSON NOT NULL DEFAULT '{}'")
+        if "autopost_style" not in columns:
+            conn.execute("ALTER TABLE user_presets ADD COLUMN autopost_style JSON NOT NULL DEFAULT '{}'")
         conn.commit()
     finally:
         conn.close()
@@ -98,6 +101,7 @@ class CreatePresetRequest(BaseModel):
     watermark_style: dict = {}
     cta_style: dict = {}
     broll_style: dict = {}
+    autopost_style: dict = {}
 
 class PresetResponse(BaseModel):
     id: int
@@ -109,6 +113,7 @@ class PresetResponse(BaseModel):
     watermark_style: dict
     cta_style: dict = {}
     broll_style: dict = {}
+    autopost_style: dict = {}
     created_at: Optional[str] = None
 
 
@@ -136,6 +141,7 @@ def _format_preset_dict(row, is_superadmin: bool = False) -> dict:
         "watermark_style": _parse_json_field(r.get("watermark_style")),
         "cta_style": _parse_json_field(r.get("cta_style")),
         "broll_style": _parse_json_field(r.get("broll_style")),
+        "autopost_style": _parse_json_field(r.get("autopost_style")),
         "created_at": r.get("created_at"),
     }
     if is_superadmin:
@@ -214,7 +220,7 @@ async def create_preset(body: CreatePresetRequest, user: CurrentUser = Depends(g
 
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO user_presets (user_id, name, slug, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style, broll_style) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_presets (user_id, name, slug, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style, broll_style, autopost_style) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 user.id,
                 name_clean,
@@ -225,6 +231,7 @@ async def create_preset(body: CreatePresetRequest, user: CurrentUser = Depends(g
                 json.dumps(body.watermark_style),
                 json.dumps(body.cta_style),
                 json.dumps(body.broll_style),
+                json.dumps(body.autopost_style),
             ),
         )
         conn.commit()
