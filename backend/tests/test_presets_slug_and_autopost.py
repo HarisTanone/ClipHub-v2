@@ -287,6 +287,13 @@ async def test_list_and_get_presets_endpoint_sqlite_row_safety():
     from src.presentation.routes.presets import list_presets, get_preset_by_slug_or_id, create_preset, CreatePresetRequest
     from src.presentation.auth_deps import CurrentUser
 
+    conn = get_dict_connection()
+    try:
+        conn.execute("DELETE FROM user_presets WHERE slug LIKE 'kopi-itam-01%'")
+        conn.commit()
+    finally:
+        conn.close()
+
     dummy_user = CurrentUser(user_id=1, email="test@example.com", role="superadmin", permissions=["*"])
 
     # 1. Create a preset
@@ -328,4 +335,12 @@ async def test_list_and_get_presets_endpoint_sqlite_row_safety():
     assert resolved["autogrid_enabled"] is True
     assert resolved["hook_engine"] == "remotion"
     assert resolved["subtitle_engine"] == "remotion"
+
+    # Cleanup
+    conn = get_dict_connection()
+    try:
+        conn.execute("DELETE FROM user_presets WHERE slug LIKE 'kopi-itam-01%'")
+        conn.commit()
+    finally:
+        conn.close()
 

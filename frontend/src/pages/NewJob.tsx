@@ -1013,6 +1013,21 @@ export function NewJob() {
               onWatermarkChange={setWatermarkStyleConfig}
               ctaStyle={ctaStyleConfig}
               onCtaChange={setCtaStyleConfig}
+              brollStyle={{
+                enabled: brollEnabled,
+                image_overlay: brollImageOverlay,
+                behind_person: brollBehindPerson,
+                video_footage: brollVideoFootage,
+                autogrid_enabled: autogridEnabled,
+              }}
+              onBrollChange={(broll) => {
+                if (broll.enabled !== undefined) setBrollEnabled(Boolean(broll.enabled));
+                if (broll.image_overlay !== undefined) setBrollImageOverlay(Boolean(broll.image_overlay));
+                if (broll.behind_person !== undefined) setBrollBehindPerson(Boolean(broll.behind_person));
+                if (broll.video_footage !== undefined) setBrollVideoFootage(Boolean(broll.video_footage));
+                if (broll.autogrid_enabled !== undefined) setAutogridEnabled(Boolean(broll.autogrid_enabled));
+              }}
+              onPresetLoad={loadPreset}
               aspectRatio={aspectRatio}
               inline
               activeTab={styleTab}

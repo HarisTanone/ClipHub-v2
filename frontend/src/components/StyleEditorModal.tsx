@@ -1256,6 +1256,9 @@ interface StyleEditorModalProps {
   onWatermarkChange?: (style: WatermarkStyle) => void;
   ctaStyle?: CtaStyle;
   onCtaChange?: (style: CtaStyle) => void;
+  brollStyle?: Record<string, any>;
+  onBrollChange?: (broll: Record<string, any>) => void;
+  onPresetLoad?: (preset: Preset) => void;
   aspectRatio?: string;
   inline?: boolean;
   activeTab?: "presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other";
@@ -1291,6 +1294,9 @@ export function StyleEditorModal({
   onWatermarkChange = () => { },
   ctaStyle = DEFAULT_CTA_STYLE,
   onCtaChange = () => { },
+  brollStyle,
+  onBrollChange,
+  onPresetLoad,
   aspectRatio = "9:16",
   inline,
   activeTab,
@@ -1454,11 +1460,14 @@ export function StyleEditorModal({
               textEmphasisStyle={textEmphasisStyle}
               watermarkStyle={watermarkStyle}
               ctaStyle={ctaStyle}
+              brollStyle={brollStyle}
               onHookChange={onHookChange}
               onSubtitleChange={onSubtitleChange}
               onTextEmphasisChange={onTextEmphasisChange}
               onWatermarkChange={onWatermarkChange}
               onCtaChange={onCtaChange}
+              onBrollChange={onBrollChange}
+              onPresetLoad={onPresetLoad}
               externalActiveId={externalActivePresetId}
               onPresetSelect={onPresetSelect}
             />
@@ -1541,11 +1550,14 @@ export function StyleEditorModal({
               textEmphasisStyle={textEmphasisStyle}
               watermarkStyle={watermarkStyle}
               ctaStyle={ctaStyle}
+              brollStyle={brollStyle}
               onHookChange={onHookChange}
               onSubtitleChange={onSubtitleChange}
               onTextEmphasisChange={onTextEmphasisChange}
               onWatermarkChange={onWatermarkChange}
               onCtaChange={onCtaChange}
+              onBrollChange={onBrollChange}
+              onPresetLoad={onPresetLoad}
               externalActiveId={externalActivePresetId}
               onPresetSelect={onPresetSelect}
             />
@@ -3300,11 +3312,14 @@ function PresetsTab({
   textEmphasisStyle,
   watermarkStyle = DEFAULT_WATERMARK_STYLE,
   ctaStyle = DEFAULT_CTA_STYLE,
+  brollStyle,
   onHookChange,
   onSubtitleChange,
   onTextEmphasisChange,
   onWatermarkChange,
   onCtaChange,
+  onBrollChange,
+  onPresetLoad,
   externalActiveId,
   onPresetSelect,
 }: {
@@ -3313,11 +3328,14 @@ function PresetsTab({
   textEmphasisStyle: TextEmphasisStyle;
   watermarkStyle?: WatermarkStyle;
   ctaStyle?: CtaStyle;
+  brollStyle?: Record<string, any>;
   onHookChange: (s: HookStyle) => void;
   onSubtitleChange: (s: SubtitleStyle) => void;
   onTextEmphasisChange: (s: TextEmphasisStyle) => void;
   onWatermarkChange?: (s: WatermarkStyle) => void;
   onCtaChange?: (s: CtaStyle) => void;
+  onBrollChange?: (b: Record<string, any>) => void;
+  onPresetLoad?: (preset: Preset) => void;
   externalActiveId?: number | null;
   onPresetSelect?: (id: number) => void;
 }) {
@@ -3342,6 +3360,8 @@ function PresetsTab({
     if (preset.text_emphasis_style) onTextEmphasisChange(normaliseTextEmphasisStyle(preset.text_emphasis_style));
     if (preset.watermark_style && onWatermarkChange) onWatermarkChange({ ...DEFAULT_WATERMARK_STYLE, ...preset.watermark_style });
     if (preset.cta_style && onCtaChange) onCtaChange(normaliseCtaStyle(preset.cta_style));
+    if (preset.broll_style && onBrollChange) onBrollChange(preset.broll_style);
+    if (onPresetLoad) onPresetLoad(preset);
     setActivePresetId(preset.id);
     if (onPresetSelect) onPresetSelect(preset.id);
     setStatusMsg(`Loaded "${preset.name}" (${preset.slug || `preset-${preset.id}`})`);
@@ -3359,7 +3379,8 @@ function PresetsTab({
         textEmphasisStyle,
         watermarkStyle,
         ctaStyle,
-        saveSlug.trim() || undefined
+        saveSlug.trim() || undefined,
+        brollStyle || {}
       );
       setSaveName("");
       setSaveSlug("");
@@ -3402,9 +3423,10 @@ function PresetsTab({
               type="text"
               value={saveName}
               onChange={(e) => {
-                setSaveName(e.target.value);
-                if (!saveSlug || saveSlug === saveName.toLowerCase().replace(/[^a-z0-9]/g, "-")) {
-                  setSaveSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""));
+                const newName = e.target.value;
+                setSaveName(newName);
+                if (!saveSlug || saveSlug === saveName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")) {
+                  setSaveSlug(newName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""));
                 }
               }}
               onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleSave())}
@@ -3432,6 +3454,8 @@ function PresetsTab({
             <span className={cn("px-1.5 py-0.5 rounded", textEmphasisStyle?.effectMode && (textEmphasisStyle.effectMode as string) !== "off" ? "bg-emerald-500/20 text-emerald-300" : "bg-zinc-800/60 text-zinc-500")}>AI Text</span>
             <span className={cn("px-1.5 py-0.5 rounded", watermarkStyle?.enabled ? "bg-emerald-500/20 text-emerald-300" : "bg-zinc-800/60 text-zinc-500")}>Watermark</span>
             <span className={cn("px-1.5 py-0.5 rounded", ctaStyle?.enabled ? "bg-emerald-500/20 text-emerald-300" : "bg-zinc-800/60 text-zinc-500")}>CTA</span>
+            <span className={cn("px-1.5 py-0.5 rounded", brollStyle?.enabled ? "bg-amber-500/20 text-amber-300" : "bg-zinc-800/60 text-zinc-500")}>B-roll</span>
+            <span className={cn("px-1.5 py-0.5 rounded", brollStyle?.autogrid_enabled ? "bg-cyan-500/20 text-cyan-300" : "bg-zinc-800/60 text-zinc-500")}>Auto-Grid</span>
           </div>
           <Button type="button" size="sm" loading={saving} onClick={handleSave} icon={<Save className="h-3.5 w-3.5" />}>Simpan Preset</Button>
         </div>
@@ -3453,7 +3477,7 @@ function PresetsTab({
           <div className="text-center py-8 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
             <Bookmark className="h-6 w-6 text-zinc-700 mx-auto mb-2" />
             <p className="text-xs text-zinc-400 font-medium">Belum ada preset yang disimpan</p>
-            <p className="text-[10px] text-zinc-600 mt-1">Atur Hook, Subtitles, AI Text, Watermark & CTA, lalu simpan di sini</p>
+            <p className="text-[10px] text-zinc-600 mt-1">Atur Hook, Subtitles, AI Text, Watermark, CTA, & B-roll, lalu simpan di sini</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -3462,6 +3486,8 @@ function PresetsTab({
               const hasTextEmp = p.text_emphasis_style && p.text_emphasis_style.effectMode && p.text_emphasis_style.effectMode !== "off";
               const hasWatermark = p.watermark_style && p.watermark_style.enabled;
               const hasCta = p.cta_style && p.cta_style.enabled;
+              const hasBroll = p.broll_style && p.broll_style.enabled;
+              const hasAutoGrid = p.broll_style && p.broll_style.autogrid_enabled;
 
               return (
                 <div key={p.id} className={cn("relative group rounded-xl border p-3.5 transition-all flex flex-col justify-between",
@@ -3494,10 +3520,12 @@ function PresetsTab({
                     <div className="space-y-1 text-[10px] text-zinc-400 mb-3 bg-zinc-950/40 p-2 rounded-lg border border-zinc-800/50">
                       <p className="flex justify-between"><span className="text-zinc-500">Hook:</span><span className="text-zinc-300 font-medium truncate max-w-[120px]">{(p.hook_style as any)?.animation?.replace(/_/g, " ") || "default"}</span></p>
                       <p className="flex justify-between"><span className="text-zinc-500">Subtitle:</span><span className="text-zinc-300 font-medium truncate max-w-[120px]">{(p.subtitle_style as any)?.stylePreset || "clean"}</span></p>
-                      <div className="flex items-center gap-1 pt-1 border-t border-zinc-800/60 mt-1">
+                      <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-zinc-800/60 mt-1">
                         {hasTextEmp && <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/20">AI Text</span>}
                         {hasWatermark && <span className="text-[8px] bg-blue-500/10 text-blue-400 px-1 py-0.2 rounded border border-blue-500/20">Watermark</span>}
                         {hasCta && <span className="text-[8px] bg-purple-500/10 text-purple-400 px-1 py-0.2 rounded border border-purple-500/20">CTA</span>}
+                        {hasBroll && <span className="text-[8px] bg-amber-500/10 text-amber-400 px-1 py-0.2 rounded border border-amber-500/20">B-roll</span>}
+                        {hasAutoGrid && <span className="text-[8px] bg-cyan-500/10 text-cyan-400 px-1 py-0.2 rounded border border-cyan-500/20">Auto-Grid</span>}
                       </div>
                       {p.owner_email && <p className="text-[9px] text-zinc-500 pt-0.5">By: {p.owner_name || p.owner_email}</p>}
                     </div>
