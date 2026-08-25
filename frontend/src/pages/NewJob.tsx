@@ -128,6 +128,13 @@ export function NewJob() {
     if (preset.text_emphasis_style) setTextEmphasisStyleConfig(normaliseTextEmphasisStyle(preset.text_emphasis_style));
     if (preset.watermark_style) setWatermarkStyleConfig({ ...DEFAULT_WATERMARK_STYLE, ...preset.watermark_style } as WatermarkStyle);
     if (preset.cta_style) setCtaStyleConfig(normaliseCtaStyle(preset.cta_style));
+    if (preset.broll_style) {
+      if (preset.broll_style.enabled !== undefined) setBrollEnabled(Boolean(preset.broll_style.enabled));
+      if (preset.broll_style.image_overlay !== undefined) setBrollImageOverlay(Boolean(preset.broll_style.image_overlay));
+      if (preset.broll_style.behind_person !== undefined) setBrollBehindPerson(Boolean(preset.broll_style.behind_person));
+      if (preset.broll_style.video_footage !== undefined) setBrollVideoFootage(Boolean(preset.broll_style.video_footage));
+      if (preset.broll_style.autogrid_enabled !== undefined) setAutogridEnabled(Boolean(preset.broll_style.autogrid_enabled));
+    }
     setActivePresetId(preset.id);
     toast.success(`Loaded preset: ${preset.name} (${preset.slug || `preset-${preset.id}`})`);
   }
@@ -136,6 +143,13 @@ export function NewJob() {
     if (!presetName.trim()) { toast.error("Name required"); return; }
     setSavingPreset(true);
     try {
+      const brollStyleConfig = {
+        enabled: brollEnabled,
+        image_overlay: brollImageOverlay,
+        behind_person: brollBehindPerson,
+        video_footage: brollVideoFootage,
+        autogrid_enabled: autogridEnabled,
+      };
       const res = await presetsApi.create(
         presetName.trim(),
         hookStyleConfig,
@@ -143,7 +157,8 @@ export function NewJob() {
         textEmphasisStyleConfig,
         watermarkStyleConfig,
         ctaStyleConfig,
-        presetSlug.trim() || undefined
+        presetSlug.trim() || undefined,
+        brollStyleConfig
       );
       toast.success(`Preset "${presetName}" saved (slug: ${res.slug || presetName})`);
       setPresetName("");

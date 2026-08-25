@@ -86,6 +86,7 @@ def resolve_preset(
             text_emphasis_style = _parse_json(r_dict.get("text_emphasis_style"))
             watermark_style = _parse_json(r_dict.get("watermark_style"))
             cta_style = _parse_json(r_dict.get("cta_style"))
+            broll_style = _parse_json(r_dict.get("broll_style"))
 
             has_text_emphasis = bool(
                 text_emphasis_style
@@ -105,6 +106,15 @@ def resolve_preset(
                 "text_emphasis_enabled": has_text_emphasis,
                 "watermark_config": watermark_style,
                 "cta_config": cta_style,
+                "broll_config": broll_style,
+                "broll_enabled": bool(broll_style.get("enabled", False)) if broll_style else False,
+                "broll_image_overlay": bool(broll_style.get("image_overlay", True)) if broll_style else True,
+                "broll_behind_person": bool(broll_style.get("behind_person", True)) if broll_style else True,
+                "broll_video_footage": bool(broll_style.get("video_footage", True)) if broll_style else True,
+                "autogrid_enabled": bool(broll_style.get("autogrid_enabled", False)) if broll_style else False,
+                "transition_style": hook_style.get("transitionStyle", "cut") if isinstance(hook_style, dict) else "cut",
+                "hook_engine": hook_style.get("engine", "remotion") if isinstance(hook_style, dict) else "remotion",
+                "subtitle_engine": subtitle_style.get("engine", "remotion") if isinstance(subtitle_style, dict) else "remotion",
             }
 
         # 5. Search system style_presets table

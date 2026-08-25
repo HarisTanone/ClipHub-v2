@@ -57,6 +57,7 @@ def _ensure_presets_table():
                 text_emphasis_style JSON NOT NULL DEFAULT '{}',
                 watermark_style JSON NOT NULL DEFAULT '{}',
                 cta_style JSON NOT NULL DEFAULT '{}',
+                broll_style JSON NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
@@ -67,15 +68,18 @@ def _ensure_presets_table():
             # Populate existing rows with slugs
             rows = conn.execute("SELECT id, name FROM user_presets").fetchall()
             for r in rows:
-                base = slugify(r["name"]) or f"preset-{r['id']}"
-                gen_slug = f"{base}-{r['id']:02d}"
-                conn.execute("UPDATE user_presets SET slug = ? WHERE id = ?", (gen_slug, r["id"]))
+                r_dict = dict(r)
+                base = slugify(r_dict["name"]) or f"preset-{r_dict['id']}"
+                gen_slug = f"{base}-{r_dict['id']:02d}"
+                conn.execute("UPDATE user_presets SET slug = ? WHERE id = ?", (gen_slug, r_dict["id"]))
         if "text_emphasis_style" not in columns:
             conn.execute("ALTER TABLE user_presets ADD COLUMN text_emphasis_style JSON NOT NULL DEFAULT '{}'")
         if "watermark_style" not in columns:
             conn.execute("ALTER TABLE user_presets ADD COLUMN watermark_style JSON NOT NULL DEFAULT '{}'")
         if "cta_style" not in columns:
             conn.execute("ALTER TABLE user_presets ADD COLUMN cta_style JSON NOT NULL DEFAULT '{}'")
+        if "broll_style" not in columns:
+            conn.execute("ALTER TABLE user_presets ADD COLUMN broll_style JSON NOT NULL DEFAULT '{}'")
         conn.commit()
     finally:
         conn.close()
@@ -93,6 +97,7 @@ class CreatePresetRequest(BaseModel):
     text_emphasis_style: dict = {}
     watermark_style: dict = {}
     cta_style: dict = {}
+    broll_style: dict = {}
 
 class PresetResponse(BaseModel):
     id: int
@@ -103,7 +108,40 @@ class PresetResponse(BaseModel):
     text_emphasis_style: dict
     watermark_style: dict
     cta_style: dict = {}
+    broll_style: dict = {}
     created_at: Optional[str] = None
+
+
+def _format_preset_dict(row, is_superadmin: bool = False) -> dict:
+    """Safely format a database row (sqlite3.Row or dict) into a preset dict."""
+    r = dict(row)
+
+    def _parse_json_field(val):
+        if isinstance(val, dict):
+            return val
+        if isinstance(val, str) and val.strip():
+            try:
+                return json.loads(val)
+            except Exception:
+                return {}
+        return {}
+
+    preset = {
+        "id": r["id"],
+        "name": r["name"],
+        "slug": r.get("slug") or f"preset-{r['id']}",
+        "hook_style": _parse_json_field(r.get("hook_style")),
+        "subtitle_style": _parse_json_field(r.get("subtitle_style")),
+        "text_emphasis_style": _parse_json_field(r.get("text_emphasis_style")),
+        "watermark_style": _parse_json_field(r.get("watermark_style")),
+        "cta_style": _parse_json_field(r.get("cta_style")),
+        "broll_style": _parse_json_field(r.get("broll_style")),
+        "created_at": r.get("created_at"),
+    }
+    if is_superadmin:
+        preset["owner_email"] = r.get("owner_email")
+        preset["owner_name"] = r.get("owner_name")
+    return preset
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -123,24 +161,7 @@ async def list_presets(user: CurrentUser = Depends(get_current_user)):
         else:
             cur.execute("SELECT * FROM user_presets WHERE user_id = ? ORDER BY created_at DESC", (user.id,))
         rows = cur.fetchall()
-        presets = []
-        for row in rows:
-            raw_cta = row["cta_style"] if "cta_style" in row.keys() else "{}"
-            preset = {
-                "id": row["id"],
-                "name": row["name"],
-                "slug": row.get("slug") or f"preset-{row['id']}",
-                "hook_style": json.loads(row["hook_style"]) if isinstance(row["hook_style"], str) else row["hook_style"],
-                "subtitle_style": json.loads(row["subtitle_style"]) if isinstance(row["subtitle_style"], str) else row["subtitle_style"],
-                "text_emphasis_style": json.loads(row["text_emphasis_style"]) if isinstance(row["text_emphasis_style"], str) else row["text_emphasis_style"],
-                "watermark_style": json.loads(row["watermark_style"]) if isinstance(row["watermark_style"], str) else row["watermark_style"],
-                "cta_style": json.loads(raw_cta) if isinstance(raw_cta, str) else (raw_cta or {}),
-                "created_at": row["created_at"],
-            }
-            if user.is_superadmin:
-                preset["owner_email"] = row["owner_email"]
-                preset["owner_name"] = row["owner_name"]
-            presets.append(preset)
+        presets = [_format_preset_dict(row, is_superadmin=user.is_superadmin) for row in rows]
         return {"success": True, "data": presets, "total": len(presets)}
     finally:
         conn.close()
@@ -166,24 +187,14 @@ async def get_preset_by_slug_or_id(slug_or_id: str, user: CurrentUser = Depends(
         if not row:
             raise HTTPException(status_code=404, detail=f"Preset '{slug_or_id}' tidak ditemukan")
 
+        r_dict = dict(row)
         # Access check (owner or superadmin)
-        if row["user_id"] != user.id and not user.is_superadmin:
+        if r_dict["user_id"] != user.id and not user.is_superadmin:
             raise HTTPException(status_code=403, detail="Akses ditolak ke preset ini")
 
-        raw_cta = row["cta_style"] if "cta_style" in row.keys() else "{}"
         return {
             "success": True,
-            "data": {
-                "id": row["id"],
-                "name": row["name"],
-                "slug": row.get("slug") or f"preset-{row['id']}",
-                "hook_style": json.loads(row["hook_style"]) if isinstance(row["hook_style"], str) else row["hook_style"],
-                "subtitle_style": json.loads(row["subtitle_style"]) if isinstance(row["subtitle_style"], str) else row["subtitle_style"],
-                "text_emphasis_style": json.loads(row["text_emphasis_style"]) if isinstance(row["text_emphasis_style"], str) else row["text_emphasis_style"],
-                "watermark_style": json.loads(row["watermark_style"]) if isinstance(row["watermark_style"], str) else row["watermark_style"],
-                "cta_style": json.loads(raw_cta) if isinstance(raw_cta, str) else (raw_cta or {}),
-                "created_at": row["created_at"],
-            }
+            "data": _format_preset_dict(row, is_superadmin=user.is_superadmin),
         }
     finally:
         conn.close()
@@ -198,12 +209,12 @@ async def create_preset(body: CreatePresetRequest, user: CurrentUser = Depends(g
 
     conn = get_dict_connection()
     try:
-        raw_slug = body.slug.strip() if body.slug and body.slug.strip() else slugify(name_clean)
+        raw_slug = slugify(body.slug.strip()) if body.slug and body.slug.strip() else slugify(name_clean)
         unique_slug = _generate_unique_slug(conn, raw_slug)
 
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO user_presets (user_id, name, slug, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_presets (user_id, name, slug, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style, broll_style) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 user.id,
                 name_clean,
@@ -213,6 +224,7 @@ async def create_preset(body: CreatePresetRequest, user: CurrentUser = Depends(g
                 json.dumps(body.text_emphasis_style),
                 json.dumps(body.watermark_style),
                 json.dumps(body.cta_style),
+                json.dumps(body.broll_style),
             ),
         )
         conn.commit()

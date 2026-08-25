@@ -737,6 +737,7 @@ export interface Preset {
   text_emphasis_style: Record<string, any>;
   watermark_style?: Record<string, any>;
   cta_style?: Record<string, any>;
+  broll_style?: Record<string, any>;
   created_at: string | null;
   owner_email?: string;
   owner_name?: string;
@@ -766,11 +767,21 @@ export const presets = {
     text_emphasis_style: Record<string, any> = {},
     watermark_style: Record<string, any> = {},
     cta_style: Record<string, any> = {},
-    slug?: string
+    slug?: string,
+    broll_style: Record<string, any> = {}
   ): Promise<{ success: boolean; id: number; slug: string; message: string }> {
     return request("/api/presets", {
       method: "POST",
-      body: JSON.stringify({ name, slug: slug || undefined, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style }),
+      body: JSON.stringify({
+        name,
+        slug: slug || undefined,
+        hook_style,
+        subtitle_style,
+        text_emphasis_style,
+        watermark_style,
+        cta_style,
+        broll_style,
+      }),
     });
   },
 

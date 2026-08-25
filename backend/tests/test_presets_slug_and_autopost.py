@@ -279,3 +279,53 @@ def test_telegram_submit_lookup_slug_integration():
         # Test finding system preset
         found_sys = lookup_preset_by_name("glassmorphism")
         assert found_sys == "glassmorphism"
+
+
+@pytest.mark.asyncio
+async def test_list_and_get_presets_endpoint_sqlite_row_safety():
+    """Verify list_presets and get_preset_by_slug_or_id work without AttributeError on sqlite3.Row."""
+    from src.presentation.routes.presets import list_presets, get_preset_by_slug_or_id, create_preset, CreatePresetRequest
+    from src.presentation.auth_deps import CurrentUser
+
+    dummy_user = CurrentUser(user_id=1, email="test@example.com", role="superadmin", permissions=["*"])
+
+    # 1. Create a preset
+    req = CreatePresetRequest(
+        name="kopi itam 01",
+        slug="",  # empty slug should auto-generate kopi-itam-01
+        hook_style={"engine": "remotion", "animation": "hook_punch_center", "fontFamily": "Impact", "transitionStyle": "zoom"},
+        subtitle_style={"engine": "remotion", "stylePreset": "bold_black", "highlightColor": "#FFE500"},
+        text_emphasis_style={"effectMode": "hero_punch", "color": "#FFCC00"},
+        watermark_style={"type": "text", "text": "@kopihitam", "opacity": 0.8},
+        cta_style={"enabled": True, "template": "subscribe_cta", "duration": 4.0},
+        broll_style={"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True, "autogrid_enabled": True},
+    )
+
+    create_res = await create_preset(req, user=dummy_user)
+    assert create_res["success"] is True
+    assert create_res["slug"] == "kopi-itam-01"
+    preset_id = create_res["id"]
+
+    # 2. Call list_presets (verifies sqlite3.Row has no .get() error)
+    list_res = await list_presets(user=dummy_user)
+    assert list_res["success"] is True
+    assert any(p["slug"] == "kopi-itam-01" for p in list_res["data"])
+
+    # 3. Call get_preset_by_slug_or_id with slug
+    get_res = await get_preset_by_slug_or_id("kopi-itam-01", user=dummy_user)
+    assert get_res["success"] is True
+    data = get_res["data"]
+    assert data["name"] == "kopi itam 01"
+    assert data["slug"] == "kopi-itam-01"
+    assert data["hook_style"]["transitionStyle"] == "zoom"
+    assert data["broll_style"]["autogrid_enabled"] is True
+
+    # 4. Resolve preset via preset_resolver
+    resolved = resolve_preset("kopi-itam-01", user_id=1)
+    assert resolved is not None
+    assert resolved["transition_style"] == "zoom"
+    assert resolved["broll_enabled"] is True
+    assert resolved["autogrid_enabled"] is True
+    assert resolved["hook_engine"] == "remotion"
+    assert resolved["subtitle_engine"] == "remotion"
+
