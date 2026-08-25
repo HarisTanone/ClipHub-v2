@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight, Layers, Zap, Check, FileText, Loader2, Search } from "lucide-react";
+import { ArrowLeft, Send, Monitor, Smartphone, Square, Clock, Palette, Type, Sparkles, ChevronLeft, ChevronRight, Bookmark, Save, Youtube, UploadCloud, FileVideo, X, MoveRight, Layers, Zap, Check, FileText, Loader2, Search, Copy, Share2, ExternalLink, Calendar, CheckCircle2, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -10,7 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_TEXT_EMPHASIS_STYLE, DEFAULT_WATERMARK_STYLE, DEFAULT_CTA_STYLE, normaliseTextEmphasisStyle, normaliseCtaStyle, type HookStyle, type SubtitleStyle, type TextEmphasisStyle, type WatermarkStyle, type CtaStyle } from "@/components/StyleEditorModal";
-import { jobs, preview, presets as presetsApi, analyze, type VideoPreview, type Preset, type AnalyzeResponse, API_BASE } from "@/lib/api";
+import { jobs, preview, presets as presetsApi, analyze, socialApi, type VideoPreview, type Preset, type AnalyzeResponse, type PlatformsStatusResponse, API_BASE } from "@/lib/api";
 import { cn, formatDuration, extractCleanYouTubeUrl, extractVideoId } from "@/lib/utils";
 import { BackgroundTemplateSection, type BackgroundMode } from "@/components/BackgroundTemplateSection";
 import { ClipTimelineEditor, type EditableClip } from "@/components/ClipTimelineEditor";
@@ -41,6 +41,15 @@ export function NewJob() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [urlError, setUrlError] = useState("");
 
+  // ─── AI Auto-Post to Social Media state ──────────────────────────
+  const [autoPostSocial, setAutoPostSocial] = useState(false);
+  const [autoPostPlatforms, setAutoPostPlatforms] = useState<string[]>([]);
+  const [autoPostAccountIds, setAutoPostAccountIds] = useState<string[]>([]);
+  const [autoPostScheduleMode, setAutoPostScheduleMode] = useState<"ai" | "custom">("ai");
+  const [autoPostCustomTime, setAutoPostCustomTime] = useState("");
+  const [platformsStatus, setPlatformsStatus] = useState<PlatformsStatusResponse | null>(null);
+  const [loadingPlatforms, setLoadingPlatforms] = useState(false);
+
   // ─── Analyze-only flow state ─────────────────────────────────────
   const [analyzeStep, setAnalyzeStep] = useState<"input" | "analyzing" | "review">("input");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -48,39 +57,22 @@ export function NewJob() {
   const [editableClips, setEditableClips] = useState<EditableClip[]>([]);
 
   // Style editor inline (not modal)
-  const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "other">("hook");
-  const [hookStyleConfig, setHookStyleConfig] = useState<HookStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_hook_style"); return s ? { ...DEFAULT_HOOK_STYLE, ...JSON.parse(s) } : DEFAULT_HOOK_STYLE; } catch { return DEFAULT_HOOK_STYLE; }
-  });
-  const [subtitleStyleConfig, setSubtitleStyleConfig] = useState<SubtitleStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_subtitle_style"); return s ? { ...DEFAULT_SUBTITLE_STYLE, ...JSON.parse(s) } : DEFAULT_SUBTITLE_STYLE; } catch { return DEFAULT_SUBTITLE_STYLE; }
-  });
-  const [textEmphasisStyleConfig, setTextEmphasisStyleConfig] = useState<TextEmphasisStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_text_emphasis_style"); return s ? normaliseTextEmphasisStyle(JSON.parse(s)) : DEFAULT_TEXT_EMPHASIS_STYLE; } catch { return DEFAULT_TEXT_EMPHASIS_STYLE; }
-  });
-  const [watermarkStyleConfig, setWatermarkStyleConfig] = useState<WatermarkStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_watermark_style"); return s ? { ...DEFAULT_WATERMARK_STYLE, ...JSON.parse(s) } : DEFAULT_WATERMARK_STYLE; } catch { return DEFAULT_WATERMARK_STYLE; }
-  });
-  const [ctaStyleConfig, setCtaStyleConfig] = useState<CtaStyle>(() => {
-    try { const s = localStorage.getItem("autocliper_cta_style"); return s ? normaliseCtaStyle(JSON.parse(s)) : DEFAULT_CTA_STYLE; } catch { return DEFAULT_CTA_STYLE; }
-  });
-
-  useEffect(() => { localStorage.setItem("autocliper_hook_style", JSON.stringify(hookStyleConfig)); }, [hookStyleConfig]);
-  useEffect(() => { localStorage.setItem("autocliper_subtitle_style", JSON.stringify(subtitleStyleConfig)); }, [subtitleStyleConfig]);
-  useEffect(() => { localStorage.setItem("autocliper_text_emphasis_style", JSON.stringify(textEmphasisStyleConfig)); }, [textEmphasisStyleConfig]);
-  useEffect(() => { localStorage.setItem("autocliper_watermark_style", JSON.stringify(watermarkStyleConfig)); }, [watermarkStyleConfig]);
-  useEffect(() => { localStorage.setItem("autocliper_cta_style", JSON.stringify(ctaStyleConfig)); }, [ctaStyleConfig]);
-
-  // YouTube preview
+  const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other">("hook");
+  const [hookStyleConfig, setHookStyleConfig] = useState<HookStyle>(DEFAULT_HOOK_STYLE);
+  const [subtitleStyleConfig, setSubtitleStyleConfig] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
+  const [textEmphasisStyleConfig, setTextEmphasisStyleConfig] = useState<TextEmphasisStyle>(DEFAULT_TEXT_EMPHASIS_STYLE);
+  const [watermarkStyleConfig, setWatermarkStyleConfig] = useState<WatermarkStyle>(DEFAULT_WATERMARK_STYLE);
+  const [ctaStyleConfig, setCtaStyleConfig] = useState<CtaStyle>(DEFAULT_CTA_STYLE);
   const [videoMeta, setVideoMeta] = useState<VideoPreview | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const previewTimeout = useRef<number | null>(null);
 
-  // User presets
+  // ─── User Presets State ──────────────────────────────────────────
   const [userPresets, setUserPresets] = useState<Preset[]>([]);
   const [presetPage, setPresetPage] = useState(0);
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
+  const [presetSlug, setPresetSlug] = useState("");
   const [showSavePreset, setShowSavePreset] = useState(false);
   const [activePresetId, setActivePresetId] = useState<number | null>(null);
   const presetsPerPage = 3;
@@ -89,6 +81,47 @@ export function NewJob() {
     presetsApi.list().then(setUserPresets).catch(() => { });
   }, []);
 
+  useEffect(() => {
+    if (autoPostSocial && !platformsStatus) {
+      setLoadingPlatforms(true);
+      socialApi.getPlatformsStatus()
+        .then((res) => {
+          setPlatformsStatus(res);
+          // Auto select connected platforms by default
+          const connected = Object.entries(res.platforms)
+            .filter(([_, info]) => info.connected)
+            .map(([plat]) => plat);
+          if (connected.length > 0 && autoPostPlatforms.length === 0) {
+            setAutoPostPlatforms(connected);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingPlatforms(false));
+    }
+  }, [autoPostSocial]);
+
+  function togglePlatform(plat: string) {
+    if (autoPostPlatforms.includes(plat)) {
+      setAutoPostPlatforms(autoPostPlatforms.filter((p) => p !== plat));
+    } else {
+      setAutoPostPlatforms([...autoPostPlatforms, plat]);
+    }
+  }
+
+  function toggleAccount(accId: string) {
+    if (autoPostAccountIds.includes(accId)) {
+      setAutoPostAccountIds(autoPostAccountIds.filter((id) => id !== accId));
+    } else {
+      setAutoPostAccountIds([...autoPostAccountIds, accId]);
+    }
+  }
+
+  function copyPresetCommand(slug: string) {
+    const cmd = `--preset ${slug}`;
+    navigator.clipboard.writeText(cmd);
+    toast.success(`Copied "${cmd}" to clipboard`);
+  }
+
   function loadPreset(preset: Preset) {
     setHookStyleConfig({ ...DEFAULT_HOOK_STYLE, ...preset.hook_style } as HookStyle);
     setSubtitleStyleConfig({ ...DEFAULT_SUBTITLE_STYLE, ...preset.subtitle_style } as SubtitleStyle);
@@ -96,16 +129,25 @@ export function NewJob() {
     if (preset.watermark_style) setWatermarkStyleConfig({ ...DEFAULT_WATERMARK_STYLE, ...preset.watermark_style } as WatermarkStyle);
     if (preset.cta_style) setCtaStyleConfig(normaliseCtaStyle(preset.cta_style));
     setActivePresetId(preset.id);
-    toast.success(`Loaded: ${preset.name}`);
+    toast.success(`Loaded preset: ${preset.name} (${preset.slug || `preset-${preset.id}`})`);
   }
 
   async function handleSavePreset() {
     if (!presetName.trim()) { toast.error("Name required"); return; }
     setSavingPreset(true);
     try {
-      await presetsApi.create(presetName.trim(), hookStyleConfig, subtitleStyleConfig, textEmphasisStyleConfig, watermarkStyleConfig, ctaStyleConfig);
-      toast.success(`Preset "${presetName}" saved`);
+      const res = await presetsApi.create(
+        presetName.trim(),
+        hookStyleConfig,
+        subtitleStyleConfig,
+        textEmphasisStyleConfig,
+        watermarkStyleConfig,
+        ctaStyleConfig,
+        presetSlug.trim() || undefined
+      );
+      toast.success(`Preset "${presetName}" saved (slug: ${res.slug || presetName})`);
       setPresetName("");
+      setPresetSlug("");
       setShowSavePreset(false);
       const list = await presetsApi.list();
       setUserPresets(list);
@@ -242,6 +284,12 @@ export function NewJob() {
       text_emphasis_style_config: textEmphasisStyleConfig,
       watermark_config: watermarkStyleConfig,
       cta_config: ctaStyleConfig,
+      // AI Auto-Post
+      auto_post_social: autoPostSocial,
+      auto_post_platforms: autoPostPlatforms.join(","),
+      auto_post_account_ids: autoPostAccountIds,
+      auto_post_schedule_mode: autoPostScheduleMode,
+      auto_post_custom_time: autoPostScheduleMode === "custom" && autoPostCustomTime ? autoPostCustomTime : undefined,
       processing_mode: sourceMode === "upload" ? uploadProcessingMode : "analyze" as const,
       custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
         ? directHook.trim() || undefined
@@ -632,12 +680,174 @@ export function NewJob() {
             </div>
           </Card>
 
+          {/* AI Auto-Post to Social Media */}
+          <Card className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Share2 className="h-3.5 w-3.5 text-emerald-400" />
+                <h3 className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">AI Auto-Post Social</h3>
+              </div>
+              <Toggle
+                label=""
+                checked={autoPostSocial}
+                onChange={setAutoPostSocial}
+              />
+            </div>
+            <p className="text-[10px] text-zinc-500 mb-2 leading-relaxed">
+              Otomatis jadwalkan klip video yang selesai dirender ke akun media sosial kamu.
+            </p>
+
+            {autoPostSocial && (
+              <div className="mt-2.5 pt-2.5 border-t border-zinc-800 space-y-3">
+                {/* Platform status & account selector */}
+                <div>
+                  <label className="block text-[10px] font-medium text-zinc-400 mb-1.5 uppercase tracking-wider">
+                    Pilih Media Sosial & Akun
+                  </label>
+
+                  {loadingPlatforms ? (
+                    <div className="flex items-center gap-2 py-3 text-zinc-500 text-[11px]">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                      <span>Memeriksa akun terhubung...</span>
+                    </div>
+                  ) : platformsStatus ? (
+                    <div className="space-y-2">
+                      {Object.entries(platformsStatus.platforms).map(([platKey, info]) => {
+                        const isSelected = autoPostPlatforms.includes(platKey);
+                        const isConnected = info.connected;
+
+                        return (
+                          <div
+                            key={platKey}
+                            className={cn(
+                              "rounded-lg border p-2 text-xs transition-all",
+                              !isConnected
+                                ? "border-zinc-800/60 bg-zinc-950/40 opacity-70"
+                                : isSelected
+                                ? "border-emerald-500/60 bg-emerald-500/5"
+                                : "border-zinc-800 bg-zinc-900/40 hover:border-zinc-700"
+                            )}
+                          >
+                            <div className="flex items-center justify-between">
+                              <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  disabled={!isConnected}
+                                  checked={isSelected && isConnected}
+                                  onChange={() => togglePlatform(platKey)}
+                                  className="rounded border-zinc-700 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/30"
+                                />
+                                <span className="font-semibold capitalize text-zinc-200">{platKey}</span>
+                              </label>
+
+                              {isConnected ? (
+                                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-medium">
+                                  {info.count} Akun Terhubung
+                                </span>
+                              ) : (
+                                <Link
+                                  to="/social"
+                                  className="inline-flex items-center gap-1 text-[9px] text-amber-400 hover:text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20"
+                                >
+                                  <span>Belum Terhubung</span>
+                                  <ExternalLink className="h-2.5 w-2.5" />
+                                </Link>
+                              )}
+                            </div>
+
+                            {/* Multi-account selector if connected and > 1 accounts */}
+                            {isConnected && isSelected && info.accounts.length > 1 && (
+                              <div className="mt-2 pt-2 border-t border-zinc-800/80 space-y-1 pl-6">
+                                <p className="text-[9px] text-zinc-400">Pilih Akun / Username:</p>
+                                <div className="space-y-1">
+                                  {info.accounts.map((acc) => {
+                                    const isAccSelected =
+                                      autoPostAccountIds.length === 0 || autoPostAccountIds.includes(acc.account_id);
+                                    return (
+                                      <label key={acc.account_id} className="flex items-center gap-1.5 text-[10px] text-zinc-300 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={isAccSelected}
+                                          onChange={() => toggleAccount(acc.account_id)}
+                                          className="rounded border-zinc-700 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/30"
+                                        />
+                                        <span className="truncate">{acc.name} {acc.username ? `(@${acc.username})` : ""}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-zinc-500 py-1">
+                      Gagal memuat status akun. Pastikan akun sudah dihubungkan di menu Social Accounts.
+                    </div>
+                  )}
+                </div>
+
+                {/* Schedule Mode Selector */}
+                <div className="pt-2 border-t border-zinc-800">
+                  <label className="block text-[10px] font-medium text-zinc-400 mb-1.5 uppercase tracking-wider">
+                    Jadwal Waktu Posting
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setAutoPostScheduleMode("ai")}
+                      className={cn(
+                        "py-1.5 px-2 rounded-lg border text-[10px] font-medium transition-all text-center",
+                        autoPostScheduleMode === "ai"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700"
+                      )}
+                    >
+                      AI Smart Peak-Hours
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAutoPostScheduleMode("custom")}
+                      className={cn(
+                        "py-1.5 px-2 rounded-lg border text-[10px] font-medium transition-all text-center",
+                        autoPostScheduleMode === "custom"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700"
+                      )}
+                    >
+                      Custom Jam Tayang
+                    </button>
+                  </div>
+
+                  {autoPostScheduleMode === "ai" ? (
+                    <p className="text-[9px] text-zinc-500 bg-zinc-950/60 p-2 rounded border border-zinc-800">
+                      AI otomatis membagikan klip di jam tayang tertinggi (11:30, 15:00, 18:30, 20:30 UTC/WIB) dengan variasi natural ±5 menit.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <label className="block text-[9px] text-zinc-400">Pilih Waktu Mulai Jadwal:</label>
+                      <input
+                        type="datetime-local"
+                        value={autoPostCustomTime}
+                        onChange={(e) => setAutoPostCustomTime(e.target.value)}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+                      />
+                      <p className="text-[8px] text-zinc-500">Klip berikutnya akan dijadwalkan bertahap dengan jeda 2 jam.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </Card>
+
           {/* Presets Carousel */}
           <Card className="p-3">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
                 <Bookmark className="h-3 w-3 text-emerald-400" />
-                <h3 className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">My Presets</h3>
+                <h3 className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">My Presets</h3>
               </div>
               <button type="button" onClick={() => setShowSavePreset(!showSavePreset)} className="text-[10px] text-emerald-400 hover:text-emerald-300 font-medium transition-colors">
                 {showSavePreset ? "Cancel" : "+ Save Current"}
@@ -645,9 +855,29 @@ export function NewJob() {
             </div>
 
             {showSavePreset && (
-              <div className="flex gap-1.5 mb-2">
-                <input type="text" value={presetName} onChange={(e) => setPresetName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleSavePreset())} placeholder="Preset name..." className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50" />
-                <Button type="button" size="xs" loading={savingPreset} onClick={handleSavePreset} icon={<Save className="h-3 w-3" />}>Save</Button>
+              <div className="space-y-1.5 mb-2.5 p-2 bg-zinc-900 rounded-lg border border-zinc-800">
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(e) => {
+                    setPresetName(e.target.value);
+                    if (!presetSlug || presetSlug === presetName.toLowerCase().replace(/[^a-z0-9]/g, "-")) {
+                      setPresetSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""));
+                    }
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleSavePreset())}
+                  placeholder="Nama preset..."
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
+                />
+                <input
+                  type="text"
+                  value={presetSlug}
+                  onChange={(e) => setPresetSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+                  onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleSavePreset())}
+                  placeholder="slug-telegram (opsional)"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-[10px] text-zinc-300 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
+                />
+                <Button type="button" size="xs" loading={savingPreset} onClick={handleSavePreset} icon={<Save className="h-3 w-3" />}>Simpan Preset</Button>
               </div>
             )}
 
@@ -656,23 +886,50 @@ export function NewJob() {
             ) : (
               <>
                 <div className="space-y-1.5">
-                  {visiblePresets.map((p) => (
-                    <button key={p.id} type="button" onClick={() => loadPreset(p)}
-                      className={cn("w-full flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-all text-left group",
-                        activePresetId === p.id
-                          ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30"
-                          : "border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5")}>
-                      <div className={cn("shrink-0 w-5 h-5 rounded flex items-center justify-center",
-                        activePresetId === p.id ? "bg-emerald-500/30" : "bg-gradient-to-br from-emerald-500/20 to-zinc-800")}>
-                        <Palette className={cn("h-2.5 w-2.5", activePresetId === p.id ? "text-emerald-300" : "text-emerald-400")} />
+                  {visiblePresets.map((p) => {
+                    const slugStr = p.slug || `preset-${p.id}`;
+                    return (
+                      <div
+                        key={p.id}
+                        className={cn(
+                          "w-full rounded-lg border p-2 transition-all text-left group",
+                          activePresetId === p.id
+                            ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                            : "border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <button
+                            type="button"
+                            onClick={() => loadPreset(p)}
+                            className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
+                          >
+                            <div className={cn("shrink-0 w-4 h-4 rounded flex items-center justify-center",
+                              activePresetId === p.id ? "bg-emerald-500/30" : "bg-gradient-to-br from-emerald-500/20 to-zinc-800")}>
+                              <Palette className={cn("h-2.5 w-2.5", activePresetId === p.id ? "text-emerald-300" : "text-emerald-400")} />
+                            </div>
+                            <span className={cn("text-[11px] font-medium truncate", activePresetId === p.id ? "text-emerald-300" : "text-zinc-300 group-hover:text-emerald-300")}>
+                              {p.name}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => copyPresetCommand(slugStr)}
+                            title="Copy --preset command"
+                            className="text-[9px] font-mono bg-zinc-800 hover:bg-zinc-700 text-emerald-400 px-1.5 py-0.5 rounded border border-zinc-700 flex items-center gap-1"
+                          >
+                            <span>{slugStr}</span>
+                            <Copy className="h-2 w-2 opacity-70" />
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between text-[9px] text-zinc-500">
+                          <span className="truncate">{p.hook_style?.animation || "custom"} · {p.subtitle_style?.stylePreset || "clean"}</span>
+                          {activePresetId === p.id && <span className="text-emerald-400 font-bold uppercase tracking-wider text-[8px]">Active</span>}
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={cn("text-[11px] font-medium truncate", activePresetId === p.id ? "text-emerald-300" : "text-zinc-300 group-hover:text-emerald-300")}>{p.name}</p>
-                        <p className="text-[9px] text-zinc-600 truncate">{p.hook_style?.animation || "custom"} · {p.hook_style?.fontFamily || "Poppins"}</p>
-                      </div>
-                      {activePresetId === p.id && <span className="shrink-0 text-[8px] text-emerald-400 font-bold uppercase tracking-wider">Active</span>}
-                    </button>
-                  ))}
+                    );
+                  })}
                 </div>
                 {totalPresetPages > 1 && (
                   <div className="flex items-center justify-center gap-2 mt-2">

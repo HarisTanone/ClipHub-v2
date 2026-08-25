@@ -2495,6 +2495,10 @@ export function Settings() {
                         ? telegramSettings.auto_post_platforms.split(",").map((p) => p.trim().toLowerCase())
                         : [];
                       const isSelected = currentList.includes(plat.code);
+                      const matchingAccounts = telegramSocialAccounts.filter(
+                        (a) => a.platform?.toLowerCase() === plat.code
+                      );
+                      const hasAccount = matchingAccounts.length > 0;
 
                       return (
                         <button
@@ -2510,19 +2514,28 @@ export function Settings() {
                             setTelegramSettings((p) => ({ ...p, auto_post_platforms: updated.join(",") }));
                           }}
                           className={cn(
-                            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all text-left",
+                            "flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all text-left",
                             isSelected
                               ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
                               : "border-zinc-800 bg-zinc-950/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
                           )}
                         >
-                          <div className={cn(
-                            "w-3 h-3 rounded flex items-center justify-center border text-[9px]",
-                            isSelected ? "border-emerald-400 bg-emerald-500 text-white" : "border-zinc-600"
-                          )}>
-                            {isSelected && <Check className="w-2.5 h-2.5" />}
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className={cn(
+                              "w-3 h-3 rounded flex items-center justify-center border text-[9px] shrink-0",
+                              isSelected ? "border-emerald-400 bg-emerald-500 text-white" : "border-zinc-600"
+                            )}>
+                              {isSelected && <Check className="w-2.5 h-2.5" />}
+                            </div>
+                            <span className="truncate">{plat.name}</span>
                           </div>
-                          <span className="truncate">{plat.name}</span>
+                          {hasAccount ? (
+                            <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono shrink-0">
+                              {matchingAccounts.length}
+                            </span>
+                          ) : (
+                            <span className="text-[8px] text-zinc-600 shrink-0">0</span>
+                          )}
                         </button>
                       );
                     })}
@@ -2537,6 +2550,7 @@ export function Settings() {
                       onChange={(e) => setTelegramSettings((p) => ({ ...p, auto_post_schedule_mode: e.target.value }))}
                       options={[
                         { value: "ai", label: "AI Smart Peak Hours (Disarankan)" },
+                        { value: "custom", label: "Custom Jam Tayang / Manual" },
                         { value: "instant", label: "Instant (1-2 Menit ke Depan)" },
                       ]}
                     />

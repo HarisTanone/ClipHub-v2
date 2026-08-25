@@ -148,6 +148,14 @@ async def list_accounts(
     return data
 
 
+@accounts_router.get("/accounts/platforms-status")
+async def get_platforms_status(user: CurrentUser = Depends(get_current_user)):
+    """Get connection status and account breakdown for each social media platform."""
+    from src.infrastructure.social_auto_post_service import social_auto_post_service
+    status = await social_auto_post_service.get_platforms_status(user_id=None if user.is_superadmin else user.id)
+    return status
+
+
 @accounts_router.get("/accounts/count")
 async def count_accounts(user: CurrentUser = Depends(get_current_user)):
     """Get account count breakdown per platform (filtered by user)."""

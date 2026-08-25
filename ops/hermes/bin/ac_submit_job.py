@@ -25,16 +25,29 @@ import ac_auth
 
 
 def lookup_preset_by_name(name: str) -> str | None:
-    """Lookup preset ID by name from API."""
+    """Lookup preset slug or ID by name/slug from API."""
+    key = str(name or "").strip()
+    if not key:
+        return None
+    # Check user presets first (slug, id, or name)
+    try:
+        user_res = ac_auth.api_get("/presets")
+        items = user_res if isinstance(user_res, list) else (user_res.get("data", []) if isinstance(user_res, dict) else [])
+        for p in items:
+            if str(p.get("slug", "")).lower() == key.lower() or str(p.get("id")) == key or p.get("name", "").lower() == key.lower():
+                return p.get("slug") or f"preset-{p.get('id')}"
+    except Exception:
+        pass
+    # Check system style presets
     try:
         result = ac_auth.api_get("/style-presets")
-        presets = result.get("data", [])
-        for preset in presets:
-            if preset.get("id") == name or preset.get("name", "").lower() == name.lower():
+        items = result if isinstance(result, list) else (result.get("data", []) if isinstance(result, dict) else [])
+        for preset in items:
+            if preset.get("id") == key or preset.get("name", "").lower() == key.lower():
                 return preset.get("id")
     except Exception:
         pass
-    return None
+    return key
 
 
 def print_usage():

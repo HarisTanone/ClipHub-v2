@@ -70,16 +70,18 @@ def main():
 
     # User presets
     if user_presets:
-        print(f"\n<b>Preset Kamu ({len(user_presets)}):</b>\n")
+        print(f"\n<b>Preset Pengguna ({len(user_presets)}):</b>\n")
         for preset in user_presets:
             preset_id = preset.get("id", "unknown")
+            preset_slug = preset.get("slug") or f"preset-{preset_id}"
             name = preset.get("name", "Unnamed")
-            print(f"• <code>user:{preset_id}</code> — {name}")
+            print(f"• <code>{preset_slug}</code> — {name} (ID: {preset_id})")
 
     # Usage hint
     print("\n<b>Cara pakai:</b>")
+    print("<code>/submit &lt;url&gt; --preset slug-presets-01</code>")
     print("<code>/submit &lt;url&gt; --preset bold_black</code>")
-    print("<code>/submit &lt;url&gt; --preset user:3</code>  (preset kamu)")
+    print("<code>/submit &lt;url&gt; --ratio 9:16 --preset viral</code>")
 
 
 if __name__ == "__main__":

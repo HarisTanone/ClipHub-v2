@@ -731,6 +731,7 @@ export const system = {
 export interface Preset {
   id: number;
   name: string;
+  slug?: string;
   hook_style: Record<string, any>;
   subtitle_style: Record<string, any>;
   text_emphasis_style: Record<string, any>;
@@ -753,22 +754,61 @@ export const presets = {
     return res.data;
   },
 
+  async getBySlug(slugOrId: string): Promise<Preset> {
+    const res = await request<{ success: boolean; data: Preset }>(`/api/presets/${slugOrId}`);
+    return res.data;
+  },
+
   async create(
     name: string,
     hook_style: Record<string, any>,
     subtitle_style: Record<string, any>,
     text_emphasis_style: Record<string, any> = {},
     watermark_style: Record<string, any> = {},
-    cta_style: Record<string, any> = {}
-  ): Promise<{ success: boolean; id: number; message: string }> {
+    cta_style: Record<string, any> = {},
+    slug?: string
+  ): Promise<{ success: boolean; id: number; slug: string; message: string }> {
     return request("/api/presets", {
       method: "POST",
-      body: JSON.stringify({ name, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style }),
+      body: JSON.stringify({ name, slug: slug || undefined, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style }),
     });
   },
 
   async remove(id: number): Promise<{ success: boolean; message: string }> {
     return request(`/api/presets/${id}`, { method: "DELETE" });
+  },
+};
+
+// ─── Social Accounts API ─────────────────────────────────────────────────────
+
+export interface PlatformAccountInfo {
+  account_id: string;
+  name: string;
+  username: string;
+  platform: string;
+  picture?: string;
+  user_id?: number;
+}
+
+export interface PlatformsStatusResponse {
+  total_accounts: number;
+  platforms: Record<
+    string,
+    {
+      connected: boolean;
+      count: number;
+      accounts: PlatformAccountInfo[];
+    }
+  >;
+  has_any_connected: boolean;
+}
+
+export const socialApi = {
+  async getPlatformsStatus(): Promise<PlatformsStatusResponse> {
+    return request<PlatformsStatusResponse>("/api/social/accounts/platforms-status");
+  },
+  async getAccounts(): Promise<{ docs: PlatformAccountInfo[] }> {
+    return request("/api/social/accounts?page=1&limit=100");
   },
 };
 

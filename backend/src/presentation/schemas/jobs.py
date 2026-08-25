@@ -37,6 +37,12 @@ class JobOptionsBase(BaseModel):
     background_mode: Optional[str] = None  # "template" | "upload"
     background_template_id: Optional[str] = None
     background_image_data_url: Optional[str] = None  # data:image/...;base64,... for upload
+    # AI Auto-Post to Social Media options
+    auto_post_social: bool = False
+    auto_post_platforms: str = ""
+    auto_post_account_ids: Optional[list[str]] = None
+    auto_post_schedule_mode: str = "ai"  # "ai" | "custom" | "instant"
+    auto_post_custom_time: Optional[str] = None
 
     @field_validator("target_aspect_ratio")
     @classmethod

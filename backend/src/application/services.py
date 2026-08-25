@@ -253,6 +253,12 @@ class JobService:
         background_mode: Optional[str] = None,
         background_template_id: Optional[str] = None,
         background_image_data_url: Optional[str] = None,
+        # AI Auto-Post options
+        auto_post_social: bool = False,
+        auto_post_platforms: str = "",
+        auto_post_account_ids: Optional[list] = None,
+        auto_post_schedule_mode: str = "ai",
+        auto_post_custom_time: Optional[str] = None,
         # User ownership
         user_id: Optional[int] = None,
         # V2 pipeline routing
@@ -301,6 +307,27 @@ class JobService:
 
         job_id = self._generate_job_id()
 
+        # Resolve preset styles if style_preset is provided (by slug, ID, or name)
+        resolved_preset = None
+        if style_preset and str(style_preset).strip().lower() not in ("", "default"):
+            try:
+                from src.infrastructure.preset_resolver import resolve_preset
+                resolved_preset = resolve_preset(style_preset, user_id=user_id)
+                if resolved_preset:
+                    if not hook_style_config and resolved_preset.get("hook_style_config"):
+                        hook_style_config = resolved_preset["hook_style_config"]
+                    if not subtitle_style_config and resolved_preset.get("subtitle_style_config"):
+                        subtitle_style_config = resolved_preset["subtitle_style_config"]
+                    if not watermark_config and resolved_preset.get("watermark_config"):
+                        watermark_config = resolved_preset["watermark_config"]
+                    if not cta_config and resolved_preset.get("cta_config"):
+                        cta_config = resolved_preset["cta_config"]
+                    if not text_emphasis_style_config and resolved_preset.get("text_emphasis_style_config"):
+                        text_emphasis_style_config = resolved_preset["text_emphasis_style_config"]
+                        text_emphasis_enabled = text_emphasis_enabled or resolved_preset.get("text_emphasis_enabled", False)
+            except Exception as e:
+                logger.warning(f"Preset resolution failed for '{style_preset}': {e}")
+
         # Store style configs in clips_data for later use during render
         initial_clips_data = {}
         if force_reprocess:
@@ -340,6 +367,14 @@ class JobService:
             )
             if canvas:
                 initial_clips_data["canvas_config"] = canvas
+        # AI Auto-Post configurations
+        if auto_post_social:
+            initial_clips_data["auto_post_social"] = True
+            initial_clips_data["auto_post_platforms"] = auto_post_platforms
+            initial_clips_data["auto_post_account_ids"] = auto_post_account_ids or []
+            initial_clips_data["auto_post_schedule_mode"] = auto_post_schedule_mode
+            initial_clips_data["auto_post_custom_time"] = auto_post_custom_time
+
         if is_upload_source:
             initial_clips_data["source"] = {
                 "type": "upload",
@@ -360,11 +395,17 @@ class JobService:
         if source_job_id:
             initial_clips_data["source_job_id"] = source_job_id
 
+        final_style_preset = (
+            resolved_preset.get("slug")
+            if resolved_preset
+            else (style_preset or settings.DEFAULT_STYLE_PRESET)
+        )
+
         job = Job(
             job_id=job_id,
             youtube_url=youtube_url,
             video_duration=source_duration if is_upload_source else None,
-            style_preset=style_preset or settings.DEFAULT_STYLE_PRESET,
+            style_preset=final_style_preset,
             target_aspect_ratio=target_aspect_ratio,
             hook_engine=hook_engine,
             hook_style=hook_style or (hook_style_config.get("animation", "") if hook_style_config else ""),
@@ -1030,18 +1071,26 @@ class JobService:
             clips_data["scene_graphs"] = {
                 str(rank): sg.to_dict() for rank, sg in scene_graphs.items()
             }
-            # Preserve style configs from job creation
+            # Preserve style configs & auto_post settings from job creation
             if job.clips_data:
-                if job.clips_data.get("hook_style_config"):
-                    clips_data["hook_style_config"] = job.clips_data["hook_style_config"]
-                if job.clips_data.get("subtitle_style_config"):
-                    clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
-                if job.clips_data.get("content_profile"):
-                    clips_data["content_profile"] = job.clips_data["content_profile"]
-                if job.clips_data.get("source"):
-                    clips_data["source"] = job.clips_data["source"]
-                if job.clips_data.get("source_type"):
-                    clips_data["source_type"] = job.clips_data["source_type"]
+                for k in (
+                    "hook_style_config",
+                    "subtitle_style_config",
+                    "content_profile",
+                    "source",
+                    "source_type",
+                    "watermark_config",
+                    "cta_config",
+                    "text_emphasis_style_config",
+                    "text_emphasis_enabled",
+                    "auto_post_social",
+                    "auto_post_platforms",
+                    "auto_post_account_ids",
+                    "auto_post_schedule_mode",
+                    "auto_post_custom_time",
+                ):
+                    if job.clips_data.get(k) is not None:
+                        clips_data[k] = job.clips_data[k]
             await self._repo.update_clips_data(job_id, clips_data)
 
             success_count = sum(1 for c in clips if trim_results.get(c.rank))
@@ -1067,6 +1116,30 @@ class JobService:
                 ))
             except Exception:
                 pass
+
+            # Direct AI Auto-Post trigger for job-specific auto-post
+            if (job.clips_data or {}).get("auto_post_social") and output_dir and os.path.exists(output_dir):
+                try:
+                    from src.infrastructure.social_auto_post_service import social_auto_post_service
+                    clips_list = [asdict(c) if hasattr(c, "__dataclass_fields__") else (c if isinstance(c, dict) else c.__dict__) for c in clips]
+                    raw_plats = (job.clips_data or {}).get("auto_post_platforms", "")
+                    target_plats = [p.strip() for p in raw_plats.split(",") if p.strip()] if raw_plats else None
+                    target_accs = (job.clips_data or {}).get("auto_post_account_ids") or None
+                    sched_mode = (job.clips_data or {}).get("auto_post_schedule_mode", "ai")
+                    custom_time = (job.clips_data or {}).get("auto_post_custom_time")
+                    asyncio.create_task(social_auto_post_service.auto_schedule_job_clips(
+                        job_id=job_id,
+                        clips=clips_list,
+                        output_dir=output_dir,
+                        user_id=job.user_id,
+                        target_platforms=target_plats,
+                        target_account_ids=target_accs,
+                        schedule_mode=sched_mode,
+                        custom_schedule_time=custom_time,
+                        notify_telegram=True,
+                    ))
+                except Exception as e:
+                    logger.warning(f"Failed to auto-post job {job_id}: {e}")
 
         except asyncio.CancelledError:
             logger.info(f"[{job_id}] Pipeline cancelled by user.")

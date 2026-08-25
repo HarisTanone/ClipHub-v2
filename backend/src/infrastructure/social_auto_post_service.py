@@ -91,41 +91,132 @@ class SocialAutoPostService:
 
         return schedule_times
 
+    def calculate_custom_schedule_times(
+        self,
+        clip_count: int,
+        custom_time_str: str = "",
+        interval_hours: int = 2,
+        start_time: Optional[dt.datetime] = None,
+    ) -> List[dt.datetime]:
+        """Calculate schedule timestamps starting from a user-specified custom time/datetime."""
+        now = start_time or dt.datetime.now(dt.timezone.utc)
+        min_start = now + dt.timedelta(minutes=2)
+
+        base_dt: Optional[dt.datetime] = None
+        if custom_time_str:
+            try:
+                # Try ISO format first (e.g. 2026-08-25T15:30:00)
+                if "T" in custom_time_str or "-" in custom_time_str:
+                    clean_str = custom_time_str.replace("Z", "+00:00")
+                    base_dt = dt.datetime.fromisoformat(clean_str)
+                    if base_dt.tzinfo is None:
+                        base_dt = base_dt.replace(tzinfo=dt.timezone.utc)
+                # Try HH:MM format (e.g. 15:30)
+                elif ":" in custom_time_str:
+                    parts = custom_time_str.strip().split(":")
+                    hour = int(parts[0])
+                    minute = int(parts[1]) if len(parts) > 1 else 0
+                    today = now.date()
+                    candidate = dt.datetime(today.year, today.month, today.day, hour, minute, tzinfo=dt.timezone.utc)
+                    if candidate <= min_start:
+                        # Schedule for tomorrow if time has already passed today
+                        candidate += dt.timedelta(days=1)
+                    base_dt = candidate
+            except Exception as e:
+                logger.warning(f"Failed to parse custom schedule time '{custom_time_str}': {e}")
+
+        if not base_dt or base_dt < min_start:
+            base_dt = min_start
+
+        schedule_times: List[dt.datetime] = []
+        for i in range(clip_count):
+            slot = base_dt + dt.timedelta(hours=i * max(1, interval_hours))
+            schedule_times.append(slot)
+
+        return schedule_times
+
     async def get_connected_accounts(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Fetch active connected social accounts from DB or Repliz."""
-        accounts = []
+        """Fetch active connected social accounts from DB and Repliz."""
+        local_accounts = []
         conn = get_dict_connection()
         try:
             cur = conn.cursor()
-            query = "SELECT * FROM social_accounts"
+            query = "SELECT sa.*, u.email as owner_email, u.full_name as owner_name FROM social_accounts sa LEFT JOIN users u ON sa.user_id = u.id"
             params = []
             if user_id is not None:
-                query += " WHERE user_id = ?"
+                query += " WHERE sa.user_id = ?"
                 params.append(user_id)
             cur.execute(query, tuple(params))
             for row in cur.fetchall():
-                accounts.append(dict(row))
+                local_accounts.append(dict(row))
         except Exception as e:
             logger.warning(f"Failed to fetch accounts from DB: {e}")
         finally:
             conn.close()
 
-        # If empty or needed, fetch live accounts from Repliz
-        if not accounts:
-            try:
-                live_res = await repliz_get("/public/account?page=1&limit=50")
-                if isinstance(live_res, dict) and "docs" in live_res:
-                    for acc in live_res["docs"]:
-                        if acc.get("isConnected"):
-                            accounts.append({
-                                "account_id": acc.get("_id") or acc.get("id"),
-                                "platform": acc.get("type", "unknown").lower(),
-                                "name": acc.get("name") or acc.get("username", "Account"),
-                            })
-            except Exception as e:
-                logger.warning(f"Failed to fetch live Repliz accounts: {e}")
+        # Fetch live accounts from Repliz
+        repliz_map = {}
+        try:
+            live_res = await repliz_get("/public/account?page=1&limit=100")
+            if isinstance(live_res, dict) and "docs" in live_res:
+                for acc in live_res["docs"]:
+                    acc_id = str(acc.get("_id") or acc.get("id") or "")
+                    if acc_id:
+                        repliz_map[acc_id] = acc
+        except Exception as e:
+            logger.warning(f"Failed to fetch live Repliz accounts: {e}")
 
-        return accounts
+        # Merge local metadata with Repliz live data
+        merged_accounts = []
+        for la in local_accounts:
+            acc_id = str(la.get("account_id", ""))
+            live_data = repliz_map.get(acc_id, {})
+            is_connected = live_data.get("isConnected", True) if repliz_map else True
+            if is_connected:
+                merged_accounts.append({
+                    "account_id": acc_id,
+                    "platform": (live_data.get("type") or la.get("platform") or "unknown").lower(),
+                    "name": live_data.get("name") or la.get("name") or "Account",
+                    "username": live_data.get("username") or "",
+                    "picture": live_data.get("picture") or "",
+                    "user_id": la.get("user_id"),
+                    "owner_email": la.get("owner_email"),
+                })
+
+        # If no local mapping found and user_id is None (superadmin), use Repliz directly
+        if not merged_accounts and user_id is None and repliz_map:
+            for acc_id, acc in repliz_map.items():
+                if acc.get("isConnected"):
+                    merged_accounts.append({
+                        "account_id": acc_id,
+                        "platform": acc.get("type", "unknown").lower(),
+                        "name": acc.get("name") or acc.get("username", "Account"),
+                        "username": acc.get("username") or "",
+                        "picture": acc.get("picture") or "",
+                        "user_id": None,
+                    })
+
+        return merged_accounts
+
+    async def get_platforms_status(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Check connection status for each social media platform for the user."""
+        all_platforms = ["tiktok", "instagram", "youtube", "facebook", "threads", "linkedin"]
+        connected_accs = await self.get_connected_accounts(user_id=user_id)
+
+        status_by_platform: Dict[str, Any] = {}
+        for plat in all_platforms:
+            matched = [a for a in connected_accs if a.get("platform", "").lower() == plat]
+            status_by_platform[plat] = {
+                "connected": len(matched) > 0,
+                "count": len(matched),
+                "accounts": matched,
+            }
+
+        return {
+            "total_accounts": len(connected_accs),
+            "platforms": status_by_platform,
+            "has_any_connected": len(connected_accs) > 0,
+        }
 
     def extract_clip_caption(
         self,
@@ -136,7 +227,7 @@ class SocialAutoPostService:
         """Extract optimized caption and hashtags for a specific platform from clip metadata."""
         hook = clip.get("hook") or f"Clip #{clip.get('rank', 1)}"
         captions_dict = clip.get("captions") or {}
-        
+
         # Platform specific caption priority
         platform_lower = platform.lower()
         if platform_lower in captions_dict and captions_dict[platform_lower]:
@@ -168,23 +259,32 @@ class SocialAutoPostService:
         job_id: str,
         clips: List[Dict[str, Any]],
         output_dir: str,
+        user_id: Optional[int] = None,
         target_platforms: Optional[List[str]] = None,
+        target_account_ids: Optional[List[str]] = None,
         schedule_mode: str = "ai",
+        custom_schedule_time: Optional[str] = None,
         notify_telegram: bool = True,
     ) -> Dict[str, Any]:
         """Execute automated scheduling of video clips to social accounts."""
         if not clips:
-            return {"success": False, "error": "No clips to schedule"}
+            return {"success": False, "error": "Tidak ada klip untuk dijadwalkan"}
 
-        # 1. Fetch available connected social accounts
-        all_accounts = await self.get_connected_accounts()
+        # 1. Fetch available connected social accounts for this user
+        all_accounts = await self.get_connected_accounts(user_id=user_id)
         if not all_accounts:
-            logger.info("auto_post: No connected social accounts found.")
+            logger.info(f"auto_post: No connected social accounts found for user_id={user_id}.")
             return {"success": False, "error": "Belum ada akun sosial media yang terhubung di ClipHub"}
 
-        # 2. Filter accounts by requested platforms / account IDs
+        # 2. Filter accounts by requested account IDs or platforms
         selected_accounts = []
-        if target_platforms:
+        if target_account_ids and len(target_account_ids) > 0:
+            target_ids_set = {str(aid).strip() for aid in target_account_ids if str(aid).strip()}
+            for acc in all_accounts:
+                if str(acc.get("account_id")) in target_ids_set or str(acc.get("username")) in target_ids_set:
+                    selected_accounts.append(acc)
+
+        if not selected_accounts and target_platforms:
             target_set = {p.strip().lower() for p in target_platforms if p.strip()}
             if "all" in target_set:
                 selected_accounts = all_accounts
@@ -194,16 +294,25 @@ class SocialAutoPostService:
                     acc_id = str(acc.get("account_id", ""))
                     if plat in target_set or acc_id in target_set:
                         selected_accounts.append(acc)
-        else:
+        elif not selected_accounts and not target_platforms:
             selected_accounts = all_accounts
 
         if not selected_accounts:
-            return {"success": False, "error": "Tidak ada akun yang cocok dengan platform yang dipilih"}
+            return {
+                "success": False,
+                "error": "Tidak ada akun sosial media yang cocok atau terhubung untuk platform yang dipilih",
+            }
 
         # 3. Calculate schedule times
         if schedule_mode == "instant":
             now = dt.datetime.now(dt.timezone.utc)
             schedule_times = [now + dt.timedelta(minutes=2 + (i * 3)) for i in range(len(clips))]
+        elif schedule_mode == "custom" or custom_schedule_time:
+            schedule_times = self.calculate_custom_schedule_times(
+                clip_count=len(clips),
+                custom_time_str=custom_schedule_time or "",
+                interval_hours=2,
+            )
         else:
             schedule_times = self.calculate_ai_schedule_times(clip_count=len(clips))
 
@@ -277,6 +386,7 @@ class SocialAutoPostService:
                     scheduled_records.append({
                         "clip_rank": rank,
                         "account_name": acc.get("name", platform),
+                        "username": acc.get("username", ""),
                         "platform": platform,
                         "schedule_at": schedule_iso,
                         "title": title,
@@ -294,11 +404,12 @@ class SocialAutoPostService:
                 msg = (
                     f"<b>AI Auto-Post Scheduled ({len(scheduled_records)} Postingan)</b>\n\n"
                     f"<b>Job:</b> <code>{job_id[:12]}</code>\n"
-                    f"<b>Mode:</b> AI Smart Peak-Hours\n\n"
+                    f"<b>Mode:</b> {schedule_mode.upper()}\n\n"
                 )
                 for rec in scheduled_records[:6]:
                     time_display = rec['schedule_at'][:16].replace("T", " ")
-                    msg += f"• <b>Clip #{rec['clip_rank']}</b> -> <b>{rec['platform'].upper()}</b> ({rec['account_name']})\n"
+                    user_tag = f" (@{rec['username']})" if rec.get('username') else ""
+                    msg += f"• <b>Clip #{rec['clip_rank']}</b> -> <b>{rec['platform'].upper()}</b> ({rec['account_name']}{user_tag})\n"
                     msg += f"  Time: <code>{time_display} UTC</code>\n"
                     msg += f"  Title: <i>{rec['title'][:40]}...</i>\n\n"
 

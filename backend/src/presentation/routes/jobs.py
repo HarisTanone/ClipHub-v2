@@ -318,6 +318,12 @@ async def create_job(
         background_mode=request.background_mode,
         background_template_id=request.background_template_id,
         background_image_data_url=request.background_image_data_url,
+        # AI Auto-Post
+        auto_post_social=request.auto_post_social,
+        auto_post_platforms=request.auto_post_platforms,
+        auto_post_account_ids=request.auto_post_account_ids,
+        auto_post_schedule_mode=request.auto_post_schedule_mode,
+        auto_post_custom_time=request.auto_post_custom_time,
         # User ownership
         user_id=user.id,
         # V2 pipeline routing
@@ -454,6 +460,12 @@ async def create_job_from_upload(
             background_mode=options.background_mode,
             background_template_id=options.background_template_id,
             background_image_data_url=options.background_image_data_url,
+            # AI Auto-Post
+            auto_post_social=options.auto_post_social,
+            auto_post_platforms=options.auto_post_platforms,
+            auto_post_account_ids=options.auto_post_account_ids,
+            auto_post_schedule_mode=options.auto_post_schedule_mode,
+            auto_post_custom_time=options.auto_post_custom_time,
             user_id=user.id,
             is_superadmin=user.is_superadmin,
             source_type="upload",

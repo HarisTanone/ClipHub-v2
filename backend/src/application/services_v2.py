@@ -1107,18 +1107,24 @@ class V2PipelineService:
             if job.clips_data:
                 for key in (
                     "hook_style_config",
+                    "subtitle_style_config",
                     "content_profile",
                     "source",
                     "source_type",
                     "processing_mode",
                     "custom_hook",
+                    "watermark_config",
+                    "cta_config",
                     "text_emphasis_enabled",
                     "text_emphasis_style_config",
+                    "auto_post_social",
+                    "auto_post_platforms",
+                    "auto_post_account_ids",
+                    "auto_post_schedule_mode",
+                    "auto_post_custom_time",
                 ):
-                    if job.clips_data.get(key):
+                    if job.clips_data.get(key) is not None:
                         clips_data[key] = job.clips_data[key]
-                if job.clips_data.get("subtitle_style_config"):
-                    clips_data["subtitle_style_config"] = job.clips_data["subtitle_style_config"]
             await self._repo.update_clips_data(job_id, clips_data)
 
             total_time = time.time() - pipeline_start
@@ -1142,6 +1148,30 @@ class V2PipelineService:
                 ))
             except Exception:
                 pass
+
+            # Direct AI Auto-Post trigger for job-specific auto-post
+            if (job.clips_data or {}).get("auto_post_social") and output_dir and os.path.exists(output_dir):
+                try:
+                    from src.infrastructure.social_auto_post_service import social_auto_post_service
+                    clips_list = [asdict(c) if hasattr(c, "__dataclass_fields__") else (c if isinstance(c, dict) else c.__dict__) for c in (valid_clips or clips)]
+                    raw_plats = (job.clips_data or {}).get("auto_post_platforms", "")
+                    target_plats = [p.strip() for p in raw_plats.split(",") if p.strip()] if raw_plats else None
+                    target_accs = (job.clips_data or {}).get("auto_post_account_ids") or None
+                    sched_mode = (job.clips_data or {}).get("auto_post_schedule_mode", "ai")
+                    custom_time = (job.clips_data or {}).get("auto_post_custom_time")
+                    asyncio.create_task(social_auto_post_service.auto_schedule_job_clips(
+                        job_id=job_id,
+                        clips=clips_list,
+                        output_dir=output_dir,
+                        user_id=job.user_id,
+                        target_platforms=target_plats,
+                        target_account_ids=target_accs,
+                        schedule_mode=sched_mode,
+                        custom_schedule_time=custom_time,
+                        notify_telegram=True,
+                    ))
+                except Exception as e:
+                    logger.warning(f"Failed to auto-post job {job_id} in V2: {e}")
 
         except asyncio.CancelledError:
             logger.info(f"[{job_id}] V2 pipeline cancelled by user.")
