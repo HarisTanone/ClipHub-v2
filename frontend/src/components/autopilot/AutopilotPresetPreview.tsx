@@ -14,6 +14,21 @@ export interface AutopilotPresetPreviewProps {
   onOpenEditor?: () => void;
 }
 
+export interface AutopilotPresetItem {
+  slug: string;
+  name: string;
+  desc: string;
+  isCustom: boolean;
+  owner_name?: string;
+  owner_email?: string;
+  hook_style: Record<string, any>;
+  subtitle_style: Record<string, any>;
+  watermark_style: Record<string, any>;
+  cta_style: Record<string, any>;
+  broll_style: Record<string, any>;
+  text_emphasis_style: Record<string, any>;
+}
+
 export function AutopilotPresetPreview({
   selectedSlug,
   onSelectSlug,
@@ -21,7 +36,7 @@ export function AutopilotPresetPreview({
   onOpenEditor,
 }: AutopilotPresetPreviewProps) {
   // Built-in presets with complete 5-layer visual configs
-  const builtInPresets = useMemo(
+  const builtInPresets: AutopilotPresetItem[] = useMemo(
     () => [
       {
         slug: "default",
@@ -147,12 +162,14 @@ export function AutopilotPresetPreview({
   );
 
   // Unified presets list
-  const allPresets = useMemo(() => {
-    const custom = (Array.isArray(presets) ? presets : []).map((p: any) => ({
+  const allPresets: AutopilotPresetItem[] = useMemo(() => {
+    const custom: AutopilotPresetItem[] = (Array.isArray(presets) ? presets : []).map((p: any) => ({
       slug: p?.slug || p?.name || String(p?.id || ""),
       name: p?.name || "Preset Kustom",
       desc: p?.slug ? `Slug: ${p.slug}` : `Preset #${p?.id || ""}`,
       isCustom: true,
+      owner_name: p?.owner_name,
+      owner_email: p?.owner_email,
       hook_style: p?.hook_style || p?.hook_style_config || {},
       subtitle_style: p?.subtitle_style || p?.subtitle_style_config || {},
       watermark_style: p?.watermark_style || p?.watermark_config || {},
@@ -329,7 +346,7 @@ export function AutopilotPresetPreview({
                   />
 
                   <div className="min-w-0 flex-1 pl-1">
-                    <div className="flex items-center gap-2 mb-0.5">
+                    <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
                       <span className={cn("text-xs font-bold truncate", isSelected ? "text-violet-200" : "text-zinc-200")}>
                         {p.name}
                       </span>
@@ -341,6 +358,11 @@ export function AutopilotPresetPreview({
                         <Badge variant="default" className="text-[8px] px-1 py-0 bg-zinc-800 text-zinc-400">
                           Built-in
                         </Badge>
+                      )}
+                      {(p.owner_name || p.owner_email) && (
+                        <span className="text-[8px] px-1 py-0 rounded bg-blue-950/60 text-blue-300 border border-blue-700/40 font-mono truncate max-w-[120px]">
+                          {p.owner_name || p.owner_email}
+                        </span>
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-400">

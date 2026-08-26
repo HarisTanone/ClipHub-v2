@@ -161,7 +161,7 @@ async def list_presets(user: CurrentUser = Depends(get_current_user)):
         if user.is_superadmin:
             cur.execute(
                 "SELECT p.*, u.email as owner_email, u.full_name as owner_name "
-                "FROM user_presets p JOIN users u ON p.user_id = u.id "
+                "FROM user_presets p LEFT JOIN users u ON p.user_id = u.id "
                 "ORDER BY p.created_at DESC"
             )
         else:
