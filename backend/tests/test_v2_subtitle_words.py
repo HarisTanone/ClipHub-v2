@@ -39,8 +39,36 @@ def test_existing_ai_keywords_are_preserved_within_quota():
     assert marked[0]["highlight"] is True
 
 
+def test_sanitize_subtitle_words_suppresses_words_during_ai_text_blocked_ranges():
+    raw_words = [
+        {"word": "awal", "start": 1.0, "end": 1.5},
+        {"word": "intro", "start": 1.6, "end": 2.0},
+        # AI Text active from 3.0 to 6.0: these 3 words should be hidden
+        {"word": "ini", "start": 3.2, "end": 3.6},
+        {"word": "sedang", "start": 3.7, "end": 4.5},
+        {"word": "fokus", "start": 4.6, "end": 5.8},
+        # Reappear after AI Text ends at 6.0
+        {"word": "kembali", "start": 6.2, "end": 6.8},
+        {"word": "muncul", "start": 6.9, "end": 7.5},
+    ]
+
+    # Blocked range for AI Cinematic Text from 3.0s to 6.0s
+    blocked = [(3.0, 6.0)]
+    words = sanitize_subtitle_words(raw_words, clip_duration=10.0, blocked_ranges=blocked)
+
+    words_text = [w["word"] for w in words]
+    assert words_text == ["awal", "intro", "kembali", "muncul"]
+    assert "ini" not in words_text
+    assert "sedang" not in words_text
+    assert "fokus" not in words_text
+    assert words[0]["start"] == 1.0
+    assert words[2]["start"] == 6.2
+
+
 if __name__ == "__main__":
     test_sanitize_subtitle_words_sorts_clamps_and_dedupes()
     test_important_keywords_are_capped_by_video_duration()
     test_existing_ai_keywords_are_preserved_within_quota()
+    test_sanitize_subtitle_words_suppresses_words_during_ai_text_blocked_ranges()
     print("v2 subtitle word tests passed")
+

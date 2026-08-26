@@ -35,6 +35,7 @@ def sanitize_subtitle_words(
     clip_duration: float,
     *,
     subtitle_min_start: float = 0.0,
+    blocked_ranges: list[tuple[float, float]] | None = None,
 ) -> list[dict]:
     """Normalize word timings for subtitle rendering.
 
@@ -44,6 +45,8 @@ def sanitize_subtitle_words(
 
     subtitle_min_start: drop words that start before this time (e.g. 3.0 so the
     hook owns 0–3s and subtitles only appear after).
+    blocked_ranges: list of (start, end) time ranges (such as active AI Cinematic Text
+    or Text Emphasis event windows) during which subtitles must be temporarily hidden.
     """
     if not raw_words or clip_duration <= 0:
         return []
@@ -72,6 +75,18 @@ def sanitize_subtitle_words(
         except (TypeError, ValueError):
             return default
 
+    # Normalize blocked ranges
+    valid_blocked = []
+    if blocked_ranges:
+        for b in blocked_ranges:
+            try:
+                b_s = float(b[0])
+                b_e = float(b[1])
+                if b_e > b_s:
+                    valid_blocked.append((b_s, b_e))
+            except (IndexError, TypeError, ValueError):
+                continue
+
     sorted_words = sorted(
         raw_words,
         key=lambda w: (_as_float(w.get("start")), _as_float(w.get("end"))),
@@ -98,6 +113,17 @@ def sanitize_subtitle_words(
         if end <= start or start >= clip_duration:
             continue
 
+        # Hide subtitle words while AI Cinematic Text is on screen
+        if valid_blocked:
+            in_blocked = False
+            for b_start, b_end in valid_blocked:
+                # If word overlaps with AI text window: hide subtitle
+                if start < b_end and end > b_start:
+                    in_blocked = True
+                    break
+            if in_blocked:
+                continue
+
         dedupe_key = (text.lower(), int(round(start * 10)))
         if dedupe_key in seen_nearby:
             continue
@@ -119,3 +145,4 @@ def sanitize_subtitle_words(
         last_end = end
 
     return mark_important_keywords(cleaned, clip_duration)
+

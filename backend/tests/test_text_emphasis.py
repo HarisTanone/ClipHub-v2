@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.application.services_v2 import V2PipelineService
-from src.domain.entities import Clip, Job
+from src.domain.entities import Clip, Job, JobStatus
 from src.infrastructure.text_emphasis import (
     ALLOWED_EFFECTS,
     LEGACY_EFFECT_MAP,
@@ -230,3 +230,44 @@ def test_foreground_generator_loads_configured_yolo_segmentation_model():
 
     fake_yolo.assert_called_once_with("/models/yolo26n-seg.pt")
     assert loaded is generator._model
+
+
+def test_prepare_text_emphasis_blocks_and_truncates_before_cta():
+    svc = _service()
+    job = Job(
+        job_id="job_cta_test",
+        youtube_url="https://youtube.com/watch?v=dummy",
+        status=JobStatus.ANALYZING,
+        broll_enabled=False,
+        clips_data={
+            "text_emphasis_enabled": True,
+            "cta_config": {"enabled": True, "duration": 4.0},
+        },
+    )
+    clip = Clip(rank=1, score=90, start=0.0, end=30.0, hook="Test Hook", reason="test")
+
+    # Mock analyzer returning 2 events: one at 10-12s, one at 27-29s (inside CTA window 26-30s)
+    mock_analyzer = MagicMock()
+    mock_analyzer.analyze_text_emphasis = AsyncMock(return_value={
+        1: [
+            {"start": 10.0, "end": 12.0, "text": "Valid phrase", "effect": "hero_punch"},
+            {"start": 27.0, "end": 29.0, "text": "Overlaps CTA", "effect": "hero_punch"},
+        ]
+    })
+    svc._get_analyzer = MagicMock(return_value=mock_analyzer)
+
+    asyncio.run(svc._prepare_text_emphasis(
+        job=job,
+        job_id="job_cta_test",
+        clips=[clip],
+        clips_with_words={1: _words()},
+        output_dir="/tmp",
+        trim_results={1: True},
+    ))
+
+    # The 27-29s event starts inside CTA window (30 - 4 = 26s), so it must be completely excluded
+    assert len(clip.text_emphasis_events) == 1
+    assert clip.text_emphasis_events[0]["text"] == "Valid phrase"
+    assert clip.text_emphasis_events[0]["start"] == 10.0
+    assert clip.text_emphasis_events[0]["end"] == 12.0
+

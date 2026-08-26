@@ -1929,6 +1929,21 @@ class V2PipelineService:
         blocked_ranges = {}
         # Adaptive min_start for short clips (hook may consume most of a short clip).
         hook_duration = float((job_data.get("hook_style_config") or {}).get("duration", 3.0) or 3.0)
+
+        # Check CTA configuration to prevent AI Text colliding with CTA end-card
+        cta_cfg = (
+            job_data.get("cta_config")
+            or job_data.get("cta_style_config")
+            or (getattr(job, "custom_style", None) or {}).get("cta_config")
+            or (getattr(job, "custom_style", None) or {}).get("cta_style_config")
+            or getattr(job, "cta_config", None)
+            or {}
+        )
+        from src.infrastructure.cta_renderer import normalise_cta_config
+        norm_cta = normalise_cta_config(cta_cfg)
+        cta_enabled = bool(norm_cta.get("enabled", False))
+        cta_duration = float(norm_cta.get("duration", 3.0) or 3.0) if cta_enabled else 0.0
+
         for clip in clips:
             clip_dur = max(0.0, clip.end - clip.start)
             if clip.hook:
@@ -1949,6 +1964,12 @@ class V2PipelineService:
                     continue
                 if dur > 0:
                     blocked.append((at, at + dur))
+
+            # Block CTA end-card window so AI Text never collides with CTA
+            if cta_enabled and cta_duration > 0:
+                cta_start = max(0.0, clip_dur - cta_duration)
+                blocked.append((cta_start, clip_dur))
+
             blocked_ranges[clip.rank] = blocked
 
         try:
@@ -1975,7 +1996,26 @@ class V2PipelineService:
         generator = PersonForegroundGenerator()
         total_events = 0
         for clip in clips:
-            events = list(event_map.get(clip.rank, []))[:2]
+            raw_events = list(event_map.get(clip.rank, []))[:2]
+            clip_dur = max(0.0, clip.end - clip.start)
+            cta_start_limit = (clip_dur - cta_duration - 0.2) if (cta_enabled and cta_duration > 0) else clip_dur
+            events = []
+            for ev in raw_events:
+                try:
+                    e_s = float(ev.get("start", 0))
+                    e_e = float(ev.get("end", 0))
+                except (TypeError, ValueError):
+                    continue
+                if e_s >= cta_start_limit:
+                    continue  # Drop AI text starting in CTA window
+                if e_e > cta_start_limit:
+                    ev["end"] = round(cta_start_limit, 2)  # Truncate before CTA starts
+                    e_e = ev["end"]
+                if e_e - e_s < 0.4:
+                    continue
+                events.append(ev)
+            events = events[:2]
+
             if not events or not trim_results.get(clip.rank):
                 clip.text_emphasis_events = []
                 continue
@@ -2220,10 +2260,16 @@ class V2PipelineService:
                 # so any re-entry path still keeps subtitles off during hook.
                 hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0)
                 sub_min = hook_dur if clip_hook else 0.0
+                te_ranges = [
+                    (float(e.get("start", 0)), float(e.get("end", 0)))
+                    for e in (getattr(clip, "text_emphasis_events", None) or [])
+                    if float(e.get("end", 0)) > float(e.get("start", 0))
+                ]
                 clip_words = sanitize_subtitle_words(
                     clip_words_raw,
                     clip_duration,
                     subtitle_min_start=sub_min,
+                    blocked_ranges=te_ranges,
                 )
 
 
@@ -2471,7 +2517,17 @@ class V2PipelineService:
             sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
             words_raw = clips_with_words.get(clip.rank) or []
             sub_min = hook_dur if clip.hook else 0.0
-            words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min) if sub_enabled else []
+            te_ranges = [
+                (float(e.get("start", 0)), float(e.get("end", 0)))
+                for e in (getattr(clip, "text_emphasis_events", None) or [])
+                if float(e.get("end", 0)) > float(e.get("start", 0))
+            ]
+            words = sanitize_subtitle_words(
+                words_raw,
+                clip_dur,
+                subtitle_min_start=sub_min,
+                blocked_ranges=te_ranges,
+            ) if sub_enabled else []
 
             # 1-pass FFmpeg compositor for FFmpeg hook + subtitles
             if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
@@ -2538,7 +2594,12 @@ class V2PipelineService:
             # ── Subtitle render (FFmpeg drawtext or Skia GPU canvas) ──
             words_raw = clips_with_words.get(clip.rank) or []
             sub_min = hook_dur if clip.hook else 0.0
-            words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min) if sub_enabled else []
+            words = sanitize_subtitle_words(
+                words_raw,
+                clip_dur,
+                subtitle_min_start=sub_min,
+                blocked_ranges=te_ranges,
+            ) if sub_enabled else []
 
             if words and sub_enabled:
                 try:
@@ -2647,12 +2708,22 @@ class V2PipelineService:
 
             try:
                 # ── 1-Pass Optimization when both hook and subtitle are FFmpeg direct ──
+                te_ranges = [
+                    (float(e.get("start", 0)), float(e.get("end", 0)))
+                    for e in (getattr(clip, "text_emphasis_events", None) or [])
+                    if float(e.get("end", 0)) > float(e.get("start", 0))
+                ]
                 if hook_engine == "ffmpeg" and sub_engine == "ffmpeg":
                     from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
                     compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
                     words_raw = clips_with_words.get(clip.rank) or []
                     sub_min = hook_dur if clip.hook else 0.0
-                    words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
+                    words = sanitize_subtitle_words(
+                        words_raw,
+                        clip_dur,
+                        subtitle_min_start=sub_min,
+                        blocked_ranges=te_ranges,
+                    )
                     tmp_composite = f"{output_dir}/clip_{clip.rank:02d}_direct_composite.mp4"
                     watermark_cfg = (job.clips_data or {}).get("watermark_config") or {}
                     cta_cfg = (job.clips_data or {}).get("cta_config") or getattr(job, "cta_config", None)
@@ -2704,7 +2775,12 @@ class V2PipelineService:
                 if sub_engine in ("ffmpeg", "skia") and sub_enabled:
                     words_raw = clips_with_words.get(clip.rank) or []
                     sub_min = hook_dur if (clip.hook and hook_engine in ("ffmpeg", "skia", "hyperframes", "remotion")) else 0.0
-                    words = sanitize_subtitle_words(words_raw, clip_dur, subtitle_min_start=sub_min)
+                    words = sanitize_subtitle_words(
+                        words_raw,
+                        clip_dur,
+                        subtitle_min_start=sub_min,
+                        blocked_ranges=te_ranges,
+                    )
                     if words:
                         clip_reframe = (job.clips_data or {}).get("reframe_data", {}).get(clip.rank) or {}
                         clip_layout_events = clip_reframe.get("layout_events") or []
@@ -2933,7 +3009,17 @@ class V2PipelineService:
                                 from src.infrastructure.subtitle_words import sanitize_subtitle_words
                                 renderer = SkiaSubtitleRenderer(font_dir=getattr(self, "_fonts_dir", "assets/fonts"))
                                 sub_min = hook_dur if clip.hook else 0.0
-                                words_clean = sanitize_subtitle_words(words, clip_dur, subtitle_min_start=sub_min)
+                                te_ranges = [
+                                    (float(e.get("start", 0)), float(e.get("end", 0)))
+                                    for e in (getattr(clip, "text_emphasis_events", None) or [])
+                                    if float(e.get("end", 0)) > float(e.get("start", 0))
+                                ]
+                                words_clean = sanitize_subtitle_words(
+                                    words,
+                                    clip_dur,
+                                    subtitle_min_start=sub_min,
+                                    blocked_ranges=te_ranges,
+                                )
                                 renderer.render_subtitles(current, words_clean, subtitle_style_config or {}, tmp_sub)
                                 if os.path.exists(tmp_sub) and os.path.getsize(tmp_sub) > 1000:
                                     current = tmp_sub

@@ -1737,10 +1737,16 @@ async def restyle_clip(
         if do_subtitle and render_words:
             try:
                 from src.infrastructure.subtitle_words import sanitize_subtitle_words
+                te_ranges = [
+                    (float(e.get("start", 0)), float(e.get("end", 0)))
+                    for e in (clip_data.get("text_emphasis_events") or [])
+                    if float(e.get("end", 0)) > float(e.get("start", 0))
+                ]
                 render_words = sanitize_subtitle_words(
                     render_words,
                     clip_duration,
                     subtitle_min_start=hook_duration if hook_text else 0.0,
+                    blocked_ranges=te_ranges,
                 )
             except Exception as e:
                 logger.warning(f"[restyle] subtitle word sanitize failed clip {clip_rank}: {e}")
