@@ -193,20 +193,23 @@ async def lifespan(app: FastAPI):
     await _recover_stale_jobs()
 
     # ─── Start background tasks ───────────────────────────────────────────
+    from src.infrastructure.autopilot_service import autopilot_service
     alerting_task = asyncio.create_task(
         _alerting_service.monitor_loop(get_queue_depth=lambda: _job_queue.pending_count)
     )
     auto_scale_task = asyncio.create_task(_auto_scale_loop())
+    autopilot_task = asyncio.create_task(autopilot_service.start_scheduler_loop())
 
     logger.info("Server started — local pipeline mode")
-    logger.info("Background tasks started: AlertingService, AutoScaleAdvisor")
+    logger.info("Background tasks started: AlertingService, AutoScaleAdvisor, AutopilotDaemon")
 
     yield
 
     # ─── Cancel background tasks on shutdown ──────────────────────────────
     alerting_task.cancel()
     auto_scale_task.cancel()
-    for task in (alerting_task, auto_scale_task):
+    autopilot_task.cancel()
+    for task in (alerting_task, auto_scale_task, autopilot_task):
         try:
             await task
         except asyncio.CancelledError:

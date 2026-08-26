@@ -11,6 +11,7 @@ Enforces:
 import os
 import json
 import logging
+import asyncio
 import datetime as dt
 import subprocess
 from typing import Any, Optional
@@ -579,6 +580,57 @@ class AutopilotService:
         finally:
             conn.close()
 
+    async def start_scheduler_loop(self):
+        """Continuous background loop that checks autopilot_settings every 30 seconds.
+        
+        When enabled=1, current time matches run_time (WIB), and can_run_today is True,
+        it automatically executes 1 autonomous daily discovery & auto-post cycle.
+        """
+        logger.info("autopilot_scheduler: Started background daemon loop")
+        while True:
+            try:
+                await self._check_and_run_scheduled_autopilots()
+            except asyncio.CancelledError:
+                logger.info("autopilot_scheduler: Stopped background daemon loop")
+                break
+            except Exception as e:
+                logger.error(f"autopilot_scheduler: Loop iteration error: {e}", exc_info=True)
+            await asyncio.sleep(30)
+
+    async def _check_and_run_scheduled_autopilots(self):
+        """Check all users with enabled autopilot settings and execute if scheduled."""
+        self._ensure_tables()
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM autopilot_settings WHERE enabled = 1")
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        if not rows:
+            return
+
+        # Current time in WIB (UTC+7)
+        now_wib = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))
+        current_hm = now_wib.strftime("%H:%M")
+
+        for row in rows:
+            user_id = row["user_id"]
+            run_time = (row.get("run_time") or "08:00").strip()
+
+            if current_hm == run_time:
+                can_run, reason, _ = self.can_run_today(user_id)
+                if can_run:
+                    logger.info(f"autopilot_daemon: Triggering scheduled daily run for user {user_id} at {current_hm} WIB...")
+                    res = await self.run_autopilot_step(
+                        user_id=user_id,
+                        trigger_source="daemon_scheduler",
+                        notify_telegram=True,
+                    )
+                    logger.info(f"autopilot_daemon: Run completed for user {user_id}: {res.get('message')}")
+
 
 # Singleton instance
 autopilot_service = AutopilotService()
+
