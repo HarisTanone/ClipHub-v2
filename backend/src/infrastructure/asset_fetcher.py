@@ -181,9 +181,8 @@ class AssetFetcher(IAssetFetcher):
                         source_id=asset.asset_id,
                         platform=asset.source_api,
                     )
-            await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _fetch_clipscout_footage(
+    async def _fetch_via_clipscout(
         self,
         suggestions: list[BRollSuggestion],
         analisa_extra_queries: Optional[list[str]] = None,
