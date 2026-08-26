@@ -1,32 +1,30 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Palette, Sparkles, Layers, Sliders, CheckCircle2, ChevronLeft, ChevronRight,
-  Eye, Play, Pause, RefreshCw, Volume2, ShieldCheck, Film, Zap, Tag, Send
+  Eye, Play, Pause, Copy, Check, Download, Bookmark, Send, ShieldCheck
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
+import type { Preset } from "@/lib/api";
+import {
+  DEFAULT_HOOK_STYLE,
+  DEFAULT_SUBTITLE_STYLE,
+  DEFAULT_TEXT_EMPHASIS_STYLE,
+  DEFAULT_WATERMARK_STYLE,
+  DEFAULT_CTA_STYLE,
+  type HookStyle,
+  type SubtitleStyle,
+} from "../style-editor/types";
+import { useGoogleFont } from "../style-editor/utils";
+import { CanvasPreviewFrame } from "../style-editor/preview/CanvasPreviewFrame";
+import { HookPreviewRenderer } from "../style-editor/preview/HookPreviewRenderer";
 
 export interface AutopilotPresetPreviewProps {
   selectedSlug: string;
   onSelectSlug: (slug: string) => void;
-  presets: any[];
+  presets: Preset[];
   onOpenEditor?: () => void;
-}
-
-export interface AutopilotPresetItem {
-  slug: string;
-  name: string;
-  desc: string;
-  isCustom: boolean;
-  owner_name?: string;
-  owner_email?: string;
-  hook_style: Record<string, any>;
-  subtitle_style: Record<string, any>;
-  watermark_style: Record<string, any>;
-  cta_style: Record<string, any>;
-  broll_style: Record<string, any>;
-  text_emphasis_style: Record<string, any>;
 }
 
 export function AutopilotPresetPreview({
@@ -35,150 +33,12 @@ export function AutopilotPresetPreview({
   presets = [],
   onOpenEditor,
 }: AutopilotPresetPreviewProps) {
-  // Built-in presets with complete 5-layer visual configs
-  const builtInPresets: AutopilotPresetItem[] = useMemo(
-    () => [
-      {
-        slug: "default",
-        name: "Default Style (Built-in)",
-        desc: "Classic clean subtitles with lower-third podcast hook",
-        isCustom: false,
-        hook_style: {
-          animation: "podcast_lower_third",
-          primary_color: "#FFFFFF",
-          secondary_color: "#FFCC00",
-          fontFamily: "Poppins",
-          fontWeight: "800",
-        },
-        subtitle_style: {
-          stylePreset: "classic",
-          fontFamily: "Poppins",
-          highlightColor: "#FFCC00",
-          position: "bottom",
-          positionY: 78,
-          color: "#FFFFFF",
-          fontWeight: "700",
-          bgEnabled: true,
-          bgColor: "#000000",
-          bgOpacity: 0.5,
-          bgRadius: 8,
-        },
-        watermark_style: { enabled: false, text: "@ClipHub", opacity: 80, position: "top-right" },
-        cta_style: { enabled: false, headline: "Follow For More", buttonText: "FOLLOW" },
-        broll_style: { enabled: true, autogrid_enabled: true },
-        text_emphasis_style: { effectMode: "hero_punch" },
-      },
-      {
-        slug: "bold_black",
-        name: "Bold Black & Yellow",
-        desc: "High contrast center pop with bold slam hook",
-        isCustom: false,
-        hook_style: {
-          animation: "bold_slam",
-          primary_color: "#FFCC00",
-          secondary_color: "#FFFFFF",
-          fontFamily: "Montserrat",
-          fontWeight: "900",
-        },
-        subtitle_style: {
-          stylePreset: "bold_yellow",
-          fontFamily: "Montserrat",
-          highlightColor: "#FFCC00",
-          position: "center",
-          positionY: 52,
-          color: "#FFFFFF",
-          fontWeight: "900",
-          uppercase: true,
-          bgEnabled: true,
-          bgColor: "#111827",
-          bgOpacity: 0.85,
-          bgRadius: 6,
-        },
-        watermark_style: { enabled: false, text: "@ClipHub", opacity: 80, position: "top-right" },
-        cta_style: { enabled: false, headline: "Follow For More", buttonText: "FOLLOW" },
-        broll_style: { enabled: true, autogrid_enabled: true },
-        text_emphasis_style: { effectMode: "hero_punch" },
-      },
-      {
-        slug: "minimal_clean",
-        name: "Minimal Clean White",
-        desc: "Subtle cinematic reveal with sky blue keywords",
-        isCustom: false,
-        hook_style: {
-          animation: "cinematic_reveal",
-          primary_color: "#FFFFFF",
-          secondary_color: "#38BDF8",
-          fontFamily: "Inter",
-          fontWeight: "700",
-        },
-        subtitle_style: {
-          stylePreset: "minimal_clean",
-          fontFamily: "Inter",
-          highlightColor: "#38BDF8",
-          position: "bottom",
-          positionY: 80,
-          color: "#F8FAFC",
-          fontWeight: "600",
-          bgEnabled: false,
-        },
-        watermark_style: { enabled: false, text: "@ClipHub", opacity: 80, position: "top-right" },
-        cta_style: { enabled: false, headline: "Subscribe Now", buttonText: "SUBSCRIBE" },
-        broll_style: { enabled: true, autogrid_enabled: true },
-        text_emphasis_style: { effectMode: "hero_punch" },
-      },
-      {
-        slug: "viral_red",
-        name: "Viral Red & High Punch",
-        desc: "Aggressive danger bold hook with energetic red highlights",
-        isCustom: false,
-        hook_style: {
-          animation: "danger_bold",
-          primary_color: "#EF4444",
-          secondary_color: "#FFFFFF",
-          fontFamily: "Impact",
-          fontWeight: "900",
-        },
-        subtitle_style: {
-          stylePreset: "emphasis_orange",
-          fontFamily: "Impact",
-          highlightColor: "#EF4444",
-          position: "center",
-          positionY: 54,
-          color: "#FFFFFF",
-          fontWeight: "900",
-          uppercase: true,
-          bgEnabled: true,
-          bgColor: "#000000",
-          bgOpacity: 0.75,
-          bgRadius: 4,
-        },
-        watermark_style: { enabled: false, text: "@ClipHub", opacity: 80, position: "top-right" },
-        cta_style: { enabled: false, headline: "Viral Clip Hub", buttonText: "SHARE" },
-        broll_style: { enabled: true, autogrid_enabled: true },
-        text_emphasis_style: { effectMode: "hero_punch" },
-      },
-    ],
-    []
-  );
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
-  // Unified presets list
-  const allPresets: AutopilotPresetItem[] = useMemo(() => {
-    const custom: AutopilotPresetItem[] = (Array.isArray(presets) ? presets : []).map((p: any) => ({
-      slug: p?.slug || p?.name || String(p?.id || ""),
-      name: p?.name || "Preset Kustom",
-      desc: p?.slug ? `Slug: ${p.slug}` : `Preset #${p?.id || ""}`,
-      isCustom: true,
-      owner_name: p?.owner_name,
-      owner_email: p?.owner_email,
-      hook_style: p?.hook_style || p?.hook_style_config || {},
-      subtitle_style: p?.subtitle_style || p?.subtitle_style_config || {},
-      watermark_style: p?.watermark_style || p?.watermark_config || {},
-      cta_style: p?.cta_style || p?.cta_config || {},
-      broll_style: p?.broll_style || p?.broll_config || {},
-      text_emphasis_style: p?.text_emphasis_style || p?.text_emphasis_style_config || {},
-    }));
-    return [...builtInPresets, ...custom];
-  }, [builtInPresets, presets]);
+  // Use only user-owned presets (or all user presets if superadmin) from presets prop
+  const allPresets = useMemo(() => {
+    return Array.isArray(presets) ? presets : [];
+  }, [presets]);
 
   // Pagination State (4 presets per page)
   const ITEMS_PER_PAGE = 4;
@@ -187,8 +47,9 @@ export function AutopilotPresetPreview({
 
   // Auto switch page when active slug is outside current page view
   useEffect(() => {
+    if (allPresets.length === 0) return;
     const activeIndex = allPresets.findIndex(
-      (p) => p.slug === selectedSlug || p.name === selectedSlug
+      (p) => p.slug === selectedSlug || p.name === selectedSlug || String(p.id) === selectedSlug
     );
     if (activeIndex !== -1) {
       const pageOfActive = Math.floor(activeIndex / ITEMS_PER_PAGE) + 1;
@@ -205,23 +66,53 @@ export function AutopilotPresetPreview({
   }, [allPresets, currentPage]);
 
   // Currently active preset object
-  const activePreset = useMemo(() => {
+  const activePreset: Preset | null = useMemo(() => {
+    if (allPresets.length === 0) return null;
     return (
-      allPresets.find((p) => p.slug === selectedSlug || p.name === selectedSlug) ||
-      builtInPresets[0]
+      allPresets.find((p) => p.slug === selectedSlug || p.name === selectedSlug || String(p.id) === selectedSlug) ||
+      allPresets[0]
     );
-  }, [allPresets, selectedSlug, builtInPresets]);
+  }, [allPresets, selectedSlug]);
+
+  // Extract visual layer configs for active preset
+  const hookStyle: HookStyle = useMemo(() => ({
+    ...DEFAULT_HOOK_STYLE,
+    ...(activePreset?.hook_style || {}),
+  }), [activePreset]);
+
+  const subStyle: SubtitleStyle = useMemo(() => ({
+    ...DEFAULT_SUBTITLE_STYLE,
+    ...(activePreset?.subtitle_style || {}),
+  }), [activePreset]);
+
+  const wmStyle = useMemo(() => ({
+    ...DEFAULT_WATERMARK_STYLE,
+    ...(activePreset?.watermark_style || {}),
+  }), [activePreset]);
+
+  const ctaStyle = useMemo(() => ({
+    ...DEFAULT_CTA_STYLE,
+    ...(activePreset?.cta_style || {}),
+  }), [activePreset]);
+
+  const brollStyle = useMemo(() => activePreset?.broll_style || {}, [activePreset]);
+  const teStyle = useMemo(() => activePreset?.text_emphasis_style || {}, [activePreset]);
+  const autopostStyle = useMemo(() => activePreset?.autopost_style || {}, [activePreset]);
+
+  // Dynamic Google Font loader
+  useGoogleFont(subStyle.fontFamily || "Poppins");
+  if (subStyle.dualStyleEnabled && subStyle.highlightFontFamily) {
+    useGoogleFont(subStyle.highlightFontFamily);
+  }
+  if (hookStyle.fontFamily && hookStyle.fontFamily !== subStyle.fontFamily) {
+    useGoogleFont(hookStyle.fontFamily);
+  }
 
   // Live Karaoke animation simulation cycle
   const [activeWordIndex, setActiveWordIndex] = useState(1);
   const [isPlayingPreview, setIsPlayingPreview] = useState(true);
   const sampleWords = useMemo(
-    () => [
-      { text: "Inilah", normal: true },
-      { text: "KATA KUNCI", normal: false },
-      { text: "Viral", normal: true },
-      { text: "Hari Ini!", normal: true },
-    ],
+    () => ["Inilah", "KATA KUNCI", "Viral", "Hari Ini!"],
     []
   );
 
@@ -229,50 +120,43 @@ export function AutopilotPresetPreview({
     if (!isPlayingPreview) return;
     const interval = setInterval(() => {
       setActiveWordIndex((prev) => (prev + 1) % sampleWords.length);
-    }, 1300);
+    }, 1200);
     return () => clearInterval(interval);
   }, [isPlayingPreview, sampleWords.length]);
 
-  // Styles extraction for rendering
-  const hookCfg = activePreset.hook_style || {};
-  const subCfg = activePreset.subtitle_style || {};
-  const wmCfg = activePreset.watermark_style || {};
-  const ctaCfg = activePreset.cta_style || {};
-  const brollCfg = activePreset.broll_style || {};
-  const teCfg = activePreset.text_emphasis_style || {};
+  function copyPresetCommand(slug: string) {
+    const cmd = `--preset ${slug}`;
+    navigator.clipboard.writeText(cmd);
+    setCopyFeedback(slug);
+    setTimeout(() => setCopyFeedback(null), 2000);
+  }
 
-  const highlightColor = subCfg.highlightColor || subCfg.secondary_color || "#FFCC00";
-  const subFont = subCfg.fontFamily || "Poppins";
-  const subColor = subCfg.color || "#FFFFFF";
-  const subWeight = Number(subCfg.fontWeight || 700);
-  const isUppercase = Boolean(subCfg.uppercase);
-  const isDualFont = Boolean(subCfg.dualStyleEnabled);
-  const dualFont = subCfg.highlightFontFamily || "Anton";
+  const highlightColor = subStyle.highlightColor || "#FFCC00";
+  const subFont = subStyle.fontFamily || "Poppins";
+  const subColor = subStyle.color || "#FFFFFF";
+  const subWeight = Number(subStyle.fontWeight || 700);
+  const isUppercase = Boolean(subStyle.uppercase);
+  const isDualFont = Boolean(subStyle.dualStyleEnabled);
+  const dualFont = subStyle.highlightFontFamily || "Anton";
 
   // Subtitle Container Box Style
-  const presetKey = subCfg.stylePreset || "classic";
+  const presetKey = subStyle.stylePreset || "classic";
   const isLightPanel = presetKey === "bubble_chat" || presetKey === "breaking_tape" || presetKey === "quote_box" || presetKey === "word_tiles";
-  const previewBg = subCfg.bgEnabled === false
+  const previewBg = subStyle.bgEnabled === false
     ? "transparent"
-    : subCfg.bgColor
-      ? `${subCfg.bgColor}${Math.round((subCfg.bgOpacity ?? 0.6) * 255).toString(16).padStart(2, "0")}`
+    : subStyle.bgColor
+      ? `${subStyle.bgColor}${Math.round((subStyle.bgOpacity ?? 0.6) * 255).toString(16).padStart(2, "0")}`
       : "rgba(0,0,0,0.55)";
-  const previewRadius = presetKey === "caption_strip" ? 0 : presetKey === "breaking_tape" ? 2 : presetKey === "bubble_chat" ? 14 : subCfg.bgRadius ?? 8;
+  const previewRadius = presetKey === "caption_strip" ? 0 : presetKey === "breaking_tape" ? 2 : presetKey === "bubble_chat" ? 14 : subStyle.bgRadius ?? 8;
 
   // Subtitle position placement percentage
-  const positionYPct = subCfg.positionY !== undefined
-    ? subCfg.positionY
-    : subCfg.position === "top"
+  const positionYPct = subStyle.positionY !== undefined
+    ? subStyle.positionY
+    : subStyle.position === "top"
       ? 20
-      : subCfg.position === "center"
+      : subStyle.position === "center"
         ? 50
         : 78;
-
-  // Hook details
-  const hookAnim = hookCfg.animation || "podcast_lower_third";
-  const hookColor = hookCfg.primary_color || "#FFFFFF";
-  const hookAccent = hookCfg.secondary_color || highlightColor;
-  const hookFont = hookCfg.fontFamily || subFont;
 
   return (
     <div className="space-y-4">
@@ -304,97 +188,151 @@ export function AutopilotPresetPreview({
 
       {/* Main 2-Column Side-by-Side Layout: Presets (Left) | Preview (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* LEFT COLUMN: Presets List with Pagination */}
+        {/* LEFT COLUMN: Presets List with Pagination matching /jobs/new */}
         <div className="lg:col-span-7 space-y-3">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-              <Layers className="h-3.5 w-3.5 text-violet-400" />
-              Daftar Preset ({allPresets.length})
+              <Bookmark className="h-3.5 w-3.5 text-emerald-400" />
+              Daftar Preset Tersimpan ({allPresets.length})
             </span>
-            <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-              <span>Hal {currentPage} dari {totalPages}</span>
-            </div>
+            <span className="text-[10px] text-zinc-500 hidden sm:inline">
+              Klik slug untuk salin command Telegram / CLI
+            </span>
           </div>
 
-          {/* Paginated Preset Cards (4 cards per page) */}
-          <div className="space-y-2">
-            {paginatedPresets.map((p) => {
-              const isSelected = p.slug === selectedSlug || p.name === selectedSlug;
-              const pHighlight = p.subtitle_style?.highlightColor || p.subtitle_style?.secondary_color || "#FFCC00";
-              const pFont = p.subtitle_style?.fontFamily || "Poppins";
-              const pHook = p.hook_style?.animation || "podcast_lower_third";
-
-              return (
-                <button
-                  key={p.slug}
+          {allPresets.length === 0 ? (
+            <div className="text-center py-8 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30 p-4 space-y-2">
+              <Bookmark className="h-6 w-6 text-zinc-600 mx-auto" />
+              <p className="text-xs text-zinc-300 font-medium">Belum ada preset tersimpan</p>
+              <p className="text-[10px] text-zinc-500 max-w-sm mx-auto">
+                Buat preset kustom di halaman <strong>New Job</strong> atau klik tombol <strong>Buka Style Editor</strong> di atas untuk menyimpan konfigurasi style Anda.
+              </p>
+              {onOpenEditor && (
+                <Button
                   type="button"
-                  onClick={() => onSelectSlug(p.slug)}
-                  className={cn(
-                    "w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between gap-3 group relative overflow-hidden",
-                    isSelected
-                      ? "border-violet-500 bg-gradient-to-r from-violet-950/40 via-zinc-900 to-zinc-900/90 shadow-md ring-1 ring-violet-500/40"
-                      : "border-zinc-800 bg-zinc-900/50 hover:border-zinc-700 hover:bg-zinc-900"
-                  )}
+                  size="xs"
+                  variant="secondary"
+                  onClick={onOpenEditor}
+                  className="mt-2 text-[11px]"
+                  icon={<Sliders className="h-3 w-3" />}
                 >
-                  {/* Left Color Indicator Accent Bar */}
-                  <span
+                  Buat Preset Sekarang
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {paginatedPresets.map((p) => {
+                const slugStr = p.slug || `preset-${p.id}`;
+                const isSelected = activePreset?.id === p.id || p.slug === selectedSlug || p.name === selectedSlug;
+                const hasTextEmp = p.text_emphasis_style && p.text_emphasis_style.effectMode && p.text_emphasis_style.effectMode !== "off";
+                const hasWatermark = p.watermark_style && p.watermark_style.enabled;
+                const hasCta = p.cta_style && p.cta_style.enabled;
+                const hasBroll = p.broll_style && p.broll_style.enabled;
+                const hasAutoGrid = p.broll_style && p.broll_style.autogrid_enabled;
+                const hasAutopost = p.autopost_style && p.autopost_style.enabled;
+
+                return (
+                  <div
+                    key={p.id}
                     className={cn(
-                      "absolute left-0 top-0 bottom-0 w-1 transition-all",
-                      isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-40"
+                      "relative group rounded-xl border p-3.5 transition-all flex flex-col justify-between text-left",
+                      isSelected
+                        ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30 shadow-md shadow-emerald-500/5"
+                        : "border-zinc-800 bg-zinc-900/60 hover:border-emerald-500/40 hover:bg-zinc-900/80"
                     )}
-                    style={{ backgroundColor: pHighlight }}
-                  />
-
-                  <div className="min-w-0 flex-1 pl-1">
-                    <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                      <span className={cn("text-xs font-bold truncate", isSelected ? "text-violet-200" : "text-zinc-200")}>
-                        {p.name}
-                      </span>
-                      {p.isCustom ? (
-                        <Badge variant="default" className="text-[8px] px-1 py-0 bg-violet-950/80 text-violet-300 border-violet-700/50">
-                          Kustom
-                        </Badge>
-                      ) : (
-                        <Badge variant="default" className="text-[8px] px-1 py-0 bg-zinc-800 text-zinc-400">
-                          Built-in
-                        </Badge>
-                      )}
-                      {(p.owner_name || p.owner_email) && (
-                        <span className="text-[8px] px-1 py-0 rounded bg-blue-950/60 text-blue-300 border border-blue-700/40 font-mono truncate max-w-[120px]">
-                          {p.owner_name || p.owner_email}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-400">
-                      <span className="font-medium text-zinc-300">{pFont}</span>
-                      <span>•</span>
-                      <span className="truncate max-w-[120px] text-zinc-500">{pHook.replace(/_/g, " ")}</span>
-                      <span>•</span>
-                      <span className="font-mono text-[9px]" style={{ color: pHighlight }}>{pHighlight}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span
-                      className="w-4 h-4 rounded-full border border-white/20 shadow-sm"
-                      style={{ backgroundColor: pHighlight }}
-                    />
-                    {isSelected ? (
-                      <div className="w-5 h-5 rounded-full bg-violet-600/30 border border-violet-500 flex items-center justify-center text-violet-300">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
+                  >
+                    <div>
+                      {/* Top Header: Title & Active Badge */}
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <h4 className={cn("text-xs font-bold truncate", isSelected ? "text-emerald-300" : "text-zinc-200")}>
+                          {p.name}
+                        </h4>
+                        {isSelected && (
+                          <span className="text-[8px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold uppercase px-1.5 py-0.5 rounded-full shrink-0">
+                            Aktif
+                          </span>
+                        )}
                       </div>
-                    ) : (
-                      <div className="w-5 h-5 rounded-full border border-zinc-700 group-hover:border-zinc-500" />
-                    )}
+
+                      {/* Slug with Copy command */}
+                      <div className="mb-2.5 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => copyPresetCommand(slugStr)}
+                          title="Klik untuk copy --preset command"
+                          className="inline-flex items-center gap-1 text-[10px] font-mono bg-zinc-800 hover:bg-zinc-700 text-emerald-400 hover:text-emerald-300 px-2 py-0.5 rounded border border-zinc-700 hover:border-emerald-500/40 transition-colors"
+                        >
+                          <code>--preset {slugStr}</code>
+                          {copyFeedback === slugStr ? (
+                            <Check className="h-2.5 w-2.5 text-emerald-300 shrink-0" />
+                          ) : (
+                            <Copy className="h-2.5 w-2.5 opacity-60 shrink-0" />
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Styles Summary & Enabled Layers */}
+                      <div className="space-y-1 text-[10px] text-zinc-400 mb-3 bg-zinc-950/50 p-2 rounded-lg border border-zinc-800/60">
+                        <p className="flex justify-between">
+                          <span className="text-zinc-500">Hook:</span>
+                          <span className="text-zinc-300 font-medium truncate max-w-[110px]">
+                            {(p.hook_style as any)?.animation?.replace(/_/g, " ") || "default"}
+                          </span>
+                        </p>
+                        <p className="flex justify-between">
+                          <span className="text-zinc-500">Subtitle:</span>
+                          <span className="text-zinc-300 font-medium truncate max-w-[110px]">
+                            {(p.subtitle_style as any)?.stylePreset?.replace(/_/g, " ") || "classic"}
+                          </span>
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-zinc-800/60 mt-1">
+                          {hasTextEmp && <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/20">AI Text</span>}
+                          {hasWatermark && <span className="text-[8px] bg-blue-500/10 text-blue-400 px-1 py-0.2 rounded border border-blue-500/20">Watermark</span>}
+                          {hasCta && <span className="text-[8px] bg-purple-500/10 text-purple-400 px-1 py-0.2 rounded border border-purple-500/20">CTA</span>}
+                          {hasBroll && <span className="text-[8px] bg-amber-500/10 text-amber-400 px-1 py-0.2 rounded border border-amber-500/20">B-roll</span>}
+                          {hasAutoGrid && <span className="text-[8px] bg-cyan-500/10 text-cyan-400 px-1 py-0.2 rounded border border-cyan-500/20">Auto-Grid</span>}
+                          {hasAutopost && <span className="text-[8px] bg-rose-500/10 text-rose-400 px-1 py-0.2 rounded border border-rose-500/20">Auto-Post</span>}
+                        </div>
+                        {(p.owner_name || p.owner_email) && (
+                          <div className="pt-1 border-t border-zinc-800/60 mt-1 flex items-center gap-1 text-[9px] text-blue-300 font-mono truncate">
+                            <ShieldCheck className="h-2.5 w-2.5 text-blue-400 shrink-0" />
+                            <span className="truncate">By: {p.owner_name || p.owner_email}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Bottom Action: Load/Pilih Preset Button */}
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => onSelectSlug(slugStr)}
+                        className={cn(
+                          "w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors",
+                          isSelected
+                            ? "border-emerald-500 bg-emerald-500/20 text-emerald-300 shadow-sm"
+                            : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:border-emerald-500/60"
+                        )}
+                      >
+                        <Download className="h-3 w-3" />
+                        {isSelected ? "Preset Aktif" : "Load Preset"}
+                      </button>
+                      {p.created_at && (
+                        <p className="text-[8px] text-zinc-600 mt-1.5 text-center">
+                          {new Date(p.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </button>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Pagination Navigation Footer */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-xs">
+            <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60 text-xs">
               <Button
                 type="button"
                 variant="ghost"
@@ -418,7 +356,7 @@ export function AutopilotPresetPreview({
                       className={cn(
                         "w-6 h-6 rounded-md text-[11px] font-medium transition-colors",
                         currentPage === pNum
-                          ? "bg-violet-600 text-white font-bold"
+                          ? "bg-emerald-600 text-white font-bold"
                           : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
                       )}
                     >
@@ -445,14 +383,16 @@ export function AutopilotPresetPreview({
           )}
         </div>
 
-        {/* RIGHT COLUMN: Live 9:16 Preview Card with High-Fidelity Rendering */}
+        {/* RIGHT COLUMN: Live 9:16 Preview Card with Exact Style Editor Parity */}
         <div className="lg:col-span-5 space-y-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/90 p-4 space-y-3 shadow-xl">
             {/* Preview Toolbar */}
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
                 <Eye className="h-3.5 w-3.5 text-violet-400 shrink-0" />
-                <span className="text-violet-300 truncate">{activePreset.name}</span>
+                <span className="text-violet-300 truncate">
+                  {activePreset ? activePreset.name : "Preview Visual 9:16"}
+                </span>
               </span>
 
               <div className="flex items-center gap-1.5 shrink-0">
@@ -471,130 +411,114 @@ export function AutopilotPresetPreview({
               </div>
             </div>
 
-            {/* Visual 9:16 Mock Smartphone Screen */}
-            <div className="relative mx-auto w-full max-w-[260px] aspect-[9/16] rounded-2xl border-2 border-zinc-700 bg-gradient-to-b from-zinc-900 via-zinc-950 to-black overflow-hidden flex flex-col justify-between p-3 shadow-2xl">
-              {/* Background ambient lighting & grid */}
-              <div className="absolute inset-0 bg-[radial-gradient(#ffffff08_1px,transparent_1px)] [background-size:10px_10px] opacity-50 pointer-events-none" />
-              <div
-                className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 rounded-full blur-3xl pointer-events-none opacity-20"
-                style={{ backgroundColor: highlightColor }}
-              />
+            {/* Official CanvasPreviewFrame (Matching Hook & Subtitle Editors) */}
+            <div className="flex justify-center">
+              <CanvasPreviewFrame
+                aspectRatio="9/16"
+                className="w-full max-w-[240px] shadow-2xl border-zinc-700"
+              >
+                {/* 1. TOP-BAR: Watermark & B-Roll / Auto-Grid Status */}
+                <div className="absolute top-2 left-2 right-2 flex items-center justify-between z-20 pointer-events-none">
+                  {brollStyle?.enabled ? (
+                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-amber-500/30 text-amber-200 border border-amber-500/40 backdrop-blur-sm">
+                      {brollStyle?.autogrid_enabled ? "Auto-Grid" : "B-Roll"}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
 
-              {/* TOP: Watermark & Ratio Badge */}
-              <div className="relative z-10 flex items-start justify-between">
-                <Badge variant="default" className="text-[8px] bg-black/60 backdrop-blur-md border-white/10 text-zinc-300 px-1.5 py-0.5">
-                  Full HD
-                </Badge>
-
-                {wmCfg.enabled !== false && (
-                  <div
-                    className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/60 border border-white/15 backdrop-blur-sm text-zinc-200 tracking-wider shadow"
-                    style={{ opacity: (wmCfg.opacity ?? 80) / 100 }}
-                  >
-                    {wmCfg.text || "@ClipHub"}
-                  </div>
-                )}
-              </div>
-
-              {/* UPPER-MID: Hook Overlay Preview */}
-              <div className="relative z-10 my-auto text-center space-y-1">
-                <div className="inline-block px-2.5 py-1.5 rounded-lg bg-zinc-900/95 border border-white/20 backdrop-blur-md shadow-xl max-w-[90%]">
-                  <span
-                    className="text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-1"
-                    style={{ color: hookAccent }}
-                  >
-                    <Sparkles className="h-2.5 w-2.5 shrink-0" />
-                    <span>{hookAnim.replace(/_/g, " ")}</span>
-                  </span>
-                  <p
-                    className="text-[11px] font-black uppercase tracking-tight mt-0.5 line-clamp-2"
-                    style={{
-                      color: hookColor,
-                      fontFamily: `'${hookFont}', sans-serif`,
-                      textShadow: `0 2px 10px ${hookAccent}55`,
-                    }}
-                  >
-                    Rahasia Sukses Viral
-                  </p>
+                  {wmStyle.enabled && (
+                    <div
+                      className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/60 border border-white/15 backdrop-blur-sm text-zinc-200 tracking-wider shadow"
+                      style={{ opacity: (wmStyle.opacity ?? 80) / 100 }}
+                    >
+                      {wmStyle.text || "@ClipHub"}
+                    </div>
+                  )}
                 </div>
 
-                {/* AI Text 3D Badge */}
-                {teCfg.effectMode && teCfg.effectMode !== "off" && (
-                  <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-500/20 border border-violet-500/40 text-[8px] font-bold text-violet-300 shadow">
-                    <Sparkles className="h-2 w-2" />
-                    <span>3D {teCfg.effectMode}</span>
-                  </div>
-                )}
-              </div>
+                {/* 2. UPPER-MID: Hook Overlay (Rendered with HookPreviewRenderer for 100% parity) */}
+                <div className="absolute top-12 left-0 right-0 z-15 flex justify-center px-2 pointer-events-none">
+                  <HookPreviewRenderer style={hookStyle} scale={0.88} />
+                </div>
 
-              {/* DYNAMIC POSITION: Subtitles Karaoke Box (Top / Center / Bottom) */}
-              <div
-                className="relative z-10 transition-all duration-300"
-                style={{
-                  marginTop: positionYPct < 40 ? "0px" : undefined,
-                  marginBottom: positionYPct > 65 ? "0px" : undefined,
-                }}
-              >
+                {/* 3. DYNAMIC POSITION: Subtitles Karaoke Box */}
                 <div
-                  className="text-center p-2 border backdrop-blur-md overflow-hidden transition-all"
-                  style={{
-                    backgroundColor: previewBg,
-                    borderRadius: previewRadius,
-                    borderColor: isLightPanel ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.12)",
-                    boxShadow: presetKey === "neon_pulse" ? `0 0 20px ${highlightColor}44` : undefined,
-                  }}
+                  className="absolute left-0 right-0 flex justify-center px-3 z-15 pointer-events-none"
+                  style={{ top: `${positionYPct}%`, transform: "translateY(-50%)" }}
                 >
-                  <div className="flex flex-wrap items-center justify-center gap-1">
+                  <div
+                    className="flex flex-wrap justify-center items-center text-center transition-all max-w-[92%]"
+                    style={{
+                      backgroundColor: previewBg,
+                      borderRadius: `${previewRadius}px`,
+                      padding: subStyle.bgEnabled ? `${Math.round((subStyle.bgPadding ?? 12) * 0.35)}px ${Math.round((subStyle.bgPadding ?? 12) * 0.65)}px` : "0px",
+                      gap: "4px",
+                      boxShadow: presetKey === "neon_pulse" ? `0 0 20px ${highlightColor}44` : undefined,
+                    }}
+                  >
                     {sampleWords.map((word, idx) => {
                       const isHighlighted = idx === activeWordIndex;
                       const wordFont = isHighlighted && isDualFont ? dualFont : subFont;
+                      const fontSize = Math.min(Math.max((subStyle.fontSize || 38) * 0.24, 10), 16);
+                      const strokeWidth = subStyle.strokeEnabled ? Math.max((subStyle.strokeWidth || 3) * 0.25, 0.6) : 0;
 
                       return (
                         <span
-                          key={word.text}
+                          key={`${word}-${idx}`}
                           style={{
                             color: isHighlighted ? highlightColor : subColor,
+                            fontSize: fontSize,
                             fontFamily: `'${wordFont}', sans-serif`,
-                            fontWeight: isHighlighted ? 900 : subWeight,
-                            textTransform: (isUppercase || (isHighlighted && subCfg.highlightUppercase)) ? "uppercase" : "none",
-                            backgroundColor: isHighlighted ? `${highlightColor}20` : undefined,
-                            borderRadius: isHighlighted ? "4px" : undefined,
-                            padding: isHighlighted ? "0px 3px" : undefined,
-                            boxShadow: isHighlighted ? `0 0 8px ${highlightColor}66` : undefined,
-                            textShadow: isHighlighted ? `0 0 10px ${highlightColor}` : undefined,
+                            fontWeight: isHighlighted ? (subStyle.highlightBold ? 900 : 800) : subWeight,
+                            textTransform: (isUppercase || (isHighlighted && subStyle.highlightUppercase)) ? "uppercase" : "none",
+                            letterSpacing: `${subStyle.letterSpacing || 0}px`,
+                            paintOrder: strokeWidth > 0 ? "stroke fill" : undefined,
+                            WebkitTextStroke: strokeWidth > 0 ? `${strokeWidth}px ${subStyle.strokeColor || "#000000"}` : undefined,
+                            textShadow: subStyle.shadowEnabled
+                              ? `1px 1px ${(subStyle.shadowBlur || 4) * 0.5}px ${subStyle.shadowColor || "#000000"}`
+                              : (isHighlighted && subStyle.highlightGlow
+                                ? `0 0 10px ${subStyle.highlightGlowColor || highlightColor}`
+                                : "0 2px 4px rgba(0,0,0,0.8)"),
+                            backgroundColor: isHighlighted && !subStyle.bgEnabled ? `${highlightColor}25` : undefined,
+                            borderRadius: isHighlighted ? "3px" : undefined,
+                            padding: isHighlighted ? "0px 2px" : undefined,
+                            transform: isHighlighted ? "scale(1.08)" : "scale(1)",
+                            transition: "all 0.15s ease-out",
+                            display: "inline-block",
                           }}
-                          className={cn(
-                            "relative z-10 text-[10px] transition-all duration-150 inline-block",
-                            isHighlighted && "scale-110 font-bold"
-                          )}
                         >
-                          {word.text}
+                          {word}
                         </span>
                       );
                     })}
                   </div>
                 </div>
 
-                {/* CTA End-Card Preview */}
-                {ctaCfg.enabled && (
-                  <div className="mt-2 p-1.5 rounded-lg bg-emerald-950/90 border border-emerald-500/40 flex items-center justify-between text-[8px] text-emerald-200">
-                    <span className="font-bold truncate flex items-center gap-1">
-                      <Send className="h-2.5 w-2.5 shrink-0 text-emerald-400" />
-                      <span>{ctaCfg.headline || "Follow For More"}</span>
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-black font-extrabold uppercase text-[7px]">
-                      {ctaCfg.buttonText || "FOLLOW"}
-                    </span>
+                {/* 4. BOTTOM: CTA End-Card Preview */}
+                {ctaStyle.enabled && (
+                  <div className="absolute bottom-2 left-2 right-2 z-20 pointer-events-none">
+                    <div className="p-1.5 rounded-lg bg-emerald-950/90 border border-emerald-500/40 flex items-center justify-between text-[8px] text-emerald-200 backdrop-blur-md shadow-lg">
+                      <span className="font-bold truncate flex items-center gap-1">
+                        <Send className="h-2.5 w-2.5 shrink-0 text-emerald-400" />
+                        <span>{ctaStyle.headline || "Follow For More"}</span>
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-black font-extrabold uppercase text-[7px]">
+                        {ctaStyle.buttonText || "FOLLOW"}
+                      </span>
+                    </div>
                   </div>
                 )}
-              </div>
+              </CanvasPreviewFrame>
             </div>
 
             {/* Preset Specs Summary Matrix */}
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800 text-[10px]">
               <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
                 <span className="text-zinc-500 block text-[9px]">Font Subtitle</span>
-                <span className="font-semibold text-zinc-200">{subFont} {isDualFont && `+ ${dualFont}`}</span>
+                <span className="font-semibold text-zinc-200 truncate block">
+                  {subFont} {isDualFont && `+ ${dualFont}`}
+                </span>
               </div>
               <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
                 <span className="text-zinc-500 block text-[9px]">Warna Highlight</span>
@@ -605,11 +529,15 @@ export function AutopilotPresetPreview({
               </div>
               <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
                 <span className="text-zinc-500 block text-[9px]">Animasi Hook</span>
-                <span className="font-semibold text-zinc-200 truncate block">{hookAnim.replace(/_/g, " ")}</span>
+                <span className="font-semibold text-zinc-200 truncate block">
+                  {hookStyle.animation.replace(/_/g, " ")}
+                </span>
               </div>
               <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
-                <span className="text-zinc-500 block text-[9px]">Status Rendering</span>
-                <span className="font-semibold text-emerald-400">100% Remotion Parity</span>
+                <span className="text-zinc-500 block text-[9px]">AI Auto-Post</span>
+                <span className={cn("font-semibold truncate block", autopostStyle?.enabled ? "text-emerald-400" : "text-zinc-400")}>
+                  {autopostStyle?.enabled ? "Aktif" : "Nonaktif"}
+                </span>
               </div>
             </div>
           </div>
