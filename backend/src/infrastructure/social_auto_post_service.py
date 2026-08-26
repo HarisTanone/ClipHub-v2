@@ -26,13 +26,19 @@ class SocialAutoPostService:
         peak_hours_str: str = "",
         interval_hours: int = 4,
         start_time: Optional[dt.datetime] = None,
+        same_day: bool = True,
     ) -> List[dt.datetime]:
         """Calculate smart AI scheduled posting timestamps for a series of clips.
 
-        Distributes clips across peak engagement hours with organic natural jitter (±3-7 mins).
+        When same_day=True (default), distributes all clips across today's active hours
+        (09:00 - 22:30) at unique, spaced-out times with organic jitter (±3-5 mins).
         """
+        if clip_count <= 0:
+            return []
+
         now = start_time or dt.datetime.now(dt.timezone.utc)
-        
+        min_start = now + dt.timedelta(minutes=15)
+
         # Parse peak hours
         raw_hours = [h.strip() for h in (peak_hours_str or "").split(",") if h.strip()]
         if not raw_hours:
@@ -51,13 +57,69 @@ class SocialAutoPostService:
 
         peak_slots.sort()
 
-        schedule_times: List[dt.datetime] = []
+        if same_day:
+            # Determine target day: today, or tomorrow if current time is late at night (>= 21:30)
+            if now.hour > 21 or (now.hour == 21 and now.minute >= 30):
+                target_date = now.date() + dt.timedelta(days=1)
+                day_start = dt.datetime(target_date.year, target_date.month, target_date.day, 9, 0, tzinfo=dt.timezone.utc)
+            else:
+                target_date = now.date()
+                day_start_candidate = dt.datetime(target_date.year, target_date.month, target_date.day, 9, 0, tzinfo=dt.timezone.utc)
+                day_start = max(min_start, day_start_candidate)
+
+            day_end = dt.datetime(target_date.year, target_date.month, target_date.day, 22, 30, tzinfo=dt.timezone.utc)
+            if day_end <= day_start:
+                day_end = day_start + dt.timedelta(hours=4)
+
+            # Available peak slots on target day that are >= day_start
+            available_peaks = []
+            for hour, minute in peak_slots:
+                slot = dt.datetime(target_date.year, target_date.month, target_date.day, hour, minute, tzinfo=dt.timezone.utc)
+                if slot >= day_start:
+                    available_peaks.append(slot)
+
+            schedule_times: List[dt.datetime] = []
+
+            # Case A: 1 clip -> nearest peak slot or day_start
+            if clip_count == 1:
+                base_slot = available_peaks[0] if available_peaks else day_start
+                jitter_sec = random.randint(-180, 180)
+                slot_with_jitter = max(min_start, base_slot + dt.timedelta(seconds=jitter_sec))
+                return [slot_with_jitter]
+
+            # Case B: Small number of clips that fit inside available peak slots
+            if clip_count <= len(available_peaks):
+                step = len(available_peaks) / clip_count
+                for i in range(clip_count):
+                    idx = min(len(available_peaks) - 1, int(i * step))
+                    base_slot = available_peaks[idx]
+                    jitter_sec = random.randint(-180, 180)
+                    slot_with_jitter = max(min_start, base_slot + dt.timedelta(seconds=jitter_sec))
+                    schedule_times.append(slot_with_jitter)
+                return sorted(schedule_times)
+
+            # Case C: Multiple clips (e.g. 5, 8, 10 clips) -> spread evenly throughout the remaining day window
+            total_minutes = (day_end - day_start).total_seconds() / 60.0
+            step_minutes = total_minutes / float(clip_count)
+
+            for i in range(clip_count):
+                base_slot = day_start + dt.timedelta(minutes=i * step_minutes)
+                jitter_sec = random.randint(-150, 150)
+                slot_with_jitter = base_slot + dt.timedelta(seconds=jitter_sec)
+                slot_with_jitter = max(min_start, slot_with_jitter)
+                schedule_times.append(slot_with_jitter)
+
+            # Ensure strict chronological order with at least 5 mins separation
+            sorted_times: List[dt.datetime] = []
+            for t in sorted(schedule_times):
+                if sorted_times and t <= sorted_times[-1]:
+                    t = sorted_times[-1] + dt.timedelta(minutes=5)
+                sorted_times.append(t)
+
+            return sorted_times
+
+        # Fallback multi-day drip distribution (if same_day=False)
         current_day = now.date()
-
-        # Minimum delay from now (at least 15 minutes in future)
-        min_start = now + dt.timedelta(minutes=15)
-
-        # Build candidate slots starting from current day up to next 7 days
         candidate_slots: List[dt.datetime] = []
         for day_offset in range(10):
             target_date = current_day + dt.timedelta(days=day_offset)
@@ -73,7 +135,7 @@ class SocialAutoPostService:
                 if slot > min_start:
                     candidate_slots.append(slot)
 
-        # Assign slots to each clip with natural jitter
+        schedule_times = []
         for i in range(clip_count):
             if i < len(candidate_slots):
                 base_slot = candidate_slots[i]
@@ -81,7 +143,6 @@ class SocialAutoPostService:
                 last_slot = schedule_times[-1] if schedule_times else min_start
                 base_slot = last_slot + dt.timedelta(hours=interval_hours)
 
-            # Add jitter between -5 and +5 minutes
             jitter_sec = random.randint(-300, 300)
             slot_with_jitter = base_slot + dt.timedelta(seconds=jitter_sec)
             if slot_with_jitter <= now:

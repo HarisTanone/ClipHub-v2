@@ -10,6 +10,9 @@ from src.infrastructure.database import StylePresetModel, HookAnimationModel, as
 router = APIRouter(prefix="/style-presets", tags=["Style Presets"])
 
 BUILTIN_HOOK_ANIMATIONS: tuple[dict[str, str], ...] = (
+    {"id": "paper_clip_scrap", "name": "Paper Clip Scrap", "description": "Pastel kraft sticky note with realistic metallic vector paper clip and washi tape"},
+    {"id": "trending_radar", "name": "Trending Radar", "description": "Cyberpunk neon glowing panel with TRENDING NOW radar badge and corner crosshairs"},
+    {"id": "news_breaking_live", "name": "Breaking News Live", "description": "TV broadcast lower third banner with red BREAKING pill and live status indicator"},
     {"id": "news_viralin_badge", "name": "#VIRALIN Badge", "description": "Akurat yellow card with tilted #VIRALIN blue badge and layered paper sheet"},
     {"id": "news_portal_pantau", "name": "News Portal Notch", "description": "Clean white news card with red category pill and speech bubble notch"},
     {"id": "news_offset_box", "name": "Detik Red Box", "description": "Detik-detik red breaking box with white offset border frame"},

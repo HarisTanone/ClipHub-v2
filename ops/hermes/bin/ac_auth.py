@@ -12,6 +12,25 @@ import httpx
 
 # ─── Config dari environment ──────────────────────────────────────────────────
 HERMES_HOME = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+
+# Load .env from HERMES_HOME, project root, or backend directory
+env_candidates = [
+    os.path.join(HERMES_HOME, ".env"),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.env")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/.env")),
+]
+for env_path in env_candidates:
+    if os.path.exists(env_path):
+        try:
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, _, v = line.partition("=")
+                        os.environ.setdefault(k.strip(), v.strip())
+        except Exception:
+            pass
+
 AUTOCLIPER_API = os.environ.get("AUTOCLIPER_API_URL", "http://127.0.0.1:8000/api")
 AUTOCLIPER_EMAIL = os.environ.get("AUTOCLIPER_EMAIL", "")
 AUTOCLIPER_PASSWORD = os.environ.get("AUTOCLIPER_PASSWORD", "")

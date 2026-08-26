@@ -28,14 +28,14 @@ def setup_db():
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT UNIQUE,
-                password_hash TEXT,
+                hashed_password TEXT,
                 full_name TEXT,
                 is_active INTEGER DEFAULT 1,
                 is_superadmin INTEGER DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        conn.execute("INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (1, 'test@example.com', 'hash', 'Test User')")
+        conn.execute("INSERT OR IGNORE INTO users (id, email, hashed_password, full_name) VALUES (1, 'test@example.com', 'hash', 'Test User')")
         conn.commit()
     finally:
         conn.close()

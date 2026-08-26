@@ -4,7 +4,7 @@ import {
   Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot,
   Send, Key, Eye, EyeOff, Radio, Bell, Video, Copy, Check, MessageSquare, Palette,
   SlidersHorizontal, UserCheck, Layers, Lock, Activity, Globe, Info, HelpCircle, HardDrive, CheckSquare,
-  Upload, FileText, ExternalLink, ShieldCheck
+  Upload, FileText, ExternalLink, ShieldCheck, Clock
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -19,6 +19,20 @@ import { cn } from "@/lib/utils";
 import { SectionDescription } from "@/components/reframe/SectionDescription";
 import { ImagePreviewPanel } from "@/components/reframe/ImagePreviewPanel";
 import { REFRAME_SLIDER_META, REFRAME_SECTION_DESCRIPTIONS } from "@/components/reframe/ReframeSliderMeta";
+import { AutopilotPresetPreview } from "@/components/autopilot/AutopilotPresetPreview";
+import {
+  StyleEditorModal,
+  DEFAULT_HOOK_STYLE,
+  DEFAULT_SUBTITLE_STYLE,
+  DEFAULT_TEXT_EMPHASIS_STYLE,
+  DEFAULT_WATERMARK_STYLE,
+  DEFAULT_CTA_STYLE,
+  type HookStyle,
+  type SubtitleStyle,
+  type TextEmphasisStyle,
+  type WatermarkStyle,
+  type CtaStyle,
+} from "@/components/StyleEditorModal";
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
 
@@ -468,11 +482,17 @@ export function Settings() {
   const [autopilotQuota, setAutopilotQuota] = useState<AutopilotQuotaInfo | null>(null);
   const [autopilotCanRun, setAutopilotCanRun] = useState<boolean>(true);
   const [autopilotPresets, setAutopilotPresets] = useState<any[]>([]);
-  const [autopilotPlatforms, setAutopilotPlatforms] = useState<any[]>([]);
+  const [autopilotPlatforms, setAutopilotPlatforms] = useState<any>({});
   const [autopilotHistory, setAutopilotHistory] = useState<any[]>([]);
   const [isLoadingAutopilot, setIsLoadingAutopilot] = useState<boolean>(false);
   const [isSavingAutopilot, setIsSavingAutopilot] = useState<boolean>(false);
   const [isRunningAutopilot, setIsRunningAutopilot] = useState<boolean>(false);
+  const [showStyleModal, setShowStyleModal] = useState<boolean>(false);
+  const [editorHook, setEditorHook] = useState<HookStyle>(DEFAULT_HOOK_STYLE);
+  const [editorSub, setEditorSub] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
+  const [editorTe, setEditorTe] = useState<TextEmphasisStyle>(DEFAULT_TEXT_EMPHASIS_STYLE);
+  const [editorWm, setEditorWm] = useState<WatermarkStyle>(DEFAULT_WATERMARK_STYLE);
+  const [editorCta, setEditorCta] = useState<CtaStyle>(DEFAULT_CTA_STYLE);
 
   // Dynamic Database System Config
   const [sysConfigItems, setSysConfigItems] = useState<SystemConfigItem[]>([]);
@@ -971,9 +991,12 @@ export function Settings() {
         setAutopilotQuota(res.quota);
         setAutopilotCanRun(res.can_run_today);
       }
-      setAutopilotPresets((presetsRes as any)?.presets || (presetsRes as any)?.data || []);
-      setAutopilotPlatforms((platsRes as any)?.platforms || []);
-      setAutopilotHistory(histRes?.data || []);
+      const rawPresets = (presetsRes as any)?.data || (presetsRes as any)?.presets || (Array.isArray(presetsRes) ? presetsRes : []);
+      setAutopilotPresets(Array.isArray(rawPresets) ? rawPresets : []);
+      const rawPlats = (platsRes as any)?.platforms || platsRes || {};
+      setAutopilotPlatforms(rawPlats);
+      const rawHist = (histRes as any)?.data || (Array.isArray(histRes) ? histRes : []);
+      setAutopilotHistory(Array.isArray(rawHist) ? rawHist : []);
     } catch (e: any) {
       toast.error("Gagal memuat pengaturan Autopilot: " + (e?.message || ""));
     } finally {
@@ -1920,7 +1943,7 @@ export function Settings() {
                   value={objectOverlay.position}
                   onChange={(e) => handleObjectChange("position", e.target.value)}
                   options={[
-                    { value: "auto", label: "✨ Dynamic Auto (Speaker Avoidance)" },
+                    { value: "auto", label: "Dynamic Auto (Speaker Avoidance)" },
                     { value: "top_left", label: "Top Left" },
                     { value: "top_right", label: "Top Right" },
                     { value: "center_left", label: "Center Left" },
@@ -2909,7 +2932,7 @@ export function Settings() {
         )}
 
         {tab === "autopilot" && (
-          <div className="max-w-6xl space-y-4">
+          <div className="space-y-4">
             {/* Header info banner */}
             <div className="rounded-xl border border-violet-500/30 bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-zinc-900/60 p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg">
               <div className="flex items-center gap-3">
@@ -3045,36 +3068,18 @@ export function Settings() {
                     </div>
                   </Card>
 
-                  {/* Visual Style Preset Selection */}
-                  <Card className="p-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <Palette className="h-4 w-4 text-violet-400" />
-                      <h3 className="text-xs font-semibold text-zinc-200">2. Preset Style Visual Rendering (5 Layer)</h3>
-                    </div>
-                    <p className="text-[11px] text-zinc-400">
-                      Preset memuat otomatis format Subtitle, Hook Animation, AI Cinematic Text 3D, Watermark, dan End-Card CTA.
-                    </p>
-
-                    <div>
-                      <Select
-                        value={autopilotSettings?.preset_slug || "default"}
-                        onChange={(e) => {
-                          if (autopilotSettings) {
-                            setAutopilotSettings({ ...autopilotSettings, preset_slug: e.target.value });
-                          }
-                        }}
-                        options={[
-                          { value: "default", label: "Default Style (Built-in)" },
-                          { value: "bold_black", label: "Bold Black & Yellow Accent" },
-                          { value: "minimal_clean", label: "Minimal Clean White" },
-                          { value: "viral_red", label: "Viral Red & High Punch" },
-                          ...autopilotPresets.map((p: any) => ({
-                            value: p.slug || p.name,
-                            label: `${p.name} (${p.slug || `#${p.id}`})`,
-                          })),
-                        ]}
-                      />
-                    </div>
+                  {/* Visual Style Preset Selection & Live 5-Layer Preview */}
+                  <Card className="p-4">
+                    <AutopilotPresetPreview
+                      selectedSlug={autopilotSettings?.preset_slug || "default"}
+                      onSelectSlug={(slug) => {
+                        if (autopilotSettings) {
+                          setAutopilotSettings({ ...autopilotSettings, preset_slug: slug });
+                        }
+                      }}
+                      presets={autopilotPresets}
+                      onOpenEditor={() => setShowStyleModal(true)}
+                    />
                   </Card>
 
                   {/* Social Media Target & Schedule Time */}
@@ -3096,8 +3101,9 @@ export function Settings() {
                       ].map((plat) => {
                         const currentPlats = (autopilotSettings?.target_platforms || "").toLowerCase().split(",").map(p => p.trim());
                         const isChecked = currentPlats.includes(plat.id);
-                        const statusObj = autopilotPlatforms.find((p: any) => p.platform === plat.id);
-                        const isConnected = statusObj?.is_connected || false;
+                        const isConnected = Array.isArray(autopilotPlatforms)
+                          ? Boolean((autopilotPlatforms as any[]).find((p: any) => p?.platform === plat.id || p?.id === plat.id)?.is_connected)
+                          : Boolean((autopilotPlatforms as any)?.[plat.id]?.connected || ((autopilotPlatforms as any)?.[plat.id]?.count && (autopilotPlatforms as any)[plat.id].count > 0));
 
                         return (
                           <label
@@ -3159,9 +3165,9 @@ export function Settings() {
                             }
                           }}
                           options={[
-                            { value: "ai", label: "AI Smart Peak Hours (11:30, 15:00, 18:30, 20:30)" },
+                            { value: "ai", label: "AI Same-Day Spread (Semua video hari ini disebar berkala di jam berbeda)" },
                             { value: "instant", label: "Instant Post (Langsung tayang saat render selesai)" },
-                            { value: "custom", label: "Custom Schedule Time" },
+                            { value: "custom", label: "Custom Schedule Time (Interval manual)" },
                           ]}
                         />
                       </div>
@@ -3186,8 +3192,18 @@ export function Settings() {
                     <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 space-y-2 mb-3">
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-zinc-400">Status Kesiapan:</span>
-                        <span className={cn("font-medium", autopilotCanRun ? "text-emerald-400" : "text-amber-400")}>
-                          {autopilotCanRun ? "✅ Siap Eksekusi" : "⏳ Kuota Hari Ini Terpenuhi"}
+                        <span className={cn("font-medium flex items-center gap-1", autopilotCanRun ? "text-emerald-400" : "text-amber-400")}>
+                          {autopilotCanRun ? (
+                            <>
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>Siap Eksekusi</span>
+                            </>
+                          ) : (
+                            <>
+                              <Clock className="h-3.5 w-3.5" />
+                              <span>Kuota Hari Ini Terpenuhi</span>
+                            </>
+                          )}
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-xs">
@@ -3487,6 +3503,34 @@ export function Settings() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Style Editor Modal for Preset Customization */}
+        {showStyleModal && (
+          <StyleEditorModal
+            open={showStyleModal}
+            onClose={() => {
+              setShowStyleModal(false);
+              loadAutopilotData();
+            }}
+            hookStyle={editorHook}
+            subtitleStyle={editorSub}
+            textEmphasisStyle={editorTe}
+            watermarkStyle={editorWm}
+            ctaStyle={editorCta}
+            onHookChange={setEditorHook}
+            onSubtitleChange={setEditorSub}
+            onTextEmphasisChange={setEditorTe}
+            onWatermarkChange={setEditorWm}
+            onCtaChange={setEditorCta}
+            onPresetLoad={(preset) => {
+              if (preset.slug && autopilotSettings) {
+                setAutopilotSettings({ ...autopilotSettings, preset_slug: preset.slug });
+              }
+              loadAutopilotData();
+            }}
+            isSuperadmin={isSuperadmin}
+          />
         )}
       </div>
     </div>

@@ -212,6 +212,9 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
     "news_offset_box",
     "brutalist_bracket",
     "quote_strip_tape",
+    "paper_clip_scrap",
+    "trending_radar",
+    "news_breaking_live",
   ]);
 
   return (
@@ -1238,6 +1241,238 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
                   );
                 })}
               </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* paper_clip_scrap: Realistic paper clip + pastel kraft card + washi tape */}
+      {animation === "paper_clip_scrap" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 14, stiffness: 140, mass: 0.7 } });
+        const scale = 0.88 + Math.min(1, entrance) * 0.12;
+        const rotate = interpolate(frame, [0, 14], [-4.5, -2.5], { extrapolateRight: "clamp" });
+        const y = Math.sin(frame * 0.05) * 4 * motionIntensity;
+        const bg = config.boxColor || "#FEF08A";
+        const textColor = config.color || "#1C1917";
+
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "relative",
+              maxWidth: "88%",
+              padding: "48px 56px 40px",
+              borderRadius: 24,
+              backgroundColor: bg,
+              boxShadow: "0 28px 75px rgba(0,0,0,0.55), 0 10px 24px rgba(0,0,0,0.35)",
+              transform: `translateY(${y}px) scale(${scale}) rotate(${rotate}deg)`,
+            }}>
+              {/* Washi tape top right */}
+              <div style={{
+                position: "absolute",
+                top: -12,
+                right: 36,
+                width: 80,
+                height: 28,
+                backgroundColor: "rgba(255, 255, 255, 0.7)",
+                border: "1px solid rgba(200, 200, 200, 0.5)",
+                transform: "rotate(12deg)",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+              }} />
+
+              {/* Realistic SVG Paper Clip at top left */}
+              <div style={{
+                position: "absolute",
+                top: -24,
+                left: 32,
+                width: 38,
+                height: 90,
+                zIndex: 10,
+                filter: "drop-shadow(2px 6px 6px rgba(0,0,0,0.4))",
+              }}>
+                <svg viewBox="0 0 38 90" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: "100%", height: "100%" }}>
+                  <path
+                    d="M12 28 V70 C12 76 17 81 23 81 C29 81 34 76 34 70 V18 C34 9 27 2 18 2 C9 2 2 9 2 18 V74"
+                    stroke="#475569"
+                    strokeWidth="5"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M12 28 V70 C12 76 17 81 23 81 C29 81 34 76 34 70 V18 C34 9 27 2 18 2 C9 2 2 9 2 18 V74"
+                    stroke="#E2E8F0"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+
+              {/* Main text */}
+              <div style={{
+                color: textColor,
+                fontSize: config.fontSize || 54,
+                fontWeight: 900,
+                fontFamily,
+                lineHeight: 1.15,
+                textAlign: "center",
+                textTransform: config.uppercase ? "uppercase" : "none",
+                letterSpacing: "0.02em",
+              }}>
+                {renderedText}
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* trending_radar: Cyber neon glowing card with corner HUD crosshairs */}
+      {animation === "trending_radar" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 12, stiffness: 160, mass: 0.6 } });
+        const scale = 0.9 + Math.min(1, entrance) * 0.1;
+        const pulseGlow = 0.5 + Math.sin(frame * 0.15) * 0.35;
+        const magenta = config.lineColor || "#D946EF";
+        const cyan = "#06B6D4";
+
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "relative",
+              maxWidth: "90%",
+              padding: "44px 48px 36px",
+              borderRadius: 24,
+              backgroundColor: "rgba(9, 5, 20, 0.94)",
+              border: `2px solid ${magenta}`,
+              boxShadow: `0 24px 70px rgba(0,0,0,0.65), 0 0 ${24 * pulseGlow}px ${magenta}88`,
+              transform: `scale(${scale})`,
+            }}>
+              {/* Corner HUD Crosshairs */}
+              <div style={{ position: "absolute", top: 8, left: 8, width: 14, height: 14, borderTop: `3px solid ${cyan}`, borderLeft: `3px solid ${cyan}` }} />
+              <div style={{ position: "absolute", top: 8, right: 8, width: 14, height: 14, borderTop: `3px solid ${cyan}`, borderRight: `3px solid ${cyan}` }} />
+              <div style={{ position: "absolute", bottom: 8, left: 8, width: 14, height: 14, borderBottom: `3px solid ${cyan}`, borderLeft: `3px solid ${cyan}` }} />
+              <div style={{ position: "absolute", bottom: 8, right: 8, width: 14, height: 14, borderBottom: `3px solid ${cyan}`, borderRight: `3px solid ${cyan}` }} />
+
+              {/* Top Badge: TRENDING NOW */}
+              <div style={{
+                position: "absolute",
+                top: -18,
+                left: "50%",
+                transform: "translateX(-50%)",
+                backgroundColor: magenta,
+                color: "#FFFFFF",
+                padding: "6px 18px",
+                borderRadius: 999,
+                fontSize: 16,
+                fontWeight: 900,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                boxShadow: `0 4px 18px ${magenta}88`,
+              }}>
+                <span style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  backgroundColor: "#FFFFFF",
+                  boxShadow: "0 0 8px #FFFFFF",
+                }} />
+                <span>{config.badgeText || "TRENDING NOW"}</span>
+              </div>
+
+              {/* Main Text */}
+              <div style={{
+                color: config.color || "#FFFFFF",
+                fontSize: config.fontSize || 54,
+                fontWeight: 900,
+                fontFamily,
+                lineHeight: 1.15,
+                textAlign: "center",
+                textTransform: config.uppercase ? "uppercase" : "none",
+                letterSpacing: "0.02em",
+                textShadow: `0 4px 20px rgba(0,0,0,0.8)`,
+              }}>
+                {renderedText}
+              </div>
+            </div>
+          </AbsoluteFill>
+        );
+      })()}
+
+      {/* news_breaking_live: TV News lower third with live broadcast indicator */}
+      {animation === "news_breaking_live" && (() => {
+        const entrance = spring({ frame, fps, config: { damping: 14, stiffness: 150 } });
+        const y = interpolate(Math.min(1, entrance), [0, 1], [80, 0]);
+        const dotOpacity = 0.4 + Math.abs(Math.sin(frame * 0.2)) * 0.6;
+        const red = config.lineColor || "#DC2626";
+
+        return (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{
+              position: "relative",
+              width: "90%",
+              borderRadius: 20,
+              overflow: "hidden",
+              backgroundColor: "rgba(15, 23, 42, 0.95)",
+              border: "1px solid rgba(255,255,255,0.15)",
+              boxShadow: "0 28px 75px rgba(0,0,0,0.65)",
+              transform: `translateY(${y}px)`,
+            }}>
+              {/* Header Bar */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "12px 24px",
+                borderBottom: "1px solid rgba(255,255,255,0.1)",
+                backgroundColor: "rgba(0,0,0,0.3)",
+              }}>
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  backgroundColor: red,
+                  color: "#FFFFFF",
+                  padding: "4px 14px",
+                  borderRadius: 6,
+                  fontSize: 18,
+                  fontWeight: 900,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                }}>
+                  <span style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 999,
+                    backgroundColor: "#FFFFFF",
+                    opacity: dotOpacity,
+                  }} />
+                  <span>{config.badgeText || "BREAKING NEWS"}</span>
+                </div>
+                <div style={{
+                  color: "rgba(255,255,255,0.5)",
+                  fontSize: 16,
+                  fontWeight: 800,
+                  letterSpacing: "0.1em",
+                }}>
+                  LIVE UPDATE
+                </div>
+              </div>
+
+              {/* Main Headline */}
+              <div style={{
+                padding: "24px 28px",
+                color: config.color || "#FFFFFF",
+                fontSize: config.fontSize || 52,
+                fontWeight: 900,
+                fontFamily,
+                lineHeight: 1.15,
+                textAlign: "left",
+                textTransform: config.uppercase ? "uppercase" : "none",
+              }}>
+                {renderedText}
+              </div>
+
+              {/* Bottom Red Accent Stripe */}
+              <div style={{ height: 6, backgroundColor: red }} />
             </div>
           </AbsoluteFill>
         );

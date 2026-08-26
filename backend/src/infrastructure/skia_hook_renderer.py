@@ -272,7 +272,59 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
         "uppercase": False,
         "duration": 3.5,
     },
-    # ─── 19 StyleEditorModal Hook Presets ────────────────────────────────────
+    # ─── Creative High-Converting Hook Presets ──────────────────────────────
+    "paper_clip_scrap": {
+        "name": "Paper Clip Scrap",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#1C1917",
+        "bg_color": "#FEF08A",
+        "box_color": "#FEF08A",
+        "bg_opacity": 1.0,
+        "bg_radius": 12,
+        "bg_padding_x": 38,
+        "bg_padding_y": 24,
+        "position_y": 42,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "trending_radar": {
+        "name": "Trending Radar",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#FFFFFF",
+        "bg_color": "#090514",
+        "box_color": "#090514",
+        "bg_opacity": 0.92,
+        "bg_radius": 14,
+        "badge_enabled": True,
+        "badge_text": "TRENDING NOW",
+        "badge_bg": "#D946EF",
+        "badge_color": "#FFFFFF",
+        "position_y": 40,
+        "uppercase": True,
+        "duration": 3.0,
+    },
+    "news_breaking_live": {
+        "name": "Breaking News Live",
+        "font_family": "Montserrat",
+        "font_size": 48,
+        "font_weight": "900",
+        "text_color": "#FFFFFF",
+        "bg_color": "#0F172A",
+        "box_color": "#0F172A",
+        "bg_opacity": 0.95,
+        "bg_radius": 12,
+        "badge_enabled": True,
+        "badge_text": "BREAKING",
+        "badge_bg": "#DC2626",
+        "badge_color": "#FFFFFF",
+        "position_y": 44,
+        "uppercase": True,
+        "duration": 3.0,
+    },
     "news_viralin_badge": {
         "name": "#VIRALIN Badge",
         "font_family": "Montserrat",
@@ -1177,7 +1229,154 @@ class SkiaHookRenderer:
             return frame
 
         # ─────────────────────────────────────────────────────────────────────
-        # 2. SPECIAL CASE: #VIRALIN Badge (`news_viralin_badge`)
+        # 1. SPECIAL CASE: Paper Clip Scrap (`paper_clip_scrap`)
+        # ─────────────────────────────────────────────────────────────────────
+        if clean_key == "paper_clip_scrap":
+            pad_x = 44
+            pad_y = 28
+            card_w = min(int(self._width * 0.90), max(total_text_width + pad_x * 2, 520))
+            card_h = total_text_height + pad_y * 2 + 14
+
+            # 1. Pastel Kraft Paper Card (Tilted -2.5 degrees)
+            paper_layer = Image.new("RGBA", (card_w + 60, card_h + 60), (0, 0, 0, 0))
+            p_draw = ImageDraw.Draw(paper_layer)
+            bg_col = self._hex_to_rgba(cfg.get("box_color", cfg.get("bg_color", "#FEF08A")), 1.0)
+
+            # Paper shadow and body
+            p_draw.rounded_rectangle([30, 30 + 8, 30 + card_w, 30 + card_h + 8], radius=14, fill=(0, 0, 0, 130))
+            p_draw.rounded_rectangle([30, 30, 30 + card_w, 30 + card_h], radius=14, fill=bg_col)
+
+            # Washi Tape on top right corner
+            tape_w, tape_h = 70, 24
+            p_draw.rectangle([30 + card_w - 60, 20, 30 + card_w + 10, 20 + tape_h], fill=(255, 255, 255, 170), outline=(200, 200, 200, 120), width=1)
+
+            # Metallic Vector Paper Clip on top left corner
+            clip_x = 46
+            clip_y = 12
+            clip_w = 30
+            clip_h = 76
+            p_draw.rounded_rectangle([clip_x, clip_y, clip_x + clip_w, clip_y + clip_h], radius=14, outline=(71, 85, 105, 255), width=5)
+            p_draw.rounded_rectangle([clip_x + 1, clip_y + 1, clip_x + clip_w - 1, clip_y + clip_h - 1], radius=13, outline=(226, 232, 240, 255), width=2)
+            p_draw.rounded_rectangle([clip_x + 8, clip_y + 16, clip_x + clip_w - 8, clip_y + clip_h - 14], radius=7, outline=(71, 85, 105, 255), width=4)
+            p_draw.rounded_rectangle([clip_x + 9, clip_y + 17, clip_x + clip_w - 9, clip_y + clip_h - 15], radius=6, outline=(255, 255, 255, 255), width=1)
+
+            # Rotate whole paper sheet -2.5 degrees
+            p_rot = paper_layer.rotate(-2.5, resample=Image.BICUBIC, expand=True)
+            px = (self._width - p_rot.width) // 2
+            py = center_y - p_rot.height // 2
+            frame.paste(p_rot, (px, py), p_rot)
+
+            # Text directly centered on card
+            txt_color = self._hex_to_rgba(cfg.get("text_color", "#1C1917"), 1.0)
+            text_origin_y = center_y - (total_text_height // 2) + 6
+            for i, line in enumerate(lines):
+                lw = line_widths[i]
+                lx = (self._width - lw) // 2
+                ly = text_origin_y + i * line_height
+                draw.text((lx, ly), line, font=font, fill=txt_color)
+
+            return frame
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 2. SPECIAL CASE: Trending Radar Alert (`trending_radar`)
+        # ─────────────────────────────────────────────────────────────────────
+        if clean_key == "trending_radar":
+            pad_x = 42
+            pad_y = 26
+            card_w = min(int(self._width * 0.92), max(total_text_width + pad_x * 2, 520))
+            card_h = total_text_height + pad_y * 2 + 18
+            card_x = (self._width - card_w) // 2
+            card_y = center_y - card_h // 2
+
+            neon_magenta = self._hex_to_rgba(cfg.get("badge_bg", "#D946EF"), 1.0)
+            neon_cyan = self._hex_to_rgba(cfg.get("line_color", "#06B6D4"), 1.0)
+            bg_col = self._hex_to_rgba(cfg.get("box_color", "#090514"), 0.94)
+
+            # Glowing dark card
+            draw.rounded_rectangle([card_x, card_y + 10, card_x + card_w, card_y + card_h + 10], radius=16, fill=(0, 0, 0, 180))
+            draw.rounded_rectangle([card_x, card_y, card_x + card_w, card_y + card_h], radius=16, fill=bg_col, outline=neon_magenta, width=2)
+
+            # Corner HUD crosshair brackets
+            hud_len = 16
+            draw.line([card_x + 6, card_y + 6, card_x + 6 + hud_len, card_y + 6], fill=neon_cyan, width=3)
+            draw.line([card_x + 6, card_y + 6, card_x + 6, card_y + 6 + hud_len], fill=neon_cyan, width=3)
+            draw.line([card_x + card_w - 6 - hud_len, card_y + 6, card_x + card_w - 6, card_y + 6], fill=neon_cyan, width=3)
+            draw.line([card_x + card_w - 6, card_y + 6, card_x + card_w - 6, card_y + 6 + hud_len], fill=neon_cyan, width=3)
+            draw.line([card_x + 6, card_y + card_h - 6 - hud_len, card_x + 6, card_y + card_h - 6], fill=neon_cyan, width=3)
+            draw.line([card_x + 6, card_y + card_h - 6, card_x + 6 + hud_len, card_y + card_h - 6], fill=neon_cyan, width=3)
+            draw.line([card_x + card_w - 6 - hud_len, card_y + card_h - 6, card_x + card_w - 6, card_y + card_h - 6], fill=neon_cyan, width=3)
+            draw.line([card_x + card_w - 6, card_y + card_h - 6 - hud_len, card_x + card_w - 6, card_y + card_h - 6], fill=neon_cyan, width=3)
+
+            # Top Badge "TRENDING NOW" with Radar Dot
+            if cfg.get("badge_enabled", True):
+                b_text = str(cfg.get("badge_text", "TRENDING NOW"))
+                b_font = self._resolve_font("Montserrat", "900", 20)
+                b_bbox = b_font.getbbox(b_text)
+                bw = (b_bbox[2] - b_bbox[0]) + 44
+                bh = 32
+                bx = (self._width - bw) // 2
+                by = card_y - 16
+                draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=8, fill=neon_magenta, outline=(255, 255, 255, 80), width=1)
+                # Radar Dot
+                draw.ellipse([bx + 12, by + 10, bx + 22, by + 20], fill=(255, 255, 255, 255))
+                draw.text((bx + 28, by + 6), b_text, font=b_font, fill=(255, 255, 255, 255))
+
+            # Text
+            txt_color = self._hex_to_rgba(cfg.get("text_color", "#FFFFFF"), 1.0)
+            text_origin_y = card_y + pad_y + (10 if cfg.get("badge_enabled", True) else 0)
+            for i, line in enumerate(lines):
+                lw = line_widths[i]
+                lx = (self._width - lw) // 2
+                ly = text_origin_y + i * line_height
+                draw.text((lx, ly), line, font=font, fill=txt_color)
+
+            return frame
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 3. SPECIAL CASE: Breaking News Live (`news_breaking_live`)
+        # ─────────────────────────────────────────────────────────────────────
+        if clean_key == "news_breaking_live":
+            pad_x = 40
+            pad_y = 24
+            card_w = min(int(self._width * 0.94), max(total_text_width + pad_x * 2, 540))
+            card_h = total_text_height + pad_y * 2 + 16
+            card_x = (self._width - card_w) // 2
+            card_y = center_y - card_h // 2
+
+            red_col = self._hex_to_rgba(cfg.get("badge_bg", "#DC2626"), 1.0)
+            bg_col = self._hex_to_rgba(cfg.get("box_color", "#0F172A"), 0.95)
+
+            # Dark card with bottom red stripe
+            draw.rounded_rectangle([card_x, card_y + 8, card_x + card_w, card_y + card_h + 8], radius=14, fill=(0, 0, 0, 180))
+            draw.rounded_rectangle([card_x, card_y, card_x + card_w, card_y + card_h], radius=14, fill=bg_col)
+            draw.rounded_rectangle([card_x, card_y + card_h - 8, card_x + card_w, card_y + card_h], radius=4, fill=red_col)
+
+            # Red Badge "BREAKING" with white circle indicator
+            if cfg.get("badge_enabled", True):
+                b_text = str(cfg.get("badge_text", "BREAKING"))
+                b_font = self._resolve_font("Montserrat", "900", 22)
+                b_bbox = b_font.getbbox(b_text)
+                bw = (b_bbox[2] - b_bbox[0]) + 38
+                bh = 34
+                bx = card_x + 24
+                by = card_y + 14
+                draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=6, fill=red_col)
+                draw.ellipse([bx + 10, by + 11, bx + 20, by + 21], fill=(255, 255, 255, 255))
+                draw.text((bx + 26, by + 6), b_text, font=b_font, fill=(255, 255, 255, 255))
+
+            # Text
+            txt_color = self._hex_to_rgba(cfg.get("text_color", "#FFFFFF"), 1.0)
+            text_origin_y = card_y + pad_y + (24 if cfg.get("badge_enabled", True) else 0)
+            for i, line in enumerate(lines):
+                lw = line_widths[i]
+                lx = card_x + 28
+                ly = text_origin_y + i * line_height
+                draw.text((lx, ly), line, font=font, fill=txt_color)
+
+            return frame
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 4. SPECIAL CASE: #VIRALIN Badge (`news_viralin_badge`)
         # ─────────────────────────────────────────────────────────────────────
         if clean_key == "news_viralin_badge":
             pad_x = 40

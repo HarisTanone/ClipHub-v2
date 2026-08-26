@@ -307,31 +307,50 @@ class JobService:
 
         job_id = self._generate_job_id()
 
-        # Resolve preset styles if style_preset is provided (by slug, ID, or name)
+        # Resolve preset styles if style_preset is provided (by slug, ID, or name) or fallback to default
         resolved_preset = None
-        if style_preset and str(style_preset).strip().lower() not in ("", "default"):
-            try:
-                from src.infrastructure.preset_resolver import resolve_preset
-                resolved_preset = resolve_preset(style_preset, user_id=user_id)
-                if resolved_preset:
-                    if not hook_style_config and resolved_preset.get("hook_style_config"):
-                        hook_style_config = resolved_preset["hook_style_config"]
-                    if not subtitle_style_config and resolved_preset.get("subtitle_style_config"):
-                        subtitle_style_config = resolved_preset["subtitle_style_config"]
-                    if not watermark_config and resolved_preset.get("watermark_config"):
-                        watermark_config = resolved_preset["watermark_config"]
-                    if not cta_config and resolved_preset.get("cta_config"):
-                        cta_config = resolved_preset["cta_config"]
-                    if not text_emphasis_style_config and resolved_preset.get("text_emphasis_style_config"):
-                        text_emphasis_style_config = resolved_preset["text_emphasis_style_config"]
-                        text_emphasis_enabled = text_emphasis_enabled or resolved_preset.get("text_emphasis_enabled", False)
-            except Exception as e:
-                logger.warning(f"Preset resolution failed for '{style_preset}': {e}")
+        try:
+            from src.infrastructure.preset_resolver import resolve_preset
+            resolved_preset = resolve_preset(style_preset, user_id=user_id)
+            if resolved_preset:
+                if not hook_style_config and resolved_preset.get("hook_style_config"):
+                    hook_style_config = resolved_preset["hook_style_config"]
+                if not subtitle_style_config and resolved_preset.get("subtitle_style_config"):
+                    subtitle_style_config = resolved_preset["subtitle_style_config"]
+                if not watermark_config and resolved_preset.get("watermark_config"):
+                    watermark_config = resolved_preset["watermark_config"]
+                if not cta_config and resolved_preset.get("cta_config"):
+                    cta_config = resolved_preset["cta_config"]
+                if not text_emphasis_style_config and resolved_preset.get("text_emphasis_style_config"):
+                    text_emphasis_style_config = resolved_preset["text_emphasis_style_config"]
+                    text_emphasis_enabled = text_emphasis_enabled or resolved_preset.get("text_emphasis_enabled", False)
+                if not broll_motion_style and resolved_preset.get("broll_config"):
+                    broll_cfg = resolved_preset.get("broll_config", {})
+                    if isinstance(broll_cfg, dict):
+                        broll_motion_style = broll_cfg.get("motion_style") or broll_motion_style
+                broll_enabled = broll_enabled or resolved_preset.get("broll_enabled", False)
+                broll_image_overlay = broll_image_overlay if broll_enabled else resolved_preset.get("broll_image_overlay", True)
+                broll_behind_person = broll_behind_person if broll_enabled else resolved_preset.get("broll_behind_person", True)
+                broll_video_footage = broll_video_footage if broll_enabled else resolved_preset.get("broll_video_footage", True)
+                autogrid_enabled = autogrid_enabled or resolved_preset.get("autogrid_enabled", False)
+                if not auto_post_social and resolved_preset.get("auto_post_social"):
+                    auto_post_social = True
+                    auto_post_platforms = auto_post_platforms or resolved_preset.get("auto_post_platforms", "")
+                    auto_post_account_ids = auto_post_account_ids or resolved_preset.get("auto_post_account_ids", [])
+                    auto_post_schedule_mode = auto_post_schedule_mode or resolved_preset.get("auto_post_schedule_mode", "ai")
+                    auto_post_custom_time = auto_post_custom_time or resolved_preset.get("auto_post_custom_time")
+        except Exception as e:
+            logger.warning(f"Preset resolution failed for '{style_preset}': {e}")
 
         # Store style configs in clips_data for later use during render
         initial_clips_data = {}
         if force_reprocess:
             initial_clips_data["force_reprocess"] = True
+        if resolved_preset:
+            initial_clips_data["style_preset_slug"] = resolved_preset.get("slug")
+            initial_clips_data["style_preset_name"] = resolved_preset.get("name")
+            if resolved_preset.get("broll_config"):
+                initial_clips_data["broll_style_config"] = resolved_preset["broll_config"]
         if hook_style_config:
             initial_clips_data["hook_style_config"] = hook_style_config
         if subtitle_style_config:
@@ -346,9 +365,11 @@ class JobService:
         if text_emphasis_style_config:
             initial_clips_data["text_emphasis_style_config"] = text_emphasis_style_config
         # B-roll sub-types (explicit false must persist)
+        initial_clips_data["broll_enabled"] = bool(broll_enabled)
         initial_clips_data["broll_image_overlay"] = bool(broll_image_overlay) if broll_enabled else False
         initial_clips_data["broll_behind_person"] = bool(broll_behind_person) if broll_enabled else False
         initial_clips_data["broll_video_footage"] = bool(broll_video_footage) if broll_enabled else False
+        initial_clips_data["autogrid_enabled"] = bool(autogrid_enabled)
         # Background/template only for landscape/square; clear on 9:16
         if target_aspect_ratio in ("16:9", "1:1"):
             mode = background_mode or "template"

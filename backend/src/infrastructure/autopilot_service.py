@@ -470,13 +470,34 @@ class AutopilotService:
         # 5. Submit job to AutoCliper service
         from src.presentation.dependencies import get_job_service
         job_service = get_job_service()
-        job = await job_service.create_job(
+        created_res = await job_service.create_job(
             youtube_url=video_url,
             user_id=user_id,
-            job_options=job_options,
+            target_aspect_ratio=job_options.get("target_aspect_ratio", "9:16"),
+            style_preset=job_options.get("style_preset", "default"),
+            force_reprocess=job_options.get("force_reprocess", False),
+            use_remotion=job_options.get("use_remotion", True),
+            ai_layer_enabled=job_options.get("ai_layer_enabled", True),
+            broll_enabled=job_options.get("broll_enabled", False),
+            broll_image_overlay=job_options.get("broll_image_overlay", True),
+            broll_behind_person=job_options.get("broll_behind_person", True),
+            broll_video_footage=job_options.get("broll_video_footage", True),
+            autogrid_enabled=job_options.get("autogrid_enabled", False),
+            text_emphasis_enabled=job_options.get("text_emphasis_enabled", True),
+            hook_style_config=job_options.get("hook_style_config"),
+            subtitle_style_config=job_options.get("subtitle_style_config"),
+            text_emphasis_style_config=job_options.get("text_emphasis_style_config"),
+            watermark_config=job_options.get("watermark_config"),
+            cta_config=job_options.get("cta_config"),
+            auto_post_social=job_options.get("auto_post_social", False),
+            auto_post_platforms=job_options.get("auto_post_platforms", ""),
+            auto_post_account_ids=job_options.get("auto_post_account_ids", []),
+            auto_post_schedule_mode=job_options.get("auto_post_schedule_mode", "ai"),
+            auto_post_custom_time=job_options.get("auto_post_custom_time"),
         )
 
-        job_id = job.id
+        job = created_res[0] if isinstance(created_res, tuple) else created_res
+        job_id = getattr(job, "id", None) or getattr(job, "job_id", str(job))
 
         # 6. Record run in database
         now_iso = dt.datetime.now(dt.timezone.utc).isoformat()

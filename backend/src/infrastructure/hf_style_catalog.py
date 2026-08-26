@@ -100,13 +100,6 @@ def catalogue() -> dict[str, Any]:
 def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     if not isinstance(cfg, dict):
         return "remotion"
-    eng = str(cfg.get(key) or cfg.get("render_engine") or "").lower().strip()
-    if eng in ("hyperframes", "hf", "hyperframe"):
-        return "hyperframes"
-    if eng in ("ffmpeg", "drawtext"):
-        return "ffmpeg"
-    if eng in ("skia", "canvaskit", "skia-python", "skia_python"):
-        return "skia"
 
     # Auto-detect from animation, style, style_id, id, stylePreset, template, etc.
     anim = str(
@@ -121,36 +114,60 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
         or ""
     ).lower().strip()
 
-    if anim.startswith("skia_") or anim.startswith("skia-") or "skia" in anim:
+    if anim.startswith("skia_") or anim.startswith("skia-") or anim.startswith("skia:"):
         return "skia"
 
-    if anim in (
+    if anim.startswith("hf_") or anim.startswith("hook_") or anim.startswith("sub_"):
+        return "hyperframes"
+
+    if anim.startswith("ffmpeg_") or anim.startswith("ffmpeg:"):
+        return "ffmpeg"
+
+    eng = str(cfg.get(key) or cfg.get("render_engine") or "").lower().strip()
+    if eng in ("remotion", "react", "motion", "remotion_renderer", "remotion-renderer", "web", "html"):
+        return "remotion"
+    if eng in ("hyperframes", "hf", "hyperframe"):
+        return "hyperframes"
+    if eng in ("ffmpeg", "drawtext"):
+        return "ffmpeg"
+    if eng in ("skia", "canvaskit", "skia-python", "skia_python"):
+        return "skia"
+
+    skia_explicit = (
         "glassmorphism", "clean_editorial", "podcast_pro", "kinetic_word_box",
         "neon_tube", "gradient_fill", "cinematic_slate", "modern_mono",
         "bold_impact_stroke", "dual_layer", "retro_chrome", "outline_stack",
         "neon_glow", "gradient_pill", "comic_pop", "cyberpunk", "minimal_clean",
         "split_duotone", "impact_yellow",
-    ):
+    )
+    if anim in skia_explicit:
         return "skia"
 
     try:
         from src.infrastructure.subtitle_styles import SKIA_STYLES, FFMPEG_STYLES
         if anim in SKIA_STYLES:
             return "skia"
-        if anim in FFMPEG_STYLES or anim.startswith("ffmpeg_"):
+        if anim in FFMPEG_STYLES:
             return "ffmpeg"
     except Exception:
         pass
 
-    if anim in (
-        "classic_karaoke", "hormozi_pop", "devon_clean", "podcast_dialogue",
-        "bold_impact", "cinematic_bar", "fire_emphasis", "glass_blur",
-        "tech_mono", "gold_luxury", "minimal_lower", "classic",
-    ):
-        return "ffmpeg"
+    # Remotion animation / preset lists
+    remotion_presets = (
+        "classic", "dual_pop", "neon_pulse", "meme_impact", "editorial_banner",
+        "spotlight_keyword", "lower_third", "bubble_chat", "minimal_clean",
+        "breaking_tape", "quote_box", "documentary", "caption_strip", "word_tiles",
+        "gradient_glass", "comic_burst", "terminal_type", "bold_yellow",
+        "emphasis_orange", "emphasis_green", "neon", "big_impact", "slide_clean",
+        "glow_purple", "fade_scale", "slide_up", "glitch", "typewriter",
+        "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold",
+        "slide_punch_framer", "bold_slam", "podcast_lower_third", "quote_card",
+        "waveform_pulse", "mic_drop", "split_panel", "kinetic_stack",
+        "glass_flash", "marker_swipe", "signal_scan",
+    )
+    if anim in remotion_presets:
+        return "remotion"
 
-    if anim.startswith("hook_") or anim.startswith("sub_") or anim.startswith("hf_"):
-        return "hyperframes"
     return "remotion"
 
 
