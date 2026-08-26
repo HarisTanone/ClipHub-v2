@@ -168,6 +168,12 @@ def _format_user_preset_row(row) -> Dict[str, Any]:
     )
 
     logger.info(f"preset_resolver: resolved user preset '{r_dict.get('name')}' (slug: {r_dict.get('slug')})")
+    raw_plats = autopost_style.get("platforms", "tiktok,instagram,youtube") if autopost_style else "tiktok,instagram,youtube"
+    if isinstance(raw_plats, (list, tuple)):
+        plat_str = ",".join(str(p) for p in raw_plats if p)
+    else:
+        plat_str = str(raw_plats or "")
+
     return {
         "source": "user_preset",
         "id": r_dict.get("id"),
@@ -192,8 +198,9 @@ def _format_user_preset_row(row) -> Dict[str, Any]:
         "subtitle_engine": subtitle_style.get("engine", "remotion") if isinstance(subtitle_style, dict) else "remotion",
         "autopost_config": autopost_style,
         "auto_post_social": bool(autopost_style.get("enabled", False)) if autopost_style else False,
-        "auto_post_platforms": autopost_style.get("platforms", "tiktok,instagram,youtube") if autopost_style else "tiktok,instagram,youtube",
+        "auto_post_platforms": plat_str,
         "auto_post_account_ids": autopost_style.get("account_ids", []) if autopost_style else [],
         "auto_post_schedule_mode": autopost_style.get("schedule_mode", "ai") if autopost_style else "ai",
         "auto_post_custom_time": autopost_style.get("custom_time") if autopost_style else None,
     }
+

@@ -251,6 +251,8 @@ export interface StyleEditorModalProps {
   onCtaChange?: (style: CtaStyle) => void;
   brollStyle?: Record<string, any>;
   onBrollChange?: (broll: Record<string, any>) => void;
+  autopostStyle?: Record<string, any>;
+  onAutopostChange?: (autopost: Record<string, any>) => void;
   onPresetLoad?: (preset: Preset) => void;
   aspectRatio?: string;
   inline?: boolean;

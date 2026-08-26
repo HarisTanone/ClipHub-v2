@@ -79,15 +79,23 @@ export function NewJob() {
 
   useEffect(() => {
     presetsApi.list().then(setUserPresets).catch(() => { });
+    // Eagerly fetch social platform status so accounts and platforms are ready immediately
+    setLoadingPlatforms(true);
+    socialApi.getPlatformsStatus()
+      .then((res) => {
+        setPlatformsStatus(res);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingPlatforms(false));
   }, []);
 
   useEffect(() => {
-    if (autoPostSocial && !platformsStatus) {
+    if (autoPostSocial && !platformsStatus && !loadingPlatforms) {
       setLoadingPlatforms(true);
       socialApi.getPlatformsStatus()
         .then((res) => {
           setPlatformsStatus(res);
-          // Auto select connected platforms by default
+          // Auto select connected platforms if none selected yet
           const connected = Object.entries(res.platforms)
             .filter(([_, info]) => info.connected)
             .map(([plat]) => plat);
@@ -151,23 +159,43 @@ export function NewJob() {
     }
 
     // AI Auto-Post Social toggle & config sync
-    if (preset.autopost_style) {
-      if (preset.autopost_style.enabled !== undefined) setAutoPostSocial(Boolean(preset.autopost_style.enabled));
+    if (preset.autopost_style && Object.keys(preset.autopost_style).length > 0) {
+      const isEnabled = preset.autopost_style.enabled !== undefined
+        ? Boolean(preset.autopost_style.enabled)
+        : false;
+      setAutoPostSocial(isEnabled);
+      
+      let plats: string[] = [];
       if (preset.autopost_style.platforms) {
-        const plats = Array.isArray(preset.autopost_style.platforms)
+        plats = Array.isArray(preset.autopost_style.platforms)
           ? preset.autopost_style.platforms
           : String(preset.autopost_style.platforms).split(",").map((s) => s.trim()).filter(Boolean);
-        setAutoPostPlatforms(plats);
       }
-      if (preset.autopost_style.account_ids) {
+      setAutoPostPlatforms(plats);
+      
+      if (preset.autopost_style.account_ids && Array.isArray(preset.autopost_style.account_ids)) {
         setAutoPostAccountIds(preset.autopost_style.account_ids);
+      } else {
+        setAutoPostAccountIds([]);
       }
+      
       if (preset.autopost_style.schedule_mode) {
         setAutoPostScheduleMode(preset.autopost_style.schedule_mode);
+      } else {
+        setAutoPostScheduleMode("ai");
       }
+      
       if (preset.autopost_style.custom_time) {
         setAutoPostCustomTime(preset.autopost_style.custom_time);
+      } else {
+        setAutoPostCustomTime("");
       }
+    } else {
+      setAutoPostSocial(false);
+      setAutoPostPlatforms([]);
+      setAutoPostAccountIds([]);
+      setAutoPostScheduleMode("ai");
+      setAutoPostCustomTime("");
     }
 
     setActivePresetId(preset.id);
@@ -768,16 +796,25 @@ export function NewJob() {
                     Pilih Media Sosial & Akun
                   </label>
 
-                  {loadingPlatforms ? (
+                  {loadingPlatforms && !platformsStatus ? (
                     <div className="flex items-center gap-2 py-3 text-zinc-500 text-[11px]">
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
                       <span>Memeriksa akun terhubung...</span>
                     </div>
-                  ) : platformsStatus ? (
+                  ) : (
                     <div className="space-y-2">
-                      {Object.entries(platformsStatus.platforms).map(([platKey, info]) => {
+                      {Object.entries(
+                        platformsStatus?.platforms || {
+                          tiktok: { connected: false, count: 0, accounts: [] },
+                          instagram: { connected: false, count: 0, accounts: [] },
+                          youtube: { connected: false, count: 0, accounts: [] },
+                          facebook: { connected: false, count: 0, accounts: [] },
+                          threads: { connected: false, count: 0, accounts: [] },
+                          linkedin: { connected: false, count: 0, accounts: [] },
+                        }
+                      ).map(([platKey, info]) => {
                         const isSelected = autoPostPlatforms.includes(platKey);
-                        const isConnected = info.connected;
+                        const isConnected = info?.connected;
 
                         return (
                           <div
@@ -785,7 +822,7 @@ export function NewJob() {
                             className={cn(
                               "rounded-lg border p-2 text-xs transition-all",
                               !isConnected
-                                ? "border-zinc-800/60 bg-zinc-950/40 opacity-70"
+                                ? "border-zinc-800/60 bg-zinc-950/40 opacity-80"
                                 : isSelected
                                 ? "border-emerald-500/60 bg-emerald-500/5"
                                 : "border-zinc-800 bg-zinc-900/40 hover:border-zinc-700"
@@ -795,8 +832,7 @@ export function NewJob() {
                               <label className="flex items-center gap-2 cursor-pointer select-none">
                                 <input
                                   type="checkbox"
-                                  disabled={!isConnected}
-                                  checked={isSelected && isConnected}
+                                  checked={isSelected}
                                   onChange={() => togglePlatform(platKey)}
                                   className="rounded border-zinc-700 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/30"
                                 />
@@ -819,11 +855,11 @@ export function NewJob() {
                             </div>
 
                             {/* Multi-account selector if connected and > 1 accounts */}
-                            {isConnected && isSelected && info.accounts.length > 1 && (
+                            {isConnected && isSelected && info?.accounts && info.accounts.length > 1 && (
                               <div className="mt-2 pt-2 border-t border-zinc-800/80 space-y-1 pl-6">
                                 <p className="text-[9px] text-zinc-400">Pilih Akun / Username:</p>
                                 <div className="space-y-1">
-                                  {info.accounts.map((acc) => {
+                                  {info.accounts.map((acc: any) => {
                                     const isAccSelected =
                                       autoPostAccountIds.length === 0 || autoPostAccountIds.includes(acc.account_id);
                                     return (
@@ -844,10 +880,6 @@ export function NewJob() {
                           </div>
                         );
                       })}
-                    </div>
-                  ) : (
-                    <div className="text-[10px] text-zinc-500 py-1">
-                      Gagal memuat status akun. Pastikan akun sudah dihubungkan di menu Social Accounts.
                     </div>
                   )}
                 </div>
@@ -1074,6 +1106,25 @@ export function NewJob() {
                 if (broll.behind_person !== undefined) setBrollBehindPerson(Boolean(broll.behind_person));
                 if (broll.video_footage !== undefined) setBrollVideoFootage(Boolean(broll.video_footage));
                 if (broll.autogrid_enabled !== undefined) setAutogridEnabled(Boolean(broll.autogrid_enabled));
+              }}
+              autopostStyle={{
+                enabled: autoPostSocial,
+                platforms: autoPostPlatforms,
+                account_ids: autoPostAccountIds,
+                schedule_mode: autoPostScheduleMode,
+                custom_time: autoPostCustomTime,
+              }}
+              onAutopostChange={(autopost) => {
+                if (autopost.enabled !== undefined) setAutoPostSocial(Boolean(autopost.enabled));
+                if (autopost.platforms) {
+                  const plats = Array.isArray(autopost.platforms)
+                    ? autopost.platforms
+                    : String(autopost.platforms).split(",").map((s) => s.trim()).filter(Boolean);
+                  setAutoPostPlatforms(plats);
+                }
+                if (autopost.account_ids) setAutoPostAccountIds(autopost.account_ids);
+                if (autopost.schedule_mode) setAutoPostScheduleMode(autopost.schedule_mode);
+                if (autopost.custom_time) setAutoPostCustomTime(autopost.custom_time);
               }}
               onPresetLoad={loadPreset}
               aspectRatio={aspectRatio}

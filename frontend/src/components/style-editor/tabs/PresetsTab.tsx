@@ -22,12 +22,14 @@ export function PresetsTab({
   watermarkStyle = DEFAULT_WATERMARK_STYLE,
   ctaStyle = DEFAULT_CTA_STYLE,
   brollStyle,
+  autopostStyle,
   onHookChange,
   onSubtitleChange,
   onTextEmphasisChange,
   onWatermarkChange,
   onCtaChange,
   onBrollChange,
+  onAutopostChange,
   onPresetLoad,
   externalActiveId,
   onPresetSelect,
@@ -38,12 +40,14 @@ export function PresetsTab({
   watermarkStyle?: WatermarkStyle;
   ctaStyle?: CtaStyle;
   brollStyle?: Record<string, any>;
+  autopostStyle?: Record<string, any>;
   onHookChange: (s: HookStyle) => void;
   onSubtitleChange: (s: SubtitleStyle) => void;
   onTextEmphasisChange: (s: TextEmphasisStyle) => void;
   onWatermarkChange?: (s: WatermarkStyle) => void;
   onCtaChange?: (s: CtaStyle) => void;
   onBrollChange?: (b: Record<string, any>) => void;
+  onAutopostChange?: (a: Record<string, any>) => void;
   onPresetLoad?: (preset: Preset) => void;
   externalActiveId?: number | null;
   onPresetSelect?: (id: number) => void;
@@ -78,6 +82,7 @@ export function PresetsTab({
     if (preset.watermark_style && onWatermarkChange) onWatermarkChange({ ...DEFAULT_WATERMARK_STYLE, ...preset.watermark_style });
     if (preset.cta_style && onCtaChange) onCtaChange(normaliseCtaStyle(preset.cta_style));
     if (preset.broll_style && onBrollChange) onBrollChange(preset.broll_style);
+    if (preset.autopost_style && onAutopostChange) onAutopostChange(preset.autopost_style);
     if (onPresetLoad) onPresetLoad(preset);
     setActivePresetId(preset.id);
     if (onPresetSelect) onPresetSelect(preset.id);
@@ -97,7 +102,8 @@ export function PresetsTab({
         watermarkStyle,
         ctaStyle,
         saveSlug.trim() || undefined,
-        brollStyle || {}
+        brollStyle || {},
+        autopostStyle || {}
       );
       setSaveName("");
       setSaveSlug("");

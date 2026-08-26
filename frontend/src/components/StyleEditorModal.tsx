@@ -32,6 +32,8 @@ export function StyleEditorModal({
   onCtaChange = () => { },
   brollStyle,
   onBrollChange,
+  autopostStyle,
+  onAutopostChange,
   onPresetLoad,
   aspectRatio = "9:16",
   inline,
@@ -71,12 +73,14 @@ export function StyleEditorModal({
               watermarkStyle={watermarkStyle}
               ctaStyle={ctaStyle}
               brollStyle={brollStyle}
+              autopostStyle={autopostStyle}
               onHookChange={onHookChange}
               onSubtitleChange={onSubtitleChange}
               onTextEmphasisChange={onTextEmphasisChange}
               onWatermarkChange={onWatermarkChange}
               onCtaChange={onCtaChange}
               onBrollChange={onBrollChange}
+              onAutopostChange={onAutopostChange}
               onPresetLoad={onPresetLoad}
               externalActiveId={externalActivePresetId}
               onPresetSelect={onPresetSelect}
@@ -177,12 +181,14 @@ export function StyleEditorModal({
               watermarkStyle={watermarkStyle}
               ctaStyle={ctaStyle}
               brollStyle={brollStyle}
+              autopostStyle={autopostStyle}
               onHookChange={onHookChange}
               onSubtitleChange={onSubtitleChange}
               onTextEmphasisChange={onTextEmphasisChange}
               onWatermarkChange={onWatermarkChange}
               onCtaChange={onCtaChange}
               onBrollChange={onBrollChange}
+              onAutopostChange={onAutopostChange}
               onPresetLoad={onPresetLoad}
               externalActiveId={externalActivePresetId}
               onPresetSelect={onPresetSelect}
