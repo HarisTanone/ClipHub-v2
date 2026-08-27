@@ -11,18 +11,18 @@ export function detectApiBase(): string {
   }
   return "http://localhost:8000";
 }
-const API_BASE = detectApiBase();
+export const API_BASE = detectApiBase();
 
-function getToken(): string | null {
+export function getToken(): string | null {
   return localStorage.getItem("access_token");
 }
 
-function setTokens(access: string, refresh: string) {
+export function setTokens(access: string, refresh: string) {
   localStorage.setItem("access_token", access);
   localStorage.setItem("refresh_token", refresh);
 }
 
-function clearTokens() {
+export function clearTokens() {
   localStorage.removeItem("access_token");
   localStorage.removeItem("refresh_token");
 }
@@ -282,6 +282,105 @@ export const auth = {
 
   isAuthenticated(): boolean {
     return !!getToken();
+  },
+};
+
+// ─── RBAC & User Management API ───────────────────────────────────────────────
+
+export interface PermissionItem {
+  id: number;
+  code: string;
+  name: string;
+  category: string;
+  description?: string;
+}
+
+export interface RoleItem {
+  id: number;
+  name: string;
+  description: string;
+  is_system: boolean;
+  user_count?: number;
+  permissions: PermissionItem[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UserListItem {
+  id: number;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  is_premium: boolean;
+  role: string;
+  role_id: number;
+  created_at: string | null;
+  last_login_at: string | null;
+}
+
+export const rbacApi = {
+  async getRoles(): Promise<RoleItem[]> {
+    const res = await request<{ success: boolean; data: RoleItem[] }>("/api/auth/roles");
+    return res.data || [];
+  },
+
+  async createRole(payload: { name: string; description?: string; permission_ids: number[] }): Promise<{ success: boolean; data: any; message?: string }> {
+    return request("/api/auth/roles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateRole(roleId: number, payload: { name?: string; description?: string; permission_ids?: number[] }): Promise<{ success: boolean; message?: string }> {
+    return request(`/api/auth/roles/${roleId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteRole(roleId: number): Promise<{ success: boolean; message?: string }> {
+    return request(`/api/auth/roles/${roleId}`, {
+      method: "DELETE",
+    });
+  },
+
+  async getPermissions(): Promise<Record<string, PermissionItem[]>> {
+    const res = await request<{ success: boolean; data: Record<string, PermissionItem[]> }>("/api/auth/permissions");
+    return res.data || {};
+  },
+
+  async getUsers(): Promise<UserListItem[]> {
+    const res = await request<{ success: boolean; data: UserListItem[] }>("/api/auth/users");
+    return res.data || [];
+  },
+
+  async createUser(payload: { email: string; password: string; full_name: string; role_id?: number; is_premium?: boolean }): Promise<{ success: boolean; data?: any; message?: string }> {
+    return request("/api/auth/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateUser(userId: number, payload: { full_name?: string; role_id?: number; is_active?: boolean; is_premium?: boolean; password?: string }): Promise<{ success: boolean; message?: string }> {
+    return request(`/api/auth/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteUser(userId: number): Promise<{ success: boolean; message?: string }> {
+    return request(`/api/auth/users/${userId}`, {
+      method: "DELETE",
+    });
+  },
+
+  async setPremium(userId: number, isPremium: boolean): Promise<boolean> {
+    const res = await fetch(`${API_BASE}/api/features/set-premium`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+      body: JSON.stringify({ user_id: userId, is_premium: isPremium }),
+    });
+    return res.ok;
   },
 };
 
@@ -874,8 +973,6 @@ export const analyze = {
     return token ? `${base}?token=${encodeURIComponent(token)}` : base;
   },
 };
-
-export { getToken, setTokens, clearTokens, API_BASE };
 
 // ─── Subtitle Styles API ─────────────────────────────────────────────────────
 

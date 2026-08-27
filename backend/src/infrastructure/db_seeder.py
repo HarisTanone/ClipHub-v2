@@ -132,43 +132,130 @@ def seed_database() -> None:
         cur.executescript(SCHEMA_SQL)
         logger.info("db_seeder: tables ensured")
 
-        # 2. Seed roles
-        cur.execute("INSERT OR IGNORE INTO roles (id, name, description, is_system) VALUES (1, 'superadmin', 'Full system access', 1)")
-        cur.execute("INSERT OR IGNORE INTO roles (id, name, description, is_system) VALUES (2, 'editor', 'Can create and manage jobs', 1)")
-        cur.execute("INSERT OR IGNORE INTO roles (id, name, description, is_system) VALUES (3, 'viewer', 'Read-only access', 1)")
-
-        # 3. Seed permissions
-        permissions = [
-            ("jobs:create", "Create Jobs", "jobs"),
-            ("jobs:read", "View Jobs", "jobs"),
-            ("jobs:delete", "Delete Jobs", "jobs"),
-            ("styles:update", "Update Styles", "styles"),
-            ("system:admin", "System Administration", "system"),
+        # 2. Seed roles (System roles)
+        system_roles = [
+            ("superadmin", "Full system access with all capabilities", 1),
+            ("admin", "Administrative management for users, roles, settings, styles, and automation", 1),
+            ("editor", "Creator and editor: can create/manage jobs, edit styles, generate videos, and publish", 1),
+            ("viewer", "Read-only access to view jobs, clips, styles, and presets", 1),
         ]
-        for code, name, category in permissions:
+        for rname, rdesc, is_sys in system_roles:
+            cur.execute("SELECT id FROM roles WHERE name = ?", (rname,))
+            rrow = cur.fetchone()
+            if not rrow:
+                cur.execute("INSERT INTO roles (name, description, is_system) VALUES (?, ?, ?)", (rname, rdesc, is_sys))
+            else:
+                cur.execute("UPDATE roles SET description = ?, is_system = ? WHERE id = ?", (rdesc, is_sys, rrow["id"]))
+
+        # Get role ID mapping
+        cur.execute("SELECT id, name FROM roles")
+        role_map = {row["name"]: row["id"] for row in cur.fetchall()}
+        superadmin_role_id = role_map.get("superadmin")
+        admin_role_id = role_map.get("admin")
+        editor_role_id = role_map.get("editor")
+        viewer_role_id = role_map.get("viewer")
+
+        # 3. Seed comprehensive permissions
+        permissions = [
+            # Jobs
+            ("jobs:create", "Create Jobs", "jobs", "Create new video clipping jobs and upload files"),
+            ("jobs:read", "View Jobs", "jobs", "View jobs, status, and rendered clips"),
+            ("jobs:update", "Update Jobs", "jobs", "Edit clips, operations, and titles"),
+            ("jobs:delete", "Delete Jobs", "jobs", "Delete jobs and rendered outputs"),
+            ("jobs:export", "Export Media", "jobs", "Download clips, media assets, and transcripts"),
+            # Styles & Presets
+            ("styles:read", "View Styles", "styles", "View style presets and subtitle configurations"),
+            ("styles:create", "Create Styles", "styles", "Create new style presets"),
+            ("styles:update", "Update Styles", "styles", "Edit style presets and subtitle formatting"),
+            ("styles:delete", "Delete Styles", "styles", "Delete custom style presets"),
+            ("brolls:read", "View B-Rolls", "styles", "View B-Roll motion typography templates"),
+            ("brolls:manage", "Manage B-Rolls", "styles", "Configure and edit B-Roll templates"),
+            # Autopilot
+            ("autopilot:read", "View Autopilot", "autopilot", "View autopilot schedule and task logs"),
+            ("autopilot:manage", "Manage Autopilot", "autopilot", "Configure autopilot settings and topics"),
+            ("autopilot:trigger", "Trigger Autopilot", "autopilot", "Manually trigger autopilot clipping run"),
+            # Video Generator
+            ("videogen:create", "Generate Videos", "video_gen", "Create AI-generated videos from prompts"),
+            ("videogen:read", "View Video Gen", "video_gen", "View AI generated video history"),
+            # Social & Telegram
+            ("social:read", "View Social Accounts", "social", "View connected social accounts"),
+            ("social:manage", "Manage Social Accounts", "social", "Connect and manage social accounts"),
+            ("social:publish", "Publish to Social", "social", "Publish and schedule clips to social media"),
+            ("telegram:manage", "Manage Telegram Bot", "social", "Configure Telegram bot settings and notifications"),
+            # AI Models & System Settings
+            ("models:read", "View AI Models", "settings", "View 9router LLM and AI models status"),
+            ("models:update", "Update AI Models", "settings", "Configure 9router and LLM routing"),
+            ("models:test", "Test AI Models", "settings", "Run benchmark and model tests"),
+            ("settings:read", "View Settings", "settings", "View system and studio settings"),
+            ("settings:update", "Update Settings", "settings", "Edit preferences and visual studio tuning"),
+            ("settings:system", "System Config", "settings", "Manage dynamic database system configs"),
+            # User & Role Access Control (RBAC)
+            ("users:read", "View Users", "rbac", "View registered users and accounts"),
+            ("users:create", "Create Users", "rbac", "Register new users with roles"),
+            ("users:update", "Update Users", "rbac", "Edit user profile, role, and premium status"),
+            ("users:delete", "Deactivate Users", "rbac", "Deactivate or remove user accounts"),
+            ("roles:read", "View Roles", "rbac", "View roles and permission matrices"),
+            ("roles:create", "Create Roles", "rbac", "Create custom roles"),
+            ("roles:update", "Update Roles", "rbac", "Modify role permissions and descriptions"),
+            ("roles:delete", "Delete Roles", "rbac", "Delete custom non-system roles"),
+            # System Ops
+            ("system:monitoring", "System Monitoring", "system", "View system metrics and health"),
+            ("system:testing", "Test & Deploy", "system", "Run pre-deployment test scripts"),
+            ("system:admin", "System Administration", "system", "Unrestricted administrator control"),
+        ]
+
+        for code, name, category, desc in permissions:
             cur.execute(
-                "INSERT OR IGNORE INTO permissions (code, name, category) VALUES (?, ?, ?)",
-                (code, name, category),
+                """INSERT INTO permissions (code, name, category, description)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(code) DO UPDATE SET name = excluded.name, category = excluded.category, description = excluded.description""",
+                (code, name, category, desc),
             )
 
         # 4. Seed role-permission mappings
-        # Superadmin gets all permissions
-        cur.execute("SELECT id FROM permissions")
-        all_perm_ids = [row["id"] for row in cur.fetchall()]
-        for pid in all_perm_ids:
-            cur.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (1, ?)", (pid,))
+        # Superadmin gets ALL permissions
+        if superadmin_role_id:
+            cur.execute("SELECT id FROM permissions")
+            all_perm_ids = [row["id"] for row in cur.fetchall()]
+            for pid in all_perm_ids:
+                cur.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (superadmin_role_id, pid))
 
-        # Editor gets create, read, styles
-        cur.execute("SELECT id FROM permissions WHERE code IN ('jobs:create', 'jobs:read', 'styles:update')")
-        editor_perm_ids = [row["id"] for row in cur.fetchall()]
-        for pid in editor_perm_ids:
-            cur.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (2, ?)", (pid,))
+        # Admin role permissions (all rbac, jobs, styles, autopilot, social, models:read, settings, system:monitoring)
+        if admin_role_id:
+            cur.execute(
+                """SELECT id FROM permissions WHERE category IN ('jobs', 'styles', 'autopilot', 'video_gen', 'social', 'rbac')
+                OR code IN ('models:read', 'models:test', 'settings:read', 'settings:update', 'settings:system', 'system:monitoring')"""
+            )
+            admin_perm_ids = [row["id"] for row in cur.fetchall()]
+            for pid in admin_perm_ids:
+                cur.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (admin_role_id, pid))
 
-        # Viewer gets read only
-        cur.execute("SELECT id FROM permissions WHERE code = 'jobs:read'")
-        viewer_perm = cur.fetchone()
-        if viewer_perm:
-            cur.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (3, ?)", (viewer_perm["id"],))
+        # Editor role permissions
+        if editor_role_id:
+            cur.execute(
+                """SELECT id FROM permissions WHERE code IN (
+                    'jobs:create', 'jobs:read', 'jobs:update', 'jobs:delete', 'jobs:export',
+                    'styles:read', 'styles:create', 'styles:update', 'brolls:read',
+                    'autopilot:read', 'videogen:create', 'videogen:read',
+                    'social:read', 'social:publish',
+                    'settings:read', 'settings:update'
+                )"""
+            )
+            editor_perm_ids = [row["id"] for row in cur.fetchall()]
+            for pid in editor_perm_ids:
+                cur.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (editor_role_id, pid))
+
+        # Viewer role permissions
+        if viewer_role_id:
+            cur.execute(
+                """SELECT id FROM permissions WHERE code IN (
+                    'jobs:read', 'jobs:export', 'styles:read', 'brolls:read',
+                    'videogen:read', 'social:read', 'autopilot:read', 'settings:read'
+                )"""
+            )
+            viewer_perm_ids = [row["id"] for row in cur.fetchall()]
+            for pid in viewer_perm_ids:
+                cur.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (viewer_role_id, pid))
 
         # 5. Seed superadmin user
         cur.execute("SELECT id, hashed_password FROM users WHERE email = ?", (settings.SUPERADMIN_EMAIL,))
@@ -176,20 +263,21 @@ def seed_database() -> None:
         if not existing:
             hashed = hash_password(settings.SUPERADMIN_PASSWORD)
             cur.execute(
-                "INSERT INTO users (email, hashed_password, full_name, is_active, role_id) VALUES (?, ?, ?, 1, 1)",
-                (settings.SUPERADMIN_EMAIL, hashed, "Super Admin"),
+                "INSERT INTO users (email, hashed_password, full_name, is_active, role_id) VALUES (?, ?, ?, 1, ?)",
+                (settings.SUPERADMIN_EMAIL, hashed, "Super Admin", superadmin_role_id),
             )
             logger.info(f"db_seeder: superadmin created ({settings.SUPERADMIN_EMAIL})")
         else:
             if not verify_password(settings.SUPERADMIN_PASSWORD, existing["hashed_password"]):
-                new_hashed = hash_password(settings.SUPERADMIN_PASSWORD)
+                new_hash = hash_password(settings.SUPERADMIN_PASSWORD)
                 cur.execute(
-                    "UPDATE users SET hashed_password = ?, is_active = 1, role_id = 1 WHERE id = ?",
-                    (new_hashed, existing["id"]),
+                    "UPDATE users SET hashed_password = ? WHERE email = ?",
+                    (new_hash, settings.SUPERADMIN_EMAIL),
                 )
-                logger.info(f"db_seeder: superadmin password updated to match settings ({settings.SUPERADMIN_EMAIL})")
-            else:
-                logger.info(f"db_seeder: superadmin already exists ({settings.SUPERADMIN_EMAIL})")
+                logger.info("db_seeder: superadmin password updated")
+            if superadmin_role_id:
+                cur.execute("UPDATE users SET role_id = ? WHERE email = ?", (superadmin_role_id, settings.SUPERADMIN_EMAIL))
+            logger.info(f"db_seeder: superadmin already exists ({settings.SUPERADMIN_EMAIL})")
 
         # 6. Seed B-Roll templates
         templates = [

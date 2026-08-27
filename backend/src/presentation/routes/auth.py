@@ -36,6 +36,7 @@ from src.presentation.auth_deps import (
     CurrentUser,
     get_current_user,
     require_permission,
+    require_any_permission,
     require_superadmin,
 )
 
@@ -63,9 +64,10 @@ class RefreshRequest(BaseModel):
 
 class CreateUserRequest(BaseModel):
     email: str = Field(..., min_length=5)
-    password: str = Field(..., min_length=8, max_length=72)
+    password: str = Field(..., min_length=6, max_length=72)
     full_name: str = Field(..., min_length=1, max_length=100)
-    role_id: Optional[int] = Field(default=2, ge=1)  # Default: editor role
+    role_id: Optional[int] = Field(default=3, ge=1)  # Default: editor role
+    is_premium: bool = False
     feature_codes: Optional[list[str]] = None  # Optional: grant features on creation
 
 
@@ -73,16 +75,18 @@ class UpdateUserRequest(BaseModel):
     full_name: Optional[str] = None
     role_id: Optional[int] = None
     is_active: Optional[bool] = None
-    password: Optional[str] = Field(None, min_length=8, max_length=72)
+    is_premium: Optional[bool] = None
+    password: Optional[str] = Field(None, min_length=6, max_length=72)
 
 
 class CreateRoleRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-z_]+$")
+    name: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-z0-9_]+$")
     description: str = ""
     permission_ids: list[int] = []
 
 
 class UpdateRoleRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=50, pattern=r"^[a-z0-9_]+$")
     description: Optional[str] = None
     permission_ids: Optional[list[int]] = None
 
@@ -95,8 +99,14 @@ def _get_conn():
 
 
 def _get_user_permissions(conn, role_id: int) -> list[str]:
-    """Get permission codes for a role."""
+    """Get permission codes for a role. Superadmin gets all permission codes or ['*']."""
     cur = conn.cursor()
+    cur.execute("SELECT name FROM roles WHERE id = ?", (role_id,))
+    role = cur.fetchone()
+    if role and role["name"] == "superadmin":
+        cur.execute("SELECT code FROM permissions")
+        return [row["code"] for row in cur.fetchall()] or ["*"]
+
     cur.execute(
         """SELECT p.code FROM permissions p
         JOIN role_permissions rp ON rp.permission_id = p.id
@@ -289,7 +299,7 @@ async def get_me(user: CurrentUser = Depends(get_current_user)):
 
 @router.post("/users", status_code=201)
 async def create_user(body: CreateUserRequest, admin: CurrentUser = Depends(require_permission("users:create"))):
-    """Create new user (admin/superadmin only). Optionally grant features on creation."""
+    """Create new user (admin/superadmin only). Optionally grant features or premium on creation."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
@@ -314,8 +324,8 @@ async def create_user(body: CreateUserRequest, admin: CurrentUser = Depends(requ
 
         hashed = hash_password(body.password)
         cur.execute(
-            "INSERT INTO users (email, hashed_password, full_name, role_id) VALUES (?,?,?,?)",
-            (body.email, hashed, body.full_name, body.role_id),
+            "INSERT INTO users (email, hashed_password, full_name, role_id, is_premium) VALUES (?,?,?,?,?)",
+            (body.email, hashed, body.full_name, body.role_id, int(body.is_premium)),
         )
         new_user_id = cur.lastrowid
 
@@ -335,19 +345,29 @@ async def create_user(body: CreateUserRequest, admin: CurrentUser = Depends(requ
         if granted_features:
             msg += f" and {len(granted_features)} features granted"
 
-        return {"success": True, "message": msg, "data": {"user_id": new_user_id, "features": granted_features}}
+        return {
+            "success": True,
+            "message": msg,
+            "data": {
+                "user_id": new_user_id,
+                "email": body.email,
+                "role": role["name"],
+                "is_premium": body.is_premium,
+                "features": granted_features,
+            },
+        }
     finally:
         conn.close()
 
 
 @router.get("/users")
 async def list_users(_: CurrentUser = Depends(require_permission("users:read"))):
-    """List all users."""
+    """List all users with roles, status, and premium flags."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
         cur.execute(
-            """SELECT u.id, u.email, u.full_name, u.is_active, u.role_id, r.name as role_name,
+            """SELECT u.id, u.email, u.full_name, u.is_active, u.is_premium, u.role_id, r.name as role_name,
             u.created_at, u.last_login_at
             FROM users u LEFT JOIN roles r ON r.id = u.role_id ORDER BY u.id"""
         )
@@ -355,8 +375,13 @@ async def list_users(_: CurrentUser = Depends(require_permission("users:read")))
         return {
             "success": True,
             "data": [{
-                "id": u["id"], "email": u["email"], "full_name": u["full_name"],
-                "is_active": bool(u["is_active"]), "role": u["role_name"], "role_id": u["role_id"],
+                "id": u["id"],
+                "email": u["email"],
+                "full_name": u["full_name"],
+                "is_active": bool(u["is_active"]),
+                "is_premium": bool(u["is_premium"]),
+                "role": u["role_name"],
+                "role_id": u["role_id"],
                 "created_at": u["created_at"],
                 "last_login_at": u["last_login_at"],
             } for u in users],
@@ -368,7 +393,7 @@ async def list_users(_: CurrentUser = Depends(require_permission("users:read")))
 
 @router.patch("/users/{user_id}")
 async def update_user(user_id: int, body: UpdateUserRequest, admin: CurrentUser = Depends(require_permission("users:update"))):
-    """Update user (admin+)."""
+    """Update user profile, role, status, or premium flag."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
@@ -382,6 +407,14 @@ async def update_user(user_id: int, body: UpdateUserRequest, admin: CurrentUser 
         if crole and crole["name"] == "superadmin" and not admin.is_superadmin:
             raise HTTPException(status_code=403, detail="Cannot modify superadmin")
 
+        if body.role_id is not None:
+            cur.execute("SELECT id, name FROM roles WHERE id = ?", (body.role_id,))
+            target_role = cur.fetchone()
+            if not target_role:
+                raise HTTPException(status_code=400, detail=f"Role ID {body.role_id} not found")
+            if target_role["name"] == "superadmin" and not admin.is_superadmin:
+                raise HTTPException(status_code=403, detail="Only superadmin can assign superadmin role")
+
         updates, params = [], []
         if body.full_name is not None:
             updates.append("full_name = ?"); params.append(body.full_name)
@@ -389,12 +422,15 @@ async def update_user(user_id: int, body: UpdateUserRequest, admin: CurrentUser 
             updates.append("role_id = ?"); params.append(body.role_id)
         if body.is_active is not None:
             updates.append("is_active = ?"); params.append(int(body.is_active))
+        if body.is_premium is not None:
+            updates.append("is_premium = ?"); params.append(int(body.is_premium))
         if body.password is not None:
             updates.append("hashed_password = ?"); params.append(hash_password(body.password))
 
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
 
+        updates.append("updated_at = datetime('now')")
         params.append(user_id)
         cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
@@ -411,7 +447,7 @@ async def delete_user(user_id: int, admin: CurrentUser = Depends(require_permiss
     conn = _get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
+        cur.execute("UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?", (user_id,))
         cur.execute("UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?", (user_id,))
         conn.commit()
         return {"success": True, "message": f"User #{user_id} deactivated"}
@@ -422,37 +458,47 @@ async def delete_user(user_id: int, admin: CurrentUser = Depends(require_permiss
 # ─── Role Management ─────────────────────────────────────────────────────────
 
 @router.get("/roles")
-async def list_roles(_: CurrentUser = Depends(require_permission("roles:read"))):
-    """List roles with permissions."""
+async def list_roles(_: CurrentUser = Depends(require_any_permission("roles:read", "users:read"))):
+    """List roles with assigned permissions and user count."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, description, is_system FROM roles ORDER BY id")
+        cur.execute("SELECT id, name, description, is_system, created_at, updated_at FROM roles ORDER BY id")
         roles = cur.fetchall()
         result = []
         for role in roles:
             cur.execute(
-                """SELECT p.id, p.code, p.name, p.category FROM permissions p
-                JOIN role_permissions rp ON rp.permission_id = p.id WHERE rp.role_id = ?""",
+                """SELECT p.id, p.code, p.name, p.category, p.description FROM permissions p
+                JOIN role_permissions rp ON rp.permission_id = p.id WHERE rp.role_id = ?
+                ORDER BY p.category, p.code""",
                 (role["id"],),
             )
             perms = [dict(p) for p in cur.fetchall()]
-            result.append({**dict(role), "is_system": bool(role["is_system"]), "permissions": perms})
+            cur.execute("SELECT COUNT(*) as cnt FROM users WHERE role_id = ?", (role["id"],))
+            user_cnt = cur.fetchone()["cnt"]
+            result.append({
+                **dict(role),
+                "is_system": bool(role["is_system"]),
+                "user_count": user_cnt,
+                "permissions": perms,
+            })
         return {"success": True, "data": result, "total": len(result)}
     finally:
         conn.close()
 
 
 @router.post("/roles", status_code=201)
-async def create_role(body: CreateRoleRequest, _: CurrentUser = Depends(require_superadmin())):
-    """Create custom role (superadmin only)."""
+async def create_role(body: CreateRoleRequest, admin: CurrentUser = Depends(require_any_permission("roles:create", "system:admin"))):
+    """Create custom role (admin/superadmin)."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM roles WHERE name = ?", (body.name,))
+        role_name = body.name.lower().strip()
+        cur.execute("SELECT id FROM roles WHERE name = ?", (role_name,))
         if cur.fetchone():
-            raise HTTPException(status_code=409, detail=f"Role '{body.name}' already exists")
-        cur.execute("INSERT INTO roles (name, description) VALUES (?, ?)", (body.name, body.description))
+            raise HTTPException(status_code=409, detail=f"Role '{role_name}' already exists")
+
+        cur.execute("INSERT INTO roles (name, description, is_system) VALUES (?, ?, 0)", (role_name, body.description))
         role_id = cur.lastrowid
         for pid in body.permission_ids:
             try:
@@ -460,30 +506,46 @@ async def create_role(body: CreateRoleRequest, _: CurrentUser = Depends(require_
             except Exception:
                 pass
         conn.commit()
-        return {"success": True, "data": {"id": role_id, "name": body.name}}
+        return {"success": True, "data": {"id": role_id, "name": role_name}, "message": f"Role '{role_name}' created"}
     finally:
         conn.close()
 
 
 @router.patch("/roles/{role_id}")
-async def update_role(role_id: int, body: UpdateRoleRequest, _: CurrentUser = Depends(require_superadmin())):
-    """Update role (superadmin only)."""
+async def update_role(role_id: int, body: UpdateRoleRequest, admin: CurrentUser = Depends(require_any_permission("roles:update", "system:admin"))):
+    """Update role name, description, or permission mappings."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, name FROM roles WHERE id = ?", (role_id,))
+        cur.execute("SELECT id, name, is_system FROM roles WHERE id = ?", (role_id,))
         role = cur.fetchone()
         if not role:
             raise HTTPException(status_code=404, detail="Role not found")
+
+        if role["is_system"] and body.name is not None and body.name != role["name"]:
+            raise HTTPException(status_code=400, detail="Cannot rename system role")
+
+        if body.name is not None and not role["is_system"]:
+            new_name = body.name.lower().strip()
+            cur.execute("SELECT id FROM roles WHERE name = ? AND id != ?", (new_name, role_id))
+            if cur.fetchone():
+                raise HTTPException(status_code=409, detail=f"Role '{new_name}' already exists")
+            cur.execute("UPDATE roles SET name = ? WHERE id = ?", (new_name, role_id))
+
         if body.description is not None:
             cur.execute("UPDATE roles SET description = ? WHERE id = ?", (body.description, role_id))
+
         if body.permission_ids is not None:
+            if role["name"] == "superadmin" and not admin.is_superadmin:
+                raise HTTPException(status_code=403, detail="Cannot modify superadmin permissions")
             cur.execute("DELETE FROM role_permissions WHERE role_id = ?", (role_id,))
             for pid in body.permission_ids:
                 try:
                     cur.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (role_id, pid))
                 except Exception:
                     pass
+
+        cur.execute("UPDATE roles SET updated_at = datetime('now') WHERE id = ?", (role_id,))
         conn.commit()
         return {"success": True, "message": f"Role '{role['name']}' updated"}
     finally:
@@ -491,8 +553,8 @@ async def update_role(role_id: int, body: UpdateRoleRequest, _: CurrentUser = De
 
 
 @router.delete("/roles/{role_id}")
-async def delete_role(role_id: int, _: CurrentUser = Depends(require_superadmin())):
-    """Delete custom role (superadmin only). System roles protected."""
+async def delete_role(role_id: int, admin: CurrentUser = Depends(require_any_permission("roles:delete", "system:admin"))):
+    """Delete custom role. System roles protected."""
     conn = _get_conn()
     try:
         cur = conn.cursor()
@@ -502,7 +564,9 @@ async def delete_role(role_id: int, _: CurrentUser = Depends(require_superadmin(
             raise HTTPException(status_code=404, detail="Role not found")
         if role["is_system"]:
             raise HTTPException(status_code=403, detail=f"Cannot delete system role '{role['name']}'")
-        cur.execute("UPDATE users SET role_id = NULL WHERE role_id = ?", (role_id,))
+
+        # Reassign users with this role to viewer (role_id=4)
+        cur.execute("UPDATE users SET role_id = 4 WHERE role_id = ?", (role_id,))
         cur.execute("DELETE FROM role_permissions WHERE role_id = ?", (role_id,))
         cur.execute("DELETE FROM roles WHERE id = ?", (role_id,))
         conn.commit()
@@ -512,7 +576,7 @@ async def delete_role(role_id: int, _: CurrentUser = Depends(require_superadmin(
 
 
 @router.get("/permissions")
-async def list_permissions(_: CurrentUser = Depends(require_permission("roles:read"))):
+async def list_permissions(_: CurrentUser = Depends(require_any_permission("roles:read", "users:read"))):
     """List all permissions grouped by category."""
     conn = _get_conn()
     try:

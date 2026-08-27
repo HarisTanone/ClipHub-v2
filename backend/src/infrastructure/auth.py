@@ -95,11 +95,39 @@ def hash_token(token: str) -> str:
 def has_permission(user_role: str, user_permissions: list[str], required_permission: str) -> bool:
     """Check if user has required permission.
 
-    Superadmin bypasses all permission checks.
+    Supports:
+    - Superadmin bypass (user_role == "superadmin")
+    - Full wildcard ("*" or "system:admin")
+    - Scope wildcard (e.g. "jobs:*" satisfies "jobs:create", "jobs:read", etc.)
+    - Exact permission match (e.g. "jobs:create")
     """
     if user_role == "superadmin":
         return True
-    return required_permission in user_permissions
+    if not user_permissions:
+        return False
+    if "*" in user_permissions or "system:admin" in user_permissions:
+        return True
+    if required_permission in user_permissions:
+        return True
+    if ":" in required_permission:
+        scope = required_permission.split(":", 1)[0]
+        if f"{scope}:*" in user_permissions:
+            return True
+    return False
+
+
+def has_any_permission(user_role: str, user_permissions: list[str], *required_permissions: str) -> bool:
+    """Check if user has AT LEAST ONE of the required permissions."""
+    if user_role == "superadmin":
+        return True
+    return any(has_permission(user_role, user_permissions, p) for p in required_permissions)
+
+
+def has_all_permissions(user_role: str, user_permissions: list[str], *required_permissions: str) -> bool:
+    """Check if user has ALL of the required permissions."""
+    if user_role == "superadmin":
+        return True
+    return all(has_permission(user_role, user_permissions, p) for p in required_permissions)
 
 
 def is_superadmin(role: str) -> bool:

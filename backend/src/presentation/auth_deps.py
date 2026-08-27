@@ -102,7 +102,7 @@ def require_any_permission(*permissions: str):
         if user.is_superadmin:
             return user
         for perm in permissions:
-            if perm in user.permissions:
+            if user.has_perm(perm):
                 return user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

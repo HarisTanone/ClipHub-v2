@@ -146,6 +146,17 @@ async def lifespan(app: FastAPI):
         if "pipeline_override" not in user_cols:
             cur.execute("ALTER TABLE users ADD COLUMN pipeline_override TEXT DEFAULT NULL")
             logger.info("migration: added pipeline_override to users table")
+        if "role_id" not in user_cols:
+            cur.execute("ALTER TABLE users ADD COLUMN role_id INTEGER DEFAULT NULL")
+            logger.info("migration: added role_id to users table")
+        if "hashed_password" not in user_cols and "password_hash" in user_cols:
+            cur.execute("ALTER TABLE users ADD COLUMN hashed_password TEXT DEFAULT ''")
+            cur.execute("UPDATE users SET hashed_password = password_hash WHERE (hashed_password = '' OR hashed_password IS NULL) AND password_hash IS NOT NULL")
+            logger.info("migration: synchronized hashed_password from password_hash")
+        elif "password_hash" not in user_cols and "hashed_password" in user_cols:
+            cur.execute("ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT ''")
+            cur.execute("UPDATE users SET password_hash = hashed_password WHERE (password_hash = '' OR password_hash IS NULL) AND hashed_password IS NOT NULL")
+            logger.info("migration: synchronized password_hash from hashed_password")
 
         conn.commit()
         conn.close()

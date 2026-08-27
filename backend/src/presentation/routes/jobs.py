@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from src.application.services import JobService
 from src.config import settings
 from src.infrastructure.clip_outputs import discover_ready_clip_ranks, find_final_clip
-from src.presentation.auth_deps import CurrentUser, get_current_user, get_optional_user
+from src.presentation.auth_deps import CurrentUser, get_current_user, get_optional_user, require_permission
 from src.presentation.dependencies import get_job_service
 from src.presentation.schemas.jobs import (
     ClipDataResponse,
@@ -280,7 +280,7 @@ async def _fetch_and_store_youtube_title(job_id: str, youtube_url: str, service:
 async def create_job(
     request: CreateJobRequest,
     service: JobService = Depends(get_job_service),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_permission("jobs:create")),
 ):
     """Buat job baru dari URL YouTube. Jika URL sudah ada yang aktif, return job yang ada.
 
@@ -371,7 +371,7 @@ async def create_job_from_upload(
     file: UploadFile = File(...),
     options_json: str = Form("{}"),
     service: JobService = Depends(get_job_service),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_permission("jobs:create")),
 ):
     """Buat job baru dari file video upload manual."""
     original_name = file.filename or "uploaded_video.mp4"
@@ -1180,7 +1180,7 @@ async def reprocess_job(
 async def delete_job(
     job_id: str,
     service: JobService = Depends(get_job_service),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_permission("jobs:delete")),
 ):
     """Delete a job and all its output files.
 

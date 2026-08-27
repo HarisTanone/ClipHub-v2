@@ -35,7 +35,13 @@ def setup_db():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        conn.execute("INSERT OR IGNORE INTO users (id, email, hashed_password, full_name) VALUES (1, 'test@example.com', 'hash', 'Test User')")
+        # Check column names in users
+        cursor = conn.execute("PRAGMA table_info(users)")
+        columns = [row["name"] for row in cursor.fetchall()]
+        if "hashed_password" not in columns and "password_hash" in columns:
+            conn.execute("INSERT OR IGNORE INTO users (id, email, password_hash, full_name) VALUES (1, 'test@example.com', 'hash', 'Test User')")
+        else:
+            conn.execute("INSERT OR IGNORE INTO users (id, email, hashed_password, full_name) VALUES (1, 'test@example.com', 'hash', 'Test User')")
         conn.commit()
     finally:
         conn.close()

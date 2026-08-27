@@ -21,6 +21,7 @@ import { SectionDescription } from "@/components/reframe/SectionDescription";
 import { ImagePreviewPanel } from "@/components/reframe/ImagePreviewPanel";
 import { REFRAME_SLIDER_META, REFRAME_SECTION_DESCRIPTIONS } from "@/components/reframe/ReframeSliderMeta";
 import { AutopilotPresetPreview } from "@/components/autopilot/AutopilotPresetPreview";
+import { RbacManager } from "@/components/settings/RbacManager";
 import {
   StyleEditorModal,
   DEFAULT_HOOK_STYLE,
@@ -1176,52 +1177,191 @@ export function Settings() {
   }
 
 
-  const tabs = [
-    { id: "general" as const, label: "General", icon: <SlidersHorizontal className="h-3.5 w-3.5" />, group: "Preferences", badge: "All Users" },
-    { id: "autopilot" as const, label: "Hermes Autopilot", icon: <Bot className="h-3.5 w-3.5" />, group: "Automation", badge: "1 Video/Hari" },
-    { id: "render" as const, label: "Render Engine", icon: <Film className="h-3.5 w-3.5" />, group: "Preferences", badge: "All Users" },
-    { id: "reframe" as const, label: "Reframe Tuning", icon: <Cpu className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
-    { id: "hyperframes" as const, label: "HyperFrames Hook", icon: <Sparkles className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
-    { id: "object" as const, label: "Object Overlay", icon: <Palette className="h-3.5 w-3.5" />, group: "Visual Studio", badge: isSuperadmin ? "Global Defaults" : "Personal" },
+  type SettingsTabId =
+    | "general"
+    | "render"
+    | "users"
+    | "reframe"
+    | "object"
+    | "hyperframes"
+    | "testing"
+    | "models"
+    | "telegram"
+    | "autopilot"
+    | "system_config";
+
+  interface SettingsTabItem {
+    id: SettingsTabId;
+    label: string;
+    icon: React.ReactNode;
+    desc: string;
+    badge?: string;
+  }
+
+  interface SettingsCategory {
+    id: string;
+    label: string;
+    tabs: SettingsTabItem[];
+  }
+
+  const navCategories: SettingsCategory[] = [
+    {
+      id: "studio",
+      label: "Studio & Rendering",
+      tabs: [
+        { id: "general", label: "General", icon: <SlidersHorizontal className="h-4 w-4" />, desc: "Preferensi render & format video default", badge: "All Users" },
+        { id: "autopilot", label: "Hermes Autopilot", icon: <Bot className="h-4 w-4" />, badge: "1 Video/Hari", desc: "Automasi pemotongan video harian" },
+        { id: "render", label: "Render Engine", icon: <Film className="h-4 w-4" />, desc: "Mesin render Remotion, 3D, & AI Layer", badge: "All Users" },
+        { id: "reframe", label: "Reframe Tuning", icon: <Cpu className="h-4 w-4" />, badge: isSuperadmin ? "Global Defaults" : "Personal", desc: "AI Face Tracking, AutoGrid Zoom, & Ghost Filter" },
+        { id: "hyperframes", label: "HyperFrames Hook", icon: <Sparkles className="h-4 w-4" />, badge: isSuperadmin ? "Global Defaults" : "Personal", desc: "Animasi hook teks headline bergerak" },
+        { id: "object", label: "Object Overlay", icon: <Palette className="h-4 w-4" />, badge: isSuperadmin ? "Global Defaults" : "Personal", desc: "Kartu overlay entitas visual & badge styling" },
+      ],
+    },
+    {
+      id: "channels",
+      label: "Channels & Bot",
+      tabs: [
+        { id: "telegram", label: "Telegram Bot", icon: <Send className="h-4 w-4" />, badge: "Superadmin", desc: "Notifikasi otomatis & kontrol bot Telegram" },
+      ],
+    },
     ...(isSuperadmin ? [
-      { id: "system_config" as const, label: "Database & Env Config", icon: <HardDrive className="h-3.5 w-3.5" />, group: "Administration", badge: "Dynamic DB" },
-      { id: "models" as const, label: "AI Models", icon: <BrainCircuit className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
-      { id: "telegram" as const, label: "Telegram Bot", icon: <Bot className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
-      { id: "users" as const, label: "Users", icon: <UserPlus className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
-      { id: "testing" as const, label: "Test & Deploy", icon: <Terminal className="h-3.5 w-3.5" />, group: "Administration", badge: "Superadmin" },
+      {
+        id: "admin",
+        label: "System & Administration",
+        tabs: [
+          { id: "system_config" as const, label: "Database & Env Config", icon: <HardDrive className="h-4 w-4" />, badge: "Dynamic DB", desc: "Konfigurasi variabel sistem tersimpan di DB" },
+          { id: "models" as const, label: "AI Models", icon: <BrainCircuit className="h-4 w-4" />, badge: "Superadmin", desc: "Routing 9Router LLM & Pool Gemini API Keys" },
+          { id: "users" as const, label: "Access Control & RBAC", icon: <ShieldCheck className="h-4 w-4" />, badge: "RBAC Matrix", desc: "Manajemen pengguna & hak akses role permission" },
+          { id: "testing" as const, label: "Test & Deploy", icon: <Terminal className="h-4 w-4" />, badge: "Superadmin", desc: "Verifikasi pipeline test runner & deployment" },
+        ],
+      },
     ] : []),
   ];
 
+  const allTabs: SettingsTabItem[] = navCategories.flatMap((c) => c.tabs);
+  const activeTabMeta: SettingsTabItem = allTabs.find((t) => t.id === tab) || allTabs[0];
+  const activeCategory: SettingsCategory | undefined = navCategories.find((c) => c.tabs.some((t) => t.id === tab));
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Header */}
-      <div className="shrink-0 space-y-3 mb-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-zinc-950/70 border border-zinc-800/80 rounded-2xl px-4 py-3 backdrop-blur-md">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500/20 to-indigo-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300">
-              <SlidersHorizontal className="h-4 w-4" />
+    <div className="flex h-full min-h-0 flex-col lg:flex-row gap-4">
+      {/* ─── Desktop Sidebar Nav ─── */}
+      <aside className="hidden lg:flex w-64 shrink-0 flex-col bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-3.5 backdrop-blur-md overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center gap-3 pb-3 border-b border-zinc-800/80 mb-3">
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500/20 to-indigo-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300">
+            <SlidersHorizontal className="h-4 w-4" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-zinc-100">Settings</h1>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className={cn("h-1.5 w-1.5 rounded-full", isSuperadmin ? "bg-emerald-400" : "bg-zinc-400")} />
+              <span className="text-[10px] text-zinc-400 font-medium">
+                {isSuperadmin ? "Superadmin Mode" : "User Preferences"}
+              </span>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-semibold text-zinc-100">Settings</h1>
-                {isSuperadmin ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                    <Shield className="h-2.5 w-2.5" />
-                    Superadmin
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-300 border border-zinc-700">
-                    <UserCheck className="h-2.5 w-2.5" />
-                    User Settings
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-zinc-400">
-                {isSuperadmin
-                  ? "Sistem kontrol penuh: model AI, bot Telegram, manajemen pengguna, dan visual tuning global."
-                  : "Pengaturan preferensi video, engine rendering, dan studio visual personal."}
+          </div>
+        </div>
+
+        {/* Categories list */}
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-0.5 scrollbar-thin">
+          {navCategories.map((group) => (
+            <div key={group.id} className="space-y-1">
+              <p className="px-2 text-[10px] font-bold text-zinc-400 tracking-wider uppercase">
+                {group.label}
               </p>
+              <div className="space-y-0.5">
+                {group.tabs.map((t) => {
+                  const isActive = tab === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setTab(t.id)}
+                      className={cn(
+                        "w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-medium transition-all text-left group",
+                        isActive
+                          ? "bg-zinc-800 text-zinc-100 border border-zinc-700/80 shadow-sm"
+                          : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 border border-transparent"
+                      )}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={cn("shrink-0 transition-colors", isActive ? "text-violet-400" : "text-zinc-500 group-hover:text-zinc-300")}>
+                          {t.icon}
+                        </span>
+                        <span className="truncate">{t.label}</span>
+                      </div>
+                      {t.badge && (
+                        <span
+                          className={cn(
+                            "text-[9px] font-semibold px-1.5 py-0.5 rounded border shrink-0",
+                            isActive
+                              ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
+                              : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                          )}
+                        >
+                          {t.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+          ))}
+        </div>
+      </aside>
+
+      {/* ─── Mobile Category & Tabs Selector (< lg) ─── */}
+      <div className="lg:hidden shrink-0 space-y-2 bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-3 backdrop-blur-md">
+        <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="h-4 w-4 text-violet-400" />
+            <h1 className="text-sm font-semibold text-zinc-100">Settings</h1>
+          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
+            {isSuperadmin ? "Superadmin" : "User"}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {allTabs.map((t) => {
+            const isActive = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all",
+                  isActive
+                    ? "bg-zinc-800 border-zinc-700 text-zinc-100 shadow-sm"
+                    : "bg-zinc-900/60 border-zinc-800/60 text-zinc-400 hover:text-zinc-200"
+                )}
+              >
+                <span className={cn(isActive ? "text-violet-400" : "text-zinc-500")}>{t.icon}</span>
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ─── Main Content Pane ─── */}
+      <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-zinc-950/50 border border-zinc-800/80 rounded-2xl p-4 sm:p-5 backdrop-blur-md overflow-hidden">
+        {/* Top Sticky Bar */}
+        <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 pb-3.5 mb-4 border-b border-zinc-800/80">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-zinc-400">{activeCategory?.label}</span>
+              <span className="text-zinc-600">/</span>
+              <h2 className="text-sm sm:text-base font-semibold text-zinc-100">{activeTabMeta.label}</h2>
+              {activeTabMeta.badge && (
+                <Badge variant="default" className="text-[9px]">
+                  {activeTabMeta.badge}
+                </Badge>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-400 mt-0.5">{activeTabMeta.desc}</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1237,76 +1377,108 @@ export function Settings() {
                 >
                   {autopilotCanRun ? "Jalankan Hari Ini (1 Video)" : "Kuota Hari Ini Terpenuhi"}
                 </Button>
-                <Button onClick={handleSaveAutopilot} loading={isSavingAutopilot} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+                <Button onClick={handleSaveAutopilot} loading={isSavingAutopilot} icon={<Save className="h-3.5 w-3.5" />} size="sm">
+                  Save
+                </Button>
               </div>
             ) : tab === "hyperframes" ? (
               <div className="flex items-center gap-2">
                 {hfDirty && <span className="text-[10px] text-amber-400 font-medium mr-1 animate-pulse">Unsaved changes</span>}
-                <Button onClick={handleRestoreHfDefaults} loading={isResettingHf} size="sm" variant="outline">Restore Defaults</Button>
-                <Button onClick={handleResetHf} disabled={!hfDirty} size="sm" variant="outline">Reset</Button>
-                <Button onClick={handleSaveHf} disabled={!hfDirty} loading={isSavingHf} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+                <Button onClick={handleRestoreHfDefaults} loading={isResettingHf} size="sm" variant="outline">
+                  Restore Defaults
+                </Button>
+                <Button onClick={handleResetHf} disabled={!hfDirty} size="sm" variant="outline">
+                  Reset
+                </Button>
+                <Button onClick={handleSaveHf} disabled={!hfDirty} loading={isSavingHf} icon={<Save className="h-3.5 w-3.5" />} size="sm">
+                  Save
+                </Button>
               </div>
             ) : tab === "reframe" ? (
               <div className="flex items-center gap-2">
                 {reframeDirty && <span className="text-[10px] text-amber-400 font-medium mr-1 animate-pulse">Unsaved changes</span>}
-                <Button onClick={handleRestoreReframeDefaults} loading={isResettingReframe} size="sm" variant="outline">Restore Defaults</Button>
-                <Button onClick={handleResetReframe} disabled={!reframeDirty} size="sm" variant="outline">Reset</Button>
-                <Button onClick={handleSaveReframe} disabled={!reframeDirty} loading={isSavingReframe} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+                <Button onClick={handleRestoreReframeDefaults} loading={isResettingReframe} size="sm" variant="outline">
+                  Restore Defaults
+                </Button>
+                <Button onClick={handleResetReframe} disabled={!reframeDirty} size="sm" variant="outline">
+                  Reset
+                </Button>
+                <Button onClick={handleSaveReframe} disabled={!reframeDirty} loading={isSavingReframe} icon={<Save className="h-3.5 w-3.5" />} size="sm">
+                  Save
+                </Button>
               </div>
             ) : tab === "object" ? (
               <div className="flex items-center gap-2">
                 {objectDirty && <span className="text-[10px] text-amber-400 font-medium mr-1 animate-pulse">Unsaved changes</span>}
-                <Button onClick={handleRestoreObjectDefaults} loading={isResettingObject} size="sm" variant="outline">Restore Defaults</Button>
-                <Button onClick={handleResetObject} disabled={!objectDirty} size="sm" variant="outline">Reset</Button>
-                <Button onClick={handleSaveObject} disabled={!objectDirty} loading={isSavingObject} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+                <Button onClick={handleRestoreObjectDefaults} loading={isResettingObject} size="sm" variant="outline">
+                  Restore Defaults
+                </Button>
+                <Button onClick={handleResetObject} disabled={!objectDirty} size="sm" variant="outline">
+                  Reset
+                </Button>
+                <Button onClick={handleSaveObject} disabled={!objectDirty} loading={isSavingObject} icon={<Save className="h-3.5 w-3.5" />} size="sm">
+                  Save
+                </Button>
               </div>
             ) : tab === "models" ? (
               <div className="flex items-center gap-2">
-                <Button onClick={handleTestAllModels} loading={isTestingAll} size="sm" variant="outline" icon={<RefreshCw className="h-3.5 w-3.5" />}>Test All</Button>
-                <Button onClick={() => handleTestModel()} loading={isTestingModel} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Model</Button>
-                <Button onClick={handleSaveModels} loading={isSavingModels} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+                <Button onClick={handleTestAllModels} loading={isTestingAll} size="sm" variant="outline" icon={<RefreshCw className="h-3.5 w-3.5" />}>
+                  Test All
+                </Button>
+                <Button onClick={() => handleTestModel()} loading={isTestingModel} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>
+                  Test Model
+                </Button>
+                <Button onClick={handleSaveModels} loading={isSavingModels} icon={<Save className="h-3.5 w-3.5" />} size="sm">
+                  Save
+                </Button>
               </div>
             ) : tab === "telegram" ? (
               <div className="flex items-center gap-2">
-                <Button onClick={handleTestTelegram} loading={isTestingTelegram} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>Test Ping</Button>
-                <Button onClick={handleTestTelegramVideo} loading={isTestingTelegramVideo} size="sm" variant="outline" icon={<Play className="h-3.5 w-3.5" />}>Test Video</Button>
-                <Button onClick={handleSaveTelegram} loading={isSavingTelegram} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+                <Button onClick={handleTestTelegram} loading={isTestingTelegram} size="sm" variant="outline" icon={<Zap className="h-3.5 w-3.5" />}>
+                  Test Ping
+                </Button>
+                <Button onClick={handleTestTelegramVideo} loading={isTestingTelegramVideo} size="sm" variant="outline" icon={<Play className="h-3.5 w-3.5" />}>
+                  Test Video
+                </Button>
+                <Button onClick={handleSaveTelegram} loading={isSavingTelegram} icon={<Save className="h-3.5 w-3.5" />} size="sm">
+                  Save
+                </Button>
+              </div>
+            ) : tab === "system_config" ? (
+              <div className="flex items-center gap-2">
+                {canEditSecrets && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const next = !sysConfigUnmask;
+                      setSysConfigUnmask(next);
+                      loadSystemConfig(next);
+                    }}
+                    icon={sysConfigUnmask ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  >
+                    {sysConfigUnmask ? "Mask Secrets" : "Show Secrets"}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  onClick={handleSaveSysConfig}
+                  loading={isSavingSysConfig}
+                  icon={<Save className="h-3.5 w-3.5" />}
+                >
+                  Save All Config
+                </Button>
               </div>
             ) : (
-              <Button onClick={handleSave} loading={isSaving} icon={<Save className="h-3.5 w-3.5" />} size="sm">Save</Button>
+              <Button onClick={handleSave} loading={isSaving} icon={<Save className="h-3.5 w-3.5" />} size="sm">
+                Save
+              </Button>
             )}
           </div>
         </div>
 
-        {/* Tab Pills Navigation */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          {tabs.map((t) => {
-            const isActive = tab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border transition-all whitespace-nowrap",
-                  isActive
-                    ? "bg-zinc-800 border-zinc-700 text-zinc-100 shadow-sm"
-                    : "bg-zinc-900/40 border-zinc-800/60 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
-                )}
-              >
-                <span className={cn(isActive ? "text-violet-400" : "text-zinc-500")}>{t.icon}</span>
-                <span>{t.label}</span>
-                {t.group === "Administration" && (
-                  <span className="text-[9px] font-semibold px-1 rounded bg-red-500/10 text-red-400 border border-red-500/20">Admin</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Tab content */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Tab content */}
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {tab === "general" && (
           <div className="space-y-4 max-w-4xl">
             {/* Scope info card */}
@@ -2000,42 +2172,8 @@ export function Settings() {
         )}
 
         {tab === "users" && isSuperadmin && (
-          <div className="max-w-3xl space-y-4">
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2.5">
-                <UserPlus className="h-4 w-4 text-violet-400 shrink-0" />
-                <span className="text-zinc-300">
-                  Manajemen akun pengguna sistem dan aktivasi fitur premium (Dual Subtitle, Auto Grid, Three.js, AI Layer).
-                </span>
-              </div>
-              <Badge variant="default" className="text-[10px]">Superadmin Access</Badge>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-zinc-500">{users.length} users registered</p>
-              <Button size="sm" onClick={() => setShowCreateUser(!showCreateUser)} icon={showCreateUser ? undefined : <UserPlus className="h-3.5 w-3.5" />}>
-                {showCreateUser ? "Cancel" : "Add User"}
-              </Button>
-            </div>
-
-            {showCreateUser && (
-              <Card className="p-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <Input label="Email" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="user@email.com" />
-                  <Input label="Name" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Full Name" />
-                  <Input label="Password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="min 6 chars" />
-                </div>
-                <Button size="sm" className="mt-3" onClick={handleCreateUser} icon={<Save className="h-3 w-3" />}>Create</Button>
-              </Card>
-            )}
-
-            <Card className="p-0">
-              <div className="divide-y divide-zinc-800/30">
-                {users.map((u) => (
-                  <UserRow key={u.id} user={u} isSuperadmin={isSuperadmin} onDelete={handleDeleteUser} toast={toast} />
-                ))}
-              </div>
-            </Card>
+          <div className="space-y-4">
+            <RbacManager />
           </div>
         )}
 
@@ -3635,90 +3773,7 @@ export function Settings() {
           />
         )}
       </div>
-    </div>
-  );
-}
-
-function UserRow({ user: u, isSuperadmin, onDelete, toast }: { user: any; isSuperadmin: boolean; onDelete: (id: number, email: string) => void; toast: any }) {
-  const [expanded, setExpanded] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  async function togglePremium() {
-    setLoading(true);
-    const newValue = !isPremium;
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/api/features/set-premium`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ user_id: u.id, is_premium: newValue }),
-    });
-    if (res.ok) {
-      setIsPremium(newValue);
-      toast.success(`${u.email} → ${newValue ? "Premium (V1 Gemini)" : "Free (V2 9router)"}`);
-    } else {
-      toast.error("Failed to update premium status");
-    }
-    setLoading(false);
-  }
-
-  function handleExpand() {
-    if (!expanded) {
-      // Fetch current premium status
-      const token = getToken();
-      fetch(`${API_BASE}/api/features/user/${u.id}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => setIsPremium(d.data?.is_premium || false))
-        .catch(() => { });
-    }
-    setExpanded(!expanded);
-  }
-
-  return (
-    <div className="px-4 py-3">
-      <div className="flex items-center gap-3">
-        <div className="shrink-0 w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center">
-          <span className="text-[11px] font-bold text-zinc-400">{(u.full_name || u.email)[0].toUpperCase()}</span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm text-zinc-200 font-medium truncate">{u.full_name || u.email}</p>
-            <Badge variant={u.role === "superadmin" ? "success" : "default"} size="sm">{u.role}</Badge>
-          </div>
-          <p className="text-[10px] text-zinc-500">{u.email}</p>
-        </div>
-        {u.role !== "superadmin" && isSuperadmin && (
-          <button type="button" onClick={handleExpand} className={cn("p-1.5 rounded transition-colors", expanded ? "bg-emerald-500/10 text-emerald-400" : "text-zinc-600 hover:text-emerald-400 hover:bg-zinc-800")}>
-            <Shield className="h-3.5 w-3.5" />
-          </button>
-        )}
-        {u.role !== "superadmin" && (
-          <button type="button" onClick={() => onDelete(u.id, u.email)} className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors">
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
       </div>
-      {expanded && u.role !== "superadmin" && (
-        <div className="mt-2 ml-11 flex items-center gap-3">
-          <button
-            type="button"
-            disabled={loading}
-            onClick={togglePremium}
-            className={cn(
-              "px-3 py-1.5 rounded-lg border text-xs font-medium transition-all flex items-center gap-2",
-              isPremium
-                ? "border-amber-500 bg-amber-500/10 text-amber-400"
-                : "border-zinc-700 text-zinc-500 hover:border-zinc-600"
-            )}
-          >
-            <span className={cn("w-2 h-2 rounded-full", isPremium ? "bg-amber-400" : "bg-zinc-600")} />
-            {isPremium ? "Premium (V1 Gemini)" : "Free (V2 9router)"}
-          </button>
-          {isPremium && (
-            <span className="text-[10px] text-zinc-600">All features unlocked</span>
-          )}
-        </div>
-      )}
     </div>
   );
 }
