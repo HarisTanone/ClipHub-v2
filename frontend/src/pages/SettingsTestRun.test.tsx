@@ -52,7 +52,7 @@ describe("Settings server test gate", () => {
   it("is visible to superadmin and can trigger test.sh in no-deploy mode", async () => {
     const { Settings } = await import("@/pages/Settings");
     render(<Settings />);
-    fireEvent.click(screen.getByText("Test & Deploy"));
+    fireEvent.click(screen.getAllByText("Test & Deploy")[0]);
     await waitFor(() => expect(screen.getByTestId("test-run-log")).toHaveTextContent("waiting"));
 
     fireEvent.click(screen.getByRole("button", { name: "Run Tests" }));

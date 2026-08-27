@@ -362,7 +362,7 @@ describe('Property 3: ReframeTuning Save Payload Matches Interface (Preservation
     render(<Settings />);
 
     // Navigate to reframe tab
-    const reframeTab = screen.getByText('Reframe Tuning');
+    const reframeTab = screen.getAllByText('Reframe Tuning')[0];
     fireEvent.click(reframeTab);
 
     // Wait for data to load

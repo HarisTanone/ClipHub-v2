@@ -47,44 +47,42 @@ class JobOptionsBase(BaseModel):
     @field_validator("target_aspect_ratio")
     @classmethod
     def valid_aspect(cls, v: str) -> str:
-        if v not in ("9:16", "16:9", "1:1"):
-            raise ValueError("aspect_ratio harus '9:16', '16:9', atau '1:1'")
+        if not v or v not in ("9:16", "16:9", "1:1"):
+            return "9:16"
         return v
 
     @field_validator("background_mode")
     @classmethod
     def valid_background_mode(cls, v: Optional[str]) -> Optional[str]:
-        if v is None or v == "":
+        if not v or v not in ("template", "upload"):
             return None
-        if v not in ("template", "upload"):
-            raise ValueError("background_mode harus 'template' atau 'upload'")
         return v
 
     @field_validator("hook_engine")
     @classmethod
     def valid_engine(cls, v: str) -> str:
-        if v not in ("v2", "v3"):
-            raise ValueError("hook_engine harus 'v2' atau 'v3'")
+        if not v or v not in ("v2", "v3"):
+            return "v3"
         return v
     
     @field_validator("remotion_quality")
     @classmethod
     def valid_quality(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in ("low", "medium", "high"):
-            raise ValueError("remotion_quality harus 'low', 'medium', atau 'high'")
+        if not v or v not in ("low", "medium", "high"):
+            return "medium"
         return v
 
     @field_validator("processing_mode")
     @classmethod
     def valid_processing_mode(cls, v: str) -> str:
-        if v not in ("analyze", "direct"):
-            raise ValueError("processing_mode harus 'analyze' atau 'direct'")
+        if not v or v not in ("analyze", "direct"):
+            return "analyze"
         return v
 
     @field_validator("text_emphasis_style_config")
     @classmethod
     def valid_text_emphasis_style(cls, value: Optional[dict]) -> Optional[dict]:
-        if value is None:
+        if not value:
             return None
         from src.infrastructure.text_emphasis import (
             ALLOWED_EFFECTS,
@@ -92,12 +90,10 @@ class JobOptionsBase(BaseModel):
             map_legacy_effect,
             normalise_text_emphasis_style,
         )
-        effect = map_legacy_effect(value.get("effectMode", "auto"))
+        raw_effect = value.get("effectMode") or "auto"
+        effect = map_legacy_effect(str(raw_effect))
         if effect not in ALLOWED_EFFECTS | {"auto"} and effect not in LEGACY_EFFECT_MAP:
-            raise ValueError(
-                "effectMode harus auto atau salah satu: "
-                + ", ".join(sorted(ALLOWED_EFFECTS))
-            )
+            effect = "auto"
         # Normalise so legacy names + clamps land in DB the same as render path
         return normalise_text_emphasis_style({**value, "effectMode": effect})
 

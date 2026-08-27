@@ -68,7 +68,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
       const { container } = render(<Settings />);
 
       // Click the Reframe Tuning tab
-      const reframeTab = screen.getByText('Reframe Tuning');
+      const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
 
       // Look for any paragraph that describes frame sampling pipeline
@@ -96,7 +96,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
-      const reframeTab = screen.getByText('Reframe Tuning');
+      const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
 
       const allParagraphs = container.querySelectorAll('p');
@@ -117,7 +117,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
-      const reframeTab = screen.getByText('Reframe Tuning');
+      const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
 
       // Look for section description elements or paragraphs about ghost filtering
@@ -183,7 +183,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
-      const reframeTab = screen.getByText('Reframe Tuning');
+      const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
 
       // Look for description elements associated with sliders
@@ -205,7 +205,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
-      const reframeTab = screen.getByText('Reframe Tuning');
+      const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
 
       const preview = container.querySelector('[data-testid="sampling-detection-preview"]');
@@ -219,7 +219,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
-      const reframeTab = screen.getByText('Reframe Tuning');
+      const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
 
       const preview = container.querySelector('[data-testid="auto-grid-preview"]');
@@ -233,7 +233,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
       const { Settings } = await import('@/pages/Settings');
       const { container } = render(<Settings />);
 
-      const reframeTab = screen.getByText('Reframe Tuning');
+      const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
 
       const preview = container.querySelector('[data-testid="ghost-detection-preview"]');

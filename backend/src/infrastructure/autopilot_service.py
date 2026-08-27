@@ -598,12 +598,16 @@ class AutopilotService:
             await asyncio.sleep(30)
 
     async def _check_and_run_scheduled_autopilots(self):
-        """Check all users with enabled autopilot settings and execute if scheduled."""
+        """Check all active users with enabled autopilot settings and execute if scheduled."""
         self._ensure_tables()
         conn = get_dict_connection()
         try:
             cur = conn.cursor()
-            cur.execute("SELECT * FROM autopilot_settings WHERE enabled = 1")
+            cur.execute("""
+                SELECT s.* FROM autopilot_settings s
+                JOIN users u ON s.user_id = u.id
+                WHERE s.enabled = 1 AND u.is_active = 1
+            """)
             rows = cur.fetchall()
         finally:
             conn.close()
@@ -616,19 +620,32 @@ class AutopilotService:
         current_hm = now_wib.strftime("%H:%M")
 
         for row in rows:
-            user_id = row["user_id"]
-            run_time = (row.get("run_time") or "08:00").strip()
+            r_dict = dict(row)
+            user_id = r_dict.get("user_id")
+            if not user_id:
+                continue
 
-            if current_hm == run_time:
+            raw_run_time = str(r_dict.get("run_time") or "08:00").strip()
+            # Normalize to HH:MM format
+            try:
+                parts = raw_run_time.split(":")
+                norm_run_time = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+            except Exception:
+                norm_run_time = "08:00"
+
+            if current_hm == norm_run_time:
                 can_run, reason, _ = self.can_run_today(user_id)
                 if can_run:
                     logger.info(f"autopilot_daemon: Triggering scheduled daily run for user {user_id} at {current_hm} WIB...")
-                    res = await self.run_autopilot_step(
-                        user_id=user_id,
-                        trigger_source="daemon_scheduler",
-                        notify_telegram=True,
-                    )
-                    logger.info(f"autopilot_daemon: Run completed for user {user_id}: {res.get('message')}")
+                    try:
+                        res = await self.run_autopilot_step(
+                            user_id=user_id,
+                            trigger_source="daemon_scheduler",
+                            notify_telegram=True,
+                        )
+                        logger.info(f"autopilot_daemon: Run completed for user {user_id}: {res.get('message')}")
+                    except Exception as step_err:
+                        logger.error(f"autopilot_daemon: Error running autopilot step for user {user_id}: {step_err}", exc_info=True)
 
 
 # Singleton instance
