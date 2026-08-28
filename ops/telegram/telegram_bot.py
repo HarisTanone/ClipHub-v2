@@ -1553,11 +1553,16 @@ async def _show_schedules_menu(target, status_filter: str = "all", toast: str = 
         return
 
     docs = data.get("docs", [])
+    if isinstance(docs, list):
+        docs.sort(
+            key=lambda d: str(d.get("scheduleAt") or d.get("createdAt") or ""),
+            reverse=True,
+        )
     total = data.get("totalDocs", len(docs))
     
     text = (
         f"📅 <b>Jadwal Posting Media Sosial (Repliz)</b>\n"
-        f"Filter: <code>{status_filter.upper()}</code> │ Total: <b>{total} Postingan</b>\n\n"
+        f"Filter: <code>{status_filter.upper()}</code> │ Total: <b>{total} Postingan</b> (Urutan Terbaru)\n\n"
     )
     if toast:
         text = f"<i>{toast}</i>\n\n" + text

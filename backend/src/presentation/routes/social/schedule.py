@@ -138,9 +138,12 @@ async def list_schedules(
     to_date: Optional[str] = Query(
         None, alias="toDate", description="ISO 8601 end date"
     ),
+    sort: Optional[str] = Query(
+        "-scheduleAt", description="Sort order (default newest: -scheduleAt)"
+    ),
     _user=Depends(get_current_user),
 ):
-    """Retrieve a paginated list of scheduled posts from Repliz."""
+    """Retrieve a paginated list of scheduled posts from Repliz (sorted newest first)."""
     params: Dict[str, Any] = {"page": page, "limit": limit}
     if status:
         params["status"] = status
@@ -148,12 +151,22 @@ async def list_schedules(
         params["fromDate"] = from_date
     if to_date:
         params["toDate"] = to_date
+    if sort:
+        params["sort"] = sort
     if account_ids:
         raw_ids = [aid.strip() for aid in account_ids.split(",") if aid.strip()]
         for i, aid in enumerate(raw_ids):
             params[f"accountIds[{i}]"] = aid
 
-    return await repliz_get("/public/schedule", params=params)
+    res = await repliz_get("/public/schedule", params=params)
+    if isinstance(res, dict) and isinstance(res.get("data"), dict):
+        docs = res["data"].get("docs")
+        if isinstance(docs, list):
+            docs.sort(
+                key=lambda d: str(d.get("scheduleAt") or d.get("createdAt") or ""),
+                reverse=True,
+            )
+    return res
 
 
 @schedule_router.get("/{schedule_id}")

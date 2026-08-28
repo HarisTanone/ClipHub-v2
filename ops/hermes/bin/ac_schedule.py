@@ -87,17 +87,21 @@ def main():
         return
 
     if "error" in result:
-        print(f"❌ Error: {result['error']}", file=sys.stderr)
+        print(f"[ERROR] {result['error']}", file=sys.stderr)
         sys.exit(1)
 
     if args.action == "retry":
-        print(f"🔄 Berhasil me-retry jadwal ID: {args.schedule_id}")
+        print(f"[OK] Berhasil me-retry jadwal ID: {args.schedule_id}")
     elif args.action == "delete":
-        print(f"🗑️ Berhasil membatalkan/menghapus jadwal ID: {args.schedule_id}")
+        print(f"[OK] Berhasil membatalkan/menghapus jadwal ID: {args.schedule_id}")
     else:
         docs = result.get("docs", [])
+        docs.sort(
+            key=lambda d: str(d.get("scheduleAt") or d.get("createdAt") or ""),
+            reverse=True,
+        )
         total = result.get("totalDocs", len(docs))
-        print(f"📅 Daftar Jadwal Posting Media Sosial (Total: {total}, Menampilkan: {len(docs)})")
+        print(f"Daftar Jadwal Posting Media Sosial (Total: {total}, Menampilkan: {len(docs)}) - Urutan Terbaru:")
         if not docs:
             print("  (Tidak ada postingan terjadwal)")
             return
@@ -113,8 +117,7 @@ def main():
             acc_name = acc.get("name") or acc.get("username") or doc.get("accountId", "-")
             acc_type = (acc.get("type") or "social").upper()
 
-            status_icon = "⏳" if status == "PENDING" else ("✅" if status == "SUCCESS" else ("❌" if status == "ERROR" else "🔄"))
-            print(f"  {idx}. {status_icon} [{status}] {ptype} -> {acc_type} ({acc_name})")
+            print(f"  {idx}. [{status}] {ptype} -> {acc_type} ({acc_name})")
             print(f"     ID: {sid}")
             print(f"     Waktu: {sched_at} UTC")
             print(f"     Konten: {title_short}")

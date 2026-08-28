@@ -886,7 +886,14 @@ function ScheduledPostsView() {
         limit: 15,
         status: statusFilter,
       });
-      setSchedules(data.docs || []);
+      const rawDocs = data.docs || [];
+      // Urutkan berdasarkan postingan terbaru (scheduleAt / createdAt descending)
+      const sortedDocs = [...rawDocs].sort((a, b) => {
+        const timeA = new Date(a.scheduleAt || a.createdAt || 0).getTime();
+        const timeB = new Date(b.scheduleAt || b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+      setSchedules(sortedDocs);
       setTotalPages(data.totalPages || 1);
       setTotalDocs(data.totalDocs || (data.docs ? data.docs.length : 0));
       setSelectedScheduleIds([]);
