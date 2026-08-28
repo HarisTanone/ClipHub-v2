@@ -92,21 +92,37 @@ class AutopilotService:
         finally:
             conn.close()
 
+    def is_pipeline_busy(self) -> bool:
+        """Check if any video clipping/rendering job is currently in progress across the system."""
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COUNT(*) as active_cnt
+                FROM jobs
+                WHERE status NOT IN ('completed', 'failed', 'timeout')
+            """)
+            row = cur.fetchone()
+            return bool(row and (row.get("active_cnt") or 0) > 0)
+        except Exception as e:
+            logger.debug(f"is_pipeline_busy check error: {e}")
+            return False
+        finally:
+            conn.close()
+
     def get_settings(self, user_id: int = 1) -> dict:
-        """Get autopilot configuration for user."""
+        """Get autopilot configuration for specific user (strict user isolation)."""
         self._ensure_tables()
         conn = get_dict_connection()
         try:
             cur = conn.cursor()
             cur.execute("SELECT * FROM autopilot_settings WHERE user_id = ?", (user_id,))
             row = cur.fetchone()
-            if not row:
-                # Fallback to user 1 or defaults
-                cur.execute("SELECT * FROM autopilot_settings WHERE user_id = 1")
-                row = cur.fetchone()
 
             if not row:
+                # Strictly return default disabled settings for this specific user
                 return {
+                    "id": None,
                     "user_id": user_id,
                     "enabled": False,
                     "niche_query": "podcast bisnis",
@@ -123,6 +139,7 @@ class AutopilotService:
                     "last_job_id": None,
                     "last_video_url": None,
                     "last_video_title": None,
+                    "updated_at": None,
                 }
 
             r = dict(row)
@@ -133,7 +150,7 @@ class AutopilotService:
 
             return {
                 "id": r.get("id"),
-                "user_id": r.get("user_id"),
+                "user_id": r.get("user_id", user_id),
                 "enabled": bool(r.get("enabled")),
                 "niche_query": r.get("niche_query", "podcast bisnis"),
                 "preset_slug": r.get("preset_slug", "default"),
@@ -155,30 +172,34 @@ class AutopilotService:
             conn.close()
 
     def update_settings(self, user_id: int, data: dict) -> dict:
-        """Update autopilot configuration."""
+        """Update autopilot configuration for user with safe partial updates."""
         self._ensure_tables()
         conn = get_dict_connection()
         try:
             cur = conn.cursor()
-            cur.execute("SELECT id FROM autopilot_settings WHERE user_id = ?", (user_id,))
-            exists = cur.fetchone()
-
-            enabled = int(data.get("enabled", 0)) if "enabled" in data else 0
-            niche = str(data.get("niche_query", "podcast bisnis")).strip() or "podcast bisnis"
-            preset = str(data.get("preset_slug", "default")).strip() or "default"
-            platforms = str(data.get("target_platforms", "tiktok,instagram,youtube")).strip()
-            acc_ids_val = data.get("target_account_ids", [])
-            acc_ids_str = json.dumps(acc_ids_val if isinstance(acc_ids_val, list) else [])
-            sched_mode = str(data.get("schedule_mode", "ai")).strip()
-            custom_time = str(data.get("custom_schedule_time", "")).strip()
-            run_time = str(data.get("run_time", "08:00")).strip()
-            min_dur = int(data.get("min_duration_sec", 480))
-            max_dur = int(data.get("max_duration_sec", 3600))
-            max_daily = 1  # strictly 1 video/day
+            cur.execute("SELECT * FROM autopilot_settings WHERE user_id = ?", (user_id,))
+            exists_row = cur.fetchone()
 
             now_str = dt.datetime.now(dt.timezone.utc).isoformat()
 
-            if exists:
+            if exists_row:
+                curr = dict(exists_row)
+                enabled = int(data["enabled"]) if "enabled" in data else int(curr.get("enabled", 0))
+                niche = str(data.get("niche_query", curr.get("niche_query", "podcast bisnis"))).strip() or "podcast bisnis"
+                preset = str(data.get("preset_slug", curr.get("preset_slug", "default"))).strip() or "default"
+                platforms = str(data.get("target_platforms", curr.get("target_platforms", "tiktok,instagram,youtube"))).strip()
+                if "target_account_ids" in data:
+                    acc_ids_val = data["target_account_ids"]
+                    acc_ids_str = json.dumps(acc_ids_val if isinstance(acc_ids_val, list) else [])
+                else:
+                    acc_ids_str = curr.get("target_account_ids", "[]")
+                sched_mode = str(data.get("schedule_mode", curr.get("schedule_mode", "ai"))).strip()
+                custom_time = str(data.get("custom_schedule_time", curr.get("custom_schedule_time", ""))).strip()
+                run_time = str(data.get("run_time", curr.get("run_time", "08:00"))).strip()
+                min_dur = int(data.get("min_duration_sec", curr.get("min_duration_sec", 480)))
+                max_dur = int(data.get("max_duration_sec", curr.get("max_duration_sec", 3600)))
+                max_daily = 1
+
                 conn.execute("""
                     UPDATE autopilot_settings SET
                         enabled = ?, niche_query = ?, preset_slug = ?, target_platforms = ?,
@@ -191,6 +212,19 @@ class AutopilotService:
                     custom_time, run_time, min_dur, max_dur, max_daily, now_str, user_id
                 ))
             else:
+                enabled = int(data.get("enabled", 0))
+                niche = str(data.get("niche_query", "podcast bisnis")).strip() or "podcast bisnis"
+                preset = str(data.get("preset_slug", "default")).strip() or "default"
+                platforms = str(data.get("target_platforms", "tiktok,instagram,youtube")).strip()
+                acc_ids_val = data.get("target_account_ids", [])
+                acc_ids_str = json.dumps(acc_ids_val if isinstance(acc_ids_val, list) else [])
+                sched_mode = str(data.get("schedule_mode", "ai")).strip()
+                custom_time = str(data.get("custom_schedule_time", "")).strip()
+                run_time = str(data.get("run_time", "08:00")).strip()
+                min_dur = int(data.get("min_duration_sec", 480))
+                max_dur = int(data.get("max_duration_sec", 3600))
+                max_daily = 1
+
                 conn.execute("""
                     INSERT INTO autopilot_settings (
                         user_id, enabled, niche_query, preset_slug, target_platforms,
@@ -394,12 +428,30 @@ class AutopilotService:
     ) -> dict:
         """Execute autonomous discovery, clipping, and auto-post pipeline.
 
-        Enforces max 1 video/day quota unless force=True.
+        Enforces enabled check, pipeline availability check, and max 1 video/day quota unless force=True.
         """
         self._ensure_tables()
         settings = self.get_settings(user_id)
 
-        # 1. Check daily quota
+        # 0. Check if user enabled autopilot
+        if not force and not settings.get("enabled"):
+            logger.info(f"autopilot: Skipped run for user {user_id}. Autopilot is disabled for this user.")
+            return {
+                "success": False,
+                "status": "disabled",
+                "message": f"Hermes Autopilot belum diaktifkan untuk pengguna ini.",
+            }
+
+        # 1. Check if server pipeline is already busy with another video
+        if not force and self.is_pipeline_busy():
+            logger.info(f"autopilot: Pipeline is currently busy processing another job. Deferring run for user {user_id}.")
+            return {
+                "success": False,
+                "status": "pipeline_busy",
+                "message": "Server sedang memproses video lain. Antrean autopilot akan menunggu hingga proses yang sedang berjalan selesai.",
+            }
+
+        # 2. Check daily quota
         can_run, reason, quota_info = self.can_run_today(user_id)
         if not can_run and not force:
             logger.info(f"autopilot: Skipped run for user {user_id}. {reason}")
@@ -410,7 +462,7 @@ class AutopilotService:
                 "quota": quota_info,
             }
 
-        # 2. Pick candidate video
+        # 3. Pick candidate video
         candidate = self.pick_best_candidate(user_id)
         if not candidate:
             logger.warning(f"autopilot: No fresh candidate video found for niche '{settings.get('niche_query')}'.")
@@ -429,12 +481,12 @@ class AutopilotService:
             f"autopilot: Selected video '{video_title}' ({video_url}) score={virality_score} for user {user_id} via {trigger_source}"
         )
 
-        # 3. Resolve preset style layers
+        # 4. Resolve preset style layers
         from src.infrastructure.preset_resolver import resolve_preset
         preset_slug = settings.get("preset_slug", "default")
         resolved_preset = resolve_preset(preset_slug, user_id=user_id)
 
-        # 4. Prepare AutoCliper job options
+        # 5. Prepare AutoCliper job options
         target_platforms = [p.strip().lower() for p in settings.get("target_platforms", "tiktok,instagram,youtube").split(",") if p.strip()]
         target_accounts = settings.get("target_account_ids", [])
         schedule_mode = settings.get("schedule_mode", "ai")
@@ -468,7 +520,7 @@ class AutopilotService:
             "auto_post_custom_time": custom_schedule_time,
         }
 
-        # 5. Submit job to AutoCliper service
+        # 6. Submit job to AutoCliper service
         from src.presentation.dependencies import get_job_service
         job_service = get_job_service()
         created_res = await job_service.create_job(
@@ -500,7 +552,7 @@ class AutopilotService:
         job = created_res[0] if isinstance(created_res, tuple) else created_res
         job_id = getattr(job, "id", None) or getattr(job, "job_id", str(job))
 
-        # 6. Record run in database
+        # 7. Record run in database
         now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
         conn = get_dict_connection()
         run_id = None
@@ -519,47 +571,49 @@ class AutopilotService:
 
             conn.execute("""
                 UPDATE autopilot_settings SET
-                    last_run_at = ?, last_job_id = ?, last_video_url = ?, last_video_title = ?
+                    last_run_at = ?,
+                    last_job_id = ?,
+                    last_video_url = ?,
+                    last_video_title = ?,
+                    updated_at = ?
                 WHERE user_id = ?
-            """, (now_iso, job_id, video_url, video_title, user_id))
+            """, (now_iso, job_id, video_url, video_title, now_iso, user_id))
             conn.commit()
+        except Exception as e:
+            logger.error(f"autopilot: Failed to record run in database: {e}")
         finally:
             conn.close()
 
-        # 7. Send Telegram Notification
+        # 8. Notify Telegram if enabled
         if notify_telegram:
             try:
-                from src.infrastructure.telegram_service import telegram_service
-                dur_min = candidate.get("duration_sec", 0) // 60
-                views_str = f"{candidate.get('views', 0):,}"
-                platforms_str = ", ".join([p.upper() for p in target_platforms])
-
-                msg = (
+                from src.infrastructure.telegram_notifier import send_telegram_broadcast
+                sched_desc = "Optimal AI Posting" if schedule_mode == "ai" else f"Mulai {custom_schedule_time or '09:00'}"
+                caption_text = (
                     f"🤖 <b>Hermes Autopilot — Job Hari Ini Dijalankan!</b>\n\n"
-                    f"🎯 <b>Niche:</b> <code>{settings.get('niche_query')}</code>\n"
-                    f"🎬 <b>Video Terpilih:</b> <a href=\"{video_url}\">{video_title}</a>\n"
-                    f"⏱ <b>Durasi:</b> {dur_min} menit | 👁 <b>Views:</b> {views_str}\n"
-                    f"🔥 <b>Virality Score:</b> {virality_score}/100\n"
-                    f"🎨 <b>Preset:</b> <code>{preset_slug}</code>\n"
-                    f"📱 <b>Target Auto-Post:</b> {platforms_str}\n"
-                    f"⏰ <b>Mode Jadwal:</b> {schedule_mode.upper()}\n"
+                    f"👤 <b>User ID:</b> {user_id}\n"
+                    f"🎬 <b>Judul:</b> {video_title}\n"
+                    f"📈 <b>Virality Score:</b> {virality_score}/100\n"
+                    f"🎨 <b>Preset:</b> {preset_slug}\n"
+                    f"📱 <b>Target Platform:</b> {','.join(target_platforms).upper()}\n"
+                    f"⏰ <b>Jadwal:</b> {sched_desc}\n"
                     f"🆔 <b>Job ID:</b> <code>{job_id}</code>\n\n"
-                    f"<i>AutoCliper sedang memproses rendering klip. Begitu selesai, video akan otomatis dijadwalkan ke media sosial Anda!</i>"
+                    f"<i>Sistem sedang memproses video YouTube menjadi Shorts/TikTok portrait dan akan otomatis dijadwalkan ke Repliz setelah selesai.</i>"
                 )
-                await telegram_service.send_message(msg)
+                await send_telegram_broadcast(caption_text)
             except Exception as e:
                 logger.warning(f"autopilot: Failed to send Telegram report: {e}")
 
         return {
             "success": True,
             "status": "submitted",
-            "run_id": run_id,
             "job_id": job_id,
-            "today_date": today_date,
+            "run_id": run_id,
             "video": candidate,
-            "preset_slug": preset_slug,
-            "target_platforms": target_platforms,
-            "schedule_mode": schedule_mode,
+            "video_url": video_url,
+            "video_title": video_title,
+            "virality_score": virality_score,
+            "platforms": target_platforms,
             "message": f"Autopilot berhasil memproses video '{video_title}' (Job ID: {job_id})",
         }
 
@@ -598,7 +652,7 @@ class AutopilotService:
             await asyncio.sleep(30)
 
     async def _check_and_run_scheduled_autopilots(self):
-        """Check all active users with enabled autopilot settings and execute if scheduled."""
+        """Check all active users with enabled autopilot settings and execute sequentially."""
         self._ensure_tables()
         conn = get_dict_connection()
         try:
@@ -607,12 +661,18 @@ class AutopilotService:
                 SELECT s.* FROM autopilot_settings s
                 JOIN users u ON s.user_id = u.id
                 WHERE s.enabled = 1 AND u.is_active = 1
+                ORDER BY s.id ASC
             """)
             rows = cur.fetchall()
         finally:
             conn.close()
 
         if not rows:
+            return
+
+        # Check if the pipeline is already busy with another video processing
+        if self.is_pipeline_busy():
+            logger.info("autopilot_daemon: Pipeline is currently busy processing a video. Deferring scheduled check until current job finishes.")
             return
 
         # Current time in WIB (UTC+7)
@@ -625,6 +685,9 @@ class AutopilotService:
             if not user_id:
                 continue
 
+            if not bool(r_dict.get("enabled")):
+                continue
+
             raw_run_time = str(r_dict.get("run_time") or "08:00").strip()
             # Normalize to HH:MM format
             try:
@@ -634,6 +697,10 @@ class AutopilotService:
                 norm_run_time = "08:00"
 
             if current_hm == norm_run_time:
+                if self.is_pipeline_busy():
+                    logger.info(f"autopilot_daemon: Server pipeline is busy. Waiting before processing user {user_id}.")
+                    return
+
                 can_run, reason, _ = self.can_run_today(user_id)
                 if can_run:
                     logger.info(f"autopilot_daemon: Triggering scheduled daily run for user {user_id} at {current_hm} WIB...")
@@ -643,11 +710,13 @@ class AutopilotService:
                             trigger_source="daemon_scheduler",
                             notify_telegram=True,
                         )
-                        logger.info(f"autopilot_daemon: Run completed for user {user_id}: {res.get('message')}")
+                        logger.info(f"autopilot_daemon: Run result for user {user_id}: {res.get('message')}")
+                        # If a job was launched, break so we process one user at a time
+                        if res.get("success"):
+                            break
                     except Exception as step_err:
                         logger.error(f"autopilot_daemon: Error running autopilot step for user {user_id}: {step_err}", exc_info=True)
 
 
 # Singleton instance
 autopilot_service = AutopilotService()
-

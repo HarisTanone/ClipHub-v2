@@ -197,3 +197,32 @@ def test_hermes_cli_script_integration():
 
         run_res = cli_mod.trigger_run(force=False)
         assert run_res["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_autopilot_user_isolation_and_busy_check():
+    """Test user isolation and pipeline busy deferral."""
+    service = AutopilotService()
+    
+    # 1. User 100 has not configured autopilot -> must be disabled by default
+    user_100_settings = service.get_settings(user_id=100)
+    assert user_100_settings["enabled"] is False
+    assert user_100_settings["user_id"] == 100
+
+    # 2. Disabled user cannot run unless force=True
+    res_disabled = await service.run_autopilot_step(user_id=100, force=False)
+    assert res_disabled["success"] is False
+    assert res_disabled["status"] == "disabled"
+
+    # 3. User 101 enables autopilot
+    service.update_settings(user_id=101, data={"enabled": 1, "niche_query": "sains"})
+    user_101_settings = service.get_settings(user_id=101)
+    assert user_101_settings["enabled"] is True
+
+    # 4. Pipeline busy check -> defers execution
+    with patch.object(service, "is_pipeline_busy", return_value=True):
+        res_busy = await service.run_autopilot_step(user_id=101, force=False)
+        assert res_busy["success"] is False
+        assert res_busy["status"] == "pipeline_busy"
+        assert "Server sedang memproses video lain" in res_busy["message"]
+

@@ -421,15 +421,15 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "int",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": 2,
-        "description": "Maksimal pemrosesan job video secara simultan",
+        "default": 1,
+        "description": "Maksimal pemrosesan job video secara simultan (1 = antrean sekuensial aman)",
     },
     "MAX_WHISPER_PARALLEL": {
         "category": "render_limits",
         "data_type": "int",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": 2,
+        "default": 1,
         "description": "Maksimal proses transkripsi Whisper paralel",
     },
     "MAX_RENDER_WORKERS": {

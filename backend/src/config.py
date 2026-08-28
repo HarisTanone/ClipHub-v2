@@ -116,10 +116,10 @@ class Settings(BaseSettings):
     SUPERADMIN_EMAIL: str = "admin@autocliper.com"
     SUPERADMIN_PASSWORD: str = "Admin@2024!Secure"
 
-    # === Job Concurrency ===
-    MAX_CONCURRENT_JOBS: int = 1 if PIPELINE_ENV == "local" else 8
-    MAX_WHISPER_PARALLEL: int = 1 if PIPELINE_ENV == "local" else 4
-    MAX_RENDER_WORKERS: int = 2 if PIPELINE_ENV == "local" else 6
+    # === Job Concurrency (Sequential safe execution) ===
+    MAX_CONCURRENT_JOBS: int = 1
+    MAX_WHISPER_PARALLEL: int = 1
+    MAX_RENDER_WORKERS: int = 2
 
     # === Limits ===
     MAX_VIDEO_DURATION: int = 300 if PIPELINE_ENV == "local" else 3600

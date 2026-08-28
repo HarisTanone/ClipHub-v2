@@ -2147,30 +2147,15 @@ async def error_handler(update: object, ctx: ContextTypes.DEFAULT_TYPE):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _autopilot_daily_worker():
-    """Background loop that checks every 60s for scheduled daily autopilot run."""
-    import datetime as _dt
-    logger.info("Hermes Autopilot daily worker active (checking schedule every 60s)...")
+    """Background monitoring loop for Hermes Autopilot status."""
+    logger.info("Hermes Autopilot scheduler active (delegated to backend daemon with sequential FIFO queue)...")
     while True:
         try:
-            from src.infrastructure.autopilot_service import autopilot_service
-            settings = autopilot_service.get_settings(user_id=1)
-            if settings.get("enabled"):
-                now_str = _dt.datetime.now().strftime("%H:%M")
-                sched_str = str(settings.get("run_time", "08:00")).strip()
-                can_run, _, _ = autopilot_service.can_run_today(user_id=1)
-                if now_str == sched_str and can_run:
-                    logger.info(f"Triggering scheduled daily Hermes Autopilot at {now_str}...")
-                    await autopilot_service.run_autopilot_step(
-                        user_id=1,
-                        force=False,
-                        trigger_source="cron",
-                        notify_telegram=True,
-                    )
+            await asyncio.sleep(60)
         except asyncio.CancelledError:
             break
-        except Exception as e:
-            logger.debug(f"Autopilot background worker check: {e}")
-        await asyncio.sleep(60)
+        except Exception:
+            pass
 
 
 async def post_init(app: Application):
