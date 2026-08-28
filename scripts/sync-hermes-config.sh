@@ -61,21 +61,21 @@ else
   if ! grep -qE '^AUTOCLIPER_EMAIL=' "$HERMES_HOME/.env" 2>/dev/null; then
     echo 'AUTOCLIPER_EMAIL=' >> "$HERMES_HOME/.env"
     echo 'AUTOCLIPER_PASSWORD=' >> "$HERMES_HOME/.env"
-    echo "  ⚠️  Set AUTOCLIPER_EMAIL dan AUTOCLIPER_PASSWORD di $HERMES_HOME/.env"
+    echo "  [WARN] Set AUTOCLIPER_EMAIL dan AUTOCLIPER_PASSWORD di $HERMES_HOME/.env"
   fi
   if ! grep -qE '^TELEGRAM_BOT_TOKEN=' "$HERMES_HOME/.env" 2>/dev/null; then
     echo '# Telegram Bot (dari @BotFather)' >> "$HERMES_HOME/.env"
     echo 'TELEGRAM_BOT_TOKEN=' >> "$HERMES_HOME/.env"
     echo 'TELEGRAM_ALLOWED_USERS=' >> "$HERMES_HOME/.env"
-    echo "  ⚠️  Set TELEGRAM_BOT_TOKEN di $HERMES_HOME/.env"
+    echo "  [WARN] Set TELEGRAM_BOT_TOKEN di $HERMES_HOME/.env"
   fi
   # Sync public URLs from backend/.env if available
   if [ -f "$PROJECT_DIR/backend/.env" ]; then
-    PUBLIC_BACKEND_VAL="$(grep -E '^PUBLIC_BACKEND_URL=' "$PROJECT_DIR/backend/.env" 2>/dev/null | tail -n 1 | cut -d'=' -f2- | tr -d '\"' | tr -d "'")"
+    PUBLIC_BACKEND_VAL="$(grep -E '^PUBLIC_BACKEND_URL=' "$PROJECT_DIR/backend/.env" 2>/dev/null | tail -n 1 | cut -d'=' -f2- | tr -d '\"' | tr -d "'" || true)"
     if [ -n "$PUBLIC_BACKEND_VAL" ] && ! grep -qE '^PUBLIC_BACKEND_URL=' "$HERMES_HOME/.env" 2>/dev/null; then
       echo "PUBLIC_BACKEND_URL=$PUBLIC_BACKEND_VAL" >> "$HERMES_HOME/.env"
     fi
-    PUBLIC_FRONTEND_VAL="$(grep -E '^PUBLIC_FRONTEND_URL=' "$PROJECT_DIR/backend/.env" 2>/dev/null | tail -n 1 | cut -d'=' -f2- | tr -d '\"' | tr -d "'")"
+    PUBLIC_FRONTEND_VAL="$(grep -E '^PUBLIC_FRONTEND_URL=' "$PROJECT_DIR/backend/.env" 2>/dev/null | tail -n 1 | cut -d'=' -f2- | tr -d '\"' | tr -d "'" || true)"
     if [ -n "$PUBLIC_FRONTEND_VAL" ] && ! grep -qE '^PUBLIC_FRONTEND_URL=' "$HERMES_HOME/.env" 2>/dev/null; then
       echo "PUBLIC_FRONTEND_URL=$PUBLIC_FRONTEND_VAL" >> "$HERMES_HOME/.env"
     fi
