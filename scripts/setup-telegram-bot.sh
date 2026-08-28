@@ -12,6 +12,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BACKEND_DIR="$PROJECT_DIR/backend"
 BOT_DIR="$PROJECT_DIR/ops/telegram"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 DEPLOY_USER="${SUDO_USER:-$(whoami)}"
@@ -22,22 +23,23 @@ echo "════════════════════════�
 echo "  AutoCliper Telegram Bot — Setup"
 echo "═══════════════════════════════════════════════════════════════"
 echo "  Bot dir   : $BOT_DIR"
+echo "  Backend   : $BACKEND_DIR"
 echo "  HERMES_HOME: $HERMES_HOME"
 echo "  User      : $DEPLOY_USER"
 echo ""
 
 # ─── 1. Pastikan HERMES_HOME/.env ada ────────────────────────────────────────
 if [ ! -f "$HERMES_HOME/.env" ]; then
-    echo "  ⚠️  $HERMES_HOME/.env tidak ditemukan"
+    echo "  [WARN] $HERMES_HOME/.env tidak ditemukan"
     echo "  Jalankan scripts/sync-hermes-config.sh terlebih dahulu"
     exit 1
 fi
 
 # ─── 2. Validasi token ────────────────────────────────────────────────────────
-BOT_TOKEN="$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HERMES_HOME/.env" 2>/dev/null | cut -d'=' -f2- | tr -d '"'"'")"
+BOT_TOKEN="$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HERMES_HOME/.env" 2>/dev/null | cut -d'=' -f2- | tr -d '"'"'" || true)"
 if [ -z "$BOT_TOKEN" ]; then
     echo ""
-    echo "  ❌ TELEGRAM_BOT_TOKEN belum di-set!"
+    echo "  [ERROR] TELEGRAM_BOT_TOKEN belum di-set!"
     echo ""
     echo "  Cara mendapatkan token:"
     echo "    1. Buka Telegram, cari @BotFather"
@@ -54,45 +56,40 @@ if [ -z "$BOT_TOKEN" ]; then
     echo ""
     exit 1
 fi
-echo "  ✅ TELEGRAM_BOT_TOKEN ditemukan"
+echo "  [OK] TELEGRAM_BOT_TOKEN ditemukan"
 
 # ─── 3. Install Python venv untuk bot ────────────────────────────────────────
 echo ""
 echo "  Installing Python dependencies..."
+mkdir -p "$BOT_DIR"
 if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR"
 fi
-"$VENV_DIR/bin/pip" install --upgrade pip -q
-"$VENV_DIR/bin/pip" install -r "$BOT_DIR/requirements.txt" -q
-echo "  ✅ Dependencies installed"
+"$VENV_DIR/bin/pip" install --upgrade pip -q 2>/dev/null || true
+if [ -f "$BOT_DIR/requirements.txt" ]; then
+    "$VENV_DIR/bin/pip" install -r "$BOT_DIR/requirements.txt" -q
+fi
+echo "  [OK] Dependencies installed"
 
-# ─── 4. Sync hermes config + toolset ────────────────────────────────────────
+# ─── 4. Sync Hermes config + custom toolset ──────────────────────────────────
 echo ""
 echo "  Syncing Hermes config + AutoCliper toolset..."
 if [ -x "$PROJECT_DIR/scripts/sync-hermes-config.sh" ]; then
-    HERMES_HOME="$HERMES_HOME" bash "$PROJECT_DIR/scripts/sync-hermes-config.sh"
+    HERMES_HOME="$HERMES_HOME" "$PROJECT_DIR/scripts/sync-hermes-config.sh"
 else
-    echo "  ⚠️  sync-hermes-config.sh tidak ditemukan"
+    echo "  [WARN] sync-hermes-config.sh tidak ditemukan"
 fi
 
 # ─── 5. Systemd service ──────────────────────────────────────────────────────
 echo ""
 echo "  Installing systemd service: $SERVICE_NAME"
 
-# Deteksi apakah running sebagai root
-if [ "$(id -u)" -eq 0 ]; then
-    SYSTEMD_DIR="/etc/systemd/system"
-    SYSTEMD_SCOPE="system"
-else
-    SYSTEMD_DIR="$HOME/.config/systemd/user"
-    SYSTEMD_SCOPE="user"
-    mkdir -p "$SYSTEMD_DIR"
-fi
-
 PYTHON_BIN="$VENV_DIR/bin/python3"
 BOT_SCRIPT="$BOT_DIR/telegram_bot.py"
 
-cat > "$SYSTEMD_DIR/$SERVICE_NAME.service" << EOF
+if [ "$(id -u)" -eq 0 ] || command -v sudo &>/dev/null; then
+    # System unit (recommended, matches deploy.sh pattern)
+    sudo tee "/etc/systemd/system/$SERVICE_NAME.service" > /dev/null << EOF
 [Unit]
 Description=AutoCliper Telegram Bot
 After=network.target autocliper-backend.service
@@ -116,17 +113,42 @@ SyslogIdentifier=$SERVICE_NAME
 [Install]
 WantedBy=multi-user.target
 EOF
+    echo "  [OK] Service file: /etc/systemd/system/$SERVICE_NAME.service"
 
-echo "  ✅ Service file: $SYSTEMD_DIR/$SERVICE_NAME.service"
-
-# ─── 6. Enable + start service ───────────────────────────────────────────────
-if [ "$(id -u)" -eq 0 ]; then
-    systemctl daemon-reload
-    systemctl enable "$SERVICE_NAME"
-    systemctl restart "$SERVICE_NAME"
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$SERVICE_NAME"
+    sudo systemctl restart "$SERVICE_NAME"
     sleep 2
-    systemctl status "$SERVICE_NAME" --no-pager || true
+    sudo systemctl status "$SERVICE_NAME" --no-pager || true
 else
+    # Fallback to User unit
+    SYSTEMD_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SYSTEMD_DIR"
+
+    cat > "$SYSTEMD_DIR/$SERVICE_NAME.service" << EOF
+[Unit]
+Description=AutoCliper Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$BOT_DIR
+EnvironmentFile=-$BACKEND_DIR/.env
+Environment=HERMES_HOME=$HERMES_HOME
+Environment=AUTOCLIPER_API_URL=http://127.0.0.1:8000/api
+ExecStart=$PYTHON_BIN $BOT_SCRIPT
+Restart=always
+RestartSec=10
+TimeoutStopSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=$SERVICE_NAME
+
+[Install]
+WantedBy=default.target
+EOF
+    echo "  [OK] User Service file: $SYSTEMD_DIR/$SERVICE_NAME.service"
+
     systemctl --user daemon-reload
     systemctl --user enable "$SERVICE_NAME"
     systemctl --user restart "$SERVICE_NAME"
