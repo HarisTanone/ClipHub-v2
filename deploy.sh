@@ -323,9 +323,9 @@ fi
 # Create directories
 mkdir -p data data/asset_cache tmp/output tmp/downloads tmp/video_gen models
 
-# Ensure yt-dlp is up-to-date (critical for YouTube cipher extraction & 1080p stream resolution)
-echo "  Ensuring latest yt-dlp..."
-./venv/bin/pip install --upgrade yt-dlp -q 2>/dev/null || true
+# Ensure yt-dlp & pytubefix are up-to-date (critical for YouTube cipher extraction & 1080p stream resolution)
+echo "  Ensuring latest yt-dlp & pytubefix..."
+./venv/bin/pip install --upgrade yt-dlp pytubefix -q 2>/dev/null || true
 echo "  yt-dlp: $(./venv/bin/python -c 'import yt_dlp; print(yt_dlp.version.__version__)' 2>/dev/null || yt-dlp --version 2>/dev/null || echo 'not found')"
 
 # Set permissions on cookies.txt if present
@@ -639,6 +639,29 @@ else
     echo "     curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
 fi
 
+# ─── Step 4d: Telegram Bot Setup ───────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Step 4d: Telegram Bot Setup"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+TELEGRAM_BOT_DIR="$PROJECT_DIR/ops/telegram"
+if [ -d "$TELEGRAM_BOT_DIR" ]; then
+    cd "$TELEGRAM_BOT_DIR"
+    if [ ! -d "venv" ]; then
+        echo "  Creating Telegram bot virtual environment..."
+        $PYTHON_BIN -m venv venv
+    fi
+    ./venv/bin/pip install --upgrade pip -q 2>/dev/null || true
+    if [ -f "requirements.txt" ]; then
+        echo "  Syncing Telegram bot dependencies..."
+        ./venv/bin/pip install -r requirements.txt -q 2>/dev/null || \
+            ./venv/bin/pip install -r requirements.txt
+    fi
+    chown -R $DEPLOY_USER:$DEPLOY_USER "$TELEGRAM_BOT_DIR" 2>/dev/null || true
+    echo "  [OK] Telegram Bot environment ready"
+fi
+
 # Continue frontend step marker — original Step 5 follows in file
 
 # ─── Step 5: Frontend Build ─────────────────────────────────────────────────
@@ -826,15 +849,43 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+# Telegram Bot service
+if [ -d "$TELEGRAM_BOT_DIR" ] && [ -f "$TELEGRAM_BOT_DIR/telegram_bot.py" ]; then
+    sudo tee /etc/systemd/system/autocliper-telegram-bot.service > /dev/null << EOF
+[Unit]
+Description=AutoCliper Telegram Bot
+After=network.target autocliper-backend.service
+Wants=autocliper-backend.service
+
+[Service]
+Type=simple
+User=$DEPLOY_USER
+WorkingDirectory=$TELEGRAM_BOT_DIR
+Environment=HERMES_HOME=$HERMES_HOME_DEPLOY
+Environment=PATH=$TELEGRAM_BOT_DIR/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=$TELEGRAM_BOT_DIR/venv/bin/python3 $TELEGRAM_BOT_DIR/telegram_bot.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    echo "  [OK] autocliper-telegram-bot.service written"
+fi
+
 # Reload and restart (Remotion FIRST — must be ready before backend)
 sudo systemctl daemon-reload
-sudo systemctl enable autocliper-9router autocliper-backend autocliper-remotion autocliper-hyperframes autocliper-frontend 2>/dev/null || true
+sudo systemctl enable autocliper-9router autocliper-backend autocliper-remotion autocliper-hyperframes autocliper-frontend autocliper-telegram-bot 2>/dev/null || true
 
 # Start Remotion first and wait for bundle to be ready
 echo "  Stopping services (cleanup stale ports)..."
 sudo systemctl stop autocliper-9router 2>/dev/null || true
 sudo systemctl stop autocliper-remotion 2>/dev/null || true
 sudo systemctl stop autocliper-hyperframes 2>/dev/null || true
+sudo systemctl stop autocliper-telegram-bot 2>/dev/null || true
 sudo systemctl stop autocliper-backend 2>/dev/null || true
 sudo systemctl stop autocliper-frontend 2>/dev/null || true
 sleep 2
@@ -887,6 +938,11 @@ fi
 # Now restart backend (Remotion is ready to handle render requests)
 sudo systemctl start autocliper-backend
 sudo systemctl start autocliper-frontend
+
+if [ -f "/etc/systemd/system/autocliper-telegram-bot.service" ]; then
+    echo "  Starting Telegram Bot..."
+    sudo systemctl start autocliper-telegram-bot 2>/dev/null || true
+fi
 
 echo "  [OK] All services registered and started"
 
@@ -970,6 +1026,9 @@ check_service "autocliper-9router" "$NINE_ROUTER_PORT"
 check_service "autocliper-remotion" "$REMOTION_PORT"
 check_service "autocliper-hyperframes" "$HYPERFRAMES_PORT"
 check_service "autocliper-frontend" "$FRONTEND_PORT"
+if [ -f "/etc/systemd/system/autocliper-telegram-bot.service" ]; then
+    check_service "autocliper-telegram-bot" "Polling"
+fi
 
 # API health check
 if curl -s "http://localhost:$BACKEND_PORT/health" | grep -q "ok" 2>/dev/null; then
@@ -1016,16 +1075,18 @@ echo "    Backend:      $PUBLIC_BACKEND_URL"
 echo "    Remotion:     http://$PUBLIC_HOST:$REMOTION_PORT   (hook+subtitle)"
 echo "    HyperFrames:  http://$PUBLIC_HOST:$HYPERFRAMES_PORT  (polish)"
 echo "    Frontend:     $PUBLIC_FRONTEND_URL"
+echo "    Telegram Bot: $(systemctl is-active autocliper-telegram-bot 2>/dev/null || echo 'not active')"
 echo "    Hermes home:  $HERMES_HOME_DEPLOY"
 echo ""
 echo "  Open:"
 echo "    $PUBLIC_FRONTEND_URL"
 echo ""
 echo "  Logs:"
-echo "    sudo journalctl -u autocliper-9router -f"
 echo "    sudo journalctl -u autocliper-backend -f"
+echo "    sudo journalctl -u autocliper-telegram-bot -f"
 echo "    sudo journalctl -u autocliper-remotion -f"
 echo "    sudo journalctl -u autocliper-hyperframes -f"
+echo "    sudo journalctl -u autocliper-9router -f"
 echo "    sudo journalctl -u autocliper-frontend -f"
 echo ""
 echo "  Management:"
