@@ -219,27 +219,99 @@ class YouTubeDownloader(IDownloader):
 
     async def download_video(self, url: str, output_path: str) -> bool:
         """
-        Download video YouTube dengan VidKraken API v2 sebagai engine utama (1080p -> 720p).
-        Jika VidKraken gagal, otomatis fallback ke yt-dlp + aria2c.
+        Download video YouTube dengan 3 Engine Terpisah (Multi-Tool Fallback):
+        1. Engine 1: yt-dlp Multi-Tier HD Engine (1080p -> 720p) + aria2c / concurrent stream
+        2. Engine 2: Native Python Pytubefix HD Engine (Adaptive stream + FFmpeg AAC Mux)
+        3. Engine 3: Cobalt API (Self-Hosted / Fast REST Downloader)
+        4. Engine 4: VidKraken API (Secondary Cloud Backup)
+
+        Aturan Mutlak: Minimal resolusi harus 720p (HD) s/d 1080p. Jika di bawah 720p,
+        file ditolak dan otomatis berpindah ke fallback engine berikutnya.
         """
         clean_url = get_canonical_youtube_url(url) or url.strip()
-        logger.info(f"[AutoCliper Downloader] Memulai download: {clean_url} → {output_path}")
+        logger.info(f"[AutoCliper Downloader] Memulai download HD: {clean_url} → {output_path}")
 
-        # ─── 1. Primary Downloader: VidKraken API v2 (1080p -> 720p) ──────
+        # ─── ENGINE 1: yt-dlp Multi-Tier HD Engine ────────────────────────────────
+        try:
+            logger.info(f"[AutoCliper Downloader] [Engine 1/3: yt-dlp HD] Mencoba mengunduh {clean_url}...")
+            ytdlp_ok = await self._download_via_ytdlp(clean_url, output_path)
+            if ytdlp_ok and await self._is_valid_hd_file(output_path):
+                logger.info(f"[AutoCliper Downloader] [Engine 1/3: yt-dlp] SUKSES mengunduh video HD! → {output_path}")
+                return True
+        except Exception as e_ytdlp:
+            logger.warning(f"[AutoCliper Downloader] [Engine 1/3: yt-dlp] Gagal ({e_ytdlp}). Beralih ke Engine 2...")
+
+        # Pastikan file non-HD/corrupt dibersihkan sebelum engine berikutnya
+        self._cleanup_file(output_path)
+
+        # ─── ENGINE 2: Native Python Pytubefix HD Engine ──────────────────────────
+        try:
+            from src.infrastructure.pytubefix_downloader import PytubefixDownloader
+            logger.info(f"[AutoCliper Downloader] [Engine 2/3: Pytubefix HD] Mencoba mengunduh {clean_url}...")
+            pytube_dl = PytubefixDownloader()
+            pytube_ok = await pytube_dl.download_video(clean_url, output_path)
+            if pytube_ok and await self._is_valid_hd_file(output_path):
+                logger.info(f"[AutoCliper Downloader] [Engine 2/3: Pytubefix] SUKSES mengunduh video HD! → {output_path}")
+                return True
+        except Exception as e_pytube:
+            logger.warning(f"[AutoCliper Downloader] [Engine 2/3: Pytubefix] Gagal ({e_pytube}). Beralih ke Engine 3...")
+
+        self._cleanup_file(output_path)
+
+        # ─── ENGINE 3: Cobalt API (Self-Hosted / Fast Microservice) ───────────────
+        try:
+            from src.infrastructure.cobalt_client import CobaltClient
+            cobalt_cl = CobaltClient()
+            if cobalt_cl.is_enabled:
+                logger.info(f"[AutoCliper Downloader] [Engine 3/3: Cobalt HD] Mencoba mengunduh {clean_url} via {cobalt_cl.base_url}...")
+                cobalt_ok = await cobalt_cl.download_video(clean_url, output_path)
+                if cobalt_ok and await self._is_valid_hd_file(output_path):
+                    logger.info(f"[AutoCliper Downloader] [Engine 3/3: Cobalt API] SUKSES mengunduh video HD! → {output_path}")
+                    return True
+        except Exception as e_cobalt:
+            logger.warning(f"[AutoCliper Downloader] [Engine 3/3: Cobalt API] Gagal ({e_cobalt}).")
+
+        self._cleanup_file(output_path)
+
+        # ─── ENGINE 4 (Optional Backup): VidKraken API ────────────────────────────
         try:
             from src.infrastructure.vidkraken_client import VidKrakenClient
             vk_client = VidKrakenClient()
             if vk_client.is_enabled:
-                logger.info(f"[AutoCliper Downloader] Menggunakan VidKraken API v2 sebagai engine utama: {clean_url}")
-                vk_success = await vk_client.download_video(clean_url, output_path)
-                if vk_success and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                    await self._validate_media_file(output_path)
-                    logger.info(f"[AutoCliper Downloader] Download via VidKraken API SUKSES! → {output_path}")
+                logger.info(f"[AutoCliper Downloader] [Engine Backup: VidKraken] Mencoba mengunduh {clean_url}...")
+                vk_ok = await vk_client.download_video(clean_url, output_path)
+                if vk_ok and await self._is_valid_hd_file(output_path):
+                    logger.info(f"[AutoCliper Downloader] [Engine Backup: VidKraken] SUKSES mengunduh video HD! → {output_path}")
                     return True
-        except Exception as vk_err:
-            logger.warning(f"[AutoCliper Downloader] VidKraken downloader gagal ({vk_err}). Melanjutkan fallback ke yt-dlp...")
+        except Exception as e_vk:
+            logger.warning(f"[AutoCliper Downloader] [Engine Backup: VidKraken] Gagal ({e_vk}).")
 
-        # ─── 2. Fallback Downloader: yt-dlp Multi-Tier Engine ─────────────
+        self._cleanup_file(output_path)
+
+        logger.error(f"[AutoCliper Downloader] Semua engine download (yt-dlp, pytubefix, Cobalt, VidKraken) gagal menghasilkan video HD (>= 720p).")
+        raise RuntimeError(f"Gagal mengunduh video YouTube dalam format HD (minimal 720p - 1080p). Seluruh fallback downloader gagal.")
+
+    def _cleanup_file(self, path: str) -> None:
+        """Hapus file jika ada dan tidak memenuhi syarat HD."""
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+
+    async def _is_valid_hd_file(self, output_path: str) -> bool:
+        """Validasi bahwa file video terunduh dan resolusinya minimal 720p."""
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            return False
+        h = await self._validate_media_file(output_path)
+        if h is not None and h >= 720:
+            return True
+        logger.warning(f"[AutoCliper Downloader] Resolusi video terdeteksi ({h}p) di bawah batas HD (720p). Menolak file dan beralih ke fallback lain...")
+        self._cleanup_file(output_path)
+        return False
+
+    async def _download_via_ytdlp(self, clean_url: str, output_path: str) -> bool:
+        """Download via yt-dlp dengan rotasi client tier HD."""
         ytdlp_cmd = _get_ytdlp_cmd()
 
         env = os.environ.copy()
@@ -261,24 +333,21 @@ class YouTubeDownloader(IDownloader):
             "--postprocessor-args", "merger:-c:v copy -c:a aac -b:a 192k",
             "-o", output_path,
             "--no-warnings",
-            "--retries", "10",
-            "--fragment-retries", "10",
+            "--retries", "5",
+            "--fragment-retries", "5",
         ]
 
-        # Check aria2c multi-connection download engine (using 4 connections to avoid CDN 403 blocks)
         aria2c_cmd = _get_aria2c_cmd()
         if settings.USE_ARIA2C and aria2c_cmd:
-            logger.info(f"[AutoCliper Downloader] Menggunakan aria2c accelerator ({aria2c_cmd}) dengan 4 koneksi paralel.")
             cmd.extend([
                 "--downloader", "aria2c",
-                "--downloader-args", "aria2c:-x 4 -s 4 -k 1M -j 4 --max-tries=5 --retry-wait=2 --summary-interval=0",
+                "--downloader-args", "aria2c:-x 4 -s 4 -k 1M -j 4 --max-tries=3 --retry-wait=2 --summary-interval=0",
             ])
         else:
             cmd.extend(["--concurrent-fragments", "8"])
 
         cmd.append(clean_url)
 
-        initial_success = False
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -286,41 +355,21 @@ class YouTubeDownloader(IDownloader):
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
-            )
+            await asyncio.wait_for(proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT)
             if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                h = await self._validate_media_file(output_path)
-                if h and h >= 720:
-                    return True
-                logger.warning(f"[AutoCliper Downloader] Initial download dihasilkan di bawah 720p ({h}p). Mencoba fallback HD tier...")
-        except asyncio.TimeoutError:
-            logger.error(f"[AutoCliper Downloader] Timeout setelah {settings.DOWNLOAD_TIMEOUT}s")
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            raise TimeoutError(
-                f"Download timeout setelah {settings.DOWNLOAD_TIMEOUT // 60} menit"
-            )
+                return True
         except Exception as e:
-            logger.debug(f"[AutoCliper Downloader] Primary download error: {e}")
+            logger.debug(f"[yt-dlp Engine] Primary tier error: {e}")
 
-        # Alternative HD client tiers (prioritizing 1080p and 720p HD streams)
+        # Alternative HD client tiers
         client_tiers = [
             ("youtube:player_client=web_creator,web_safari,mweb", _get_cookie_args()),
             ("youtube:player_client=visionos,web_safari,mweb", []),
             ("youtube:player_client=visionos,web", []),
             ("youtube:player_client=web_safari,mweb,ios", _get_cookie_args()),
-            ("youtube:player_client=tv,mweb", []),
-            ("youtube:player_client=web,mweb", _get_cookie_args()),
-            ("youtube:player_client=android_creator,android", []),  # Last resort only
         ]
 
-        err = ""
         for client_arg, active_cookie_args in client_tiers:
-            cookie_label = "with cookies" if active_cookie_args else "without cookies"
-            logger.warning(f"[AutoCliper Downloader] Mencoba download fallback dengan {client_arg} ({cookie_label})...")
             retry_cmd = [
                 ytdlp_cmd,
                 "--geo-bypass",
@@ -332,8 +381,8 @@ class YouTubeDownloader(IDownloader):
                 "--postprocessor-args", "merger:-c:v copy -c:a aac -b:a 192k",
                 "-o", output_path,
                 "--no-warnings",
-                "--retries", "5",
-                "--fragment-retries", "5",
+                "--retries", "3",
+                "--fragment-retries", "3",
                 "--concurrent-fragments", "8",
                 clean_url,
             ]
@@ -344,26 +393,13 @@ class YouTubeDownloader(IDownloader):
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
                 )
-                r_stdout, r_stderr = await asyncio.wait_for(
-                    retry_proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT
-                )
+                await asyncio.wait_for(retry_proc.communicate(), timeout=settings.DOWNLOAD_TIMEOUT)
                 if retry_proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                    h = await self._validate_media_file(output_path)
-                    if h and h >= 720:
-                        logger.info(f"[AutoCliper Downloader] Fallback download HD berhasil dengan {client_arg} ({cookie_label}) — Resolusi: {h}p!")
-                        return True
-                    logger.warning(f"[AutoCliper Downloader] Fallback {client_arg} menghasilkan {h}p (<720p). Melanjutkan tier berikutnya...")
-                err = r_stderr.decode().strip()
+                    return True
             except Exception as ex:
-                logger.debug(f"[AutoCliper Downloader] Retry {client_arg} error: {ex}")
+                logger.debug(f"[yt-dlp Engine] Retry {client_arg} error: {ex}")
 
-        # If a video was downloaded but lower than 720p, accept as last resort if exists
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            await self._validate_media_file(output_path)
-            return True
-
-        logger.error(f"[AutoCliper Downloader] Gagal mengunduh: {err[:300]}")
-        raise RuntimeError(f"Download gagal: {err[:300]}")
+        return False
 
     async def _validate_media_file(self, file_path: str) -> Optional[int]:
         """Memverifikasi file hasil unduhan dengan ffprobe (resolusi, codec, durasi, bitrate)."""

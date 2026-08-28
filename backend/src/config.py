@@ -55,11 +55,16 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY: str = ""
     YOUTUBE_COOKIES_PATH: str = ""
 
-    # VidKraken Video Downloader API
+    # VidKraken Video Downloader API (Backup)
     VIDKRAKEN_API_KEY: str = "ce1bcba1-b808-470f-987c-072ca2d35488"
     VIDKRAKEN_BASE_URL: str = "https://vidkraken.com/api/v2"
     VIDKRAKEN_ENABLED: bool = True
     VIDKRAKEN_TIMEOUT: int = 180
+
+    # Cobalt Video Downloader API (Self-Hosted / Fast REST)
+    COBALT_API_URL: str = "http://localhost:9000"
+    COBALT_ENABLED: bool = True
+    COBALT_TIMEOUT: int = 180
 
     # ─── Deepgram TTS ─────────────────────────────────────────────────────
     DEEPGRAM_API_KEY: str = ""

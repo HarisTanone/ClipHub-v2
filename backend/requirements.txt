@@ -6,6 +6,7 @@ greenlet>=3.0.0
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
 yt-dlp>=2026.8.19
+pytubefix>=10.11.0
 python-multipart>=0.0.12
 aiofiles>=24.1.0
 youtube-transcript-api>=1.2.0

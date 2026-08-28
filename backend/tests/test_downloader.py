@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from src.infrastructure.downloader import extract_youtube_video_id, get_canonical_youtube_url, YouTubeDownloader
 
@@ -32,8 +33,10 @@ async def test_validate_url_dirty_string_validation():
 
 
 @pytest.mark.asyncio
-async def test_vidkraken_client_initialization():
+async def test_vidkraken_client_initialization(monkeypatch):
     from src.infrastructure.vidkraken_client import VidKrakenClient
+    from src.config import settings
+    monkeypatch.setattr(settings, "VIDKRAKEN_ENABLED", True)
     client = VidKrakenClient()
     assert client.is_enabled is True
     assert client.api_key == "ce1bcba1-b808-470f-987c-072ca2d35488"
@@ -43,6 +46,8 @@ async def test_vidkraken_client_initialization():
 @pytest.mark.asyncio
 async def test_vidkraken_download_video_mocked(monkeypatch, tmp_path):
     from src.infrastructure.vidkraken_client import VidKrakenClient
+    from src.config import settings
+    monkeypatch.setattr(settings, "VIDKRAKEN_ENABLED", True)
     client = VidKrakenClient()
     output_file = str(tmp_path / "test_vid.mp4")
 
@@ -78,6 +83,8 @@ async def test_vidkraken_download_video_mocked(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_vidkraken_fallback_to_720_on_1080_fail(monkeypatch, tmp_path):
     from src.infrastructure.vidkraken_client import VidKrakenClient
+    from src.config import settings
+    monkeypatch.setattr(settings, "VIDKRAKEN_ENABLED", True)
     client = VidKrakenClient()
     output_file = str(tmp_path / "test_vid.mp4")
 
@@ -109,4 +116,78 @@ async def test_vidkraken_fallback_to_720_on_1080_fail(monkeypatch, tmp_path):
     success = await client.download_video("https://www.youtube.com/watch?v=dQw4w9WgXcQ", output_file)
     assert success is True
     assert enqueue_calls == ["1080", "720"]
+
+
+@pytest.mark.asyncio
+async def test_multi_engine_fallback_to_pytubefix(monkeypatch, tmp_path):
+    downloader = YouTubeDownloader()
+    output_file = str(tmp_path / "test_hd.mp4")
+
+    # Mock yt-dlp to fail
+    monkeypatch.setattr(downloader, "_download_via_ytdlp", lambda *a, **kw: asyncio.sleep(0, result=False))
+
+    # Mock pytubefix to succeed with valid HD file
+    from src.infrastructure.pytubefix_downloader import PytubefixDownloader
+    async def mock_pytube_download(self, url, out_path):
+        with open(out_path, "wb") as f:
+            f.write(b"\x00" * 2048)
+        return True
+
+    monkeypatch.setattr(PytubefixDownloader, "download_video", mock_pytube_download)
+    # Mock validate_media_file to return 1080p
+    monkeypatch.setattr(downloader, "_validate_media_file", lambda p: asyncio.sleep(0, result=1080))
+
+    success = await downloader.download_video("https://www.youtube.com/watch?v=dQw4w9WgXcQ", output_file)
+    assert success is True
+
+
+@pytest.mark.asyncio
+async def test_multi_engine_fallback_to_cobalt_on_pytube_fail(monkeypatch, tmp_path):
+    downloader = YouTubeDownloader()
+    output_file = str(tmp_path / "test_cobalt_hd.mp4")
+
+    # Mock yt-dlp & pytubefix to fail
+    monkeypatch.setattr(downloader, "_download_via_ytdlp", lambda *a, **kw: asyncio.sleep(0, result=False))
+    from src.infrastructure.pytubefix_downloader import PytubefixDownloader
+    monkeypatch.setattr(PytubefixDownloader, "download_video", lambda self, u, o: asyncio.sleep(0, result=False))
+
+    # Mock Cobalt to succeed
+    from src.infrastructure.cobalt_client import CobaltClient
+    async def mock_cobalt_download(self, url, out_path):
+        with open(out_path, "wb") as f:
+            f.write(b"\x00" * 4096)
+        return True
+
+    monkeypatch.setattr(CobaltClient, "download_video", mock_cobalt_download)
+    # Mock validate_media_file to return 720p
+    monkeypatch.setattr(downloader, "_validate_media_file", lambda p: asyncio.sleep(0, result=720))
+
+    success = await downloader.download_video("https://www.youtube.com/watch?v=dQw4w9WgXcQ", output_file)
+    assert success is True
+
+
+@pytest.mark.asyncio
+async def test_multi_engine_rejects_sub_hd_video(monkeypatch, tmp_path):
+    downloader = YouTubeDownloader()
+    output_file = str(tmp_path / "test_sub_hd.mp4")
+
+    # Mock yt-dlp to write a 360p file
+    async def mock_ytdlp_360p(url, out_path):
+        with open(out_path, "wb") as f:
+            f.write(b"\x00" * 1024)
+        return True
+
+    monkeypatch.setattr(downloader, "_download_via_ytdlp", mock_ytdlp_360p)
+    # Mock validate_media_file to return 360p
+    monkeypatch.setattr(downloader, "_validate_media_file", lambda p: asyncio.sleep(0, result=360))
+
+    # Pytubefix & Cobalt also fail
+    from src.infrastructure.pytubefix_downloader import PytubefixDownloader
+    from src.infrastructure.cobalt_client import CobaltClient
+    monkeypatch.setattr(PytubefixDownloader, "download_video", lambda self, u, o: asyncio.sleep(0, result=False))
+    monkeypatch.setattr(CobaltClient, "download_video", lambda self, u, o: asyncio.sleep(0, result=False))
+
+    with pytest.raises(RuntimeError, match="Gagal mengunduh video YouTube dalam format HD"):
+        await downloader.download_video("https://www.youtube.com/watch?v=dQw4w9WgXcQ", output_file)
+
 
