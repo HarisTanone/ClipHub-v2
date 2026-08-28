@@ -506,11 +506,11 @@ class KB:
             ],
             [
                 InlineKeyboardButton("🤖 Hermes Autopilot", callback_data="menu_autopilot"),
-                InlineKeyboardButton("Auto-Post Sosmed", callback_data="menu_autopost"),
+                InlineKeyboardButton("🚀 Auto-Post", callback_data="menu_autopost"),
             ],
             [
+                InlineKeyboardButton("📅 Jadwal Sosmed", callback_data="act_schedules"),
                 InlineKeyboardButton("Job Terbaru",  callback_data="act_jobs"),
-                InlineKeyboardButton("Cek Status",   callback_data="menu_status"),
             ],
             [
                 InlineKeyboardButton("Model LLM",    callback_data="menu_model"),
@@ -543,6 +543,40 @@ class KB:
             ],
         ]
         return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def schedules_menu(current_filter: str = "all", docs: list = None) -> InlineKeyboardMarkup:
+        """Interactive keyboard for viewing and managing scheduled posts from Repliz."""
+        filters = [
+            ("all", "Semua"),
+            ("pending", "Pending"),
+            ("success", "Sukses"),
+            ("error", "Error"),
+        ]
+        f_row = []
+        for code, label in filters:
+            prefix = "• " if code == current_filter.lower() else ""
+            f_row.append(InlineKeyboardButton(f"{prefix}{label}", callback_data=f"act_sched_f_{code}"))
+
+        rows = [f_row]
+
+        # Action buttons for error docs if any
+        if docs:
+            error_docs = [d for d in docs if (d.get("status") or "").lower() == "error"]
+            for edoc in error_docs[:3]:
+                sid = edoc.get("_id") or edoc.get("id") or ""
+                if sid:
+                    rows.append([
+                        InlineKeyboardButton(f"🔄 Retry ({sid[:8]}...)", callback_data=f"act_sched_retry_{sid}")
+                    ])
+
+        rows.append([
+            InlineKeyboardButton("🔄 Refresh", callback_data=f"act_sched_f_{current_filter}"),
+            InlineKeyboardButton("⚙️ Auto-Post", callback_data="menu_autopost"),
+        ])
+        rows.append([InlineKeyboardButton("Menu Utama", callback_data="act_back")])
+        return InlineKeyboardMarkup(rows)
+
 
     @staticmethod
     def autopost_menu(is_enabled: bool, selected_platforms: list[str], mode: str = "ai") -> InlineKeyboardMarkup:
@@ -1495,6 +1529,78 @@ async def cmd_autopost(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _show_autopost_menu(update.message)
 
 
+# ─── /schedules (Jadwal Posting Sosmed) ──────────────────────────────────────
+
+async def _show_schedules_menu(target, status_filter: str = "all", toast: str = ""):
+    """Fetch and display social media schedules from Repliz."""
+    from src.presentation.routes.social.helpers import repliz_get
+    
+    params = {"page": 1, "limit": 10}
+    if status_filter != "all":
+        params["status"] = status_filter
+        
+    try:
+        data = await repliz_get("/public/schedule", params=params)
+    except Exception as e:
+        text = f"❌ Gagal memuat jadwal dari Repliz: <code>{str(e)}</code>"
+        kb = KB.schedules_menu(current_filter=status_filter)
+        if hasattr(target, "edit_message_text"):
+            return await edit_or_reply(target, text, kb)
+        elif hasattr(target, "reply_text"):
+            return await target.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        elif hasattr(target, "message") and hasattr(target.message, "reply_text"):
+            return await target.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return
+
+    docs = data.get("docs", [])
+    total = data.get("totalDocs", len(docs))
+    
+    text = (
+        f"📅 <b>Jadwal Posting Media Sosial (Repliz)</b>\n"
+        f"Filter: <code>{status_filter.upper()}</code> │ Total: <b>{total} Postingan</b>\n\n"
+    )
+    if toast:
+        text = f"<i>{toast}</i>\n\n" + text
+        
+    if not docs:
+        text += "<i>Belum ada postingan terjadwal untuk filter ini.</i>\n"
+    else:
+        for idx, doc in enumerate(docs[:8], 1):
+            sid = doc.get("_id") or doc.get("id") or "-"
+            status = (doc.get("status") or "unknown").upper()
+            ptype = (doc.get("type") or "video").upper()
+            sched_at = (doc.get("scheduleAt") or "")[:19].replace("T", " ")
+            title = doc.get("title") or doc.get("description") or "-"
+            title_short = (title[:35] + "...") if len(title) > 35 else title
+            acc = doc.get("account") or {}
+            acc_name = acc.get("name") or acc.get("username") or "-"
+            acc_type = (acc.get("type") or "sosmed").upper()
+            
+            icon = "⏳" if status == "PENDING" else ("✅" if status == "SUCCESS" else ("❌" if status == "ERROR" else "🔄"))
+            text += f"{idx}. {icon} <b>[{status}]</b> <code>{acc_type}</code> ({acc_name})\n"
+            text += f"   Waktu: <code>{sched_at} UTC</code>\n"
+            text += f"   Judul: <i>{title_short}</i>\n"
+            text += f"   ID: <code>{sid[:12]}...</code>\n\n"
+            
+    kb = KB.schedules_menu(current_filter=status_filter, docs=docs)
+    if hasattr(target, "edit_message_text"):
+        await edit_or_reply(target, text, kb)
+    elif hasattr(target, "reply_text"):
+        await target.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    elif hasattr(target, "message") and hasattr(target.message, "reply_text"):
+        await target.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def cmd_schedules(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Command handler for /schedules or /jadwal."""
+    if not is_allowed(update.effective_user.id if update.effective_user else None):
+        return await deny_access(update)
+
+    status_filter = ctx.args[0].lower() if ctx.args else "all"
+    await _show_schedules_menu(update.message, status_filter=status_filter)
+
+
+
 # ─── /autopilot ───────────────────────────────────────────────────────────────
 
 async def _show_autopilot_menu(target, toast: str = ""):
@@ -1674,6 +1780,26 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         new_mode = "instant" if current_mode == "ai" else "ai"
         telegram_service.update_settings({"auto_post_schedule_mode": new_mode})
         await _show_autopost_menu(query, toast=f"Mode jadwal: {new_mode.upper()}")
+
+    # ── Schedules (Jadwal Posting) ─────────────────────────────────────────────
+    elif data == "act_schedules":
+        await _show_schedules_menu(query, status_filter="all")
+
+    elif data.startswith("act_sched_f_"):
+        status = data.replace("act_sched_f_", "")
+        await _show_schedules_menu(query, status_filter=status)
+
+    elif data.startswith("act_sched_retry_"):
+        sid = data.replace("act_sched_retry_", "")
+        from src.presentation.routes.social.helpers import repliz_put
+        toast = ""
+        try:
+            await repliz_put(f"/public/schedule/{sid}/retry", json_body={})
+            toast = f"✅ Berhasil me-retry jadwal ID: {sid[:8]}"
+        except Exception as e:
+            toast = f"❌ Gagal me-retry: {str(e)}"
+        await _show_schedules_menu(query, status_filter="error", toast=toast)
+
 
     # ── My ID ──────────────────────────────────────────────────────────────────
     elif data == "act_myid":
@@ -2068,6 +2194,7 @@ async def post_init(app: Application):
         BotCommand("jobs",      "List job terbaru"),
         BotCommand("model",     "Ganti model LLM"),
         BotCommand("autopost",  "Auto-Post Sosmed Settings"),
+        BotCommand("schedules", "Lihat Jadwal Posting Sosmed"),
         BotCommand("id",        "Tampilkan Telegram ID"),
         BotCommand("cancel",    "Batalkan operasi"),
     ])
@@ -2111,7 +2238,10 @@ def main():
     app.add_handler(CommandHandler("model",     cmd_model))
     app.add_handler(CommandHandler("autopost",  cmd_autopost))
     app.add_handler(CommandHandler("social",    cmd_autopost))
+    app.add_handler(CommandHandler("schedules", cmd_schedules))
+    app.add_handler(CommandHandler("jadwal",    cmd_schedules))
     app.add_handler(CommandHandler("cancel",    cmd_cancel))
+
 
     # ── Callback query handler ────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_callback))

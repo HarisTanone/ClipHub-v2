@@ -2025,7 +2025,7 @@ export function VideoGeneratorPage() {
                           >
                             {availableCountries.map((c) => (
                               <option key={c} value={c}>
-                                {c === "All" ? "🌐 Semua Bahasa & Gaya" : c === "Indonesia" ? "🇮🇩 Bahasa Indonesia (Semua Gaya Daerah)" : c}
+                                {c === "All" ? "Semua Bahasa & Gaya" : c === "Indonesia" ? "Bahasa Indonesia (Semua Gaya Daerah)" : c}
                               </option>
                             ))}
                           </select>
@@ -2052,13 +2052,13 @@ export function VideoGeneratorPage() {
                               }}
                               className="w-full rounded-lg border border-zinc-800 bg-zinc-900/90 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
                             >
-                              <option value="Kore">✨ Kore · Default Native Voice</option>
+                              <option value="Kore">Kore · Default Native Voice</option>
                               {filteredVoices.map((option) => (
                                 <option key={option.model || option.key} value={option.model}>
                                   {option.key} {option.gender ? `(${option.gender})` : ""}
                                 </option>
                               ))}
-                              <option value="custom">✏️ Gunakan Prebuilt Voice Name custom...</option>
+                              <option value="custom">Gunakan Prebuilt Voice Name custom...</option>
                             </select>
                           </div>
 
@@ -2124,7 +2124,7 @@ export function VideoGeneratorPage() {
                           </select>
                         </div>
                         <div className="flex items-center text-[11px] text-zinc-400 pt-5">
-                          ✨ Google Gemini TTS Audio API terhubung dari Settings &gt; Database &amp; Env Config.
+                          Google Gemini TTS Audio API terhubung dari Settings &gt; Database &amp; Env Config.
                         </div>
                       </div>
                     </div>

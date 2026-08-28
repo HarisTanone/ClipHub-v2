@@ -1,17 +1,19 @@
-"""Publish endpoint — upload video to Google Drive then schedule post via Repliz.
+"""Publish endpoint — upload video to Google Drive then schedule post via Repliz API.
 
-Flow: clip final video → Google Drive (public link) → Repliz schedule API
+Flow: Clip/Video output -> Google Drive (public direct link) -> Repliz Schedule API
 """
 import logging
 import os
+import re
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.config import settings
-from src.presentation.routes.auth import get_current_user
 from src.infrastructure.clip_outputs import find_final_clip
 from src.infrastructure.gdrive_uploader import gdrive_uploader
+from src.presentation.routes.auth import get_current_user
 from src.presentation.routes.social.helpers import repliz_post
 
 logger = logging.getLogger(__name__)
@@ -19,53 +21,71 @@ publish_router = APIRouter(prefix="/publish", tags=["social-publish"])
 
 
 class PublishRequest(BaseModel):
-    """Request to publish a clip or AI generated video to social media (single or multiple accounts)."""
+    """Request to publish a clip or AI generated video to social media."""
+
     jobId: str
-    clipRank: int | None = None
-    videoSource: str | None = None  # "clip" or "video_generator"
-    accountId: str | None = None
-    accountIds: list[str] | None = None
+    clipRank: Optional[int] = None
+    videoSource: Optional[str] = None  # "clip" or "video_generator"
+    accountId: Optional[str] = None
+    accountIds: Optional[List[str]] = None
     caption: str = ""
     title: str = ""
-    scheduleAt: str  # ISO 8601
-    type: str = "video"  # video, reel
+    topic: str = ""
+    type: str = "video"  # "video", "reel", "story"
+    tags: List[str] = Field(default_factory=list)
+    firstReply: Optional[str] = ""
+    isAiGenerated: bool = True
+    isDraft: bool = False
+    collaborators: List[str] = Field(default_factory=list)
+    mentions: List[str] = Field(default_factory=list)
+    targetCountries: List[str] = Field(default_factory=list)
+    scheduleAt: str  # ISO 8601 UTC string
+
 
 
 @publish_router.post("")
 async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     """Upload clip or AI generated video to Google Drive once and schedule posts across all selected accounts via Repliz."""
-    # Resolve target account IDs (support both accountIds list and legacy single accountId)
-    target_account_ids: list[str] = []
+    # 1. Resolve target account IDs
+    target_account_ids: List[str] = []
     if body.accountIds:
-        target_account_ids = [aid.strip() for aid in body.accountIds if aid and str(aid).strip()]
+        target_account_ids = [
+            aid.strip() for aid in body.accountIds if aid and str(aid).strip()
+        ]
     elif body.accountId:
         target_account_ids = [body.accountId.strip()]
 
     if not target_account_ids:
         raise HTTPException(
             status_code=400,
-            detail="Pilih minimal satu akun media sosial untuk posting."
+            detail="Pilih minimal satu akun media sosial untuk posting.",
         )
 
-    # Check config
+    # 2. Check credentials
     if not gdrive_uploader.is_configured:
         raise HTTPException(
             status_code=503,
-            detail="Google Drive not configured. Set GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN in .env"
+            detail="Google Drive belum dikonfigurasi. Pastikan GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, dan GOOGLE_DRIVE_REFRESH_TOKEN sudah terisi.",
         )
     if not settings.REPLIZ_ACCESS_KEY or not settings.REPLIZ_SECRET_KEY:
-        raise HTTPException(status_code=503, detail="Repliz credentials not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="Repliz API credentials belum dikonfigurasi. Pastikan REPLIZ_ACCESS_KEY dan REPLIZ_SECRET_KEY sudah terisi.",
+        )
 
-    # Locate video file (from Video Generator or ClipHub clips)
+    # 3. Locate video file (from Video Generator or ClipHub clips)
     video_file = None
     upload_filename = ""
 
-    is_video_gen = body.videoSource == "video_generator" or body.jobId.startswith("vg_")
+    is_video_gen = (
+        body.videoSource == "video_generator" or body.jobId.startswith("vg_")
+    )
     if not is_video_gen:
         output_dir = os.path.join(settings.OUTPUT_DIR, body.jobId)
         if not os.path.isdir(output_dir):
             try:
                 from src.application.video_generator import get_video_generator
+
                 vg = get_video_generator()
                 if vg.get_job(body.jobId):
                     is_video_gen = True
@@ -74,12 +94,18 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
 
     if is_video_gen:
         from src.application.video_generator import get_video_generator
+
         vg = get_video_generator()
         vg_job = vg.get_job(body.jobId)
         if not vg_job:
-            raise HTTPException(status_code=404, detail="Video generator job not found")
+            raise HTTPException(
+                status_code=404, detail="Video generator job not found"
+            )
         if not vg_job.output_path or not os.path.exists(vg_job.output_path):
-            raise HTTPException(status_code=404, detail="Final generated video not found or not ready")
+            raise HTTPException(
+                status_code=404,
+                detail="Final generated video not found or not ready",
+            )
         video_file = vg_job.output_path
         upload_filename = f"videogen_{body.jobId}.mp4"
     else:
@@ -92,32 +118,52 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         if not clip_final:
             raise HTTPException(
                 status_code=404,
-                detail=f"Final video for clip #{clip_rank} not found"
+                detail=f"Final video for clip #{clip_rank} not found",
             )
         video_file = clip_final
         upload_filename = f"{body.jobId}_clip{clip_rank}.mp4"
 
-    # Upload to Google Drive ONCE
+    # 4. Upload to Google Drive ONCE
     try:
-        drive_result = gdrive_uploader.upload_video(video_file, filename=upload_filename)
+        drive_result = gdrive_uploader.upload_video(
+            video_file, filename=upload_filename
+        )
     except Exception as e:
         logger.error(f"Google Drive upload failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Google Drive upload failed: {str(e)}")
+        raise HTTPException(
+            status_code=502, detail=f"Google Drive upload failed: {str(e)}"
+        )
 
-    # Schedule on Repliz for each account using the public Google Drive URL
-    video_url = drive_result.get("direct_link") or drive_result.get("web_view_link")
+    video_url = drive_result.get("direct_link") or drive_result.get(
+        "web_view_link"
+    )
+    if not video_url:
+        raise HTTPException(
+            status_code=502,
+            detail="Gagal mendapatkan link download langsung dari Google Drive.",
+        )
+
+    # 5. Extract hashtags for tags if tags list is empty
+    tags = list(body.tags)
+    if not tags and body.caption:
+        hashtag_matches = re.findall(r"#(\w+)", body.caption)
+        if hashtag_matches:
+            tags = hashtag_matches[:10]
+
+    # 6. Schedule on Repliz for each target account
     successful_schedules = []
     failed_schedules = []
 
     for acc_id in target_account_ids:
         try:
             payload = {
-                "title": body.title,
+                "title": body.title or "Video",
                 "description": body.caption,
-                "type": body.type,
+                "topic": body.topic or "",
+                "type": body.type or "video",
                 "medias": [
                     {
-                        "alt": "",
+                        "alt": body.title or "Video",
                         "customThumbnail": False,
                         "type": "video",
                         "thumbnail": "",
@@ -126,29 +172,56 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
                 ],
                 "meta": {"title": "", "description": "", "url": ""},
                 "additionalInfo": {
-                    "isAiGenerated": False,
-                    "isDraft": False,
+                    "isAiGenerated": body.isAiGenerated,
+                    "isDraft": body.isDraft,
                     "isAutoAddMusic": False,
-                    "collaborators": [],
-                    "mentions": [],
-                    "music": {"id": "", "artist": "", "name": "", "thumbnail": ""},
+                    "collaborators": body.collaborators,
+                    "mentions": body.mentions,
+                    "music": {
+                        "id": "",
+                        "artist": "",
+                        "name": "",
+                        "thumbnail": "",
+                    },
                     "products": [],
-                    "tags": [],
-                    "targetCountries": [],
+                    "tags": tags,
+                    "targetCountries": body.targetCountries,
                 },
-                "replies": [],
+                "replies": (
+                    [{"text": body.firstReply.strip(), "order": 1}]
+                    if body.firstReply and body.firstReply.strip()
+                    else []
+                ),
                 "accountId": acc_id,
                 "scheduleAt": body.scheduleAt,
             }
-            schedule_result = await repliz_post("/public/schedule", json_body=payload)
+
+            schedule_result = await repliz_post(
+                "/public/schedule", json_body=payload
+            )
+            schedule_id = (
+                schedule_result.get("scheduleId")
+                or schedule_result.get("_id")
+                or schedule_result.get("id")
+                if isinstance(schedule_result, dict)
+                else None
+            )
+
             successful_schedules.append({
                 "accountId": acc_id,
+                "scheduleId": schedule_id,
                 "result": schedule_result,
             })
-            logger.info(f"Successfully scheduled post for account {acc_id} on clip {body.clipRank}")
+            logger.info(
+                f"Successfully scheduled post for account {acc_id} (scheduleId: {schedule_id})"
+            )
         except HTTPException as he:
-            logger.warning(f"Repliz schedule HTTP error for account {acc_id}: {he.detail}")
-            failed_schedules.append({"accountId": acc_id, "error": str(he.detail)})
+            logger.warning(
+                f"Repliz schedule HTTP error for account {acc_id}: {he.detail}"
+            )
+            failed_schedules.append(
+                {"accountId": acc_id, "error": str(he.detail)}
+            )
         except Exception as e:
             logger.error(f"Repliz schedule failed for account {acc_id}: {e}")
             failed_schedules.append({"accountId": acc_id, "error": str(e)})
@@ -158,7 +231,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         first_err = failed_schedules[0]["error"]
         raise HTTPException(
             status_code=502,
-            detail=f"Gagal posting ke semua akun: {first_err}"
+            detail=f"Gagal posting ke semua akun: {first_err}",
         )
 
     return {
@@ -173,8 +246,10 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
 
 @publish_router.get("/status")
 async def publish_status(_user=Depends(get_current_user)):
-    """Check if publishing is configured."""
+    """Check if publishing credentials are configured."""
     return {
         "gdrive_configured": gdrive_uploader.is_configured,
-        "repliz_configured": bool(settings.REPLIZ_ACCESS_KEY and settings.REPLIZ_SECRET_KEY),
+        "repliz_configured": bool(
+            settings.REPLIZ_ACCESS_KEY and settings.REPLIZ_SECRET_KEY
+        ),
     }

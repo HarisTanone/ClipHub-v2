@@ -223,3 +223,132 @@ tools:
         - "--force"
         - "${force}"
 
+  - name: autocliper_list_schedules
+    display_name: List Jadwal Posting Sosial Media
+    description: |
+      Tampilkan daftar postingan terjadwal di Repliz untuk semua akun media sosial.
+      Dapat memfilter status: 'pending', 'process', 'success', 'error', atau 'all'.
+    input_schema:
+      type: object
+      properties:
+        status:
+          type: string
+          description: "Filter status: 'pending', 'process', 'success', 'error', 'all' (default: all)"
+          default: "all"
+        limit:
+          type: integer
+          description: "Jumlah jadwal yang ditampilkan (default: 10)"
+          default: 10
+        page:
+          type: integer
+          description: "Halaman pagination (default: 1)"
+          default: 1
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_schedule.py"
+        - "--action"
+        - "list"
+        - "--status"
+        - "${status}"
+        - "--limit"
+        - "${limit}"
+        - "--page"
+        - "${page}"
+
+  - name: autocliper_retry_schedule
+    display_name: Retry Jadwal Posting Gagal
+    description: |
+      Coba lagi (re-queue) postingan media sosial yang berstatus error di Repliz.
+    input_schema:
+      type: object
+      properties:
+        schedule_id:
+          type: string
+          description: "Schedule ID postingan yang gagal"
+      required:
+        - schedule_id
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_schedule.py"
+        - "--action"
+        - "retry"
+        - "--schedule-id"
+        - "${schedule_id}"
+
+  - name: autocliper_delete_schedule
+    display_name: Batalkan / Hapus Jadwal Posting
+    description: |
+      Batalkan atau hapus postingan yang sudah dijadwalkan di Repliz.
+    input_schema:
+      type: object
+      properties:
+        schedule_id:
+          type: string
+          description: "Schedule ID postingan yang ingin dibatalkan"
+      required:
+        - schedule_id
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_schedule.py"
+        - "--action"
+        - "delete"
+        - "--schedule-id"
+        - "${schedule_id}"
+
+  - name: autocliper_social_publish
+    display_name: Publish / Schedule Klip ke Media Sosial
+    description: |
+      Unggah dan jadwalkan posting klip video AutoCliper atau Video Generator ke akun sosial media yang terhubung (TikTok, Instagram, YouTube, Facebook, Threads, LinkedIn).
+    input_schema:
+      type: object
+      properties:
+        job_id:
+          type: string
+          description: "Job ID AutoCliper yang ingin diposting"
+        clip_rank:
+          type: integer
+          description: "Nomor klip (default: 1)"
+          default: 1
+        caption:
+          type: string
+          description: "Caption atau deskripsi postingan (opsional)"
+          default: ""
+        title:
+          type: string
+          description: "Judul postingan (opsional, terutama untuk YouTube)"
+          default: ""
+        schedule_at:
+          type: string
+          description: "Waktu posting ISO 8601 UTC (contoh: 2026-08-28T15:00:00.000Z, default: segera/2 menit)"
+          default: ""
+        post_type:
+          type: string
+          description: "Tipe postingan: 'video', 'reel', 'story' (default: video)"
+          default: "video"
+      required:
+        - job_id
+    executable:
+      type: script
+      command: python3
+      args:
+        - "${HERMES_HOME}/skills/bin/ac_social_publish.py"
+        - "--job-id"
+        - "${job_id}"
+        - "--clip-rank"
+        - "${clip_rank}"
+        - "--caption"
+        - "${caption}"
+        - "--title"
+        - "${title}"
+        - "--schedule-at"
+        - "${schedule_at}"
+        - "--type"
+        - "${post_type}"
+
+

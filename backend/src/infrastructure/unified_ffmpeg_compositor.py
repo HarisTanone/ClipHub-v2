@@ -577,7 +577,8 @@ class UnifiedFFmpegCompositor:
                 y_expr = _overlay_y_expr(cfg["position"]).format(m=f"{margin:.4f}")
                 w_expr = f"max(2,trunc(main_w*{cfg['sizePct'] / 100.0:.4f}/2)*2)"
                 overlay_complex = (
-                    f"scale2ref=w='{w_expr}':h=-2[wm][base];"
+                    f"[1:v]setsar=1[wm_in];"
+                    f"[wm_in][0:v]scale2ref=w='{w_expr}':h=-2[wm][base];"
                     f"[wm]format=rgba,lut=a='floor(val*{opacity:.2f})'[wm2];"
                     f"[base][wm2]overlay=x={x_expr}:y={y_expr}:format=auto,setsar=1"
                 )

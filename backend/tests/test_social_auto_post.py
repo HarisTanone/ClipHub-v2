@@ -198,6 +198,76 @@ class TestSocialAutoPost(unittest.TestCase):
                 filename="videogen_vg_test_123.mp4"
             )
 
+    @patch("src.presentation.routes.social.schedule.repliz_post")
+    def test_create_schedule_endpoint(self, mock_repliz_post):
+        """Verify create_schedule endpoint passes compliant Repliz payload."""
+        from src.presentation.routes.social.schedule import create_schedule, ScheduleCreateRequest
+
+        mock_repliz_post.return_value = {"scheduleId": "sch_abc123"}
+        body = ScheduleCreateRequest(
+            title="Judul Video Viral",
+            description="Deskripsi postingan keren #fyp",
+            topic="Tech News",
+            type="video",
+            medias=[{"url": "https://drive.google.com/test.mp4", "type": "video"}],
+            accountId="680affa5ce12f2f72916f67e",
+            scheduleAt="2026-08-28T15:00:00.000Z",
+            additionalInfo={"isAiGenerated": True, "tags": ["Shorts", "Viral"]},
+        )
+
+        res = asyncio.run(create_schedule(body, _user={"id": "admin"}))
+        self.assertEqual(res["scheduleId"], "sch_abc123")
+        mock_repliz_post.assert_called_once()
+        called_args = mock_repliz_post.call_args[1]["json_body"]
+        self.assertEqual(called_args["title"], "Judul Video Viral")
+        self.assertEqual(called_args["topic"], "Tech News")
+        self.assertEqual(called_args["accountId"], "680affa5ce12f2f72916f67e")
+        self.assertTrue(called_args["additionalInfo"]["isAiGenerated"])
+        self.assertEqual(called_args["additionalInfo"]["tags"], ["Shorts", "Viral"])
+
+    @patch("src.presentation.routes.social.schedule.repliz_get")
+    def test_list_schedules_endpoint(self, mock_repliz_get):
+        """Verify list_schedules passes query parameters to Repliz."""
+        from src.presentation.routes.social.schedule import list_schedules
+
+        mock_repliz_get.return_value = {
+            "docs": [{"_id": "sch_1", "status": "pending"}],
+            "totalDocs": 1,
+            "totalPages": 1,
+        }
+
+        res = asyncio.run(list_schedules(
+            page=1,
+            limit=10,
+            status="pending",
+            account_ids="acc_1,acc_2",
+            from_date="2026-08-01",
+            to_date="2026-08-30",
+            _user={"id": "admin"},
+        ))
+
+        self.assertEqual(len(res["docs"]), 1)
+        mock_repliz_get.assert_called_once()
+        params = mock_repliz_get.call_args[1]["params"]
+        self.assertEqual(params["page"], 1)
+        self.assertEqual(params["limit"], 10)
+        self.assertEqual(params["status"], "pending")
+        self.assertEqual(params["accountIds[0]"], "acc_1")
+        self.assertEqual(params["accountIds[1]"], "acc_2")
+        self.assertEqual(params["fromDate"], "2026-08-01")
+        self.assertEqual(params["toDate"], "2026-08-30")
+
+    @patch("src.presentation.routes.social.schedule.repliz_put")
+    def test_retry_schedule_endpoint(self, mock_repliz_put):
+        """Verify retry_schedule calls Repliz /retry endpoint."""
+        from src.presentation.routes.social.schedule import retry_schedule
+
+        mock_repliz_put.return_value = {"success": True, "message": "Schedule retried"}
+        res = asyncio.run(retry_schedule("sch_123", _user={"id": "admin"}))
+        self.assertTrue(res["success"])
+        mock_repliz_put.assert_called_once_with("/public/schedule/sch_123/retry", json_body={})
+
 
 if __name__ == "__main__":
     unittest.main()
+

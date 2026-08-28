@@ -1,9 +1,10 @@
-"""SocialAutoPostService — AI Smart Scheduling & Auto-Publishing to Social Media."""
+"""SocialAutoPostService — AI Smart Scheduling & Auto-Publishing to Social Media via Repliz API."""
 import asyncio
 import datetime as dt
 import logging
 import os
 import random
+import re
 from typing import Any, Dict, List, Optional
 
 from src.config import settings
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class SocialAutoPostService:
-    """Service to automatically schedule and post video clips to social media via AI."""
+    """Service to automatically schedule and post video clips to social media via AI and Repliz."""
 
     DEFAULT_PEAK_HOURS = ["11:30", "15:00", "18:30", "20:30"]
 
@@ -98,7 +99,7 @@ class SocialAutoPostService:
                     schedule_times.append(slot_with_jitter)
                 return sorted(schedule_times)
 
-            # Case C: Multiple clips (e.g. 5, 8, 10 clips) -> spread evenly throughout the remaining day window
+            # Case C: Multiple clips -> spread evenly throughout the remaining day window
             total_minutes = (day_end - day_start).total_seconds() / 60.0
             step_minutes = total_minutes / float(clip_count)
 
@@ -118,7 +119,7 @@ class SocialAutoPostService:
 
             return sorted_times
 
-        # Fallback multi-day drip distribution (if same_day=False)
+        # Drip distribution across multiple days
         current_day = now.date()
         candidate_slots: List[dt.datetime] = []
         for day_offset in range(10):
@@ -247,7 +248,7 @@ class SocialAutoPostService:
         # If no local mapping found and user_id is None (superadmin), use Repliz directly
         if not merged_accounts and user_id is None and repliz_map:
             for acc_id, acc in repliz_map.items():
-                if acc.get("isConnected"):
+                if acc.get("isConnected", True):
                     merged_accounts.append({
                         "account_id": acc_id,
                         "platform": acc.get("type", "unknown").lower(),
@@ -309,6 +310,8 @@ class SocialAutoPostService:
                 tags = "\n\n#fyp #viral #trending #reels #podcast #shorts #autocliper"
             elif platform_lower == "youtube":
                 tags = "\n\n#Shorts #Viral #Podcast #Trending"
+            elif platform_lower == "threads":
+                tags = "\n\n#threads #viral #trending"
             else:
                 tags = "\n\n#viral #video #trending"
 
@@ -327,7 +330,7 @@ class SocialAutoPostService:
         custom_schedule_time: Optional[str] = None,
         notify_telegram: bool = True,
     ) -> Dict[str, Any]:
-        """Execute automated scheduling of video clips to social accounts."""
+        """Execute automated scheduling of video clips to social accounts via Google Drive & Repliz API."""
         if not clips:
             return {"success": False, "error": "Tidak ada klip untuk dijadwalkan"}
 
@@ -388,13 +391,13 @@ class SocialAutoPostService:
                 logger.warning(f"auto_post: Final video for clip #{rank} not found at {output_dir}")
                 continue
 
-            # Upload video to Google Drive or get public URL
+            # Upload video to Google Drive to obtain direct download URL for Repliz
             video_url = ""
             if gdrive_uploader.is_configured:
                 try:
                     filename = f"{job_id}_clip{rank}.mp4"
                     drive_res = gdrive_uploader.upload_video(clip_file, filename=filename)
-                    video_url = drive_res.get("direct_link", "")
+                    video_url = drive_res.get("direct_link", "") or drive_res.get("web_view_link", "")
                 except Exception as e:
                     logger.error(f"auto_post: GDrive upload failed for clip #{rank}: {e}")
                     errors.append(f"Clip #{rank} GDrive upload: {str(e)}")
@@ -404,18 +407,31 @@ class SocialAutoPostService:
                 continue
 
             scheduled_time = schedule_times[i] if i < len(schedule_times) else dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=4)
-            schedule_iso = scheduled_time.isoformat()
+            # Format ISO 8601 UTC string (e.g. 2026-08-28T12:00:00.000Z)
+            schedule_iso = scheduled_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+            # Extract tags for YouTube and hashtags
+            raw_tags = []
+            caption_hashtags = re.findall(r"#(\w+)", clip.get("hook", "") + " " + clip.get("reason", ""))
+            if caption_hashtags:
+                raw_tags = caption_hashtags[:10]
+            if not raw_tags:
+                raw_tags = ["Shorts", "Viral", "Trending", "Podcast"]
 
             # Schedule on each target account
             for acc in selected_accounts:
-                platform = acc.get("platform", "video")
+                platform = acc.get("platform", "video").lower()
                 caption = self.extract_clip_caption(clip, platform=platform)
                 title = clip.get("hook", f"Clip #{rank}")[:100]
+
+                # Post type per platform: reel for Facebook Reels if desired, video for others
+                post_type = "video"
 
                 payload = {
                     "title": title,
                     "description": caption,
-                    "type": "video",
+                    "topic": clip.get("topic") or (title[:50] if platform == "threads" else ""),
+                    "type": post_type,
                     "medias": [
                         {
                             "alt": title,
@@ -434,7 +450,7 @@ class SocialAutoPostService:
                         "mentions": [],
                         "music": {"id": "", "artist": "", "name": "", "thumbnail": ""},
                         "products": [],
-                        "tags": [],
+                        "tags": raw_tags if platform == "youtube" else [],
                         "targetCountries": [],
                     },
                     "replies": [],
@@ -444,6 +460,12 @@ class SocialAutoPostService:
 
                 try:
                     res = await repliz_post("/public/schedule", json_body=payload)
+                    schedule_id = (
+                        res.get("scheduleId") or res.get("_id") or res.get("id")
+                        if isinstance(res, dict)
+                        else None
+                    )
+
                     scheduled_records.append({
                         "clip_rank": rank,
                         "account_name": acc.get("name", platform),
@@ -451,9 +473,10 @@ class SocialAutoPostService:
                         "platform": platform,
                         "schedule_at": schedule_iso,
                         "title": title,
+                        "schedule_id": schedule_id,
                         "res": res,
                     })
-                    logger.info(f"auto_post: Scheduled clip #{rank} on {platform} ({acc.get('name')}) at {schedule_iso}")
+                    logger.info(f"auto_post: Scheduled clip #{rank} on {platform} ({acc.get('name')}) scheduleId={schedule_id} at {schedule_iso}")
                 except Exception as e:
                     logger.error(f"auto_post: Failed to schedule clip #{rank} on {platform}: {e}")
                     errors.append(f"{platform} ({acc.get('name')}): {str(e)}")
@@ -470,7 +493,8 @@ class SocialAutoPostService:
                 for rec in scheduled_records[:6]:
                     time_display = rec['schedule_at'][:16].replace("T", " ")
                     user_tag = f" (@{rec['username']})" if rec.get('username') else ""
-                    msg += f"• <b>Clip #{rec['clip_rank']}</b> -> <b>{rec['platform'].upper()}</b> ({rec['account_name']}{user_tag})\n"
+                    sched_tag = f" [ID: <code>{rec['schedule_id'][:8]}...</code>]" if rec.get('schedule_id') else ""
+                    msg += f"• <b>Clip #{rec['clip_rank']}</b> -> <b>{rec['platform'].upper()}</b> ({rec['account_name']}{user_tag}){sched_tag}\n"
                     msg += f"  Time: <code>{time_display} UTC</code>\n"
                     msg += f"  Title: <i>{rec['title'][:40]}...</i>\n\n"
 

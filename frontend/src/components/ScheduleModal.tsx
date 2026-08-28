@@ -13,9 +13,14 @@ import {
   Sparkles,
   AlertCircle,
   Share2,
+  Tag,
+  Hash,
+  Bot,
+  Video,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { Textarea } from "@/components/ui/Input";
+import { Textarea, Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
 import { API_BASE, getToken } from "@/lib/api";
@@ -118,6 +123,9 @@ async function publishClip(payload: {
   accountIds: string[];
   caption: string;
   title: string;
+  topic?: string;
+  tags?: string[];
+  isAiGenerated?: boolean;
   scheduleAt: string;
   type: string;
 }): Promise<any> {
@@ -178,7 +186,13 @@ export function ScheduleModal({
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>("all");
+  const [title, setTitle] = useState(hookText || "");
   const [caption, setCaption] = useState(defaultCaption || "");
+  const [firstReply, setFirstReply] = useState("");
+  const [topic, setTopic] = useState("");
+  const [tagsStr, setTagsStr] = useState("");
+  const [postType, setPostType] = useState<"video" | "reel" | "story">("video");
+  const [isAiGenerated, setIsAiGenerated] = useState(true);
   const [scheduleMode, setScheduleMode] = useState<"now" | "later">("now");
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
@@ -188,6 +202,7 @@ export function ScheduleModal({
 
   useEffect(() => {
     if (open) {
+      setTitle(hookText || (clipRank ? `Clip #${clipRank}` : "AI Generated Video"));
       setCaption(defaultCaption || "");
       setLoadingAccounts(true);
       Promise.all([fetchSocialAccounts(), checkPublishStatus()])
@@ -203,7 +218,7 @@ export function ScheduleModal({
         })
         .finally(() => setLoadingAccounts(false));
     }
-  }, [open, defaultCaption]);
+  }, [open, defaultCaption, hookText]);
 
   const connectedAccounts = useMemo(() => {
     return accounts.filter((a) => a.isConnected);
@@ -224,6 +239,19 @@ export function ScheduleModal({
     return connectedAccounts.filter((a) => (a.type || "").toLowerCase().trim() === activeFilter);
   }, [connectedAccounts, activeFilter]);
 
+  // Check if selected accounts include Threads or YouTube
+  const hasThreadsSelected = useMemo(() => {
+    return connectedAccounts.some(
+      (a) => (a.type || "").toLowerCase().trim() === "threads" && selectedAccountIds.includes(a._id || a.id)
+    );
+  }, [connectedAccounts, selectedAccountIds]);
+
+  const hasYouTubeSelected = useMemo(() => {
+    return connectedAccounts.some(
+      (a) => (a.type || "").toLowerCase().trim() === "youtube" && selectedAccountIds.includes(a._id || a.id)
+    );
+  }, [connectedAccounts, selectedAccountIds]);
+
   if (!open) return null;
 
   function toggleAccount(accId: string) {
@@ -240,18 +268,16 @@ export function ScheduleModal({
     const displayedIds = displayedAccounts.map((a) => a._id || a.id).filter(Boolean);
     const allSelected = displayedIds.every((id) => selectedAccountIds.includes(id));
     if (allSelected) {
-      // Unselect all displayed
       setSelectedAccountIds((prev) => prev.filter((id) => !displayedIds.includes(id)));
     } else {
-      // Select all displayed
       setSelectedAccountIds((prev) => Array.from(new Set([...prev, ...displayedIds])));
     }
   }
 
   function getScheduleAt(): string {
     if (scheduleMode === "now") {
-      // Schedule 1 minute from now (Repliz needs future time)
-      const d = new Date(Date.now() + 60_000);
+      // Schedule 2 minutes from now to give buffer for Google Drive upload and Repliz worker
+      const d = new Date(Date.now() + 120_000);
       return d.toISOString();
     }
     if (!scheduleDate || !scheduleTime) return "";
@@ -269,6 +295,10 @@ export function ScheduleModal({
       return;
     }
 
+    const tags = tagsStr
+      ? tagsStr.split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean)
+      : [];
+
     setPosting(true);
     try {
       const payload = {
@@ -277,15 +307,19 @@ export function ScheduleModal({
         videoSource: videoSource || (clipRank !== undefined ? "clip" : "video_generator"),
         accountIds: selectedAccountIds,
         caption,
-        title: hookText || "",
+        title: title || hookText || "Video",
+        topic: topic || "",
+        tags,
+        firstReply: firstReply.trim() || undefined,
+        isAiGenerated,
         scheduleAt,
-        type: "video",
+        type: postType,
       };
 
       const result = await publishClip(payload);
       const successCount = result.count || selectedAccountIds.length;
       if (scheduleMode === "now") {
-        toast.success(`Video berhasil di-upload dan diposting ke ${successCount} akun!`);
+        toast.success(`Video berhasil di-upload dan dijadwalkan untuk segera tayang di ${successCount} akun!`);
       } else {
         toast.success(`Berhasil dijadwalkan untuk ${scheduleDate} ${scheduleTime} ke ${successCount} akun!`);
       }
@@ -296,6 +330,7 @@ export function ScheduleModal({
       setPosting(false);
     }
   }
+
 
   const isAllDisplayedSelected =
     displayedAccounts.length > 0 &&
@@ -345,6 +380,15 @@ export function ScheduleModal({
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <p className="text-xs leading-relaxed">
                 Repliz API belum dikonfigurasi. Pastikan <code className="bg-amber-950/60 px-1 py-0.5 rounded text-[11px]">REPLIZ_ACCESS_KEY</code> dan <code className="bg-amber-950/60 px-1 py-0.5 rounded text-[11px]">REPLIZ_SECRET_KEY</code> sudah terisi di backend.
+              </p>
+            </div>
+          )}
+
+          {status && !status.gdrive_configured && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <p className="text-xs leading-relaxed">
+                Google Drive belum dikonfigurasi. Video membutuhkan Cloud Storage Google Drive untuk direct link publik ke Repliz API.
               </p>
             </div>
           )}
@@ -438,7 +482,7 @@ export function ScheduleModal({
                 Tidak ada akun untuk platform <span className="capitalize text-zinc-300 font-medium">{activeFilter}</span>.
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+              <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
                 {displayedAccounts.map((acc) => {
                   const accId = acc._id || acc.id;
                   const isSelected = selectedAccountIds.includes(accId);
@@ -457,7 +501,7 @@ export function ScheduleModal({
                         }
                       }}
                       className={cn(
-                        "group relative w-full flex items-center gap-3.5 rounded-xl border p-3 text-left cursor-pointer transition-all duration-150 select-none",
+                        "group relative w-full flex items-center gap-3.5 rounded-xl border p-2.5 sm:p-3 text-left cursor-pointer transition-all duration-150 select-none",
                         isSelected
                           ? "border-emerald-500/60 bg-emerald-500/10 shadow-[0_0_15px_rgba(16,185,129,0.08)] ring-1 ring-emerald-500/30"
                           : "border-zinc-800/80 bg-zinc-950/50 hover:border-zinc-700 hover:bg-zinc-900/60"
@@ -481,15 +525,15 @@ export function ScheduleModal({
                           <img
                             src={acc.picture}
                             alt=""
-                            className="h-9 w-9 rounded-full object-cover border border-zinc-700 bg-zinc-800"
+                            className="h-8 w-8 rounded-full object-cover border border-zinc-700 bg-zinc-800"
                           />
                         ) : (
-                          <div className="h-9 w-9 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                          <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
                             <PlatformIcon type={acc.type} className="h-4 w-4" />
                           </div>
                         )}
                         <div className="absolute -bottom-1 -right-1 rounded-full p-0.5 bg-zinc-900 border border-zinc-800">
-                          <PlatformIcon type={acc.type} className="h-3 w-3" />
+                          <PlatformIcon type={acc.type} className="h-2.5 w-2.5" />
                         </div>
                       </div>
 
@@ -515,7 +559,7 @@ export function ScheduleModal({
 
                       {/* Selection Tag */}
                       {isSelected && (
-                        <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-md shrink-0">
+                        <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-md shrink-0">
                           Selected
                         </span>
                       )}
@@ -524,6 +568,31 @@ export function ScheduleModal({
                 })}
               </div>
             )}
+          </div>
+
+          {/* Title & Post Type */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div className="sm:col-span-2 space-y-1">
+              <label className="text-xs font-semibold text-zinc-200">Judul Konten</label>
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Judul video / YouTube Title..."
+                className="text-xs bg-zinc-950/60 border-zinc-800 rounded-xl"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-zinc-200">Tipe Post</label>
+              <select
+                value={postType}
+                onChange={(e: any) => setPostType(e.target.value)}
+                className="w-full h-9 rounded-xl border border-zinc-800 bg-zinc-950/60 px-2.5 text-xs text-zinc-200 outline-none focus:border-emerald-500/50"
+              >
+                <option value="video">Video (Standard)</option>
+                <option value="reel">Reel / Shorts</option>
+                <option value="story">Story</option>
+              </select>
+            </div>
           </div>
 
           {/* Caption Box */}
@@ -550,9 +619,61 @@ export function ScheduleModal({
               className="text-xs bg-zinc-950/60 border-zinc-800 focus:border-emerald-500/50 rounded-xl"
             />
             <div className="flex items-center justify-between text-[10px] text-zinc-500 px-1">
-              <span>Caption ini akan diterapkan ke semua akun yang dipilih.</span>
+              <span>Caption akan diterapkan ke semua akun yang dipilih.</span>
               <span>{caption.length} karakter</span>
             </div>
+          </div>
+
+          {/* Platform Specific Addons */}
+          {(hasThreadsSelected || hasYouTubeSelected) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
+              {hasThreadsSelected && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-zinc-300 flex items-center gap-1">
+                    <Tag className="h-3 w-3 text-zinc-400" /> Threads Topic
+                  </label>
+                  <Input
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    placeholder="e.g. Technology, AI, Podcast"
+                    className="text-xs bg-zinc-900 border-zinc-800 rounded-lg h-8"
+                  />
+                </div>
+              )}
+              {hasYouTubeSelected && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-zinc-300 flex items-center gap-1">
+                    <Hash className="h-3 w-3 text-red-400" /> YouTube Tags
+                  </label>
+                  <Input
+                    value={tagsStr}
+                    onChange={(e) => setTagsStr(e.target.value)}
+                    placeholder="Shorts, Viral, Podcast (pisah koma)"
+                    className="text-xs bg-zinc-900 border-zinc-800 rounded-lg h-8"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Auto First Comment (Repliz Replies Feature) */}
+          <div className="space-y-1.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5 text-blue-400" />
+                <span>Komentar Pertama Otomatis (First Reply)</span>
+              </label>
+              <span className="text-[10px] text-zinc-500 font-mono">Opsional</span>
+            </div>
+            <Input
+              value={firstReply}
+              onChange={(e) => setFirstReply(e.target.value)}
+              placeholder="e.g. Link info lengkap & promo ada di deskripsi/bio!"
+              className="text-xs bg-zinc-900 border-zinc-800 focus:border-blue-500/50 rounded-lg h-8"
+            />
+            <p className="text-[10px] text-zinc-500">
+              Repliz akan otomatis memposting komentar ini segera setelah video tayang di media sosial.
+            </p>
           </div>
 
           {/* Schedule Timing */}
@@ -591,15 +712,13 @@ export function ScheduleModal({
                   <label className="text-[10px] font-medium text-zinc-400 mb-1 block">
                     Pilih Tanggal
                   </label>
-                  <div className="relative">
-                    <input
-                      type="date"
-                      min={new Date().toISOString().split("T")[0]}
-                      value={scheduleDate}
-                      onChange={(e) => setScheduleDate(e.target.value)}
-                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
-                    />
-                  </div>
+                  <input
+                    type="date"
+                    min={new Date().toISOString().split("T")[0]}
+                    value={scheduleDate}
+                    onChange={(e) => setScheduleDate(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] font-medium text-zinc-400 mb-1 block">
@@ -616,11 +735,25 @@ export function ScheduleModal({
             )}
           </div>
 
-          {/* Storage & Pipeline Notice */}
-          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-3 flex items-center gap-2.5 text-[11px] text-zinc-400">
+          {/* AI Generated Badge Option */}
+          <div className="flex items-center justify-between p-2.5 rounded-xl border border-zinc-800 bg-zinc-950/40 text-xs">
+            <div className="flex items-center gap-2 text-zinc-300">
+              <Bot className="h-4 w-4 text-emerald-400" />
+              <span>Tandai sebagai Konten AI (Repliz isAiGenerated)</span>
+            </div>
+            <input
+              type="checkbox"
+              checked={isAiGenerated}
+              onChange={(e) => setIsAiGenerated(e.target.checked)}
+              className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0 cursor-pointer"
+            />
+          </div>
+
+          {/* Storage Notice */}
+          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-2.5 flex items-center gap-2.5 text-[11px] text-zinc-400">
             <Upload className="h-4 w-4 text-emerald-400 shrink-0" />
             <span>
-              Video Clip #{clipRank} akan di-upload ke Cloud Storage 1x dan dijadwalkan otomatis ke semua akun yang dipilih.
+              Video di-upload ke Cloud Storage 1x dan dijadwalkan otomatis ke akun media sosial via Repliz API.
             </span>
           </div>
         </div>

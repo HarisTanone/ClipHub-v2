@@ -25,9 +25,9 @@ def _detect_nvenc() -> bool:
             ["ffmpeg", "-encoders"],
             capture_output=True, text=True, timeout=10,
         )
-        if result.returncode == 0 and "h264_nvenc" in result.stdout:
+        if getattr(result, "returncode", 1) == 0 and "h264_nvenc" in (getattr(result, "stdout", "") or ""):
             return True
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except Exception:
         pass
     return False
 

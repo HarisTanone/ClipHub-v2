@@ -218,9 +218,18 @@ export function WatermarkEditor({
             </>
           )}
           {/* Watermark overlay — spans the full 9:16 frame */}
-          <span className={cn("absolute z-10", posClass)} style={{ opacity: Math.max(0.05, style.opacity / 100) }}>
+          <span className={cn("absolute z-10 flex items-center justify-center pointer-events-none", posClass)} style={{ opacity: Math.max(0.05, style.opacity / 100) }}>
             {style.type === "image" && style.imageDataUrl ? (
-              <img src={style.imageDataUrl} alt="" className="h-auto w-auto object-contain" style={{ maxWidth: `${Math.max(8, style.sizePct)}%`, maxHeight: 44 }} />
+              <img
+                src={style.imageDataUrl}
+                alt="Watermark"
+                className="object-contain block max-w-full h-auto"
+                style={{
+                  width: `${Math.max(12, Math.round(176 * (style.sizePct / 100)))}px`,
+                  maxHeight: "60px",
+                  aspectRatio: "auto",
+                }}
+              />
             ) : (
               <span
                 className="font-semibold"
