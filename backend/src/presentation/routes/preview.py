@@ -190,6 +190,8 @@ class UpdateStyleRequest(BaseModel):
     """Update style for a clip before re-render."""
     hook_text: Optional[str] = None
     hook_style: Optional[str] = None
+    hook_style_config: Optional[dict] = None
+    subtitle_style_config: Optional[dict] = None
     primary_color: Optional[str] = None
     secondary_color: Optional[str] = None
     font_size: Optional[int] = None
@@ -244,16 +246,18 @@ async def get_clip_preview(
     # Duration
     duration = clip_info.get("duration", 0)
     
-    # Build style from job settings and creative direction
-    creative = clips_data.get("creative_direction", {})
+    # Build style from job settings, hook_style_config, and subtitle_style_config
+    creative = clips_data.get("creative_direction", {}) if isinstance(clips_data.get("creative_direction"), dict) else {}
+    hook_cfg = clips_data.get("hook_style_config", {}) or {}
+    sub_cfg = clips_data.get("subtitle_style_config", {}) or {}
     style = StyleConfig(
-        primary_color=creative.get("primary_color", "#FFFFFF"),
-        secondary_color=creative.get("secondary_color", "#FFCC00"),
-        background_accent=creative.get("background_accent", "#000000"),
-        hook_animation=job.hook_style or "fade_scale",
-        font_size=36,
-        uppercase=creative.get("subtitle_uppercase", False),
-        subtitle_position=creative.get("subtitle_position", "bottom"),
+        primary_color=sub_cfg.get("color") or creative.get("primary_color", "#FFFFFF"),
+        secondary_color=sub_cfg.get("highlightColor") or creative.get("secondary_color", "#FFCC00"),
+        background_accent=hook_cfg.get("bgColor") or creative.get("background_accent", "#000000"),
+        hook_animation=clip_info.get("hook_style") or hook_cfg.get("animation") or job.hook_style or "podcast_lower_third",
+        font_size=sub_cfg.get("fontSize", 36),
+        uppercase=sub_cfg.get("uppercase", creative.get("subtitle_uppercase", False)),
+        subtitle_position=sub_cfg.get("position", creative.get("subtitle_position", "bottom")),
     )
     
     # URLs
@@ -375,6 +379,10 @@ async def update_clip_style(
             # Update hook style
             if body.hook_style is not None:
                 c["hook_style"] = body.hook_style
+            if body.hook_style_config is not None:
+                c["hook_style_config_override"] = body.hook_style_config
+            if body.subtitle_style_config is not None:
+                c["subtitle_style_config_override"] = body.subtitle_style_config
             # Update style overrides
             style_overrides = c.get("style_overrides", {})
             if body.primary_color is not None:

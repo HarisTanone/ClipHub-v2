@@ -120,50 +120,31 @@ class RemotionAdapter(IRemotionRenderer):
                             render_words = content
                         break
         
-        # Use directly passed hook text, fallback to scene_graph
+        hook_cfg = creative_direction.get("hook_style_config", {}) if isinstance(creative_direction, dict) else {}
+        
+        # Use directly passed hook text and animation, fallback to hook_cfg, then scene_graph
         render_hook_text = hook_text or ""
-        render_hook_animation = hook_style or "podcast_lower_third"
+        render_hook_animation = (
+            hook_style
+            or hook_cfg.get("animation")
+            or ""
+        )
         if not render_hook_text:
             for layer in scene_graph.get("layers", []):
                 if layer.get("layer_id") == "L3_hook":
                     events = layer.get("events", [])
                     if events:
                         render_hook_text = events[0].get("content", "")
-                        render_hook_animation = events[0].get("event_type", "fade_scale")
+                        if not render_hook_animation:
+                            render_hook_animation = events[0].get("event_type", "")
                     break
 
-        hook_cfg = creative_direction.get("hook_style_config", {})
-        
-        # Validate hook animation
-        valid_animations = (
-            "fade_scale",
-            "slide_up",
-            "glitch",
-            "typewriter",
-            "glitch_rgb",
-            "shake_neon",
-            "cinematic_reveal",
-            "danger_bold",
-            "slide_punch_framer",
-            "bold_slam",
-            "podcast_lower_third",
-            "quote_card",
-            "waveform_pulse",
-            "breaking_tape",
-            "mic_drop",
-            "split_panel",
-            "kinetic_stack",
-            "glass_flash",
-            "marker_swipe",
-            "signal_scan",
-        )
-        if render_hook_animation not in valid_animations:
-            hook_cfg_animation = hook_cfg.get("animation")
-            render_hook_animation = (
-                hook_cfg_animation
-                if hook_cfg_animation in valid_animations
-                else "podcast_lower_third"
-            )
+        if not render_hook_animation:
+            render_hook_animation = hook_cfg.get("animation") or "podcast_lower_third"
+
+        # Ensure hook_cfg has the consistent animation
+        if isinstance(hook_cfg, dict) and render_hook_animation:
+            hook_cfg["animation"] = render_hook_animation
 
         # Warn if critical render data is empty
         if not render_words:
@@ -307,28 +288,30 @@ class RemotionAdapter(IRemotionRenderer):
                             render_words = content
                         break
 
+        hook_cfg = creative_direction.get("hook_style_config", {}) if isinstance(creative_direction, dict) else {}
+        
         render_hook_text = hook_text or ""
-        render_hook_animation = hook_style or "podcast_lower_third"
+        render_hook_animation = (
+            hook_style
+            or hook_cfg.get("animation")
+            or ""
+        )
         if not render_hook_text:
             for layer in scene_graph.get("layers", []):
                 if layer.get("layer_id") == "L3_hook":
                     events = layer.get("events", [])
                     if events:
                         render_hook_text = events[0].get("content", "")
-                        render_hook_animation = events[0].get("event_type", "podcast_lower_third")
+                        if not render_hook_animation:
+                            render_hook_animation = events[0].get("event_type", "")
                     break
 
-        hook_cfg = creative_direction.get("hook_style_config", {})
-        valid_animations = (
-            "fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb",
-            "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer",
-            "bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse",
-            "breaking_tape", "mic_drop", "split_panel", "kinetic_stack",
-            "glass_flash", "marker_swipe", "signal_scan",
-        )
-        if render_hook_animation not in valid_animations:
-            cfg_anim = hook_cfg.get("animation")
-            render_hook_animation = cfg_anim if cfg_anim in valid_animations else "podcast_lower_third"
+        if not render_hook_animation:
+            render_hook_animation = hook_cfg.get("animation") or "podcast_lower_third"
+
+        # Ensure hook_cfg has consistent animation
+        if isinstance(hook_cfg, dict) and render_hook_animation:
+            hook_cfg["animation"] = render_hook_animation
 
         template_mode = hook_cfg.get("template_mode", "custom")
         composition_id = "ClipComposition"

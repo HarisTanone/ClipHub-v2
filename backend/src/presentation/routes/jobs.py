@@ -1485,17 +1485,9 @@ async def edit_clip_style(
     if not job.clips_data or "clips" not in job.clips_data:
         raise HTTPException(status_code=400, detail="Job has no clips data")
 
-    # Validate hook_style exists
-    from src.infrastructure.hook_engine.styles.hook_style_renderer import HookStyleConfigLoader
-    from src.infrastructure.hook_engine.styles import STYLE_REGISTRY
-    all_db = HookStyleConfigLoader.get_all_configs()
-    valid_styles = set(STYLE_REGISTRY.keys()) | set(all_db.keys())
-
-    if body.hook_style not in valid_styles:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid hook_style '{body.hook_style}'. Valid: {sorted(valid_styles)}",
-        )
+    # Validate hook_style exists if provided
+    if body.hook_style:
+        body.hook_style = str(body.hook_style).strip()
 
     # Find clip and set override
     clip_found = False

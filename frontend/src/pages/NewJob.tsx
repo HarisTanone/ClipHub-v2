@@ -341,7 +341,11 @@ export function NewJob() {
     setUploadProgress(sourceMode === "upload" ? 0 : null);
 
     const isFromReview = analyzeStep === "review" && editableClips.length > 0;
+    const activePreset = userPresets.find((p) => p.id === activePresetId);
+    const activePresetSlug = activePreset ? (activePreset.slug || `preset-${activePreset.id}`) : undefined;
+
     const jobOptions = {
+      style_preset: activePresetSlug,
       target_aspect_ratio: aspectRatio,
       hook_style: hookStyleConfig.animation || undefined,
       force_reprocess: isFromReview ? false : (sourceMode === "youtube" ? forceReprocess : true),
@@ -359,10 +363,9 @@ export function NewJob() {
       subtitle_style_config: {
         ...subtitleStyleConfig,
         engine: subtitleStyleConfig.engine || (
-          ["glassmorphism", "clean_editorial", "podcast_pro", "kinetic_word_box", "neon_tube", "gradient_fill", "cinematic_slate", "modern_mono", "bold_impact_stroke", "dual_layer", "retro_chrome", "outline_stack"].includes(subtitleStyleConfig.stylePreset || "")
-          || subtitleStyleConfig.stylePreset?.startsWith("skia_")
+          subtitleStyleConfig.stylePreset?.startsWith("skia_")
             ? "skia"
-            : (subtitleStyleConfig.hf_template?.startsWith("sub_") ? "hyperframes" : "ffmpeg")
+            : (subtitleStyleConfig.hf_template?.startsWith("sub_") ? "hyperframes" : "remotion")
         ),
         hf_template: subtitleStyleConfig.hf_template,
       },

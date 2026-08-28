@@ -30,7 +30,7 @@ def resolve_preset(
     try:
         cur = conn.cursor()
 
-        # Handle empty or 'default' preset identifier: try user's default setting or latest preset
+        # Handle empty or 'default' preset identifier: try user's default setting
         if not key or key.lower() in ("default", "none"):
             # Check user_settings for default_style_preset
             if user_id is not None:
@@ -42,20 +42,10 @@ def resolve_preset(
                 if user_set and user_set["default_style_preset"]:
                     key = str(user_set["default_style_preset"]).strip()
 
-            # If still default, check most recent user_preset for user_id
+            # If still default or empty, check system default setting, otherwise return None
             if not key or key.lower() in ("default", "none"):
-                if user_id is not None:
-                    cur.execute(
-                        "SELECT * FROM user_presets WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-                        (user_id,),
-                    )
-                    row = cur.fetchone()
-                    if row:
-                        return _format_user_preset_row(row)
-
-                # Fallback to system default setting
                 sys_default = getattr(settings, "DEFAULT_STYLE_PRESET", "")
-                if sys_default and sys_default.lower() not in ("default", ""):
+                if sys_default and sys_default.lower() not in ("default", "none", ""):
                     key = sys_default
                 else:
                     return None
