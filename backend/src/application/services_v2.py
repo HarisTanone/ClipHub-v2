@@ -2106,11 +2106,11 @@ class V2PipelineService:
             and not need_ai_text
         )
 
-        # Pure direct path: both hook + sub use ffmpeg or skia → no Remotion/HF browser needed
+        # Pure direct path: only when user explicitly specifies direct engine (ffmpeg or skia) in config
         has_text_emphasis_events = any(bool(getattr(c, "text_emphasis_events", None)) for c in clips)
         pure_direct = (
-            hook_engine in ("ffmpeg", "skia")
-            and sub_engine in ("ffmpeg", "skia")
+            hook_style_config.get("engine") in ("ffmpeg", "skia")
+            and subtitle_style_config.get("engine") in ("ffmpeg", "skia")
             and not need_canvas
             and not (need_ai_text and has_text_emphasis_events)
         )
@@ -2279,9 +2279,9 @@ class V2PipelineService:
                 hook_eng = _resolve_eng(hook_style_config)
                 sub_eng = _resolve_eng(subtitle_style_config)
                 sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
-                # Remotion only renders hook/sub when Remotion engine is specifically selected and enabled.
-                remotion_hook_text = clip_hook if hook_eng == "remotion" else ""
-                remotion_words = (clip_words if sub_eng == "remotion" else []) if sub_enabled else []
+                # Remotion is the unified renderer in v3.0; render hook & subtitles directly unless explicitly HF
+                remotion_hook_text = clip_hook if hook_eng != "hyperframes" else ""
+                remotion_words = clip_words if (sub_enabled and sub_eng != "hyperframes") else []
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")

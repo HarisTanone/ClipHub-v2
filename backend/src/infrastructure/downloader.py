@@ -18,29 +18,28 @@ YOUTUBE_PATTERN = re.compile(
 )
 
 # Hierarchical format preference enforcing >= 720p HD quality (never below 720p):
-# Layer 1: 1080p H.264 (avc1) + AAC (mp4a) -> Primary target for optimal decode/encode speed & HD quality
-# Layer 2: 1080p AV1 (av01) + AAC
-# Layer 3: 1080p VP9 + AAC / Opus
-# Layer 4: 1080p any codec + audio
-# Layer 5: Higher than 1080p (1440p / 2160p) + bestaudio
-# Layer 6: 720p H.264 (avc1) + AAC
-# Layer 7: 720p AV1 / VP9 + audio
-# Layer 8: Any stream with height >= 720
-YOUTUBE_FORMAT_SELECTOR = (
-    "bestvideo[height=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height=1080][vcodec^=av01]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height=1080][vcodec^=vp9]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height=1080]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height=1080]+bestaudio/"
-    "bestvideo[height>=1080]+bestaudio/"
-    "bestvideo[height>=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height>=720][vcodec^=av01]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height>=720]+bestaudio[acodec^=mp4a]/"
-    "bestvideo[height>=720]+bestaudio/"
-    "best[height>=720]/"
-    "bestvideo+bestaudio/best"
+# Prefer original native audio tracks over auto-generated synthetic/English dubs
+AUDIO_PREF = (
+    "bestaudio[language=original][acodec^=mp4a]/bestaudio[language=original]/"
+    "bestaudio[language=id][acodec^=mp4a]/bestaudio[language=id]/"
+    "bestaudio[language=id-ID][acodec^=mp4a]/bestaudio[language=id-ID]/"
+    "bestaudio[language_preference=10][acodec^=mp4a]/bestaudio[language_preference=10]/"
+    "bestaudio[acodec^=mp4a]/bestaudio"
 )
-YOUTUBE_FORMAT_SORT = "res:1080,fps:60,vcodec:avc1,vcodec:av01,vcodec:vp9,br,size"
+
+YOUTUBE_FORMAT_SELECTOR = (
+    f"bestvideo[height=1080][vcodec^=avc1]+{AUDIO_PREF}/"
+    f"bestvideo[height=1080][vcodec^=av01]+{AUDIO_PREF}/"
+    f"bestvideo[height=1080][vcodec^=vp9]+{AUDIO_PREF}/"
+    f"bestvideo[height=1080]+{AUDIO_PREF}/"
+    f"bestvideo[height>=1080]+{AUDIO_PREF}/"
+    f"bestvideo[height>=720][vcodec^=avc1]+{AUDIO_PREF}/"
+    f"bestvideo[height>=720][vcodec^=av01]+{AUDIO_PREF}/"
+    f"bestvideo[height>=720]+{AUDIO_PREF}/"
+    f"best[height>=720]/"
+    f"bestvideo+{AUDIO_PREF}/best"
+)
+YOUTUBE_FORMAT_SORT = "hasaudio,lang:original,lang:id,lang:id-ID,lang:default,res:1080,fps:60,vcodec:avc1,vcodec:av01,vcodec:vp9,br,size"
 
 
 def extract_youtube_video_id(url: str) -> Optional[str]:
@@ -100,10 +99,11 @@ def _get_cookie_args() -> list[str]:
 
 def _get_extractor_args(has_cookies: bool = False) -> list[str]:
     """Extractor arguments.
-    visionos,web_creator,web_safari,mweb delivers full 4K/1080p/720p HD streams without triggering GVS 360p caps or bot challenge lockouts."""
+    visionos,web_creator,web_safari,mweb delivers full 4K/1080p/720p HD streams without triggering GVS 360p caps or bot challenge lockouts.
+    lang=original,id ensures original audio track is preserved (prevents auto-generated synthetic TTS dubbing)."""
     if has_cookies:
-        return ["--extractor-args", "youtube:player_client=web_creator,web_safari,mweb,ios"]
-    return ["--extractor-args", "youtube:player_client=visionos,web_safari,mweb,web"]
+        return ["--extractor-args", "youtube:player_client=web_creator,web_safari,mweb,ios;lang=original,id,id-ID"]
+    return ["--extractor-args", "youtube:player_client=visionos,web_safari,mweb,web;lang=original,id,id-ID"]
 
 
 class YouTubeDownloader(IDownloader):
@@ -328,6 +328,7 @@ class YouTubeDownloader(IDownloader):
             *extractor_args,
             *cookie_args,
             "--format-sort", YOUTUBE_FORMAT_SORT,
+            "--format-sort-force",
             "-f", YOUTUBE_FORMAT_SELECTOR,
             "--merge-output-format", "mp4",
             "--postprocessor-args", "merger:-c:v copy -c:a aac -b:a 192k",
