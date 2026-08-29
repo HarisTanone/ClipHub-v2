@@ -33,30 +33,62 @@ class TestSocialCompliance(unittest.TestCase):
     @patch("src.infrastructure.social_compliance.probe_media")
     @patch("os.path.exists", return_value=True)
     @patch("os.path.getsize", return_value=5 * 1024 * 1024)
-    def test_validate_tiktok_duration_constraints(self, mock_size, mock_exists, mock_probe, mock_dur):
+    def test_validate_all_platform_constraints(self, mock_size, mock_exists, mock_probe, mock_dur):
         from src.infrastructure.social_compliance import validate_social_media_constraints
 
         mock_probe.return_value = {
             "streams": [{"codec_type": "video", "codec_name": "h264", "width": 1080, "height": 1920}]
         }
 
-        # Case 1: Video under 3.0 seconds -> rejected
-        mock_dur.return_value = 2.4
-        valid, err = validate_social_media_constraints("dummy.mp4", platform="tiktok")
+        # Instagram: min 3.0s, max 900s
+        mock_dur.return_value = 2.0
+        valid, err = validate_social_media_constraints("dummy.mp4", platform="instagram")
         self.assertFalse(valid)
-        self.assertIn("below TikTok minimum requirement", err)
+        self.assertIn("below Reels minimum requirement", err)
 
-        # Case 2: Video over 600 seconds -> rejected
-        mock_dur.return_value = 650.0
-        valid, err = validate_social_media_constraints("dummy.mp4", platform="tiktok", max_duration_sec=600.0)
-        self.assertFalse(valid)
-        self.assertIn("exceeds TikTok maximum", err)
-
-        # Case 3: Valid 45-second clip -> approved
-        mock_dur.return_value = 45.0
-        valid, err = validate_social_media_constraints("dummy.mp4", platform="tiktok")
+        mock_dur.return_value = 60.0
+        valid, err = validate_social_media_constraints("dummy.mp4", platform="instagram")
         self.assertTrue(valid)
-        self.assertIsNone(err)
+
+        # Facebook: min 3.0s, max 900s
+        mock_dur.return_value = 950.0
+        valid, err = validate_social_media_constraints("dummy.mp4", platform="facebook")
+        self.assertFalse(valid)
+        self.assertIn("exceeds Reels maximum", err)
+
+        # YouTube Shorts: max 180s
+        mock_dur.return_value = 200.0
+        valid, err = validate_social_media_constraints("dummy.mp4", platform="youtube")
+        self.assertFalse(valid)
+        self.assertIn("exceeds YouTube Shorts maximum", err)
+
+        mock_dur.return_value = 55.0
+        valid, err = validate_social_media_constraints("dummy.mp4", platform="youtube")
+        self.assertTrue(valid)
+
+    def test_get_supported_post_types_matrix(self):
+        from src.presentation.routes.social.publish import get_supported_post_type
+
+        # TikTok: must be 'video', never 'reel'
+        self.assertEqual(get_supported_post_type("reel", "tiktok"), "video")
+        self.assertEqual(get_supported_post_type("video", "tiktok"), "video")
+
+        # Instagram: Repliz schema uses 'video' for reels
+        self.assertEqual(get_supported_post_type("reel", "instagram"), "video")
+        self.assertEqual(get_supported_post_type("story", "instagram"), "story")
+
+        # Facebook: supports 'reel', 'video', 'story'
+        self.assertEqual(get_supported_post_type("reel", "facebook"), "reel")
+        self.assertEqual(get_supported_post_type("video", "facebook"), "video")
+
+        # YouTube: must be 'video'
+        self.assertEqual(get_supported_post_type("reel", "youtube"), "video")
+        self.assertEqual(get_supported_post_type("video", "youtube"), "video")
+
+        # Threads & LinkedIn
+        self.assertEqual(get_supported_post_type("text", "threads"), "text")
+        self.assertEqual(get_supported_post_type("video", "threads"), "video")
+        self.assertEqual(get_supported_post_type("video", "linkedin"), "video")
 
 
 if __name__ == "__main__":
