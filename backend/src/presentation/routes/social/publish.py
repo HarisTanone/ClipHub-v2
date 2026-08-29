@@ -219,6 +219,23 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     if thumb_url:
         media_obj["thumbnail"] = thumb_url
 
+    # 5b. Safe scheduleAt normalization (guaranteeing minimum 20min future threshold for TikTok/Repliz)
+    import datetime as dt
+
+    raw_schedule_at = body.scheduleAt
+    normalized_schedule_at = raw_schedule_at
+    if raw_schedule_at:
+        try:
+            parsed_dt = dt.datetime.fromisoformat(raw_schedule_at.replace("Z", "+00:00"))
+            min_future = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)
+            if parsed_dt < min_future:
+                parsed_dt = min_future
+            normalized_schedule_at = parsed_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        except Exception:
+            normalized_schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    else:
+        normalized_schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
     for acc_id in target_account_ids:
         try:
             post_title = (body.title or "Video")[:100]
@@ -255,7 +272,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
                     else []
                 ),
                 "accountId": acc_id,
-                "scheduleAt": body.scheduleAt,
+                "scheduleAt": normalized_schedule_at,
             }
 
             schedule_result = await repliz_post(

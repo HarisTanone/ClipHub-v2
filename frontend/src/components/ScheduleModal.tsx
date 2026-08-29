@@ -276,8 +276,8 @@ export function ScheduleModal({
 
   function getScheduleAt(): string {
     if (scheduleMode === "now") {
-      // Schedule 2 minutes from now to give buffer for Google Drive upload and Repliz worker
-      const d = new Date(Date.now() + 120_000);
+      // TikTok and Repliz require scheduled posts to be at least 20 minutes in the future
+      const d = new Date(Date.now() + 20 * 60 * 1000);
       return d.toISOString();
     }
     if (!scheduleDate || !scheduleTime) return "";
