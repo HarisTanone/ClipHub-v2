@@ -56,15 +56,25 @@ class CobaltClient:
             "audioFormat": "mp3",
         }
 
+        candidate_endpoints = [
+            f"{self.base_url}/api/json",
+            f"{self.base_url}/",
+        ]
+        last_error = ""
+
         async with httpx.AsyncClient(timeout=float(self.timeout)) as client:
-            resp = await client.post(
-                f"{self.base_url}/",
-                headers=headers,
-                json=payload,
-            )
-            if resp.status_code != 200:
-                text = resp.text
-                raise RuntimeError(f"Cobalt API error {resp.status_code}: {text[:200]}")
+            resp = None
+            for ep in candidate_endpoints:
+                try:
+                    resp = await client.post(ep, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        break
+                    last_error = f"Cobalt API {ep} error {resp.status_code}: {resp.text[:200]}"
+                except Exception as ex:
+                    last_error = f"Cobalt API {ep} connection error: {ex}"
+
+            if not resp or resp.status_code != 200:
+                raise RuntimeError(last_error or "Cobalt API returned non-200 status")
 
             data = resp.json()
             status = data.get("status")

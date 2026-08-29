@@ -17,35 +17,50 @@ YOUTUBE_PATTERN = re.compile(
     r"(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/shorts/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})"
 )
 
-# Hierarchical format preference enforcing >= 720p HD quality (never below 720p):
-# Prefer original native audio tracks over auto-generated synthetic/English dubs
-AUDIO_PREF = (
-    "bestaudio[language=original][acodec^=mp4a]/bestaudio[language=original]/"
-    "bestaudio[language=id][acodec^=mp4a]/bestaudio[language=id]/"
-    "bestaudio[language=id-ID][acodec^=mp4a]/bestaudio[language=id-ID]/"
-    "bestaudio[language_preference=10][acodec^=mp4a]/bestaudio[language_preference=10]/"
-    "bestaudio[acodec^=mp4a]/bestaudio"
-)
-
 # Format Selector: Default target 1080p (Full HD), fallback to 720p (HD) only if 1080p is unavailable.
-# Strictly rejects low quality streams (< 720p).
+# Strictly pairs video + audio on every candidate and rejects low quality streams (< 720p).
 YOUTUBE_FORMAT_SELECTOR = (
     # Tier 1: 1080p Full HD (Default Target)
-    f"bestvideo[height=1080][vcodec^=avc1]+{AUDIO_PREF}/"
-    f"bestvideo[height=1080][vcodec^=av01]+{AUDIO_PREF}/"
-    f"bestvideo[height=1080][vcodec^=vp9]+{AUDIO_PREF}/"
-    f"bestvideo[height=1080]+{AUDIO_PREF}/"
-    f"bestvideo[height>=1080]+{AUDIO_PREF}/"
+    "bestvideo[height=1080][vcodec^=avc1]+bestaudio[language=original]/"
+    "bestvideo[height=1080][vcodec^=avc1]+bestaudio[language=id]/"
+    "bestvideo[height=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=1080][vcodec^=avc1]+bestaudio/"
+    "bestvideo[height=1080][vcodec^=av01]+bestaudio[language=original]/"
+    "bestvideo[height=1080][vcodec^=av01]+bestaudio[language=id]/"
+    "bestvideo[height=1080][vcodec^=av01]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=1080][vcodec^=av01]+bestaudio/"
+    "bestvideo[height=1080][vcodec^=vp9]+bestaudio[language=original]/"
+    "bestvideo[height=1080][vcodec^=vp9]+bestaudio[language=id]/"
+    "bestvideo[height=1080][vcodec^=vp9]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=1080][vcodec^=vp9]+bestaudio/"
+    "bestvideo[height=1080]+bestaudio[language=original]/"
+    "bestvideo[height=1080]+bestaudio[language=id]/"
+    "bestvideo[height=1080]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=1080]+bestaudio/"
+    "bestvideo[height>=1080]+bestaudio[language=original]/"
+    "bestvideo[height>=1080]+bestaudio[language=id]/"
+    "bestvideo[height>=1080]+bestaudio/"
     # Tier 2: 720p HD Fallback (Only if 1080p is not available on source video)
-    f"bestvideo[height=720][vcodec^=avc1]+{AUDIO_PREF}/"
-    f"bestvideo[height=720][vcodec^=av01]+{AUDIO_PREF}/"
-    f"bestvideo[height=720][vcodec^=vp9]+{AUDIO_PREF}/"
-    f"bestvideo[height=720]+{AUDIO_PREF}/"
-    f"bestvideo[height>=720]+{AUDIO_PREF}/"
-    f"best[height>=720]/"
-    f"bestvideo[height>=720]+bestaudio/best[height>=720]"
+    "bestvideo[height=720][vcodec^=avc1]+bestaudio[language=original]/"
+    "bestvideo[height=720][vcodec^=avc1]+bestaudio[language=id]/"
+    "bestvideo[height=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=720][vcodec^=avc1]+bestaudio/"
+    "bestvideo[height=720][vcodec^=av01]+bestaudio[language=original]/"
+    "bestvideo[height=720][vcodec^=av01]+bestaudio[language=id]/"
+    "bestvideo[height=720][vcodec^=av01]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=720][vcodec^=av01]+bestaudio/"
+    "bestvideo[height=720][vcodec^=vp9]+bestaudio[language=original]/"
+    "bestvideo[height=720][vcodec^=vp9]+bestaudio[language=id]/"
+    "bestvideo[height=720][vcodec^=vp9]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=720][vcodec^=vp9]+bestaudio/"
+    "bestvideo[height=720]+bestaudio[language=original]/"
+    "bestvideo[height=720]+bestaudio[language=id]/"
+    "bestvideo[height=720]+bestaudio[acodec^=mp4a]/"
+    "bestvideo[height=720]+bestaudio/"
+    "bestvideo[height>=720]+bestaudio/"
+    "best[height>=720]"
 )
-YOUTUBE_FORMAT_SORT = "hasaudio,lang:original,lang:id,lang:id-ID,lang:default,res:1080,res:720,fps:60,vcodec:avc1,vcodec:av01,vcodec:vp9,br,size"
+YOUTUBE_FORMAT_SORT = "lang:original,lang:id,lang:id-ID,lang:default,res:1080,res:720,fps:60,vcodec:avc1,vcodec:av01,vcodec:vp9,br,size"
 
 
 def extract_youtube_video_id(url: str) -> Optional[str]:
