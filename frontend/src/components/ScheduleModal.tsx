@@ -276,8 +276,8 @@ export function ScheduleModal({
 
   function getScheduleAt(): string {
     if (scheduleMode === "now") {
-      // TikTok and Repliz require scheduled posts to be at least 20 minutes in the future
-      const d = new Date(Date.now() + 20 * 60 * 1000);
+      // Schedule 2 minutes in future so Repliz background worker fetches media & posts immediately
+      const d = new Date(Date.now() + 2 * 60 * 1000);
       return d.toISOString();
     }
     if (!scheduleDate || !scheduleTime) return "";

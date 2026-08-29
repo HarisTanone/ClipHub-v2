@@ -287,12 +287,12 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     except Exception as e:
         logger.warning(f"Failed to lookup local social account platforms: {e}")
 
-    # 7. Safe scheduleAt normalization (minimum 20min future threshold for TikTok/Repliz API compliance)
+    # 7. Safe scheduleAt normalization (minimum 2min future threshold for immediate execution)
     import datetime as dt
 
     raw_schedule_at = body.scheduleAt
     now_utc = dt.datetime.now(dt.timezone.utc)
-    min_future = now_utc + dt.timedelta(minutes=20)
+    min_future = now_utc + dt.timedelta(minutes=2)
     if raw_schedule_at:
         try:
             parsed_dt = dt.datetime.fromisoformat(raw_schedule_at.replace("Z", "+00:00"))

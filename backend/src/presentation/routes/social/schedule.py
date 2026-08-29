@@ -126,10 +126,10 @@ async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current
             else:
                 sanitized_replies.append(r)
 
-    # Normalize scheduleAt to ensure minimum 20min future buffer for TikTok API compliance
+    # Normalize scheduleAt to ensure minimum 2min future buffer for worker execution
     raw_schedule_at = body.scheduleAt
     now_utc = dt.datetime.now(dt.timezone.utc)
-    min_future = now_utc + dt.timedelta(minutes=20)
+    min_future = now_utc + dt.timedelta(minutes=2)
     if raw_schedule_at:
         try:
             parsed_dt = dt.datetime.fromisoformat(raw_schedule_at.replace("Z", "+00:00"))
