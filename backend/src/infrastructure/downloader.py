@@ -27,19 +27,25 @@ AUDIO_PREF = (
     "bestaudio[acodec^=mp4a]/bestaudio"
 )
 
+# Format Selector: Default target 1080p (Full HD), fallback to 720p (HD) only if 1080p is unavailable.
+# Strictly rejects low quality streams (< 720p).
 YOUTUBE_FORMAT_SELECTOR = (
+    # Tier 1: 1080p Full HD (Default Target)
     f"bestvideo[height=1080][vcodec^=avc1]+{AUDIO_PREF}/"
     f"bestvideo[height=1080][vcodec^=av01]+{AUDIO_PREF}/"
     f"bestvideo[height=1080][vcodec^=vp9]+{AUDIO_PREF}/"
     f"bestvideo[height=1080]+{AUDIO_PREF}/"
     f"bestvideo[height>=1080]+{AUDIO_PREF}/"
-    f"bestvideo[height>=720][vcodec^=avc1]+{AUDIO_PREF}/"
-    f"bestvideo[height>=720][vcodec^=av01]+{AUDIO_PREF}/"
+    # Tier 2: 720p HD Fallback (Only if 1080p is not available on source video)
+    f"bestvideo[height=720][vcodec^=avc1]+{AUDIO_PREF}/"
+    f"bestvideo[height=720][vcodec^=av01]+{AUDIO_PREF}/"
+    f"bestvideo[height=720][vcodec^=vp9]+{AUDIO_PREF}/"
+    f"bestvideo[height=720]+{AUDIO_PREF}/"
     f"bestvideo[height>=720]+{AUDIO_PREF}/"
     f"best[height>=720]/"
-    f"bestvideo+{AUDIO_PREF}/best"
+    f"bestvideo[height>=720]+bestaudio/best[height>=720]"
 )
-YOUTUBE_FORMAT_SORT = "hasaudio,lang:original,lang:id,lang:id-ID,lang:default,res:1080,fps:60,vcodec:avc1,vcodec:av01,vcodec:vp9,br,size"
+YOUTUBE_FORMAT_SORT = "hasaudio,lang:original,lang:id,lang:id-ID,lang:default,res:1080,res:720,fps:60,vcodec:avc1,vcodec:av01,vcodec:vp9,br,size"
 
 
 def extract_youtube_video_id(url: str) -> Optional[str]:
