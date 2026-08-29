@@ -43,7 +43,8 @@ class SocialAutoPostService:
             return []
 
         now = start_time or dt.datetime.now(dt.timezone.utc)
-        min_start = now + dt.timedelta(minutes=15)
+        # TikTok Content Posting API requires scheduleAt to be at least 15-20 minutes in the future
+        min_start = now + dt.timedelta(minutes=20)
 
         # Parse peak hours
         raw_hours = [h.strip() for h in (peak_hours_str or "").split(",") if h.strip()]
@@ -89,7 +90,7 @@ class SocialAutoPostService:
             # Case A: 1 clip -> nearest peak slot or day_start
             if clip_count == 1:
                 base_slot = available_peaks[0] if available_peaks else day_start
-                jitter_sec = random.randint(-180, 180)
+                jitter_sec = random.randint(-120, 120)
                 slot_with_jitter = max(min_start, base_slot + dt.timedelta(seconds=jitter_sec))
                 return [slot_with_jitter]
 
@@ -99,27 +100,34 @@ class SocialAutoPostService:
                 for i in range(clip_count):
                     idx = min(len(available_peaks) - 1, int(i * step))
                     base_slot = available_peaks[idx]
-                    jitter_sec = random.randint(-180, 180)
+                    jitter_sec = random.randint(-120, 120)
                     slot_with_jitter = max(min_start, base_slot + dt.timedelta(seconds=jitter_sec))
                     schedule_times.append(slot_with_jitter)
-                return sorted(schedule_times)
+                
+                # Ensure minimum 15 minutes separation
+                sorted_peaks: List[dt.datetime] = []
+                for t in sorted(schedule_times):
+                    if sorted_peaks and t < sorted_peaks[-1] + dt.timedelta(minutes=15):
+                        t = sorted_peaks[-1] + dt.timedelta(minutes=15)
+                    sorted_peaks.append(t)
+                return sorted_peaks
 
             # Case C: Multiple clips -> spread evenly throughout the remaining day window
             total_minutes = (day_end - day_start).total_seconds() / 60.0
-            step_minutes = total_minutes / float(clip_count)
+            step_minutes = max(15.0, total_minutes / float(clip_count))
 
             for i in range(clip_count):
                 base_slot = day_start + dt.timedelta(minutes=i * step_minutes)
-                jitter_sec = random.randint(-150, 150)
+                jitter_sec = random.randint(-90, 90)
                 slot_with_jitter = base_slot + dt.timedelta(seconds=jitter_sec)
                 slot_with_jitter = max(min_start, slot_with_jitter)
                 schedule_times.append(slot_with_jitter)
 
-            # Ensure strict chronological order with at least 5 mins separation
+            # Ensure strict chronological order with at least 15 mins separation for TikTok compliance
             sorted_times: List[dt.datetime] = []
             for t in sorted(schedule_times):
-                if sorted_times and t <= sorted_times[-1]:
-                    t = sorted_times[-1] + dt.timedelta(minutes=5)
+                if sorted_times and t < sorted_times[-1] + dt.timedelta(minutes=15):
+                    t = sorted_times[-1] + dt.timedelta(minutes=15)
                 sorted_times.append(t)
 
             return sorted_times

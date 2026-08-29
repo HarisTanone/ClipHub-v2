@@ -229,6 +229,9 @@ def ensure_social_compliant_video(
         "-b:a", "192k",
         "-ar", "44100",
         "-ac", "2",
+        "-avoid_negative_ts", "make_zero",
+        "-fflags", "+genpts",
+        "-max_interleave_delta", "0",
         "-movflags", "+faststart",
         out_file,
     ])
