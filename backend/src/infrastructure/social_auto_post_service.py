@@ -11,6 +11,10 @@ from src.config import settings
 from src.infrastructure.clip_outputs import find_final_clip
 from src.infrastructure.db_connection import get_dict_connection
 from src.infrastructure.gdrive_uploader import gdrive_uploader
+from src.infrastructure.social_compliance import (
+    ensure_social_compliant_video,
+    ensure_social_compliant_thumbnail,
+)
 from src.presentation.routes.social.helpers import repliz_get, repliz_post
 
 logger = logging.getLogger(__name__)
@@ -391,20 +395,58 @@ class SocialAutoPostService:
                 logger.warning(f"auto_post: Final video for clip #{rank} not found at {output_dir}")
                 continue
 
+            # Ensure 100% compliant MP4 format for TikTok and Instagram Reels (H.264 + AAC + yuv420p + faststart)
+            try:
+                compliant_clip_file = ensure_social_compliant_video(clip_file)
+            except Exception as e:
+                logger.warning(f"auto_post: Video compliance check fallback on clip #{rank}: {e}")
+                compliant_clip_file = clip_file
+
             # Upload video to Google Drive to obtain direct download URL for Repliz
             video_url = ""
             if gdrive_uploader.is_configured:
                 try:
                     filename = f"{job_id}_clip{rank}.mp4"
-                    drive_res = gdrive_uploader.upload_video(clip_file, filename=filename)
+                    drive_res = gdrive_uploader.upload_video(compliant_clip_file, filename=filename)
                     video_url = drive_res.get("direct_link", "") or drive_res.get("web_view_link", "")
                 except Exception as e:
                     logger.error(f"auto_post: GDrive upload failed for clip #{rank}: {e}")
                     errors.append(f"Clip #{rank} GDrive upload: {str(e)}")
 
+            # Fallback to direct public backend streaming URL if configured and drive upload not available
             if not video_url:
-                logger.warning(f"auto_post: No public video URL for clip #{rank}. GDrive must be configured.")
+                public_backend = os.environ.get("AUTOCLIPER_PUBLIC_URL") or os.environ.get("PUBLIC_BACKEND_URL")
+                if public_backend:
+                    video_url = f"{public_backend.rstrip('/')}/api/jobs/{job_id}/clips/{rank}/final"
+                    thumb_url = thumb_url or f"{public_backend.rstrip('/')}/api/jobs/{job_id}/clips/{rank}/thumb"
+
+            if not video_url:
+                logger.warning(f"auto_post: No public video URL for clip #{rank}. GDrive or PUBLIC_BACKEND_URL must be configured.")
                 continue
+
+
+            # Ensure compliant JPEG thumbnail meeting TikTok & Instagram photo constraints (< 20MB, JPG, <= 1080x1920)
+            thumb_url = None
+            if gdrive_uploader.is_configured:
+                try:
+                    thumb_dir = os.path.join(output_dir, "thumbnail")
+                    candidate_thumb = os.path.join(thumb_dir, f"clip_{rank:02d}.jpg")
+                    if not os.path.exists(candidate_thumb):
+                        candidate_thumb = os.path.join(thumb_dir, f"clip_{rank:02d}_thumb.jpg")
+
+                    compliant_thumb = ensure_social_compliant_thumbnail(
+                        thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
+                        video_path=compliant_clip_file,
+                        output_path=os.path.join(thumb_dir, f"clip_{rank:02d}_social.jpg"),
+                    )
+
+                    if compliant_thumb and os.path.exists(compliant_thumb):
+                        thumb_res = gdrive_uploader.upload_image(
+                            compliant_thumb, filename=f"{job_id}_clip{rank}_thumb.jpg"
+                        )
+                        thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
+                except Exception as e:
+                    logger.warning(f"auto_post: Thumbnail upload skipped for clip #{rank}: {e}")
 
             scheduled_time = schedule_times[i] if i < len(schedule_times) else dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=4)
             # Format ISO 8601 UTC string (e.g. 2026-08-28T12:00:00.000Z)
@@ -424,23 +466,24 @@ class SocialAutoPostService:
                 caption = self.extract_clip_caption(clip, platform=platform)
                 title = clip.get("hook", f"Clip #{rank}")[:100]
 
-                # Post type per platform: reel for Facebook Reels if desired, video for others
-                post_type = "video"
+                # Post type per platform: reel for Facebook/Instagram Reels, video for others
+                post_type = "reel" if platform in ("facebook", "instagram") else "video"
+
+                media_item: Dict[str, Any] = {
+                    "alt": title,
+                    "customThumbnail": bool(thumb_url),
+                    "type": "video",
+                    "url": video_url,
+                }
+                if thumb_url:
+                    media_item["thumbnail"] = thumb_url
 
                 payload = {
                     "title": title,
                     "description": caption,
                     "topic": clip.get("topic") or (title[:50] if platform == "threads" else ""),
                     "type": post_type,
-                    "medias": [
-                        {
-                            "alt": title,
-                            "customThumbnail": False,
-                            "type": "video",
-                            "thumbnail": "",
-                            "url": video_url,
-                        }
-                    ],
+                    "medias": [media_item],
                     "meta": {"title": "", "description": "", "url": ""},
                     "additionalInfo": {
                         "isAiGenerated": True,

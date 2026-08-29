@@ -13,6 +13,10 @@ from pydantic import BaseModel, Field
 from src.config import settings
 from src.infrastructure.clip_outputs import find_final_clip
 from src.infrastructure.gdrive_uploader import gdrive_uploader
+from src.infrastructure.social_compliance import (
+    ensure_social_compliant_video,
+    ensure_social_compliant_thumbnail,
+)
 from src.presentation.routes.auth import get_current_user
 from src.presentation.routes.social.helpers import repliz_post
 
@@ -123,10 +127,16 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         video_file = clip_final
         upload_filename = f"{body.jobId}_clip{clip_rank}.mp4"
 
-    # 4. Upload to Google Drive ONCE
+    # 4. Transcode to 100% compliant video format and upload to Google Drive
+    try:
+        compliant_video = ensure_social_compliant_video(video_file)
+    except Exception as e:
+        logger.warning(f"Video compliance transcode fallback: {e}")
+        compliant_video = video_file
+
     try:
         drive_result = gdrive_uploader.upload_video(
-            video_file, filename=upload_filename
+            compliant_video, filename=upload_filename
         )
     except Exception as e:
         logger.error(f"Google Drive upload failed: {e}")
@@ -143,6 +153,29 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             detail="Gagal mendapatkan link download langsung dari Google Drive.",
         )
 
+    # 4b. Optional compliant thumbnail
+    thumb_url = None
+    if not is_video_gen and body.clipRank is not None and gdrive_uploader.is_configured:
+        try:
+            rank_num = body.clipRank
+            thumb_dir = os.path.join(settings.OUTPUT_DIR, body.jobId, "thumbnail")
+            candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}.jpg")
+            if not os.path.exists(candidate_thumb):
+                candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}_thumb.jpg")
+
+            comp_thumb = ensure_social_compliant_thumbnail(
+                thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
+                video_path=compliant_video,
+                output_path=os.path.join(thumb_dir, f"clip_{rank_num:02d}_social.jpg"),
+            )
+            if comp_thumb and os.path.exists(comp_thumb):
+                thumb_res = gdrive_uploader.upload_image(
+                    comp_thumb, filename=f"{body.jobId}_clip{rank_num}_thumb.jpg"
+                )
+                thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
+        except Exception as e:
+            logger.warning(f"Thumbnail upload failed in publish route: {e}")
+
     # 5. Extract hashtags for tags if tags list is empty
     tags = list(body.tags)
     if not tags and body.caption:
@@ -154,6 +187,15 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     successful_schedules = []
     failed_schedules = []
 
+    media_obj: Dict[str, Any] = {
+        "alt": body.title or "Video",
+        "customThumbnail": bool(thumb_url),
+        "type": "video",
+        "url": video_url,
+    }
+    if thumb_url:
+        media_obj["thumbnail"] = thumb_url
+
     for acc_id in target_account_ids:
         try:
             payload = {
@@ -161,15 +203,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
                 "description": body.caption,
                 "topic": body.topic or "",
                 "type": body.type or "video",
-                "medias": [
-                    {
-                        "alt": body.title or "Video",
-                        "customThumbnail": False,
-                        "type": "video",
-                        "thumbnail": "",
-                        "url": video_url,
-                    }
-                ],
+                "medias": [media_obj],
                 "meta": {"title": "", "description": "", "url": ""},
                 "additionalInfo": {
                     "isAiGenerated": body.isAiGenerated,

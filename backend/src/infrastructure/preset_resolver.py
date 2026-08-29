@@ -42,13 +42,29 @@ def resolve_preset(
                 if user_set and user_set["default_style_preset"]:
                     key = str(user_set["default_style_preset"]).strip()
 
-            # If still default or empty, check system default setting, otherwise return None
+            # If still default or empty, check system default setting or find first user preset / system preset
             if not key or key.lower() in ("default", "none"):
                 sys_default = getattr(settings, "DEFAULT_STYLE_PRESET", "")
                 if sys_default and sys_default.lower() not in ("default", "none", ""):
                     key = sys_default
                 else:
-                    return None
+                    # Fallback: user's latest preset or any active preset in user_presets
+                    cur.execute(
+                        "SELECT * FROM user_presets WHERE user_id = ? OR user_id = 1 ORDER BY id DESC LIMIT 1",
+                        (user_id or 1,),
+                    )
+                    fallback_user_p = cur.fetchone()
+                    if fallback_user_p:
+                        return _format_user_preset_row(fallback_user_p)
+
+                    # Otherwise search first style_presets row
+                    cur.execute("SELECT * FROM style_presets ORDER BY id ASC LIMIT 1")
+                    fallback_sys = cur.fetchone()
+                    if fallback_sys:
+                        key = str(fallback_sys["id"]).strip()
+                    else:
+                        return None
+
 
         # 1. Search user_presets by slug
         query = "SELECT * FROM user_presets WHERE slug = ?"
@@ -121,12 +137,56 @@ def resolve_preset(
                 "transition_duration": 0.35,
             }
 
-        return None
+        return _get_builtin_default_preset()
     except Exception as e:
         logger.warning(f"preset_resolver error for '{key}': {e}")
-        return None
+        return _get_builtin_default_preset()
     finally:
         conn.close()
+
+
+def _get_builtin_default_preset() -> Dict[str, Any]:
+    """Fallback preset definition when no database preset is configured."""
+    return {
+        "source": "builtin_default",
+        "id": "default",
+        "name": "Default Studio",
+        "slug": "default",
+        "hook_style_config": {
+            "animation": "slide_up",
+            "fontFamily": "Montserrat",
+            "fontSize": 48,
+            "color": "#FFFFFF",
+        },
+        "subtitle_style_config": {
+            "fontFamily": "Montserrat",
+            "fontSize": 38,
+            "highlightColor": "#00FFCC",
+            "position": "bottom",
+        },
+        "text_emphasis_style_config": {},
+        "text_emphasis_enabled": False,
+        "watermark_config": {},
+        "cta_config": {},
+        "broll_config": {},
+        "broll_style_config": {},
+        "broll_enabled": False,
+        "broll_image_overlay": True,
+        "broll_behind_person": True,
+        "broll_video_footage": True,
+        "autogrid_enabled": False,
+        "transition_style": "cut",
+        "transition_duration": 0.35,
+        "hook_engine": "remotion",
+        "subtitle_engine": "remotion",
+        "autopost_config": {},
+        "auto_post_social": False,
+        "auto_post_platforms": "tiktok,instagram,youtube",
+        "auto_post_account_ids": [],
+        "auto_post_schedule_mode": "ai",
+        "auto_post_custom_time": None,
+    }
+
 
 
 def _format_user_preset_row(row) -> Dict[str, Any]:
