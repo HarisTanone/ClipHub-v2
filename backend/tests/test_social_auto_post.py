@@ -267,7 +267,28 @@ class TestSocialAutoPost(unittest.TestCase):
         self.assertTrue(res["success"])
         mock_repliz_put.assert_called_once_with("/public/schedule/sch_123/retry", json_body={})
 
+    def test_get_supported_post_type_platform_rules(self):
+        """Verify post type is normalized according to Repliz supported post types table."""
+        from src.presentation.routes.social.publish import get_supported_post_type
+
+        # TikTok does NOT support 'reel', must be 'video'
+        self.assertEqual(get_supported_post_type("reel", platform="tiktok"), "video")
+        self.assertEqual(get_supported_post_type("video", platform="tiktok"), "video")
+
+        # Instagram does NOT support 'reel' in Repliz API, must be 'video'
+        self.assertEqual(get_supported_post_type("reel", platform="instagram"), "video")
+        self.assertEqual(get_supported_post_type("story", platform="instagram"), "story")
+
+        # Facebook supports 'reel'
+        self.assertEqual(get_supported_post_type("reel", platform="facebook"), "reel")
+        self.assertEqual(get_supported_post_type("video", platform="facebook"), "video")
+
+        # YouTube only supports 'video'
+        self.assertEqual(get_supported_post_type("reel", platform="youtube"), "video")
+        self.assertEqual(get_supported_post_type("video", platform="youtube"), "video")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

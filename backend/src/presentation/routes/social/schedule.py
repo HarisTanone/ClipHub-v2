@@ -94,32 +94,54 @@ async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current
     """Create a scheduled post in Repliz."""
     import datetime as dt
 
-    # Sanitize medias: omit empty thumbnail string to avoid Repliz/TikTok validation failure
+    # Sanitize medias: ensure compliant fields
     sanitized_medias = []
     for m in body.medias:
         m_copy = dict(m)
         thumb = m_copy.get("thumbnail")
-        if not thumb or not str(thumb).strip():
-            m_copy.pop("thumbnail", None)
-            m_copy["customThumbnail"] = False
-        else:
+        if thumb and str(thumb).strip():
+            m_copy["thumbnail"] = str(thumb).strip()
             m_copy["customThumbnail"] = True
+        else:
+            m_copy["thumbnail"] = ""
+            m_copy["customThumbnail"] = False
+        if not m_copy.get("alt"):
+            m_copy["alt"] = (body.title or "Media")[:100]
+        if not m_copy.get("type"):
+            m_copy["type"] = "video"
         sanitized_medias.append(m_copy)
+
+    # Sanitize replies (Threads nested posts support)
+    sanitized_replies = []
+    for r in body.replies:
+        if isinstance(r, dict):
+            if "description" in r or "text" in r:
+                sanitized_replies.append({
+                    "title": r.get("title", ""),
+                    "description": r.get("description") or r.get("text", ""),
+                    "topic": r.get("topic", ""),
+                    "type": r.get("type", "text"),
+                    "medias": r.get("medias", []),
+                })
+            else:
+                sanitized_replies.append(r)
 
     # Normalize scheduleAt to ensure minimum 20min future buffer for TikTok API compliance
     raw_schedule_at = body.scheduleAt
-    normalized_schedule_at = raw_schedule_at
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    min_future = now_utc + dt.timedelta(minutes=20)
     if raw_schedule_at:
         try:
             parsed_dt = dt.datetime.fromisoformat(raw_schedule_at.replace("Z", "+00:00"))
-            min_future = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)
+            if parsed_dt.tzinfo is None:
+                parsed_dt = parsed_dt.replace(tzinfo=dt.timezone.utc)
             if parsed_dt < min_future:
                 parsed_dt = min_future
             normalized_schedule_at = parsed_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
         except Exception:
-            normalized_schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            normalized_schedule_at = min_future.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     else:
-        normalized_schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        normalized_schedule_at = min_future.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
     payload = {
         "title": (body.title or "Video")[:100],
@@ -141,7 +163,7 @@ async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current
             "tags": body.additionalInfo.get("tags", []),
             "targetCountries": body.additionalInfo.get("targetCountries", []),
         },
-        "replies": body.replies,
+        "replies": sanitized_replies,
         "accountId": body.accountId,
         "scheduleAt": normalized_schedule_at,
     }
@@ -211,17 +233,37 @@ async def update_schedule(
     _user=Depends(get_current_user),
 ):
     """Update an existing scheduled post."""
-    # Sanitize medias: omit empty thumbnail string to avoid Repliz/TikTok validation failure
+    # Sanitize medias: ensure compliant fields
     sanitized_medias = []
     for m in body.medias:
         m_copy = dict(m)
         thumb = m_copy.get("thumbnail")
-        if not thumb or not str(thumb).strip():
-            m_copy.pop("thumbnail", None)
-            m_copy["customThumbnail"] = False
-        else:
+        if thumb and str(thumb).strip():
+            m_copy["thumbnail"] = str(thumb).strip()
             m_copy["customThumbnail"] = True
+        else:
+            m_copy["thumbnail"] = ""
+            m_copy["customThumbnail"] = False
+        if not m_copy.get("alt"):
+            m_copy["alt"] = (body.title or "Media")[:100]
+        if not m_copy.get("type"):
+            m_copy["type"] = "video"
         sanitized_medias.append(m_copy)
+
+    # Sanitize replies (Threads nested posts support)
+    sanitized_replies = []
+    for r in body.replies:
+        if isinstance(r, dict):
+            if "description" in r or "text" in r:
+                sanitized_replies.append({
+                    "title": r.get("title", ""),
+                    "description": r.get("description") or r.get("text", ""),
+                    "topic": r.get("topic", ""),
+                    "type": r.get("type", "text"),
+                    "medias": r.get("medias", []),
+                })
+            else:
+                sanitized_replies.append(r)
 
     payload = {
         "title": (body.title or "Video")[:100],
@@ -243,7 +285,7 @@ async def update_schedule(
             "tags": body.additionalInfo.get("tags", []),
             "targetCountries": body.additionalInfo.get("targetCountries", []),
         },
-        "replies": body.replies,
+        "replies": sanitized_replies,
         "scheduleAt": body.scheduleAt,
     }
     if body.templateId:

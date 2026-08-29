@@ -491,17 +491,16 @@ class SocialAutoPostService:
                 caption = self.extract_clip_caption(clip, platform=platform)
                 title = clip.get("hook", f"Clip #{rank}")[:100]
 
-                # Post type per platform: reel for Facebook/Instagram Reels, video for others
-                post_type = "reel" if platform in ("facebook", "instagram") else "video"
+                # Post type per platform: reel for Facebook, video for Instagram, TikTok, YouTube, Threads, LinkedIn
+                post_type = "reel" if platform == "facebook" else "video"
 
                 media_item: Dict[str, Any] = {
                     "alt": title,
                     "customThumbnail": bool(thumb_url),
                     "type": "video",
+                    "thumbnail": thumb_url or "",
                     "url": video_url,
                 }
-                if thumb_url:
-                    media_item["thumbnail"] = thumb_url
 
                 payload = {
                     "title": title,

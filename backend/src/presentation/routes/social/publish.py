@@ -48,6 +48,51 @@ class PublishRequest(BaseModel):
 
 
 
+def get_supported_post_type(requested_type: Optional[str], platform: str = "") -> str:
+    """Normalize post type to comply with Repliz official Supported Post Types specification.
+    
+    Repliz Documentation Matrix:
+    - Facebook: text, image, video, reel, album, link, story
+    - Instagram: image, video, album, story (NO 'reel')
+    - TikTok: image, video, album (NO 'reel', NO 'story')
+    - YouTube: video (NO 'reel', NO 'story')
+    - Threads: text, image, video, album
+    - LinkedIn: image, video, album
+    """
+    plat = (platform or "").lower().strip()
+    req = (requested_type or "video").lower().strip()
+
+    if plat == "facebook":
+        if req in ("text", "image", "video", "reel", "album", "link", "story"):
+            return req
+        return "video"
+    elif plat == "instagram":
+        if req == "story":
+            return "story"
+        if req in ("image", "album"):
+            return req
+        return "video"  # In Repliz API, Instagram reels/videos use 'video'
+    elif plat == "tiktok":
+        if req in ("image", "album"):
+            return req
+        return "video"  # TikTok video is 'video'
+    elif plat == "youtube":
+        return "video"  # YouTube is always 'video'
+    elif plat == "threads":
+        if req in ("text", "image", "album"):
+            return req
+        return "video"
+    elif plat == "linkedin":
+        if req in ("image", "album"):
+            return req
+        return "video"
+
+    # Default fallback for unknown platforms
+    if req in ("reel", "story"):
+        return "video"
+    return req or "video"
+
+
 @publish_router.post("")
 async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     """Upload clip or AI generated video to Google Drive once and schedule posts across all selected accounts via Repliz."""
@@ -206,71 +251,100 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         if hashtag_matches:
             tags = hashtag_matches[:10]
 
-    # 6. Schedule on Repliz for each target account
-    successful_schedules = []
-    failed_schedules = []
+    # 6. Lookup account platform types from database if available
+    account_platform_map = {}
+    try:
+        from sqlalchemy import select
+        from src.infrastructure.database import SocialAccountModel, async_session
 
-    media_obj: Dict[str, Any] = {
-        "alt": body.title or "Video",
-        "customThumbnail": bool(thumb_url),
-        "type": "video",
-        "url": video_url,
-    }
-    if thumb_url:
-        media_obj["thumbnail"] = thumb_url
+        async with async_session() as session:
+            result = await session.execute(
+                select(SocialAccountModel.account_id, SocialAccountModel.platform).where(
+                    SocialAccountModel.account_id.in_(target_account_ids)
+                )
+            )
+            for acc_id_row, plat_row in result.fetchall():
+                account_platform_map[acc_id_row] = plat_row
+    except Exception as e:
+        logger.warning(f"Failed to lookup local social account platforms: {e}")
 
-    # 5b. Safe scheduleAt normalization (guaranteeing minimum 20min future threshold for TikTok/Repliz)
+    # 7. Safe scheduleAt normalization (minimum 20min future threshold for TikTok/Repliz API compliance)
     import datetime as dt
 
     raw_schedule_at = body.scheduleAt
-    normalized_schedule_at = raw_schedule_at
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    min_future = now_utc + dt.timedelta(minutes=20)
     if raw_schedule_at:
         try:
             parsed_dt = dt.datetime.fromisoformat(raw_schedule_at.replace("Z", "+00:00"))
-            min_future = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)
+            if parsed_dt.tzinfo is None:
+                parsed_dt = parsed_dt.replace(tzinfo=dt.timezone.utc)
             if parsed_dt < min_future:
                 parsed_dt = min_future
             normalized_schedule_at = parsed_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
         except Exception:
-            normalized_schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            normalized_schedule_at = min_future.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     else:
-        normalized_schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        normalized_schedule_at = min_future.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    # 8. Schedule on Repliz for each target account
+    successful_schedules = []
+    failed_schedules = []
+
+    post_title = (body.title or "Video")[:100]
+    post_desc = (body.caption or "")
+    if len(post_desc) > 2000:
+        post_desc = post_desc[:1990].rstrip() + "..."
+
+    media_obj: Dict[str, Any] = {
+        "alt": post_title,
+        "customThumbnail": bool(thumb_url),
+        "type": "video",
+        "thumbnail": thumb_url or "",
+        "url": video_url,
+    }
+
+    replies = []
+    if body.firstReply and body.firstReply.strip():
+        replies.append({
+            "title": "",
+            "description": body.firstReply.strip(),
+            "topic": "",
+            "type": "text",
+            "medias": [],
+        })
+
+    additional_info = {
+        "isAiGenerated": bool(body.isAiGenerated),
+        "isDraft": bool(body.isDraft),
+        "isAutoAddMusic": False,
+        "collaborators": body.collaborators or [],
+        "mentions": body.mentions or [],
+        "music": {
+            "id": "",
+            "artist": "",
+            "name": "",
+            "thumbnail": "",
+        },
+        "products": [],
+        "tags": tags or [],
+        "targetCountries": body.targetCountries or [],
+    }
 
     for acc_id in target_account_ids:
         try:
-            post_title = (body.title or "Video")[:100]
-            post_desc = (body.caption or "")
-            if len(post_desc) > 2000:
-                post_desc = post_desc[:1990].rstrip() + "..."
+            platform = account_platform_map.get(acc_id, "")
+            post_type = get_supported_post_type(body.type, platform)
 
             payload = {
                 "title": post_title,
                 "description": post_desc,
                 "topic": body.topic or "",
-                "type": body.type or "video",
+                "type": post_type,
                 "medias": [media_obj],
                 "meta": {"title": "", "description": "", "url": ""},
-                "additionalInfo": {
-                    "isAiGenerated": body.isAiGenerated,
-                    "isDraft": body.isDraft,
-                    "isAutoAddMusic": False,
-                    "collaborators": body.collaborators,
-                    "mentions": body.mentions,
-                    "music": {
-                        "id": "",
-                        "artist": "",
-                        "name": "",
-                        "thumbnail": "",
-                    },
-                    "products": [],
-                    "tags": tags,
-                    "targetCountries": body.targetCountries,
-                },
-                "replies": (
-                    [{"text": body.firstReply.strip(), "order": 1}]
-                    if body.firstReply and body.firstReply.strip()
-                    else []
-                ),
+                "additionalInfo": additional_info,
+                "replies": replies,
                 "accountId": acc_id,
                 "scheduleAt": normalized_schedule_at,
             }
