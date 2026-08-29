@@ -1012,6 +1012,15 @@ fi
 if [ -f "/etc/systemd/system/autocliper-tunnel.service" ]; then
     echo "  Starting Cloudflare Tunnel..."
     sudo systemctl start autocliper-tunnel 2>/dev/null || true
+    # Auto-detect dynamic trycloudflare quick tunnel URL
+    sleep 3
+    DETECTED_TUNNEL_URL="$(sudo journalctl -u autocliper-tunnel -n 50 --no-pager 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' | tail -n 1)"
+    if [ -n "$DETECTED_TUNNEL_URL" ]; then
+        AUTOCLIPER_PUBLIC_URL="$DETECTED_TUNNEL_URL"
+        set_env_value "$BACKEND_DIR/.env" "AUTOCLIPER_PUBLIC_URL" "$DETECTED_TUNNEL_URL"
+        echo "  [OK] Cloudflare Tunnel live at: $DETECTED_TUNNEL_URL"
+        sudo systemctl restart autocliper-backend 2>/dev/null || true
+    fi
 fi
 
 echo "  [OK] All services registered and started"
