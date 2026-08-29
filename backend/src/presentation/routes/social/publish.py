@@ -221,9 +221,14 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
 
     for acc_id in target_account_ids:
         try:
+            post_title = (body.title or "Video")[:100]
+            post_desc = (body.caption or "")
+            if len(post_desc) > 2000:
+                post_desc = post_desc[:1990].rstrip() + "..."
+
             payload = {
-                "title": body.title or "Video",
-                "description": body.caption,
+                "title": post_title,
+                "description": post_desc,
                 "topic": body.topic or "",
                 "type": body.type or "video",
                 "medias": [media_obj],

@@ -321,6 +321,9 @@ class SocialAutoPostService:
                 tags = "\n\n#viral #video #trending"
 
         full_caption = f"{caption_body}{tags}".strip()
+        # Cap caption length to 2000 chars to strictly comply with TikTok (2200) and Instagram (2200) limits
+        if len(full_caption) > 2000:
+            full_caption = full_caption[:1990].rstrip() + "..."
         return full_caption
 
     async def auto_schedule_job_clips(
