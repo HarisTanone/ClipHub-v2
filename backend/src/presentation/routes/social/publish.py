@@ -153,26 +153,40 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             detail="Gagal mendapatkan link download langsung dari Google Drive.",
         )
 
-    # 4b. Optional compliant thumbnail
+    # 4b. Optional compliant thumbnail (captured at hook frame 1.5s)
     thumb_url = None
-    if not is_video_gen and body.clipRank is not None and gdrive_uploader.is_configured:
+    if gdrive_uploader.is_configured:
         try:
-            rank_num = body.clipRank
-            thumb_dir = os.path.join(settings.OUTPUT_DIR, body.jobId, "thumbnail")
-            candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}.jpg")
-            if not os.path.exists(candidate_thumb):
-                candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}_thumb.jpg")
+            if not is_video_gen and body.clipRank is not None:
+                rank_num = body.clipRank
+                thumb_dir = os.path.join(settings.OUTPUT_DIR, body.jobId, "thumbnail")
+                candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}.jpg")
+                if not os.path.exists(candidate_thumb):
+                    candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}_thumb.jpg")
 
-            comp_thumb = ensure_social_compliant_thumbnail(
-                thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
-                video_path=compliant_video,
-                output_path=os.path.join(thumb_dir, f"clip_{rank_num:02d}_social.jpg"),
-            )
-            if comp_thumb and os.path.exists(comp_thumb):
-                thumb_res = gdrive_uploader.upload_image(
-                    comp_thumb, filename=f"{body.jobId}_clip{rank_num}_thumb.jpg"
+                comp_thumb = ensure_social_compliant_thumbnail(
+                    thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
+                    video_path=compliant_video,
+                    output_path=os.path.join(thumb_dir, f"clip_{rank_num:02d}_social.jpg"),
+                    seek=1.5,
                 )
-                thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
+                if comp_thumb and os.path.exists(comp_thumb):
+                    thumb_res = gdrive_uploader.upload_image(
+                        comp_thumb, filename=f"{body.jobId}_clip{rank_num}_thumb.jpg"
+                    )
+                    thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
+            elif is_video_gen:
+                vg_thumb_out = os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, body.jobId, "thumb.jpg")
+                comp_thumb = ensure_social_compliant_thumbnail(
+                    video_path=compliant_video,
+                    output_path=vg_thumb_out,
+                    seek=1.5,
+                )
+                if comp_thumb and os.path.exists(comp_thumb):
+                    thumb_res = gdrive_uploader.upload_image(
+                        comp_thumb, filename=f"vg_{body.jobId}_thumb.jpg"
+                    )
+                    thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
         except Exception as e:
             logger.warning(f"Thumbnail upload failed in publish route: {e}")
 
