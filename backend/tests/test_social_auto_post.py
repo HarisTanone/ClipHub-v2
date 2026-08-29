@@ -330,6 +330,50 @@ class TestSocialAutoPost(unittest.TestCase):
         self.assertEqual(get_supported_post_type("reel", platform="youtube"), "video")
         self.assertEqual(get_supported_post_type("video", platform="youtube"), "video")
 
+    @patch("src.presentation.routes.social.schedule._get_user_account_ids")
+    @patch("src.presentation.routes.social.schedule.repliz_get")
+    def test_regular_user_isolation_schedules(self, mock_repliz_get, mock_get_account_ids):
+        """Verify non-superadmin only sees schedules belonging to their own accounts."""
+        from src.presentation.routes.social.schedule import list_schedules
+
+        # Regular user with account 'acc_user1'
+        mock_get_account_ids.return_value = ["acc_user1"]
+        mock_repliz_get.return_value = {
+            "docs": [
+                {"_id": "sch_1", "accountId": "acc_user1", "status": "pending"},
+                {"_id": "sch_2", "accountId": "acc_other_user", "status": "pending"},
+            ],
+            "totalDocs": 2,
+            "totalPages": 1,
+        }
+
+        res = asyncio.run(list_schedules(
+            page=1,
+            limit=10,
+            _user={"id": 42, "is_superadmin": False, "role": "user"},
+        ))
+
+        # Only sch_1 belongs to user's accounts
+        self.assertEqual(len(res["docs"]), 1)
+        self.assertEqual(res["docs"][0]["_id"], "sch_1")
+        self.assertEqual(res["totalDocs"], 1)
+
+    @patch("src.presentation.routes.social.schedule._get_user_account_ids")
+    def test_regular_user_without_accounts_gets_empty_schedules(self, mock_get_account_ids):
+        """Verify non-superadmin with no connected accounts gets empty response without calling Repliz."""
+        from src.presentation.routes.social.schedule import list_schedules
+
+        mock_get_account_ids.return_value = []
+
+        res = asyncio.run(list_schedules(
+            page=1,
+            limit=10,
+            _user={"id": 99, "is_superadmin": False, "role": "user"},
+        ))
+
+        self.assertEqual(res["data"]["totalDocs"], 0)
+        self.assertEqual(len(res["data"]["docs"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

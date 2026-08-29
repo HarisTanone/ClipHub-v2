@@ -44,6 +44,7 @@ async function fetchSchedules(params: {
   limit?: number;
   status?: string;
   accountIds?: string;
+  userId?: number | null;
 } = {}): Promise<any> {
   const token = getToken();
   const query = new URLSearchParams();
@@ -51,6 +52,7 @@ async function fetchSchedules(params: {
   if (params.limit) query.set("limit", String(params.limit));
   if (params.status && params.status !== "all") query.set("status", params.status);
   if (params.accountIds) query.set("accountIds", params.accountIds);
+  if (params.userId) query.set("user_id", String(params.userId));
 
   const res = await fetch(`${API_BASE}/api/social/schedule?${query.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -865,11 +867,18 @@ function AccountStatsModal({ account, onClose }: AccountStatsModalProps) {
 
 // ─── Scheduled Posts View ───────────────────────────────────────────────────
 
-function ScheduledPostsView() {
+function ScheduledPostsView({
+  isSuperadmin = false,
+  usersList = [],
+}: {
+  isSuperadmin?: boolean;
+  usersList?: any[];
+}) {
   const toast = useToast();
   const [schedules, setSchedules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedUserId, setSelectedUserId] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalDocs, setTotalDocs] = useState(0);
@@ -885,6 +894,7 @@ function ScheduledPostsView() {
         page,
         limit: 15,
         status: statusFilter,
+        userId: isSuperadmin && selectedUserId !== "all" ? Number(selectedUserId) : null,
       });
       const rawDocs = data.docs || [];
       // Urutkan berdasarkan postingan terbaru (scheduleAt / createdAt descending)
@@ -902,7 +912,7 @@ function ScheduledPostsView() {
     } finally {
       setLoading(false);
     }
-  }, [page, statusFilter, toast]);
+  }, [page, statusFilter, selectedUserId, isSuperadmin, toast]);
 
   useEffect(() => {
     loadSchedules();
@@ -1164,6 +1174,30 @@ function ScheduledPostsView() {
               {f.label}
             </button>
           ))}
+          
+          {/* User filter for superadmin */}
+          {isSuperadmin && usersList.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1">
+              <Users className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+              <select
+                value={selectedUserId}
+                onChange={(e) => {
+                  setSelectedUserId(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-transparent text-xs text-zinc-300 focus:outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-zinc-900 text-zinc-200">
+                  Semua User ({usersList.length})
+                </option>
+                {usersList.map((u: any) => (
+                  <option key={u.id} value={String(u.id)} className="bg-zinc-900 text-zinc-200">
+                    {u.full_name || u.email} ({u.accounts_count} akun)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -1587,7 +1621,7 @@ export function SocialAccounts() {
 
       {/* Main Tab Content */}
       {mainTab === "schedules" ? (
-        <ScheduledPostsView />
+        <ScheduledPostsView isSuperadmin={isSuperadmin} usersList={usersList} />
       ) : (
         <>
           {/* Stats row */}

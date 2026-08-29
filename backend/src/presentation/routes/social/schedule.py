@@ -16,6 +16,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.config import settings
+from src.infrastructure.database import async_session, SocialAccountModel
+from src.presentation.auth_deps import CurrentUser
 from src.presentation.routes.auth import get_current_user
 from src.presentation.routes.social.helpers import (
     repliz_auth_header,
@@ -24,8 +26,63 @@ from src.presentation.routes.social.helpers import (
     repliz_post,
     repliz_put,
 )
+from sqlalchemy import select
 
 schedule_router = APIRouter(prefix="/schedule", tags=["social-schedule"])
+
+
+def _extract_user_info(user: Any) -> tuple[int, bool]:
+    """Extract (user_id, is_superadmin) safely whether user is CurrentUser, dict, or model."""
+    if isinstance(user, dict):
+        uid = user.get("id", 0)
+        is_super = bool(
+            user.get("is_superadmin")
+            or user.get("role") in ("superadmin", "admin")
+            or str(uid).lower() == "admin"
+        )
+        try:
+            uid_int = int(uid)
+        except (ValueError, TypeError):
+            uid_int = 0
+        return uid_int, is_super
+
+    uid = getattr(user, "id", 0)
+    is_super = bool(
+        getattr(user, "is_superadmin", False)
+        or getattr(user, "role", "") in ("superadmin", "admin")
+    )
+    try:
+        uid_int = int(uid)
+    except (ValueError, TypeError):
+        uid_int = 0
+    return uid_int, is_super
+
+
+async def _get_user_account_ids(user: Any) -> list[str]:
+    """Get account IDs owned by this user. Superadmin gets empty (meaning unrestricted)."""
+    user_id, is_super = _extract_user_info(user)
+    if is_super:
+        return []
+    async with async_session() as session:
+        result = await session.execute(
+            select(SocialAccountModel.account_id).where(SocialAccountModel.user_id == user_id)
+        )
+        return [row[0] for row in result.fetchall()]
+
+
+async def _user_owns_account(user: Any, account_id: str) -> bool:
+    """Check if user owns this account (superadmin owns all)."""
+    user_id, is_super = _extract_user_info(user)
+    if is_super:
+        return True
+    async with async_session() as session:
+        result = await session.execute(
+            select(SocialAccountModel.id).where(
+                SocialAccountModel.user_id == user_id,
+                SocialAccountModel.account_id == account_id,
+            )
+        )
+        return result.first() is not None
 
 
 class ScheduleMediaItem(BaseModel):
@@ -183,6 +240,9 @@ async def list_schedules(
     account_ids: Optional[str] = Query(
         None, alias="accountIds", description="Comma-separated account IDs"
     ),
+    user_id: Optional[int] = Query(
+        None, description="Filter by user ID (superadmin only)"
+    ),
     from_date: Optional[str] = Query(
         None, alias="fromDate", description="ISO 8601 start date"
     ),
@@ -194,9 +254,52 @@ async def list_schedules(
     ),
     _user=Depends(get_current_user),
 ):
-    """Retrieve a paginated list of scheduled posts from Repliz (sorted newest first)."""
+    """Retrieve a paginated list of scheduled posts from Repliz (filtered by user ownership unless superadmin)."""
+    _, is_super = _extract_user_info(_user)
+    user_account_ids: list[str] = []
+
+    real_user_id = user_id if isinstance(user_id, int) else None
+    if is_super and real_user_id is not None:
+        async with async_session() as session:
+            result = await session.execute(
+                select(SocialAccountModel.account_id).where(SocialAccountModel.user_id == real_user_id)
+            )
+            user_account_ids = [row[0] for row in result.fetchall()]
+            if not user_account_ids:
+                return {
+                    "data": {
+                        "docs": [],
+                        "totalDocs": 0,
+                        "limit": limit,
+                        "page": page,
+                        "totalPages": 0,
+                        "pagingCounter": 1,
+                        "hasPrevPage": False,
+                        "hasNextPage": False,
+                        "prevPage": None,
+                        "nextPage": None,
+                    }
+                }
+    elif not is_super:
+        user_account_ids = await _get_user_account_ids(_user)
+        if not user_account_ids:
+            return {
+                "data": {
+                    "docs": [],
+                    "totalDocs": 0,
+                    "limit": limit,
+                    "page": page,
+                    "totalPages": 0,
+                    "pagingCounter": 1,
+                    "hasPrevPage": False,
+                    "hasNextPage": False,
+                    "prevPage": None,
+                    "nextPage": None,
+                }
+            }
+
     params: Dict[str, Any] = {"page": page, "limit": limit}
-    if status:
+    if status and status != "all":
         params["status"] = status
     if from_date:
         params["fromDate"] = from_date
@@ -204,15 +307,33 @@ async def list_schedules(
         params["toDate"] = to_date
     if sort:
         params["sort"] = sort
-    if account_ids:
+
+    target_account_ids: list[str] = []
+    if account_ids and isinstance(account_ids, str):
         raw_ids = [aid.strip() for aid in account_ids.split(",") if aid.strip()]
-        for i, aid in enumerate(raw_ids):
+        if is_super and real_user_id is None:
+            target_account_ids = raw_ids
+        else:
+            target_account_ids = [aid for aid in raw_ids if aid in user_account_ids]
+    elif user_account_ids:
+        target_account_ids = user_account_ids
+
+    if target_account_ids:
+        for i, aid in enumerate(target_account_ids):
             params[f"accountIds[{i}]"] = aid
 
     res = await repliz_get("/public/schedule", params=params)
-    if isinstance(res, dict) and isinstance(res.get("data"), dict):
-        docs = res["data"].get("docs")
+    if isinstance(res, dict):
+        container = res.get("data") if isinstance(res.get("data"), dict) else res
+        docs = container.get("docs") if isinstance(container, dict) else None
         if isinstance(docs, list):
+            # Enforce strict client-side account filtering as defense in depth
+            if user_account_ids:
+                docs = [d for d in docs if str(d.get("accountId") or d.get("account_id") or "") in user_account_ids]
+                container["docs"] = docs
+                if container.get("totalDocs", 0) > len(docs):
+                    container["totalDocs"] = len(docs)
+
             docs.sort(
                 key=lambda d: str(d.get("scheduleAt") or d.get("createdAt") or ""),
                 reverse=True,
@@ -222,8 +343,17 @@ async def list_schedules(
 
 @schedule_router.get("/{schedule_id}")
 async def get_schedule(schedule_id: str, _user=Depends(get_current_user)):
-    """Get full details for a specific scheduled post."""
-    return await repliz_get(f"/public/schedule/{schedule_id}")
+    """Get full details for a specific scheduled post with ownership check."""
+    _, is_super = _extract_user_info(_user)
+    res = await repliz_get(f"/public/schedule/{schedule_id}")
+    if not is_super and isinstance(res, dict) and isinstance(res.get("data"), dict):
+        doc = res["data"]
+        acc_id = str(doc.get("accountId") or doc.get("account_id") or "")
+        if acc_id and not await _user_owns_account(_user, acc_id):
+            raise HTTPException(
+                status_code=403, detail="Akses ditolak: Jadwal ini bukan milik akun Anda."
+            )
+    return res
 
 
 @schedule_router.put("/{schedule_id}")
@@ -232,7 +362,17 @@ async def update_schedule(
     body: ScheduleUpdateRequest,
     _user=Depends(get_current_user),
 ):
-    """Update an existing scheduled post."""
+    """Update an existing scheduled post with ownership verification."""
+    _, is_super = _extract_user_info(_user)
+    if not is_super:
+        sched_info = await repliz_get(f"/public/schedule/{schedule_id}")
+        if isinstance(sched_info, dict) and isinstance(sched_info.get("data"), dict):
+            acc_id = str(sched_info["data"].get("accountId") or sched_info["data"].get("account_id") or "")
+            if acc_id and not await _user_owns_account(_user, acc_id):
+                raise HTTPException(
+                    status_code=403, detail="Akses ditolak: Anda tidak memiliki izin untuk mengubah jadwal ini."
+                )
+
     # Sanitize medias: ensure compliant fields
     sanitized_medias = []
     for m in body.medias:
@@ -304,7 +444,25 @@ async def mass_delete_schedules(
     if not body.scheduleIds:
         return {"success": True, "message": "No schedules to delete"}
 
-    params = [("scheduleIds[]", sid) for sid in body.scheduleIds if sid]
+    target_ids = body.scheduleIds
+    _, is_super = _extract_user_info(_user)
+    if not is_super:
+        user_account_ids = await _get_user_account_ids(_user)
+        valid_ids = []
+        for sid in target_ids:
+            try:
+                s_data = await repliz_get(f"/public/schedule/{sid}")
+                if isinstance(s_data, dict) and isinstance(s_data.get("data"), dict):
+                    acc_id = str(s_data["data"].get("accountId") or s_data["data"].get("account_id") or "")
+                    if acc_id in user_account_ids:
+                        valid_ids.append(sid)
+            except Exception:
+                pass
+        target_ids = valid_ids
+        if not target_ids:
+            return {"success": True, "message": "Tidak ada jadwal milik Anda yang dapat dibatalkan"}
+
+    params = [("scheduleIds[]", sid) for sid in target_ids if sid]
     url = f"{settings.REPLIZ_BASE_URL}/public/schedule/mass"
     headers = repliz_auth_header()
     async with httpx.AsyncClient(timeout=30) as client:
@@ -319,19 +477,39 @@ async def mass_delete_schedules(
 
     return {
         "success": True,
-        "message": f"Successfully removed {len(body.scheduleIds)} schedules",
+        "message": f"Successfully removed {len(target_ids)} schedules",
     }
 
 
 @schedule_router.delete("/{schedule_id}")
 async def remove_schedule(schedule_id: str, _user=Depends(get_current_user)):
-    """Cancel and remove a scheduled post."""
+    """Cancel and remove a scheduled post with ownership check."""
+    _, is_super = _extract_user_info(_user)
+    if not is_super:
+        sched_info = await repliz_get(f"/public/schedule/{schedule_id}")
+        if isinstance(sched_info, dict) and isinstance(sched_info.get("data"), dict):
+            acc_id = str(sched_info["data"].get("accountId") or sched_info["data"].get("account_id") or "")
+            if acc_id and not await _user_owns_account(_user, acc_id):
+                raise HTTPException(
+                    status_code=403, detail="Akses ditolak: Anda tidak memiliki izin untuk membatalkan jadwal ini."
+                )
+
     await repliz_delete(f"/public/schedule/{schedule_id}")
     return {"success": True, "message": "Schedule removed"}
 
 
 @schedule_router.put("/{schedule_id}/retry")
 async def retry_schedule(schedule_id: str, _user=Depends(get_current_user)):
-    """Retry / re-queue a failed scheduled post."""
+    """Retry / re-queue a failed scheduled post with ownership check."""
+    _, is_super = _extract_user_info(_user)
+    if not is_super:
+        sched_info = await repliz_get(f"/public/schedule/{schedule_id}")
+        if isinstance(sched_info, dict) and isinstance(sched_info.get("data"), dict):
+            acc_id = str(sched_info["data"].get("accountId") or sched_info["data"].get("account_id") or "")
+            if acc_id and not await _user_owns_account(_user, acc_id):
+                raise HTTPException(
+                    status_code=403, detail="Akses ditolak: Anda tidak memiliki izin untuk me-retry jadwal ini."
+                )
+
     res = await repliz_put(f"/public/schedule/{schedule_id}/retry", json_body={})
     return res or {"success": True, "message": "Schedule retried"}
