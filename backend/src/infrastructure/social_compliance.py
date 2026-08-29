@@ -155,48 +155,45 @@ def ensure_social_compliant_video(
 
 
 def ensure_social_compliant_thumbnail(
-    thumb_path: Optional[str],
+    thumb_path: Optional[str] = None,
     video_path: Optional[str] = None,
     output_path: Optional[str] = None,
     seek: float = 1.5,
     max_width: int = 1080,
     max_height: int = 1920,
 ) -> Optional[str]:
-    """Ensure a compliant JPEG thumbnail (meeting TikTok/Instagram photo constraints: JPG/JPEG/WebP, max 1080x1920, <= 20MB).
+    """Ensure a compliant JPEG thumbnail capturing the hook text display when video_path is provided.
     
-    If thumb_path exists and is valid JPEG/WebP <= 20MB, returns it.
-    If not, extracts frame from video_path.
+    Extracts high quality frame at seek timestamp (default 1.5s when hook overlay is fully visible).
     """
+    out_file = output_path
+    if not out_file and video_path:
+        out_file = os.path.splitext(video_path)[0] + "_thumb.jpg"
+
+    # If video_path is provided, extract directly from final video at the hook moment (1.5s)
+    if video_path and os.path.exists(video_path) and out_file:
+        os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{max(0.2, float(seek)):.2f}",
+            "-i", video_path,
+            "-frames:v", "1",
+            "-vf", f"scale='min({max_width},iw)':-2",
+            "-q:v", "2",
+            out_file,
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+            if res.returncode == 0 and os.path.exists(out_file) and os.path.getsize(out_file) > 0:
+                return out_file
+        except Exception as e:
+            logger.warning(f"Failed to generate thumbnail at hook moment: {e}")
+
+    # Fallback to existing thumb_path if extraction from video didn't run or failed
     if thumb_path and os.path.exists(thumb_path):
         size_mb = os.path.getsize(thumb_path) / (1024 * 1024)
         ext = os.path.splitext(thumb_path)[1].lower()
         if size_mb <= 20 and ext in (".jpg", ".jpeg", ".webp"):
             return thumb_path
 
-    if not video_path or not os.path.exists(video_path):
-        return thumb_path if (thumb_path and os.path.exists(thumb_path)) else None
-
-    out_file = output_path
-    if not out_file:
-        out_file = os.path.splitext(video_path)[0] + "_thumb.jpg"
-
-    os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-ss", f"{max(0.2, float(seek)):.2f}",
-        "-i", video_path,
-        "-frames:v", "1",
-        "-vf", f"scale='min({max_width},iw)':-2",
-        "-q:v", "2",
-        out_file,
-    ]
-
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-        if res.returncode == 0 and os.path.exists(out_file) and os.path.getsize(out_file) > 0:
-            return out_file
-    except Exception as e:
-        logger.warning(f"Failed to generate compliant thumbnail from video: {e}")
-
-    return thumb_path if (thumb_path and os.path.exists(thumb_path)) else None
+    return None
