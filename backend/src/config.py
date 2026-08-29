@@ -342,6 +342,10 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""  # Bot token for direct Telegram API (alternative to notify URL)
     TELEGRAM_CHAT_ID: str = ""  # Chat/group ID to send notifications to
 
+    # ─── Public Domain / Tunnel (Social Auto-Post & Repliz Media CDN) ───
+    AUTOCLIPER_PUBLIC_URL: str = "https://cliperhub-tunnel.trycloudflare.com"
+    PUBLIC_BACKEND_URL: str = ""
+
     # ─── Repliz Social Media Management ─────────────────────────────────
     REPLIZ_ACCESS_KEY: str = ""
     REPLIZ_SECRET_KEY: str = ""

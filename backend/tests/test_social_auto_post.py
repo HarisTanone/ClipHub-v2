@@ -163,7 +163,7 @@ class TestSocialAutoPost(unittest.TestCase):
     @patch("src.presentation.routes.social.publish.gdrive_uploader")
     @patch("src.application.video_generator.get_video_generator")
     def test_publish_video_generator_job(self, mock_get_vg, mock_gdrive, mock_repliz_post):
-        """Verify publish_clip endpoint handles video_generator jobs correctly."""
+        """Verify publish_clip endpoint handles video_generator jobs with GDrive fallback when tunnel is unset."""
         from src.presentation.routes.social.publish import publish_clip, PublishRequest
 
         mock_vg = MagicMock()
@@ -178,6 +178,8 @@ class TestSocialAutoPost(unittest.TestCase):
         mock_repliz_post.return_value = {"_id": "post_vg_1", "status": "scheduled"}
 
         with patch("os.path.exists", return_value=True), \
+             patch("src.config.settings.AUTOCLIPER_PUBLIC_URL", ""), \
+             patch.dict(os.environ, {"AUTOCLIPER_PUBLIC_URL": "", "PUBLIC_BACKEND_URL": ""}, clear=False), \
              patch("src.config.settings.REPLIZ_ACCESS_KEY", "key"), \
              patch("src.config.settings.REPLIZ_SECRET_KEY", "secret"):
             body = PublishRequest(
@@ -196,6 +198,47 @@ class TestSocialAutoPost(unittest.TestCase):
             mock_gdrive.upload_video.assert_called_once_with(
                 "/tmp/video_gen/vg_test_123/final.mp4",
                 filename="videogen_vg_test_123.mp4"
+            )
+
+    @patch("src.presentation.routes.social.publish.repliz_post")
+    @patch("src.presentation.routes.social.publish.gdrive_uploader")
+    @patch("src.application.video_generator.get_video_generator")
+    def test_publish_video_generator_tunnel_flow(self, mock_get_vg, mock_gdrive, mock_repliz_post):
+        """Verify publish_clip endpoint uses direct tunnel URL without uploading to Google Drive."""
+        from src.presentation.routes.social.publish import publish_clip, PublishRequest
+
+        mock_vg = MagicMock()
+        mock_job = MagicMock()
+        mock_job.job_id = "vg_test_123"
+        mock_job.output_path = "/tmp/video_gen/vg_test_123/final.mp4"
+        mock_vg.get_job.return_value = mock_job
+        mock_get_vg.return_value = mock_vg
+
+        mock_gdrive.is_configured = False
+        mock_repliz_post.return_value = {"_id": "post_vg_tunnel", "status": "scheduled"}
+
+        with patch("os.path.exists", return_value=True), \
+             patch("src.config.settings.AUTOCLIPER_PUBLIC_URL", "https://cliperhub-tunnel.trycloudflare.com"), \
+             patch("src.config.settings.REPLIZ_ACCESS_KEY", "key"), \
+             patch("src.config.settings.REPLIZ_SECRET_KEY", "secret"):
+            body = PublishRequest(
+                jobId="vg_test_123",
+                videoSource="video_generator",
+                accountIds=["acc_tt_1"],
+                caption="AI Generated Video Content",
+                title="AI Video Title",
+                scheduleAt="2026-08-20T12:00:00Z",
+                type="video",
+            )
+
+            res = asyncio.run(publish_clip(body, _user={"id": "admin"}))
+            self.assertTrue(res["success"])
+            self.assertEqual(res["count"], 1)
+            mock_gdrive.upload_video.assert_not_called()
+            call_payload = mock_repliz_post.call_args[1]["json_body"]
+            self.assertEqual(
+                call_payload["medias"][0]["url"],
+                "https://cliperhub-tunnel.trycloudflare.com/api/jobs/vg_test_123/clips/1/final",
             )
 
     @patch("src.presentation.routes.social.schedule.repliz_post")

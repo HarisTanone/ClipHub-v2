@@ -61,6 +61,7 @@ FRONTEND_PORT=3001
 PUBLIC_HOST="${PUBLIC_HOST:-localhost}"
 PUBLIC_FRONTEND_URL="${PUBLIC_FRONTEND_URL:-http://$PUBLIC_HOST:$FRONTEND_PORT}"
 PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-http://$PUBLIC_HOST:$BACKEND_PORT}"
+AUTOCLIPER_PUBLIC_URL="${AUTOCLIPER_PUBLIC_URL:-https://cliperhub-tunnel.trycloudflare.com}"
 NINE_ROUTER_PORT="${NINE_ROUTER_PORT:-20128}"
 NINE_ROUTER_HOST="${NINE_ROUTER_HOST:-127.0.0.1}"
 NINE_ROUTER_CLI_VERSION="${NINE_ROUTER_CLI_VERSION:-0.5.20}"
@@ -251,6 +252,42 @@ if [ -d "$BACKEND_DIR/assets/fonts" ]; then
     echo "  [OK] Custom fonts cached ($(ls "$BACKEND_DIR/assets/fonts"/*.ttf 2>/dev/null | wc -l | tr -d ' ') fonts)"
 fi
 
+# ─── Step 2.8: Cloudflare Tunnel (cloudflared) ──────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Step 2.8: Cloudflare Tunnel (Repliz Media & Public Gateway)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if command -v cloudflared &>/dev/null; then
+    echo "  [OK] cloudflared found: $(command -v cloudflared) ($(cloudflared --version 2>/dev/null | head -1 | cut -d' ' -f1-3))"
+else
+    echo "  Installing cloudflared binary/package..."
+    ARCH="$(uname -m)"
+    if [ "$ARCH" = "x86_64" ]; then
+        CLOUDFLARED_PKG="cloudflared-linux-amd64.deb"
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        CLOUDFLARED_PKG="cloudflared-linux-arm64.deb"
+    else
+        CLOUDFLARED_PKG="cloudflared-linux-amd64.deb"
+    fi
+
+    if command -v apt-get &>/dev/null; then
+        curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/${CLOUDFLARED_PKG}" -o "/tmp/${CLOUDFLARED_PKG}" 2>/dev/null || true
+        if [ -f "/tmp/${CLOUDFLARED_PKG}" ]; then
+            sudo dpkg -i "/tmp/${CLOUDFLARED_PKG}" 2>/dev/null || true
+            rm -f "/tmp/${CLOUDFLARED_PKG}"
+        fi
+    elif command -v brew &>/dev/null; then
+        brew install cloudflared 2>/dev/null || true
+    fi
+
+    if command -v cloudflared &>/dev/null; then
+        echo "  [OK] cloudflared installed: $(cloudflared --version 2>/dev/null | head -1)"
+    else
+        echo "  [INFO] cloudflared auto-download skipped (install manually if tunnel service is desired)"
+    fi
+fi
+
 # ─── Step 3: Backend Setup ──────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -317,7 +354,8 @@ if [ ! -f ".env" ]; then
 fi
 
 if [ -f ".env" ]; then
-    append_env_if_missing ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000"
+    append_env_if_missing ".env" "AUTOCLIPER_PUBLIC_URL" "$AUTOCLIPER_PUBLIC_URL"
+    append_env_if_missing ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000,$AUTOCLIPER_PUBLIC_URL,https://cliperhub-tunnel.trycloudflare.com"
 fi
 
 # Create directories
@@ -876,9 +914,35 @@ EOF
     echo "  [OK] autocliper-telegram-bot.service written"
 fi
 
+# Cloudflare Tunnel service (autocliper-tunnel)
+CLOUDFLARED_BIN="$(command -v cloudflared || true)"
+if [ -n "$CLOUDFLARED_BIN" ]; then
+    sudo tee /etc/systemd/system/autocliper-tunnel.service > /dev/null << EOF
+[Unit]
+Description=AutoCliper Cloudflare Tunnel (Repliz Media & Public Gateway)
+After=network.target autocliper-backend.service
+Wants=autocliper-backend.service
+
+[Service]
+Type=simple
+User=$DEPLOY_USER
+EnvironmentFile=-$BACKEND_DIR/.env
+ExecStart=$CLOUDFLARED_BIN tunnel --url http://127.0.0.1:$BACKEND_PORT --no-autoupdate
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    echo "  [OK] autocliper-tunnel.service written"
+fi
+
 # Reload and restart (Remotion FIRST — must be ready before backend)
 sudo systemctl daemon-reload
-sudo systemctl enable autocliper-9router autocliper-backend autocliper-remotion autocliper-hyperframes autocliper-frontend autocliper-telegram-bot 2>/dev/null || true
+sudo systemctl enable autocliper-9router autocliper-backend autocliper-remotion autocliper-hyperframes autocliper-frontend autocliper-telegram-bot autocliper-tunnel 2>/dev/null || true
 
 # Start Remotion first and wait for bundle to be ready
 echo "  Stopping services (cleanup stale ports)..."
@@ -886,6 +950,7 @@ sudo systemctl stop autocliper-9router 2>/dev/null || true
 sudo systemctl stop autocliper-remotion 2>/dev/null || true
 sudo systemctl stop autocliper-hyperframes 2>/dev/null || true
 sudo systemctl stop autocliper-telegram-bot 2>/dev/null || true
+sudo systemctl stop autocliper-tunnel 2>/dev/null || true
 sudo systemctl stop autocliper-backend 2>/dev/null || true
 sudo systemctl stop autocliper-frontend 2>/dev/null || true
 sleep 2
@@ -944,6 +1009,11 @@ if [ -f "/etc/systemd/system/autocliper-telegram-bot.service" ]; then
     sudo systemctl start autocliper-telegram-bot 2>/dev/null || true
 fi
 
+if [ -f "/etc/systemd/system/autocliper-tunnel.service" ]; then
+    echo "  Starting Cloudflare Tunnel..."
+    sudo systemctl start autocliper-tunnel 2>/dev/null || true
+fi
+
 echo "  [OK] All services registered and started"
 
 # ─── Step 7: Nginx (optional — only if nginx is installed) ──────────────────
@@ -957,7 +1027,7 @@ if command -v nginx &>/dev/null; then
         sudo tee /etc/nginx/sites-available/autocliper > /dev/null << 'EOF'
 server {
     listen 80;
-    server_name autocliper.local _;
+    server_name autocliper.local cliperhub-tunnel.trycloudflare.com *.trycloudflare.com _;
 
     # Security: block .git exposure
     location ~ /\.git {
@@ -1029,6 +1099,9 @@ check_service "autocliper-frontend" "$FRONTEND_PORT"
 if [ -f "/etc/systemd/system/autocliper-telegram-bot.service" ]; then
     check_service "autocliper-telegram-bot" "Polling"
 fi
+if [ -f "/etc/systemd/system/autocliper-tunnel.service" ]; then
+    check_service "autocliper-tunnel" "Tunnel"
+fi
 
 # API health check
 if curl -s "http://localhost:$BACKEND_PORT/health" | grep -q "ok" 2>/dev/null; then
@@ -1072,10 +1145,12 @@ echo ""
 echo "  Services:"
 echo "    9router:      http://127.0.0.1:$NINE_ROUTER_PORT"
 echo "    Backend:      $PUBLIC_BACKEND_URL"
+echo "    Public CDN:   $AUTOCLIPER_PUBLIC_URL"
 echo "    Remotion:     http://$PUBLIC_HOST:$REMOTION_PORT   (hook+subtitle)"
 echo "    HyperFrames:  http://$PUBLIC_HOST:$HYPERFRAMES_PORT  (polish)"
 echo "    Frontend:     $PUBLIC_FRONTEND_URL"
 echo "    Telegram Bot: $(systemctl is-active autocliper-telegram-bot 2>/dev/null || echo 'not active')"
+echo "    Tunnel:       $(systemctl is-active autocliper-tunnel 2>/dev/null || echo 'not active')"
 echo "    Hermes home:  $HERMES_HOME_DEPLOY"
 echo ""
 echo "  Open:"
@@ -1083,6 +1158,7 @@ echo "    $PUBLIC_FRONTEND_URL"
 echo ""
 echo "  Logs:"
 echo "    sudo journalctl -u autocliper-backend -f"
+echo "    sudo journalctl -u autocliper-tunnel -f"
 echo "    sudo journalctl -u autocliper-telegram-bot -f"
 echo "    sudo journalctl -u autocliper-remotion -f"
 echo "    sudo journalctl -u autocliper-hyperframes -f"

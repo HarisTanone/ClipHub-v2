@@ -642,11 +642,22 @@ async def get_clip_final(
 ):
     """Stream final clip, optionally as cached preview quality."""
     job = await service.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+    final_path = None
+    if job:
+        output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
+        final_path = find_final_clip(output_dir, clip_rank)
+    else:
+        # Check Video Generator job
+        try:
+            from src.application.video_generator import get_video_generator
 
-    output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
-    final_path = find_final_clip(output_dir, clip_rank)
+            vg = get_video_generator()
+            vg_job = vg.get_job(job_id)
+            if vg_job and vg_job.output_path and os.path.exists(vg_job.output_path):
+                final_path = vg_job.output_path
+        except Exception:
+            pass
+
     if not final_path:
         raise HTTPException(status_code=404, detail="File final clip tidak ditemukan")
 
@@ -745,10 +756,36 @@ async def get_clip_thumb(
     import subprocess
 
     job = await service.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
-
     output_dir = f"{settings.OUTPUT_DIR}/{job_id}"
+    source_video = None
+
+    if not job:
+        # Check Video Generator job
+        try:
+            from src.application.video_generator import get_video_generator
+
+            vg = get_video_generator()
+            vg_job = vg.get_job(job_id)
+            if vg_job:
+                vg_thumb_dir = os.path.join(
+                    getattr(settings, "VIDEO_GEN_OUTPUT_DIR", "tmp/video_gen"),
+                    job_id,
+                )
+                vg_thumb = os.path.join(vg_thumb_dir, "thumb.jpg")
+                if os.path.exists(vg_thumb):
+                    return FileResponse(
+                        vg_thumb,
+                        media_type="image/jpeg",
+                        filename=f"vg_{job_id}_thumb.jpg",
+                    )
+                if vg_job.output_path and os.path.exists(vg_job.output_path):
+                    output_dir = vg_thumb_dir
+                    source_video = vg_job.output_path
+        except Exception:
+            pass
+
+    if not job and not source_video:
+        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
 
     # Check existing thumbnails
     thumb_candidates = [
@@ -762,20 +799,20 @@ async def get_clip_thumb(
             return FileResponse(path, media_type="image/jpeg", filename=f"clip_{clip_rank}_thumb.jpg")
 
     # Auto-generate thumbnail from video file
-    video_candidates = [
-        f"{output_dir}/clip_{clip_rank:02d}_final.mp4",
-        f"{output_dir}/final/clip_{clip_rank:02d}.mp4",
-        f"{output_dir}/final/clip_{clip_rank}_final.mp4",
-        f"{output_dir}/final/clip_{clip_rank:02d}_final.mp4",
-        f"{output_dir}/clip_{clip_rank:02d}.mp4",
-        f"{output_dir}/raw/clip_{clip_rank:02d}.mp4",
-        f"{output_dir}/raw/clip_{clip_rank}.mp4",
-    ]
-    source_video = None
-    for vp in video_candidates:
-        if os.path.exists(vp):
-            source_video = vp
-            break
+    if not source_video:
+        video_candidates = [
+            f"{output_dir}/clip_{clip_rank:02d}_final.mp4",
+            f"{output_dir}/final/clip_{clip_rank:02d}.mp4",
+            f"{output_dir}/final/clip_{clip_rank}_final.mp4",
+            f"{output_dir}/final/clip_{clip_rank:02d}_final.mp4",
+            f"{output_dir}/clip_{clip_rank:02d}.mp4",
+            f"{output_dir}/raw/clip_{clip_rank:02d}.mp4",
+            f"{output_dir}/raw/clip_{clip_rank}.mp4",
+        ]
+        for vp in video_candidates:
+            if os.path.exists(vp):
+                source_video = vp
+                break
 
     if not source_video:
         raise HTTPException(status_code=404, detail="No video source for thumbnail")

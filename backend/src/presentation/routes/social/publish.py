@@ -112,10 +112,17 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         )
 
     # 2. Check credentials
-    if not gdrive_uploader.is_configured:
+    public_base = (
+        getattr(settings, "AUTOCLIPER_PUBLIC_URL", "")
+        or os.environ.get("AUTOCLIPER_PUBLIC_URL")
+        or os.environ.get("PUBLIC_BACKEND_URL")
+        or ""
+    ).rstrip("/")
+
+    if not public_base and not gdrive_uploader.is_configured:
         raise HTTPException(
             status_code=503,
-            detail="Google Drive belum dikonfigurasi. Pastikan GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, dan GOOGLE_DRIVE_REFRESH_TOKEN sudah terisi.",
+            detail="Media URL host belum dikonfigurasi. Pastikan AUTOCLIPER_PUBLIC_URL atau Google Drive sudah terisi.",
         )
     if not settings.REPLIZ_ACCESS_KEY or not settings.REPLIZ_SECRET_KEY:
         raise HTTPException(
@@ -173,7 +180,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         video_file = clip_final
         upload_filename = f"{body.jobId}_clip{clip_rank}.mp4"
 
-    # 4. Transcode to 100% compliant video format and upload to Google Drive
+    # 4. Transcode to 100% compliant video format
     try:
         compliant_video = ensure_social_compliant_video(video_file)
     except Exception as e:
@@ -188,61 +195,73 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         if not is_valid and "minimum requirement of 3.0 seconds" in str(constraint_err):
             raise HTTPException(status_code=400, detail=constraint_err)
 
+    # 4b. Ensure local compliant thumbnail (captured at hook frame 1.5s)
+    thumb_url = None
+    comp_thumb = None
     try:
-        drive_result = gdrive_uploader.upload_video(
-            compliant_video, filename=upload_filename
-        )
-    except Exception as e:
-        logger.error(f"Google Drive upload failed: {e}")
-        raise HTTPException(
-            status_code=502, detail=f"Google Drive upload failed: {str(e)}"
-        )
+        if not is_video_gen and body.clipRank is not None:
+            rank_num = body.clipRank
+            thumb_dir = os.path.join(settings.OUTPUT_DIR, body.jobId, "thumbnail")
+            os.makedirs(thumb_dir, exist_ok=True)
+            candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}.jpg")
+            if not os.path.exists(candidate_thumb):
+                candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}_thumb.jpg")
 
-    video_url = drive_result.get("direct_link") or drive_result.get(
-        "web_view_link"
-    )
+            comp_thumb = ensure_social_compliant_thumbnail(
+                thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
+                video_path=compliant_video,
+                output_path=os.path.join(thumb_dir, f"clip_{rank_num:02d}_social.jpg"),
+                seek=1.5,
+            )
+        elif is_video_gen:
+            vg_thumb_out = os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, body.jobId, "thumb.jpg")
+            os.makedirs(os.path.dirname(vg_thumb_out), exist_ok=True)
+            comp_thumb = ensure_social_compliant_thumbnail(
+                video_path=compliant_video,
+                output_path=vg_thumb_out,
+                seek=1.5,
+            )
+    except Exception as e:
+        logger.warning(f"Local thumbnail generation skipped: {e}")
+
+    # 4c. Resolve video_url and thumb_url (prefer direct public domain / tunnel URL)
+    drive_result = None
+    video_url = ""
+
+    if public_base:
+        if is_video_gen:
+            video_url = f"{public_base}/api/jobs/{body.jobId}/clips/1/final"
+            thumb_url = f"{public_base}/api/jobs/{body.jobId}/clips/1/thumb"
+        else:
+            clip_rank = body.clipRank or 1
+            video_url = f"{public_base}/api/jobs/{body.jobId}/clips/{clip_rank}/final"
+            thumb_url = f"{public_base}/api/jobs/{body.jobId}/clips/{clip_rank}/thumb"
+    elif gdrive_uploader.is_configured:
+        try:
+            drive_result = gdrive_uploader.upload_video(
+                compliant_video, filename=upload_filename
+            )
+            video_url = drive_result.get("direct_link") or drive_result.get("web_view_link")
+        except Exception as e:
+            logger.error(f"Google Drive upload failed: {e}")
+            raise HTTPException(
+                status_code=502, detail=f"Google Drive upload failed: {str(e)}"
+            )
+
+        if comp_thumb and os.path.exists(comp_thumb):
+            try:
+                thumb_res = gdrive_uploader.upload_image(
+                    comp_thumb, filename=f"{body.jobId}_thumb.jpg"
+                )
+                thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
+            except Exception as e:
+                logger.warning(f"Thumbnail upload to Drive failed: {e}")
+
     if not video_url:
         raise HTTPException(
             status_code=502,
-            detail="Gagal mendapatkan link download langsung dari Google Drive.",
+            detail="Gagal mendapatkan URL publik untuk file video (AUTOCLIPER_PUBLIC_URL atau Google Drive).",
         )
-
-    # 4b. Optional compliant thumbnail (captured at hook frame 1.5s)
-    thumb_url = None
-    if gdrive_uploader.is_configured:
-        try:
-            if not is_video_gen and body.clipRank is not None:
-                rank_num = body.clipRank
-                thumb_dir = os.path.join(settings.OUTPUT_DIR, body.jobId, "thumbnail")
-                candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}.jpg")
-                if not os.path.exists(candidate_thumb):
-                    candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}_thumb.jpg")
-
-                comp_thumb = ensure_social_compliant_thumbnail(
-                    thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
-                    video_path=compliant_video,
-                    output_path=os.path.join(thumb_dir, f"clip_{rank_num:02d}_social.jpg"),
-                    seek=1.5,
-                )
-                if comp_thumb and os.path.exists(comp_thumb):
-                    thumb_res = gdrive_uploader.upload_image(
-                        comp_thumb, filename=f"{body.jobId}_clip{rank_num}_thumb.jpg"
-                    )
-                    thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
-            elif is_video_gen:
-                vg_thumb_out = os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, body.jobId, "thumb.jpg")
-                comp_thumb = ensure_social_compliant_thumbnail(
-                    video_path=compliant_video,
-                    output_path=vg_thumb_out,
-                    seek=1.5,
-                )
-                if comp_thumb and os.path.exists(comp_thumb):
-                    thumb_res = gdrive_uploader.upload_image(
-                        comp_thumb, filename=f"vg_{body.jobId}_thumb.jpg"
-                    )
-                    thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
-        except Exception as e:
-            logger.warning(f"Thumbnail upload failed in publish route: {e}")
 
     # 5. Extract hashtags for tags if tags list is empty
     tags = list(body.tags)
@@ -400,7 +419,15 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
 @publish_router.get("/status")
 async def publish_status(_user=Depends(get_current_user)):
     """Check if publishing credentials are configured."""
+    public_url = (
+        getattr(settings, "AUTOCLIPER_PUBLIC_URL", "")
+        or os.environ.get("AUTOCLIPER_PUBLIC_URL")
+        or os.environ.get("PUBLIC_BACKEND_URL")
+        or ""
+    )
     return {
+        "public_url_configured": bool(public_url),
+        "public_url": public_url,
         "gdrive_configured": gdrive_uploader.is_configured,
         "repliz_configured": bool(
             settings.REPLIZ_ACCESS_KEY and settings.REPLIZ_SECRET_KEY

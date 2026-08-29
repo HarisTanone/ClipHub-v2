@@ -1304,6 +1304,14 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": "",
         "description": "OAuth Refresh Token Google Drive",
     },
+    "AUTOCLIPER_PUBLIC_URL": {
+        "category": "integrations",
+        "data_type": "string",
+        "min_role": "superadmin",
+        "is_secret": False,
+        "default": "https://cliperhub-tunnel.trycloudflare.com",
+        "description": "Public base URL / Tunnel domain untuk media streaming Repliz & sosial media",
+    },
 }
 
 # Role hierarchy ranking

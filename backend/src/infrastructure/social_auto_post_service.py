@@ -414,9 +414,20 @@ class SocialAutoPostService:
                 logger.warning(f"auto_post: Video compliance check fallback on clip #{rank}: {e}")
                 compliant_clip_file = clip_file
 
-            # Upload video to Google Drive to obtain direct download URL for Repliz
+            # Resolve public direct URL for Repliz (prefer direct tunnel/public URL)
             video_url = ""
-            if gdrive_uploader.is_configured:
+            thumb_url = None
+            public_backend = (
+                getattr(settings, "AUTOCLIPER_PUBLIC_URL", "")
+                or os.environ.get("AUTOCLIPER_PUBLIC_URL")
+                or os.environ.get("PUBLIC_BACKEND_URL")
+                or ""
+            ).rstrip("/")
+
+            if public_backend:
+                video_url = f"{public_backend}/api/jobs/{job_id}/clips/{rank}/final"
+                thumb_url = f"{public_backend}/api/jobs/{job_id}/clips/{rank}/thumb"
+            elif gdrive_uploader.is_configured:
                 try:
                     filename = f"{job_id}_clip{rank}.mp4"
                     drive_res = gdrive_uploader.upload_video(compliant_clip_file, filename=filename)
@@ -425,21 +436,6 @@ class SocialAutoPostService:
                     logger.error(f"auto_post: GDrive upload failed for clip #{rank}: {e}")
                     errors.append(f"Clip #{rank} GDrive upload: {str(e)}")
 
-            # Fallback to direct public backend streaming URL if configured and drive upload not available
-            if not video_url:
-                public_backend = os.environ.get("AUTOCLIPER_PUBLIC_URL") or os.environ.get("PUBLIC_BACKEND_URL")
-                if public_backend:
-                    video_url = f"{public_backend.rstrip('/')}/api/jobs/{job_id}/clips/{rank}/final"
-                    thumb_url = thumb_url or f"{public_backend.rstrip('/')}/api/jobs/{job_id}/clips/{rank}/thumb"
-
-            if not video_url:
-                logger.warning(f"auto_post: No public video URL for clip #{rank}. GDrive or PUBLIC_BACKEND_URL must be configured.")
-                continue
-
-
-            # Ensure compliant JPEG thumbnail meeting TikTok & Instagram photo constraints (< 20MB, JPG, <= 1080x1920)
-            thumb_url = None
-            if gdrive_uploader.is_configured:
                 try:
                     thumb_dir = os.path.join(output_dir, "thumbnail")
                     candidate_thumb = os.path.join(thumb_dir, f"clip_{rank:02d}.jpg")
@@ -459,6 +455,10 @@ class SocialAutoPostService:
                         thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
                 except Exception as e:
                     logger.warning(f"auto_post: Thumbnail upload skipped for clip #{rank}: {e}")
+
+            if not video_url:
+                logger.warning(f"auto_post: No public video URL for clip #{rank}. AUTOCLIPER_PUBLIC_URL or GDrive must be configured.")
+                continue
 
             scheduled_time = schedule_times[i] if i < len(schedule_times) else dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=4)
             # Format ISO 8601 UTC string (e.g. 2026-08-28T12:00:00.000Z)
