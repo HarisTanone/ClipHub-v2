@@ -92,12 +92,41 @@ class MassDeleteScheduleRequest(BaseModel):
 @schedule_router.post("")
 async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current_user)):
     """Create a scheduled post in Repliz."""
+    import datetime as dt
+
+    # Sanitize medias: omit empty thumbnail string to avoid Repliz/TikTok validation failure
+    sanitized_medias = []
+    for m in body.medias:
+        m_copy = dict(m)
+        thumb = m_copy.get("thumbnail")
+        if not thumb or not str(thumb).strip():
+            m_copy.pop("thumbnail", None)
+            m_copy["customThumbnail"] = False
+        else:
+            m_copy["customThumbnail"] = True
+        sanitized_medias.append(m_copy)
+
+    # Normalize scheduleAt to ensure minimum 20min future buffer for TikTok API compliance
+    raw_schedule_at = body.scheduleAt
+    normalized_schedule_at = raw_schedule_at
+    if raw_schedule_at:
+        try:
+            parsed_dt = dt.datetime.fromisoformat(raw_schedule_at.replace("Z", "+00:00"))
+            min_future = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)
+            if parsed_dt < min_future:
+                parsed_dt = min_future
+            normalized_schedule_at = parsed_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        except Exception:
+            normalized_schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    else:
+        normalized_schedule_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
     payload = {
-        "title": body.title,
-        "description": body.description,
+        "title": (body.title or "Video")[:100],
+        "description": (body.description or "")[:2000],
         "topic": body.topic,
         "type": body.type,
-        "medias": body.medias,
+        "medias": sanitized_medias,
         "meta": body.meta or {"title": "", "description": "", "url": ""},
         "additionalInfo": {
             "isAiGenerated": body.additionalInfo.get("isAiGenerated", False),
@@ -114,7 +143,7 @@ async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current
         },
         "replies": body.replies,
         "accountId": body.accountId,
-        "scheduleAt": body.scheduleAt,
+        "scheduleAt": normalized_schedule_at,
     }
     if body.templateId:
         payload["templateId"] = body.templateId
@@ -182,12 +211,24 @@ async def update_schedule(
     _user=Depends(get_current_user),
 ):
     """Update an existing scheduled post."""
+    # Sanitize medias: omit empty thumbnail string to avoid Repliz/TikTok validation failure
+    sanitized_medias = []
+    for m in body.medias:
+        m_copy = dict(m)
+        thumb = m_copy.get("thumbnail")
+        if not thumb or not str(thumb).strip():
+            m_copy.pop("thumbnail", None)
+            m_copy["customThumbnail"] = False
+        else:
+            m_copy["customThumbnail"] = True
+        sanitized_medias.append(m_copy)
+
     payload = {
-        "title": body.title,
-        "description": body.description,
+        "title": (body.title or "Video")[:100],
+        "description": (body.description or "")[:2000],
         "topic": body.topic,
         "type": body.type,
-        "medias": body.medias,
+        "medias": sanitized_medias,
         "meta": body.meta or {"title": "", "description": "", "url": ""},
         "additionalInfo": {
             "isAiGenerated": body.additionalInfo.get("isAiGenerated", False),
