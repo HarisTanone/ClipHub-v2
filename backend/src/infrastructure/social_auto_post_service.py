@@ -14,6 +14,7 @@ from src.infrastructure.gdrive_uploader import gdrive_uploader
 from src.infrastructure.social_compliance import (
     ensure_social_compliant_video,
     ensure_social_compliant_thumbnail,
+    validate_social_media_constraints,
 )
 from src.presentation.routes.social.helpers import repliz_get, repliz_post
 
@@ -463,6 +464,19 @@ class SocialAutoPostService:
             # Schedule on each target account
             for acc in selected_accounts:
                 platform = acc.get("platform", "video").lower()
+
+                # Programmatic duration & constraint audit required by TikTok / Meta API
+                if os.path.exists(compliant_clip_file):
+                    valid, constraint_err = validate_social_media_constraints(
+                        compliant_clip_file, platform=platform
+                    )
+                    if not valid:
+                        logger.warning(
+                            f"auto_post: Clip #{rank} skipped for {platform} ({acc.get('name')}): {constraint_err}"
+                        )
+                        errors.append(f"{platform} ({acc.get('name')}): {constraint_err}")
+                        continue
+
                 caption = self.extract_clip_caption(clip, platform=platform)
                 title = clip.get("hook", f"Clip #{rank}")[:100]
 

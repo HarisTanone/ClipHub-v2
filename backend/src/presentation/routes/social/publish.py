@@ -16,6 +16,7 @@ from src.infrastructure.gdrive_uploader import gdrive_uploader
 from src.infrastructure.social_compliance import (
     ensure_social_compliant_video,
     ensure_social_compliant_thumbnail,
+    validate_social_media_constraints,
 )
 from src.presentation.routes.auth import get_current_user
 from src.presentation.routes.social.helpers import repliz_post
@@ -133,6 +134,14 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     except Exception as e:
         logger.warning(f"Video compliance transcode fallback: {e}")
         compliant_video = video_file
+
+    # 4a. Programmatic duration and format validation check (Mandatory TikTok/Meta API requirement)
+    if os.path.exists(compliant_video):
+        is_valid, constraint_err = validate_social_media_constraints(
+            compliant_video, platform="tiktok"
+        )
+        if not is_valid and "minimum requirement of 3.0 seconds" in str(constraint_err):
+            raise HTTPException(status_code=400, detail=constraint_err)
 
     try:
         drive_result = gdrive_uploader.upload_video(

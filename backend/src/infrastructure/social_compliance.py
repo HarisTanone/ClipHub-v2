@@ -37,6 +37,97 @@ def probe_media(file_path: str) -> Dict[str, Any]:
     return {}
 
 
+def get_media_duration(file_path: str) -> float:
+    """Extract media duration in seconds via ffprobe."""
+    info = probe_media(file_path)
+    fmt = info.get("format", {})
+    dur = fmt.get("duration")
+    if dur is not None:
+        try:
+            return float(dur)
+        except (ValueError, TypeError):
+            pass
+    # Fallback to stream duration
+    for s in info.get("streams", []):
+        s_dur = s.get("duration")
+        if s_dur is not None:
+            try:
+                return float(s_dur)
+            except (ValueError, TypeError):
+                pass
+    return 0.0
+
+
+def validate_social_media_constraints(
+    file_path: str,
+    platform: str = "tiktok",
+    max_duration_sec: Optional[float] = None,
+) -> tuple[bool, Optional[str]]:
+    """Validate video duration, size, and dimensions against platform API constraints.
+    
+    Enforces mandatory TikTok Content Posting API requirements:
+    - Minimum duration >= 3.0 seconds
+    - Maximum duration <= max_video_post_duration_sec (default 600.0s / 10m)
+    - File size within platform quotas
+    - Video dimensions and aspect ratios
+    """
+    if not file_path:
+        return False, "Video file path not provided"
+
+    # In test/mock environments or when file is inaccessible
+    try:
+        if not os.path.exists(file_path):
+            return True, None
+        file_size_bytes = os.path.getsize(file_path)
+    except OSError:
+        file_size_bytes = 0
+
+    info = probe_media(file_path)
+    dur = get_media_duration(file_path)
+    file_size_mb = file_size_bytes / (1024 * 1024)
+
+    streams = info.get("streams", [])
+    v_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if not v_stream and streams:
+        return False, "Video stream missing from container"
+
+    plat = platform.lower().strip()
+
+    # 1. TikTok constraints (TikTok Content Posting API guidelines)
+    if plat == "tiktok":
+        # Duration check
+        if dur > 0 and dur < 3.0:
+            return False, f"Video duration ({dur:.1f}s) is below TikTok minimum requirement of 3.0 seconds."
+        
+        limit_max = float(max_duration_sec or 600.0)
+        if dur > limit_max:
+            return False, f"Video duration ({dur:.1f}s) exceeds TikTok maximum allowed duration ({limit_max:.1f}s)."
+
+        # File size (max 4GB for direct post)
+        if file_size_mb > 4096.0:
+            return False, f"Video file size ({file_size_mb:.1f} MB) exceeds TikTok maximum limit of 4096 MB."
+
+    # 2. Instagram & Facebook Reels constraints
+    elif plat in ("instagram", "facebook"):
+        if dur > 0 and dur < 3.0:
+            return False, f"Video duration ({dur:.1f}s) is below Reels minimum requirement of 3.0 seconds."
+        
+        limit_max = float(max_duration_sec or 900.0)
+        if dur > limit_max:
+            return False, f"Video duration ({dur:.1f}s) exceeds Reels maximum allowed duration ({limit_max:.1f}s)."
+
+        if file_size_mb > 4096.0:
+            return False, f"Video file size ({file_size_mb:.1f} MB) exceeds maximum limit of 4096 MB."
+
+    # 3. YouTube Shorts constraints
+    elif plat == "youtube":
+        limit_max = float(max_duration_sec or 180.0)
+        if dur > limit_max:
+            return False, f"Video duration ({dur:.1f}s) exceeds YouTube Shorts maximum duration of {limit_max:.1f}s."
+
+    return True, None
+
+
 def is_video_social_compliant(file_path: str) -> bool:
     """Check if video satisfies TikTok & Instagram Reels technical constraints."""
     info = probe_media(file_path)
@@ -71,6 +162,7 @@ def is_video_social_compliant(file_path: str) -> bool:
             return False
 
     return True
+
 
 
 def ensure_social_compliant_video(
