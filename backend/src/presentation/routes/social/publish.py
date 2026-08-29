@@ -112,12 +112,9 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         )
 
     # 2. Check credentials
-    public_base = (
-        getattr(settings, "AUTOCLIPER_PUBLIC_URL", "")
-        or os.environ.get("AUTOCLIPER_PUBLIC_URL")
-        or os.environ.get("PUBLIC_BACKEND_URL")
-        or ""
-    ).rstrip("/")
+    from src.infrastructure.social_compliance import resolve_public_media_base_url
+
+    public_base = resolve_public_media_base_url()
 
     if not public_base and not gdrive_uploader.is_configured:
         raise HTTPException(
@@ -419,12 +416,9 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
 @publish_router.get("/status")
 async def publish_status(_user=Depends(get_current_user)):
     """Check if publishing credentials are configured."""
-    public_url = (
-        getattr(settings, "AUTOCLIPER_PUBLIC_URL", "")
-        or os.environ.get("AUTOCLIPER_PUBLIC_URL")
-        or os.environ.get("PUBLIC_BACKEND_URL")
-        or ""
-    )
+    from src.infrastructure.social_compliance import resolve_public_media_base_url
+
+    public_url = resolve_public_media_base_url()
     return {
         "public_url_configured": bool(public_url),
         "public_url": public_url,

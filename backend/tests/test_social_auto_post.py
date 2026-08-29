@@ -218,7 +218,7 @@ class TestSocialAutoPost(unittest.TestCase):
         mock_repliz_post.return_value = {"_id": "post_vg_tunnel", "status": "scheduled"}
 
         with patch("os.path.exists", return_value=True), \
-             patch("src.config.settings.AUTOCLIPER_PUBLIC_URL", "https://cliperhub-tunnel.trycloudflare.com"), \
+             patch("src.config.settings.AUTOCLIPER_PUBLIC_URL", "https://my-live-tunnel.trycloudflare.com"), \
              patch("src.config.settings.REPLIZ_ACCESS_KEY", "key"), \
              patch("src.config.settings.REPLIZ_SECRET_KEY", "secret"):
             body = PublishRequest(
@@ -238,7 +238,7 @@ class TestSocialAutoPost(unittest.TestCase):
             call_payload = mock_repliz_post.call_args[1]["json_body"]
             self.assertEqual(
                 call_payload["medias"][0]["url"],
-                "https://cliperhub-tunnel.trycloudflare.com/api/jobs/vg_test_123/clips/1/final",
+                "https://my-live-tunnel.trycloudflare.com/api/jobs/vg_test_123/clips/1/final",
             )
 
     @patch("src.presentation.routes.social.schedule.repliz_post")

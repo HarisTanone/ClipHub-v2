@@ -415,14 +415,11 @@ class SocialAutoPostService:
                 compliant_clip_file = clip_file
 
             # Resolve public direct URL for Repliz (prefer direct tunnel/public URL)
+            from src.infrastructure.social_compliance import resolve_public_media_base_url
+
             video_url = ""
             thumb_url = None
-            public_backend = (
-                getattr(settings, "AUTOCLIPER_PUBLIC_URL", "")
-                or os.environ.get("AUTOCLIPER_PUBLIC_URL")
-                or os.environ.get("PUBLIC_BACKEND_URL")
-                or ""
-            ).rstrip("/")
+            public_backend = resolve_public_media_base_url()
 
             if public_backend:
                 video_url = f"{public_backend}/api/jobs/{job_id}/clips/{rank}/final"

@@ -292,3 +292,39 @@ def ensure_social_compliant_thumbnail(
             return thumb_path
 
     return None
+
+
+def resolve_public_media_base_url() -> str:
+    """Resolve the active public base URL for video/thumb streaming.
+
+    Priority:
+    1. System settings / Config / ENV (if set and not dummy placeholder)
+    2. Auto-detection from local systemd Cloudflare Tunnel (trycloudflare.com)
+    3. Empty string (falls back to GDrive if configured)
+    """
+    from src.config import settings
+
+    raw_candidates = [
+        getattr(settings, "AUTOCLIPER_PUBLIC_URL", ""),
+        os.environ.get("AUTOCLIPER_PUBLIC_URL", ""),
+        os.environ.get("PUBLIC_BACKEND_URL", ""),
+    ]
+
+    for candidate in raw_candidates:
+        if candidate and isinstance(candidate, str):
+            clean = candidate.strip().rstrip("/")
+            if clean and "cliperhub-tunnel.trycloudflare.com" not in clean:
+                return clean
+
+    # Auto-detect live Quick Tunnel from systemd journal on Linux
+    if os.name != "nt":
+        try:
+            cmd = "journalctl -u autocliper-tunnel -n 50 --no-pager 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com' | tail -n 1"
+            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=2)
+            detected = res.stdout.strip()
+            if detected and "trycloudflare.com" in detected and "cliperhub-tunnel" not in detected:
+                return detected.rstrip("/")
+        except Exception:
+            pass
+
+    return ""

@@ -343,7 +343,7 @@ class Settings(BaseSettings):
     TELEGRAM_CHAT_ID: str = ""  # Chat/group ID to send notifications to
 
     # ─── Public Domain / Tunnel (Social Auto-Post & Repliz Media CDN) ───
-    AUTOCLIPER_PUBLIC_URL: str = "https://cliperhub-tunnel.trycloudflare.com"
+    AUTOCLIPER_PUBLIC_URL: str = ""
     PUBLIC_BACKEND_URL: str = ""
 
     # ─── Repliz Social Media Management ─────────────────────────────────
