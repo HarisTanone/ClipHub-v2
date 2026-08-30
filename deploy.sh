@@ -1060,10 +1060,11 @@ if command -v nginx &>/dev/null; then
     sudo tee /etc/nginx/sites-available/autocliper > /dev/null << 'EOF'
 server {
     listen 80 default_server;
-    listen [::]:80 default_server;
     server_name _;
 
     client_max_body_size 500M;
+    client_header_buffer_size 8k;
+    large_client_header_buffers 4 32k;
 
     # Security Headers
     add_header X-Content-Type-Options "nosniff" always;
