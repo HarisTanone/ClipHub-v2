@@ -2256,10 +2256,9 @@ class V2PipelineService:
 
                 clip_words_raw = clips_with_words.get(clip.rank, [])
                 clip_hook = clip.hook or ""
-                # words already filtered at Step 10; re-sanitize with hook window
-                # so any re-entry path still keeps subtitles off during hook.
+                hook_enabled = (hook_style_config or {}).get("enabled", True) is not False
                 hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0)
-                sub_min = hook_dur if clip_hook else 0.0
+                sub_min = hook_dur if (clip_hook and hook_enabled) else 0.0
                 te_ranges = [
                     (float(e.get("start", 0)), float(e.get("end", 0)))
                     for e in (getattr(clip, "text_emphasis_events", None) or [])
@@ -2280,7 +2279,7 @@ class V2PipelineService:
                 sub_eng = _resolve_eng(subtitle_style_config)
                 sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
                 # Remotion is the unified renderer in v3.0; render hook & subtitles directly unless explicitly HF
-                remotion_hook_text = clip_hook if hook_eng != "hyperframes" else ""
+                remotion_hook_text = clip_hook if (hook_enabled and hook_eng != "hyperframes") else ""
                 remotion_words = clip_words if (sub_enabled and sub_eng != "hyperframes") else []
 
                 hook_style = (hook_style_config.get("animation", "")

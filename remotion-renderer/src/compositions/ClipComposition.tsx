@@ -91,10 +91,11 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
       : { ...subtitle.config, position: "center", positionY: creativeDirection.subtitle_position_y ?? 50 }
     : subtitle.config;
 
+  const isHookActive = Boolean(hookText && hook.config.enabled !== false);
   const hookDurationFrames = Math.floor(hook.duration * fps);
   // Hook owns 0–N seconds. Drop subtitle words that start inside that window
   // so even stale word payloads never draw under the hook overlay.
-  const subtitleWords = hookText
+  const subtitleWords = isHookActive
     ? words.filter((w) => (w.start ?? 0) >= hook.duration)
     : words;
 
@@ -179,7 +180,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
 
 
       {/* L4: Hook overlay — highest z-index */}
-      {hookText && (
+      {isHookActive && (
         <Sequence from={0} durationInFrames={hookDurationFrames + Math.floor(fps * 0.5)}>
           <AbsoluteFill style={{ zIndex: 3 }}>
             <HookLayer text={hookText} config={hook.config} />

@@ -1771,10 +1771,11 @@ async def restyle_clip(
                     for e in (clip_data.get("text_emphasis_events") or [])
                     if float(e.get("end", 0)) > float(e.get("start", 0))
                 ]
+                hook_enabled = (hook_config or {}).get("enabled", True) is not False
                 render_words = sanitize_subtitle_words(
                     render_words,
                     clip_duration,
-                    subtitle_min_start=hook_duration if hook_text else 0.0,
+                    subtitle_min_start=hook_duration if (hook_text and hook_enabled) else 0.0,
                     blocked_ranges=te_ranges,
                 )
             except Exception as e:
@@ -1782,7 +1783,8 @@ async def restyle_clip(
         else:
             render_words = []
 
-        remotion_hook_text = hook_text if hook_render_engine != "hyperframes" else ""
+        hook_enabled = (hook_config or {}).get("enabled", True) is not False
+        remotion_hook_text = hook_text if (hook_enabled and hook_render_engine != "hyperframes") else ""
         remotion_words = render_words if subtitle_render_engine != "hyperframes" else []
         needs_canvas = bool(root_style_data.get("canvas_config")) or (
             (job.target_aspect_ratio or "") in ("16:9", "1:1")

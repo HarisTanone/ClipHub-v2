@@ -875,6 +875,8 @@ export function VideoPreviewOverlay({
   const subtitleRender = useMemo(() => {
     if (!showSubtitles || !words.length) return null;
     if (currentTime < subtitleOffset) return null;
+    // Suppress subtitles while Hook overlay is active on screen (exact parity with Remotion)
+    if (hookVisible) return null;
 
     const cfg = subtitleStyleConfig;
     const fontFamily = cfg?.fontFamily || "Inter";
