@@ -297,7 +297,7 @@ app.post('/assemble', (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '127.0.0.1', () => {
   console.log(
     `[hyperframes] listening :${PORT} templates=${listTemplates().join(',') || '(none)'} work=${WORK}`,
   );

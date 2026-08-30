@@ -355,7 +355,21 @@ fi
 
 if [ -f ".env" ]; then
     append_env_if_missing ".env" "AUTOCLIPER_PUBLIC_URL" "$AUTOCLIPER_PUBLIC_URL"
-    append_env_if_missing ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000,$AUTOCLIPER_PUBLIC_URL,https://cliperhub-tunnel.trycloudflare.com"
+    append_env_if_missing ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000,$AUTOCLIPER_PUBLIC_URL,https://cliperhub-tunnel.trycloudflare.com,https://jnck.cliperhub.web.id"
+
+    # Auto-generate cryptographically secure JWT keys if default or missing
+    CURRENT_JWT="$(env_value ".env" "JWT_SECRET_KEY" "")"
+    if [ -z "$CURRENT_JWT" ] || [ "$CURRENT_JWT" = "change-me-in-production" ]; then
+        RANDOM_JWT="$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))')"
+        set_env_value ".env" "JWT_SECRET_KEY" "$RANDOM_JWT"
+        echo "  [SEC] Generated secure random JWT_SECRET_KEY"
+    fi
+    CURRENT_JWT_REFRESH="$(env_value ".env" "JWT_REFRESH_SECRET_KEY" "")"
+    if [ -z "$CURRENT_JWT_REFRESH" ] || [ "$CURRENT_JWT_REFRESH" = "change-me-in-production-refresh" ]; then
+        RANDOM_JWT_REFRESH="$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))')"
+        set_env_value ".env" "JWT_REFRESH_SECRET_KEY" "$RANDOM_JWT_REFRESH"
+        echo "  [SEC] Generated secure random JWT_REFRESH_SECRET_KEY"
+    fi
 fi
 
 # Create directories
@@ -763,7 +777,7 @@ Environment=PATH=$BACKEND_DIR/venv/bin:/usr/local/bin:/usr/bin
 # Kill any stale process on port before starting (prevents EADDRINUSE)
 ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $BACKEND_PORT/tcp 2>/dev/null || true'
 ExecStartPre=/bin/sleep 1
-ExecStart=$BACKEND_DIR/venv/bin/python -m uvicorn src.presentation.api:app --host 0.0.0.0 --port $BACKEND_PORT --workers ${BACKEND_WORKERS:-2}
+ExecStart=$BACKEND_DIR/venv/bin/python -m uvicorn src.presentation.api:app --host ${BACKEND_HOST:-127.0.0.1} --port $BACKEND_PORT --workers ${BACKEND_WORKERS:-2}
 Restart=always
 RestartSec=5
 TimeoutStopSec=10
@@ -1032,30 +1046,91 @@ echo "  Step 7: Nginx Reverse Proxy (optional)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if command -v nginx &>/dev/null; then
-    if [ ! -f "/etc/nginx/sites-available/autocliper" ]; then
-        sudo tee /etc/nginx/sites-available/autocliper > /dev/null << 'EOF'
+    # 1. Global security & Cloudflare Real IP & Rate Limiting conf
+    sudo tee /etc/nginx/conf.d/autocliper_security.conf > /dev/null << 'EOF'
+# AutoCliper Security & Rate Limiting
+limit_req_zone $binary_remote_addr zone=auth_limit:10m rate=5r/s;
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=30r/s;
+
+# Cloudflare Anycast IPv4/IPv6 ranges for real IP restoration
+set_real_ip_from 173.245.48.0/20;
+set_real_ip_from 103.21.244.0/22;
+set_real_ip_from 103.22.200.0/22;
+set_real_ip_from 103.31.4.0/22;
+set_real_ip_from 141.101.64.0/18;
+set_real_ip_from 108.162.192.0/18;
+set_real_ip_from 190.93.240.0/20;
+set_real_ip_from 188.114.96.0/20;
+set_real_ip_from 197.234.240.0/22;
+set_real_ip_from 198.41.128.0/17;
+set_real_ip_from 162.158.0.0/15;
+set_real_ip_from 104.16.0.0/13;
+set_real_ip_from 104.24.0.0/14;
+set_real_ip_from 172.64.0.0/13;
+set_real_ip_from 131.0.72.0/22;
+set_real_ip_from 2400:cb00::/32;
+set_real_ip_from 2606:4700::/32;
+set_real_ip_from 2803:f800::/32;
+set_real_ip_from 2405:b500::/32;
+set_real_ip_from 2405:8100::/32;
+set_real_ip_from 2a06:98c0::/29;
+set_real_ip_from 2c0f:f248::/32;
+real_ip_header CF-Connecting-IP;
+EOF
+
+    # 2. Site configuration with security headers & blocked file extensions
+    sudo tee /etc/nginx/sites-available/autocliper > /dev/null << 'EOF'
 server {
     listen 80;
-    server_name autocliper.local cliperhub-tunnel.trycloudflare.com *.trycloudflare.com _;
+    server_name jnck.cliperhub.web.id *.cliperhub.web.id cliperhub.web.id autocliper.local cliperhub-tunnel.trycloudflare.com *.trycloudflare.com _;
 
-    # Security: block .git exposure
-    location ~ /\.git {
+    server_tokens off;
+
+    # Security Headers
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    # Block sensitive files & dotfiles (.env, .git, .sqlite, .db, .log, .py, .sh, .sql)
+    location ~ /\.(?!well-known) {
+        deny all;
+        return 404;
+    }
+    location ~* \.(sqlite|sqlite3|db|sql|log|sh|py|bak|env|yml|yaml|md)$ {
         deny all;
         return 404;
     }
 
-    # Frontend
+    # Frontend (Vite)
     location / {
         proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Backend API
-    location /api/ {
+    # Auth endpoints (Rate Limited: 5 requests/sec, burst 10)
+    location /api/auth/ {
+        limit_req zone=auth_limit burst=10 nodelay;
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # Backend API (Rate Limited: 30 requests/sec, burst 50)
+    location /api/ {
+        limit_req zone=api_limit burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 300s;
         client_max_body_size 500M;
     }
@@ -1063,22 +1138,25 @@ server {
     # Backend health
     location /health {
         proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # Video files (large responses)
+    # Video files (large responses / streaming)
     location ~* /api/jobs/.*/clips/.*/(?:final|raw|thumb) {
         proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 600s;
         proxy_buffering off;
     }
 }
 EOF
-        sudo ln -sf /etc/nginx/sites-available/autocliper /etc/nginx/sites-enabled/ 2>/dev/null
-        sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null
-        echo "  [OK] Nginx configured"
-    else
-        echo "  [OK] Nginx config already exists"
-    fi
+    sudo ln -sf /etc/nginx/sites-available/autocliper /etc/nginx/sites-enabled/ 2>/dev/null
+    sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null
+    echo "  [OK] Nginx configured with Security Headers, Rate Limiting & Cloudflare Real IP"
 else
     echo "  [WARN]  Nginx not installed — access services directly via ports"
 fi

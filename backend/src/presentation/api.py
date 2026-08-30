@@ -237,7 +237,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — merge env origins with local defaults
+# CORS — merge env origins with local defaults and public domain
 default_cors_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -248,10 +248,14 @@ default_cors_origins = [
     "http://127.0.0.1:3002",
 ]
 env_cors_origins = [
-    origin.strip()
+    origin.strip().rstrip("/")
     for origin in settings.CORS_ORIGINS.split(",")
     if origin.strip()
 ]
+if getattr(settings, "AUTOCLIPER_PUBLIC_URL", ""):
+    pub_url = settings.AUTOCLIPER_PUBLIC_URL.strip().rstrip("/")
+    if pub_url and pub_url not in env_cors_origins:
+        env_cors_origins.append(pub_url)
 
 # Merge both — env extends defaults
 all_cors_origins = list(set(default_cors_origins + env_cors_origins))
@@ -259,8 +263,9 @@ all_cors_origins = list(set(default_cors_origins + env_cors_origins))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=all_cors_origins if all_cors_origins else ["*"],
+    allow_origin_regex=r"^https?://([a-zA-Z0-9-]+\.)*(cliperhub\.web\.id|trycloudflare\.com)(:[0-9]+)?$",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
