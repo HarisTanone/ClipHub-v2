@@ -1056,10 +1056,12 @@ if command -v nginx &>/dev/null; then
     # 1. Global security & Cloudflare Real IP & Rate Limiting conf
     sudo tee /etc/nginx/conf.d/autocliper_security.conf > /dev/null << 'EOF'
 # AutoCliper Security & Rate Limiting
-limit_req_zone $binary_remote_addr zone=auth_limit:10m rate=5r/s;
-limit_req_zone $binary_remote_addr zone=api_limit:10m rate=30r/s;
+limit_req_zone $binary_remote_addr zone=auth_limit:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=50r/s;
 
-# Cloudflare Anycast IPv4/IPv6 ranges for real IP restoration
+# Real IP from Tunnel connector (localhost) & Cloudflare Anycast IPv4/IPv6
+set_real_ip_from 127.0.0.1;
+set_real_ip_from ::1;
 set_real_ip_from 173.245.48.0/20;
 set_real_ip_from 103.21.244.0/22;
 set_real_ip_from 103.22.200.0/22;
@@ -1083,15 +1085,18 @@ set_real_ip_from 2405:8100::/32;
 set_real_ip_from 2a06:98c0::/29;
 set_real_ip_from 2c0f:f248::/32;
 real_ip_header CF-Connecting-IP;
+real_ip_recursive on;
 EOF
 
     # 2. Site configuration with security headers & blocked file extensions
     sudo tee /etc/nginx/sites-available/autocliper > /dev/null << 'EOF'
 server {
     listen 80 default_server;
-    server_name jnck.cliperhub.web.id *.cliperhub.web.id cliperhub.web.id autocliper.local cliperhub-tunnel.trycloudflare.com *.trycloudflare.com _;
+    listen [::]:80 default_server;
+    server_name _;
 
     server_tokens off;
+    client_max_body_size 500M;
 
     # Security Headers
     add_header X-Content-Type-Options "nosniff" always;
@@ -1100,64 +1105,68 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
-    # Block sensitive files & dotfiles (.env, .git, .sqlite, .db, .log, .py, .sh, .sql)
+    # Block sensitive files & dotfiles
     location ~ /\.(?!well-known) {
-        deny all;
         return 404;
     }
     location ~* \.(sqlite|sqlite3|db|sql|log|sh|py|bak|env|yml|yaml|md)$ {
-        deny all;
         return 404;
     }
 
-    # Frontend (Vite)
-    location / {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_set_header Host $host;
+    # Backend API (Rate Limited: 50 requests/sec, burst 50)
+    location /api/ {
+        limit_req zone=api_limit burst=50 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
     }
 
-    # Auth endpoints (Rate Limited: 5 requests/sec, burst 10)
+    # Auth endpoints (Rate Limited: 10 requests/sec, burst 10)
     location /api/auth/ {
         limit_req zone=auth_limit burst=10 nodelay;
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
     }
 
-    # Backend API (Rate Limited: 30 requests/sec, burst 50)
-    location /api/ {
-        limit_req zone=api_limit burst=50 nodelay;
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
-        client_max_body_size 500M;
-    }
-
     # Backend health
     location /health {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
     # Video files (large responses / streaming)
     location ~* /api/jobs/.*/clips/.*/(?:final|raw|thumb) {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 600s;
         proxy_buffering off;
+    }
+
+    # Frontend (Vite Static / SPA)
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 EOF
