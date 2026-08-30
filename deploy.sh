@@ -1053,49 +1053,16 @@ if ! command -v nginx &>/dev/null; then
 fi
 
 if command -v nginx &>/dev/null; then
-    # 1. Global security & Cloudflare Real IP & Rate Limiting conf
-    sudo tee /etc/nginx/conf.d/autocliper_security.conf > /dev/null << 'EOF'
-# AutoCliper Security & Rate Limiting
-limit_req_zone $binary_remote_addr zone=auth_limit:10m rate=10r/s;
-limit_req_zone $binary_remote_addr zone=api_limit:10m rate=50r/s;
+    # Clean any stale/conflicting conf.d configs
+    sudo rm -f /etc/nginx/conf.d/autocliper_security.conf 2>/dev/null || true
 
-# Real IP from Tunnel connector (localhost) & Cloudflare Anycast IPv4/IPv6
-set_real_ip_from 127.0.0.1;
-set_real_ip_from ::1;
-set_real_ip_from 173.245.48.0/20;
-set_real_ip_from 103.21.244.0/22;
-set_real_ip_from 103.22.200.0/22;
-set_real_ip_from 103.31.4.0/22;
-set_real_ip_from 141.101.64.0/18;
-set_real_ip_from 108.162.192.0/18;
-set_real_ip_from 190.93.240.0/20;
-set_real_ip_from 188.114.96.0/20;
-set_real_ip_from 197.234.240.0/22;
-set_real_ip_from 198.41.128.0/17;
-set_real_ip_from 162.158.0.0/15;
-set_real_ip_from 104.16.0.0/13;
-set_real_ip_from 104.24.0.0/14;
-set_real_ip_from 172.64.0.0/13;
-set_real_ip_from 131.0.72.0/22;
-set_real_ip_from 2400:cb00::/32;
-set_real_ip_from 2606:4700::/32;
-set_real_ip_from 2803:f800::/32;
-set_real_ip_from 2405:b500::/32;
-set_real_ip_from 2405:8100::/32;
-set_real_ip_from 2a06:98c0::/29;
-set_real_ip_from 2c0f:f248::/32;
-real_ip_header CF-Connecting-IP;
-real_ip_recursive on;
-EOF
-
-    # 2. Site configuration with security headers & blocked file extensions
+    # Clean site configuration
     sudo tee /etc/nginx/sites-available/autocliper > /dev/null << 'EOF'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
 
-    server_tokens off;
     client_max_body_size 500M;
 
     # Security Headers
@@ -1103,9 +1070,8 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
-    # Block sensitive files & dotfiles
+    # Block sensitive files
     location ~ /\.(?!well-known) {
         return 404;
     }
@@ -1113,43 +1079,30 @@ server {
         return 404;
     }
 
-    # Backend API (Rate Limited: 50 requests/sec, burst 50)
+    # Backend API
     location /api/ {
-        limit_req zone=api_limit burst=50 nodelay;
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 300s;
     }
 
-    # Auth endpoints (Rate Limited: 10 requests/sec, burst 10)
-    location /api/auth/ {
-        limit_req zone=auth_limit burst=10 nodelay;
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 60s;
-    }
-
     # Backend health
     location /health {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # Video files (large responses / streaming)
+    # Video files (streaming)
     location ~* /api/jobs/.*/clips/.*/(?:final|raw|thumb) {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -1163,7 +1116,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $http_host;
+        proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -1174,9 +1127,9 @@ EOF
     sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
     sudo ln -sf /etc/nginx/sites-available/autocliper /etc/nginx/sites-enabled/ 2>/dev/null
     sudo systemctl enable nginx 2>/dev/null || true
-    if sudo nginx -t 2>/dev/null; then
-        sudo systemctl restart nginx 2>/dev/null || sudo systemctl reload nginx 2>/dev/null
-        echo "  [OK] Nginx configured with Security Headers, Rate Limiting & Cloudflare Real IP"
+    if sudo nginx -t; then
+        sudo systemctl restart nginx
+        echo "  [OK] Nginx configured and active on port 80"
     else
         echo "  [WARN] Nginx config test failed — check: sudo nginx -t"
     fi
