@@ -2186,6 +2186,16 @@ class V2PipelineService:
                     "HyperFrames hook/subtitle render failed: "
                     + "; ".join(errors[:5])
                 )
+        # Post-Remotion FFmpeg / Skia overlays when user explicitly picked FFmpeg or Skia for hook and/or subtitle
+        if hook_engine in ("ffmpeg", "skia") or sub_engine in ("ffmpeg", "skia"):
+            direct_errors = await self._apply_direct_hook_subtitle_pass(
+                job, job_id, clips, clips_with_words,
+                output_dir, trim_results,
+                hook_style_config, subtitle_style_config,
+                hook_engine=hook_engine, sub_engine=sub_engine,
+            )
+            if direct_errors:
+                logger.warning(f"[{job_id}] Post-Remotion direct pass warnings: {direct_errors}")
 
     async def _render_via_remotion(
         self, job, job_id, clips, clips_with_words, creative_direction,
@@ -2268,9 +2278,10 @@ class V2PipelineService:
                 hook_eng = _resolve_eng(hook_style_config)
                 sub_eng = _resolve_eng(subtitle_style_config)
                 sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
-                # Remotion is the unified renderer in v3.0; render hook & subtitles directly unless explicitly HF
-                remotion_hook_text = clip_hook if (hook_enabled and hook_eng != "hyperframes") else ""
-                remotion_words = clip_words if (sub_enabled and sub_eng != "hyperframes") else []
+                # Remotion only renders hook & subtitles if engine is explicitly remotion.
+                # If engine is hyperframes, skia, or ffmpeg, it is handled exclusively by its dedicated pass.
+                remotion_hook_text = clip_hook if (hook_enabled and hook_eng == "remotion") else ""
+                remotion_words = clip_words if (sub_enabled and sub_eng == "remotion") else []
 
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")
@@ -2347,11 +2358,11 @@ class V2PipelineService:
                         cta=clip_cta,
                     )
                     if result.success:
-                        # HF-owned layers are pending. Do not expose an
+                        # Non-Remotion layers (HyperFrames / Skia / FFmpeg) are pending. Do not expose an
                         # incomplete Remotion base as a ready final clip.
                         has_pending_pass = (
-                            hook_eng == "hyperframes"
-                            or sub_eng == "hyperframes"
+                            hook_eng in ("hyperframes", "ffmpeg", "skia")
+                            or sub_eng in ("hyperframes", "ffmpeg", "skia")
                         )
                         if not has_pending_pass:
                             # CTA End-Card (FFmpeg overlay/drawtext)

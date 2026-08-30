@@ -1784,8 +1784,8 @@ async def restyle_clip(
             render_words = []
 
         hook_enabled = (hook_config or {}).get("enabled", True) is not False
-        remotion_hook_text = hook_text if (hook_enabled and hook_render_engine != "hyperframes") else ""
-        remotion_words = render_words if subtitle_render_engine != "hyperframes" else []
+        remotion_hook_text = hook_text if (hook_enabled and hook_render_engine == "remotion") else ""
+        remotion_words = render_words if subtitle_render_engine == "remotion" else []
         needs_canvas = bool(root_style_data.get("canvas_config")) or (
             (job.target_aspect_ratio or "") in ("16:9", "1:1")
         )
