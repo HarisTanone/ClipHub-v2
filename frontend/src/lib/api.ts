@@ -1,14 +1,23 @@
-// Auto-detect API base: use same hostname as frontend but backend port (8000)
-// This ensures nip.io, local LAN, and production IPs work without manual env config
+// Auto-detect API base:
+// - If VITE_API_URL is explicitly set, use it.
+// - If accessing via domain or standard ports (like Cloudflare Tunnel, jnck.cliperhub.web.id, etc.), use same origin (Nginx proxies /api/ to backend).
+// - If accessing via raw IP/localhost with custom ports (e.g. 100.64.5.96:3001, localhost:3000), use port 8000.
 export function detectApiBase(): string {
-  if (typeof window !== "undefined" && window.location && window.location.hostname) {
-    const { protocol, hostname } = window.location;
-    return `${protocol}//${hostname}:8000`;
-  }
   const envUrl = import.meta.env.VITE_API_URL;
   if (envUrl && typeof envUrl === "string" && envUrl.trim() !== "") {
-    return envUrl;
+    return envUrl.replace(/\/+$/, "");
   }
+
+  if (typeof window !== "undefined" && window.location && window.location.hostname) {
+    const { protocol, hostname, port, origin } = window.location;
+    // If accessing directly via raw IP or localhost on non-standard ports without reverse proxy
+    if (port && port !== "80" && port !== "443" && (hostname === "localhost" || hostname === "127.0.0.1" || /^(\d+\.){3}\d+$/.test(hostname))) {
+      return `${protocol}//${hostname}:8000`;
+    }
+    // For domains (Cloudflare tunnel, production domains, reverse proxy on port 80/443)
+    return origin;
+  }
+
   return "http://localhost:8000";
 }
 export const API_BASE = detectApiBase();
