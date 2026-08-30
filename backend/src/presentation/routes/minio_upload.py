@@ -7,6 +7,7 @@ from typing import Optional
 
 from src.config import settings
 from src.infrastructure.minio_service import get_minio_service
+from src.presentation.auth_deps import CurrentUser, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/minio", tags=["MinIO Upload"])
@@ -23,7 +24,11 @@ class UploadResponse(BaseModel):
 
 
 @router.post("/upload/{job_id}/{clip_rank}")
-async def upload_clip_to_minio(job_id: str, clip_rank: int) -> UploadResponse:
+async def upload_clip_to_minio(
+    job_id: str,
+    clip_rank: int,
+    user: CurrentUser = Depends(get_current_user),
+) -> UploadResponse:
     """Upload a rendered clip to MinIO bucket under job_{id}/ folder.
 
     Looks for the final clip at the standard output path.
@@ -74,7 +79,10 @@ async def upload_clip_to_minio(job_id: str, clip_rank: int) -> UploadResponse:
 
 
 @router.get("/files/{job_id}")
-async def list_job_files(job_id: str):
+async def list_job_files(
+    job_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
     """List all uploaded files for a job in MinIO."""
     try:
         minio_svc = get_minio_service()
@@ -85,7 +93,11 @@ async def list_job_files(job_id: str):
 
 
 @router.get("/url/{job_id}/{filename}")
-async def get_download_url(job_id: str, filename: str):
+async def get_download_url(
+    job_id: str,
+    filename: str,
+    user: CurrentUser = Depends(get_current_user),
+):
     """Get presigned download URL for a specific file."""
     try:
         minio_svc = get_minio_service()
@@ -103,7 +115,12 @@ class TelegramNotifyRequest(BaseModel):
 
 
 @router.post("/notify-telegram/{job_id}/{clip_rank}")
-async def notify_telegram_upload(job_id: str, clip_rank: int, body: TelegramNotifyRequest):
+async def notify_telegram_upload(
+    job_id: str,
+    clip_rank: int,
+    body: TelegramNotifyRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
     """Send upload notification to Telegram bot with download link + caption."""
     try:
         import httpx
