@@ -217,7 +217,7 @@ ATURAN:
   Dilarang: nama orang, brand, abstraksi, mood-only.
   behind_person: CLOSE-UP object/icon/subject (fill frame). LARANG wide landscape/cityscape.
   full_frame: boleh medium shot action; tetap mirror topik.
-- duration 1.5-3.0 detik.
+- duration 2.5-3.2 detik (santai dan jelas terlihat).
 - visual_category: footage (video) | icon | motion_graphic | reaction
 - placement: full_frame | behind_person
 - template: word_pop_typography | line_reveal_typography | particle_text_burst
@@ -225,7 +225,7 @@ ATURAN:
 
 
 OUTPUT RAW JSON:
-{{"items":[{{"at_time":12.5,"keyword":"concrete stock query from this transcript","duration":2.5,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography","motion_style":"ken_burns"}},{{"at_time":20.0,"keyword":"another concrete closeup object","duration":2.0,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
+{{"items":[{{"at_time":12.5,"keyword":"concrete stock query from this transcript","duration":2.8,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography","motion_style":"ken_burns"}},{{"at_time":20.0,"keyword":"another concrete closeup object","duration":2.8,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
 
 
         try:
@@ -838,12 +838,12 @@ ATURAN:
 - keyword = ENGLISH stock query 3-8 kata, KONKRET visual dari konteks clip ini (boleh refine seed di atas)
   JELEK: abstract mood "success", "lifestyle", "viral", "city skyline generic"
   behind_person: CLOSE-UP object fill-frame (bukan wide landscape)
-- duration 1.5-3.0; min jarak 3.5s antar item placement sama
+- duration 2.5-3.2s (santai dan jelas); min jarak 3.5s antar item placement sama
 - placement + visual_category + template wajib
 - Analisa dinamis dari transkrip — jangan andalkan daftar kata domain tetap
 
 OUTPUT RAW JSON:
-{{"items":[{{"at_time":12.5,"keyword":"concrete stock query from this clip","duration":2.5,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography"}},{{"at_time":22.0,"keyword":"another concrete closeup object","duration":2.0,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography"}}]}}
+{{"items":[{{"at_time":12.5,"keyword":"concrete stock query from this clip","duration":2.8,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography"}},{{"at_time":22.0,"keyword":"another concrete closeup object","duration":2.8,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography"}}]}}
 """
         try:
             raw = await asyncio.wait_for(
@@ -915,11 +915,11 @@ OUTPUT RAW JSON:
             if any(abs(at_time - existing["at_time"]) < min(3.5, max(1.5, duration * 0.12)) for existing in items):
                 continue
             try:
-                item_duration = float(item.get("duration", 2.25))
+                item_duration = float(item.get("duration", 2.8))
             except (TypeError, ValueError):
-                item_duration = 2.25
-            max_hold = min(3.5, max(0.8, duration * 0.35))
-            item_duration = min(max_hold, max(0.8, item_duration), duration - at_time)
+                item_duration = 2.8
+            max_hold = min(3.5, max(1.5, duration * 0.35))
+            item_duration = min(max_hold, max(2.5, item_duration), max(0.4, duration - at_time))
             if item_duration < 0.6:
                 continue
             template = str(item.get("template") or "word_pop_typography")

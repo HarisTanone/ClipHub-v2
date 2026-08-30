@@ -269,7 +269,7 @@ class Settings(BaseSettings):
     TOP_OVERLAY_OUTLINE_COLOR: str = "255,255,255"
     # white | neon | black | gradient | comic
     TOP_OVERLAY_OUTLINE_STYLE: str = "white"
-    TOP_OVERLAY_MAX_PER_CLIP: int = 2
+    TOP_OVERLAY_MAX_PER_CLIP: int = 3
     TOP_OVERLAY_SEG_CONFIDENCE: float = 0.25
     TOP_OVERLAY_MASK_FEATHER: int = 3          # subpixel anti-aliased matte edge feathering
     TOP_OVERLAY_MASK_STRIDE: int = 1

@@ -689,7 +689,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "int",
         "min_role": "editor",
         "is_secret": False,
-        "default": 2,
+        "default": 3,
         "description": "Maksimal segmen Top Behind Overlay per klip",
     },
     "TOP_OVERLAY_SEG_CONFIDENCE": {

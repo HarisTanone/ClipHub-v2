@@ -1073,12 +1073,12 @@ def snap_overlay_to_phrase(
     duration: float,
     words: list[dict] | None,
     clip_duration: float = 0.0,
-    min_dur: float = 1.2,
-    max_dur: float = 3.5,
+    min_dur: float = 2.5,
+    max_dur: float = 3.2,
 ) -> tuple[float, float]:
     """Snap behind-person window to nearby word/phrase bounds when available."""
     at = max(0.0, float(at_time or 0.0))
-    dur = float(np.clip(float(duration or 2.0), min_dur, max_dur))
+    dur = float(np.clip(float(duration or 2.8), min_dur, max_dur))
     if not words:
         if clip_duration > 0:
             dur = min(dur, max(0.4, clip_duration - at))
@@ -1126,7 +1126,7 @@ def pick_top_overlay_suggestions(
     clip_duration: float = 0.0,
 ) -> list[TopOverlaySegment]:
     """Pick BRollSuggestion rows for top-behind-person."""
-    limit = max(1, max_per_clip) if max_per_clip is not None else 2
+    limit = max(1, max_per_clip) if max_per_clip is not None else 3
     blocked = list(blocked_ranges or [])
     words = words or []
     scored = []
