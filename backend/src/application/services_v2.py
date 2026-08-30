@@ -2173,7 +2173,7 @@ class V2PipelineService:
             text_emphasis_style_config,
             prosody_results=prosody_results or {},
         )
-        # Post-Remotion HF overlays when user picked HF for hook and/or subtitle
+        # Post-Remotion HF overlays when user explicitly picked HF for hook and/or subtitle
         if hook_engine == "hyperframes" or sub_engine == "hyperframes":
             errors = await self._apply_hf_hook_subtitle_pass(
                 job, job_id, clips, clips_with_words,
@@ -2186,16 +2186,6 @@ class V2PipelineService:
                     "HyperFrames hook/subtitle render failed: "
                     + "; ".join(errors[:5])
                 )
-        # Post-Remotion FFmpeg / Skia overlays when user picked FFmpeg or Skia for hook and/or subtitle
-        if hook_engine in ("ffmpeg", "skia") or sub_engine in ("ffmpeg", "skia"):
-            direct_errors = await self._apply_direct_hook_subtitle_pass(
-                job, job_id, clips, clips_with_words,
-                output_dir, trim_results,
-                hook_style_config, subtitle_style_config,
-                hook_engine=hook_engine, sub_engine=sub_engine,
-            )
-            if direct_errors:
-                logger.warning(f"[{job_id}] Post-Remotion direct pass warnings: {direct_errors}")
 
     async def _render_via_remotion(
         self, job, job_id, clips, clips_with_words, creative_direction,
@@ -2357,11 +2347,11 @@ class V2PipelineService:
                         cta=clip_cta,
                     )
                     if result.success:
-                        # HF-owned layers and direct passes are pending. Do not expose an
+                        # HF-owned layers are pending. Do not expose an
                         # incomplete Remotion base as a ready final clip.
                         has_pending_pass = (
-                            hook_eng in ("hyperframes", "ffmpeg", "skia")
-                            or sub_eng in ("hyperframes", "ffmpeg", "skia")
+                            hook_eng == "hyperframes"
+                            or sub_eng == "hyperframes"
                         )
                         if not has_pending_pass:
                             # CTA End-Card (FFmpeg overlay/drawtext)
