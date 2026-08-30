@@ -1045,6 +1045,13 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Step 7: Nginx Reverse Proxy (optional)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Nginx reverse proxy
+if ! command -v nginx &>/dev/null; then
+    echo "  Installing Nginx..."
+    sudo apt-get update -qq 2>/dev/null || true
+    sudo apt-get install -y nginx 2>/dev/null || true
+fi
+
 if command -v nginx &>/dev/null; then
     # 1. Global security & Cloudflare Real IP & Rate Limiting conf
     sudo tee /etc/nginx/conf.d/autocliper_security.conf > /dev/null << 'EOF'
@@ -1081,7 +1088,7 @@ EOF
     # 2. Site configuration with security headers & blocked file extensions
     sudo tee /etc/nginx/sites-available/autocliper > /dev/null << 'EOF'
 server {
-    listen 80;
+    listen 80 default_server;
     server_name jnck.cliperhub.web.id *.cliperhub.web.id cliperhub.web.id autocliper.local cliperhub-tunnel.trycloudflare.com *.trycloudflare.com _;
 
     server_tokens off;
@@ -1154,9 +1161,16 @@ server {
     }
 }
 EOF
+    # Remove default debian/ubuntu nginx site to avoid port 80 conflict
+    sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
     sudo ln -sf /etc/nginx/sites-available/autocliper /etc/nginx/sites-enabled/ 2>/dev/null
-    sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null
-    echo "  [OK] Nginx configured with Security Headers, Rate Limiting & Cloudflare Real IP"
+    sudo systemctl enable nginx 2>/dev/null || true
+    if sudo nginx -t 2>/dev/null; then
+        sudo systemctl restart nginx 2>/dev/null || sudo systemctl reload nginx 2>/dev/null
+        echo "  [OK] Nginx configured with Security Headers, Rate Limiting & Cloudflare Real IP"
+    else
+        echo "  [WARN] Nginx config test failed — check: sudo nginx -t"
+    fi
 else
     echo "  [WARN]  Nginx not installed — access services directly via ports"
 fi
