@@ -837,56 +837,65 @@ export function SubtitleEditor({
               </span>
             </div>
             <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
-              <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: `${style.positionY ?? 78}%`, transform: "translateY(-50%)" }}>
-                {(() => {
-                  const isWordPop = style.lineTransition === "word_pop";
-                  const sampleWords = ["ini", "kata", "penting", "banget", "untuk", "kamu"];
-                  const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
-                  const words = sampleWords.slice(0, count);
-                  const displayWords = isWordPop ? [words[activeWordIdx % words.length]] : words;
-                  const bgAlpha = Math.round(Math.max(0, Math.min(1, style.bgOpacity ?? 0.75)) * 255).toString(16).padStart(2, "0");
+              {(() => {
+                const posTop = style.position === "top"
+                  ? (style.positionY != null && style.positionY <= 35 ? style.positionY : 15)
+                  : style.position === "center"
+                    ? (style.positionY != null && style.positionY > 35 && style.positionY < 65 ? style.positionY : 50)
+                    : (style.positionY != null && style.positionY >= 65 ? style.positionY : 82);
+                return (
+                  <div className="absolute left-0 right-0 flex justify-center px-3 pointer-events-none" style={{ top: `${posTop}%`, transform: "translateY(-50%)" }}>
+                    {(() => {
+                      const isWordPop = style.lineTransition === "word_pop";
+                      const sampleWords = ["ini", "kata", "penting", "banget", "untuk", "kamu"];
+                      const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
+                      const words = sampleWords.slice(0, count);
+                      const displayWords = isWordPop ? [words[activeWordIdx % words.length]] : words;
+                      const bgAlpha = Math.round(Math.max(0, Math.min(1, style.bgOpacity ?? 0.75)) * 255).toString(16).padStart(2, "0");
 
-                  return (
-                    <div
-                      className="flex flex-wrap justify-center items-center"
-                      style={{
-                        gap: isWordPop ? 0 : Math.max(3, (style.wordSpacing ?? 6) * 0.6),
-                        maxWidth: "92%",
-                        backgroundColor: style.bgEnabled ? `${style.bgColor || "#000000"}${bgAlpha}` : "transparent",
-                        padding: style.bgEnabled ? `${Math.round((style.bgPadding ?? 12) * 0.35)}px ${Math.round((style.bgPadding ?? 12) * 0.65)}px` : "0px",
-                        borderRadius: `${style.bgRadius ? Math.min(style.bgRadius, 14) : 4}px`,
-                      }}
-                    >
-                      {displayWords.map((w, i) => {
-                        const isActive = isWordPop ? true : (i === activeWordIdx % words.length);
-                        const fontSize = Math.min(Math.max((style.fontSize || 38) * 0.22, 10), 16);
-                        const strokeWidth = style.strokeEnabled ? Math.max((style.strokeWidth || 3) * 0.25, 0.6) : 0;
+                      return (
+                        <div
+                          className="flex flex-wrap justify-center items-center"
+                          style={{
+                            gap: isWordPop ? 0 : Math.max(3, (style.wordSpacing ?? 6) * 0.6),
+                            maxWidth: "92%",
+                            backgroundColor: style.bgEnabled ? `${style.bgColor || "#000000"}${bgAlpha}` : "transparent",
+                            padding: style.bgEnabled ? `${Math.round((style.bgPadding ?? 12) * 0.35)}px ${Math.round((style.bgPadding ?? 12) * 0.65)}px` : "0px",
+                            borderRadius: `${style.bgRadius ? Math.min(style.bgRadius, 14) : 4}px`,
+                          }}
+                        >
+                          {displayWords.map((w, i) => {
+                            const isActive = isWordPop ? true : (i === activeWordIdx % words.length);
+                            const fontSize = Math.min(Math.max((style.fontSize || 38) * 0.22, 10), 16);
+                            const strokeWidth = style.strokeEnabled ? Math.max((style.strokeWidth || 3) * 0.25, 0.6) : 0;
 
-                        return (
-                          <span
-                            key={`${w}-${i}`}
-                            style={{
-                              color: isActive ? (style.highlightColor || "#FFCC00") : (style.color || "#FFFFFF"),
-                              fontSize: fontSize,
-                              fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
-                              fontWeight: isActive ? 900 : Number(style.fontWeight || 700),
-                              textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none",
-                              fontStyle: style.italic ? "italic" : "normal",
-                              letterSpacing: `${style.letterSpacing || 0}px`,
-                              paintOrder: strokeWidth > 0 ? "stroke fill" : undefined,
-                              WebkitTextStroke: strokeWidth > 0 ? `${strokeWidth}px ${style.strokeColor || "#000000"}` : undefined,
-                              textShadow: style.shadowEnabled ? `1px 1px 0px ${style.shadowColor || "#000000"}` : "0 2px 4px rgba(0,0,0,0.8)",
-                              wordBreak: "break-word",
-                            }}
-                          >
-                            {w}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-              </div>
+                            return (
+                              <span
+                                key={`${w}-${i}`}
+                                style={{
+                                  color: isActive ? (style.highlightColor || "#FFCC00") : (style.color || "#FFFFFF"),
+                                  fontSize: fontSize,
+                                  fontFamily: `'${style.fontFamily || "Poppins"}', sans-serif`,
+                                  fontWeight: isActive ? 900 : Number(style.fontWeight || 700),
+                                  textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none",
+                                  fontStyle: style.italic ? "italic" : "normal",
+                                  letterSpacing: `${style.letterSpacing || 0}px`,
+                                  paintOrder: strokeWidth > 0 ? "stroke fill" : undefined,
+                                  WebkitTextStroke: strokeWidth > 0 ? `${strokeWidth}px ${style.strokeColor || "#000000"}` : undefined,
+                                  textShadow: style.shadowEnabled ? `1px 1px 0px ${style.shadowColor || "#000000"}` : "0 2px 4px rgba(0,0,0,0.8)",
+                                  wordBreak: "break-word",
+                                }}
+                              >
+                                {w}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
               <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-500 z-10">
                 ffmpeg {style.lineTransition || "word_pop"} · {style.stylePreset || "classic"}
               </p>
@@ -906,54 +915,69 @@ export function SubtitleEditor({
             </div>
             <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
               <div className="absolute inset-0 bg-gradient-to-b from-zinc-700/10 to-transparent pointer-events-none" />
-              <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                {style.lineTransition === "emphasis" ? (
-                  <div className="flex flex-col items-center gap-1">
-                    <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
-                    <span style={{ color: style.highlightColor, fontSize: Math.max(style.fontSize * 0.85, 20), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: 900, textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined }}>Animasi</span>
+              {(() => {
+                const posTop = style.position === "top"
+                  ? (style.positionY != null && style.positionY <= 35 ? style.positionY : 15)
+                  : style.position === "center"
+                    ? (style.positionY != null && style.positionY > 35 && style.positionY < 65 ? style.positionY : 50)
+                    : (style.positionY != null && style.positionY >= 65 ? style.positionY : 82);
+                const sampleWords = ["ini", "kata", "penting", "banget", "untuk", "kamu"];
+                const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
+                const words = sampleWords.slice(0, count);
+                const isWordPop = style.lineTransition === "word_pop";
+                const displayWords = isWordPop ? [words[activeWordIdx % words.length]] : words;
+
+                return (
+                  <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${posTop}%`, transform: "translateY(-50%)" }}>
+                    {style.lineTransition === "emphasis" ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <span style={{ color: style.color, fontSize: Math.max(style.fontSize * 0.25, 9), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: Number(style.fontWeight) }}>gak banyak</span>
+                        <span style={{ color: style.highlightColor, fontSize: Math.max(style.fontSize * 0.85, 20), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: 900, textShadow: style.highlightGlow ? `0 0 12px ${style.highlightGlowColor || style.highlightColor}, 0 0 24px ${style.highlightGlowColor || style.highlightColor}` : undefined }}>Animasi</span>
+                      </div>
+                    ) : style.lineTransition === "line_reveal" ? (
+                      <div className={cn("overflow-hidden", getSubAnimationClass(style.animationStyle))} style={{ backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.42, borderRadius: style.bgRadius, borderLeft: `3px solid ${style.highlightColor}` }}>
+                        <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
+                        <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
+                          {displayWords.map((w, i) => {
+                            const isHighlight = i === activeWordIdx % displayWords.length;
+                            return (
+                              <span key={`${w}-${i}`} style={{ color: isHighlight ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isHighlight ? 900 : Number(style.fontWeight), letterSpacing: style.letterSpacing, textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined }}>{w}</span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: isWordPop ? 0 : style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
+                        {displayWords.map((w, i) => {
+                          const isHighlight = isWordPop ? true : (i === activeWordIdx % displayWords.length);
+                          const isKeyword = style.highlightWords.includes(w);
+                          const shouldHighlight = isHighlight || isKeyword;
+                          const useDual = shouldHighlight && style.dualStyleEnabled;
+                          const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
+                          const hlStyle = style.highlightStyle || "scale";
+                          const wordStyles: React.CSSProperties = {
+                            color: shouldHighlight ? style.highlightColor : style.color,
+                            fontSize: fs,
+                            fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
+                            fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
+                            fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
+                            letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
+                            textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none"),
+                            textShadow: [(useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "", shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : ""].filter(Boolean).join(", ") || undefined,
+                            WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
+                            transition: "all 0.2s ease",
+                            display: "inline-block",
+                            ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
+                            ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
+                            ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
+                          };
+                          return <span key={`${w}-${i}`} style={wordStyles}>{w}</span>;
+                        })}
+                      </div>
+                    )}
                   </div>
-                ) : style.lineTransition === "line_reveal" ? (
-                  <div className={cn("overflow-hidden", getSubAnimationClass(style.animationStyle))} style={{ backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.42, borderRadius: style.bgRadius, borderLeft: `3px solid ${style.highlightColor}` }}>
-                    <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
-                    <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
-                      {["ini", "kata", "penting", "banget"].map((w, i) => {
-                        const isHighlight = i === activeWordIdx;
-                        return (
-                          <span key={w} style={{ color: isHighlight ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isHighlight ? 900 : Number(style.fontWeight), letterSpacing: style.letterSpacing, textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined }}>{w}</span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
-                    {["ini", "kata", "penting", "banget"].map((w, i) => {
-                      const isHighlight = i === activeWordIdx;
-                      const isKeyword = style.highlightWords.includes(w);
-                      const shouldHighlight = isHighlight || isKeyword;
-                      const useDual = shouldHighlight && style.dualStyleEnabled;
-                      const fs = Math.max((shouldHighlight ? (useDual ? style.highlightFontSize : style.fontSize * style.highlightScale) : style.fontSize) * 0.35, 10);
-                      const hlStyle = style.highlightStyle || "scale";
-                      const wordStyles: React.CSSProperties = {
-                        color: shouldHighlight ? style.highlightColor : style.color,
-                        fontSize: fs,
-                        fontWeight: useDual ? Number(style.highlightFontWeight) : (shouldHighlight && style.highlightBold ? 900 : Number(style.fontWeight)),
-                        fontFamily: useDual ? `'${style.highlightFontFamily}', sans-serif` : `'${style.fontFamily}', sans-serif`,
-                        fontStyle: useDual ? (style.highlightItalic ? "italic" : "normal") : (style.italic ? "italic" : "normal"),
-                        letterSpacing: useDual ? style.highlightLetterSpacing : style.letterSpacing,
-                        textTransform: useDual ? (style.highlightUppercase ? "uppercase" : "none") : (style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none"),
-                        textShadow: [(useDual ? style.highlightShadowEnabled : style.shadowEnabled) ? `0 0 ${useDual ? style.highlightShadowBlur : style.shadowBlur}px ${useDual ? style.highlightShadowColor : style.shadowColor}` : "", shouldHighlight && style.highlightGlow ? `0 0 12px ${style.highlightGlowColor}` : ""].filter(Boolean).join(", ") || undefined,
-                        WebkitTextStroke: (useDual ? style.highlightStrokeEnabled : style.strokeEnabled) ? `${(useDual ? style.highlightStrokeWidth : style.strokeWidth) * 0.3}px ${useDual ? style.highlightStrokeColor : style.strokeColor}` : undefined,
-                        transition: "all 0.2s ease",
-                        display: "inline-block",
-                        ...(!useDual && shouldHighlight && hlStyle === "underline" ? { textDecoration: "underline", textDecorationColor: style.highlightColor, textUnderlineOffset: "3px", textDecorationThickness: "2px" } : {}),
-                        ...(!useDual && shouldHighlight && hlStyle === "background" ? { backgroundColor: `${style.highlightColor}30`, borderRadius: 3, padding: "1px 4px" } : {}),
-                        ...(!useDual && shouldHighlight && hlStyle === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: style.highlightColor, textDecorationThickness: "2px" } : {}),
-                      };
-                      return <span key={i} style={wordStyles}>{w}</span>;
-                    })}
-                  </div>
-                )}
-              </div>
+                );
+              })()}
               <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">{style.lineTransition === "emphasis" ? "emphasis" : style.animationStyle} | {style.position}</p>
             </CanvasPreviewFrame>
             <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">

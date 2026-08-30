@@ -965,13 +965,18 @@ export function VideoPreviewOverlay({
     const visibleLine = lines[visibleLineIdx];
 
     // Position style
-    const posStyle: React.CSSProperties = typeof cfg?.positionY === "number"
-      ? { top: `${cfg.positionY}%`, bottom: "auto", transform: "translateY(-50%)" }
-      : position === "top"
-        ? { top: "8%", bottom: "auto" }
-        : position === "center"
-          ? { top: "50%", bottom: "auto", transform: "translateY(-50%)" }
-          : { bottom: "12%" };
+    const posStyle: React.CSSProperties = (() => {
+      let topPct = 82;
+      if (position === "top") {
+        topPct = typeof cfg?.positionY === "number" && cfg.positionY <= 35 ? cfg.positionY : 12;
+      } else if (position === "center") {
+        topPct = typeof cfg?.positionY === "number" && cfg.positionY > 35 && cfg.positionY < 65 ? cfg.positionY : 50;
+      } else {
+        // bottom
+        topPct = typeof cfg?.positionY === "number" && cfg.positionY >= 65 ? cfg.positionY : 82;
+      }
+      return { top: `${topPct}%`, bottom: "auto", transform: "translateY(-50%)" };
+    })();
 
     // Panel style matching Remotion presetPanelStyle per preset
     const presetPanelStyle: React.CSSProperties = (() => {
@@ -1165,7 +1170,7 @@ export function VideoPreviewOverlay({
             const isActive = currentTime >= wordStart && currentTime <= wordEnd;
             const isRevealed = currentTime >= wordStart - 0.05;
 
-            if (!isRevealed) return null;
+            if (lineTransition === "word_pop" && !isActive) return null;
 
             const isKeyword = Boolean(w.highlight) || highlightWords.includes(w.word.toLowerCase());
             // Match Remotion: karaoke color for all active, but scale/size only for keywords

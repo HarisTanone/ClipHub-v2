@@ -122,15 +122,38 @@ class SkiaSubtitleRenderer:
             or base.get("font_size", 38)
         )
 
+        pos_str = str(style.get("position") or base.get("position") or "").strip().lower()
+        raw_y = (
+            style.get("positionY")
+            if style.get("positionY") is not None
+            else style.get("position_y")
+            if style.get("position_y") is not None
+            else style.get("position_y_pct")
+            if style.get("position_y_pct") is not None
+            else base.get("position_y_pct")
+        )
+        if pos_str == "top":
+            pos_y_pct = float(raw_y) if (raw_y is not None and float(raw_y) <= 35) else 15.0
+        elif pos_str == "center":
+            pos_y_pct = float(raw_y) if (raw_y is not None and 35 < float(raw_y) < 65) else 50.0
+        elif pos_str == "bottom":
+            pos_y_pct = float(raw_y) if (raw_y is not None and float(raw_y) >= 65) else 78.0
+        else:
+            try:
+                pos_y_pct = float(raw_y) if raw_y is not None else 78.0
+            except (ValueError, TypeError):
+                pos_y_pct = 78.0
+
         normalized = {
             "id": preset_id,
+            "position": pos_str or ("top" if pos_y_pct <= 35 else "center" if pos_y_pct < 65 else "bottom"),
             "font_family": style.get("fontFamily") or style.get("font_family") or base.get("font_family", default_font),
             "font_size": raw_font_size,
             "font_weight": str(style.get("fontWeight") or style.get("font_weight") or base.get("font_weight", "Bold")),
             "text_color": style.get("color") or style.get("text_color") or base.get("color") or base.get("text_color", "#FFFFFF"),
             "highlight_color": style.get("highlightColor") or style.get("highlight_color") or base.get("highlight_color", "#38BDF8"),
-            "position_y_pct": float(style.get("positionY") or style.get("position_y_pct") or base.get("position_y_pct", 78)),
-            "position_y": style.get("position_y") or style.get("positionY"),
+            "position_y_pct": pos_y_pct,
+            "position_y": pos_y_pct,
             "grid_position_y": float(style.get("gridPositionY") or style.get("grid_position_y") or 50.0),
             "layout_events": list(style.get("layout_events") or style.get("layoutEvents") or []),
             "autogrid_enabled": bool(style.get("autogrid_enabled", True) if style.get("autogrid_enabled") is not None else style.get("autogridEnabled", True)),

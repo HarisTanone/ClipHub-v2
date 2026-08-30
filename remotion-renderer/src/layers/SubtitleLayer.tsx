@@ -173,12 +173,22 @@ const defaultMaxWidthForPreset = (preset: SubtitleVisualPreset): number => {
 };
 
 export const resolveSubtitlePositionY = (config: SubtitleConfig): number => {
-  if (typeof config.positionY === "number" && Number.isFinite(config.positionY)) {
-    return clamp(config.positionY, 8, 94);
+  const posStr = String(config.position || "").trim().toLowerCase();
+  const rawY = typeof config.positionY === "number" && Number.isFinite(config.positionY) ? config.positionY : null;
+
+  if (posStr === "top") {
+    return rawY !== null && rawY <= 35 ? clamp(rawY, 8, 35) : 15;
   }
-  if (config.position === "top") return 18;
-  if (config.position === "center") return 50;
-  return 85;
+  if (posStr === "center") {
+    return rawY !== null && rawY > 35 && rawY < 65 ? clamp(rawY, 35, 65) : 50;
+  }
+  if (posStr === "bottom") {
+    return rawY !== null && rawY >= 65 ? clamp(rawY, 65, 94) : 82;
+  }
+  if (rawY !== null) {
+    return clamp(rawY, 8, 94);
+  }
+  return 82;
 };
 
 export const resolveLayoutAtTime = (
@@ -633,6 +643,8 @@ function SubtitlePage({
             const startRel = (t.fromMs || 0) - (page.startMs || 0);
             const endRel = (t.toMs || 0) - (page.startMs || 0);
             const isActive = startRel <= timeInMs && endRel > timeInMs;
+            const isWordPop = lineTransition === "word_pop";
+            if (isWordPop && !isActive) return null;
             const wordText = (t.text || "").trim();
             if (!wordText) return null;
             const isKeyword = Boolean(t.highlight) || highlightWords.includes(wordText.toLowerCase());

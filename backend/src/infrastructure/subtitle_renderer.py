@@ -348,14 +348,27 @@ class SubtitleRenderer(ISubtitleRenderer):
         return lines
 
     def _calculate_y_position(self, config: SubtitleStyleConfig) -> str:
-        if config.position_y:
-            return config.position_y
-        if config.position == "top":
-            return "50"
-        elif config.position == "center":
+        pos_str = str(config.position or "").strip().lower()
+        if pos_str == "top":
+            return "0.12*h"
+        elif pos_str == "center":
             return "(h-text_h)/2"
-        else:  # bottom
-            return f"h-text_h-{config.padding_bottom}"
+        elif pos_str == "bottom":
+            pad = config.padding_bottom or int(0.12 * 1920)
+            return f"h-text_h-{pad}"
+
+        if config.position_y:
+            try:
+                val_str = str(config.position_y).replace("%", "").strip()
+                val_num = float(val_str)
+                if 0 <= val_num <= 100:
+                    return f"{val_num / 100.0}*h - text_h/2"
+            except (ValueError, TypeError):
+                pass
+            return str(config.position_y)
+
+        pad = config.padding_bottom or 120
+        return f"h-text_h-{pad}"
 
     def _resolve_font(self, font_family: str, font_weight: str = "Regular") -> Optional[str]:
         """Try to find font file across assets and system font directories."""

@@ -19,7 +19,11 @@ export function SkiaSubtitleLivePreview({
 }) {
   const presetId = style.stylePreset || "clean_editorial";
   const preset = SKIA_SUBTITLE_PRESETS.find((p) => p.id === presetId) || SKIA_SUBTITLE_PRESETS[0];
-  const posTop = `${style.positionY ?? 78}%`;
+  const posTop = style.position === "top"
+    ? `${style.positionY != null && style.positionY <= 35 ? style.positionY : 15}%`
+    : style.position === "center"
+      ? `${style.positionY != null && style.positionY > 35 && style.positionY < 65 ? style.positionY : 50}%`
+      : `${style.positionY != null && style.positionY >= 65 ? style.positionY : 82}%`;
   const sampleWords = ["ini", "kata", "penting", "banget", "untuk", "kamu"];
   const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
   const words = sampleWords.slice(0, count);
