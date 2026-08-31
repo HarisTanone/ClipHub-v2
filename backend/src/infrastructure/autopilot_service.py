@@ -485,6 +485,13 @@ class AutopilotService:
         from src.infrastructure.preset_resolver import resolve_preset
         preset_slug = settings.get("preset_slug", "default")
         resolved_preset = resolve_preset(preset_slug, user_id=user_id)
+        # If preset is default or fallback to builtin_default, automatically check if user has custom user_presets
+        if not resolved_preset or resolved_preset.get("source") == "builtin_default":
+            fallback_p = resolve_preset("", user_id=user_id)
+            if fallback_p and fallback_p.get("source") != "builtin_default":
+                resolved_preset = fallback_p
+                preset_slug = resolved_preset.get("slug") or preset_slug
+                logger.info(f"autopilot: Automatically resolved active user preset '{resolved_preset.get('name')}' ({preset_slug})")
 
         # 5. Prepare AutoCliper job options
         target_platforms = [p.strip().lower() for p in settings.get("target_platforms", "tiktok,instagram,youtube").split(",") if p.strip()]

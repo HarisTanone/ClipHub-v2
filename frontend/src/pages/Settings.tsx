@@ -3236,9 +3236,19 @@ export function Settings() {
                   <Card className="p-4">
                     <AutopilotPresetPreview
                       selectedSlug={autopilotSettings?.preset_slug || "default"}
-                      onSelectSlug={(slug) => {
+                      onSelectSlug={async (slug) => {
                         if (autopilotSettings) {
-                          setAutopilotSettings({ ...autopilotSettings, preset_slug: slug });
+                          const updated = { ...autopilotSettings, preset_slug: slug };
+                          setAutopilotSettings(updated);
+                          try {
+                            const res = await autopilotApi.updateSettings(updated);
+                            if (res && res.data) {
+                              setAutopilotSettings(res.data);
+                              toast.success(`Preset '${slug}' aktif & tersimpan untuk Hermes Autopilot!`);
+                            }
+                          } catch (e: any) {
+                            console.warn("Auto-save autopilot preset failed:", e);
+                          }
                         }
                       }}
                       presets={autopilotPresets}
@@ -3763,9 +3773,19 @@ export function Settings() {
             onTextEmphasisChange={setEditorTe}
             onWatermarkChange={setEditorWm}
             onCtaChange={setEditorCta}
-            onPresetLoad={(preset) => {
+            onPresetLoad={async (preset) => {
               if (preset.slug && autopilotSettings) {
-                setAutopilotSettings({ ...autopilotSettings, preset_slug: preset.slug });
+                const updated = { ...autopilotSettings, preset_slug: preset.slug };
+                setAutopilotSettings(updated);
+                try {
+                  const res = await autopilotApi.updateSettings(updated);
+                  if (res && res.data) {
+                    setAutopilotSettings(res.data);
+                    toast.success(`Preset '${preset.name || preset.slug}' aktif & tersimpan untuk Hermes Autopilot!`);
+                  }
+                } catch (e: any) {
+                  console.warn("Auto-save autopilot preset failed:", e);
+                }
               }
               loadAutopilotData();
             }}
