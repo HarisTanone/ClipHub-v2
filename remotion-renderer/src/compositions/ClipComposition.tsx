@@ -81,15 +81,16 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   // ─── Per-component config extraction ─────────────────────────────
   const hook = useHookConfig(creativeDirection, hookAnimation);
   const subtitle = useSubtitleConfig(creativeDirection);
-  const subtitleConfig = creativeDirection.reframe_layout === "double"
-    ? creativeDirection.layout_mode === "dynamic"
-      ? {
+  const hasLayoutEvents = Array.isArray(creativeDirection.layout_events) && creativeDirection.layout_events.length > 0;
+  const subtitleConfig = hasLayoutEvents
+    ? {
         ...subtitle.config,
         layoutEvents: creativeDirection.layout_events,
         gridPositionY: creativeDirection.subtitle_position_y ?? 50,
       }
-      : { ...subtitle.config, position: "center", positionY: creativeDirection.subtitle_position_y ?? 50 }
-    : subtitle.config;
+    : creativeDirection.reframe_layout === "double"
+      ? { ...subtitle.config, position: "center", positionY: creativeDirection.subtitle_position_y ?? 50 }
+      : subtitle.config;
 
   const isHookActive = Boolean(hookText && hook.config.enabled !== false);
   const hookDurationFrames = Math.floor(hook.duration * fps);

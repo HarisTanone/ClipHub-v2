@@ -158,8 +158,6 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     }
 
     norm_anim = anim.replace(" ", "_").replace("-", "_")
-    if norm_anim in remotion_presets:
-        return "remotion"
 
     skia_explicit = (
         "glassmorphism", "clean_editorial", "podcast_pro", "kinetic_word_box",
@@ -179,6 +177,9 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
             return "ffmpeg"
     except Exception:
         pass
+
+    if norm_anim in remotion_presets:
+        return "remotion"
 
     return "remotion"
 

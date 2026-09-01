@@ -10,10 +10,12 @@ from src.config import settings
 
 def repliz_auth_header() -> dict[str, str]:
     """Build Basic Auth header for Repliz API."""
-    if not settings.REPLIZ_ACCESS_KEY or not settings.REPLIZ_SECRET_KEY:
+    access_key = (settings.REPLIZ_ACCESS_KEY or "").strip()
+    secret_key = (settings.REPLIZ_SECRET_KEY or "").strip()
+    if not access_key or not secret_key:
         raise HTTPException(status_code=503, detail="Repliz credentials not configured")
     creds = base64.b64encode(
-        f"{settings.REPLIZ_ACCESS_KEY}:{settings.REPLIZ_SECRET_KEY}".encode()
+        f"{access_key}:{secret_key}".encode()
     ).decode()
     return {"Authorization": f"Basic {creds}"}
 

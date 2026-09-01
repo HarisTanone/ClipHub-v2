@@ -530,7 +530,7 @@ class PodcastReframeEngine(IReframeEngine):
                     tid for tid in (tracked_data.get("track_to_position") or {}).keys()
                     if int(tid) in (tracked_data.get("stable_positions") or {})
                 ])
-                if valid_track_count <= 1:
+                if valid_track_count <= 1 and grid_decision.get("sub_layout") != "screen_cam":
                     logger.info(
                         "podcast_reframe: ghost elimination reduced to 1 valid track; "
                         "overriding to single layout"
@@ -548,7 +548,7 @@ class PodcastReframeEngine(IReframeEngine):
                 # Reject same-person panels before any render path.
                 top_tid = grid_decision.get("top_track_id")
                 bottom_tid = grid_decision.get("bottom_track_id")
-                if top_tid is not None and bottom_tid is not None and int(top_tid) == int(bottom_tid):
+                if top_tid is not None and bottom_tid is not None and str(top_tid) == str(bottom_tid):
                     logger.info(
                         "podcast_reframe: autogrid rejected duplicate panel identity "
                         f"(P{top_tid})"
@@ -1387,6 +1387,131 @@ class PodcastReframeEngine(IReframeEngine):
                     return True
         return False
 
+    def _check_screen_plus_cam_layout(
+        self,
+        tracked_data: dict,
+        width: int,
+        height: int,
+        speaker_result: Optional[ActiveSpeakerResult] = None,
+    ) -> Optional[dict]:
+        """Detect Screen + Cam layout (TradingView screencast, gaming facecam, webinar, slides).
+
+        Triggers when:
+        1. 1 primary person/webcam is detected (or 2 where one is dominant at edge/corner).
+        2. The person is located towards a side or corner (e.g. left sidebar or right PiP).
+        3. The rest of the screen represents main content (chart, game, slides).
+
+        Returns a 2-panel grid decision:
+        - Top panel: Main screen/chart/gameplay.
+        - Bottom panel: Facecam/person.
+        - Dynamic detect-then-switch layout_events (single hook -> double split).
+        """
+        position_targets = {
+            int(pos_id): float(x)
+            for pos_id, x in (tracked_data.get("position_targets") or {}).items()
+        }
+        position_profiles = self._normalise_position_profiles(
+            tracked_data.get("position_target_profiles") or {}
+        )
+
+        if not position_targets:
+            return None
+
+        # Find which position matches a streamer / trader / presenter camera:
+        candidate_cams = []
+        for cand_pid in position_targets.keys():
+            cand_prof = position_profiles.get(cand_pid, {})
+            cand_cx = float(position_targets.get(cand_pid, width / 2))
+            cand_cy = float(cand_prof.get("y", height / 2))
+            cand_pw = float(cand_prof.get("width", width * 0.25))
+            cand_ph = float(cand_prof.get("height", height * 0.40))
+
+            # Streamer or trader webcam criteria:
+            # 1. Extreme edge streamer (e.g. trading chart or gameplay overlay):
+            #    cand_cx < 0.18*W or cand_cx > 0.82*W, with width < 0.25*W
+            # 2. Corner PiP box (top-left, top-right, bottom-left, bottom-right):
+            #    (cand_cx < 0.25*W or cand_cx > 0.75*W) and (cand_cy > 0.65*H or cand_cy < 0.35*H)
+            #    and small relative width < 0.25*W and height < 0.40*H
+            is_extreme_edge = (cand_cx < width * 0.18 or cand_cx > width * 0.82) and cand_pw < width * 0.25
+            is_corner_pip = (
+                (cand_cx < width * 0.25 or cand_cx > width * 0.75)
+                and (cand_cy > height * 0.65 or cand_cy < height * 0.35)
+                and cand_pw < width * 0.25
+                and cand_ph < height * 0.40
+            )
+
+            if is_extreme_edge or is_corner_pip:
+                c_left = cand_cx < width * 0.5
+                c_right = cand_cx >= width * 0.5
+                candidate_cams.append((cand_pid, cand_cx, cand_cy, cand_pw, cand_ph, c_left, c_right, is_corner_pip))
+
+        if not candidate_cams:
+            return None
+
+        # Prioritize PiP corner webcam, then edge placement
+        candidate_cams.sort(key=lambda item: (item[7], item[5] or item[6]), reverse=True)
+        pid, cx, cy, pw, ph, is_left_side, is_right_side, is_small_pip = candidate_cams[0]
+
+        # ── 1. Calculate Screen Crop (Top Panel) ──
+        # In 9:16 target (1080x1920), each panel is 1080x960 (aspect ratio 9:8 = 1.125)
+        screen_crop_h = height
+        screen_crop_w = int(screen_crop_h * 9 / 8)
+        if screen_crop_w > width:
+            screen_crop_w = width
+            screen_crop_h = int(width * 8 / 9)
+
+        if is_left_side:
+            # Person on left (Image 1: TradingView): Screen/chart is on the right
+            screen_crop_x = max(0, width - screen_crop_w)
+            screen_crop_y = max(0, (height - screen_crop_h) // 2)
+        else:
+            # Person on right (Image 5: Gaming): Screen/gameplay is on the left
+            screen_crop_x = 0
+            screen_crop_y = max(0, (height - screen_crop_h) // 2)
+
+        # ── 2. Calculate Cam/Person Crop (Bottom Panel) ──
+        # Frame around person with good headroom
+        cam_crop_h = min(height, max(int(ph * 1.5), int(height * 0.65)))
+        cam_crop_w = int(cam_crop_h * 9 / 8)
+        if cam_crop_w > width:
+            cam_crop_w = width
+            cam_crop_h = int(width * 8 / 9)
+
+        cam_crop_x = max(0, min(width - cam_crop_w, int(cx - cam_crop_w / 2)))
+        cam_crop_y = max(0, min(height - cam_crop_h, int(cy - cam_crop_h * 0.38)))
+
+        # ── 3. Dynamic Detect-Then-Switch Layout Events ──
+        sample_timestamps = tracked_data.get("sample_timestamps") or []
+        clip_dur = sample_timestamps[-1] if sample_timestamps else 15.0
+        switch_time = 1.8 if clip_dur >= 5.0 else 0.0
+
+        layout_events = [
+            {"time": 0.0, "layout": "single"},
+            {"time": switch_time, "layout": "double"},
+        ]
+
+        return {
+            "layout": "double",
+            "sub_layout": "screen_cam",
+            "person_count": 1,
+            "top_track_id": "screen",
+            "bottom_track_id": pid,
+            "top_crop_x": screen_crop_x,
+            "top_crop_y": screen_crop_y,
+            "top_crop_w": screen_crop_w,
+            "top_crop_h": screen_crop_h,
+            "bottom_crop_x": cam_crop_x,
+            "bottom_crop_y": cam_crop_y,
+            "bottom_crop_w": cam_crop_w,
+            "bottom_crop_h": cam_crop_h,
+            "crop_w": screen_crop_w,
+            "crop_h": screen_crop_h,
+            "top_x": screen_crop_x + screen_crop_w // 2,
+            "bottom_x": cam_crop_x + cam_crop_w // 2,
+            "layout_events": layout_events,
+            "grid_zoom": 1.0,
+        }
+
     def _decide_autogrid_layout(
         self,
         tracked_data: dict,
@@ -1398,16 +1523,12 @@ class PodcastReframeEngine(IReframeEngine):
         """Detect-then-switch auto grid (v2 — robust distinct & no head crop).
 
         Rules:
-          1. 1 person visible  -> single layout (no grid forced)
+          1. 1 person visible  -> check Screen + Cam layout (Trading/Gaming); otherwise single layout
           2. >=2 distinct people co-visible in same frame -> double layout after hysteresis
           3. Grid panels MUST have different identities (position_id AND track_id)
           4. Layout timeline always starts single at t=0, then switches to double when
-             second person enters and is confirmed via GRID_ENTER_SAMPLES. Transisi
-             single -> grid menggunakan style yang dipilih user (handled in renderer).
+             confirmed via GRID_ENTER_SAMPLES.
           5. Face crop Y uses headroom-aware _clamp_grid_y to avoid top clipping.
-
-        Raw face counts not sufficient: duplicate detections / ByteTrack re-IDs
-        must still count as one seat via stable position clustering.
         """
         per_frame_tracked = tracked_data.get("per_frame_tracked") or []
         track_to_position = {
@@ -1422,46 +1543,102 @@ class PodcastReframeEngine(IReframeEngine):
             tracked_data.get("position_target_profiles") or {}
         )
         person_count = int(tracked_data.get("person_count") or 0)
-        # Auto Grid counts visual people, not audio speakers. Diarization may
-        # report one speaker while several people are visible (for example one
-        # host talking while a guest listens). Speaker data is used below only
-        # to choose panel ordering; it must not veto a visually valid grid.
 
-        if not per_frame_tracked or person_count < 2 or len(position_targets) < 2:
-            return {"layout": "single", "person_count": person_count}
+        # Check if there is an unambiguous corner webcam streamer (Gaming / Screencast),
+        # even if YOLO detected an in-game character or background subject (person_count == 2).
+        # Multi-person group scenes (>=3 people like gazebo/roundtable) are preserved as multi-person.
+        is_corner_streamer = (
+            len(position_targets) <= 2
+            and any(
+                prof.get("width", width) < width * 0.25
+                and prof.get("height", height) < height * 0.40
+                and (
+                    position_targets.get(p_id, width / 2) < width * 0.18
+                    or position_targets.get(p_id, width / 2) > width * 0.82
+                    or (
+                        (position_targets.get(p_id, width / 2) < width * 0.25 or position_targets.get(p_id, width / 2) > width * 0.75)
+                        and (prof.get("y", height / 2) > height * 0.65 or prof.get("y", height / 2) < height * 0.35)
+                    )
+                )
+                for p_id, prof in position_profiles.items()
+            )
+        )
+
+        if is_corner_streamer or not per_frame_tracked or person_count < 2 or len(position_targets) < 2:
+            # Check for Screen + Cam layout (Trading, Screencast, Gaming, Webinar)
+            screen_cam = self._check_screen_plus_cam_layout(
+                tracked_data=tracked_data,
+                width=width,
+                height=height,
+                speaker_result=speaker_result,
+            )
+            if screen_cam:
+                logger.info("podcast_reframe: detected Screen + Cam layout (Trading / Gaming / Screencast)")
+                return screen_cam
+            if not per_frame_tracked or person_count < 2 or len(position_targets) < 2:
+                return {"layout": "single", "person_count": person_count}
 
         # ─── Person-first / detect-then-switch path ───────────────────────
         # Never force grid from t=0. Use stable seat positions so ByteTrack
         # re-IDs of the same person still count as one seat. Require co-visible
         # samples before switching, so timeline always starts single.
         if skip_ghost_pair_check and len(position_targets) >= 2:
-            # Generate candidate seat pairs. Do not reject a pair merely because
-            # one tracker ID appeared near both seats at different timestamps:
-            # re-identification and cross-seat movement make that historical
-            # signal unreliable. The frame-level validation below is the hard
-            # gate and requires two distinct physical detections concurrently.
             candidate_pairs = []
             position_ids = sorted(position_targets.keys())
-            # Generate pairs sorted by separation (descending)
+
+            # Find active speaker position ID if available for multi-person prioritization
+            active_spk_pos: Optional[int] = None
+            recent_spk_pos: Optional[int] = None
+            if speaker_result and speaker_result.per_frame_speaker:
+                frames_sorted = sorted(speaker_result.per_frame_speaker.keys())
+                if frames_sorted:
+                    last_f = frames_sorted[-1]
+                    active_spk_id = speaker_result.per_frame_speaker[last_f]
+                    active_spk_pos = track_to_position.get(active_spk_id)
+                    # Find a recent different speaker (conversational partner)
+                    for f in reversed(frames_sorted):
+                        spk = speaker_result.per_frame_speaker[f]
+                        if spk != active_spk_id and track_to_position.get(spk) != active_spk_pos:
+                            recent_spk_pos = track_to_position.get(spk)
+                            break
+            elif speaker_result and speaker_result.dominant_speaker_id is not None:
+                active_spk_pos = track_to_position.get(int(speaker_result.dominant_speaker_id))
+
+            # Generate candidate seat pairs scored by separation + active speaker priority
             for i, pid_a in enumerate(position_ids):
                 for pid_b in position_ids[i + 1:]:
                     if pid_a == pid_b:
                         continue
                     sep = abs(position_targets[pid_a] - position_targets[pid_b])
                     if sep >= width * self.MIN_SEPARATION_RATIO:
-                        candidate_pairs.append((pid_a, pid_b, sep))
+                        score = sep
+                        if active_spk_pos is not None:
+                            if pid_a == active_spk_pos or pid_b == active_spk_pos:
+                                score += width * 2.0  # Big boost for active speaker
+                            if recent_spk_pos is not None and (pid_a == recent_spk_pos or pid_b == recent_spk_pos):
+                                score += width * 1.0  # Dialogue partner boost
+                        candidate_pairs.append((pid_a, pid_b, sep, score))
             
-            # Sort by separation descending
-            candidate_pairs.sort(key=lambda x: x[2], reverse=True)
+            # Sort by priority score descending
+            candidate_pairs.sort(key=lambda x: x[3], reverse=True)
             
             if not candidate_pairs:
+                # Check for Screen + Cam fallback
+                screen_cam = self._check_screen_plus_cam_layout(
+                    tracked_data=tracked_data,
+                    width=width,
+                    height=height,
+                    speaker_result=speaker_result,
+                )
+                if screen_cam:
+                    return screen_cam
                 logger.info(
                     "podcast_reframe: person-first grid skipped (no sufficiently separated seat pairs)"
                 )
                 return {"layout": "single", "person_count": person_count}
             
             # Try each candidate pair until one succeeds
-            for first_id, second_id, best_separation in candidate_pairs:
+            for first_id, second_id, best_separation, _ in candidate_pairs:
                 logger.info(
                     f"podcast_reframe: trying grid pair P{first_id}/P{second_id} (sep={best_separation:.0f}px)"
                 )
@@ -1499,7 +1676,7 @@ class PodcastReframeEngine(IReframeEngine):
                     continue  # Try next pair
                 pf = position_profiles.get(first_id, {})
                 ps = position_profiles.get(second_id, {})
-                if pf and ps and self._is_ghost_pair(pf, ps, width, height):
+                if not skip_ghost_pair_check and pf and ps and self._is_ghost_pair(pf, ps, width, height):
                     logger.info(f"podcast_reframe: person-first ghost pair rejected P{first_id}/P{second_id}")
                     continue  # Try next pair
 
@@ -2973,6 +3150,10 @@ class PodcastReframeEngine(IReframeEngine):
 
         crop_w = int(decision["crop_w"])
         crop_h = int(decision["crop_h"])
+        top_crop_w = int(decision.get("top_crop_w") or crop_w)
+        top_crop_h = int(decision.get("top_crop_h") or crop_h)
+        bottom_crop_w = int(decision.get("bottom_crop_w") or crop_w)
+        bottom_crop_h = int(decision.get("bottom_crop_h") or crop_h)
         top_x = int(decision["top_crop_x"])
         bottom_x = int(decision["bottom_crop_x"])
         top_y = int(decision["top_crop_y"])
@@ -3000,13 +3181,13 @@ class PodcastReframeEngine(IReframeEngine):
                 f"fps={fps_value:.6f},settb=AVTB,setpts=PTS-STARTPTS[single]"
             ),
             (
-                f"[top_src]crop={crop_w}:{crop_h}:{top_x}:{top_y},"
+                f"[top_src]crop={top_crop_w}:{top_crop_h}:{top_x}:{top_y},"
                 f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
                 f"unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
                 "format=yuv420p,setsar=1[top]"
             ),
             (
-                f"[bottom_src]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},"
+                f"[bottom_src]crop={bottom_crop_w}:{bottom_crop_h}:{bottom_x}:{bottom_y},"
                 f"scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
                 f"unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
                 "format=yuv420p,setsar=1[bottom]"
@@ -3398,8 +3579,13 @@ class PodcastReframeEngine(IReframeEngine):
             crop_w = width
             crop_h = int(width * 8 / 9)
 
-        top_x = int(decision.get("top_crop_x", self._clamp_x(top_center_x, crop_w, width)))
-        bottom_x = int(decision.get("bottom_crop_x", self._clamp_x(bottom_center_x, crop_w, width)))
+        top_crop_w = int(decision.get("top_crop_w") or crop_w)
+        top_crop_h = int(decision.get("top_crop_h") or crop_h)
+        bottom_crop_w = int(decision.get("bottom_crop_w") or crop_w)
+        bottom_crop_h = int(decision.get("bottom_crop_h") or crop_h)
+
+        top_x = int(decision.get("top_crop_x", self._clamp_x(top_center_x, top_crop_w, width)))
+        bottom_x = int(decision.get("bottom_crop_x", self._clamp_x(bottom_center_x, bottom_crop_w, width)))
 
         # Center each person independently; front/back rows can have different Y.
         fallback_y = max(0, (height - crop_h) // 2)
@@ -3408,8 +3594,8 @@ class PodcastReframeEngine(IReframeEngine):
 
         vf = (
             f"setpts=PTS-STARTPTS,split=2[top][bot];"
-            f"[top]crop={crop_w}:{crop_h}:{top_x}:{top_y},scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p[t];"
-            f"[bot]crop={crop_w}:{crop_h}:{bottom_x}:{bottom_y},scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p[b];"
+            f"[top]crop={top_crop_w}:{top_crop_h}:{top_x}:{top_y},scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p[t];"
+            f"[bot]crop={bottom_crop_w}:{bottom_crop_h}:{bottom_x}:{bottom_y},scale=1080:{self.GRID_PANEL_HEIGHT}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,format=yuv420p[b];"
             f"[t][b]vstack=inputs=2,setsar=1[vout]"
         )
 

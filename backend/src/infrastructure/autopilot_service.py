@@ -246,7 +246,9 @@ class AutopilotService:
 
         Returns: (can_run: bool, reason: str, info: dict)
         """
-        today_date = dt.date.today().isoformat()
+        # Always calculate daily run date based on WIB (Asia/Jakarta, UTC+7)
+        now_wib = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))
+        today_date = now_wib.date().isoformat()
         settings = self.get_settings(user_id)
         max_daily = settings.get("max_daily_videos", 1)
 
@@ -475,8 +477,8 @@ class AutopilotService:
         video_url = candidate["url"]
         video_title = candidate["title"]
         virality_score = candidate.get("virality_score", 75.0)
-        today_date = dt.date.today().isoformat()
-
+        now_wib = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))
+        today_date = now_wib.date().isoformat()
         logger.info(
             f"autopilot: Selected video '{video_title}' ({video_url}) score={virality_score} for user {user_id} via {trigger_source}"
         )

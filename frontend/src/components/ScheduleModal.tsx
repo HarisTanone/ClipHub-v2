@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Calendar,
   Clock,
@@ -9,24 +9,33 @@ import {
   Check,
   CheckSquare,
   Square,
-  Layers,
   Sparkles,
   AlertCircle,
   Share2,
   Tag,
   Hash,
   Bot,
-  Video,
   MessageSquare,
+  Music,
+  Volume2,
+  VolumeX,
+  Play,
+  Pause,
+  Flame,
+  ShieldCheck,
+  UserCheck,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Textarea, Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
-import { API_BASE, getToken } from "@/lib/api";
+import { API_BASE, getToken, socialApi, type TikTokMusicTrack } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
-// ─── Custom Platform Icons ───────────────────────────────────────────────────
+// ─── Custom Platform Icons (Pure SVG) ─────────────────────────────────────────
 
 function PlatformIcon({ type, className = "h-4 w-4" }: { type: string; className?: string }) {
   const norm = (type || "").toLowerCase().trim();
@@ -116,19 +125,7 @@ async function fetchSocialAccounts(): Promise<any[]> {
   return data.docs || [];
 }
 
-async function publishClip(payload: {
-  jobId: string;
-  clipRank?: number;
-  videoSource?: string;
-  accountIds: string[];
-  caption: string;
-  title: string;
-  topic?: string;
-  tags?: string[];
-  isAiGenerated?: boolean;
-  scheduleAt: string;
-  type: string;
-}): Promise<any> {
+async function publishClip(payload: any): Promise<any> {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/social/publish`, {
     method: "POST",
@@ -156,17 +153,11 @@ async function checkPublishStatus(): Promise<{ gdrive_configured: boolean; repli
 interface ScheduleModalProps {
   open: boolean;
   onClose: () => void;
-  /** Job ID */
   jobId: string;
-  /** Clip rank number (optional for video generator) */
   clipRank?: number;
-  /** Video source type */
   videoSource?: "clip" | "video_generator";
-  /** Pre-filled caption from clip */
   defaultCaption?: string;
-  /** Clip hook text / Video title */
   hookText?: string;
-  /** Custom label for header */
   itemLabel?: string;
 }
 
@@ -183,6 +174,9 @@ export function ScheduleModal({
   itemLabel,
 }: ScheduleModalProps) {
   const toast = useToast();
+  const { user, isSuperadmin } = useAuth();
+  const canPublish = isSuperadmin || user?.role !== "viewer";
+
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>("all");
@@ -200,6 +194,17 @@ export function ScheduleModal({
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [status, setStatus] = useState<{ gdrive_configured: boolean; repliz_configured: boolean } | null>(null);
 
+  // ── TikTok Music Auto-Pick & Volume States ──
+  const [autoPickMusic, setAutoPickMusic] = useState(false);
+  const [musicTracks, setMusicTracks] = useState<TikTokMusicTrack[]>([]);
+  const [selectedTrack, setSelectedTrack] = useState<TikTokMusicTrack | null>(null);
+  const [loadingMusic, setLoadingMusic] = useState(false);
+  const [showAllMusic, setShowAllMusic] = useState(false);
+  const [originalVolume, setOriginalVolume] = useState<number>(100);
+  const [musicVolume, setMusicVolume] = useState<number>(0);
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
   useEffect(() => {
     if (open) {
       setTitle(hookText || (clipRank ? `Clip #${clipRank}` : "AI Generated Video"));
@@ -210,7 +215,6 @@ export function ScheduleModal({
           setAccounts(accs);
           setStatus(st);
           const connected = accs.filter((a: any) => a.isConnected);
-          // Default select the first connected account if none selected
           if (connected.length > 0 && selectedAccountIds.length === 0) {
             const firstId = connected[0]._id || connected[0].id;
             if (firstId) setSelectedAccountIds([firstId]);
@@ -224,7 +228,6 @@ export function ScheduleModal({
     return accounts.filter((a) => a.isConnected);
   }, [accounts]);
 
-  // Unique platform types available
   const availablePlatforms = useMemo(() => {
     const set = new Set<string>();
     connectedAccounts.forEach((a) => {
@@ -233,13 +236,11 @@ export function ScheduleModal({
     return Array.from(set);
   }, [connectedAccounts]);
 
-  // Filtered accounts for display
   const displayedAccounts = useMemo(() => {
     if (activeFilter === "all") return connectedAccounts;
     return connectedAccounts.filter((a) => (a.type || "").toLowerCase().trim() === activeFilter);
   }, [connectedAccounts, activeFilter]);
 
-  // Check if selected accounts include Threads or YouTube
   const hasThreadsSelected = useMemo(() => {
     return connectedAccounts.some(
       (a) => (a.type || "").toLowerCase().trim() === "threads" && selectedAccountIds.includes(a._id || a.id)
@@ -251,6 +252,43 @@ export function ScheduleModal({
       (a) => (a.type || "").toLowerCase().trim() === "youtube" && selectedAccountIds.includes(a._id || a.id)
     );
   }, [connectedAccounts, selectedAccountIds]);
+
+  const hasTikTokSelected = useMemo(() => {
+    return connectedAccounts.some(
+      (a) => (a.type || "").toLowerCase().trim() === "tiktok" && selectedAccountIds.includes(a._id || a.id)
+    );
+  }, [connectedAccounts, selectedAccountIds]);
+
+  // Load TikTok trending music when TikTok account is selected and music feature is active
+  useEffect(() => {
+    if (open && hasTikTokSelected && autoPickMusic && musicTracks.length === 0) {
+      setLoadingMusic(true);
+      socialApi
+        .getTikTokTrendingMusic({ country_code: "ID", limit: 30 })
+        .then((res) => {
+          if (res && res.tracks && res.tracks.length > 0) {
+            setMusicTracks(res.tracks);
+            if (!selectedTrack) {
+              setSelectedTrack(res.tracks[0]);
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn("Failed to load TikTok music:", err);
+        })
+        .finally(() => setLoadingMusic(false));
+    }
+  }, [open, hasTikTokSelected, autoPickMusic, musicTracks.length, selectedTrack]);
+
+  // Clean up audio player when modal is closed
+  useEffect(() => {
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -265,7 +303,7 @@ export function ScheduleModal({
   }
 
   function handleSelectAll() {
-    const displayedIds = displayedAccounts.map((a) => a._id || a.id).filter(Boolean);
+    const displayedIds = displayedAccounts.map((a) => a._id || a.id);
     const allSelected = displayedIds.every((id) => selectedAccountIds.includes(id));
     if (allSelected) {
       setSelectedAccountIds((prev) => prev.filter((id) => !displayedIds.includes(id)));
@@ -274,25 +312,64 @@ export function ScheduleModal({
     }
   }
 
-  function getScheduleAt(): string {
-    if (scheduleMode === "now") {
-      // Schedule 2 minutes in future so Repliz background worker fetches media & posts immediately
-      const d = new Date(Date.now() + 2 * 60 * 1000);
-      return d.toISOString();
+  function handleToggleAutoPickMusic(checked: boolean) {
+    setAutoPickMusic(checked);
+    if (checked) {
+      setMusicVolume(0); // Default 0% music volume as requested
+      if (musicTracks.length > 0 && !selectedTrack) {
+        setSelectedTrack(musicTracks[0]);
+      }
+    } else {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        setPlayingTrackId(null);
+      }
     }
-    if (!scheduleDate || !scheduleTime) return "";
-    return new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString();
+  }
+
+  function togglePlayDemo(track: TikTokMusicTrack, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    if (playingTrackId === track.id) {
+      audioPlayerRef.current?.pause();
+      setPlayingTrackId(null);
+    } else {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      const audio = new Audio(track.url);
+      audio.volume = Math.max(0.2, musicVolume > 0 ? musicVolume / 100 : 0.7);
+      audio.onended = () => setPlayingTrackId(null);
+      audio.onerror = () => {
+        toast.error("Gagal memuat audio demo lagu");
+        setPlayingTrackId(null);
+      };
+      audio.play().catch(() => setPlayingTrackId(null));
+      audioPlayerRef.current = audio;
+      setPlayingTrackId(track.id);
+    }
   }
 
   async function handlePost() {
     if (selectedAccountIds.length === 0) {
-      toast.error("Pilih minimal 1 akun untuk memposting.");
+      toast.error("Pilih minimal satu akun sosial media.");
       return;
     }
-    const scheduleAt = getScheduleAt();
-    if (!scheduleAt) {
-      toast.error("Tentukan tanggal dan waktu jadwal posting.");
-      return;
+
+    let scheduleAt: string;
+    if (scheduleMode === "now") {
+      const future = new Date(Date.now() + 2 * 60 * 1000);
+      scheduleAt = future.toISOString();
+    } else {
+      if (!scheduleDate || !scheduleTime) {
+        toast.error("Pilih tanggal dan jam untuk menjadwalkan postingan.");
+        return;
+      }
+      const scheduled = new Date(`${scheduleDate}T${scheduleTime}:00`);
+      if (isNaN(scheduled.getTime())) {
+        toast.error("Format tanggal atau jam tidak valid.");
+        return;
+      }
+      scheduleAt = scheduled.toISOString();
     }
 
     const tags = tagsStr
@@ -301,7 +378,7 @@ export function ScheduleModal({
 
     setPosting(true);
     try {
-      const payload = {
+      const payload: any = {
         jobId,
         clipRank: clipRank || 1,
         videoSource: videoSource || (clipRank !== undefined ? "clip" : "video_generator"),
@@ -314,6 +391,19 @@ export function ScheduleModal({
         isAiGenerated,
         scheduleAt,
         type: postType,
+        isAutoAddMusic: hasTikTokSelected && autoPickMusic,
+        music:
+          hasTikTokSelected && autoPickMusic && selectedTrack
+            ? {
+                id: selectedTrack.id,
+                name: selectedTrack.name,
+                artist: selectedTrack.artist,
+                thumbnail: selectedTrack.thumbnail,
+                url: selectedTrack.url,
+              }
+            : undefined,
+        originalVolume: originalVolume / 100,
+        musicVolume: hasTikTokSelected && autoPickMusic ? musicVolume / 100 : 0,
       };
 
       const result = await publishClip(payload);
@@ -331,10 +421,11 @@ export function ScheduleModal({
     }
   }
 
-
   const isAllDisplayedSelected =
     displayedAccounts.length > 0 &&
     displayedAccounts.every((a) => selectedAccountIds.includes(a._id || a.id));
+
+  const visibleMusicTracks = showAllMusic ? musicTracks : musicTracks.slice(0, 4);
 
   return (
     <div
@@ -342,24 +433,33 @@ export function ScheduleModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg bg-zinc-900 border border-zinc-800/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh] sm:max-h-[90vh]"
+        className="w-full max-w-3xl bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b border-zinc-800/80 bg-zinc-900/50">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800 bg-zinc-900/60 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-9 w-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
               <Share2 className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5 flex-wrap">
-                <span>Post to Social Media</span>
-                <span className="text-[11px] font-normal text-zinc-400">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm font-bold text-zinc-100">Post to Social Media</h2>
+                <span className="text-xs font-medium text-zinc-400">
                   {itemLabel || (clipRank ? `(Clip #${clipRank})` : `(AI Generated Video)`)}
                 </span>
-              </h2>
+                {isSuperadmin ? (
+                  <Badge variant="info" size="sm" className="gap-1 border-cyan-500/30 bg-cyan-500/10 text-cyan-300 py-0 text-[10px]">
+                    <ShieldCheck className="h-2.5 w-2.5" /> Superadmin
+                  </Badge>
+                ) : user?.role === "editor" ? (
+                  <Badge variant="default" size="sm" className="gap-1 border-blue-500/30 bg-blue-500/10 text-blue-300 py-0 text-[10px]">
+                    <UserCheck className="h-2.5 w-2.5" /> Editor
+                  </Badge>
+                ) : null}
+              </div>
               <p className="text-[11px] text-zinc-500 truncate">
-                Pilih satu atau beberapa akun untuk publikasi video
+                Pilih akun sosial media dan atur opsi publikasi konten
               </p>
             </div>
           </div>
@@ -373,7 +473,7 @@ export function ScheduleModal({
         </div>
 
         {/* Body */}
-        <div className="px-4 py-3 sm:px-6 sm:py-4 space-y-3.5 sm:space-y-4 overflow-y-auto flex-1 custom-scrollbar">
+        <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
           {/* Status Warnings */}
           {status && !status.repliz_configured && (
             <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300">
@@ -384,389 +484,576 @@ export function ScheduleModal({
             </div>
           )}
 
-          {status && !status.gdrive_configured && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300">
-              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              <p className="text-xs leading-relaxed">
-                Google Drive belum dikonfigurasi. Video membutuhkan Cloud Storage Google Drive untuk direct link publik ke Repliz API.
-              </p>
+          {!canPublish && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-zinc-700 bg-zinc-950/60 p-3 text-zinc-400 text-xs">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-zinc-400" />
+              <p>Peran akun Anda saat ini adalah Viewer (Read-only). Publikasi video hanya dapat dilakukan oleh Editor atau Superadmin.</p>
             </div>
           )}
 
-          {/* Account Selector Section */}
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-semibold text-zinc-200">
-                  Pilih Akun Platform
-                </label>
-                {selectedAccountIds.length > 0 && (
-                  <Badge variant="success" size="sm" className="px-2 py-0 text-[10px] font-semibold">
-                    {selectedAccountIds.length} Akun Terpilih
-                  </Badge>
-                )}
-              </div>
+          {/* 2-Column Responsive Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* ── LEFT COLUMN: Accounts & Timing (5 cols) ── */}
+            <div className="lg:col-span-5 space-y-4">
+              {/* Account Selector */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold text-zinc-200">
+                      Pilih Akun Platform
+                    </label>
+                    {selectedAccountIds.length > 0 && (
+                      <Badge variant="success" size="sm" className="px-2 py-0 text-[10px] font-semibold">
+                        {selectedAccountIds.length} Terpilih
+                      </Badge>
+                    )}
+                  </div>
 
-              {connectedAccounts.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleSelectAll}
-                  className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
-                >
-                  {isAllDisplayedSelected ? (
-                    <>
-                      <Square className="h-3.5 w-3.5" /> Hapus Pilihan
-                    </>
-                  ) : (
-                    <>
-                      <CheckSquare className="h-3.5 w-3.5" /> Pilih Semua ({displayedAccounts.length})
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-
-            {/* Platform Filter Pills */}
-            {availablePlatforms.length > 1 && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-                <button
-                  type="button"
-                  onClick={() => setActiveFilter("all")}
-                  className={cn(
-                    "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap",
-                    activeFilter === "all"
-                      ? "bg-zinc-100 text-zinc-950 font-semibold"
-                      : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
-                  )}
-                >
-                  Semua ({connectedAccounts.length})
-                </button>
-                {availablePlatforms.map((plat) => {
-                  const count = connectedAccounts.filter((a) => (a.type || "").toLowerCase().trim() === plat).length;
-                  return (
+                  {connectedAccounts.length > 0 && (
                     <button
-                      key={plat}
                       type="button"
-                      onClick={() => setActiveFilter(plat)}
+                      onClick={handleSelectAll}
+                      className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
+                    >
+                      {isAllDisplayedSelected ? (
+                        <>
+                          <Square className="h-3.5 w-3.5" /> Hapus Semua
+                        </>
+                      ) : (
+                        <>
+                          <CheckSquare className="h-3.5 w-3.5" /> Pilih Semua ({displayedAccounts.length})
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Pills */}
+                {availablePlatforms.length > 1 && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilter("all")}
                       className={cn(
-                        "px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all whitespace-nowrap capitalize",
-                        activeFilter === plat
+                        "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap",
+                        activeFilter === "all"
                           ? "bg-zinc-100 text-zinc-950 font-semibold"
                           : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
                       )}
                     >
-                      <PlatformIcon type={plat} className="h-3 w-3" />
-                      {plat} ({count})
+                      Semua ({connectedAccounts.length})
                     </button>
-                  );
-                })}
-              </div>
-            )}
+                    {availablePlatforms.map((plat) => {
+                      const count = connectedAccounts.filter((a) => (a.type || "").toLowerCase().trim() === plat).length;
+                      return (
+                        <button
+                          key={plat}
+                          type="button"
+                          onClick={() => setActiveFilter(plat)}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all whitespace-nowrap capitalize",
+                            activeFilter === plat
+                              ? "bg-zinc-100 text-zinc-950 font-semibold"
+                              : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+                          )}
+                        >
+                          <PlatformIcon type={plat} className="h-3 w-3" />
+                          {plat} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
-            {/* Account List */}
-            {loadingAccounts ? (
-              <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500">
-                <RefreshCw className="h-4 w-4 animate-spin text-emerald-400" />
-                <span>Memuat daftar akun sosial media...</span>
-              </div>
-            ) : connectedAccounts.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-6 text-center">
-                <Share2 className="h-6 w-6 text-zinc-600 mx-auto mb-2" />
-                <p className="text-xs text-zinc-400 font-medium">Belum ada akun sosial media yang terhubung.</p>
-                <p className="text-[11px] text-zinc-600 mt-1">
-                  Koneksikan akun TikTok, YouTube, Instagram, dsb di menu Social Accounts terlebih dahulu.
-                </p>
-              </div>
-            ) : displayedAccounts.length === 0 ? (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 text-center text-xs text-zinc-500">
-                Tidak ada akun untuk platform <span className="capitalize text-zinc-300 font-medium">{activeFilter}</span>.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
-                {displayedAccounts.map((acc) => {
-                  const accId = acc._id || acc.id;
-                  const isSelected = selectedAccountIds.includes(accId);
-                  const platBadgeColor = getPlatformColorClass(acc.type);
+                {/* Account Cards */}
+                {loadingAccounts ? (
+                  <div className="flex items-center justify-center gap-2 py-6 text-xs text-zinc-500">
+                    <RefreshCw className="h-4 w-4 animate-spin text-emerald-400" />
+                    <span>Memuat daftar akun...</span>
+                  </div>
+                ) : connectedAccounts.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4 text-center">
+                    <Share2 className="h-5 w-5 text-zinc-600 mx-auto mb-1.5" />
+                    <p className="text-xs text-zinc-400 font-medium">Belum ada akun sosial media yang terhubung.</p>
+                    <p className="text-[10px] text-zinc-600 mt-1">Koneksikan di menu Social Accounts.</p>
+                  </div>
+                ) : displayedAccounts.length === 0 ? (
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 text-center text-xs text-zinc-500">
+                    Tidak ada akun untuk platform <span className="capitalize text-zinc-300 font-medium">{activeFilter}</span>.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
+                    {displayedAccounts.map((acc) => {
+                      const accId = acc._id || acc.id;
+                      const isSelected = selectedAccountIds.includes(accId);
+                      const platBadgeColor = getPlatformColorClass(acc.type);
 
-                  return (
-                    <div
-                      key={accId}
-                      onClick={() => toggleAccount(accId)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === " " || e.key === "Enter") {
-                          e.preventDefault();
-                          toggleAccount(accId);
-                        }
-                      }}
-                      className={cn(
-                        "group relative w-full flex items-center gap-3.5 rounded-xl border p-2.5 sm:p-3 text-left cursor-pointer transition-all duration-150 select-none",
-                        isSelected
-                          ? "border-emerald-500/60 bg-emerald-500/10 shadow-[0_0_15px_rgba(16,185,129,0.08)] ring-1 ring-emerald-500/30"
-                          : "border-zinc-800/80 bg-zinc-950/50 hover:border-zinc-700 hover:bg-zinc-900/60"
-                      )}
-                    >
-                      {/* Custom Checkbox */}
-                      <div
-                        className={cn(
-                          "h-5 w-5 rounded-md flex items-center justify-center border transition-all shrink-0",
-                          isSelected
-                            ? "bg-emerald-500 border-emerald-500 text-zinc-950 shadow-sm"
-                            : "border-zinc-700 bg-zinc-900/80 text-transparent group-hover:border-zinc-500"
-                        )}
-                      >
-                        <Check className="h-3.5 w-3.5 stroke-[3]" />
-                      </div>
-
-                      {/* Avatar / Platform Icon */}
-                      <div className="relative shrink-0">
-                        {acc.picture ? (
-                          <img
-                            src={acc.picture}
-                            alt=""
-                            className="h-8 w-8 rounded-full object-cover border border-zinc-700 bg-zinc-800"
-                          />
-                        ) : (
-                          <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
-                            <PlatformIcon type={acc.type} className="h-4 w-4" />
-                          </div>
-                        )}
-                        <div className="absolute -bottom-1 -right-1 rounded-full p-0.5 bg-zinc-900 border border-zinc-800">
-                          <PlatformIcon type={acc.type} className="h-2.5 w-2.5" />
-                        </div>
-                      </div>
-
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs font-semibold text-zinc-100 truncate">
-                            {acc.name || "Akun Sosial"}
-                          </p>
-                          <span
+                      return (
+                        <div
+                          key={accId}
+                          onClick={() => toggleAccount(accId)}
+                          role="button"
+                          tabIndex={0}
+                          className={cn(
+                            "group relative w-full flex items-center gap-3 rounded-xl border p-2.5 text-left cursor-pointer transition-all duration-150 select-none",
+                            isSelected
+                              ? "border-emerald-500/60 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                              : "border-zinc-800 bg-zinc-950/50 hover:border-zinc-700 hover:bg-zinc-900/60"
+                          )}
+                        >
+                          <div
                             className={cn(
-                              "text-[10px] font-medium px-2 py-0.5 rounded-full border capitalize tracking-wider",
-                              platBadgeColor
+                              "h-4 w-4 rounded flex items-center justify-center border transition-all shrink-0",
+                              isSelected
+                                ? "bg-emerald-500 border-emerald-500 text-zinc-950 shadow-sm"
+                                : "border-zinc-700 bg-zinc-900/80 text-transparent group-hover:border-zinc-500"
                             )}
                           >
-                            {acc.type}
-                          </span>
+                            <Check className="h-3 w-3 stroke-[3]" />
+                          </div>
+
+                          <div className="relative shrink-0">
+                            {acc.picture ? (
+                              <img
+                                src={acc.picture}
+                                alt=""
+                                className="h-7 w-7 rounded-full object-cover border border-zinc-700 bg-zinc-800"
+                              />
+                            ) : (
+                              <div className="h-7 w-7 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                                <PlatformIcon type={acc.type} className="h-3.5 w-3.5" />
+                              </div>
+                            )}
+                            <div className="absolute -bottom-1 -right-1 rounded-full p-0.5 bg-zinc-900 border border-zinc-800">
+                              <PlatformIcon type={acc.type} className="h-2.5 w-2.5" />
+                            </div>
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs font-semibold text-zinc-100 truncate">
+                                {acc.name || "Akun Sosial"}
+                              </p>
+                              <span className={cn("text-[9px] font-medium px-1.5 py-0.2 rounded border capitalize", platBadgeColor)}>
+                                {acc.type}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-zinc-500 truncate">
+                              {acc.username ? `@${acc.username}` : `ID: ${accId.slice(-6)}`}
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-[11px] text-zinc-500 truncate mt-0.5">
-                          {acc.username ? `@${acc.username}` : `ID: ${accId.slice(-6)}`}
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Timing */}
+              <div className="space-y-2 pt-1 border-t border-zinc-800/80">
+                <label className="text-xs font-semibold text-zinc-200">Waktu Publikasi</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleMode("now")}
+                    className={cn(
+                      "flex items-center justify-center gap-2 rounded-xl border p-2 text-xs font-medium transition-all",
+                      scheduleMode === "now"
+                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400 font-semibold shadow-sm"
+                        : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                    )}
+                  >
+                    <Send className="h-3.5 w-3.5" /> Post Sekarang
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleMode("later")}
+                    className={cn(
+                      "flex items-center justify-center gap-2 rounded-xl border p-2 text-xs font-medium transition-all",
+                      scheduleMode === "later"
+                        ? "border-blue-500/60 bg-blue-500/10 text-blue-400 font-semibold shadow-sm"
+                        : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                    )}
+                  >
+                    <Clock className="h-3.5 w-3.5" /> Jadwalkan
+                  </button>
+                </div>
+
+                {scheduleMode === "later" && (
+                  <div className="grid grid-cols-2 gap-2 pt-1 animate-in fade-in duration-150">
+                    <div>
+                      <label className="text-[10px] font-medium text-zinc-400 mb-1 block">Tanggal</label>
+                      <input
+                        type="date"
+                        min={new Date().toISOString().split("T")[0]}
+                        value={scheduleDate}
+                        onChange={(e) => setScheduleDate(e.target.value)}
+                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-zinc-400 mb-1 block">Jam (WIB)</label>
+                      <input
+                        type="time"
+                        value={scheduleTime}
+                        onChange={(e) => setScheduleTime(e.target.value)}
+                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Post Type & AI Toggle */}
+              <div className="space-y-2 pt-1 border-t border-zinc-800/80">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="w-1/2 space-y-1">
+                    <label className="text-xs font-semibold text-zinc-200">Tipe Post</label>
+                    <select
+                      value={postType}
+                      onChange={(e: any) => setPostType(e.target.value)}
+                      className="w-full h-8 rounded-xl border border-zinc-800 bg-zinc-950/60 px-2.5 text-xs text-zinc-200 outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="video">Video</option>
+                      <option value="reel">Reel / Shorts</option>
+                      <option value="story">Story</option>
+                    </select>
+                  </div>
+                  <div className="w-1/2 pt-4">
+                    <label className="flex items-center gap-2 text-[11px] text-zinc-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isAiGenerated}
+                        onChange={(e) => setIsAiGenerated(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0 cursor-pointer"
+                      />
+                      <span>Tandai Konten AI</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── RIGHT COLUMN: Content & TikTok Viral Music (7 cols) ── */}
+            <div className="lg:col-span-7 space-y-3.5">
+              {/* Title & Caption */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-zinc-200">Judul Konten</label>
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Judul video / YouTube Title..."
+                  className="text-xs bg-zinc-950/60 border-zinc-800 rounded-xl h-8"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-zinc-200">Caption Post</label>
+                  {hookText && (
+                    <button
+                      type="button"
+                      onClick={() => setCaption((prev) => (prev ? `${hookText}\n\n${prev}` : hookText))}
+                      className="text-[10px] font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                    >
+                      <Sparkles className="h-3 w-3" /> Masukkan Hook
+                    </button>
+                  )}
+                </div>
+                <Textarea
+                  value={caption}
+                  onChange={(e) => setCaption(e.target.value)}
+                  rows={3}
+                  placeholder="Tulis caption atau deskripsi untuk video ini..."
+                  className="text-xs bg-zinc-950/60 border-zinc-800 focus:border-emerald-500/50 rounded-xl"
+                />
+              </div>
+
+              {/* Platform Addons */}
+              {(hasThreadsSelected || hasYouTubeSelected) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 rounded-xl border border-zinc-800 bg-zinc-950/40">
+                  {hasThreadsSelected && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-medium text-zinc-300 flex items-center gap-1">
+                        <Tag className="h-3 w-3 text-zinc-400" /> Threads Topic
+                      </label>
+                      <Input
+                        value={topic}
+                        onChange={(e) => setTopic(e.target.value)}
+                        placeholder="AI, Podcast"
+                        className="text-xs bg-zinc-900 border-zinc-800 rounded-lg h-7"
+                      />
+                    </div>
+                  )}
+                  {hasYouTubeSelected && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-medium text-zinc-300 flex items-center gap-1">
+                        <Hash className="h-3 w-3 text-red-400" /> YouTube Tags
+                      </label>
+                      <Input
+                        value={tagsStr}
+                        onChange={(e) => setTagsStr(e.target.value)}
+                        placeholder="Shorts, Viral (pisah koma)"
+                        className="text-xs bg-zinc-900 border-zinc-800 rounded-lg h-7"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── TIKTOK VIRAL MUSIC SUITE ── */}
+              {hasTikTokSelected && (
+                <div className="rounded-xl border border-pink-500/30 bg-gradient-to-b from-pink-950/20 via-zinc-950/60 to-zinc-950/60 p-3.5 space-y-3 shadow-sm">
+                  {/* Header & Toggle */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-7 w-7 rounded-lg bg-pink-500/15 border border-pink-500/30 flex items-center justify-center text-pink-400 shrink-0">
+                        <Flame className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                          <span>Auto Pick Lagu Viral TikTok</span>
+                          <span className="text-[10px] font-semibold text-pink-400 bg-pink-500/10 px-1.5 py-0.2 rounded border border-pink-500/20">
+                            Viral Addon
+                          </span>
+                        </h3>
+                        <p className="text-[10px] text-zinc-400">
+                          Sematkan lagu trending TikTok untuk mendongkrak algoritma FYP
                         </p>
                       </div>
-
-                      {/* Selection Tag */}
-                      {isSelected && (
-                        <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-md shrink-0">
-                          Selected
-                        </span>
-                      )}
                     </div>
-                  );
-                })}
+
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={autoPickMusic}
+                      onClick={() => handleToggleAutoPickMusic(!autoPickMusic)}
+                      className={cn(
+                        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                        autoPickMusic ? "bg-pink-500" : "bg-zinc-800"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out",
+                          autoPickMusic ? "translate-x-4" : "translate-x-0"
+                        )}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Body when Auto Pick is active */}
+                  {autoPickMusic && (
+                    <div className="space-y-3 pt-1 animate-in fade-in duration-200">
+                      {/* Track Selection Cards */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1">
+                            <Music className="h-3 w-3 text-pink-400" /> Rekomendasi Lagu Trending Teratas
+                          </label>
+                          {musicTracks.length > 4 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowAllMusic(!showAllMusic)}
+                              className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-0.5"
+                            >
+                              {showAllMusic ? (
+                                <>
+                                  Tutup <ChevronUp className="h-3 w-3" />
+                                </>
+                              ) : (
+                                <>
+                                  Lihat Lainnya ({musicTracks.length}) <ChevronDown className="h-3 w-3" />
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+
+                        {loadingMusic ? (
+                          <div className="flex items-center justify-center gap-2 py-4 text-xs text-zinc-500">
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin text-pink-400" />
+                            <span>Mengambil data lagu viral TikTok dari Repliz...</span>
+                          </div>
+                        ) : musicTracks.length === 0 ? (
+                          <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-900/60 text-center text-xs text-zinc-500">
+                            Sedang memuat data lagu trending...
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 gap-1.5 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
+                            {visibleMusicTracks.map((track) => {
+                              const isSelected = selectedTrack?.id === track.id;
+                              const isPlaying = playingTrackId === track.id;
+
+                              return (
+                                <div
+                                  key={track.id}
+                                  onClick={() => setSelectedTrack(track)}
+                                  className={cn(
+                                    "flex items-center justify-between p-2 rounded-lg border text-left cursor-pointer transition-all duration-150",
+                                    isSelected
+                                      ? "border-pink-500/60 bg-pink-500/10 ring-1 ring-pink-500/30"
+                                      : "border-zinc-800/80 bg-zinc-900/50 hover:border-zinc-700"
+                                  )}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    {/* Thumbnail & Rank Badge */}
+                                    <div className="relative shrink-0">
+                                      {track.thumbnail ? (
+                                        <img
+                                          src={track.thumbnail}
+                                          alt=""
+                                          className="h-8 w-8 rounded-md object-cover border border-zinc-700 bg-zinc-800"
+                                        />
+                                      ) : (
+                                        <div className="h-8 w-8 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center text-pink-400">
+                                          <Music className="h-4 w-4" />
+                                        </div>
+                                      )}
+                                      <span className="absolute -top-1 -left-1 text-[8px] font-bold bg-pink-600 text-white rounded px-1">
+                                        #{track.rank}
+                                      </span>
+                                    </div>
+
+                                    {/* Track Info */}
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-zinc-100 truncate">
+                                        {track.name}
+                                      </p>
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-[10px] text-zinc-400 truncate max-w-[110px]">
+                                          {track.artist}
+                                        </span>
+                                        <span className="text-[9px] text-pink-400 bg-pink-950/60 px-1 py-0.2 rounded border border-pink-500/20 truncate">
+                                          {track.usage_label}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Play/Pause Demo & Selection */}
+                                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => togglePlayDemo(track, e)}
+                                      className={cn(
+                                        "h-7 w-7 rounded-full flex items-center justify-center transition-colors border",
+                                        isPlaying
+                                          ? "bg-pink-500 text-zinc-950 border-pink-400 shadow-sm"
+                                          : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-700"
+                                      )}
+                                      title={isPlaying ? "Jeda demo lagu" : "Dengarkan demo lagu"}
+                                    >
+                                      {isPlaying ? (
+                                        <Pause className="h-3 w-3 fill-current" />
+                                      ) : (
+                                        <Play className="h-3 w-3 fill-current ml-0.5" />
+                                      )}
+                                    </button>
+
+                                    <div
+                                      className={cn(
+                                        "h-4 w-4 rounded-full border flex items-center justify-center",
+                                        isSelected
+                                          ? "border-pink-500 bg-pink-500 text-zinc-950"
+                                          : "border-zinc-700"
+                                      )}
+                                    >
+                                      {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-zinc-950" />}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Dual Volume Sliders */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80">
+                        {/* 1. Original Video Volume */}
+                        <div className="space-y-1.5 p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-zinc-300 flex items-center gap-1">
+                              <Volume2 className="h-3.5 w-3.5 text-emerald-400" />
+                              Suara Asli Video
+                            </span>
+                            <span className="font-mono text-emerald-400 font-bold">{originalVolume}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={originalVolume}
+                            onChange={(e) => setOriginalVolume(Number(e.target.value))}
+                            className="w-full accent-emerald-500 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
+                          />
+                          <p className="text-[9px] text-zinc-500">Volume suara dialog pembicara asli</p>
+                        </div>
+
+                        {/* 2. TikTok Music Overlay Volume */}
+                        <div className="space-y-1.5 p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-zinc-300 flex items-center gap-1">
+                              <Music className="h-3.5 w-3.5 text-pink-400" />
+                              Volume Musik TikTok
+                            </span>
+                            <span className="font-mono text-pink-400 font-bold">{musicVolume}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={musicVolume}
+                            onChange={(e) => setMusicVolume(Number(e.target.value))}
+                            className="w-full accent-pink-500 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
+                          />
+                          <p className="text-[9px] text-zinc-500">
+                            {musicVolume === 0
+                              ? "Volume 0% tetap menautkan algoritma viral TikTok tanpa mengubah audio video."
+                              : `Musik akan dimixing di latar belakang dengan volume ${musicVolume}%.`}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* First Reply Option */}
+              <div className="space-y-1 p-2.5 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+                    <MessageSquare className="h-3 w-3 text-blue-400" />
+                    <span>Komentar Pertama Otomatis (First Reply)</span>
+                  </label>
+                  <span className="text-[9px] text-zinc-500">Opsional</span>
+                </div>
+                <Input
+                  value={firstReply}
+                  onChange={(e) => setFirstReply(e.target.value)}
+                  placeholder="Link info lengkap & promo ada di bio!"
+                  className="text-xs bg-zinc-900 border-zinc-800 focus:border-blue-500/50 rounded-lg h-7"
+                />
               </div>
-            )}
-          </div>
-
-          {/* Title & Post Type */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-            <div className="sm:col-span-2 space-y-1">
-              <label className="text-xs font-semibold text-zinc-200">Judul Konten</label>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Judul video / YouTube Title..."
-                className="text-xs bg-zinc-950/60 border-zinc-800 rounded-xl"
-              />
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-zinc-200">Tipe Post</label>
-              <select
-                value={postType}
-                onChange={(e: any) => setPostType(e.target.value)}
-                className="w-full h-9 rounded-xl border border-zinc-800 bg-zinc-950/60 px-2.5 text-xs text-zinc-200 outline-none focus:border-emerald-500/50"
-              >
-                <option value="video">Video (Standard)</option>
-                <option value="reel">Reel / Shorts</option>
-                <option value="story">Story</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Caption Box */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-zinc-200">
-                Caption Post
-              </label>
-              {hookText && (
-                <button
-                  type="button"
-                  onClick={() => setCaption((prev) => (prev ? `${hookText}\n\n${prev}` : hookText))}
-                  className="text-[10px] font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
-                >
-                  <Sparkles className="h-3 w-3" /> Masukkan Hook
-                </button>
-              )}
-            </div>
-            <Textarea
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              rows={3}
-              placeholder="Tulis caption atau deskripsi untuk video ini..."
-              className="text-xs bg-zinc-950/60 border-zinc-800 focus:border-emerald-500/50 rounded-xl"
-            />
-            <div className="flex items-center justify-between text-[10px] text-zinc-500 px-1">
-              <span>Caption akan diterapkan ke semua akun yang dipilih.</span>
-              <span>{caption.length} karakter</span>
-            </div>
-          </div>
-
-          {/* Platform Specific Addons */}
-          {(hasThreadsSelected || hasYouTubeSelected) && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
-              {hasThreadsSelected && (
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-zinc-300 flex items-center gap-1">
-                    <Tag className="h-3 w-3 text-zinc-400" /> Threads Topic
-                  </label>
-                  <Input
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    placeholder="e.g. Technology, AI, Podcast"
-                    className="text-xs bg-zinc-900 border-zinc-800 rounded-lg h-8"
-                  />
-                </div>
-              )}
-              {hasYouTubeSelected && (
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-zinc-300 flex items-center gap-1">
-                    <Hash className="h-3 w-3 text-red-400" /> YouTube Tags
-                  </label>
-                  <Input
-                    value={tagsStr}
-                    onChange={(e) => setTagsStr(e.target.value)}
-                    placeholder="Shorts, Viral, Podcast (pisah koma)"
-                    className="text-xs bg-zinc-900 border-zinc-800 rounded-lg h-8"
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Auto First Comment (Repliz Replies Feature) */}
-          <div className="space-y-1.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                <MessageSquare className="h-3.5 w-3.5 text-blue-400" />
-                <span>Komentar Pertama Otomatis (First Reply)</span>
-              </label>
-              <span className="text-[10px] text-zinc-500 font-mono">Opsional</span>
-            </div>
-            <Input
-              value={firstReply}
-              onChange={(e) => setFirstReply(e.target.value)}
-              placeholder="e.g. Link info lengkap & promo ada di deskripsi/bio!"
-              className="text-xs bg-zinc-900 border-zinc-800 focus:border-blue-500/50 rounded-lg h-8"
-            />
-            <p className="text-[10px] text-zinc-500">
-              Repliz akan otomatis memposting komentar ini segera setelah video tayang di media sosial.
-            </p>
-          </div>
-
-          {/* Schedule Timing */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-200">Waktu Publikasi</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setScheduleMode("now")}
-                className={cn(
-                  "flex items-center justify-center gap-2 rounded-xl border p-2.5 text-xs font-medium transition-all",
-                  scheduleMode === "now"
-                    ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400 font-semibold shadow-sm"
-                    : "border-zinc-800/80 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                )}
-              >
-                <Send className="h-3.5 w-3.5" /> Post Sekarang
-              </button>
-              <button
-                type="button"
-                onClick={() => setScheduleMode("later")}
-                className={cn(
-                  "flex items-center justify-center gap-2 rounded-xl border p-2.5 text-xs font-medium transition-all",
-                  scheduleMode === "later"
-                    ? "border-blue-500/60 bg-blue-500/10 text-blue-400 font-semibold shadow-sm"
-                    : "border-zinc-800/80 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                )}
-              >
-                <Clock className="h-3.5 w-3.5" /> Jadwalkan Nanti
-              </button>
-            </div>
-
-            {scheduleMode === "later" && (
-              <div className="grid grid-cols-2 gap-2.5 pt-1 animate-in fade-in duration-150">
-                <div>
-                  <label className="text-[10px] font-medium text-zinc-400 mb-1 block">
-                    Pilih Tanggal
-                  </label>
-                  <input
-                    type="date"
-                    min={new Date().toISOString().split("T")[0]}
-                    value={scheduleDate}
-                    onChange={(e) => setScheduleDate(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-medium text-zinc-400 mb-1 block">
-                    Pilih Jam
-                  </label>
-                  <input
-                    type="time"
-                    value={scheduleTime}
-                    onChange={(e) => setScheduleTime(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* AI Generated Badge Option */}
-          <div className="flex items-center justify-between p-2.5 rounded-xl border border-zinc-800 bg-zinc-950/40 text-xs">
-            <div className="flex items-center gap-2 text-zinc-300">
-              <Bot className="h-4 w-4 text-emerald-400" />
-              <span>Tandai sebagai Konten AI (Repliz isAiGenerated)</span>
-            </div>
-            <input
-              type="checkbox"
-              checked={isAiGenerated}
-              onChange={(e) => setIsAiGenerated(e.target.checked)}
-              className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0 cursor-pointer"
-            />
-          </div>
-
-          {/* Storage Notice */}
-          <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-2.5 flex items-center gap-2.5 text-[11px] text-zinc-400">
-            <Upload className="h-4 w-4 text-emerald-400 shrink-0" />
-            <span>
-              Video di-upload ke Cloud Storage 1x dan dijadwalkan otomatis ke akun media sosial via Repliz API.
-            </span>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-3.5 border-t border-zinc-800/80 bg-zinc-900/50 flex-wrap gap-2">
+        <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-800 bg-zinc-900/60 shrink-0 flex-wrap gap-2">
           <div className="text-xs text-zinc-400">
             {selectedAccountIds.length > 0 ? (
               <span>
                 <strong className="text-zinc-100">{selectedAccountIds.length}</strong> akun dipilih
+                {autoPickMusic && selectedTrack && (
+                  <span className="ml-2 text-pink-400 font-medium text-[11px]">
+                    Lagu: {selectedTrack.name} ({musicVolume}%)
+                  </span>
+                )}
               </span>
             ) : (
-              <span className="text-amber-400 text-[11px]">Pilih minimal 1 akun</span>
+              <span className="text-amber-400 text-xs">Pilih minimal 1 akun sosial media</span>
             )}
           </div>
 
@@ -785,6 +1072,7 @@ export function ScheduleModal({
               onClick={handlePost}
               loading={posting}
               disabled={
+                !canPublish ||
                 selectedAccountIds.length === 0 ||
                 (scheduleMode === "later" && (!scheduleDate || !scheduleTime)) ||
                 (status !== null && !status.repliz_configured)
@@ -793,7 +1081,7 @@ export function ScheduleModal({
               icon={scheduleMode === "now" ? <Send className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
             >
               {posting
-                ? `Memposting (${selectedAccountIds.length} akun)...`
+                ? `Memproses (${selectedAccountIds.length} akun)...`
                 : scheduleMode === "now"
                 ? selectedAccountIds.length > 1
                   ? `Post ke ${selectedAccountIds.length} Akun`

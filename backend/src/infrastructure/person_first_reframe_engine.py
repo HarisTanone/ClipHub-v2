@@ -242,10 +242,9 @@ class PersonFirstReframeEngine(IReframeEngine):
 
         self._log_speaker_summary(speaker_result, tracked_data, fps, total_frames)
 
-        # Step 5: Auto Grid. Count distinct co-visible visual identities from
-        # the combined body+head model. Audio speaker count only helps choose
-        # the active panel and must not hide a visible listener.
-        if autogrid and person_count >= 2:
+        # Step 5: Auto Grid. Supports both multi-speaker (>=2 persons) and
+        # Screen + Cam layout (1 person + presentation/chart/gameplay).
+        if autogrid:
             grid_result = self._try_auto_grid(
                 video_path, output_path, width, height, fps, total_frames,
                 tracked_data, speaker_result, transition_style, transition_duration,
@@ -628,15 +627,15 @@ class PersonFirstReframeEngine(IReframeEngine):
 
         top_id = decision.get("top_track_id")
         bottom_id = decision.get("bottom_track_id")
-        if top_id is None or bottom_id is None or int(top_id) == int(bottom_id):
+        if top_id is None or bottom_id is None or str(top_id) == str(bottom_id):
             logger.info("person_first_reframe: grid rejected (non-distinct panel identities)")
             return None
 
         # Must be 2 distinct persons in same frame at some timestamp — detect then switch spec
         per_frame_positions_raw = []
         t2p = decision.get("track_to_position") or tracked_data.get("track_to_position") or {}
-        # validation is already done inside _decide_autogrid_layout, extra safety:
-        if isinstance(t2p, dict) and len({int(top_id), int(bottom_id)}) < 2:
+        # validation is already done inside _decide_autogrid_layout, extra safety for multi-person:
+        if decision.get("sub_layout") != "screen_cam" and isinstance(t2p, dict) and len({int(top_id), int(bottom_id)}) < 2:
             return None
 
         decision["transition_style"] = transition_style

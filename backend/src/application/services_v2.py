@@ -1084,6 +1084,7 @@ class V2PipelineService:
                 clips, clips_with_words, creative_direction, output_dir,
                 transcript_source=transcript_result.source,
             )
+            clips_data["reframe_data"] = reframe_data
             clips_data["broll_enabled"] = job.broll_enabled
             clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", True))
             clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", True))
@@ -1501,6 +1502,7 @@ class V2PipelineService:
         # Full-frame splice stays as-is. Additionally place image/video assets
         # behind the person in the top ~50% only. Runs on base/reframed (or
         # already-spliced) clip so both effects can coexist on different times.
+        reframe_data = (job.clips_data or {}).get("reframe_data")
         if (
             settings.TOP_OVERLAY_ENABLED
             and job.target_aspect_ratio == "9:16"
@@ -1513,6 +1515,7 @@ class V2PipelineService:
                 output_dir=output_dir,
                 trim_results=trim_results,
                 clips_with_words=getattr(self, "_last_clips_with_words", None),
+                reframe_data=reframe_data,
             )
 
         # ─── Step 10.8: Object image+text overlay (noun → stock photo card) ──
@@ -1546,12 +1549,14 @@ class V2PipelineService:
         output_dir: str,
         trim_results: dict[int, bool],
         clips_with_words: dict[int, list[dict]] | None = None,
+        reframe_data: dict | None = None,
     ) -> None:
         """Bake top-region behind-person overlays. Additive to full-frame splice.
 
         Blocks full-frame splice time ranges — person is gone there, so
         behind-person would be invisible. Tracks must use different times.
         Phrase-aware when word timestamps available.
+        Strictly suppresses behind-person overlays during active double-grid segments.
         """
         from src.infrastructure.top_behind_subject_renderer import (
             TopBehindSubjectRenderer,
@@ -1562,8 +1567,19 @@ class V2PipelineService:
         words_map = clips_with_words or {}
         renderer = TopBehindSubjectRenderer()
         applied = 0
+        ref_dict = reframe_data or (job.clips_data or {}).get("reframe_data") or {}
+
         for clip in clips:
             if not trim_results.get(clip.rank) or not clip.broll_suggestions:
+                clip.top_overlay_events = []
+                continue
+
+            clip_reframe = ref_dict.get(clip.rank) or {}
+            clip_dur = max(0.0, float(clip.end) - float(clip.start))
+
+            # Suppress all behind-person overlays if clip is completely static double-grid
+            if clip_reframe.get("layout") in ("double", "grid", "2-grid", "split") and not clip_reframe.get("layout_events"):
+                logger.info(f"[{job_id}] Top overlay suppressed for clip {clip.rank} (static double grid active)")
                 clip.top_overlay_events = []
                 continue
 
@@ -1582,7 +1598,15 @@ class V2PipelineService:
                 if has_asset or (getattr(s, "placement", "") or "") == "full_frame":
                     blocked.append((float(s.at_time), float(s.at_time) + float(s.duration)))
 
-            clip_dur = max(0.0, float(clip.end) - float(clip.start))
+            # Block times when auto-grid / double layout is active
+            # (Behind-person overlays are strictly suppressed during double-grid segments)
+            clip_layout_events = clip_reframe.get("layout_events") or []
+            for idx, ev in enumerate(clip_layout_events):
+                if ev.get("layout") in ("double", "grid", "2-grid", "split"):
+                    ev_start = float(ev.get("time", 0.0))
+                    ev_end = float(clip_layout_events[idx + 1].get("time", clip_dur)) if idx + 1 < len(clip_layout_events) else clip_dur
+                    blocked.append((ev_start, ev_end))
+
             segments = pick_top_overlay_suggestions(
                 clip.broll_suggestions,
                 max_per_clip=settings.TOP_OVERLAY_MAX_PER_CLIP,
@@ -2511,6 +2535,7 @@ class V2PipelineService:
             clip_sub_config = dict(subtitle_style_config or {})
             clip_sub_config["layout_events"] = clip_layout_events
             clip_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", True))
+            clip_sub_config["grid_position_y"] = float((subtitle_style_config or {}).get("grid_position_y") or (subtitle_style_config or {}).get("gridPositionY") or 50.0)
             if clip_reframe.get("layout"):
                 clip_sub_config["reframe_layout"] = clip_reframe.get("layout")
 
@@ -2793,6 +2818,7 @@ class V2PipelineService:
                         clip_sub_config = dict(subtitle_style_config or {})
                         clip_sub_config["layout_events"] = clip_layout_events
                         clip_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", True))
+                        clip_sub_config["grid_position_y"] = float((subtitle_style_config or {}).get("grid_position_y") or (subtitle_style_config or {}).get("gridPositionY") or 50.0)
                         if clip_reframe.get("layout"):
                             clip_sub_config["reframe_layout"] = clip_reframe.get("layout")
 

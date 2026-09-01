@@ -2,10 +2,14 @@
 
 Flow: Clip/Video output -> Google Drive (public direct link) -> Repliz Schedule API
 """
+import asyncio
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
+
+import httpx
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -41,10 +45,80 @@ class PublishRequest(BaseModel):
     firstReply: Optional[str] = ""
     isAiGenerated: bool = False
     isDraft: bool = False
+    isAutoAddMusic: bool = False
+    music: Optional[Dict[str, Any]] = None
+    originalVolume: float = 1.0
+    musicVolume: float = 0.0
     collaborators: List[str] = Field(default_factory=list)
     mentions: List[str] = Field(default_factory=list)
     targetCountries: List[str] = Field(default_factory=list)
     scheduleAt: str  # ISO 8601 UTC string
+
+
+async def mix_video_with_music(
+    video_path: str,
+    music_url: str,
+    original_vol: float = 1.0,
+    music_vol: float = 0.0,
+) -> str:
+    """Download TikTok music and mix it with video at specified relative volumes."""
+    if music_vol <= 0.0 and abs(original_vol - 1.0) < 0.01:
+        return video_path
+
+    base, ext = os.path.splitext(video_path)
+    output_path = f"{base}_mixed_{int(time.time())}{ext}"
+
+    import tempfile
+    temp_music = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    temp_music_path = temp_music.name
+    temp_music.close()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(music_url)
+            if resp.status_code == 200:
+                with open(temp_music_path, "wb") as f:
+                    f.write(resp.content)
+            else:
+                logger.warning(f"Failed to download music track from {music_url}: status={resp.status_code}")
+                return video_path
+
+        orig_vol_clamped = max(0.0, min(1.0, float(original_vol)))
+        mus_vol_clamped = max(0.0, min(1.0, float(music_vol)))
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-stream_loop", "-1", "-i", temp_music_path,
+            "-filter_complex",
+            f"[0:a]volume={orig_vol_clamped:.2f}[a0];[1:a]volume={mus_vol_clamped:.2f}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+            "-map", "0:v:0",
+            "-map", "[aout]",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0 and os.path.exists(output_path):
+            logger.info(f"Successfully mixed video with TikTok music (orig={orig_vol_clamped}, mus={mus_vol_clamped}) -> {output_path}")
+            return output_path
+        else:
+            logger.warning(f"FFmpeg audio mixing warning: {stderr.decode(errors='ignore')[:300]}")
+            return video_path
+    except Exception as e:
+        logger.error(f"Error mixing video with music: {e}")
+        return video_path
+    finally:
+        if os.path.exists(temp_music_path):
+            try:
+                os.remove(temp_music_path)
+            except Exception:
+                pass
 
 
 
@@ -183,6 +257,18 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     except Exception as e:
         logger.warning(f"Video compliance transcode fallback: {e}")
         compliant_video = video_file
+
+    # 4-music. Optionally mix TikTok background music if musicVolume > 0 and music url provided
+    if body.musicVolume > 0.0 and body.music and body.music.get("url"):
+        try:
+            compliant_video = await mix_video_with_music(
+                video_path=compliant_video,
+                music_url=body.music["url"],
+                original_vol=body.originalVolume,
+                music_vol=body.musicVolume,
+            )
+        except Exception as mix_err:
+            logger.warning(f"Failed to mix TikTok music into video: {mix_err}")
 
     # 4a. Programmatic duration and format validation check (Mandatory TikTok/Meta API requirement)
     if os.path.exists(compliant_video):
@@ -333,15 +419,15 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     additional_info = {
         "isAiGenerated": bool(body.isAiGenerated),
         "isDraft": bool(body.isDraft),
-        "isAutoAddMusic": False,
+        "isAutoAddMusic": bool(body.isAutoAddMusic),
         "collaborators": body.collaborators or [],
         "mentions": body.mentions or [],
         "music": {
-            "id": "",
-            "artist": "",
-            "name": "",
-            "thumbnail": "",
-        },
+            "id": str((body.music or {}).get("id") or ""),
+            "artist": str((body.music or {}).get("artist") or ""),
+            "name": str((body.music or {}).get("name") or ""),
+            "thumbnail": str((body.music or {}).get("thumbnail") or ""),
+        } if body.music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
         "products": [],
         "tags": tags or [],
         "targetCountries": body.targetCountries or [],

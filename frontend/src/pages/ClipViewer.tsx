@@ -15,8 +15,6 @@ import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_T
 import { jobs, API_BASE, getToken, type ClipDetailResponse } from "@/lib/api";
 import { formatDuration, cn } from "@/lib/utils";
 
-type PreviewQuality = "original" | "720" | "480" | "360" | "320";
-
 export function ClipViewer() {
   const { jobId, rank } = useParams<{ jobId: string; rank: string }>();
   const toast = useToast();
@@ -37,7 +35,6 @@ export function ClipViewer() {
   const [showSubtitles, setShowSubtitles] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
-  const [previewQuality, setPreviewQuality] = useState<PreviewQuality>("original");
 
   // Hook editing
   const [isEditingHook, setIsEditingHook] = useState(false);
@@ -269,11 +266,6 @@ export function ClipViewer() {
     finally { setIsRestyling(false); setRestyleProgress(null); }
   }
 
-  function handlePreviewQualityChange(quality: PreviewQuality) {
-    pendingSeekRef.current = videoRef.current?.currentTime ?? null;
-    setPreviewQuality(quality);
-  }
-
   if (isLoading && !clip) {
     return <div className="space-y-3"><SkeletonCard /><SkeletonCard /></div>;
   }
@@ -287,9 +279,7 @@ export function ClipViewer() {
 
   const rawUrl = clip.urls.raw ? `${API_BASE}${clip.urls.raw}` : null;
   const finalDownloadUrl = clip.urls.final ? `${API_BASE}${clip.urls.final}` : null;
-  const finalPreviewUrl = finalDownloadUrl && !showRaw
-    ? jobs.getClipFinalUrl(jobId!, clipRank, previewQuality)
-    : finalDownloadUrl;
+  const finalPreviewUrl = finalDownloadUrl;
   const versionedFinalUrl = finalPreviewUrl
     ? `${finalPreviewUrl}${finalPreviewUrl.includes("?") ? "&" : "?"}v=${videoRevision}`
     : null;
@@ -458,17 +448,12 @@ export function ClipViewer() {
                   </button>
                 ))}
               </div>
-              <QualitySelect
-                value={previewQuality}
-                onChange={handlePreviewQualityChange}
-                disabled={showRaw || !finalDownloadUrl}
-              />
             </div>
 
             {/* Action Buttons */}
             <div className="flex items-center gap-1.5 flex-wrap justify-end sm:ml-auto">
               {rawUrl && <a href={rawUrl} download><Button variant="outline" size="xs" icon={<Download className="h-3 w-3" />}>Raw</Button></a>}
-              {finalDownloadUrl && <a href={jobs.getClipFinalUrl(jobId!, clipRank, previewQuality)} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final {previewQuality === "original" ? "" : `${previewQuality}p`}</Button></a>}
+              {finalDownloadUrl && <a href={finalDownloadUrl} download><Button variant="primary" size="xs" icon={<Download className="h-3 w-3" />}>Final</Button></a>}
               {finalDownloadUrl && (
                 <Button
                   variant="outline"
@@ -861,38 +846,6 @@ function ToggleBtn({ label, active, onClick, icon, color = "emerald" }: { label:
     <button type="button" onClick={onClick} className={cn("flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition-colors", active ? activeClass : "border-zinc-800 bg-zinc-900/50 text-zinc-500")}>
       {icon}{label}
     </button>
-  );
-}
-
-function QualitySelect({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: PreviewQuality;
-  onChange: (quality: PreviewQuality) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <label className={cn(
-      "flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition-colors",
-      disabled ? "border-zinc-900 bg-zinc-950/40 text-zinc-700" : "border-zinc-800 bg-zinc-900/50 text-zinc-400"
-    )}>
-      <span>Quality</span>
-      <select
-        aria-label="Preview quality"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value as PreviewQuality)}
-        className="bg-transparent text-zinc-200 outline-none disabled:text-zinc-700"
-      >
-        <option value="original">Original</option>
-        <option value="720">720p</option>
-        <option value="480">480p</option>
-        <option value="360">360p</option>
-        <option value="320">320p</option>
-      </select>
-    </label>
   );
 }
 

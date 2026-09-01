@@ -927,12 +927,49 @@ export interface PlatformsStatusResponse {
   has_any_connected: boolean;
 }
 
+export interface TikTokMusicTrack {
+  id: string;
+  name: string;
+  artist: string;
+  thumbnail: string;
+  duration: number;
+  url: string;
+  rank: number;
+  usage_label: string;
+  is_recommended: boolean;
+}
+
+export interface TikTokMusicResponse {
+  success: boolean;
+  country_code: string;
+  date_range: string;
+  genre: string;
+  total: number;
+  tracks: TikTokMusicTrack[];
+}
+
 export const socialApi = {
   async getPlatformsStatus(): Promise<PlatformsStatusResponse> {
     return request<PlatformsStatusResponse>("/api/social/accounts/platforms-status");
   },
   async getAccounts(): Promise<{ docs: PlatformAccountInfo[] }> {
     return request("/api/social/accounts?page=1&limit=100");
+  },
+  async getTikTokTrendingMusic(params?: {
+    genre?: string;
+    country_code?: string;
+    date_range?: string;
+    limit?: number;
+    search?: string;
+  }): Promise<TikTokMusicResponse> {
+    const q = new URLSearchParams();
+    if (params?.genre) q.set("genre", params.genre);
+    if (params?.country_code) q.set("country_code", params.country_code);
+    if (params?.date_range) q.set("date_range", params.date_range);
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.search) q.set("search", params.search);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return request<TikTokMusicResponse>(`/api/social/tiktok/music${qs}`);
   },
 };
 
