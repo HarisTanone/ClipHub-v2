@@ -60,9 +60,7 @@ export function SubtitleEditor({
   const hfId = style.hf_template || defaultHfSubtitleId();
   const hfPreset = HF_SUBTITLE_STYLES.find((h) => h.id === hfId) || HF_SUBTITLE_STYLES[0];
   useGoogleFont(style.fontFamily);
-  if (style.dualStyleEnabled && style.highlightFontFamily) {
-    useGoogleFont(style.highlightFontFamily);
-  }
+  useGoogleFont(style.highlightFontFamily);
   const update = (patch: Partial<SubtitleStyle>) => onChange({ ...style, ...patch });
 
   function addHighlightWord() {

@@ -21,6 +21,7 @@ import { SectionDescription } from "@/components/reframe/SectionDescription";
 import { ImagePreviewPanel } from "@/components/reframe/ImagePreviewPanel";
 import { REFRAME_SLIDER_META, REFRAME_SECTION_DESCRIPTIONS } from "@/components/reframe/ReframeSliderMeta";
 import { AutopilotPresetPreview } from "@/components/autopilot/AutopilotPresetPreview";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { RbacManager } from "@/components/settings/RbacManager";
 import {
   StyleEditorModal,
@@ -3234,26 +3235,28 @@ export function Settings() {
 
                   {/* Visual Style Preset Selection & Live 5-Layer Preview */}
                   <Card className="p-4">
-                    <AutopilotPresetPreview
-                      selectedSlug={autopilotSettings?.preset_slug || "default"}
-                      onSelectSlug={async (slug) => {
-                        if (autopilotSettings) {
-                          const updated = { ...autopilotSettings, preset_slug: slug };
-                          setAutopilotSettings(updated);
-                          try {
-                            const res = await autopilotApi.updateSettings(updated);
-                            if (res && res.data) {
-                              setAutopilotSettings(res.data);
-                              toast.success(`Preset '${slug}' aktif & tersimpan untuk Hermes Autopilot!`);
+                    <ErrorBoundary fallbackTitle="Pratinjau Preset Hermes Autopilot">
+                      <AutopilotPresetPreview
+                        selectedSlug={autopilotSettings?.preset_slug || "default"}
+                        onSelectSlug={async (slug) => {
+                          if (autopilotSettings) {
+                            const updated = { ...autopilotSettings, preset_slug: slug };
+                            setAutopilotSettings(updated);
+                            try {
+                              const res = await autopilotApi.updateSettings(updated);
+                              if (res && res.data) {
+                                setAutopilotSettings(res.data);
+                                toast.success(`Preset '${slug}' aktif & tersimpan untuk Hermes Autopilot!`);
+                              }
+                            } catch (e: any) {
+                              console.warn("Auto-save autopilot preset failed:", e);
                             }
-                          } catch (e: any) {
-                            console.warn("Auto-save autopilot preset failed:", e);
                           }
-                        }
-                      }}
-                      presets={autopilotPresets}
-                      onOpenEditor={() => setShowStyleModal(true)}
-                    />
+                        }}
+                        presets={autopilotPresets}
+                        onOpenEditor={() => setShowStyleModal(true)}
+                      />
+                    </ErrorBoundary>
                   </Card>
 
                   {/* Social Media Target & Schedule Time */}

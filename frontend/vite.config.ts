@@ -16,6 +16,9 @@ export default defineConfig({
     host: true,
     allowedHosts: true,
   },
+  build: {
+    sourcemap: true,
+  },
   test: {
     globals: true,
     environment: 'jsdom',

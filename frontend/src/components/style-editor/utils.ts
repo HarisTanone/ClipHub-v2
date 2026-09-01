@@ -1,16 +1,20 @@
 import { useEffect } from "react";
 import { PAGINATION_PAGE_SIZE } from "./types";
 
-export function useGoogleFont(fontFamily: string) {
+export function loadGoogleFont(fontFamily?: string) {
+  if (!fontFamily || fontFamily === "monospace" || typeof document === "undefined") return;
+  const id = `gfont-${fontFamily.replace(/\s/g, "")}`;
+  if (document.getElementById(id)) return;
+  const link = document.createElement("link");
+  link.id = id;
+  link.rel = "stylesheet";
+  link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontFamily)}:wght@400;500;600;700;800;900&display=swap`;
+  document.head.appendChild(link);
+}
+
+export function useGoogleFont(fontFamily?: string) {
   useEffect(() => {
-    if (!fontFamily || fontFamily === "monospace") return;
-    const id = `gfont-${fontFamily.replace(/\s/g, "")}`;
-    if (document.getElementById(id)) return;
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontFamily)}:wght@400;500;600;700;800;900&display=swap`;
-    document.head.appendChild(link);
+    loadGoogleFont(fontFamily);
   }, [fontFamily]);
 }
 

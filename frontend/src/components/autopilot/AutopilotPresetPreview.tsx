@@ -99,14 +99,10 @@ export function AutopilotPresetPreview({
   const teStyle = useMemo(() => activePreset?.text_emphasis_style || {}, [activePreset]);
   const autopostStyle = useMemo(() => activePreset?.autopost_style || {}, [activePreset]);
 
-  // Dynamic Google Font loader
+  // Dynamic Google Font loader (unconditional top-level hooks)
   useGoogleFont(subStyle.fontFamily || "Poppins");
-  if (subStyle.dualStyleEnabled && subStyle.highlightFontFamily) {
-    useGoogleFont(subStyle.highlightFontFamily);
-  }
-  if (hookStyle.fontFamily && hookStyle.fontFamily !== subStyle.fontFamily) {
-    useGoogleFont(hookStyle.fontFamily);
-  }
+  useGoogleFont(subStyle.highlightFontFamily);
+  useGoogleFont(hookStyle.fontFamily);
 
   // Live Karaoke animation simulation cycle
   const [activeWordIndex, setActiveWordIndex] = useState(1);
