@@ -127,4 +127,12 @@ describe("HookLayer - Effect Layer Styles (Double-Render Prevention)", () => {
     expect(style.color).toBe("#FF0000");
     expect(style.textShadow).toContain("#FF0000");
   });
+
+  it("normalizes animation keys with spaces and dashes so pov stamp matches pov_stamp", () => {
+    const normalizeAnim = (anim: string) => anim.toLowerCase().replace(/[\s-]+/g, "_");
+    expect(normalizeAnim("pov stamp")).toBe("pov_stamp");
+    expect(normalizeAnim("POV Stamp")).toBe("pov_stamp");
+    expect(normalizeAnim("news viralin badge")).toBe("news_viralin_badge");
+    expect(normalizeAnim("news-viralin-badge")).toBe("news_viralin_badge");
+  });
 });

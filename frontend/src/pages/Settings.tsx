@@ -3156,7 +3156,7 @@ export function Settings() {
                           </div>
                           <p className="text-[11px] text-zinc-400 mt-0.5">
                             {autopilotSettings?.enabled
-                              ? `Berjalan otomatis setiap hari pada jam ${autopilotSettings.run_time || "08:00"} WIB`
+                              ? `Berjalan otomatis setiap hari pada jam ${autopilotSettings.run_time || "05:00"} WIB`
                               : "Otomasi nonaktif. Aktifkan sakelar untuk menjalankan pencarian dan posting harian otomatis."}
                           </p>
                         </div>
@@ -3397,7 +3397,7 @@ export function Settings() {
                         <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
                         <Input
                           type="time"
-                          value={autopilotSettings?.run_time || "08:00"}
+                          value={autopilotSettings?.run_time || "05:00"}
                           onChange={(e) => {
                             if (autopilotSettings) {
                               setAutopilotSettings({ ...autopilotSettings, run_time: e.target.value });
@@ -3458,7 +3458,7 @@ export function Settings() {
                       </div>
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-zinc-400">Jadwal Harian:</span>
-                        <span className="text-zinc-200">{autopilotSettings?.run_time || "08:00"} WIB</span>
+                        <span className="text-zinc-200">{autopilotSettings?.run_time || "05:00"} WIB</span>
                       </div>
                       {autopilotSettings?.last_video_title && (
                         <div className="pt-1 border-t border-zinc-800/80">

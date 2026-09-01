@@ -49,8 +49,9 @@ export function HookPreviewRenderer({
     : {};
 
   const posTop = `${style.positionY}%`;
+  const animKey = (style.animation || "").toLowerCase().replace(/[\s-]+/g, "_");
 
-  switch (style.animation) {
+  switch (animKey) {
     case "paper_clip_scrap": {
       const cardBg = style.boxColor || "#FEF08A";
       return (

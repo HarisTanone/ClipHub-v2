@@ -1094,7 +1094,7 @@ class SkiaHookRenderer:
         self, hook_text: str, hook_style: str = "skia_impact_badge", style_config: Optional[dict] = None
     ) -> Image.Image:
         """Generate a 1080x1920 RGBA transparent frame containing the complete Skia/FFmpeg hook."""
-        clean_key = hook_style
+        clean_key = str(hook_style or "skia_impact_badge").lower().replace(" ", "_").replace("-", "_").strip()
         if clean_key not in SKIA_HOOK_PRESETS and f"skia_{clean_key}" in SKIA_HOOK_PRESETS:
             clean_key = f"skia_{clean_key}"
         cfg = dict(SKIA_HOOK_PRESETS.get(clean_key, SKIA_HOOK_PRESETS.get("news_viralin_badge", SKIA_HOOK_PRESETS["skia_impact_badge"])))

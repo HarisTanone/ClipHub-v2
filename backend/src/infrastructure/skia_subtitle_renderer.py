@@ -62,18 +62,24 @@ class SkiaSubtitleRenderer:
             style = {}
 
         # Look up preset by ID if provided (stylePreset, preset, id, style_id)
-        preset_id = (
+        raw_preset_id = str(
             style.get("stylePreset")
             or style.get("preset")
             or style.get("id")
             or style.get("style_id")
             or "glassmorphism"
-        )
+        ).strip().lower()
+        preset_id = raw_preset_id.replace(" ", "_").replace("-", "_")
+
         base = {}
         if preset_id in SKIA_STYLES:
             base = dict(SKIA_STYLES[preset_id])
+        elif raw_preset_id in SKIA_STYLES:
+            base = dict(SKIA_STYLES[raw_preset_id])
         elif preset_id in FFMPEG_STYLES:
             base = dict(FFMPEG_STYLES[preset_id])
+        elif raw_preset_id in FFMPEG_STYLES:
+            base = dict(FFMPEG_STYLES[raw_preset_id])
 
         # Default font based on preset
         preset_default_fonts = {

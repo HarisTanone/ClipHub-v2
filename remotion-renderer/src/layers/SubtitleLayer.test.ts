@@ -161,6 +161,11 @@ describe("SubtitleLayer - Page Grouping", () => {
     expect(resolveSubtitleVisualPreset({ stylePreset: "bold_yellow" })).toBe("dual_pop");
     expect(resolveSubtitleVisualPreset({ stylePreset: "word_tiles" })).toBe("word_tiles");
     expect(resolveSubtitleVisualPreset({ stylePreset: "terminal_type" })).toBe("terminal_type");
+    expect(resolveSubtitleVisualPreset({ stylePreset: "bold_impact" })).toBe("meme_impact");
+    expect(resolveSubtitleVisualPreset({ stylePreset: "bold impact" })).toBe("meme_impact");
+    expect(resolveSubtitleVisualPreset({ stylePreset: "kinetic word box" })).toBe("word_tiles");
+    expect(resolveSubtitleVisualPreset({ stylePreset: "clean editorial" })).toBe("editorial_banner");
+    expect(resolveSubtitleVisualPreset({ stylePreset: "podcast pro" })).toBe("lower_third");
   });
 });
 

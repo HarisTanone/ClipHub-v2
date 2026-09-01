@@ -153,12 +153,16 @@ def _format_preset_dict(row, is_superadmin: bool = False) -> dict:
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("")
-async def list_presets(user: CurrentUser = Depends(get_current_user)):
-    """List presets. Superadmin sees ALL presets (with owner info), others see only their own."""
+async def list_presets(
+    all_users: bool = False,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """List presets. Strictly returns current user's presets by default for multi-user isolation.
+    Superadmin can pass all_users=True to see all presets in system audit table."""
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
-        if user.is_superadmin:
+        if user.is_superadmin and all_users:
             cur.execute(
                 "SELECT p.*, u.email as owner_email, u.full_name as owner_name "
                 "FROM user_presets p LEFT JOIN users u ON p.user_id = u.id "
@@ -175,28 +179,23 @@ async def list_presets(user: CurrentUser = Depends(get_current_user)):
 
 @router.get("/{slug_or_id}")
 async def get_preset_by_slug_or_id(slug_or_id: str, user: CurrentUser = Depends(get_current_user)):
-    """Retrieve a single preset by ID or slug."""
+    """Retrieve a single preset by ID or slug strictly for the current user."""
     conn = get_dict_connection()
     try:
         cur = conn.cursor()
         is_id = slug_or_id.isdigit()
         if is_id:
-            cur.execute("SELECT * FROM user_presets WHERE id = ?", (int(slug_or_id),))
+            cur.execute("SELECT * FROM user_presets WHERE id = ? AND user_id = ?", (int(slug_or_id), user.id))
         else:
-            cur.execute("SELECT * FROM user_presets WHERE slug = ?", (slug_or_id,))
+            cur.execute("SELECT * FROM user_presets WHERE slug = ? AND user_id = ?", (slug_or_id, user.id))
         row = cur.fetchone()
         if not row:
-            # Fallback by name lookup
-            cur.execute("SELECT * FROM user_presets WHERE LOWER(name) = LOWER(?)", (slug_or_id,))
+            # Fallback by name lookup for current user
+            cur.execute("SELECT * FROM user_presets WHERE LOWER(name) = LOWER(?) AND user_id = ?", (slug_or_id, user.id))
             row = cur.fetchone()
 
         if not row:
             raise HTTPException(status_code=404, detail=f"Preset '{slug_or_id}' tidak ditemukan")
-
-        r_dict = dict(row)
-        # Access check (owner or superadmin)
-        if r_dict["user_id"] != user.id and not user.is_superadmin:
-            raise HTTPException(status_code=403, detail="Akses ditolak ke preset ini")
 
         return {
             "success": True,

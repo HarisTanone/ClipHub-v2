@@ -50,7 +50,7 @@ def publish_post(
             "title": title,
             "scheduleAt": schedule_at,
             "type": post_type,
-            "isAiGenerated": True,
+            "isAiGenerated": False,
         }
 
         # If no accountIds specified, fetch all connected accounts

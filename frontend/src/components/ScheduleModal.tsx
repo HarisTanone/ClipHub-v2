@@ -192,7 +192,7 @@ export function ScheduleModal({
   const [topic, setTopic] = useState("");
   const [tagsStr, setTagsStr] = useState("");
   const [postType, setPostType] = useState<"video" | "reel" | "story">("video");
-  const [isAiGenerated, setIsAiGenerated] = useState(true);
+  const [isAiGenerated, setIsAiGenerated] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<"now" | "later">("now");
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");

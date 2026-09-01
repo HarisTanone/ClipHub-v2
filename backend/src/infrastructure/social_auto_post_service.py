@@ -24,147 +24,88 @@ logger = logging.getLogger(__name__)
 class SocialAutoPostService:
     """Service to automatically schedule and post video clips to social media via AI and Repliz."""
 
-    DEFAULT_PEAK_HOURS = ["11:30", "15:00", "18:30", "20:30"]
+    WIB = dt.timezone(dt.timedelta(hours=7))
+    DEFAULT_PEAK_HOURS = ["07:30", "09:00", "11:30", "13:30", "15:00", "17:00", "18:30", "20:00", "21:30"]
 
     def calculate_ai_schedule_times(
         self,
         clip_count: int,
         peak_hours_str: str = "",
-        interval_hours: int = 4,
+        interval_hours: int = 2,
         start_time: Optional[dt.datetime] = None,
         same_day: bool = True,
     ) -> List[dt.datetime]:
         """Calculate smart AI scheduled posting timestamps for a series of clips.
 
-        When same_day=True (default), distributes all clips across today's active hours
-        (09:00 - 22:30) at unique, spaced-out times with organic jitter (±3-5 mins).
+        Rule:
+        - Active posting window is strictly 07:00 WIB to 22:00 WIB (07:00 AM - 10:00 PM).
+        - When processing in the morning (e.g. Hermes 05:00/06:00 AM), all generated clips
+          are scheduled on the SAME DAY across distinct, evenly-spaced hours in the 07:00 - 22:00 window.
+        - Spaced evenly with human jitter (±1.5 minutes) and minimum 15-minute gap.
+        - Returns timestamps in UTC for Repliz API compatibility.
         """
         if clip_count <= 0:
             return []
 
-        now = start_time or dt.datetime.now(dt.timezone.utc)
-        # TikTok Content Posting API requires scheduleAt to be at least 15-20 minutes in the future
-        min_start = now + dt.timedelta(minutes=20)
+        # Reference time in WIB (UTC+7)
+        if start_time:
+            now_wib = start_time if start_time.tzinfo else start_time.replace(tzinfo=dt.timezone.utc)
+            now_wib = now_wib.astimezone(self.WIB)
+        else:
+            now_wib = dt.datetime.now(self.WIB)
 
-        # Parse peak hours
-        raw_hours = [h.strip() for h in (peak_hours_str or "").split(",") if h.strip()]
-        if not raw_hours:
-            raw_hours = self.DEFAULT_PEAK_HOURS
+        # Minimum margin: TikTok & Repliz require scheduleAt to be >= 15 minutes in the future
+        min_start_wib = now_wib + dt.timedelta(minutes=15)
 
-        peak_slots = []
-        for h in raw_hours:
-            try:
-                parts = h.split(":")
-                peak_slots.append((int(parts[0]), int(parts[1]) if len(parts) > 1 else 0))
-            except Exception:
-                pass
+        target_date = now_wib.date()
+        window_start_wib = dt.datetime(target_date.year, target_date.month, target_date.day, 7, 0, tzinfo=self.WIB)
+        window_end_wib = dt.datetime(target_date.year, target_date.month, target_date.day, 22, 0, tzinfo=self.WIB)
 
-        if not peak_slots:
-            peak_slots = [(11, 30), (15, 0), (18, 30), (20, 30)]
+        # Earliest possible slot today: at least 07:00 WIB, and at least now + 15 mins
+        day_start_wib = max(window_start_wib, min_start_wib)
 
-        peak_slots.sort()
+        # If current time is already too late today (< 20 mins before 22:00 WIB), target tomorrow 07:00 - 22:00 WIB
+        if day_start_wib >= window_end_wib - dt.timedelta(minutes=20):
+            target_date = target_date + dt.timedelta(days=1)
+            window_start_wib = dt.datetime(target_date.year, target_date.month, target_date.day, 7, 0, tzinfo=self.WIB)
+            window_end_wib = dt.datetime(target_date.year, target_date.month, target_date.day, 22, 0, tzinfo=self.WIB)
+            day_start_wib = window_start_wib
 
-        if same_day:
-            # Determine target day: today, or tomorrow if current time is late at night (>= 21:30)
-            if now.hour > 21 or (now.hour == 21 and now.minute >= 30):
-                target_date = now.date() + dt.timedelta(days=1)
-                day_start = dt.datetime(target_date.year, target_date.month, target_date.day, 9, 0, tzinfo=dt.timezone.utc)
-            else:
-                target_date = now.date()
-                day_start_candidate = dt.datetime(target_date.year, target_date.month, target_date.day, 9, 0, tzinfo=dt.timezone.utc)
-                day_start = max(min_start, day_start_candidate)
+        available_minutes = (window_end_wib - day_start_wib).total_seconds() / 60.0
 
-            day_end = dt.datetime(target_date.year, target_date.month, target_date.day, 22, 30, tzinfo=dt.timezone.utc)
-            if day_end <= day_start:
-                day_end = day_start + dt.timedelta(hours=4)
+        schedule_times: List[dt.datetime] = []
 
-            # Available peak slots on target day that are >= day_start
-            available_peaks = []
-            for hour, minute in peak_slots:
-                slot = dt.datetime(target_date.year, target_date.month, target_date.day, hour, minute, tzinfo=dt.timezone.utc)
-                if slot >= day_start:
-                    available_peaks.append(slot)
-
-            schedule_times: List[dt.datetime] = []
-
-            # Case A: 1 clip -> nearest peak slot or day_start
-            if clip_count == 1:
-                base_slot = available_peaks[0] if available_peaks else day_start
-                jitter_sec = random.randint(-120, 120)
-                slot_with_jitter = max(min_start, base_slot + dt.timedelta(seconds=jitter_sec))
-                return [slot_with_jitter]
-
-            # Case B: Small number of clips that fit inside available peak slots
-            if clip_count <= len(available_peaks):
-                step = len(available_peaks) / clip_count
-                for i in range(clip_count):
-                    idx = min(len(available_peaks) - 1, int(i * step))
-                    base_slot = available_peaks[idx]
-                    jitter_sec = random.randint(-120, 120)
-                    slot_with_jitter = max(min_start, base_slot + dt.timedelta(seconds=jitter_sec))
-                    schedule_times.append(slot_with_jitter)
-                
-                # Ensure minimum 15 minutes separation
-                sorted_peaks: List[dt.datetime] = []
-                for t in sorted(schedule_times):
-                    if sorted_peaks and t < sorted_peaks[-1] + dt.timedelta(minutes=15):
-                        t = sorted_peaks[-1] + dt.timedelta(minutes=15)
-                    sorted_peaks.append(t)
-                return sorted_peaks
-
-            # Case C: Multiple clips -> spread evenly throughout the remaining day window
-            total_minutes = (day_end - day_start).total_seconds() / 60.0
-            step_minutes = max(15.0, total_minutes / float(clip_count))
+        if clip_count == 1:
+            # 1 clip: pick middle or day_start_wib
+            slot = day_start_wib + dt.timedelta(minutes=min(30, int(available_minutes / 2)))
+            schedule_times.append(min(slot, window_end_wib))
+        else:
+            # Distribute all N clips evenly across the range [day_start_wib, window_end_wib]
+            buffer_min = 20.0 if available_minutes > 60 else 5.0
+            effective_span = max(15.0 * (clip_count - 1), available_minutes - buffer_min)
+            step_minutes = effective_span / float(clip_count - 1)
 
             for i in range(clip_count):
-                base_slot = day_start + dt.timedelta(minutes=i * step_minutes)
+                offset_min = i * step_minutes
+                base_slot = day_start_wib + dt.timedelta(minutes=offset_min)
                 jitter_sec = random.randint(-90, 90)
                 slot_with_jitter = base_slot + dt.timedelta(seconds=jitter_sec)
-                slot_with_jitter = max(min_start, slot_with_jitter)
-                schedule_times.append(slot_with_jitter)
+                clamped_slot = max(day_start_wib, min(slot_with_jitter, window_end_wib))
+                schedule_times.append(clamped_slot)
 
-            # Ensure strict chronological order with at least 15 mins separation for TikTok compliance
+            # Ensure strict chronological order with at least 15 mins gap
             sorted_times: List[dt.datetime] = []
             for t in sorted(schedule_times):
                 if sorted_times and t < sorted_times[-1] + dt.timedelta(minutes=15):
                     t = sorted_times[-1] + dt.timedelta(minutes=15)
+                if t > window_end_wib:
+                    t = window_end_wib
                 sorted_times.append(t)
 
-            return sorted_times
+            schedule_times = sorted_times
 
-        # Drip distribution across multiple days
-        current_day = now.date()
-        candidate_slots: List[dt.datetime] = []
-        for day_offset in range(10):
-            target_date = current_day + dt.timedelta(days=day_offset)
-            for hour, minute in peak_slots:
-                slot = dt.datetime(
-                    year=target_date.year,
-                    month=target_date.month,
-                    day=target_date.day,
-                    hour=hour,
-                    minute=minute,
-                    tzinfo=dt.timezone.utc,
-                )
-                if slot > min_start:
-                    candidate_slots.append(slot)
-
-        schedule_times = []
-        for i in range(clip_count):
-            if i < len(candidate_slots):
-                base_slot = candidate_slots[i]
-            else:
-                last_slot = schedule_times[-1] if schedule_times else min_start
-                base_slot = last_slot + dt.timedelta(hours=interval_hours)
-
-            jitter_sec = random.randint(-300, 300)
-            slot_with_jitter = base_slot + dt.timedelta(seconds=jitter_sec)
-            if slot_with_jitter <= now:
-                slot_with_jitter = now + dt.timedelta(minutes=15 + (i * 30))
-
-            schedule_times.append(slot_with_jitter)
-
-        return schedule_times
+        # Return all scheduled times converted to UTC
+        return [t.astimezone(dt.timezone.utc) for t in schedule_times]
 
     def calculate_custom_schedule_times(
         self,
@@ -507,7 +448,7 @@ class SocialAutoPostService:
                     "medias": [media_item],
                     "meta": {"title": "", "description": "", "url": ""},
                     "additionalInfo": {
-                        "isAiGenerated": True,
+                        "isAiGenerated": False,
                         "isDraft": False,
                         "isAutoAddMusic": False,
                         "collaborators": [],
@@ -555,11 +496,16 @@ class SocialAutoPostService:
                     f"<b>Mode:</b> {schedule_mode.upper()}\n\n"
                 )
                 for rec in scheduled_records[:6]:
-                    time_display = rec['schedule_at'][:16].replace("T", " ")
                     user_tag = f" (@{rec['username']})" if rec.get('username') else ""
                     sched_tag = f" [ID: <code>{rec['schedule_id'][:8]}...</code>]" if rec.get('schedule_id') else ""
+                    try:
+                        t_utc = dt.datetime.fromisoformat(rec['schedule_at'].replace("Z", "+00:00"))
+                        t_wib = t_utc.astimezone(self.WIB)
+                        wib_str = t_wib.strftime("%H:%M WIB (%d %b)")
+                    except Exception:
+                        wib_str = rec['schedule_at'][:16].replace("T", " ")
                     msg += f"• <b>Clip #{rec['clip_rank']}</b> -> <b>{rec['platform'].upper()}</b> ({rec['account_name']}{user_tag}){sched_tag}\n"
-                    msg += f"  Time: <code>{time_display} UTC</code>\n"
+                    msg += f"  Waktu: <code>{wib_str}</code>\n"
                     msg += f"  Title: <i>{rec['title'][:40]}...</i>\n\n"
 
                 if len(scheduled_records) > 6:

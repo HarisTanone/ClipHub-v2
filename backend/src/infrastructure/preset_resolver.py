@@ -42,72 +42,69 @@ def resolve_preset(
                 if user_set and user_set["default_style_preset"]:
                     key = str(user_set["default_style_preset"]).strip()
 
-            # If still default or empty, check system default setting or find first user preset / system preset
+            # If still default or empty, check user's own latest preset in user_presets
+            if user_id is not None and (not key or key.lower() in ("default", "none")):
+                cur.execute(
+                    "SELECT * FROM user_presets WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                    (user_id,),
+                )
+                fallback_user_p = cur.fetchone()
+                if fallback_user_p:
+                    return _format_user_preset_row(fallback_user_p)
+
+            # Otherwise check system DEFAULT_STYLE_PRESET or style_presets
             if not key or key.lower() in ("default", "none"):
                 sys_default = getattr(settings, "DEFAULT_STYLE_PRESET", "")
                 if sys_default and sys_default.lower() not in ("default", "none", ""):
                     key = sys_default
                 else:
-                    # Fallback: user's latest preset or any active preset in user_presets
-                    cur.execute(
-                        "SELECT * FROM user_presets WHERE user_id = ? OR user_id = 1 ORDER BY id DESC LIMIT 1",
-                        (user_id or 1,),
-                    )
-                    fallback_user_p = cur.fetchone()
-                    if fallback_user_p:
-                        return _format_user_preset_row(fallback_user_p)
-
-                    # Otherwise search first style_presets row
                     cur.execute("SELECT * FROM style_presets ORDER BY id ASC LIMIT 1")
                     fallback_sys = cur.fetchone()
                     if fallback_sys:
                         key = str(fallback_sys["id"]).strip()
                     else:
-                        return None
+                        return _get_builtin_default_preset()
 
+        slug_norm_dash = key.strip().lower().replace(" ", "-").replace("_", "-")
+        slug_norm_under = key.strip().lower().replace(" ", "_").replace("-", "_")
 
-        # 1. Search user_presets by slug
-        query = "SELECT * FROM user_presets WHERE slug = ?"
-        params = [key]
+        row = None
+        # 1. If user_id is provided, search strictly in this user's user_presets
         if user_id is not None:
-            query += " AND (user_id = ? OR user_id = 1)"
-            params.append(user_id)
-        cur.execute(query, tuple(params))
-        row = cur.fetchone()
-
-        # 2. If not found, try by ID if numeric
-        if not row and key.isdigit():
-            query = "SELECT * FROM user_presets WHERE id = ?"
-            params = [int(key)]
-            if user_id is not None:
-                query += " AND (user_id = ? OR user_id = 1)"
-                params.append(user_id)
-            cur.execute(query, tuple(params))
-            row = cur.fetchone()
-
-        # 3. If not found, try by name (case-insensitive)
-        if not row:
-            query = "SELECT * FROM user_presets WHERE LOWER(name) = LOWER(?)"
-            params = [key]
-            if user_id is not None:
-                query += " AND (user_id = ? OR user_id = 1)"
-                params.append(user_id)
-            cur.execute(query, tuple(params))
-            row = cur.fetchone()
-
-        # 4. Fallback search without user_id filter if not found
-        if not row:
-            cur.execute(
-                "SELECT * FROM user_presets WHERE slug = ? OR (id = ? AND ? GLOB '[0-9]*') OR LOWER(name) = LOWER(?)",
-                (key, int(key) if key.isdigit() else -1, key, key),
+            query = (
+                "SELECT * FROM user_presets WHERE "
+                "(slug = ? OR slug = ? OR slug = ? OR LOWER(name) = LOWER(?)"
+                + (" OR id = ?" if key.isdigit() else "")
+                + ") AND user_id = ?"
             )
+            params = [key, slug_norm_dash, slug_norm_under, key]
+            if key.isdigit():
+                params.append(int(key))
+            params.append(user_id)
+            cur.execute(query, tuple(params))
+            row = cur.fetchone()
+        else:
+            # When user_id is None (system background caller without user context)
+            query = (
+                "SELECT * FROM user_presets WHERE "
+                "(slug = ? OR slug = ? OR slug = ? OR LOWER(name) = LOWER(?)"
+                + (" OR id = ?" if key.isdigit() else "")
+                + ") ORDER BY id DESC LIMIT 1"
+            )
+            params = [key, slug_norm_dash, slug_norm_under, key]
+            if key.isdigit():
+                params.append(int(key))
+            cur.execute(query, tuple(params))
             row = cur.fetchone()
 
         if row:
             return _format_user_preset_row(row)
 
-        # 5. Search system style_presets table
-        cur.execute("SELECT * FROM style_presets WHERE id = ? OR LOWER(name) = LOWER(?)", (key, key))
+        # 2. Search system style_presets table
+        cur.execute(
+            "SELECT * FROM style_presets WHERE id = ? OR id = ? OR id = ? OR LOWER(name) = LOWER(?)",
+            (key, slug_norm_under, slug_norm_dash, key),
+        )
         sys_row = cur.fetchone()
         if sys_row:
             s_dict = dict(sys_row)
@@ -136,6 +133,17 @@ def resolve_preset(
                 "transition_style": "cut",
                 "transition_duration": 0.35,
             }
+
+        # 3. If specified preset not found, fall back to user's own latest preset (never another user's preset)
+        if user_id is not None:
+            cur.execute(
+                "SELECT * FROM user_presets WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                (user_id,),
+            )
+            last_user_p = cur.fetchone()
+            if last_user_p:
+                logger.info(f"preset_resolver: falling back to user's own active preset '{last_user_p['name']}' ({last_user_p['slug']})")
+                return _format_user_preset_row(last_user_p)
 
         return _get_builtin_default_preset()
     except Exception as e:

@@ -151,6 +151,14 @@ async def send_clip_to_telegram(
     user: CurrentUser = Depends(get_current_user)
 ):
     """Send a specific rendered video clip to Telegram."""
+    from src.presentation.dependencies import get_job_service
+    job = await get_job_service().get_job(job_id)
+    if not job or (job.user_id and job.user_id != user.id and not user.is_superadmin):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job tidak ditemukan"
+        )
+
     result = await telegram_service.send_clip_by_rank(
         job_id=job_id,
         clip_rank=clip_rank,

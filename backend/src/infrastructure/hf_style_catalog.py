@@ -133,6 +133,34 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     if eng in ("skia", "canvaskit", "skia-python", "skia_python"):
         return "skia"
 
+    # Remotion animation / preset lists (both hooks and subtitles supported natively by Remotion)
+    remotion_presets = {
+        # Subtitle visual presets & aliases
+        "classic", "dual_pop", "neon_pulse", "meme_impact", "editorial_banner",
+        "spotlight_keyword", "lower_third", "bubble_chat", "minimal_clean",
+        "breaking_tape", "quote_box", "documentary", "caption_strip", "word_tiles",
+        "gradient_glass", "comic_burst", "terminal_type", "bold_yellow",
+        "emphasis_orange", "emphasis_green", "neon", "big_impact", "slide_clean",
+        "glow_purple", "bold_impact", "bold_impact_stroke", "hormozi_pop",
+        "classic_karaoke", "devon_clean", "clean_editorial", "podcast_pro",
+        "podcast_dialogue", "kinetic_word_box", "neon_tube", "neon_glow",
+        "gradient_fill", "cinematic_slate", "cinematic_bar", "modern_mono",
+        "tech_mono", "comic_pop", "retro_chrome", "outline_stack", "fire_emphasis",
+        # Hook animation styles & cards
+        "fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb",
+        "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer",
+        "bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse",
+        "mic_drop", "split_panel", "kinetic_stack", "glass_flash", "marker_swipe",
+        "signal_scan", "comment_reply", "search_prompt", "countdown_list",
+        "pov_stamp", "news_viralin_badge", "news_portal_pantau", "news_offset_box",
+        "brutalist_bracket", "quote_strip_tape", "paper_clip_scrap",
+        "trending_radar", "news_breaking_live",
+    }
+
+    norm_anim = anim.replace(" ", "_").replace("-", "_")
+    if norm_anim in remotion_presets:
+        return "remotion"
+
     skia_explicit = (
         "glassmorphism", "clean_editorial", "podcast_pro", "kinetic_word_box",
         "neon_tube", "gradient_fill", "cinematic_slate", "modern_mono",
@@ -140,33 +168,17 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
         "neon_glow", "gradient_pill", "comic_pop", "cyberpunk", "minimal_clean",
         "split_duotone", "impact_yellow",
     )
-    if anim in skia_explicit:
+    if anim in skia_explicit or norm_anim in skia_explicit:
         return "skia"
 
     try:
         from src.infrastructure.subtitle_styles import SKIA_STYLES, FFMPEG_STYLES
-        if anim in SKIA_STYLES:
+        if anim in SKIA_STYLES or norm_anim in SKIA_STYLES:
             return "skia"
-        if anim in FFMPEG_STYLES:
+        if anim in FFMPEG_STYLES or norm_anim in FFMPEG_STYLES:
             return "ffmpeg"
     except Exception:
         pass
-
-    # Remotion animation / preset lists
-    remotion_presets = (
-        "classic", "dual_pop", "neon_pulse", "meme_impact", "editorial_banner",
-        "spotlight_keyword", "lower_third", "bubble_chat", "minimal_clean",
-        "breaking_tape", "quote_box", "documentary", "caption_strip", "word_tiles",
-        "gradient_glass", "comic_burst", "terminal_type", "bold_yellow",
-        "emphasis_orange", "emphasis_green", "neon", "big_impact", "slide_clean",
-        "glow_purple", "fade_scale", "slide_up", "glitch", "typewriter",
-        "glitch_rgb", "shake_neon", "cinematic_reveal", "danger_bold",
-        "slide_punch_framer", "bold_slam", "podcast_lower_third", "quote_card",
-        "waveform_pulse", "mic_drop", "split_panel", "kinetic_stack",
-        "glass_flash", "marker_swipe", "signal_scan",
-    )
-    if anim in remotion_presets:
-        return "remotion"
 
     return "remotion"
 

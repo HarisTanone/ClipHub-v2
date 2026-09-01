@@ -253,9 +253,9 @@ def _ensure_preview_quality_variant(final_path: str, quality: str) -> str:
     return variant_path
 
 
-async def _check_job_ownership(job, user: CurrentUser):
-    """Verify user owns this job. Superadmin bypasses."""
-    if user.is_superadmin:
+async def _check_job_ownership(job, user: CurrentUser, allow_superadmin: bool = False):
+    """Verify user owns this job strictly unless allow_superadmin is explicitly requested."""
+    if allow_superadmin and user.is_superadmin:
         return
     if job.user_id and job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
@@ -922,6 +922,7 @@ async def list_jobs(
     status: str = None,
     limit: int = 20,
     offset: int = 0,
+    all_users: bool = False,
     service: JobService = Depends(get_job_service),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -931,8 +932,9 @@ async def list_jobs(
     - status: Filter by status (e.g. 'completed', 'failed', 'processing')
     - limit: Max results (default 20, max 100)
     - offset: Pagination offset
+    - all_users: If True and caller is superadmin, returns jobs from all users.
 
-    Superadmin sees all jobs. Regular users see only their own.
+    Default: Strict per-user isolation (every user only sees their own jobs).
     """
     from sqlalchemy import select, func, desc
     from src.infrastructure.database import JobModel, async_session
@@ -945,15 +947,15 @@ async def list_jobs(
         if status:
             query = query.where(JobModel.status == status)
 
-        # User isolation: non-superadmin only sees own jobs
-        if not user.is_superadmin:
+        # Strict user isolation: by default, each user only sees their own jobs (even superadmin)
+        if not (user.is_superadmin and all_users):
             query = query.where(JobModel.user_id == user.id)
 
         # Count total
         count_query = select(func.count()).select_from(JobModel)
         if status:
             count_query = count_query.where(JobModel.status == status)
-        if not user.is_superadmin:
+        if not (user.is_superadmin and all_users):
             count_query = count_query.where(JobModel.user_id == user.id)
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0

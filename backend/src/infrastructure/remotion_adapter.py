@@ -152,14 +152,8 @@ class RemotionAdapter(IRemotionRenderer):
         if not render_hook_text:
             logger.info(f"[Remotion] clip {clip_rank}: hookText is empty — hook overlay will not render")
 
-        # Choose composition based on style config
-        template_mode = hook_cfg.get("template_mode", "custom")
-        if template_mode == "tiktok":
-            composition_id = "TikTokComposition"
-        elif template_mode == "creative":
-            composition_id = "CreativeComposition"
-        else:
-            composition_id = "ClipComposition"
+        # Always use ClipComposition as the full-featured 5-layer composition (HookLayer, SubtitleLayer, etc.)
+        composition_id = "ClipComposition"
 
         # Build Remotion render request
         payload = {
@@ -313,12 +307,8 @@ class RemotionAdapter(IRemotionRenderer):
         if isinstance(hook_cfg, dict) and render_hook_animation:
             hook_cfg["animation"] = render_hook_animation
 
-        template_mode = hook_cfg.get("template_mode", "custom")
+        # Always use ClipComposition as the full-featured 5-layer composition (HookLayer, SubtitleLayer, etc.)
         composition_id = "ClipComposition"
-        if template_mode == "tiktok":
-            composition_id = "TikTokComposition"
-        elif template_mode == "creative":
-            composition_id = "CreativeComposition"
 
         payload = {
             "compositionId": composition_id,

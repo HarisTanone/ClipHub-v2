@@ -42,7 +42,7 @@ class AutopilotService:
                     target_account_ids TEXT NOT NULL DEFAULT '[]',
                     schedule_mode TEXT NOT NULL DEFAULT 'ai',
                     custom_schedule_time TEXT DEFAULT '',
-                    run_time TEXT NOT NULL DEFAULT '08:00',
+                    run_time TEXT NOT NULL DEFAULT '05:00',
                     min_duration_sec INTEGER NOT NULL DEFAULT 480,
                     max_duration_sec INTEGER NOT NULL DEFAULT 3600,
                     max_daily_videos INTEGER NOT NULL DEFAULT 1,
@@ -131,7 +131,7 @@ class AutopilotService:
                     "target_account_ids": [],
                     "schedule_mode": "ai",
                     "custom_schedule_time": "",
-                    "run_time": "08:00",
+                    "run_time": "05:00",
                     "min_duration_sec": 480,
                     "max_duration_sec": 3600,
                     "max_daily_videos": 1,
@@ -158,7 +158,7 @@ class AutopilotService:
                 "target_account_ids": acc_ids,
                 "schedule_mode": r.get("schedule_mode", "ai"),
                 "custom_schedule_time": r.get("custom_schedule_time") or "",
-                "run_time": r.get("run_time", "08:00"),
+                "run_time": r.get("run_time", "05:00"),
                 "min_duration_sec": r.get("min_duration_sec", 480),
                 "max_duration_sec": r.get("max_duration_sec", 3600),
                 "max_daily_videos": r.get("max_daily_videos", 1),
@@ -195,7 +195,7 @@ class AutopilotService:
                     acc_ids_str = curr.get("target_account_ids", "[]")
                 sched_mode = str(data.get("schedule_mode", curr.get("schedule_mode", "ai"))).strip()
                 custom_time = str(data.get("custom_schedule_time", curr.get("custom_schedule_time", ""))).strip()
-                run_time = str(data.get("run_time", curr.get("run_time", "08:00"))).strip()
+                run_time = str(data.get("run_time", curr.get("run_time", "05:00"))).strip()
                 min_dur = int(data.get("min_duration_sec", curr.get("min_duration_sec", 480)))
                 max_dur = int(data.get("max_duration_sec", curr.get("max_duration_sec", 3600)))
                 max_daily = 1
@@ -220,7 +220,7 @@ class AutopilotService:
                 acc_ids_str = json.dumps(acc_ids_val if isinstance(acc_ids_val, list) else [])
                 sched_mode = str(data.get("schedule_mode", "ai")).strip()
                 custom_time = str(data.get("custom_schedule_time", "")).strip()
-                run_time = str(data.get("run_time", "08:00")).strip()
+                run_time = str(data.get("run_time", "05:00")).strip()
                 min_dur = int(data.get("min_duration_sec", 480))
                 max_dur = int(data.get("max_duration_sec", 3600))
                 max_daily = 1
@@ -504,7 +504,9 @@ class AutopilotService:
             "target_aspect_ratio": "9:16",
             "style_preset": preset_slug,
             "force_reprocess": False,
-            "use_remotion": resolved_preset.get("hook_engine", "remotion") == "remotion" if resolved_preset else True,
+            "use_remotion": True,
+            "pipeline_version": "v2",
+            "hook_style": resolved_preset.get("hook_style_config", {}).get("animation") if resolved_preset else None,
             "ai_layer_enabled": True,
             # B-roll & Auto-Grid layers from resolved preset
             "broll_enabled": resolved_preset.get("broll_enabled", False) if resolved_preset else False,
@@ -695,13 +697,13 @@ class AutopilotService:
             if not bool(r_dict.get("enabled")):
                 continue
 
-            raw_run_time = str(r_dict.get("run_time") or "08:00").strip()
+            raw_run_time = str(r_dict.get("run_time") or "05:00").strip()
             # Normalize to HH:MM format
             try:
                 parts = raw_run_time.split(":")
                 norm_run_time = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
             except Exception:
-                norm_run_time = "08:00"
+                norm_run_time = "05:00"
 
             if current_hm == norm_run_time:
                 if self.is_pipeline_busy():

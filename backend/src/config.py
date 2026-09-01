@@ -462,14 +462,27 @@ class Settings(BaseSettings):
 
     @property
     def db_path(self) -> str:
-        """Extract SQLite file path from DATABASE_URL."""
+        """Extract SQLite file path from DATABASE_URL with robust path resolution."""
         url = self.DATABASE_URL
-        # Handle both sqlite+aiosqlite:///path and sqlite:///path
+        raw_path = "data/autoclip.db"
         for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
             if url.startswith(prefix):
-                return url[len(prefix):]
-        # Fallback
-        return "data/autoclip.db"
+                raw_path = url[len(prefix):]
+                break
+
+        if os.path.isabs(raw_path):
+            return raw_path
+
+        # If running from project root, check backend/data/...
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        backend_candidate = os.path.join(backend_dir, raw_path)
+        if os.path.exists(backend_candidate):
+            return backend_candidate
+
+        if os.path.exists(raw_path):
+            return os.path.abspath(raw_path)
+
+        return backend_candidate
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -69,7 +69,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const animation = config.animation || "podcast_lower_third";
+  const animation = (config.animation || "podcast_lower_third").toLowerCase().replace(/[\s-]+/g, "_");
   const duration = config.duration || 3.0;
   const fadeIn = config.fadeIn || 0.3;
   const fadeOut = config.fadeOut || 0.3;

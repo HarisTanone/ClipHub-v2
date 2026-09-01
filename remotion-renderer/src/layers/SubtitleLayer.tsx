@@ -130,12 +130,35 @@ const PRESET_ALIASES: Record<string, SubtitleVisualPreset> = {
   emphasis_green: "spotlight_keyword",
   neon: "neon_pulse",
   big_impact: "meme_impact",
+  bold_impact: "meme_impact",
+  bold_impact_stroke: "meme_impact",
+  hormozi_pop: "meme_impact",
+  devon_clean: "minimal_clean",
+  classic_karaoke: "classic",
+  clean_editorial: "editorial_banner",
+  podcast_pro: "lower_third",
+  podcast_dialogue: "lower_third",
+  kinetic_word_box: "word_tiles",
+  neon_tube: "neon_pulse",
+  neon_glow: "neon_pulse",
+  gradient_fill: "gradient_glass",
+  cinematic_slate: "documentary",
+  cinematic_bar: "caption_strip",
   slide_clean: "editorial_banner",
   glow_purple: "neon_pulse",
+  modern_mono: "terminal_type",
+  tech_mono: "terminal_type",
+  comic_pop: "comic_burst",
+  retro_chrome: "meme_impact",
+  outline_stack: "meme_impact",
+  fire_emphasis: "spotlight_keyword",
 };
 
 export const resolveSubtitleVisualPreset = (config: SubtitleConfig): SubtitleVisualPreset => {
-  const rawPreset = String(config.stylePreset || config.presetStyle || config.subtitleStyle || "").trim();
+  const rawPreset = String(config.stylePreset || config.presetStyle || config.subtitleStyle || "")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .trim();
   if (SUBTITLE_VISUAL_PRESETS.has(rawPreset as SubtitleVisualPreset)) {
     return rawPreset as SubtitleVisualPreset;
   }
@@ -177,18 +200,18 @@ export const resolveSubtitlePositionY = (config: SubtitleConfig): number => {
   const rawY = typeof config.positionY === "number" && Number.isFinite(config.positionY) ? config.positionY : null;
 
   if (posStr === "top") {
-    return rawY !== null && rawY <= 35 ? clamp(rawY, 8, 35) : 15;
+    return rawY !== null && rawY <= 35 ? clamp(rawY, 8, 35) : 18;
   }
   if (posStr === "center") {
     return rawY !== null && rawY > 35 && rawY < 65 ? clamp(rawY, 35, 65) : 50;
   }
   if (posStr === "bottom") {
-    return rawY !== null && rawY >= 65 ? clamp(rawY, 65, 94) : 82;
+    return rawY !== null && rawY >= 65 ? clamp(rawY, 65, 94) : 85;
   }
   if (rawY !== null) {
     return clamp(rawY, 8, 94);
   }
-  return 82;
+  return 85;
 };
 
 export const resolveLayoutAtTime = (
@@ -730,7 +753,7 @@ function SubtitlePage({
                   padding: presetPadding,
                   // Highlight style decorations (only if NOT dual)
                   ...(!useDual && shouldHighlight && highlightStyleType === "underline" ? { textDecoration: "underline", textDecorationColor: highlightColor, textUnderlineOffset: "4px", textDecorationThickness: "3px" } : {}),
-                  ...(!useDual && shouldHighlight && highlightStyleType === "background" ? { backgroundColor: `${highlightColor}30`, borderRadius: 4, padding: "2px 6px" } : {}),
+                  ...(!useDual && shouldHighlight && (highlightStyleType === "background" || (!config.bgEnabled && visualPreset !== "word_tiles")) ? { backgroundColor: `${highlightColor}35`, borderRadius: 4, padding: "2px 6px" } : {}),
                   ...(!useDual && shouldHighlight && highlightStyleType === "strikethrough" ? { textDecoration: "line-through", textDecorationColor: highlightColor, textDecorationThickness: "3px" } : {}),
                   transition: "transform 0.1s ease-out, color 0.05s",
                   transform: transformParts.length ? transformParts.join(" ") : undefined,

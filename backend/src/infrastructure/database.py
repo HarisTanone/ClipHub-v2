@@ -14,7 +14,7 @@ if _db_dir:
     os.makedirs(_db_dir, exist_ok=True)
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    f"sqlite+aiosqlite:///{settings.db_path}",
     echo=False,
     # SQLite doesn't use pool_size/max_overflow the same way
     connect_args={"check_same_thread": False},

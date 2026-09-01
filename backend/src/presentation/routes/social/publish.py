@@ -39,7 +39,7 @@ class PublishRequest(BaseModel):
     type: str = "video"  # "video", "reel", "story"
     tags: List[str] = Field(default_factory=list)
     firstReply: Optional[str] = ""
-    isAiGenerated: bool = True
+    isAiGenerated: bool = False
     isDraft: bool = False
     collaborators: List[str] = Field(default_factory=list)
     mentions: List[str] = Field(default_factory=list)
