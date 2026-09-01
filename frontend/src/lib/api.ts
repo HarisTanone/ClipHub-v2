@@ -937,6 +937,7 @@ export interface TikTokMusicTrack {
   rank: number;
   usage_label: string;
   is_recommended: boolean;
+  match_reason?: string;
 }
 
 export interface TikTokMusicResponse {
@@ -944,6 +945,8 @@ export interface TikTokMusicResponse {
   country_code: string;
   date_range: string;
   genre: string;
+  requested_genre?: string;
+  match_reason?: string;
   total: number;
   tracks: TikTokMusicTrack[];
 }
@@ -961,6 +964,12 @@ export const socialApi = {
     date_range?: string;
     limit?: number;
     search?: string;
+    job_id?: string;
+    clip_rank?: number;
+    title?: string;
+    hook?: string;
+    topic?: string;
+    shuffle_seed?: number;
   }): Promise<TikTokMusicResponse> {
     const q = new URLSearchParams();
     if (params?.genre) q.set("genre", params.genre);
@@ -968,6 +977,12 @@ export const socialApi = {
     if (params?.date_range) q.set("date_range", params.date_range);
     if (params?.limit) q.set("limit", String(params.limit));
     if (params?.search) q.set("search", params.search);
+    if (params?.job_id) q.set("job_id", params.job_id);
+    if (params?.clip_rank !== undefined) q.set("clip_rank", String(params.clip_rank));
+    if (params?.title) q.set("title", params.title);
+    if (params?.hook) q.set("hook", params.hook);
+    if (params?.topic) q.set("topic", params.topic);
+    if (params?.shuffle_seed !== undefined) q.set("shuffle_seed", String(params.shuffle_seed));
     const qs = q.toString() ? `?${q.toString()}` : "";
     return request<TikTokMusicResponse>(`/api/social/tiktok/music${qs}`);
   },

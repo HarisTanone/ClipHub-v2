@@ -9,11 +9,15 @@ Follows official Repliz Schedule API documentation:
 - DELETE /public/schedule/mass (Mass Remove Schedules)
 - PUT /public/schedule/{scheduleId}/retry (Retry Schedule)
 """
+import asyncio
+import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from src.config import settings
 from src.infrastructure.database import async_session, SocialAccountModel
@@ -341,6 +345,66 @@ async def list_schedules(
     return res
 
 
+@schedule_router.get("/stats")
+async def get_schedule_stats(
+    user_id: Optional[int] = Query(None, description="Filter by user ID (superadmin only)"),
+    _user=Depends(get_current_user),
+):
+    """Retrieve fast count statistics of scheduled posts (all, pending, success, error)."""
+    _, is_super = _extract_user_info(_user)
+    user_account_ids: list[str] = []
+
+    real_user_id = user_id if isinstance(user_id, int) else None
+    if is_super and real_user_id is not None:
+        async with async_session() as session:
+            result = await session.execute(
+                select(SocialAccountModel.account_id).where(SocialAccountModel.user_id == real_user_id)
+            )
+            user_account_ids = [row[0] for row in result.fetchall()]
+            if not user_account_ids:
+                return {"success": True, "stats": {"all": 0, "pending": 0, "success": 0, "error": 0}}
+    elif not is_super:
+        user_account_ids = await _get_user_account_ids(_user)
+        if not user_account_ids:
+            return {"success": True, "stats": {"all": 0, "pending": 0, "success": 0, "error": 0}}
+
+    base_params: Dict[str, Any] = {"page": 1, "limit": 1}
+    if user_account_ids:
+        for i, aid in enumerate(user_account_ids):
+            base_params[f"accountIds[{i}]"] = aid
+
+    async def _fetch_count(status_val: Optional[str] = None) -> int:
+        p = dict(base_params)
+        if status_val:
+            p["status"] = status_val
+        try:
+            res = await repliz_get("/public/schedule", params=p)
+            if isinstance(res, dict):
+                container = res.get("data") if isinstance(res.get("data"), dict) else res
+                return int(container.get("totalDocs") or 0)
+            return 0
+        except Exception as e:
+            logger.warning(f"Failed to fetch schedule count (status={status_val}): {e}")
+            return 0
+
+    all_cnt, pending_cnt, success_cnt, error_cnt = await asyncio.gather(
+        _fetch_count(None),
+        _fetch_count("pending"),
+        _fetch_count("success"),
+        _fetch_count("error"),
+    )
+
+    return {
+        "success": True,
+        "stats": {
+            "all": all_cnt,
+            "pending": pending_cnt,
+            "success": success_cnt,
+            "error": error_cnt,
+        },
+    }
+
+
 @schedule_router.get("/{schedule_id}")
 async def get_schedule(schedule_id: str, _user=Depends(get_current_user)):
     """Get full details for a specific scheduled post with ownership check."""
@@ -437,14 +501,25 @@ async def update_schedule(
 
 @schedule_router.delete("/mass")
 async def mass_delete_schedules(
-    body: MassDeleteScheduleRequest,
+    body: Optional[MassDeleteScheduleRequest] = None,
+    schedule_ids_query: Optional[List[str]] = Query(default=None, alias="scheduleIds[]"),
+    schedule_ids_plain: Optional[List[str]] = Query(default=None, alias="scheduleIds"),
     _user=Depends(get_current_user),
 ):
     """Cancel and remove multiple scheduled posts at once."""
-    if not body.scheduleIds:
-        return {"success": True, "message": "No schedules to delete"}
+    target_ids: List[str] = []
+    if body and body.scheduleIds:
+        target_ids.extend(body.scheduleIds)
+    if schedule_ids_query:
+        target_ids.extend(schedule_ids_query)
+    if schedule_ids_plain:
+        target_ids.extend(schedule_ids_plain)
 
-    target_ids = body.scheduleIds
+    # De-duplicate while preserving order
+    target_ids = list(dict.fromkeys(sid.strip() for sid in target_ids if sid and str(sid).strip()))
+
+    if not target_ids:
+        return {"success": True, "message": "No schedules to delete"}
     _, is_super = _extract_user_info(_user)
     if not is_super:
         user_account_ids = await _get_user_account_ids(_user)

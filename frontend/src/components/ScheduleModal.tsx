@@ -25,7 +25,12 @@ import {
   ShieldCheck,
   UserCheck,
   ChevronDown,
-  ChevronUp,
+  Search,
+  Shuffle,
+  Zap,
+  Radio,
+  Coffee,
+  Disc,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Textarea, Input } from "@/components/ui/Input";
@@ -34,6 +39,16 @@ import { useToast } from "@/components/ui/Toast";
 import { API_BASE, getToken, socialApi, type TikTokMusicTrack } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+
+const MUSIC_GENRE_FILTERS = [
+  { id: "RECOMMENDED", label: "Saran Video", Icon: Sparkles },
+  { id: "VIRAL_TODAY", label: "Viral Hari Ini", Icon: Flame },
+  { id: "POP", label: "Pop", Icon: Music },
+  { id: "EDM", label: "EDM / Hype", Icon: Zap },
+  { id: "ROCK", label: "Rock", Icon: Radio },
+  { id: "FOLK", label: "Santai / Folk", Icon: Coffee },
+  { id: "JAZZ", label: "Jazz", Icon: Disc },
+];
 
 // ─── Custom Platform Icons (Pure SVG) ─────────────────────────────────────────
 
@@ -200,6 +215,10 @@ export function ScheduleModal({
   const [selectedTrack, setSelectedTrack] = useState<TikTokMusicTrack | null>(null);
   const [loadingMusic, setLoadingMusic] = useState(false);
   const [showAllMusic, setShowAllMusic] = useState(false);
+  const [selectedGenre, setSelectedGenre] = useState<string>("RECOMMENDED");
+  const [musicSearchQuery, setMusicSearchQuery] = useState<string>("");
+  const [shuffleSeed, setShuffleSeed] = useState<number>(0);
+  const [matchReason, setMatchReason] = useState<string>("");
   const [originalVolume, setOriginalVolume] = useState<number>(100);
   const [musicVolume, setMusicVolume] = useState<number>(0);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
@@ -209,6 +228,10 @@ export function ScheduleModal({
     if (open) {
       setTitle(hookText || (clipRank ? `Clip #${clipRank}` : "AI Generated Video"));
       setCaption(defaultCaption || "");
+      setSelectedGenre("RECOMMENDED");
+      setMusicSearchQuery("");
+      setShuffleSeed(0);
+      setMatchReason("");
       setLoadingAccounts(true);
       Promise.all([fetchSocialAccounts(), checkPublishStatus()])
         .then(([accs, st]) => {
@@ -259,17 +282,33 @@ export function ScheduleModal({
     );
   }, [connectedAccounts, selectedAccountIds]);
 
-  // Load TikTok trending music when TikTok account is selected and music feature is active
+  // Load TikTok trending/recommended music when TikTok is selected and music feature is active
   useEffect(() => {
-    if (open && hasTikTokSelected && autoPickMusic && musicTracks.length === 0) {
+    if (!open || !hasTikTokSelected || !autoPickMusic) return;
+
+    const timer = setTimeout(() => {
       setLoadingMusic(true);
       socialApi
-        .getTikTokTrendingMusic({ country_code: "ID", limit: 30 })
+        .getTikTokTrendingMusic({
+          genre: selectedGenre,
+          country_code: "ID",
+          limit: 30,
+          search: musicSearchQuery.trim() || undefined,
+          job_id: jobId,
+          clip_rank: clipRank,
+          title,
+          hook: hookText,
+          topic,
+          shuffle_seed: shuffleSeed,
+        })
         .then((res) => {
-          if (res && res.tracks && res.tracks.length > 0) {
+          if (res && res.tracks) {
             setMusicTracks(res.tracks);
-            if (!selectedTrack) {
+            setMatchReason(res.match_reason || "");
+            if (res.tracks.length > 0) {
               setSelectedTrack(res.tracks[0]);
+            } else {
+              setSelectedTrack(null);
             }
           }
         })
@@ -277,8 +316,22 @@ export function ScheduleModal({
           console.warn("Failed to load TikTok music:", err);
         })
         .finally(() => setLoadingMusic(false));
-    }
-  }, [open, hasTikTokSelected, autoPickMusic, musicTracks.length, selectedTrack]);
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [
+    open,
+    hasTikTokSelected,
+    autoPickMusic,
+    selectedGenre,
+    musicSearchQuery,
+    shuffleSeed,
+    jobId,
+    clipRank,
+    title,
+    hookText,
+    topic,
+  ]);
 
   // Clean up audio player when modal is closed
   useEffect(() => {
@@ -315,7 +368,7 @@ export function ScheduleModal({
   function handleToggleAutoPickMusic(checked: boolean) {
     setAutoPickMusic(checked);
     if (checked) {
-      setMusicVolume(0); // Default 0% music volume as requested
+      setMusicVolume(0); // Default 0% music volume
       if (musicTracks.length > 0 && !selectedTrack) {
         setSelectedTrack(musicTracks[0]);
       }
@@ -327,6 +380,19 @@ export function ScheduleModal({
     }
   }
 
+  function handleMusicVolumeChange(newVol: number) {
+    const clamped = Math.max(0, Math.min(100, newVol));
+    setMusicVolume(clamped);
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.volume = clamped / 100;
+    }
+  }
+
+  function handleOriginalVolumeChange(newVol: number) {
+    const clamped = Math.max(0, Math.min(100, newVol));
+    setOriginalVolume(clamped);
+  }
+
   function togglePlayDemo(track: TikTokMusicTrack, e?: React.MouseEvent) {
     e?.stopPropagation();
     if (playingTrackId === track.id) {
@@ -336,8 +402,14 @@ export function ScheduleModal({
       if (audioPlayerRef.current) {
         audioPlayerRef.current.pause();
       }
+      // If music volume is currently 0, unmute to 25% preview so user actually hears the demo
+      let activeVolume = musicVolume;
+      if (activeVolume === 0) {
+        activeVolume = 25;
+        handleMusicVolumeChange(25);
+      }
       const audio = new Audio(track.url);
-      audio.volume = Math.max(0.2, musicVolume > 0 ? musicVolume / 100 : 0.7);
+      audio.volume = activeVolume / 100;
       audio.onended = () => setPlayingTrackId(null);
       audio.onerror = () => {
         toast.error("Gagal memuat audio demo lagu");
@@ -378,6 +450,7 @@ export function ScheduleModal({
 
     setPosting(true);
     try {
+      const hasActiveMusic = hasTikTokSelected && autoPickMusic && musicVolume > 0;
       const payload: any = {
         jobId,
         clipRank: clipRank || 1,
@@ -391,9 +464,9 @@ export function ScheduleModal({
         isAiGenerated,
         scheduleAt,
         type: postType,
-        isAutoAddMusic: hasTikTokSelected && autoPickMusic,
+        isAutoAddMusic: hasActiveMusic,
         music:
-          hasTikTokSelected && autoPickMusic && selectedTrack
+          hasActiveMusic && selectedTrack
             ? {
                 id: selectedTrack.id,
                 name: selectedTrack.name,
@@ -403,7 +476,7 @@ export function ScheduleModal({
               }
             : undefined,
         originalVolume: originalVolume / 100,
-        musicVolume: hasTikTokSelected && autoPickMusic ? musicVolume / 100 : 0,
+        musicVolume: hasActiveMusic ? musicVolume / 100 : 0,
       };
 
       const result = await publishClip(payload);
@@ -846,41 +919,119 @@ export function ScheduleModal({
                   {autoPickMusic && (
                     <div className="space-y-3 pt-1 animate-in fade-in duration-200">
                       {/* Track Selection Cards */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1">
-                            <Music className="h-3 w-3 text-pink-400" /> Rekomendasi Lagu Trending Teratas
+                      <div className="space-y-2">
+                        {/* Section Header */}
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <label className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+                            <Music className="h-3.5 w-3.5 text-pink-400" />
+                            <span>Rekomendasi Lagu TikTok</span>
+                            {selectedGenre === "RECOMMENDED" && (
+                              <span className="text-[9px] bg-pink-500/10 text-pink-400 border border-pink-500/20 px-1.5 py-0.5 rounded-full">
+                                Sesuai Video
+                              </span>
+                            )}
                           </label>
-                          {musicTracks.length > 4 && (
+                          <div className="flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => setShowAllMusic(!showAllMusic)}
-                              className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-0.5"
+                              onClick={() => setShuffleSeed((s) => s + 1)}
+                              disabled={loadingMusic}
+                              className="flex items-center gap-1 text-[10px] font-medium text-pink-400 hover:text-pink-300 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-all disabled:opacity-50 cursor-pointer"
+                              title="Pilihkan saran lagu TikTok lainnya yang sesuai"
                             >
-                              {showAllMusic ? (
-                                <>
-                                  Tutup <ChevronUp className="h-3 w-3" />
-                                </>
-                              ) : (
-                                <>
-                                  Lihat Lainnya ({musicTracks.length}) <ChevronDown className="h-3 w-3" />
-                                </>
-                              )}
+                              <Shuffle className={cn("h-3 w-3", loadingMusic && "animate-spin")} />
+                              <span>Ganti Saran</span>
+                            </button>
+                            {musicTracks.length > 4 && !musicSearchQuery && (
+                              <button
+                                type="button"
+                                onClick={() => setShowAllMusic(!showAllMusic)}
+                                className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-0.5 cursor-pointer"
+                              >
+                                {showAllMusic ? (
+                                  <>
+                                    Tutup <ChevronUp className="h-3 w-3" />
+                                  </>
+                                ) : (
+                                  <>
+                                    Semua ({musicTracks.length}) <ChevronDown className="h-3 w-3" />
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Genre / Mood Pills */}
+                        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+                          {MUSIC_GENRE_FILTERS.map((filter) => {
+                            const isActive = selectedGenre === filter.id;
+                            return (
+                              <button
+                                key={filter.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedGenre(filter.id);
+                                  setShuffleSeed(0);
+                                }}
+                                className={cn(
+                                  "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all border shrink-0 cursor-pointer",
+                                  isActive
+                                    ? "bg-pink-500/20 border-pink-500/60 text-pink-300 font-semibold shadow-xs"
+                                    : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                                )}
+                              >
+                                <filter.Icon className="h-3 w-3 shrink-0" />
+                                <span>{filter.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Search Input */}
+                        <div className="relative">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+                          <input
+                            type="text"
+                            value={musicSearchQuery}
+                            onChange={(e) => setMusicSearchQuery(e.target.value)}
+                            placeholder="Cari lagu atau artis viral TikTok..."
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 pl-8 pr-7 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:border-pink-500/50 focus:outline-none focus:ring-1 focus:ring-pink-500/50 transition-all"
+                          />
+                          {musicSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setMusicSearchQuery("")}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                            >
+                              <X className="h-3 w-3" />
                             </button>
                           )}
                         </div>
 
+                        {/* Recommendation Context Banner */}
+                        {matchReason && selectedGenre === "RECOMMENDED" && !musicSearchQuery && (
+                          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/20 text-[10px] text-pink-300">
+                            <Sparkles className="h-3.5 w-3.5 text-pink-400 shrink-0" />
+                            <span className="truncate">
+                              <strong className="font-semibold text-pink-200">Saran Khusus Video:</strong> {matchReason}
+                            </span>
+                          </div>
+                        )}
+
                         {loadingMusic ? (
                           <div className="flex items-center justify-center gap-2 py-4 text-xs text-zinc-500">
                             <RefreshCw className="h-3.5 w-3.5 animate-spin text-pink-400" />
-                            <span>Mengambil data lagu viral TikTok dari Repliz...</span>
+                            <span>Mencari rekomendasi lagu TikTok yang cocok...</span>
                           </div>
                         ) : musicTracks.length === 0 ? (
-                          <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-900/60 text-center text-xs text-zinc-500">
-                            Sedang memuat data lagu trending...
+                          <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-900/60 text-center text-xs text-zinc-400">
+                            {musicSearchQuery
+                              ? `Tidak ditemukan lagu dengan kata kunci "${musicSearchQuery}"`
+                              : "Sedang memuat data lagu trending..."}
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 gap-1.5 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
+                          <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
                             {visibleMusicTracks.map((track) => {
                               const isSelected = selectedTrack?.id === track.id;
                               const isPlaying = playingTrackId === track.id;
@@ -920,13 +1071,20 @@ export function ScheduleModal({
                                       <p className="text-xs font-semibold text-zinc-100 truncate">
                                         {track.name}
                                       </p>
-                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                         <span className="text-[10px] text-zinc-400 truncate max-w-[110px]">
                                           {track.artist}
                                         </span>
-                                        <span className="text-[9px] text-pink-400 bg-pink-950/60 px-1 py-0.2 rounded border border-pink-500/20 truncate">
-                                          {track.usage_label}
-                                        </span>
+                                        {track.match_reason ? (
+                                          <span className="text-[9px] text-pink-300 bg-pink-500/20 px-1.5 py-0.5 rounded border border-pink-500/30 flex items-center gap-0.5 truncate">
+                                            <Sparkles className="h-2.5 w-2.5 text-pink-400 shrink-0" />
+                                            {track.match_reason}
+                                          </span>
+                                        ) : (
+                                          <span className="text-[9px] text-zinc-400 bg-zinc-800/80 px-1 py-0.2 rounded border border-zinc-700/50 truncate">
+                                            {track.usage_label}
+                                          </span>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
@@ -969,50 +1127,158 @@ export function ScheduleModal({
                         )}
                       </div>
 
-                      {/* Dual Volume Sliders */}
+                      {/* Dual Volume Controls with Matching Selector Style */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80">
-                        {/* 1. Original Video Volume */}
-                        <div className="space-y-1.5 p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="font-semibold text-zinc-300 flex items-center gap-1">
-                              <Volume2 className="h-3.5 w-3.5 text-emerald-400" />
-                              Suara Asli Video
+                        {/* 1. Original Video Volume Card */}
+                        <div className="space-y-2.5 p-3 rounded-xl bg-zinc-950/50 border border-zinc-800/80">
+                          <div className="flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => handleOriginalVolumeChange(originalVolume === 0 ? 100 : 0)}
+                              className="font-semibold text-xs text-zinc-300 flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
+                              title={originalVolume === 0 ? "Unmute suara asli" : "Mute suara asli"}
+                            >
+                              {originalVolume === 0 ? (
+                                <VolumeX className="h-4 w-4 text-zinc-500" />
+                              ) : (
+                                <Volume2 className="h-4 w-4 text-emerald-400" />
+                              )}
+                              <span>Suara Asli Video</span>
+                            </button>
+                            <span
+                              className={cn(
+                                "font-mono text-[11px] font-bold px-2 py-0.5 rounded-md border",
+                                originalVolume === 0
+                                  ? "text-zinc-500 bg-zinc-900 border-zinc-800"
+                                  : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                              )}
+                            >
+                              {originalVolume}%
                             </span>
-                            <span className="font-mono text-emerald-400 font-bold">{originalVolume}%</span>
                           </div>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={originalVolume}
-                            onChange={(e) => setOriginalVolume(Number(e.target.value))}
-                            className="w-full accent-emerald-500 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
-                          />
-                          <p className="text-[9px] text-zinc-500">Volume suara dialog pembicara asli</p>
+
+                          {/* Quick Preset Selector Pills */}
+                          <div className="grid grid-cols-4 gap-1">
+                            {[
+                              { label: "Mute", val: 0 },
+                              { label: "50%", val: 50 },
+                              { label: "80%", val: 80 },
+                              { label: "100%", val: 100 },
+                            ].map((preset) => {
+                              const isActive = originalVolume === preset.val;
+                              return (
+                                <button
+                                  key={preset.val}
+                                  type="button"
+                                  onClick={() => handleOriginalVolumeChange(preset.val)}
+                                  className={cn(
+                                    "py-1 rounded-lg text-[10px] font-medium transition-all border text-center cursor-pointer",
+                                    isActive
+                                      ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-300 font-semibold shadow-xs"
+                                      : "border-zinc-800/80 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                                  )}
+                                >
+                                  {preset.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <div className="space-y-1">
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={originalVolume}
+                              onChange={(e) => handleOriginalVolumeChange(Number(e.target.value))}
+                              className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                              style={{
+                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${originalVolume}%, #27272a ${originalVolume}%, #27272a 100%)`,
+                                '--slider-thumb-color': '#10b981',
+                              } as React.CSSProperties}
+                            />
+                            <p className="text-[10px] text-zinc-500">
+                              {originalVolume === 0
+                                ? "Suara dialog pembicara asli dibisukan (0%)."
+                                : "Volume dialog pembicara asli video."}
+                            </p>
+                          </div>
                         </div>
 
-                        {/* 2. TikTok Music Overlay Volume */}
-                        <div className="space-y-1.5 p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="font-semibold text-zinc-300 flex items-center gap-1">
-                              <Music className="h-3.5 w-3.5 text-pink-400" />
-                              Volume Musik TikTok
+                        {/* 2. TikTok Music Overlay Volume Card */}
+                        <div className="space-y-2.5 p-3 rounded-xl bg-zinc-950/50 border border-zinc-800/80">
+                          <div className="flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => handleMusicVolumeChange(musicVolume === 0 ? 25 : 0)}
+                              className="font-semibold text-xs text-zinc-300 flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
+                              title={musicVolume === 0 ? "Unmute musik TikTok" : "Mute musik TikTok"}
+                            >
+                              {musicVolume === 0 ? (
+                                <VolumeX className="h-4 w-4 text-zinc-500" />
+                              ) : (
+                                <Music className="h-4 w-4 text-pink-400" />
+                              )}
+                              <span>Volume Musik TikTok</span>
+                            </button>
+                            <span
+                              className={cn(
+                                "font-mono text-[11px] font-bold px-2 py-0.5 rounded-md border",
+                                musicVolume === 0
+                                  ? "text-zinc-500 bg-zinc-900 border-zinc-800"
+                                  : "text-pink-400 bg-pink-500/10 border-pink-500/20"
+                              )}
+                            >
+                              {musicVolume}%
                             </span>
-                            <span className="font-mono text-pink-400 font-bold">{musicVolume}%</span>
                           </div>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={musicVolume}
-                            onChange={(e) => setMusicVolume(Number(e.target.value))}
-                            className="w-full accent-pink-500 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
-                          />
-                          <p className="text-[9px] text-zinc-500">
-                            {musicVolume === 0
-                              ? "Volume 0% tetap menautkan algoritma viral TikTok tanpa mengubah audio video."
-                              : `Musik akan dimixing di latar belakang dengan volume ${musicVolume}%.`}
-                          </p>
+
+                          {/* Quick Preset Selector Pills */}
+                          <div className="grid grid-cols-4 gap-1">
+                            {[
+                              { label: "Mute", val: 0 },
+                              { label: "10% Soft", val: 10 },
+                              { label: "25% Normal", val: 25 },
+                              { label: "50% Loud", val: 50 },
+                            ].map((preset) => {
+                              const isActive = musicVolume === preset.val;
+                              return (
+                                <button
+                                  key={preset.val}
+                                  type="button"
+                                  onClick={() => handleMusicVolumeChange(preset.val)}
+                                  className={cn(
+                                    "py-1 rounded-lg text-[10px] font-medium transition-all border text-center cursor-pointer",
+                                    isActive
+                                      ? "border-pink-500/60 bg-pink-500/15 text-pink-300 font-semibold shadow-xs"
+                                      : "border-zinc-800/80 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                                  )}
+                                >
+                                  {preset.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <div className="space-y-1">
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={musicVolume}
+                              onChange={(e) => handleMusicVolumeChange(Number(e.target.value))}
+                              className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                              style={{
+                                background: `linear-gradient(to right, #ec4899 0%, #ec4899 ${musicVolume}%, #27272a ${musicVolume}%, #27272a 100%)`,
+                                '--slider-thumb-color': '#ec4899',
+                              } as React.CSSProperties}
+                            />
+                            <p className="text-[10px] text-zinc-500">
+                              {musicVolume === 0
+                                ? "Volume 0% (Mute) — Musik dimatikan, video diposting tanpa lagu TikTok."
+                                : `Musik akan dimixing di latar belakang dengan volume ${musicVolume}%.`}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1047,8 +1313,12 @@ export function ScheduleModal({
               <span>
                 <strong className="text-zinc-100">{selectedAccountIds.length}</strong> akun dipilih
                 {autoPickMusic && selectedTrack && (
-                  <span className="ml-2 text-pink-400 font-medium text-[11px]">
-                    Lagu: {selectedTrack.name} ({musicVolume}%)
+                  <span className="ml-2 font-medium text-[11px]">
+                    {musicVolume === 0 ? (
+                      <span className="text-zinc-500">Lagu: {selectedTrack.name} (Muted/Nonaktif)</span>
+                    ) : (
+                      <span className="text-pink-400">Lagu: {selectedTrack.name} ({musicVolume}%)</span>
+                    )}
                   </span>
                 )}
               </span>

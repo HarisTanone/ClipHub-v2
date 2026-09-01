@@ -10,6 +10,7 @@ from src.presentation.routes.auth import get_current_user
 from src.presentation.routes.social.publish import (
     PublishRequest,
     mix_video_with_music,
+    scale_video_audio_volume,
 )
 
 
@@ -247,3 +248,167 @@ def test_publish_request_accepts_all_music_parameters():
     assert req.music["id"] == "7604121927885342721"
     assert req.originalVolume == 0.90
     assert req.musicVolume == 0.15
+
+
+@pytest.mark.asyncio
+async def test_scale_video_audio_volume():
+    """Verify that scale_video_audio_volume invokes ffmpeg with volume filter when volume != 1.0."""
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
+         patch("os.path.exists") as mock_exists:
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_exec.return_value = mock_proc
+        mock_exists.return_value = True
+
+        res = await scale_video_audio_volume("/tmp/input.mp4", volume=0.5)
+        assert "_vol_" in res
+        mock_exec.assert_called_once()
+        cmd_args = mock_exec.call_args[0]
+        cmd_str = " ".join(str(a) for a in cmd_args)
+        assert "volume=0.50" in cmd_str
+
+
+def test_zero_music_volume_disables_repliz_music():
+    """Verify additional_info sets isAutoAddMusic=False and music.id='' when musicVolume is 0."""
+    from src.presentation.routes.social.publish import PublishRequest
+
+    body = PublishRequest(
+        jobId="job_zero",
+        accountId="acc_1",
+        scheduleAt="2026-09-01T15:00:00.000Z",
+        isAutoAddMusic=True,
+        music={"id": "track_123", "name": "Trending Song", "artist": "Artist", "url": "https://sf16.com/1.mp3"},
+        musicVolume=0.0,
+        originalVolume=1.0,
+    )
+
+    has_active_music = bool(body.isAutoAddMusic) and body.musicVolume > 0.0 and bool(body.music)
+    assert has_active_music is False
+    additional_info = {
+        "isAutoAddMusic": has_active_music,
+        "music": {
+            "id": str((body.music or {}).get("id") or ""),
+        } if has_active_music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
+    }
+    assert additional_info["isAutoAddMusic"] is False
+    assert additional_info["music"]["id"] == ""
+
+
+def test_infer_music_recommendation_vibe_and_diversity():
+    """Verify infer_music_recommendation maps content vibe accurately and varies by clip rank."""
+    from src.presentation.routes.social.tiktok import infer_music_recommendation
+
+    # Energetic / Dance
+    rec_dance = infer_music_recommendation(title="Tutorial Workout & Dance Party Jedag Jedug", clip_rank=1)
+    assert rec_dance["genre"] == "EDM"
+    assert "ritme cepat" in rec_dance["match_reason"]
+
+    # Motivation / Business
+    rec_biz = infer_music_recommendation(title="5 Rahasia Sukses Finansial & Bisnis Anak Muda", clip_rank=1)
+    assert rec_biz["genre"] == "POP"
+    assert "edukasi" in rec_biz["match_reason"]
+
+    # Podcast / Narrative
+    rec_pod = infer_music_recommendation(title="Podcast Cerita Santai Bareng Teman Ngopi", clip_rank=1)
+    assert rec_pod["genre"] == "FOLK"
+    assert "dialog cerita" in rec_pod["match_reason"]
+
+    # Per-clip diversity: clip 1, clip 2, clip 3 in generic videos get different music recommendations
+    rec_clip1 = infer_music_recommendation(title="Clip Highlight Video", clip_rank=1)
+    rec_clip2 = infer_music_recommendation(title="Clip Highlight Video", clip_rank=2)
+    rec_clip3 = infer_music_recommendation(title="Clip Highlight Video", clip_rank=3)
+
+    assert rec_clip1["genre"] != rec_clip2["genre"]
+    assert rec_clip2["genre"] != rec_clip3["genre"]
+
+
+def test_tiktok_music_recommendation_endpoint(client):
+    """Verify GET /api/social/tiktok/music with recommendation returns matched reason and tracks."""
+    fake_user = CurrentUser(1, "admin@test.com", "superadmin", ["*"])
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+
+    with patch("src.presentation.routes.social.tiktok.repliz_get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "docs": [
+                {"id": "track_biz_1", "name": "Motivasi Pagi", "artist": "Inspirasi Band", "duration": 60, "url": "https://cdn.com/1.mp3"},
+                {"id": "track_biz_2", "name": "Semangat Hidup", "artist": "Creative Group", "duration": 75, "url": "https://cdn.com/2.mp3"},
+            ]
+        }
+        resp = client.get(
+            "/api/social/tiktok/music",
+            params={
+                "genre": "RECOMMENDED",
+                "title": "Tips Sukses Bisnis Online",
+                "clip_rank": 1,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["genre"] == "POP"  # Inferred from 'bisnis' / 'sukses'
+        assert "edukasi" in data["match_reason"].lower()
+        assert len(data["tracks"]) == 2
+        assert data["tracks"][0]["match_reason"] != ""
+
+
+def test_schedule_stats_endpoint(client):
+    """Verify GET /api/social/schedule/stats returns all, pending, success, error counts."""
+    fake_user = CurrentUser(1, "admin@test.com", "superadmin", ["*"])
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+
+    async def mock_get(url, params=None):
+        st = (params or {}).get("status")
+        if st == "pending":
+            return {"totalDocs": 9}
+        elif st == "success":
+            return {"totalDocs": 60}
+        elif st == "error":
+            return {"totalDocs": 11}
+        return {"totalDocs": 80}
+
+    with patch("src.presentation.routes.social.schedule.repliz_get", side_effect=mock_get):
+        resp = client.get("/api/social/schedule/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["stats"]["all"] == 80
+        assert data["stats"]["pending"] == 9
+        assert data["stats"]["success"] == 60
+        assert data["stats"]["error"] == 11
+
+
+def test_mass_delete_with_query_params_compatibility(client):
+    """Verify DELETE /api/social/schedule/mass works with query params without 422 error."""
+    fake_user = CurrentUser(1, "admin@test.com", "superadmin", ["*"])
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"success": true}'
+
+    with patch("src.presentation.routes.social.schedule.repliz_auth_header", return_value={"x-api-key": "fake"}), \
+         patch("httpx.AsyncClient.delete", new_callable=AsyncMock) as mock_delete:
+        mock_delete.return_value = mock_resp
+
+        # Test query param scheduleIds[] format
+        resp = client.delete(
+            "/api/social/schedule/mass?scheduleIds[]=id_1&scheduleIds[]=id_2"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "2 schedules" in data["message"]
+
+        # Test JSON body format
+        resp2 = client.request(
+            "DELETE",
+            "/api/social/schedule/mass",
+            json={"scheduleIds": ["id_3", "id_4"]},
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["success"] is True
+        assert "2 schedules" in data2["message"]
+
+

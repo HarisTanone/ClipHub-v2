@@ -121,6 +121,40 @@ async def mix_video_with_music(
                 pass
 
 
+async def scale_video_audio_volume(video_path: str, volume: float = 1.0) -> str:
+    """Scale video audio volume without mixing additional music."""
+    vol_clamped = max(0.0, min(1.0, float(volume)))
+    if abs(vol_clamped - 1.0) < 0.01:
+        return video_path
+
+    base, ext = os.path.splitext(video_path)
+    output_path = f"{base}_vol_{int(time.time())}{ext}"
+    try:
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-filter:a", f"volume={vol_clamped:.2f}",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0 and os.path.exists(output_path):
+            logger.info(f"Successfully scaled video audio volume to {vol_clamped:.2f} -> {output_path}")
+            return output_path
+        else:
+            logger.warning(f"FFmpeg volume scale warning: {stderr.decode(errors='ignore')[:300]}")
+            return video_path
+    except Exception as e:
+        logger.error(f"Error scaling video volume: {e}")
+        return video_path
+
+
 
 def get_supported_post_type(requested_type: Optional[str], platform: str = "") -> str:
     """Normalize post type to comply with Repliz official Supported Post Types specification.
@@ -269,6 +303,15 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             )
         except Exception as mix_err:
             logger.warning(f"Failed to mix TikTok music into video: {mix_err}")
+    elif abs(body.originalVolume - 1.0) >= 0.01:
+        # Scale original dialogue volume when music is muted/absent
+        try:
+            compliant_video = await scale_video_audio_volume(
+                video_path=compliant_video,
+                volume=body.originalVolume,
+            )
+        except Exception as vol_err:
+            logger.warning(f"Failed to scale original video audio volume: {vol_err}")
 
     # 4a. Programmatic duration and format validation check (Mandatory TikTok/Meta API requirement)
     if os.path.exists(compliant_video):
@@ -416,10 +459,11 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             "medias": [],
         })
 
+    has_active_music = bool(body.isAutoAddMusic) and body.musicVolume > 0.0 and bool(body.music)
     additional_info = {
         "isAiGenerated": bool(body.isAiGenerated),
         "isDraft": bool(body.isDraft),
-        "isAutoAddMusic": bool(body.isAutoAddMusic),
+        "isAutoAddMusic": has_active_music,
         "collaborators": body.collaborators or [],
         "mentions": body.mentions or [],
         "music": {
@@ -427,7 +471,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             "artist": str((body.music or {}).get("artist") or ""),
             "name": str((body.music or {}).get("name") or ""),
             "thumbnail": str((body.music or {}).get("thumbnail") or ""),
-        } if body.music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
+        } if has_active_music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
         "products": [],
         "tags": tags or [],
         "targetCountries": body.targetCountries or [],
