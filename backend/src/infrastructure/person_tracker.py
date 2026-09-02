@@ -86,6 +86,12 @@ class TrackedDetection:
     is_new: bool = False           # True if this is a newly created track
     person_bbox: Optional[BBox] = None # Full person bounding box (for person-first reframe)
     face_bbox: Optional[BBox] = None  # Optional face bbox (for person-first mode)
+    anatomical_center_x: Optional[float] = None  # Multi-modal center (retina + nose + lips)
+    anatomical_center_y: Optional[float] = None
+    eyes_y: Optional[float] = None               # True eye level line
+    nose_x: Optional[float] = None               # Sagittal midline
+    mouth_y: Optional[float] = None              # Articulation center
+    landmarks: Optional[dict] = None             # Raw landmarks dict
 
 
 class SimpleIoUTracker:

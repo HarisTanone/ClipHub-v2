@@ -711,7 +711,156 @@ def test_strong_mapping_is_reliable():
     assert len(result.mappings) == 2
 
 
+def test_anatomical_landmarks_extraction():
+    """Verify multi-modal extraction of retina/eyes, nose tip, lips/mouth, chin, and forehead."""
+    detector = ActiveSpeakerDetector()
+    # Create mock landmarks (478 landmarks)
+    mock_lms = [SimpleNamespace(x=0.5, y=0.5) for _ in range(478)]
+    # Nose tip (1) at (500, 400)
+    mock_lms[1] = SimpleNamespace(x=500 / 1000, y=400 / 1000)
+    # Left iris (468) at (450, 350), Right iris (473) at (550, 350)
+    mock_lms[468] = SimpleNamespace(x=450 / 1000, y=350 / 1000)
+    mock_lms[473] = SimpleNamespace(x=550 / 1000, y=350 / 1000)
+    # Lips: Upper (13) at (500, 450), Lower (14) at (500, 470)
+    mock_lms[13] = SimpleNamespace(x=500 / 1000, y=450 / 1000)
+    mock_lms[14] = SimpleNamespace(x=500 / 1000, y=470 / 1000)
+    mock_lms[78] = SimpleNamespace(x=460 / 1000, y=460 / 1000)
+    mock_lms[308] = SimpleNamespace(x=540 / 1000, y=460 / 1000)
+    # Chin (152) at (500, 550), Forehead (10) at (500, 250)
+    mock_lms[152] = SimpleNamespace(x=500 / 1000, y=550 / 1000)
+    mock_lms[10] = SimpleNamespace(x=500 / 1000, y=250 / 1000)
+
+    anat = detector._extract_anatomical_landmarks(mock_lms, width=1000, height=1000)
+    assert anat["nose_x"] == 500
+    assert anat["nose_y"] == 400
+    assert anat["eyes_center_x"] == 500
+    assert anat["eyes_center_y"] == 350
+    assert anat["mouth_x"] == 500
+    assert anat["mouth_y"] == 460
+    assert anat["chin_y"] == 550
+    assert anat["forehead_y"] == 250
+    # True midline centered
+    assert abs(anat["anatomical_center_x"] - 500) < 1.0
+
+
+def test_single_grid_centers_on_anatomical_center():
+    """Verify single grid panning locks onto anatomical center (retina/nose/lips) over raw bbox."""
+    engine = PodcastReframeEngine()
+    # Detection has a wider/asymmetric person bbox (1000 to 1400, center 1200),
+    # but the person's face/retina/nose anatomical center is at 1150
+    det = TrackedDetection(
+        track_id=1,
+        bbox=BBox(1000, 100, 1400, 700),
+        frame_idx=10,
+        face_bbox=BBox(1080, 150, 1260, 350),
+        anatomical_center_x=1150.0,
+        anatomical_center_y=250.0,
+    )
+
+    center, target_det, position_id, source = engine._choose_panning_target_x(
+        frame_faces=[1150.0],
+        frame_tracked=[det],
+        speaker_result=None,
+        frame_idx_approx=10,
+        position_targets={1: 1150.0},
+        position_target_profiles={1: {"x": 1200.0, "anatomical_x": 1150.0}},
+        track_to_position={1: 1},
+        frame_width=1920,
+        frame_height=1080,
+    )
+
+    assert center == 1150
+    assert target_det is det
+
+
+def test_double_grid_centers_each_person_on_face_anatomical_center():
+    """Verify 2-grid centers each panel on face/anatomical center rather than torso body_x."""
+    engine = PodcastReframeEngine()
+    # Person 1 (left seat): torso centered at x=750, but head/face turned at x=700
+    # Person 2 (right seat): torso centered at x=1350, but head/face turned at x=1400
+    profiles = {
+        0: {
+            "x": 750.0,
+            "y": 600.0,
+            "width": 300.0,
+            "height": 700.0,
+            "face_x": 700.0,
+            "face_y": 250.0,
+            "face_width": 120.0,
+            "face_height": 140.0,
+            "anatomical_x": 700.0,
+            "anatomical_y": 250.0,
+            "eyes_y": 220.0,
+            "chin_y": 320.0,
+        },
+        1: {
+            "x": 1350.0,
+            "y": 600.0,
+            "width": 300.0,
+            "height": 700.0,
+            "face_x": 1400.0,
+            "face_y": 250.0,
+            "face_width": 120.0,
+            "face_height": 140.0,
+            "anatomical_x": 1400.0,
+            "anatomical_y": 250.0,
+            "eyes_y": 220.0,
+            "chin_y": 320.0,
+        },
+    }
+
+    geom = engine._calculate_grid_geometry(
+        first_id=0,
+        second_id=1,
+        position_targets={0: 750.0, 1: 1350.0},
+        position_profiles=profiles,
+        width=1920,
+        height=1080,
+    )
+
+    assert geom is not None
+    crop_w = geom["crop_w"]
+    # P1 panel center (first_crop_x + crop_w/2) should be close to face anatomical center (700),
+    # NOT torso center (750)
+    p1_panel_center = geom["first_crop_x"] + crop_w / 2
+    assert abs(p1_panel_center - 700.0) < abs(p1_panel_center - 750.0)
+
+    # P2 panel center (second_crop_x + crop_w/2) should be close to face anatomical center (1400),
+    # NOT torso center (1350)
+    p2_panel_center = geom["second_crop_x"] + crop_w / 2
+    assert abs(p2_panel_center - 1400.0) < abs(p2_panel_center - 1350.0)
+
+
+
+def test_double_grid_vertical_clamp_uses_real_eye_level_and_protects_chin():
+    """Verify _clamp_grid_y positions eyes at ~38% down the panel and protects chin."""
+    crop_h = 720
+    frame_h = 1080
+    face_y = 300.0
+    face_height = 140.0
+    real_eyes_y = 260.0
+    real_chin_y = 370.0
+
+    crop_y = PodcastReframeEngine._clamp_grid_y(
+        face_y=face_y,
+        face_height=face_height,
+        crop_h=crop_h,
+        frame_h=frame_h,
+        eyes_y=real_eyes_y,
+        chin_y=real_chin_y,
+    )
+
+    # In the panel, eyes position from top of panel is real_eyes_y - crop_y
+    eyes_in_panel = real_eyes_y - crop_y
+    ratio = eyes_in_panel / crop_h
+    # Rule of thirds: eyes should be framed comfortably around 30-45% from the top
+    assert 0.30 <= ratio <= 0.45
+    # Chin should not be clipped: chin is inside crop
+    assert crop_y + crop_h >= real_chin_y
+
+
 if __name__ == "__main__":
+
     test_single_visible_face_uses_stable_position_target()
     test_head_motion_is_keyed_after_stable_id_assignment()
     test_face_mesh_assignment_uses_2d_profiles_for_front_back_panelists()

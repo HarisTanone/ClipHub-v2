@@ -27,16 +27,56 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class SpeakerAnatomicalLandmarks:
+    """Multi-modal facial landmark metrics for precision centering (voice, retina, lips, nose)."""
+    speaker_id: int
+    eyes_center_x: float
+    eyes_center_y: float
+    left_eye_x: float
+    left_eye_y: float
+    right_eye_x: float
+    right_eye_y: float
+    nose_tip_x: float
+    nose_tip_y: float
+    mouth_center_x: float
+    mouth_center_y: float
+    chin_x: float
+    chin_y: float
+    forehead_x: float
+    forehead_y: float
+    anatomical_center_x: float
+    anatomical_center_y: float
+    face_width: float = 0.0
+    face_height: float = 0.0
+    lip_aperture: float = 0.0
+    speech_confidence: float = 1.0
+
+
+@dataclass
 class FaceSpeechFrame:
-    """Speech data for a single face in a single frame."""
+    """Speech and multi-modal anatomical landmark data for a single face in a single frame."""
     face_id: int
     lip_aperture: float  # normalized lip opening (0 = closed, 1 = wide open)
     head_motion: float   # normalized head movement (0 = still, 1 = moving fast)
     bbox_x: float        # face center X in pixels
     bbox_y: float        # face center Y in pixels
     yaw_deg: float = 0.0 # estimated yaw angle (0 = frontal, ±90 = profile)
-    nose_x: float = 0.0  # nose X in pixels, used after stable ID assignment
-    nose_y: float = 0.0  # nose Y in pixels, used after stable ID assignment
+    nose_x: float = 0.0  # nose X in pixels
+    nose_y: float = 0.0  # nose Y in pixels
+    left_eye_x: float = 0.0
+    left_eye_y: float = 0.0
+    right_eye_x: float = 0.0
+    right_eye_y: float = 0.0
+    eyes_center_x: float = 0.0
+    eyes_center_y: float = 0.0
+    mouth_x: float = 0.0
+    mouth_y: float = 0.0
+    chin_x: float = 0.0
+    chin_y: float = 0.0
+    forehead_x: float = 0.0
+    forehead_y: float = 0.0
+    anatomical_center_x: float = 0.0
+    anatomical_center_y: float = 0.0
 
 
 @dataclass
@@ -59,6 +99,7 @@ class ActiveSpeakerResult:
     speaker_lip_variance: Dict[int, float] = field(default_factory=dict)
     speaker_lip_amplitude: Dict[int, float] = field(default_factory=dict)
     speaker_head_motion: Dict[int, float] = field(default_factory=dict)
+    speaker_landmarks: Dict[int, SpeakerAnatomicalLandmarks] = field(default_factory=dict)
 
 
 class ActiveSpeakerDetector:
@@ -76,10 +117,15 @@ class ActiveSpeakerDetector:
     MOUTH_RIGHT = 78
     MOUTH_LEFT = 308
 
-    # Yaw estimation landmarks
+    # Yaw estimation & anatomical landmarks
     NOSE_TIP = 1
+    NOSE_BRIDGE = 168
     LEFT_EYE_INNER = 33
+    LEFT_EYE_OUTER = 133
     RIGHT_EYE_INNER = 263
+    RIGHT_EYE_OUTER = 362
+    LEFT_IRIS_CENTER = 468
+    RIGHT_IRIS_CENTER = 473
     CHIN = 152
     FOREHEAD = 10
 
@@ -260,10 +306,9 @@ class ActiveSpeakerDetector:
                 if results.multi_face_landmarks:
                     for face_idx, face_landmarks in enumerate(results.multi_face_landmarks):
                         lip_aperture = self._compute_lip_aperture_legacy(face_landmarks, proc_frame.shape)
-                        nose = face_landmarks.landmark[1]
-                        cx = nose.x * width
-                        cy = nose.y * height
-
+                        anat = self._extract_anatomical_landmarks(face_landmarks.landmark, width, height)
+                        cx = anat["nose_x"]
+                        cy = anat["nose_y"]
                         yaw = self._estimate_yaw_legacy(face_landmarks)
                         faces_in_frame.append(FaceSpeechFrame(
                             face_id=face_idx,
@@ -272,8 +317,22 @@ class ActiveSpeakerDetector:
                             bbox_x=cx,
                             bbox_y=cy,
                             yaw_deg=yaw,
-                            nose_x=cx,
-                            nose_y=cy,
+                            nose_x=anat["nose_x"],
+                            nose_y=anat["nose_y"],
+                            left_eye_x=anat["left_eye_x"],
+                            left_eye_y=anat["left_eye_y"],
+                            right_eye_x=anat["right_eye_x"],
+                            right_eye_y=anat["right_eye_y"],
+                            eyes_center_x=anat["eyes_center_x"],
+                            eyes_center_y=anat["eyes_center_y"],
+                            mouth_x=anat["mouth_x"],
+                            mouth_y=anat["mouth_y"],
+                            chin_x=anat["chin_x"],
+                            chin_y=anat["chin_y"],
+                            forehead_x=anat["forehead_x"],
+                            forehead_y=anat["forehead_y"],
+                            anatomical_center_x=anat["anatomical_center_x"],
+                            anatomical_center_y=anat["anatomical_center_y"],
                         ))
             else:
                 # Task API: mp.tasks.vision.FaceLandmarker
@@ -283,10 +342,9 @@ class ActiveSpeakerDetector:
                 if result.face_landmarks:
                     for face_idx, landmarks in enumerate(result.face_landmarks):
                         lip_aperture = self._compute_lip_aperture_task(landmarks, proc_frame.shape)
-                        nose = landmarks[1]
-                        cx = nose.x * width
-                        cy = nose.y * height
-
+                        anat = self._extract_anatomical_landmarks(landmarks, width, height)
+                        cx = anat["nose_x"]
+                        cy = anat["nose_y"]
                         faces_in_frame.append(FaceSpeechFrame(
                             face_id=face_idx,
                             lip_aperture=lip_aperture,
@@ -294,9 +352,24 @@ class ActiveSpeakerDetector:
                             bbox_x=cx,
                             bbox_y=cy,
                             yaw_deg=self._estimate_yaw_task(landmarks),
-                            nose_x=cx,
-                            nose_y=cy,
+                            nose_x=anat["nose_x"],
+                            nose_y=anat["nose_y"],
+                            left_eye_x=anat["left_eye_x"],
+                            left_eye_y=anat["left_eye_y"],
+                            right_eye_x=anat["right_eye_x"],
+                            right_eye_y=anat["right_eye_y"],
+                            eyes_center_x=anat["eyes_center_x"],
+                            eyes_center_y=anat["eyes_center_y"],
+                            mouth_x=anat["mouth_x"],
+                            mouth_y=anat["mouth_y"],
+                            chin_x=anat["chin_x"],
+                            chin_y=anat["chin_y"],
+                            forehead_x=anat["forehead_x"],
+                            forehead_y=anat["forehead_y"],
+                            anatomical_center_x=anat["anatomical_center_x"],
+                            anatomical_center_y=anat["anatomical_center_y"],
                         ))
+
 
             frame_data.append((frame_idx, faces_in_frame))
 
@@ -374,6 +447,54 @@ class ActiveSpeakerDetector:
                 speaker_lip_amplitude[face_id] = float(max(lip_vals) - min(lip_vals))
                 speaker_head_motion[face_id] = float(np.mean(head_vals))
 
+        # Aggregate multi-modal anatomical landmarks per speaker ID (voice, retina, lips, nose)
+        speaker_landmarks: Dict[int, SpeakerAnatomicalLandmarks] = {}
+        landmarks_by_speaker: Dict[int, List[FaceSpeechFrame]] = {}
+        for _, faces in frame_data:
+            for face in faces:
+                landmarks_by_speaker.setdefault(face.face_id, []).append(face)
+
+        def _med(arr, default=0.0):
+            return float(np.median(arr)) if arr else default
+
+        for spk_id, face_list in landmarks_by_speaker.items():
+            if not face_list:
+                continue
+            nose_xs = [f.nose_x for f in face_list if f.nose_x > 0]
+            nose_ys = [f.nose_y for f in face_list if f.nose_y > 0]
+            eyes_cxs = [f.eyes_center_x for f in face_list if f.eyes_center_x > 0]
+            eyes_cys = [f.eyes_center_y for f in face_list if f.eyes_center_y > 0]
+            mouth_xs = [f.mouth_x for f in face_list if f.mouth_x > 0]
+            mouth_ys = [f.mouth_y for f in face_list if f.mouth_y > 0]
+            chin_xs = [f.chin_x for f in face_list if f.chin_x > 0]
+            chin_ys = [f.chin_y for f in face_list if f.chin_y > 0]
+            forehead_xs = [f.forehead_x for f in face_list if f.forehead_x > 0]
+            forehead_ys = [f.forehead_y for f in face_list if f.forehead_y > 0]
+            anat_cxs = [f.anatomical_center_x for f in face_list if f.anatomical_center_x > 0]
+            anat_cys = [f.anatomical_center_y for f in face_list if f.anatomical_center_y > 0]
+
+            speaker_landmarks[spk_id] = SpeakerAnatomicalLandmarks(
+                speaker_id=spk_id,
+                eyes_center_x=_med(eyes_cxs),
+                eyes_center_y=_med(eyes_cys),
+                left_eye_x=_med([f.left_eye_x for f in face_list if f.left_eye_x > 0]),
+                left_eye_y=_med([f.left_eye_y for f in face_list if f.left_eye_y > 0]),
+                right_eye_x=_med([f.right_eye_x for f in face_list if f.right_eye_x > 0]),
+                right_eye_y=_med([f.right_eye_y for f in face_list if f.right_eye_y > 0]),
+                nose_tip_x=_med(nose_xs),
+                nose_tip_y=_med(nose_ys),
+                mouth_center_x=_med(mouth_xs),
+                mouth_center_y=_med(mouth_ys),
+                chin_x=_med(chin_xs),
+                chin_y=_med(chin_ys),
+                forehead_x=_med(forehead_xs),
+                forehead_y=_med(forehead_ys),
+                anatomical_center_x=_med(anat_cxs, default=_med(eyes_cxs, default=_med([f.bbox_x for f in face_list]))),
+                anatomical_center_y=_med(anat_cys, default=_med(eyes_cys, default=_med([f.bbox_y for f in face_list]))),
+                lip_aperture=float(np.mean([f.lip_aperture for f in face_list])),
+                speech_confidence=speaker_lip_variance.get(spk_id, 0.5),
+            )
+
         return ActiveSpeakerResult(
             segments=segments,
             dominant_speaker_id=dominant_id,
@@ -383,7 +504,76 @@ class ActiveSpeakerDetector:
             speaker_lip_variance=speaker_lip_variance,
             speaker_lip_amplitude=speaker_lip_amplitude,
             speaker_head_motion=speaker_head_motion,
+            speaker_landmarks=speaker_landmarks,
         )
+
+    def _extract_anatomical_landmarks(self, landmarks, width: int, height: int) -> dict:
+        """Extract multi-modal facial landmarks (retina, nose, lips, chin, forehead)."""
+        num = len(landmarks) if hasattr(landmarks, "__len__") else 468
+        def get_pt(idx: int):
+            lm = landmarks[idx]
+            return float(lm.x * width), float(lm.y * height)
+
+        # 1. Nose Tip (Midline sagittal axis)
+        nose_x, nose_y = get_pt(self.NOSE_TIP)
+
+        # 2. Retina / Pupils / Eyes
+        if num > self.RIGHT_IRIS_CENTER:
+            left_eye_x, left_eye_y = get_pt(self.LEFT_IRIS_CENTER)
+            right_eye_x, right_eye_y = get_pt(self.RIGHT_IRIS_CENTER)
+        else:
+            lin_x, lin_y = get_pt(self.LEFT_EYE_INNER)
+            lout_x, lout_y = get_pt(self.LEFT_EYE_OUTER) if num > self.LEFT_EYE_OUTER else (lin_x, lin_y)
+            rin_x, rin_y = get_pt(self.RIGHT_EYE_INNER)
+            rout_x, rout_y = get_pt(self.RIGHT_EYE_OUTER) if num > self.RIGHT_EYE_OUTER else (rin_x, rin_y)
+            left_eye_x, left_eye_y = (lin_x + lout_x) / 2.0, (lin_y + lout_y) / 2.0
+            right_eye_x, right_eye_y = (rin_x + rout_x) / 2.0, (rin_y + rout_y) / 2.0
+
+        eyes_center_x = (left_eye_x + right_eye_x) / 2.0
+        eyes_center_y = (left_eye_y + right_eye_y) / 2.0
+
+        # 3. Lips & Mouth Center
+        up_x, up_y = get_pt(self.UPPER_LIP_CENTER)
+        low_x, low_y = get_pt(self.LOWER_LIP_CENTER)
+        ml_x, ml_y = get_pt(self.MOUTH_LEFT)
+        mr_x, mr_y = get_pt(self.MOUTH_RIGHT)
+        mouth_x = (ml_x + mr_x) / 2.0
+        mouth_y = (up_y + low_y) / 2.0
+
+        # 4. Chin & Forehead
+        chin_x, chin_y = get_pt(self.CHIN)
+        forehead_x, forehead_y = get_pt(self.FOREHEAD)
+
+        # 5. Multi-modal anatomical center
+        # Nose tip = sagittal midline (35%), Eyes midpoint = interpupillary level (35%),
+        # Mouth = articulation center (20%), Chin-Forehead balance (10%)
+        anatomical_cx = 0.35 * nose_x + 0.35 * eyes_center_x + 0.20 * mouth_x + 0.10 * ((nose_x + mouth_x) / 2.0)
+        anatomical_cy = 0.40 * eyes_center_y + 0.30 * nose_y + 0.20 * mouth_y + 0.10 * chin_y
+
+        face_w = abs(mr_x - ml_x) * 2.5
+        face_h = abs(chin_y - forehead_y)
+
+        return {
+            "nose_x": nose_x,
+            "nose_y": nose_y,
+            "left_eye_x": left_eye_x,
+            "left_eye_y": left_eye_y,
+            "right_eye_x": right_eye_x,
+            "right_eye_y": right_eye_y,
+            "eyes_center_x": eyes_center_x,
+            "eyes_center_y": eyes_center_y,
+            "mouth_x": mouth_x,
+            "mouth_y": mouth_y,
+            "chin_x": chin_x,
+            "chin_y": chin_y,
+            "forehead_x": forehead_x,
+            "forehead_y": forehead_y,
+            "anatomical_center_x": anatomical_cx,
+            "anatomical_center_y": anatomical_cy,
+            "face_width": face_w,
+            "face_height": face_h,
+        }
+
 
     def _compute_lip_aperture_legacy(self, face_landmarks, frame_shape: tuple) -> float:
         """Compute normalized lip aperture (legacy mp.solutions API).

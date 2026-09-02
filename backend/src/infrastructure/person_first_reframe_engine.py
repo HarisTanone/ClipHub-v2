@@ -698,12 +698,16 @@ class PersonFirstReframeEngine(IReframeEngine):
             crop_h = int(decision.get("crop_h") or min(height, int(crop_w * 8 / 9)))
             top_crop_x = int(decision.get("top_crop_x", max(0, min(int(decision.get("top_x", 0)) - crop_w // 2, width - crop_w))))
             bottom_crop_x = int(decision.get("bottom_crop_x", max(0, min(int(decision.get("bottom_x", 0)) - crop_w // 2, width - crop_w))))
-            if top_crop_x != bottom_crop_x or int(decision.get("top_crop_y", 0)) != int(decision.get("bottom_crop_y", 0)):
+            top_crop_y = int(decision.get("top_crop_y", max(0, (height - crop_h) // 2)))
+            bottom_crop_y = int(decision.get("bottom_crop_y", max(0, (height - crop_h) // 2)))
+            if top_crop_x != bottom_crop_x or top_crop_y != bottom_crop_y:
                 static = self._render_double_grid(
                     video_path, output_path, width, height,
                     crop_w, crop_h, top_crop_x, bottom_crop_x,
                     tracked_data.get("person_count", 2),
                     int(top_id), int(bottom_id),
+                    top_crop_y=top_crop_y,
+                    bottom_crop_y=bottom_crop_y,
                 )
                 if static:
                     static["method"] = "person_first_static_auto_grid_fallback"
@@ -716,7 +720,9 @@ class PersonFirstReframeEngine(IReframeEngine):
             crop_h = int(decision.get("crop_h") or min(height, int(crop_w * 8 / 9)))
             top_crop_x = int(decision.get("top_crop_x", max(0, min(int(decision.get("top_x", 0)) - crop_w // 2, width - crop_w))))
             bottom_crop_x = int(decision.get("bottom_crop_x", max(0, min(int(decision.get("bottom_x", 0)) - crop_w // 2, width - crop_w))))
-            if top_crop_x == bottom_crop_x and int(decision.get("top_crop_y", 0)) == int(decision.get("bottom_crop_y", 0)):
+            top_crop_y = int(decision.get("top_crop_y", max(0, (height - crop_h) // 2)))
+            bottom_crop_y = int(decision.get("bottom_crop_y", max(0, (height - crop_h) // 2)))
+            if top_crop_x == bottom_crop_x and top_crop_y == bottom_crop_y:
                 logger.info("person_first_reframe: grid rejected identical crops")
                 return None
             return self._render_double_grid(
@@ -724,6 +730,8 @@ class PersonFirstReframeEngine(IReframeEngine):
                 crop_w, crop_h, top_crop_x, bottom_crop_x,
                 tracked_data.get("person_count", 2),
                 int(top_id), int(bottom_id),
+                top_crop_y=top_crop_y,
+                bottom_crop_y=bottom_crop_y,
             )
 
         return None
@@ -741,10 +749,13 @@ class PersonFirstReframeEngine(IReframeEngine):
         person_count: int,
         top_track_id: int,
         bottom_track_id: int,
+        top_crop_y: Optional[int] = None,
+        bottom_crop_y: Optional[int] = None,
     ) -> Optional[dict]:
         """Render 50/50 grid (top/bottom panels)."""
-        top_y = max(0, (height - crop_h) // 2)
-        bottom_y = top_y
+        top_y = top_crop_y if top_crop_y is not None else max(0, (height - crop_h) // 2)
+        bottom_y = bottom_crop_y if bottom_crop_y is not None else max(0, (height - crop_h) // 2)
+
 
         vf = (
             f"setpts=PTS-STARTPTS,split=2[top][bot];"

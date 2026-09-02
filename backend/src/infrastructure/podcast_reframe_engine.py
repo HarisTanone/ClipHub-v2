@@ -29,7 +29,12 @@ import numpy as np
 from src.config import settings
 from src.domain.interfaces import IReframeEngine
 from src.infrastructure.gpu_encoder import get_video_encoder_args
-from src.infrastructure.active_speaker_detector import ActiveSpeakerDetector, ActiveSpeakerResult, SpeakerSegment
+from src.infrastructure.active_speaker_detector import (
+    ActiveSpeakerDetector,
+    ActiveSpeakerResult,
+    SpeakerSegment,
+    SpeakerAnatomicalLandmarks,
+)
 from src.infrastructure.person_tracker import SimpleIoUTracker, BBox, TrackedDetection
 from src.infrastructure.speaker_diarizer import SpeakerDiarizer, DiarizationResult
 from src.infrastructure.speaker_face_mapper import SpeakerFaceMapper, MappingResult
@@ -508,6 +513,18 @@ class PodcastReframeEngine(IReframeEngine):
             total_frames=total_frames,
         )
 
+        # Enrich position target profiles with multi-modal anatomical landmarks (voice, retina, lips, nose)
+        if speaker_result and getattr(speaker_result, "speaker_landmarks", None):
+            pos_profiles = tracked_data.get("position_target_profiles") or {}
+            for spk_id, lm in speaker_result.speaker_landmarks.items():
+                if spk_id in pos_profiles:
+                    pos_profiles[spk_id]["anatomical_x"] = lm.anatomical_center_x
+                    pos_profiles[spk_id]["anatomical_y"] = lm.anatomical_center_y
+                    pos_profiles[spk_id]["eyes_y"] = lm.eyes_center_y
+                    pos_profiles[spk_id]["nose_x"] = lm.nose_tip_x
+                    pos_profiles[spk_id]["mouth_x"] = lm.mouth_center_x
+                    pos_profiles[spk_id]["chin_y"] = lm.chin_y
+
         # Step 3: Auto Grid decisions. Grid is only allowed for two distinct,
         # concurrently visible tracked identities. Content classification alone
         # (for example a false "gaming" label) must never duplicate one person.
@@ -808,6 +825,31 @@ class PodcastReframeEngine(IReframeEngine):
             "podcast_reframe: single visible person detected → "
             "speaker=P0, centering target=P0"
         )
+        prof = (tracked_data.get("position_target_profiles") or {}).get(0) or (tracked_data.get("stable_position_profiles") or {}).get(0) or {}
+        spk_lms = {}
+        if prof:
+            ax = float(prof.get("anatomical_x") or prof.get("face_x") or prof.get("x", 0.0))
+            ay = float(prof.get("anatomical_y") or prof.get("face_y") or prof.get("y", 0.0))
+            spk_lms[0] = SpeakerAnatomicalLandmarks(
+                speaker_id=0,
+                eyes_center_x=ax,
+                eyes_center_y=float(prof.get("eyes_y", ay - 40.0)),
+                left_eye_x=ax - 30.0,
+                left_eye_y=float(prof.get("eyes_y", ay - 40.0)),
+                right_eye_x=ax + 30.0,
+                right_eye_y=float(prof.get("eyes_y", ay - 40.0)),
+                nose_tip_x=float(prof.get("nose_x", ax)),
+                nose_tip_y=ay,
+                mouth_center_x=float(prof.get("mouth_x", ax)),
+                mouth_center_y=float(prof.get("mouth_y", ay + 35.0)),
+                chin_x=ax,
+                chin_y=float(prof.get("chin_y", ay + 70.0)),
+                forehead_x=ax,
+                forehead_y=ay - 70.0,
+                anatomical_center_x=ax,
+                anatomical_center_y=ay,
+            )
+
         return ActiveSpeakerResult(
             segments=[
                 SpeakerSegment(
@@ -821,7 +863,9 @@ class PodcastReframeEngine(IReframeEngine):
             dominant_ratio=1.0,
             per_frame_speaker=per_frame_speaker,
             total_speakers=1,
+            speaker_landmarks=spk_lms,
         )
+
 
     def _build_visual_fallback_speaker_result(
         self,
@@ -2339,28 +2383,36 @@ class PodcastReframeEngine(IReframeEngine):
             return None
 
         # Convert body profiles to face profiles for proper grid geometry.
-        # Prefer real face_* fields when present (person-first detector).
-        # Body bbox is used for horizontal seat separation; face for Y framing.
+        # Prefer real face_* and anatomical_* fields when present.
+        # Body bbox is used for horizontal seat separation; face & landmarks for crop centering.
         def body_to_face_profile(body_profile: dict) -> dict:
-            """Estimate face from body, or pass through real face measurements."""
+            """Estimate face from body, or pass through real face and anatomical landmark measurements."""
             body_height = float(body_profile.get("height", height * 0.8))
             body_width = float(body_profile.get("width", width * 0.3))
             body_y = float(body_profile.get("y", height * 0.5))
             body_x = float(body_profile.get("x", width * 0.5))
 
-            # Real face from person-first crop detector (preferred).
-            if body_profile.get("face_y") is not None:
-                face_y = float(body_profile["face_y"])
+            # Real face / anatomical landmarks from person-first crop detector or active speaker detector
+            if body_profile.get("face_y") is not None or body_profile.get("anatomical_y") is not None:
+                face_y = float(body_profile.get("face_y") or body_profile.get("anatomical_y") or body_y)
                 face_h = float(body_profile.get("face_height") or max(body_height * 0.18, 40.0))
                 face_w = float(body_profile.get("face_width") or max(body_width * 0.22, 40.0))
                 face_x = float(body_profile.get("face_x") or body_x)
+                anatomical_x = float(body_profile.get("anatomical_x") or face_x)
+                anatomical_y = float(body_profile.get("anatomical_y") or face_y)
                 return {
-                    "x": body_x,  # keep body X for left/right isolation
+                    "x": body_x,  # keep body X for left/right collision & isolation boundary
                     "y": face_y,
                     "width": face_w,
                     "height": face_h,
                     "area": face_w * face_h,
                     "face_x": face_x,
+                    "anatomical_x": anatomical_x,
+                    "anatomical_y": anatomical_y,
+                    "eyes_y": body_profile.get("eyes_y"),
+                    "chin_y": body_profile.get("chin_y"),
+                    "nose_x": body_profile.get("nose_x"),
+                    "mouth_x": body_profile.get("mouth_x"),
                 }
 
             # Already face-sized profile (legacy face-tracker path) — do not re-shrink.
@@ -2377,18 +2429,21 @@ class PodcastReframeEngine(IReframeEngine):
                     "width": body_width,
                     "height": body_height,
                     "area": body_width * body_height,
+                    "face_x": body_x,
+                    "anatomical_x": body_profile.get("anatomical_x", body_x),
+                    "anatomical_y": body_profile.get("anatomical_y", body_y),
+                    "eyes_y": body_profile.get("eyes_y"),
+                    "chin_y": body_profile.get("chin_y"),
+                    "nose_x": body_profile.get("nose_x"),
+                    "mouth_x": body_profile.get("mouth_x"),
                 }
 
             # Estimate face at the TOP of the body. The head sits at the top
             # of a person bbox, so the face center is face_height/2 below the
-            # body top — NOT 10% into the body (that lands near the neck and
-            # causes the "nose-only" grid crop). Keep the size generous so the
-            # headroom clamp in _clamp_grid_y keeps the forehead in frame even
-            # when the detector box starts at the shoulders.
+            # body top.
             face_height = max(body_height * 0.18, body_width * 0.28, 48.0)
             face_width = max(body_width * 0.22, face_height * 0.75, 40.0)
             body_top = body_y - body_height / 2
-            # Face center = top of body + half face height (head fully inside body).
             face_y = body_top + face_height / 2
 
             return {
@@ -2397,6 +2452,13 @@ class PodcastReframeEngine(IReframeEngine):
                 "width": face_width,
                 "height": face_height,
                 "area": face_width * face_height,
+                "face_x": body_x,
+                "anatomical_x": body_profile.get("anatomical_x", body_x),
+                "anatomical_y": body_profile.get("anatomical_y", face_y),
+                "eyes_y": body_profile.get("eyes_y"),
+                "chin_y": body_profile.get("chin_y"),
+                "nose_x": body_profile.get("nose_x"),
+                "mouth_x": body_profile.get("mouth_x"),
             }
 
         all_profiles = {
@@ -2444,8 +2506,11 @@ class PodcastReframeEngine(IReframeEngine):
             if crop_w < own_face_min_w or crop_h < own_face_min_h:
                 break
 
-            first_crop_x = self._clamp_x(first_profile["x"], crop_w, width)
-            second_crop_x = self._clamp_x(second_profile["x"], crop_w, width)
+            # Center on user's face / anatomical visual center (retina/eyes, nose tip, lips)
+            p1_cx = first_profile.get("anatomical_x") or first_profile.get("face_x") or first_profile["x"]
+            p2_cx = second_profile.get("anatomical_x") or second_profile.get("face_x") or second_profile["x"]
+            first_crop_x = self._clamp_x(p1_cx, crop_w, width)
+            second_crop_x = self._clamp_x(p2_cx, crop_w, width)
             first_isolated = all(
                 first_crop_x + crop_w
                 <= profile["x"] - profile["width"] / 2 - face_gutter
@@ -2470,12 +2535,14 @@ class PodcastReframeEngine(IReframeEngine):
                     zoom += 0.02
                     continue
 
-                # Profile already contains face position (converted from body bbox above)
+                # Multi-modal vertical centering with eye level and chin margin
                 first_crop_y = self._clamp_grid_y(
-                    first_profile["y"], first_profile["height"], crop_h, height
+                    first_profile["y"], first_profile["height"], crop_h, height,
+                    eyes_y=first_profile.get("eyes_y"), chin_y=first_profile.get("chin_y"),
                 )
                 second_crop_y = self._clamp_grid_y(
-                    second_profile["y"], second_profile["height"], crop_h, height
+                    second_profile["y"], second_profile["height"], crop_h, height,
+                    eyes_y=second_profile.get("eyes_y"), chin_y=second_profile.get("chin_y"),
                 )
                 return {
                     "first_id": first_id,
@@ -2492,15 +2559,12 @@ class PodcastReframeEngine(IReframeEngine):
             zoom += 0.02
 
         # Fallback for face-to-face: isolation impossible — avoid over-zoom.
-        # Use mildest possible crop that still keeps full head (no kejauhan zoom).
-        # Pilih zoom minimal yang masih izolasi parsial, bukan langsung MAX.
         best_zoom = self.GRID_BASE_ZOOM
         target_crop_w = min(width, max(2, int(base_crop_w / best_zoom)))
         target_crop_h = min(height, max(2, int(target_crop_w * 8 / 9)))
-        # Clamp agar face full height tetap muat dengan headroom
         needed_h = max(
             first_profile["height"], second_profile["height"], 1.0
-        ) * (1 + self.GRID_FACE_MARGIN + 0.25)  # + headroom extra
+        ) * (1 + self.GRID_FACE_MARGIN + 0.25)
         if target_crop_h < needed_h:
             target_crop_h = int(needed_h)
             target_crop_w = int(target_crop_h * 9 / 8)
@@ -2508,16 +2572,23 @@ class PodcastReframeEngine(IReframeEngine):
 
         crop_w_fallback = min(width, target_crop_w)
         crop_h_fallback = min(height, max(2, int(crop_w_fallback * 8 / 9)))
-        # Jika masih ketinggian kurang, sesuaikan
         if crop_h_fallback < needed_h and needed_h <= height:
             crop_h_fallback = int(min(height, needed_h))
             crop_w_fallback = min(width, int(crop_h_fallback * 9 / 8))
 
-        first_crop_x_fb = self._clamp_x(first_profile["x"], crop_w_fallback, width)
-        second_crop_x_fb = self._clamp_x(second_profile["x"], crop_w_fallback, width)
-        # Profile already contains face position (converted from body bbox above)
-        first_crop_y_fb = self._clamp_grid_y(first_profile["y"], first_profile["height"], crop_h_fallback, height)
-        second_crop_y_fb = self._clamp_grid_y(second_profile["y"], second_profile["height"], crop_h_fallback, height)
+        p1_fb_cx = first_profile.get("anatomical_x") or first_profile.get("face_x") or first_profile["x"]
+        p2_fb_cx = second_profile.get("anatomical_x") or second_profile.get("face_x") or second_profile["x"]
+        first_crop_x_fb = self._clamp_x(p1_fb_cx, crop_w_fallback, width)
+        second_crop_x_fb = self._clamp_x(p2_fb_cx, crop_w_fallback, width)
+
+        first_crop_y_fb = self._clamp_grid_y(
+            first_profile["y"], first_profile["height"], crop_h_fallback, height,
+            eyes_y=first_profile.get("eyes_y"), chin_y=first_profile.get("chin_y"),
+        )
+        second_crop_y_fb = self._clamp_grid_y(
+            second_profile["y"], second_profile["height"], crop_h_fallback, height,
+            eyes_y=second_profile.get("eyes_y"), chin_y=second_profile.get("chin_y"),
+        )
 
         all_profiles_count = len(all_profiles)
         is_few_people = (all_profiles_count <= 2)
@@ -2567,7 +2638,14 @@ class PodcastReframeEngine(IReframeEngine):
         }
 
     @staticmethod
-    def _clamp_grid_y(face_y: float, face_height: float, crop_h: int, frame_h: int) -> int:
+    def _clamp_grid_y(
+        face_y: float,
+        face_height: float,
+        crop_h: int,
+        frame_h: int,
+        eyes_y: Optional[float] = None,
+        chin_y: Optional[float] = None,
+    ) -> int:
         """Place face in panel with forehead + eyes visible (not nose-only).
 
         Talking-head framing: eyes sit ~38% down the panel. Two hard guarantees:
@@ -2577,10 +2655,6 @@ class PodcastReframeEngine(IReframeEngine):
           * ceiling (keep eyes in): crop_top <= face_top + face_h * 0.30
             → eyes are NEVER above the crop top (prevents the "nose-only" cut
               that happens when a body-estimated face_y lands too low).
-
-        When both cannot hold simultaneously (crop too short for the head),
-        the floor wins — keeping the full head inside is more important than
-        hitting the exact 38% line.
         """
         if crop_h >= frame_h:
             return 0
@@ -2594,8 +2668,8 @@ class PodcastReframeEngine(IReframeEngine):
         chin_margin = max(face_h * 0.55, crop_h * 0.10)
 
         # Ideal: eyes ~38% down the panel (natural talking-head framing).
-        eyes_y = float(face_y) - face_h * 0.10
-        target_y = int(eyes_y - crop_h * 0.38)
+        actual_eyes_y = float(eyes_y) if eyes_y is not None else (float(face_y) - face_h * 0.10)
+        target_y = int(actual_eyes_y - crop_h * 0.38)
 
         # Hard floor: face_top - headroom must stay inside crop.
         floor_y = int(face_top - headroom)
@@ -2608,12 +2682,14 @@ class PodcastReframeEngine(IReframeEngine):
         target_y = min(target_y, floor_y)
 
         # If room remains, also try to keep the chin inside.
-        min_y_for_chin = int(face_bottom + chin_margin - crop_h)
+        actual_chin_y = float(chin_y) if chin_y is not None else face_bottom
+        min_y_for_chin = int(actual_chin_y + chin_margin - crop_h)
         if min_y_for_chin <= floor_y:
             target_y = max(target_y, min_y_for_chin)
 
         max_y = max(0, frame_h - crop_h)
         return max(0, min(int(target_y), max_y))
+
 
     def _decide_layout_v2(
         self,
@@ -2812,10 +2888,12 @@ class PodcastReframeEngine(IReframeEngine):
             )
             if closest_frame is not None:
                 active_speaker = speaker_result.per_frame_speaker[closest_frame]
-                # Prefer recent live position average over the static whole-clip
-                # median. This eliminates snap-back jitter when the hold fallback
-                # disagrees with where the person actually is now.
-                if (
+                # Multi-modal active speaker centering: prioritize anatomical landmark center
+                # (retina/pupils, nose tip, and speech mouth center)
+                spk_lms = getattr(speaker_result, "speaker_landmarks", {})
+                if active_speaker in spk_lms and spk_lms[active_speaker].anatomical_center_x > 0:
+                    target_x_hint = float(spk_lms[active_speaker].anatomical_center_x)
+                elif (
                     recent_live_positions
                     and active_speaker in recent_live_positions
                     and recent_live_positions[active_speaker]
@@ -2823,12 +2901,21 @@ class PodcastReframeEngine(IReframeEngine):
                     target_x_hint = float(np.mean(recent_live_positions[active_speaker]))
                 else:
                     target_x_hint = position_targets.get(active_speaker)
+
                 target_profile = position_target_profiles.get(active_speaker)
-                if target_x_hint is None and target_profile:
-                    target_x_hint = target_profile.get("x")
+                if target_profile:
+                    target_x_hint = (
+                        target_profile.get("anatomical_x")
+                        or target_profile.get("face_x")
+                        or target_x_hint
+                        or target_profile.get("x")
+                    )
 
         def get_det_cx(d: TrackedDetection) -> float:
+            if getattr(d, 'anatomical_center_x', None) is not None:
+                return float(d.anatomical_center_x)
             return d.face_bbox.center_x if getattr(d, 'face_bbox', None) is not None else d.bbox.center_x
+
 
         def get_det_profile_distance(d: TrackedDetection, prof: dict) -> float:
             box = d.face_bbox if getattr(d, 'face_bbox', None) is not None else d.bbox
@@ -3982,6 +4069,12 @@ class PodcastReframeEngine(IReframeEngine):
             result["face_y"] = float(np.median(face_y))
             result["face_width"] = float(np.median(values.get("face_width") or [0.0]))
             result["face_height"] = float(np.median(values.get("face_height") or [0.0]))
+
+        for key in ("anatomical_x", "anatomical_y", "eyes_y", "nose_x", "mouth_y", "chin_y"):
+            arr = values.get(key) or []
+            if arr:
+                result[key] = float(np.median(arr))
+
         return result
 
     @staticmethod
@@ -3994,7 +4087,15 @@ class PodcastReframeEngine(IReframeEngine):
             "height": float(np.median([p.get("height", 0.0) for p in profiles])),
             "area": float(np.median([p.get("area", 0.0) for p in profiles])),
         }
+        for key in (
+            "face_x", "face_y", "face_width", "face_height",
+            "anatomical_x", "anatomical_y", "eyes_y", "nose_x", "mouth_y", "chin_y",
+        ):
+            vals = [p[key] for p in profiles if key in p]
+            if vals:
+                result[key] = float(np.median(vals))
         return result
+
 
     @staticmethod
     def _profile_distance(
@@ -4428,7 +4529,46 @@ class PodcastReframeEngine(IReframeEngine):
                 if face_found:
                     analytics_faces_found += 1
                     det.face_bbox = face_found
-                    frame_faces.append(face_found.center_x)
+                    # Extract anatomical landmarks from detector if available
+                    if self._crop_face_detector_type == "retinaface" and faces:
+                        lms = best_face.get('landmarks')
+                        if isinstance(lms, dict) and 'nose' in lms:
+                            nx, ny = lms['nose'][0] + head_x1, lms['nose'][1] + head_y1
+                            lex, ley = lms.get('left_eye', [nx, ny])[0] + head_x1, lms.get('left_eye', [nx, ny])[1] + head_y1
+                            rex, rey = lms.get('right_eye', [nx, ny])[0] + head_x1, lms.get('right_eye', [nx, ny])[1] + head_y1
+                            mlx, mly = lms.get('mouth_left', [nx, ny])[0] + head_x1, lms.get('mouth_left', [nx, ny])[1] + head_y1
+                            mrx, mry = lms.get('mouth_right', [nx, ny])[0] + head_x1, lms.get('mouth_right', [nx, ny])[1] + head_y1
+                            det.nose_x = nx
+                            det.eyes_y = (ley + rey) / 2.0
+                            det.mouth_y = (mly + mry) / 2.0
+                            ecx = (lex + rex) / 2.0
+                            mcx = (mlx + mrx) / 2.0
+                            det.anatomical_center_x = 0.35 * nx + 0.35 * ecx + 0.20 * mcx + 0.10 * face_found.center_x
+                            det.anatomical_center_y = 0.40 * det.eyes_y + 0.30 * ny + 0.20 * det.mouth_y + 0.10 * face_found.center_y
+                    elif self._crop_face_detector_type == "mediapipe":
+                        if self._use_legacy_api:
+                            keypoints = getattr(best_det.location_data, "relative_keypoints", None)
+                            if keypoints and len(keypoints) >= 4:
+                                crop_h, crop_w = crop.shape[:2]
+                                rex, rey = keypoints[0].x * crop_w + head_x1, keypoints[0].y * crop_h + head_y1
+                                lex, ley = keypoints[1].x * crop_w + head_x1, keypoints[1].y * crop_h + head_y1
+                                nx, ny = keypoints[2].x * crop_w + head_x1, keypoints[2].y * crop_h + head_y1
+                                mx, my = keypoints[3].x * crop_w + head_x1, keypoints[3].y * crop_h + head_y1
+                                det.nose_x = nx
+                                det.eyes_y = (ley + rey) / 2.0
+                                det.mouth_y = my
+                                ecx = (lex + rex) / 2.0
+                                det.anatomical_center_x = 0.35 * nx + 0.35 * ecx + 0.20 * mx + 0.10 * face_found.center_x
+                                det.anatomical_center_y = 0.40 * det.eyes_y + 0.30 * ny + 0.20 * my + 0.10 * face_found.center_y
+
+                    if getattr(det, "anatomical_center_x", None) is None:
+                        det.anatomical_center_x = face_found.center_x
+                        det.anatomical_center_y = face_found.center_y
+                        det.eyes_y = face_found.center_y - face_found.height * 0.15
+                        det.nose_x = face_found.center_x
+                        det.mouth_y = face_found.center_y + face_found.height * 0.25
+
+                    frame_faces.append(det.anatomical_center_x)
                 else:
                     fallback_face_x = det.bbox.center_x
                     fallback_face_y = p_y1 + 0.15 * p_h
@@ -4440,7 +4580,13 @@ class PodcastReframeEngine(IReframeEngine):
                         fallback_face_x + fallback_face_w/2,
                         fallback_face_y + fallback_face_h/2
                     )
+                    det.anatomical_center_x = fallback_face_x
+                    det.anatomical_center_y = fallback_face_y
+                    det.eyes_y = fallback_face_y - fallback_face_h * 0.15
+                    det.nose_x = fallback_face_x
+                    det.mouth_y = fallback_face_y + fallback_face_h * 0.25
                     frame_faces.append(det.face_bbox.center_x)
+
 
             per_frame_faces.append(frame_faces)
             per_frame_tracked.append(tracked_detections)
@@ -4541,13 +4687,24 @@ class PodcastReframeEngine(IReframeEngine):
                 profile["width"].append(body_box.width)
                 profile["height"].append(body_box.height)
                 profile["area"].append(body_box.area)
-                # Capture the real face bbox (person-first detector provides it)
-                # so grid-Y framing centers the actual face, not a body estimate.
+                # Capture the real face bbox and multi-modal anatomical landmarks
+                # so grid framing centers the actual face and eyes, not a coarse body estimate.
                 if detection.face_bbox is not None:
                     profile["face_x"].append(detection.face_bbox.center_x)
                     profile["face_y"].append(detection.face_bbox.center_y)
                     profile["face_width"].append(detection.face_bbox.width)
                     profile["face_height"].append(detection.face_bbox.height)
+                if getattr(detection, "anatomical_center_x", None) is not None:
+                    profile["anatomical_x"].append(detection.anatomical_center_x)
+                    profile["anatomical_y"].append(detection.anatomical_center_y)
+                if getattr(detection, "eyes_y", None) is not None:
+                    profile["eyes_y"].append(detection.eyes_y)
+                if getattr(detection, "nose_x", None) is not None:
+                    profile["nose_x"].append(detection.nose_x)
+                if getattr(detection, "mouth_y", None) is not None:
+                    profile["mouth_y"].append(detection.mouth_y)
+                if getattr(detection, "chin_y", None) is not None:
+                    profile["chin_y"].append(detection.chin_y)
 
         if not track_profiles:
             return {
