@@ -425,6 +425,7 @@ class AutopilotService:
         self,
         user_id: int = 1,
         force: bool = False,
+        preset_override: Optional[str] = None,
         trigger_source: str = "cron",
         notify_telegram: bool = True,
     ) -> dict:
@@ -485,21 +486,28 @@ class AutopilotService:
 
         # 4. Resolve preset style layers
         from src.infrastructure.preset_resolver import resolve_preset
-        preset_slug = settings.get("preset_slug", "default")
+        preset_slug = str(preset_override or settings.get("preset_slug", "default")).strip() or "default"
         resolved_preset = resolve_preset(preset_slug, user_id=user_id)
-        # If preset is default or fallback to builtin_default, automatically check if user has custom user_presets
+        # If preset is default/active or falls back to builtin_default, automatically check if user has custom active preset
         if not resolved_preset or resolved_preset.get("source") == "builtin_default":
-            fallback_p = resolve_preset("", user_id=user_id)
+            fallback_p = resolve_preset("active", user_id=user_id)
             if fallback_p and fallback_p.get("source") != "builtin_default":
                 resolved_preset = fallback_p
                 preset_slug = resolved_preset.get("slug") or preset_slug
                 logger.info(f"autopilot: Automatically resolved active user preset '{resolved_preset.get('name')}' ({preset_slug})")
+        elif resolved_preset:
+            preset_slug = resolved_preset.get("slug") or preset_slug
 
         # 5. Prepare AutoCliper job options
         target_platforms = [p.strip().lower() for p in settings.get("target_platforms", "tiktok,instagram,youtube").split(",") if p.strip()]
         target_accounts = settings.get("target_account_ids", [])
+        if not target_accounts and resolved_preset and resolved_preset.get("auto_post_account_ids"):
+            target_accounts = resolved_preset.get("auto_post_account_ids")
+
         schedule_mode = settings.get("schedule_mode", "ai")
         custom_schedule_time = settings.get("custom_schedule_time") if schedule_mode == "custom" else None
+        broll_style = resolved_preset.get("broll_config") or resolved_preset.get("broll_style_config") or {}
+        broll_motion_style = broll_style.get("motion_style") if isinstance(broll_style, dict) else None
 
         job_options = {
             "youtube_url": video_url,
@@ -515,6 +523,7 @@ class AutopilotService:
             "broll_image_overlay": resolved_preset.get("broll_image_overlay", True) if resolved_preset else True,
             "broll_behind_person": resolved_preset.get("broll_behind_person", True) if resolved_preset else True,
             "broll_video_footage": resolved_preset.get("broll_video_footage", True) if resolved_preset else True,
+            "broll_motion_style": broll_motion_style,
             "autogrid_enabled": resolved_preset.get("autogrid_enabled", False) if resolved_preset else False,
             # Text & Hook & Subtitle layers from resolved preset
             "text_emphasis_enabled": resolved_preset.get("text_emphasis_enabled", True) if resolved_preset else True,
@@ -546,6 +555,7 @@ class AutopilotService:
             broll_image_overlay=job_options.get("broll_image_overlay", True),
             broll_behind_person=job_options.get("broll_behind_person", True),
             broll_video_footage=job_options.get("broll_video_footage", True),
+            broll_motion_style=job_options.get("broll_motion_style"),
             autogrid_enabled=job_options.get("autogrid_enabled", False),
             text_emphasis_enabled=job_options.get("text_emphasis_enabled", True),
             hook_style_config=job_options.get("hook_style_config"),
@@ -624,6 +634,8 @@ class AutopilotService:
             "video_url": video_url,
             "video_title": video_title,
             "virality_score": virality_score,
+            "preset_slug": preset_slug,
+            "preset_name": resolved_preset.get("name") if resolved_preset else preset_slug,
             "platforms": target_platforms,
             "message": f"Autopilot berhasil memproses video '{video_title}' (Job ID: {job_id})",
         }

@@ -2,6 +2,7 @@
 
 Run automatically on server startup via lifespan.
 """
+import json
 import logging
 import sqlite3
 
@@ -266,8 +267,10 @@ def seed_database() -> None:
                 "INSERT INTO users (email, hashed_password, full_name, is_active, role_id) VALUES (?, ?, ?, 1, ?)",
                 (settings.SUPERADMIN_EMAIL, hashed, "Super Admin", superadmin_role_id),
             )
+            superadmin_user_id = cur.lastrowid
             logger.info(f"db_seeder: superadmin created ({settings.SUPERADMIN_EMAIL})")
         else:
+            superadmin_user_id = existing["id"]
             if not verify_password(settings.SUPERADMIN_PASSWORD, existing["hashed_password"]):
                 new_hash = hash_password(settings.SUPERADMIN_PASSWORD)
                 cur.execute(
@@ -310,6 +313,173 @@ def seed_database() -> None:
             logger.info("db_seeder: system settings defaults initialized")
         except Exception as err:
             logger.warning(f"db_seeder: warning seeding system settings: {err}")
+
+        # 8. Seed default 5-layer presets for superadmin
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_presets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    slug TEXT NOT NULL DEFAULT '',
+                    hook_style JSON NOT NULL DEFAULT '{}',
+                    subtitle_style JSON NOT NULL DEFAULT '{}',
+                    text_emphasis_style JSON NOT NULL DEFAULT '{}',
+                    watermark_style JSON NOT NULL DEFAULT '{}',
+                    cta_style JSON NOT NULL DEFAULT '{}',
+                    broll_style JSON NOT NULL DEFAULT '{}',
+                    autopost_style JSON NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            """)
+            default_presets = [
+                (
+                    "Neon Glow", "neon-glow-01",
+                    {"animation": "fade_scale", "fontFamily": "Inter", "color": "#FFFFFF", "duration": 3.0},
+                    {"stylePreset": "neon_pulse", "highlightColor": "#00FFCC", "fontFamily": "Poppins", "highlightBold": True, "dualStyleEnabled": True, "highlightFontFamily": "Anton"},
+                    {"effectMode": "hero_punch", "fontFamily": "Anton", "color": "#00FFCC"},
+                    {"enabled": False, "type": "text", "text": "@ClipHub", "position": "top-right"},
+                    {"enabled": False, "template": "follow_badge", "headline": "Follow For More"},
+                    {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True},
+                    {"enabled": False, "platforms": "tiktok,instagram,youtube", "schedule_mode": "ai"},
+                ),
+                (
+                    "Bold Cinema", "bold-cinema-02",
+                    {"animation": "cinematic_reveal", "fontFamily": "Montserrat", "color": "#FFFFFF", "duration": 3.0},
+                    {"stylePreset": "meme_impact", "highlightColor": "#FFE500", "fontFamily": "Anton", "uppercase": True},
+                    {"effectMode": "hero_punch", "fontFamily": "Anton", "color": "#FFE500"},
+                    {"enabled": False, "type": "text", "text": "@ClipHub", "position": "top-right"},
+                    {"enabled": False, "template": "follow_badge", "headline": "Follow For More"},
+                    {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True},
+                    {"enabled": False, "platforms": "tiktok,instagram,youtube", "schedule_mode": "ai"},
+                ),
+                (
+                    "Minimal Clean", "minimal-clean-03",
+                    {"animation": "fade_scale", "fontFamily": "Inter", "color": "#FFFFFF", "duration": 3.0},
+                    {"stylePreset": "minimal_clean", "highlightColor": "#FFFFFF", "fontFamily": "Inter", "bgEnabled": False},
+                    {},
+                    {"enabled": False, "type": "text", "text": "@ClipHub", "position": "top-right"},
+                    {"enabled": False, "template": "follow_badge", "headline": "Follow For More"},
+                    {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True},
+                    {"enabled": False, "platforms": "tiktok,instagram,youtube", "schedule_mode": "ai"},
+                ),
+                (
+                    "Podcast Pro", "podcast-pro-04",
+                    {"animation": "podcast_lower_third", "fontFamily": "Barlow Condensed", "color": "#FFFFFF", "duration": 3.0},
+                    {"stylePreset": "lower_third", "highlightColor": "#10B981", "fontFamily": "Poppins"},
+                    {"effectMode": "hero_punch", "fontFamily": "Anton", "color": "#10B981"},
+                    {"enabled": False, "type": "text", "text": "@ClipHub", "position": "top-right"},
+                    {"enabled": False, "template": "follow_badge", "headline": "Follow For More"},
+                    {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True, "autogrid_enabled": True},
+                    {"enabled": False, "platforms": "tiktok,instagram,youtube", "schedule_mode": "ai"},
+                ),
+                (
+                    "Glitch Tech", "glitch-tech-05",
+                    {"animation": "glitch_rgb", "fontFamily": "Barlow Condensed", "color": "#FFFFFF", "duration": 3.0},
+                    {"stylePreset": "word_tiles", "highlightColor": "#FF0055", "fontFamily": "Montserrat"},
+                    {"effectMode": "hero_punch", "fontFamily": "Anton", "color": "#FF0055"},
+                    {"enabled": False, "type": "text", "text": "@ClipHub", "position": "top-right"},
+                    {"enabled": False, "template": "follow_badge", "headline": "Follow For More"},
+                    {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True},
+                    {"enabled": False, "platforms": "tiktok,instagram,youtube", "schedule_mode": "ai"},
+                ),
+            ]
+            for pname, pslug, hook, sub, te, wm, cta, broll, autopost in default_presets:
+                cur.execute("SELECT id FROM user_presets WHERE slug = ?", (pslug,))
+                if not cur.fetchone():
+                    cur.execute("""
+                        INSERT INTO user_presets (user_id, name, slug, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style, broll_style, autopost_style)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        superadmin_user_id or 1,
+                        pname,
+                        pslug,
+                        json.dumps(hook),
+                        json.dumps(sub),
+                        json.dumps(te),
+                        json.dumps(wm),
+                        json.dumps(cta),
+                        json.dumps(broll),
+                        json.dumps(autopost),
+                    ))
+                    logger.info(f"db_seeder: seeded default preset '{pname}' ({pslug})")
+            conn.commit()
+        except Exception as preset_err:
+            logger.warning(f"db_seeder: warning seeding user presets: {preset_err}")
+
+        # 9. Seed default autopilot settings for superadmin
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS autopilot_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER UNIQUE NOT NULL DEFAULT 1,
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    niche_query TEXT NOT NULL DEFAULT 'podcast bisnis',
+                    preset_slug TEXT NOT NULL DEFAULT 'neon-glow-01',
+                    target_platforms TEXT NOT NULL DEFAULT 'tiktok,instagram,youtube',
+                    target_account_ids TEXT NOT NULL DEFAULT '[]',
+                    schedule_mode TEXT NOT NULL DEFAULT 'ai',
+                    custom_schedule_time TEXT DEFAULT '',
+                    run_time TEXT NOT NULL DEFAULT '05:00',
+                    min_duration_sec INTEGER NOT NULL DEFAULT 480,
+                    max_duration_sec INTEGER NOT NULL DEFAULT 3600,
+                    max_daily_videos INTEGER NOT NULL DEFAULT 1,
+                    last_run_at TEXT DEFAULT NULL,
+                    last_job_id TEXT DEFAULT NULL,
+                    last_video_url TEXT DEFAULT NULL,
+                    last_video_title TEXT DEFAULT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("SELECT id, preset_slug FROM autopilot_settings WHERE user_id = ?", (superadmin_user_id or 1,))
+            auto_row = cur.fetchone()
+            if not auto_row:
+                cur.execute("""
+                    INSERT INTO autopilot_settings (user_id, enabled, niche_query, preset_slug, target_platforms, schedule_mode, run_time, max_daily_videos)
+                    VALUES (?, 1, 'podcast bisnis', 'neon-glow-01', 'tiktok,instagram,youtube', 'ai', '05:00', 1)
+                """, (superadmin_user_id or 1,))
+                logger.info("db_seeder: autopilot settings seeded (default preset: neon-glow-01)")
+            elif not auto_row["preset_slug"] or auto_row["preset_slug"] == "default":
+                cur.execute("UPDATE autopilot_settings SET preset_slug = 'neon-glow-01' WHERE id = ?", (auto_row["id"],))
+            conn.commit()
+        except Exception as auto_err:
+            logger.warning(f"db_seeder: warning seeding autopilot settings: {auto_err}")
+
+        # 10. Seed user_settings for superadmin
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    default_aspect_ratio TEXT NOT NULL DEFAULT '9:16',
+                    default_hook_engine TEXT NOT NULL DEFAULT 'v3',
+                    default_style_preset TEXT NOT NULL DEFAULT 'neon-glow-01',
+                    default_hook_style TEXT NOT NULL DEFAULT '',
+                    max_clips_per_job INTEGER NOT NULL DEFAULT 5,
+                    whisper_model_size TEXT NOT NULL DEFAULT 'medium',
+                    broll_enabled INTEGER NOT NULL DEFAULT 1,
+                    autogrid_enabled INTEGER NOT NULL DEFAULT 0,
+                    use_remotion INTEGER NOT NULL DEFAULT 1,
+                    remotion_ai_layer INTEGER NOT NULL DEFAULT 1,
+                    remotion_threejs INTEGER NOT NULL DEFAULT 0,
+                    remotion_quality TEXT NOT NULL DEFAULT 'medium',
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            """)
+            cur.execute("SELECT user_id, default_style_preset FROM user_settings WHERE user_id = ?", (superadmin_user_id or 1,))
+            us_row = cur.fetchone()
+            if not us_row:
+                cur.execute("""
+                    INSERT INTO user_settings (user_id, default_style_preset, use_remotion, remotion_ai_layer)
+                    VALUES (?, 'neon-glow-01', 1, 1)
+                """, (superadmin_user_id or 1,))
+            elif not us_row["default_style_preset"] or us_row["default_style_preset"] == "default":
+                cur.execute("UPDATE user_settings SET default_style_preset = 'neon-glow-01' WHERE user_id = ?", (superadmin_user_id or 1,))
+            conn.commit()
+        except Exception as us_err:
+            logger.warning(f"db_seeder: warning seeding user settings: {us_err}")
 
         logger.info("db_seeder: seed complete")
 

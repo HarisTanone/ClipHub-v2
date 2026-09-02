@@ -65,7 +65,7 @@ tools:
           description: "URL YouTube yang akan diproses (contoh: https://youtube.com/watch?v=...)"
         style_preset:
           type: string
-          description: "Style preset untuk rendering: 'default', 'viral', 'minimal', 'bold'"
+          description: "Style preset slug atau nama (misal: 'neon-glow-01', 'bold-cinema-02', 'active', 'default', atau gunakan autocliper_list_presets)"
           default: "default"
         target_aspect_ratio:
           type: string
@@ -206,13 +206,17 @@ tools:
       properties:
         action:
           type: string
-          description: "'status' untuk mengecek kuota & konfigurasi, 'run' untuk menjalankan 1 siklus video hari ini"
-          enum: ["status", "run"]
+          description: "'status' untuk mengecek kuota & konfigurasi, 'run' untuk menjalankan 1 siklus video hari ini, 'set_preset' untuk menyetel preset aktif"
+          enum: ["status", "run", "set_preset"]
           default: "status"
         force:
           type: boolean
           description: "Paksa jalan meskipun kuota 1 video hari ini sudah tercapai (default: false)"
           default: false
+        preset:
+          type: string
+          description: "ID, slug, nama preset, atau 'active' untuk menggunakan preset yang sedang aktif"
+          default: ""
     executable:
       type: script
       command: python3
@@ -220,6 +224,8 @@ tools:
         - "${HERMES_HOME}/skills/bin/ac_autopilot.py"
         - "--action"
         - "${action}"
+        - "--preset"
+        - "${preset}"
         - "--force"
         - "${force}"
 

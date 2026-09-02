@@ -1,9 +1,9 @@
 """
-AutoCliper Tool: Hermes Autopilot Status & Manual Trigger
+AutoCliper Tool: Hermes Autopilot Status, Configuration & Manual Trigger
 Dipanggil oleh Hermes toolset autocliper_autopilot.
 
-Mengecek status kuota harian (maksimal 1 video/hari) dan memicu
-pencarian video viral otomatis + rendering dengan preset + social auto-post.
+Mengecek status kuota harian (maksimal 1 video/hari), mengatur preset visual,
+dan memicu pencarian video viral otomatis + rendering dengan preset + social auto-post.
 """
 import argparse
 import json
@@ -34,10 +34,22 @@ def get_status() -> dict:
         return {"error": str(e)}
 
 
-def trigger_run(force: bool = False) -> dict:
+def trigger_run(force: bool = False, preset: str = "") -> dict:
     """Jalankan siklus autopilot hari ini (1 video/hari)."""
     try:
-        res = ac_auth.api_post("/autopilot/run", {"force": force})
+        payload = {"force": force}
+        if preset:
+            payload["preset_slug"] = preset
+        res = ac_auth.api_post("/autopilot/run", payload)
+        return res if isinstance(res, dict) else {"data": res}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def set_preset(preset_slug: str) -> dict:
+    """Set preset autopilot untuk user."""
+    try:
+        res = ac_auth.api_post("/autopilot/settings", {"preset_slug": preset_slug})
         return res if isinstance(res, dict) else {"data": res}
     except Exception as e:
         return {"error": str(e)}
@@ -47,21 +59,31 @@ def main():
     parser = argparse.ArgumentParser(description="AutoCliper Autopilot Management Tool")
     parser.add_argument(
         "--action",
-        choices=["status", "run"],
+        choices=["status", "run", "set_preset"],
         default="status",
-        help="Aksi yang akan dijalankan: 'status' (cek kuota & config) atau 'run' (jalankan 1 video hari ini)",
+        help="Aksi yang akan dijalankan: 'status' (cek kuota & config), 'run' (jalankan 1 video), atau 'set_preset' (atur preset aktif autopilot)",
     )
     parser.add_argument(
         "--force",
         action="store_true",
         help="Paksa jalankan meskipun kuota hari ini sudah tercapai",
     )
+    parser.add_argument(
+        "--preset",
+        default="",
+        help="Preset style ID, slug, nama, atau 'active' untuk menggunakan preset yang sedang aktif",
+    )
     parser.add_argument("--json", action="store_true", help="Output format JSON")
 
     args = parser.parse_args()
 
     if args.action == "run":
-        result = trigger_run(force=args.force)
+        result = trigger_run(force=args.force, preset=args.preset)
+    elif args.action == "set_preset":
+        if not args.preset:
+            print("❌ Error: Parameter --preset diperlukan untuk aksi set_preset", file=sys.stderr)
+            sys.exit(1)
+        result = set_preset(preset_slug=args.preset)
     else:
         result = get_status()
 
@@ -85,6 +107,9 @@ def main():
             print(f"  🆔 Job ID: {result.get('job_id')}")
         else:
             print(f"⚠️ {result.get('message', 'Tidak dapat menjalankan autopilot')}")
+    elif args.action == "set_preset":
+        data = result.get("data", {})
+        print(f"✅ Preset Autopilot berhasil diperbarui ke '{data.get('preset_slug')}'")
     else:
         data = result.get("data", {})
         quota = result.get("quota", {})

@@ -8,6 +8,160 @@ from src.infrastructure.db_connection import get_dict_connection
 
 logger = logging.getLogger(__name__)
 
+# ─── Default Style Constants (100% Parity with Frontend style-editor/types.ts) ───
+
+DEFAULT_HOOK_STYLE: Dict[str, Any] = {
+    "animation": "podcast_lower_third",
+    "text": "",
+    "engine": "remotion",
+    "fontFamily": "Barlow Condensed",
+    "fontSize": 52,
+    "fontWeight": "900",
+    "letterSpacing": 0,
+    "lineHeight": 1.3,
+    "color": "#FFFFFF",
+    "gradientEnabled": False,
+    "gradientFrom": "#FFFFFF",
+    "gradientTo": "#FFCC00",
+    "gradientAngle": 180,
+    "shadowEnabled": True,
+    "shadowColor": "#000000",
+    "shadowBlur": 12,
+    "shadowX": 0,
+    "shadowY": 4,
+    "glowEnabled": False,
+    "glowColor": "#16F2B3",
+    "glowSize": 24,
+    "bgColor": "#06111F",
+    "bgOpacity": 0.42,
+    "position": "bottom",
+    "positionY": 78,
+    "textAlign": "left",
+    "uppercase": True,
+    "italic": False,
+    "lineEnabled": False,
+    "linePosition": "bottom",
+    "lineColor": "#16F2B3",
+    "lineWidth": 60,
+    "lineAutoWidth": False,
+    "lineThickness": 4,
+    "lineOffset": 12,
+    "boxEnabled": False,
+    "boxColor": "#FFFFFF",
+    "boxOpacity": 0.1,
+    "boxPadding": 20,
+    "boxRadius": 8,
+    "strokeEnabled": False,
+    "strokeColor": "#000000",
+    "strokeWidth": 3,
+    "badgeEnabled": True,
+    "badgeText": "ON AIR",
+    "footerEnabled": True,
+    "footerText": "READ MORE AT chatgpt.com",
+    "decorativeElements": True,
+    "motionIntensity": 1.0,
+    "duration": 3.0,
+    "fadeIn": 0.3,
+    "fadeOut": 0.3,
+    "transitionStyle": "cut",
+    "transitionDuration": 0.35,
+}
+
+DEFAULT_SUBTITLE_STYLE: Dict[str, Any] = {
+    "enabled": True,
+    "stylePreset": "classic",
+    "engine": "remotion",
+    "fontFamily": "Poppins",
+    "fontSize": 34,
+    "fontWeight": "700",
+    "letterSpacing": 0,
+    "lineHeight": 1.4,
+    "color": "#FFFFFF",
+    "highlightColor": "#FFCC00",
+    "highlightScale": 1.2,
+    "highlightBold": True,
+    "highlightStyle": "scale",
+    "highlightGlow": False,
+    "highlightGlowColor": "#FFCC00",
+    "highlightWords": [],
+    "dualStyleEnabled": False,
+    "highlightFontFamily": "Anton",
+    "highlightFontSize": 38,
+    "highlightFontWeight": "900",
+    "highlightLetterSpacing": 1,
+    "highlightItalic": False,
+    "highlightUppercase": True,
+    "highlightStrokeEnabled": True,
+    "highlightStrokeColor": "#000000",
+    "highlightStrokeWidth": 3,
+    "highlightShadowEnabled": True,
+    "highlightShadowColor": "#000000",
+    "highlightShadowBlur": 12,
+    "bgEnabled": True,
+    "bgColor": "#000000",
+    "bgOpacity": 0.4,
+    "bgRadius": 8,
+    "bgPadding": 12,
+    "position": "bottom",
+    "positionY": 85,
+    "uppercase": False,
+    "capitalize": False,
+    "italic": False,
+    "strokeEnabled": True,
+    "strokeColor": "#000000",
+    "strokeWidth": 2,
+    "shadowEnabled": True,
+    "shadowColor": "#000000",
+    "shadowBlur": 8,
+    "maxWordsPerLine": 3,
+    "wordSpacing": 4,
+    "animationStyle": "pop",
+    "animationSpeed": 1.0,
+    "lineTransition": "word_pop",
+}
+
+DEFAULT_WATERMARK_STYLE: Dict[str, Any] = {
+    "enabled": False,
+    "type": "text",
+    "imageDataUrl": None,
+    "text": "@yourchannel",
+    "fontFamily": "Poppins",
+    "fontSize": 28,
+    "fontWeight": "600",
+    "color": "#FFFFFF",
+    "sizePct": 20,
+    "opacity": 60,
+    "position": "bottom-right",
+    "marginPct": 3,
+}
+
+DEFAULT_CTA_STYLE: Dict[str, Any] = {
+    "enabled": False,
+    "ctaType": "card",
+    "template": "follow_badge",
+    "duration": 3.0,
+    "text": "Jangan lupa follow untuk tips berikutnya!",
+    "headline": "Follow For More",
+    "subhead": "@yourchannel",
+    "buttonText": "FOLLOW",
+    "selectedIcon": "tiktok",
+    "socialPlatform": "tiktok",
+    "socialHandle": "@yourchannel",
+    "position": "bottom",
+    "bgBox": True,
+    "animation": "slide_up",
+    "primaryColor": "#10B981",
+    "textColor": "#FFFFFF",
+    "backgroundColor": "#0F172A",
+    "bgOpacity": 90,
+    "fontSize": 28,
+    "fontFamily": "Poppins",
+    "fontWeight": "700",
+    "showIcon": True,
+    "showArrow": True,
+    "avatarUrl": None,
+}
+
 
 def resolve_preset(
     preset_identifier: Optional[str] = None,
@@ -30,7 +184,52 @@ def resolve_preset(
     try:
         cur = conn.cursor()
 
-        # Handle empty or 'default' preset identifier: try user's default setting
+        # Handle 'active', 'current', 'auto': resolve the user's active / configured preset
+        if key.lower() in ("active", "current", "auto"):
+            # 1. Check user_settings for default_style_preset
+            if user_id is not None:
+                cur.execute(
+                    "SELECT default_style_preset FROM user_settings WHERE user_id = ?",
+                    (user_id,),
+                )
+                user_set = cur.fetchone()
+                if user_set and user_set["default_style_preset"]:
+                    cand = str(user_set["default_style_preset"]).strip()
+                    if cand.lower() not in ("active", "current", "auto", "default", "none", ""):
+                        key = cand
+
+            # 2. Check autopilot_settings for preset_slug if still active/auto
+            if user_id is not None and key.lower() in ("active", "current", "auto"):
+                cur.execute(
+                    "SELECT preset_slug FROM autopilot_settings WHERE user_id = ?",
+                    (user_id,),
+                )
+                auto_set = cur.fetchone()
+                if auto_set and auto_set["preset_slug"]:
+                    cand_auto = str(auto_set["preset_slug"]).strip()
+                    if cand_auto.lower() not in ("active", "current", "auto", "default", "none", ""):
+                        key = cand_auto
+
+            # 3. If still active/auto, find the user's latest custom preset
+            if user_id is not None and key.lower() in ("active", "current", "auto"):
+                cur.execute(
+                    "SELECT * FROM user_presets WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                    (user_id,),
+                )
+                fallback_user_p = cur.fetchone()
+                if fallback_user_p:
+                    return _format_user_preset_row(fallback_user_p)
+
+            # 4. If user has no custom presets, find latest custom preset globally
+            if key.lower() in ("active", "current", "auto"):
+                cur.execute("SELECT * FROM user_presets ORDER BY id DESC LIMIT 1")
+                global_latest = cur.fetchone()
+                if global_latest:
+                    logger.info(f"preset_resolver: 'active' resolved to global latest preset '{global_latest['name']}' ({global_latest['slug']})")
+                    return _format_user_preset_row(global_latest)
+                return _get_builtin_default_preset()
+
+        # Handle 'default', 'none', or empty string
         if not key or key.lower() in ("default", "none"):
             # Check user_settings for default_style_preset
             if user_id is not None:
@@ -40,36 +239,19 @@ def resolve_preset(
                 )
                 user_set = cur.fetchone()
                 if user_set and user_set["default_style_preset"]:
-                    key = str(user_set["default_style_preset"]).strip()
+                    cand = str(user_set["default_style_preset"]).strip()
+                    if cand.lower() not in ("default", "none", ""):
+                        key = cand
 
-            # If still default or empty, check user's own latest preset in user_presets
-            if user_id is not None and (not key or key.lower() in ("default", "none")):
-                cur.execute(
-                    "SELECT * FROM user_presets WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-                    (user_id,),
-                )
-                fallback_user_p = cur.fetchone()
-                if fallback_user_p:
-                    return _format_user_preset_row(fallback_user_p)
-
-            # Otherwise check system DEFAULT_STYLE_PRESET or style_presets
             if not key or key.lower() in ("default", "none"):
-                sys_default = getattr(settings, "DEFAULT_STYLE_PRESET", "")
-                if sys_default and sys_default.lower() not in ("default", "none", ""):
-                    key = sys_default
-                else:
-                    cur.execute("SELECT * FROM style_presets ORDER BY id ASC LIMIT 1")
-                    fallback_sys = cur.fetchone()
-                    if fallback_sys:
-                        key = str(fallback_sys["id"]).strip()
-                    else:
-                        return _get_builtin_default_preset()
+                # Return standard clean Studio Default with all 5 layers merged
+                return _get_builtin_default_preset()
 
         slug_norm_dash = key.strip().lower().replace(" ", "-").replace("_", "-")
         slug_norm_under = key.strip().lower().replace(" ", "_").replace("-", "_")
 
         row = None
-        # 1. If user_id is provided, search strictly in this user's user_presets
+        # 1. Search in user's own user_presets if user_id is provided
         if user_id is not None:
             query = (
                 "SELECT * FROM user_presets WHERE "
@@ -83,24 +265,43 @@ def resolve_preset(
             params.append(user_id)
             cur.execute(query, tuple(params))
             row = cur.fetchone()
-        else:
-            # When user_id is None (system background caller without user context)
-            query = (
+
+        # 2. Global fallback in user_presets (accessible to superadmin & autopilot)
+        is_admin_or_system = (user_id is None or user_id == 1)
+        if not is_admin_or_system and user_id is not None:
+            try:
+                cur.execute(
+                    "SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?",
+                    (user_id,),
+                )
+                r_row = cur.fetchone()
+                if r_row and r_row["name"] == "superadmin":
+                    is_admin_or_system = True
+            except Exception:
+                pass
+
+        if not row and is_admin_or_system:
+            query_global = (
                 "SELECT * FROM user_presets WHERE "
                 "(slug = ? OR slug = ? OR slug = ? OR LOWER(name) = LOWER(?)"
                 + (" OR id = ?" if key.isdigit() else "")
                 + ") ORDER BY id DESC LIMIT 1"
             )
-            params = [key, slug_norm_dash, slug_norm_under, key]
+            params_g = [key, slug_norm_dash, slug_norm_under, key]
             if key.isdigit():
-                params.append(int(key))
-            cur.execute(query, tuple(params))
+                params_g.append(int(key))
+            cur.execute(query_global, tuple(params_g))
             row = cur.fetchone()
+            if row:
+                logger.info(
+                    f"preset_resolver: resolved preset '{key}' globally from user_presets "
+                    f"(id: {row['id']}, owner user_id: {row['user_id']})"
+                )
 
         if row:
             return _format_user_preset_row(row)
 
-        # 2. Search system style_presets table
+        # 3. Search system style_presets table
         cur.execute(
             "SELECT * FROM style_presets WHERE id = ? OR id = ? OR id = ? OR LOWER(name) = LOWER(?)",
             (key, slug_norm_under, slug_norm_dash, key),
@@ -115,26 +316,27 @@ def resolve_preset(
                 "name": s_dict.get("name"),
                 "slug": s_dict.get("id"),
                 "hook_style_config": {
-                    "animation": s_dict.get("hook_animation", "zoom_in"),
-                    "primary_color": s_dict.get("primary_color", "#FFFFFF"),
-                    "secondary_color": s_dict.get("secondary_color", "#FFCC00"),
+                    **DEFAULT_HOOK_STYLE,
+                    "animation": s_dict.get("hook_animation", "podcast_lower_third"),
+                    "color": s_dict.get("primary_color", "#FFFFFF"),
                 },
                 "subtitle_style_config": {
+                    **DEFAULT_SUBTITLE_STYLE,
                     "stylePreset": s_dict.get("id"),
                     "highlightColor": s_dict.get("secondary_color", "#FFCC00"),
                     "position": s_dict.get("subtitle_position", "bottom"),
                 },
                 "text_emphasis_style_config": {},
                 "text_emphasis_enabled": bool(s_dict.get("enable_ai_layer", 0)),
-                "watermark_config": {},
-                "cta_config": {},
+                "watermark_config": dict(DEFAULT_WATERMARK_STYLE),
+                "cta_config": dict(DEFAULT_CTA_STYLE),
                 "broll_config": {},
                 "broll_enabled": False,
                 "transition_style": "cut",
                 "transition_duration": 0.35,
             }
 
-        # 3. If specified preset not found, fall back to user's own latest preset (never another user's preset)
+        # 4. If specified preset not found, fall back to user's own latest preset
         if user_id is not None:
             cur.execute(
                 "SELECT * FROM user_presets WHERE user_id = ? ORDER BY id DESC LIMIT 1",
@@ -160,25 +362,15 @@ def _get_builtin_default_preset() -> Dict[str, Any]:
         "id": "default",
         "name": "Default Studio",
         "slug": "default",
-        "hook_style_config": {
-            "animation": "slide_up",
-            "fontFamily": "Montserrat",
-            "fontSize": 48,
-            "color": "#FFFFFF",
-        },
-        "subtitle_style_config": {
-            "fontFamily": "Montserrat",
-            "fontSize": 38,
-            "highlightColor": "#00FFCC",
-            "position": "bottom",
-        },
+        "hook_style_config": dict(DEFAULT_HOOK_STYLE),
+        "subtitle_style_config": dict(DEFAULT_SUBTITLE_STYLE),
         "text_emphasis_style_config": {},
         "text_emphasis_enabled": False,
-        "watermark_config": {},
-        "cta_config": {},
-        "broll_config": {},
-        "broll_style_config": {},
-        "broll_enabled": False,
+        "watermark_config": dict(DEFAULT_WATERMARK_STYLE),
+        "cta_config": dict(DEFAULT_CTA_STYLE),
+        "broll_config": {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True},
+        "broll_style_config": {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True},
+        "broll_enabled": True,
         "broll_image_overlay": True,
         "broll_behind_person": True,
         "broll_video_footage": True,
@@ -196,9 +388,12 @@ def _get_builtin_default_preset() -> Dict[str, Any]:
     }
 
 
-
 def _format_user_preset_row(row) -> Dict[str, Any]:
-    """Format user_presets sqlite row into comprehensive preset dictionary."""
+    """Format user_presets sqlite row into comprehensive preset dictionary.
+    
+    Merges saved user styles with full layer defaults to ensure 100% parity
+    with AutopilotPresetPreview.tsx.
+    """
     r_dict = dict(row)
 
     def _parse_json(val):
@@ -219,6 +414,12 @@ def _format_user_preset_row(row) -> Dict[str, Any]:
     broll_style = _parse_json(r_dict.get("broll_style"))
     autopost_style = _parse_json(r_dict.get("autopost_style"))
 
+    # 100% visual parity merge with frontend style defaults
+    merged_hook_style = {**DEFAULT_HOOK_STYLE, **(hook_style or {})}
+    merged_subtitle_style = {**DEFAULT_SUBTITLE_STYLE, **(subtitle_style or {})}
+    merged_watermark_style = {**DEFAULT_WATERMARK_STYLE, **(watermark_style or {})} if watermark_style else dict(DEFAULT_WATERMARK_STYLE)
+    merged_cta_style = {**DEFAULT_CTA_STYLE, **(cta_style or {})} if cta_style else dict(DEFAULT_CTA_STYLE)
+
     has_text_emphasis = bool(
         text_emphasis_style
         and text_emphasis_style.get("effectMode")
@@ -232,28 +433,37 @@ def _format_user_preset_row(row) -> Dict[str, Any]:
     else:
         plat_str = str(raw_plats or "")
 
+    # B-Roll enabled logic:
+    # If broll_style explicitly defines 'enabled', respect it.
+    # If broll_style contains options (image_overlay, etc.) but no explicit 'enabled', treat as True.
+    # If broll_style is empty or None, treat as False.
+    if isinstance(broll_style, dict) and broll_style:
+        broll_enabled = bool(broll_style.get("enabled", True))
+    else:
+        broll_enabled = False
+
     return {
         "source": "user_preset",
         "id": r_dict.get("id"),
         "name": r_dict.get("name"),
         "slug": r_dict.get("slug") or f"preset-{r_dict.get('id')}",
-        "hook_style_config": hook_style,
-        "subtitle_style_config": subtitle_style,
+        "hook_style_config": merged_hook_style,
+        "subtitle_style_config": merged_subtitle_style,
         "text_emphasis_style_config": text_emphasis_style,
         "text_emphasis_enabled": has_text_emphasis,
-        "watermark_config": watermark_style,
-        "cta_config": cta_style,
+        "watermark_config": merged_watermark_style,
+        "cta_config": merged_cta_style,
         "broll_config": broll_style,
         "broll_style_config": broll_style,
-        "broll_enabled": bool(broll_style.get("enabled", False)) if broll_style else False,
+        "broll_enabled": broll_enabled,
         "broll_image_overlay": bool(broll_style.get("image_overlay", True)) if broll_style else True,
         "broll_behind_person": bool(broll_style.get("behind_person", True)) if broll_style else True,
         "broll_video_footage": bool(broll_style.get("video_footage", True)) if broll_style else True,
         "autogrid_enabled": bool(broll_style.get("autogrid_enabled", False)) if broll_style else False,
-        "transition_style": hook_style.get("transitionStyle", "cut") if isinstance(hook_style, dict) else "cut",
-        "transition_duration": float(hook_style.get("transitionDuration", 0.35)) if isinstance(hook_style, dict) else 0.35,
-        "hook_engine": hook_style.get("engine", "remotion") if isinstance(hook_style, dict) else "remotion",
-        "subtitle_engine": subtitle_style.get("engine", "remotion") if isinstance(subtitle_style, dict) else "remotion",
+        "transition_style": merged_hook_style.get("transitionStyle", "cut"),
+        "transition_duration": float(merged_hook_style.get("transitionDuration", 0.35) or 0.35),
+        "hook_engine": merged_hook_style.get("engine", "remotion"),
+        "subtitle_engine": merged_subtitle_style.get("engine", "remotion"),
         "autopost_config": autopost_style,
         "auto_post_social": bool(autopost_style.get("enabled", False)) if autopost_style else False,
         "auto_post_platforms": plat_str,
@@ -261,4 +471,3 @@ def _format_user_preset_row(row) -> Dict[str, Any]:
         "auto_post_schedule_mode": autopost_style.get("schedule_mode", "ai") if autopost_style else "ai",
         "auto_post_custom_time": autopost_style.get("custom_time") if autopost_style else None,
     }
-

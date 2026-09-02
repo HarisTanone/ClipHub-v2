@@ -32,8 +32,14 @@ for env_path in env_candidates:
             pass
 
 AUTOCLIPER_API = os.environ.get("AUTOCLIPER_API_URL", "http://127.0.0.1:8000/api")
-AUTOCLIPER_EMAIL = os.environ.get("AUTOCLIPER_EMAIL", "")
-AUTOCLIPER_PASSWORD = os.environ.get("AUTOCLIPER_PASSWORD", "")
+AUTOCLIPER_EMAIL = (
+    os.environ.get("AUTOCLIPER_EMAIL", "").strip()
+    or os.environ.get("SUPERADMIN_EMAIL", "").strip()
+)
+AUTOCLIPER_PASSWORD = (
+    os.environ.get("AUTOCLIPER_PASSWORD", "").strip()
+    or os.environ.get("SUPERADMIN_PASSWORD", "").strip()
+)
 TOKEN_FILE = os.path.join(HERMES_HOME, "autocliper_token.json")
 
 

@@ -279,3 +279,19 @@ class TestDetectThenSwitch:
         assert events[0] == {"time": 0.0, "layout": "single"}
         assert events[1]["layout"] == "double"
         assert events[1]["time"] == 2.0
+
+    def test_overlapping_candidate_crops_rejected_to_prevent_duplicate_speaker(self):
+        """Single speaker with shifted track detections must NOT duplicate into double grid."""
+        frames = []
+        for i in range(TOTAL_FRAMES):
+            # Single speaker with two slightly shifted detections
+            frames.append([
+                make_det(1, 450, 400, 300, 360, i),
+                make_det(2, 600, 420, 300, 360, i),
+            ])
+
+        model, decision = decide(self.engine, frames, skip_ghost_pair_check=True)
+        assert decision["layout"] == "single", (
+            f"Overlapping candidate crops must stay single, got {decision['layout']}"
+        )
+

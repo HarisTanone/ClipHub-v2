@@ -1686,6 +1686,14 @@ async def cmd_autopilot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.HTML,
                 )
             return
+        elif arg in ("preset", "style") and len(ctx.args) > 1:
+            preset_slug = ctx.args[1].strip()
+            autopilot_service.update_settings(user_id=1, data={"preset_slug": preset_slug})
+            await update.message.reply_text(
+                f"🎨 <b>Preset Autopilot berhasil disetel ke:</b> <code>{preset_slug}</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
 
     await _show_autopilot_menu(update.message)
 
@@ -1754,6 +1762,13 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         toast = f"✅ Job #{res.get('job_id')} berhasil disubmit!" if res.get("success") else f"⚠️ {res.get('message')}"
         await _show_autopilot_menu(query, toast=toast)
+
+    elif data == "menu_presets":
+        try:
+            result = await run_ac_tool("ac_list_presets.py")
+            await edit_or_reply(query, result, reply_markup=KB.back())
+        except Exception as e:
+            await edit_or_reply(query, f"❌ Gagal mengambil presets: {e}", reply_markup=KB.back())
 
     # ── Auto-Post Sosmed Menu ──────────────────────────────────────────────────
     elif data == "menu_autopost":

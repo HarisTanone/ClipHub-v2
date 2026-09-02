@@ -27,6 +27,7 @@ class UpdateAutopilotSettingsRequest(BaseModel):
 
 class TriggerAutopilotRequest(BaseModel):
     force: bool = Field(False, description="Paksa jalankan meskipun kuota hari ini sudah tercapai")
+    preset_slug: Optional[str] = Field(None, description="Optional preset override untuk run ini")
 
 
 @router.get("/settings")
@@ -73,6 +74,7 @@ async def trigger_autopilot_now(
     res = await autopilot_service.run_autopilot_step(
         user_id=user.id,
         force=req.force,
+        preset_override=req.preset_slug,
         trigger_source="web_dashboard",
         notify_telegram=True,
     )

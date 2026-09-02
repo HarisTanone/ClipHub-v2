@@ -50,19 +50,50 @@ if [ ! -f "$HERMES_HOME/.env" ]; then
     echo "Seeded $HERMES_HOME/.env from env.example — FILL API KEYS"
   fi
 else
-  # Ensure 9router base URL present
-  if ! grep -qE '^OPENAI_BASE_URL=' "$HERMES_HOME/.env" 2>/dev/null; then
-    echo 'OPENAI_BASE_URL=http://127.0.0.1:20128/v1' >> "$HERMES_HOME/.env"
-  fi
-  # Ensure AutoCliper API vars present (append-only, never overwrite)
-  if ! grep -qE '^AUTOCLIPER_API_URL=' "$HERMES_HOME/.env" 2>/dev/null; then
-    echo 'AUTOCLIPER_API_URL=http://127.0.0.1:8000/api' >> "$HERMES_HOME/.env"
-  fi
-  if ! grep -qE '^AUTOCLIPER_EMAIL=' "$HERMES_HOME/.env" 2>/dev/null; then
-    echo 'AUTOCLIPER_EMAIL=' >> "$HERMES_HOME/.env"
-    echo 'AUTOCLIPER_PASSWORD=' >> "$HERMES_HOME/.env"
-    echo "  [WARN] Set AUTOCLIPER_EMAIL dan AUTOCLIPER_PASSWORD di $HERMES_HOME/.env"
-  fi
+  # Dynamically inherit superadmin credentials from backend/.env if not explicitly set in HERMES_HOME/.env
+  python3 -c "
+import os
+hermes_env = '$HERMES_HOME/.env'
+be_env = '$PROJECT_DIR/backend/.env'
+defaults = {
+    'OPENAI_BASE_URL': 'http://127.0.0.1:20128/v1',
+    'AUTOCLIPER_API_URL': 'http://127.0.0.1:8000/api',
+}
+if os.path.exists(be_env):
+    with open(be_env, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith('SUPERADMIN_EMAIL='):
+                defaults['AUTOCLIPER_EMAIL'] = line.split('=', 1)[1].strip('\"\' ')
+            elif line.startswith('SUPERADMIN_PASSWORD='):
+                defaults['AUTOCLIPER_PASSWORD'] = line.split('=', 1)[1].strip('\"\' ')
+
+if os.path.exists(hermes_env):
+    with open(hermes_env, 'r') as f:
+        lines = f.readlines()
+    keys_found = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        matched = False
+        for k, v in defaults.items():
+            if stripped.startswith(f'{k}='):
+                val = stripped.split('=', 1)[1].strip('\"\' ')
+                if not val and v:
+                    new_lines.append(f'{k}={v}\n')
+                else:
+                    new_lines.append(line)
+                keys_found.add(k)
+                matched = True
+                break
+        if not matched:
+            new_lines.append(line)
+    for k, v in defaults.items():
+        if k not in keys_found and v:
+            new_lines.append(f'{k}={v}\n')
+    with open(hermes_env, 'w') as f:
+        f.writelines(new_lines)
+" 2>/dev/null || true
   if ! grep -qE '^TELEGRAM_BOT_TOKEN=' "$HERMES_HOME/.env" 2>/dev/null; then
     echo '# Telegram Bot (dari @BotFather)' >> "$HERMES_HOME/.env"
     echo 'TELEGRAM_BOT_TOKEN=' >> "$HERMES_HOME/.env"

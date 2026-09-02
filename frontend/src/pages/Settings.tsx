@@ -985,7 +985,7 @@ export function Settings() {
     try {
       const [res, presetsRes, platsRes, histRes] = await Promise.all([
         autopilotApi.getSettings(),
-        presetsApi.list().catch(() => ({ presets: [] })),
+        presetsApi.list(isSuperadmin).catch(() => ({ presets: [] })),
         socialApi.getPlatformsStatus().catch(() => ({ platforms: [] })),
         autopilotApi.getHistory(15).catch(() => ({ data: [] })),
       ]);

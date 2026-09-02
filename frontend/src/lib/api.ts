@@ -859,8 +859,9 @@ export interface PresetsListResponse {
 }
 
 export const presets = {
-  async list(): Promise<Preset[]> {
-    const res = await request<PresetsListResponse>("/api/presets");
+  async list(allUsers: boolean = false): Promise<Preset[]> {
+    const query = allUsers ? "?all_users=true" : "";
+    const res = await request<PresetsListResponse>(`/api/presets${query}`);
     return res.data;
   },
 

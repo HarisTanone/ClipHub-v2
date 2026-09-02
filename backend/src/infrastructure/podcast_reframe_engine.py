@@ -3158,6 +3158,18 @@ class PodcastReframeEngine(IReframeEngine):
         bottom_x = int(decision["bottom_crop_x"])
         top_y = int(decision["top_crop_y"])
         bottom_y = int(decision["bottom_crop_y"])
+
+        # Validate that top and bottom crops do not heavily overlap
+        iw = max(0, min(top_x + top_crop_w, bottom_x + bottom_crop_w) - max(top_x, bottom_x))
+        ih = max(0, min(top_y + top_crop_h, bottom_y + bottom_crop_h) - max(top_y, bottom_y))
+        min_crop_area = max(1, min(top_crop_w * top_crop_h, bottom_crop_w * bottom_crop_h))
+        if (iw * ih) / min_crop_area > 0.35:
+            logger.warning(
+                f"podcast_reframe: dynamic auto grid rejected overlapping crops "
+                f"(overlap={(iw * ih) / min_crop_area:.1%}) — would duplicate same person"
+            )
+            return None
+
         single_crop_w = int(plan["crop_w"])
         single_x_expr = plan["crop_x_expr"]
 
@@ -3591,6 +3603,17 @@ class PodcastReframeEngine(IReframeEngine):
         fallback_y = max(0, (height - crop_h) // 2)
         top_y = int(decision.get("top_crop_y", fallback_y))
         bottom_y = int(decision.get("bottom_crop_y", fallback_y))
+
+        # Ensure crops do not heavily overlap (which would duplicate the same person in top & bottom)
+        iw = max(0, min(top_x + top_crop_w, bottom_x + bottom_crop_w) - max(top_x, bottom_x))
+        ih = max(0, min(top_y + top_crop_h, bottom_y + bottom_crop_h) - max(top_y, bottom_y))
+        min_area = max(1, min(top_crop_w * top_crop_h, bottom_crop_w * bottom_crop_h))
+        if (iw * ih) / min_area > 0.35:
+            logger.warning(
+                f"podcast_reframe: rejected double grid with overlapping crops "
+                f"(overlap={(iw * ih) / min_area:.1%}) — would duplicate same person"
+            )
+            return None
 
         vf = (
             f"setpts=PTS-STARTPTS,split=2[top][bot];"

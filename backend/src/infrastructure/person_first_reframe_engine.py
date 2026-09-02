@@ -638,6 +638,25 @@ class PersonFirstReframeEngine(IReframeEngine):
         if decision.get("sub_layout") != "screen_cam" and isinstance(t2p, dict) and len({int(top_id), int(bottom_id)}) < 2:
             return None
 
+        # Ensure crops do not heavily overlap (prevent duplicating the same person)
+        top_crop_w = int(decision.get("top_crop_w") or decision.get("crop_w", 1))
+        top_crop_h = int(decision.get("top_crop_h") or decision.get("crop_h", 1))
+        bottom_crop_w = int(decision.get("bottom_crop_w") or decision.get("crop_w", 1))
+        bottom_crop_h = int(decision.get("bottom_crop_h") or decision.get("crop_h", 1))
+        top_x = int(decision.get("top_crop_x", 0))
+        top_y = int(decision.get("top_crop_y", 0))
+        bottom_x = int(decision.get("bottom_crop_x", 0))
+        bottom_y = int(decision.get("bottom_crop_y", 0))
+
+        iw = max(0, min(top_x + top_crop_w, bottom_x + bottom_crop_w) - max(top_x, bottom_x))
+        ih = max(0, min(top_y + top_crop_h, bottom_y + bottom_crop_h) - max(top_y, bottom_y))
+        min_crop_area = max(1, min(top_crop_w * top_crop_h, bottom_crop_w * bottom_crop_h))
+        if (iw * ih) / min_crop_area > 0.35:
+            logger.info(
+                f"person_first_reframe: grid rejected (overlapping panel crops: {(iw * ih) / min_crop_area:.1%})"
+            )
+            return None
+
         decision["transition_style"] = transition_style
         decision["transition_duration"] = transition_duration
         # _decide_autogrid_layout already produces correct t=0 layout.
