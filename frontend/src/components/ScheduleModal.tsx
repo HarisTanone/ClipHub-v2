@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   UserCheck,
   ChevronDown,
+  ChevronUp,
   Search,
   Shuffle,
   Zap,
