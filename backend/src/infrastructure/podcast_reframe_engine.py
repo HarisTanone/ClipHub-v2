@@ -560,10 +560,18 @@ class PodcastReframeEngine(IReframeEngine):
                 ih = max(0, min(top_cy + c_h, bot_cy + c_h) - max(top_cy, bot_cy))
                 panel_overlap = (iw * ih) / max(1, c_w * c_h)
 
-                if (top_tid is not None and bottom_tid is not None and str(top_tid) == str(bottom_tid)) or panel_overlap > 0.45:
+                is_few_people = (person_count <= 2)
+                is_duplicate = (top_tid is not None and bottom_tid is not None and str(top_tid) == str(bottom_tid))
+                
+                top_pos_x = (tracked_data.get("position_targets") or {}).get(top_tid)
+                bot_pos_x = (tracked_data.get("position_targets") or {}).get(bottom_tid)
+                top_in_bot = (bot_cx <= top_pos_x <= bot_cx + c_w) if top_pos_x is not None else False
+                bot_in_top = (top_cx <= bot_pos_x <= top_cx + c_w) if bot_pos_x is not None else False
+
+                if is_duplicate or (is_few_people and (top_in_bot or bot_in_top or panel_overlap > 0.45)) or panel_overlap > 0.85:
                     logger.info(
                         "podcast_reframe: autogrid rejected duplicate panel identity or excessive overlap "
-                        f"(P{top_tid} vs P{bottom_tid}, overlap={panel_overlap:.1%})"
+                        f"(P{top_tid} vs P{bottom_tid}, overlap={panel_overlap:.1%}, top_in_bot={top_in_bot}, bot_in_top={bot_in_top})"
                     )
                     grid_decision = {"layout": "single", "person_count": person_count}
                 else:
@@ -1691,13 +1699,13 @@ class PodcastReframeEngine(IReframeEngine):
                 is_few = (len(position_targets) <= 2 or person_count <= 2)
                 same_crop = (
                     (fc_x == sc_x and fc_y == sc_y)
-                    or (is_few and ((p1_in_sc and p2_in_fc) or overlap_ratio > 0.45))
+                    or (is_few and (p1_in_sc or p2_in_fc or overlap_ratio > 0.45))
                     or (not is_few and (p1_in_sc and p2_in_fc and overlap_ratio > 0.85))
                 )
                 if same_crop:
                     logger.info(
                         f"podcast_reframe: person-first grid rejected overlapping crops "
-                        f"(overlap={overlap_ratio:.1%}, pair=P{first_id}/P{second_id})"
+                        f"(p1_in_sc={p1_in_sc}, p2_in_fc={p2_in_fc}, overlap={overlap_ratio:.1%}, pair=P{first_id}/P{second_id})"
                     )
                     continue  # Try next pair
 
@@ -1797,6 +1805,16 @@ class PodcastReframeEngine(IReframeEngine):
                             detections_per_seat[second_id],
                             width,
                             height,
+                        )
+                        and (
+                            (len(position_targets) > 2 and person_count > 2)
+                            or self._grid_frame_is_safe(
+                                frame_tracked,
+                                geometry,
+                                first_id,
+                                second_id,
+                                track_to_position,
+                            )
                         )
                     )
                     raw_double.append(both)
@@ -2210,14 +2228,32 @@ class PodcastReframeEngine(IReframeEngine):
                 or bbox.y1 >= crop_y + crop_h
             )
 
-        if any(
-            intersects(detection.bbox, *first_rect)
-            and intersects(detection.bbox, *second_rect)
-            for detection in frame_tracked
-        ):
-            return False
+        # Check if candidate targets intersect both rects (or in <=2 person scenes, any detection)
+        unique_seats = set(track_to_position.values()) if track_to_position else set()
+        is_few = (len(unique_seats) <= 2)
 
-        if first_id is None or second_id is None or track_to_position is None:
+        for detection in frame_tracked:
+            det_seat = track_to_position.get(int(detection.track_id)) if track_to_position else None
+            is_candidate_target = (first_id is None or second_id is None or det_seat in (first_id, second_id))
+            if is_few or is_candidate_target:
+                box = getattr(detection, "face_bbox", None) or detection.bbox
+                if (
+                    intersects(detection.bbox, *first_rect)
+                    and intersects(detection.bbox, *second_rect)
+                ) or (
+                    box is not None
+                    and intersects(box, *first_rect)
+                    and intersects(box, *second_rect)
+                ):
+                    return False
+                # If the center of a target person is inside both crops, reject frame
+                if (
+                    first_rect[0] <= detection.bbox.center_x <= first_rect[0] + crop_w
+                    and second_rect[0] <= detection.bbox.center_x <= second_rect[0] + crop_w
+                ):
+                    return False
+
+        if first_id is None or second_id is None or not track_to_position:
             return bool(frame_tracked)
 
         first_detections = [
@@ -2393,6 +2429,13 @@ class PodcastReframeEngine(IReframeEngine):
                 if position_id != second_id
             )
             if first_isolated and second_isolated:
+                p1_in_second = (second_crop_x <= first_profile["x"] <= second_crop_x + crop_w)
+                p2_in_first = (first_crop_x <= second_profile["x"] <= first_crop_x + crop_w)
+                iw = max(0, min(first_crop_x + crop_w, second_crop_x + crop_w) - max(first_crop_x, second_crop_x))
+                if (len(all_profiles) <= 2 and (p1_in_second or p2_in_first or (iw / crop_w > 0.45))) or (iw / crop_w > 0.85):
+                    zoom += 0.02
+                    continue
+
                 # Profile already contains face position (converted from body bbox above)
                 first_crop_y = self._clamp_grid_y(
                     first_profile["y"], first_profile["height"], crop_h, height
@@ -2456,7 +2499,7 @@ class PodcastReframeEngine(IReframeEngine):
         overlap_ratio = (iw * ih) / max(1, crop_w_fallback * crop_h_fallback)
 
         if is_few_people:
-            if (first_in_second and second_in_first) or overlap_ratio > 0.45:
+            if first_in_second or second_in_first or overlap_ratio > 0.45:
                 logger.info(
                     f"podcast_reframe: fallback grid rejected — duplicate person detected "
                     f"(first_in_second={first_in_second}, second_in_first={second_in_first}, "

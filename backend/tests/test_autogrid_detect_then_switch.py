@@ -327,4 +327,39 @@ class TestDetectThenSwitch:
             f"Expected single layout for single speaker with TV reflection, got {decision['layout']}"
         )
 
+    def test_person_first_single_speaker_with_tv_background_face_stays_single(self):
+        """Speaker sits in front of TV screen displaying a face.
+        Speaker body extends into the TV crop window. Must NOT split into double grid!
+        """
+        frames = []
+        for i in range(TOTAL_FRAMES):
+            # Speaker at x=800, width=500 (bbox [550 .. 1050])
+            # TV on wall at x=1400, width=280 (bbox [1260 .. 1540])
+            frames.append([
+                make_det(1, 800, 500, 500, 600, i),
+                make_det(2, 1400, 350, 280, 280, i),
+            ])
+
+        model = self.engine._build_position_model_person_first(frames, FRAME_WIDTH, FRAME_HEIGHT)
+        tracked = {
+            "per_frame_tracked": frames,
+            "person_count": model["person_count"],
+            "position_targets": model["position_targets"],
+            "position_target_profiles": model["position_target_profiles"],
+            "track_to_position": model["track_to_position"],
+            "stable_positions": model["stable_positions"],
+            "sample_timestamps": [i * self.engine.SAMPLE_INTERVAL_SEC for i in range(len(frames))],
+        }
+        decision = self.engine._decide_autogrid_layout(
+            tracked_data=tracked,
+            speaker_result=None,
+            width=FRAME_WIDTH,
+            height=FRAME_HEIGHT,
+            skip_ghost_pair_check=True,
+        )
+        assert decision["layout"] == "single", (
+            f"Expected single layout when speaker body overlaps TV crop, got {decision['layout']}"
+        )
+
+
 
