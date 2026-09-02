@@ -361,5 +361,102 @@ class TestDetectThenSwitch:
             f"Expected single layout when speaker body overlaps TV crop, got {decision['layout']}"
         )
 
+    def test_wall_mounted_tv_screen_is_eliminated_in_person_first_position_model(self):
+        """Host seated at desk (bottom reaches 850px) with TV on wall (top=50px, bottom=450px).
+        The TV track must be eliminated in ghost elimination as wall_display/TV, leaving person_count=1.
+        """
+        frames = []
+        for i in range(TOTAL_FRAMES):
+            # Seated host: cy=500, h=700 -> y1=150, y2=850 (reaches desk > 0.60*H)
+            # TV on wall: cy=250, h=400 -> y1=50 (< 0.18*H), y2=450 (< 0.52*H)
+            frames.append([
+                make_det(1, 600, 500, 450, 700, i),
+                make_det(2, 1500, 250, 350, 400, i),
+            ])
+
+        model = self.engine._build_position_model_person_first(
+            frames, FRAME_WIDTH, FRAME_HEIGHT
+        )
+        assert model["person_count"] == 1, (
+            f"Expected 1 person after eliminating wall-mounted TV, got {model['person_count']}"
+        )
+        assert 1 in model["stable_positions"], "Host track should survive"
+        assert 2 not in model["stable_positions"], "Wall TV track should be eliminated"
+
+    def test_static_object_motion_eliminated_in_person_first_position_model(self):
+        """A static display/poster track with near-zero pixel motion (<1.05) is eliminated."""
+        frames = []
+        for i in range(TOTAL_FRAMES):
+            frames.append([
+                make_det(1, 600, 600, 450, 600, i),
+                make_det(2, 1400, 600, 400, 600, i),
+            ])
+
+        # Track 1 has active living hand motion (5.2), Track 2 has static sensor noise (0.8)
+        track_hand_motions = {1: [5.2] * TOTAL_FRAMES, 2: [0.8] * TOTAL_FRAMES}
+        track_body_motions = {1: [6.1] * TOTAL_FRAMES, 2: [0.9] * TOTAL_FRAMES}
+
+        model = self.engine._build_position_model_person_first(
+            frames,
+            FRAME_WIDTH,
+            FRAME_HEIGHT,
+            track_hand_motions=track_hand_motions,
+            track_body_motions=track_body_motions,
+        )
+        assert model["person_count"] == 1, (
+            f"Expected static track to be eliminated, got person_count={model['person_count']}"
+        )
+        assert 1 in model["stable_positions"]
+        assert 2 not in model["stable_positions"]
+
+    def test_candidate_pair_with_zero_mouth_movement_and_zero_speech_rejected_in_autogrid(self):
+        """Even if 2 tracks exist, if one is speaking and the other has zero speech and
+        zero mouth movement (lip_variance < 0.00006), auto-grid is suppressed.
+        """
+        from src.infrastructure.active_speaker_detector import ActiveSpeakerResult
+        n = max(self.engine.GRID_ENTER_SAMPLES, 12)
+        frames = []
+        for i in range(n):
+            frames.append([
+                make_det(1, 500, 600, 400, 600, i),
+                make_det(2, 1400, 600, 400, 600, i),
+            ])
+
+        tracked = {
+            "per_frame_tracked": frames,
+            "person_count": 2,
+            "position_targets": {0: 500, 1: 1400},
+            "position_target_profiles": {
+                0: {"x": 500, "y": 600, "width": 400, "height": 600},
+                1: {"x": 1400, "y": 600, "width": 400, "height": 600},
+            },
+            "track_to_position": {1: 0, 2: 1},
+            "stable_positions": {1: 500, 2: 1400},
+            "sample_timestamps": [i * self.engine.SAMPLE_INTERVAL_SEC for i in range(n)],
+        }
+
+        # Speaker P0 is speaking (host), P1 has 0 speech and lip_variance of 0.00001 (static face on TV)
+        speaker_res = ActiveSpeakerResult(
+            segments=[],
+            dominant_speaker_id=0,
+            dominant_ratio=1.0,
+            per_frame_speaker={i: 0 for i in range(n)},
+            total_speakers=1,
+            speaker_lip_variance={0: 0.00085, 1: 0.00001},
+            speaker_lip_amplitude={0: 0.045, 1: 0.002},
+            speaker_head_motion={0: 0.25, 1: 0.0},
+        )
+
+        decision = self.engine._decide_autogrid_layout(
+            tracked_data=tracked,
+            speaker_result=speaker_res,
+            width=FRAME_WIDTH,
+            height=FRAME_HEIGHT,
+            skip_ghost_pair_check=True,
+        )
+        assert decision["layout"] == "single", (
+            f"Expected single layout when candidate has zero mouth movement, got {decision['layout']}"
+        )
+
 
 

@@ -245,10 +245,18 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 sudo apt-get install -y fontconfig fonts-dejavu-core 2>/dev/null || true
 if [ -d "$BACKEND_DIR/assets/fonts" ]; then
-    echo "  Installing custom typography into system font directory..."
-    sudo mkdir -p /usr/local/share/fonts/autocliper
-    sudo cp -f "$BACKEND_DIR"/assets/fonts/*.ttf /usr/local/share/fonts/autocliper/ 2>/dev/null || true
-    sudo fc-cache -f /usr/local/share/fonts/autocliper 2>/dev/null || fc-cache -f 2>/dev/null || true
+    echo "  Installing custom typography into font directory..."
+    USER_FONT_DIR="$HOME/.local/share/fonts/autocliper"
+    if [ "$(uname -s)" = "Darwin" ]; then
+        USER_FONT_DIR="$HOME/Library/Fonts"
+    fi
+    mkdir -p "$USER_FONT_DIR" 2>/dev/null || true
+    cp -f "$BACKEND_DIR"/assets/fonts/*.ttf "$USER_FONT_DIR"/ 2>/dev/null || true
+    if [ "$(uname -s)" != "Darwin" ]; then
+        sudo mkdir -p /usr/local/share/fonts/autocliper 2>/dev/null || true
+        sudo cp -f "$BACKEND_DIR"/assets/fonts/*.ttf /usr/local/share/fonts/autocliper/ 2>/dev/null || true
+    fi
+    fc-cache -f "$USER_FONT_DIR" 2>/dev/null || fc-cache -f 2>/dev/null || true
     echo "  [OK] Custom fonts cached ($(ls "$BACKEND_DIR/assets/fonts"/*.ttf 2>/dev/null | wc -l | tr -d ' ') fonts)"
 fi
 

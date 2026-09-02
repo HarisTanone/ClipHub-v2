@@ -56,6 +56,9 @@ class ActiveSpeakerResult:
     dominant_ratio: float                     # % of time dominant speaker was active
     per_frame_speaker: Dict[int, int]        # frame_idx → active speaker face_id
     total_speakers: int
+    speaker_lip_variance: Dict[int, float] = field(default_factory=dict)
+    speaker_lip_amplitude: Dict[int, float] = field(default_factory=dict)
+    speaker_head_motion: Dict[int, float] = field(default_factory=dict)
 
 
 class ActiveSpeakerDetector:
@@ -360,12 +363,26 @@ class ActiveSpeakerDetector:
             f"frames={{{frame_counts_log}}}, segments=[{segment_log}]"
         )
 
+        speaker_lip_variance: Dict[int, float] = {}
+        speaker_lip_amplitude: Dict[int, float] = {}
+        speaker_head_motion: Dict[int, float] = {}
+        for face_id, series in face_data_series.items():
+            if series:
+                lip_vals = [item[1] for item in series]
+                head_vals = [item[2] for item in series]
+                speaker_lip_variance[face_id] = float(np.var(lip_vals))
+                speaker_lip_amplitude[face_id] = float(max(lip_vals) - min(lip_vals))
+                speaker_head_motion[face_id] = float(np.mean(head_vals))
+
         return ActiveSpeakerResult(
             segments=segments,
             dominant_speaker_id=dominant_id,
             dominant_ratio=dominant_ratio,
             per_frame_speaker=per_frame_speaker,
             total_speakers=total_speakers,
+            speaker_lip_variance=speaker_lip_variance,
+            speaker_lip_amplitude=speaker_lip_amplitude,
+            speaker_head_motion=speaker_head_motion,
         )
 
     def _compute_lip_aperture_legacy(self, face_landmarks, frame_shape: tuple) -> float:

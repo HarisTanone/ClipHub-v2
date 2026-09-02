@@ -1629,6 +1629,40 @@ class PodcastReframeEngine(IReframeEngine):
                 for pid_b in position_ids[i + 1:]:
                     if pid_a == pid_b:
                         continue
+
+                    # Filter out TV / background display candidates in candidate pairs:
+                    prof_a = position_profiles.get(pid_a, {})
+                    prof_b = position_profiles.get(pid_b, {})
+                    bot_a = prof_a.get("y", 0) + prof_a.get("height", 0) / 2
+                    bot_b = prof_b.get("y", 0) + prof_b.get("height", 0) / 2
+                    top_a = prof_a.get("y", 0) - prof_a.get("height", 0) / 2
+                    top_b = prof_b.get("y", 0) - prof_b.get("height", 0) / 2
+
+                    # Wall-mounted floating display check
+                    if bot_a > height * 0.60 and bot_b < height * 0.52 and top_b < height * 0.18:
+                        logger.info(f"podcast_reframe: skip candidate pair P{pid_a}/P{pid_b} (P{pid_b} is wall display/TV)")
+                        continue
+                    if bot_b > height * 0.60 and bot_a < height * 0.52 and top_a < height * 0.18:
+                        logger.info(f"podcast_reframe: skip candidate pair P{pid_a}/P{pid_b} (P{pid_a} is wall display/TV)")
+                        continue
+
+                    # Mouth movement & speech correlation check
+                    if speaker_result:
+                        per_frame = speaker_result.per_frame_speaker or {}
+                        spk_a = sum(1 for s in per_frame.values() if s == pid_a or track_to_position.get(s) == pid_a)
+                        spk_b = sum(1 for s in per_frame.values() if s == pid_b or track_to_position.get(s) == pid_b)
+                        lip_vars = getattr(speaker_result, "speaker_lip_variance", {})
+                        lip_a = lip_vars.get(pid_a)
+                        lip_b = lip_vars.get(pid_b)
+
+                        # If one speaker is talking and the other has zero speech + near-zero lip motion:
+                        if spk_a > 0 and spk_b == 0 and lip_b is not None and lip_b < 0.00006:
+                            logger.info(f"podcast_reframe: skip candidate pair P{pid_a}/P{pid_b} (P{pid_b} has 0 speech and 0 mouth movement {lip_b:.6f})")
+                            continue
+                        if spk_b > 0 and spk_a == 0 and lip_a is not None and lip_a < 0.00006:
+                            logger.info(f"podcast_reframe: skip candidate pair P{pid_a}/P{pid_b} (P{pid_a} has 0 speech and 0 mouth movement {lip_a:.6f})")
+                            continue
+
                     sep = abs(position_targets[pid_a] - position_targets[pid_b])
                     if sep >= width * self.MIN_SEPARATION_RATIO:
                         score = sep
@@ -4167,6 +4201,10 @@ class PodcastReframeEngine(IReframeEngine):
         frame_face_counts: List[int] = []
         sample_frame_indices: List[int] = []
         sample_timestamps: List[float] = []
+        prev_hand_crops: Dict[int, np.ndarray] = {}
+        prev_body_crops: Dict[int, np.ndarray] = {}
+        track_hand_motions: Dict[int, List[float]] = {}
+        track_body_motions: Dict[int, List[float]] = {}
 
         for frame_idx in sample_indices:
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
@@ -4290,6 +4328,32 @@ class PodcastReframeEngine(IReframeEngine):
                 bboxes = [BBox(b[0], b[1], b[2], b[3]) for b in person_bboxes]
                 tracked_detections = self._person_tracker.update(bboxes, frame_idx)
 
+            # 2b. Track hand/arm motion and body motion per person.
+            # Lower 55% of body bbox contains hands, arms and table interaction.
+            for det in tracked_detections:
+                bx1, by1 = int(max(0, det.bbox.x1)), int(max(0, det.bbox.y1))
+                bx2, by2 = int(min(w_frame, det.bbox.x2)), int(min(h_frame, det.bbox.y2))
+                if bx2 > bx1 and by2 > by1:
+                    body_c = frame_rgb[by1:by2, bx1:bx2]
+                    hand_y1 = by1 + int(0.45 * (by2 - by1))
+                    hand_c = frame_rgb[hand_y1:by2, bx1:bx2]
+
+                    if hand_c.size > 0:
+                        hg = cv2.cvtColor(hand_c, cv2.COLOR_RGB2GRAY)
+                        hn = cv2.resize(hg, (48, 48))
+                        if det.track_id in prev_hand_crops:
+                            dh = float(np.mean(np.abs(hn.astype(np.float32) - prev_hand_crops[det.track_id].astype(np.float32))))
+                            track_hand_motions.setdefault(det.track_id, []).append(dh)
+                        prev_hand_crops[det.track_id] = hn
+
+                    if body_c.size > 0:
+                        bg = cv2.cvtColor(body_c, cv2.COLOR_RGB2GRAY)
+                        bn = cv2.resize(bg, (48, 48))
+                        if det.track_id in prev_body_crops:
+                            db = float(np.mean(np.abs(bn.astype(np.float32) - prev_body_crops[det.track_id].astype(np.float32))))
+                            track_body_motions.setdefault(det.track_id, []).append(db)
+                        prev_body_crops[det.track_id] = bn
+
             # 3. Face Detection inside head region of person crops
             frame_faces: List[float] = []
             frame_track_detections: List[TrackedDetection] = []
@@ -4394,7 +4458,13 @@ class PodcastReframeEngine(IReframeEngine):
         logger.info(f"podcast_reframe: [ANALYTICS] Face recall on crop: {analytics_faces_found}/{max(1, analytics_crops_processed)} ({(analytics_faces_found / max(1, analytics_crops_processed))*100:.1f}%)")
         logger.info(f"podcast_reframe: [ANALYTICS] Unique person track IDs: {len(analytics_id_switch_sets)}")
 
-        position_model = self._build_position_model_person_first(per_frame_tracked, width, height)
+        position_model = self._build_position_model_person_first(
+            per_frame_tracked,
+            width,
+            height,
+            track_hand_motions=track_hand_motions,
+            track_body_motions=track_body_motions,
+        )
         person_count = position_model["person_count"]
         stable_positions = position_model["stable_positions"]
         stable_position_profiles = position_model["stable_position_profiles"]
@@ -4451,6 +4521,8 @@ class PodcastReframeEngine(IReframeEngine):
         per_frame_tracked: List[List[TrackedDetection]],
         width: int,
         height: int,
+        track_hand_motions: Optional[Dict[int, List[float]]] = None,
+        track_body_motions: Optional[Dict[int, List[float]]] = None,
     ) -> dict:
         """Build stable person positions using BODY bbox for grid geometry separation."""
         track_profiles: Dict[int, Dict[str, List[float]]] = defaultdict(
@@ -4500,6 +4572,12 @@ class PodcastReframeEngine(IReframeEngine):
             track_id: self._median_profile(values)
             for track_id, values in filtered.items()
         }
+        for tid, prof in stable_position_profiles.items():
+            h_mots = (track_hand_motions or {}).get(tid, [])
+            b_mots = (track_body_motions or {}).get(tid, [])
+            prof["hand_motion"] = float(np.mean(h_mots)) if h_mots else 5.0
+            prof["body_motion"] = float(np.mean(b_mots)) if b_mots else 5.0
+
         stable_positions = {
             track_id: profile["x"]
             for track_id, profile in stable_position_profiles.items()
@@ -4507,11 +4585,15 @@ class PodcastReframeEngine(IReframeEngine):
 
         # Ghost elimination for person-first mode:
         # 1) Drop tiny noise tracks by size.
-        # 2) Collapse nested tight/loose body boxes and same-face track fragments.
-        # Do NOT use broad proximity merges that would fuse face-to-face speakers.
+        # 2) Drop wall-mounted TV screens / background displays / static posters.
+        # 3) Collapse nested tight/loose body boxes and same-face track fragments.
         if len(stable_position_profiles) >= 2:
             max_area = max(
                 p.get("area", p.get("width", 0) * p.get("height", 0))
+                for p in stable_position_profiles.values()
+            )
+            max_bottom_y = max(
+                p.get("y", 0) + p.get("height", 0) / 2
                 for p in stable_position_profiles.values()
             )
 
@@ -4529,7 +4611,41 @@ class PodcastReframeEngine(IReframeEngine):
                 track_area = profile.get(
                     "area", profile.get("width", 0) * profile.get("height", 0)
                 )
-                # Size filter: drop noise fragments that are < 25% of the main person's area.
+                track_bottom_y = profile.get("y", 0) + profile.get("height", 0) / 2
+                track_top_y = profile.get("y", 0) - profile.get("height", 0) / 2
+
+                # 1) Wall-mounted display / TV / portrait elimination:
+                # In podcast studio / desk videos, a real person sitting or standing
+                # reaches down to the desk/ground (bottom_y > 0.60*H).
+                # A person displayed on a wall-mounted TV or picture has its entire body
+                # floating in the upper half of the wall (top_y < 0.18*H and bottom_y < 0.52*H).
+                if (
+                    max_bottom_y > height * 0.60
+                    and track_bottom_y < height * 0.52
+                    and track_top_y < height * 0.18
+                ):
+                    ghost_track_ids.add(track_id)
+                    ghost_reasons[track_id] = (
+                        f"wall_display/TV top={track_top_y:.0f} bottom={track_bottom_y:.0f}<{height * 0.52:.0f}"
+                    )
+                    continue
+
+                # 2) Hand / body motion check:
+                # If motion scores are available, a real person has living pixel motion (breathing, gesturing).
+                # A static image / paused screen / poster has hand_motion < 1.05 and body_motion < 1.20.
+                hand_mots = (track_hand_motions or {}).get(track_id, [])
+                body_mots = (track_body_motions or {}).get(track_id, [])
+                if hand_mots and body_mots:
+                    avg_hand_mot = float(np.mean(hand_mots))
+                    avg_body_mot = float(np.mean(body_mots))
+                    if avg_hand_mot < 1.05 and avg_body_mot < 1.20:
+                        ghost_track_ids.add(track_id)
+                        ghost_reasons[track_id] = (
+                            f"static_display hand_mot={avg_hand_mot:.2f}<1.05 body_mot={avg_body_mot:.2f}<1.20"
+                        )
+                        continue
+
+                # 3) Size filter: drop noise fragments that are < 25% of the main person's area.
                 if (
                     len(stable_position_profiles) >= 2
                     and max_area > 0
