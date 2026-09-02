@@ -548,10 +548,22 @@ class PodcastReframeEngine(IReframeEngine):
                 # Reject same-person panels before any render path.
                 top_tid = grid_decision.get("top_track_id")
                 bottom_tid = grid_decision.get("bottom_track_id")
-                if top_tid is not None and bottom_tid is not None and str(top_tid) == str(bottom_tid):
+                
+                # Check overlapping panel crops (safety guard against duplicating the same person)
+                top_cx = int(grid_decision.get("top_crop_x", 0))
+                bot_cx = int(grid_decision.get("bottom_crop_x", 0))
+                top_cy = int(grid_decision.get("top_crop_y", 0))
+                bot_cy = int(grid_decision.get("bottom_crop_y", 0))
+                c_w = int(grid_decision.get("crop_w", 1))
+                c_h = int(grid_decision.get("crop_h", 1))
+                iw = max(0, min(top_cx + c_w, bot_cx + c_w) - max(top_cx, bot_cx))
+                ih = max(0, min(top_cy + c_h, bot_cy + c_h) - max(top_cy, bot_cy))
+                panel_overlap = (iw * ih) / max(1, c_w * c_h)
+
+                if (top_tid is not None and bottom_tid is not None and str(top_tid) == str(bottom_tid)) or panel_overlap > 0.45:
                     logger.info(
-                        "podcast_reframe: autogrid rejected duplicate panel identity "
-                        f"(P{top_tid})"
+                        "podcast_reframe: autogrid rejected duplicate panel identity or excessive overlap "
+                        f"(P{top_tid} vs P{bottom_tid}, overlap={panel_overlap:.1%})"
                     )
                     grid_decision = {"layout": "single", "person_count": person_count}
                 else:
@@ -1659,15 +1671,33 @@ class PodcastReframeEngine(IReframeEngine):
                     )
                     continue  # Try next pair
 
-                # Reject identical crop windows (would duplicate one person into both panels).
+                # Reject identical or heavily overlapping crop windows (would duplicate one person into both panels).
+                crop_w = int(geometry.get("crop_w", 1))
+                crop_h = int(geometry.get("crop_h", 1))
+                fc_x = int(geometry.get("first_crop_x", 0))
+                sc_x = int(geometry.get("second_crop_x", 0))
+                fc_y = int(geometry.get("first_crop_y", 0))
+                sc_y = int(geometry.get("second_crop_y", 0))
+
+                iw = max(0, min(fc_x + crop_w, sc_x + crop_w) - max(fc_x, sc_x))
+                ih = max(0, min(fc_y + crop_h, sc_y + crop_h) - max(fc_y, sc_y))
+                overlap_ratio = (iw * ih) / max(1, crop_w * crop_h)
+
+                p1_x = position_targets.get(first_id, fc_x + crop_w / 2)
+                p2_x = position_targets.get(second_id, sc_x + crop_w / 2)
+                p1_in_sc = (sc_x <= p1_x <= sc_x + crop_w)
+                p2_in_fc = (fc_x <= p2_x <= fc_x + crop_w)
+
+                is_few = (len(position_targets) <= 2 or person_count <= 2)
                 same_crop = (
-                    int(geometry.get("first_crop_x", -1)) == int(geometry.get("second_crop_x", -2))
-                    and int(geometry.get("first_crop_y", -1)) == int(geometry.get("second_crop_y", -2))
+                    (fc_x == sc_x and fc_y == sc_y)
+                    or (is_few and ((p1_in_sc and p2_in_fc) or overlap_ratio > 0.45))
+                    or (not is_few and (p1_in_sc and p2_in_fc and overlap_ratio > 0.85))
                 )
                 if same_crop:
                     logger.info(
-                        f"podcast_reframe: person-first grid rejected identical crops "
-                        f"(pair=P{first_id}/P{second_id})"
+                        f"podcast_reframe: person-first grid rejected overlapping crops "
+                        f"(overlap={overlap_ratio:.1%}, pair=P{first_id}/P{second_id})"
                     )
                     continue  # Try next pair
 
@@ -2411,6 +2441,35 @@ class PodcastReframeEngine(IReframeEngine):
         # Profile already contains face position (converted from body bbox above)
         first_crop_y_fb = self._clamp_grid_y(first_profile["y"], first_profile["height"], crop_h_fallback, height)
         second_crop_y_fb = self._clamp_grid_y(second_profile["y"], second_profile["height"], crop_h_fallback, height)
+
+        all_profiles_count = len(all_profiles)
+        is_few_people = (all_profiles_count <= 2)
+
+        # Fallback validation: ensure crops do not duplicate the same person across panels
+        first_x = first_profile["x"]
+        second_x = second_profile["x"]
+        first_in_second = (second_crop_x_fb <= first_x <= second_crop_x_fb + crop_w_fallback)
+        second_in_first = (first_crop_x_fb <= second_x <= first_crop_x_fb + crop_w_fallback)
+
+        iw = max(0, min(first_crop_x_fb + crop_w_fallback, second_crop_x_fb + crop_w_fallback) - max(first_crop_x_fb, second_crop_x_fb))
+        ih = max(0, min(first_crop_y_fb + crop_h_fallback, second_crop_y_fb + crop_h_fallback) - max(first_crop_y_fb, second_crop_y_fb))
+        overlap_ratio = (iw * ih) / max(1, crop_w_fallback * crop_h_fallback)
+
+        if is_few_people:
+            if (first_in_second and second_in_first) or overlap_ratio > 0.45:
+                logger.info(
+                    f"podcast_reframe: fallback grid rejected — duplicate person detected "
+                    f"(first_in_second={first_in_second}, second_in_first={second_in_first}, "
+                    f"overlap={overlap_ratio:.1%}, P{first_id}@{first_x:.0f} vs P{second_id}@{second_x:.0f})"
+                )
+                return None
+        else:
+            if (first_in_second and second_in_first and overlap_ratio > 0.85) or (first_crop_x_fb == second_crop_x_fb and first_crop_y_fb == second_crop_y_fb):
+                logger.info(
+                    f"podcast_reframe: multi-person fallback grid rejected identical pair "
+                    f"(overlap={overlap_ratio:.1%}, P{first_id} vs P{second_id})"
+                )
+                return None
 
         final_zoom = base_crop_w / max(1, crop_w_fallback)
         logger.info(
@@ -4427,9 +4486,9 @@ class PodcastReframeEngine(IReframeEngine):
                 track_area = profile.get(
                     "area", profile.get("width", 0) * profile.get("height", 0)
                 )
-                # Size filter only when 3+ tracks (noise fragments).
+                # Size filter: drop noise fragments that are < 25% of the main person's area.
                 if (
-                    len(stable_position_profiles) > 2
+                    len(stable_position_profiles) >= 2
                     and max_area > 0
                     and track_area / max_area < 0.25
                 ):
@@ -4478,19 +4537,35 @@ class PodcastReframeEngine(IReframeEngine):
                     if tid not in ghost_track_ids
                 }
 
-        # Person-first mode: surviving track IDs map 1:1 to seats. Nested
-        # duplicates are already collapsed above so we do not re-cluster seats
-        # (which can merge two face-to-face speakers from a center camera).
+        # Cluster nearby tracks of the same person (e.g. ByteTrack ID switches or small posture shifts)
+        # while keeping distinct seats separated.
         clusters: List[dict] = []
+        cluster_threshold = 0.12
         for track_id, profile in sorted(
             stable_position_profiles.items(),
             key=lambda kv: (kv[1]["x"], kv[1]["y"]),
         ):
-            clusters.append({
-                "track_ids": [track_id],
-                "profiles": [profile],
-                "profile": dict(profile),
-            })
+            best_cluster_idx: Optional[int] = None
+            best_distance = float("inf")
+            for idx, cluster in enumerate(clusters):
+                distance = self._profile_distance(
+                    profile, cluster["profile"], width, height
+                )
+                if distance < best_distance:
+                    best_distance = distance
+                    best_cluster_idx = idx
+
+            if best_cluster_idx is not None and best_distance <= cluster_threshold:
+                cluster = clusters[best_cluster_idx]
+                cluster["track_ids"].append(track_id)
+                cluster["profiles"].append(profile)
+                cluster["profile"] = self._merge_profiles(cluster["profiles"])
+            else:
+                clusters.append({
+                    "track_ids": [track_id],
+                    "profiles": [profile],
+                    "profile": dict(profile),
+                })
 
         position_targets: Dict[int, float] = {}
         position_target_profiles: Dict[int, Dict[str, float]] = {}

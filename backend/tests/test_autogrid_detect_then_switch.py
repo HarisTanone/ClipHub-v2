@@ -295,3 +295,36 @@ class TestDetectThenSwitch:
             f"Overlapping candidate crops must stay single, got {decision['layout']}"
         )
 
+    def test_person_first_single_speaker_with_tv_reflection_stays_single(self):
+        """Single speaker at table with TV reflection/shifted detection must NOT duplicate into double grid."""
+        frames = []
+        for i in range(TOTAL_FRAMES):
+            # Real speaker at center-right (x=1050, w=400, h=500, area=200000)
+            # Reflection on TV screen at x=1500 (w=150, h=180, area=27000)
+            frames.append([
+                make_det(1, 1050, 450, 400, 500, i),
+                make_det(2, 1500, 300, 150, 180, i),
+            ])
+
+        model = self.engine._build_position_model_person_first(frames, FRAME_WIDTH, FRAME_HEIGHT)
+        tracked = {
+            "per_frame_tracked": frames,
+            "person_count": model["person_count"],
+            "position_targets": model["position_targets"],
+            "position_target_profiles": model["position_target_profiles"],
+            "track_to_position": model["track_to_position"],
+            "stable_positions": model["stable_positions"],
+            "sample_timestamps": [i * self.engine.SAMPLE_INTERVAL_SEC for i in range(len(frames))],
+        }
+        decision = self.engine._decide_autogrid_layout(
+            tracked_data=tracked,
+            speaker_result=None,
+            width=FRAME_WIDTH,
+            height=FRAME_HEIGHT,
+            skip_ghost_pair_check=True,
+        )
+        assert decision["layout"] == "single", (
+            f"Expected single layout for single speaker with TV reflection, got {decision['layout']}"
+        )
+
+
