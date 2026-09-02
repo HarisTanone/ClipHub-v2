@@ -49,7 +49,12 @@ KNOWN_ALIASES = {
 
 def fetch_9router_models() -> list[str]:
     """Ambil daftar model dari 9router /v1/models endpoint."""
-    api_key = os.environ.get("NINE_ROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    api_key = (
+        os.environ.get("NINE_ROUTER_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("HERMES_CUSTOM_127_0_0_1_20128_API_KEY")
+        or ""
+    )
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -103,7 +108,7 @@ def main():
         help="Nama model (alias pendek atau nama dari 9router /v1/models)",
     )
     parser.add_argument(
-        "--list", default="false", dest="list_models",
+        "--list", default="false", nargs="?", const="true", dest="list_models",
         help="Tampilkan semua model yang tersedia dari 9router (true/false)",
     )
     args = parser.parse_args()

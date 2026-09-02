@@ -114,7 +114,8 @@ print("\n── 3. V1 Code Path Static Check ──")
 # Verify key V1 components still importable
 import importlib
 try:
-    sys.path.insert(0, "/Users/macbookairm1/Documents/autocliper-backend-v01/backend")
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     
     from src.application.services import JobService
     check("JobService importable", True)

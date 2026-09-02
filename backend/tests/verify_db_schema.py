@@ -1,6 +1,7 @@
 """Verify database schema — is_premium column and existing users."""
 import sys
-sys.path.insert(0, "/Users/macbookairm1/Documents/autocliper-backend-v01/backend")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.infrastructure.db_connection import get_dict_connection
 

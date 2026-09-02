@@ -147,3 +147,7 @@ graphify-out/
 tmp/
 .vite/
 *.tsbuildinfo
+*.pth
+*.pt
+*.onnx
+

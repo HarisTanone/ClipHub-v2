@@ -181,11 +181,13 @@ def test_hermes_cli_script_integration():
     """Test ops/hermes/bin/ac_autopilot.py helper methods."""
     import sys
     import importlib.util
-    hermes_bin = "/Users/macbookairm1/Documents/autocliper-backend-v01/ops/hermes/bin"
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+    hermes_bin = str(repo_root / "ops" / "hermes" / "bin")
     if hermes_bin not in sys.path:
         sys.path.insert(0, hermes_bin)
 
-    cli_path = "/Users/macbookairm1/Documents/autocliper-backend-v01/ops/hermes/bin/ac_autopilot.py"
+    cli_path = str(repo_root / "ops" / "hermes" / "bin" / "ac_autopilot.py")
     spec = importlib.util.spec_from_file_location("ac_autopilot", cli_path)
     cli_mod = importlib.util.module_from_spec(spec)
 
@@ -348,7 +350,9 @@ def test_preset_default_style_parity_with_preview():
 def test_hermes_cli_set_preset():
     """Test ac_autopilot.set_preset helper."""
     import importlib.util
-    cli_path = "/Users/macbookairm1/Documents/autocliper-backend-v01/ops/hermes/bin/ac_autopilot.py"
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+    cli_path = str(repo_root / "ops" / "hermes" / "bin" / "ac_autopilot.py")
     spec = importlib.util.spec_from_file_location("ac_autopilot_set", cli_path)
     cli_mod = importlib.util.module_from_spec(spec)
 
