@@ -96,6 +96,7 @@ class SystemInfo(BaseModel):
     whisper_model_size: str
     gemini_model: str
     gemini_keys_count: int
+    gemini_video_processing: str = "agentic"
     cdn_enabled: bool
     asset_fetch_enabled: bool
 
@@ -655,6 +656,7 @@ async def get_system_info(user: CurrentUser = Depends(get_current_user)):
             whisper_model_size=settings.WHISPER_MODEL_SIZE,
             gemini_model=settings.GEMINI_MODEL,
             gemini_keys_count=len(settings.gemini_api_keys),
+            gemini_video_processing=getattr(settings, "GEMINI_VIDEO_PROCESSING", "agentic"),
             cdn_enabled=settings.CDN_ENABLED,
             asset_fetch_enabled=settings.ASSET_FETCH_ENABLED,
         ).model_dump(),

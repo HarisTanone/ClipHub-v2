@@ -25,17 +25,28 @@ RETRY_DELAYS = [5, 15, 30]
 MAX_RETRIES = 3
 
 
+class InteractionResponseAdapter:
+    """Adapter wrapping Gemini Interaction response to expose .text attribute matching generate_content."""
+    def __init__(self, text: str, steps: Optional[list] = None):
+        self.text = text
+        self.steps = steps or []
+
+
 class GeminiAnalyzer(IGeminiAnalyzer):
     def __init__(self):
         from src.infrastructure.auth import GeminiKeyRotator
         self._key_rotator = GeminiKeyRotator()
         self._model = settings.GEMINI_MODEL
         self._fallback_model = settings.GEMINI_FALLBACK_MODEL
+        self._video_processing = getattr(settings, "GEMINI_VIDEO_PROCESSING", "agentic")
         self._using_fallback = False
         self._consecutive_503 = 0
         self._client = None
         self._init_client()
-        logger.info(f"gemini_analyzer_init: model={self._model}, fallback={self._fallback_model}")
+        logger.info(
+            f"gemini_analyzer_init: model={self._model}, fallback={self._fallback_model}, "
+            f"video_processing={self._video_processing}"
+        )
 
     def _switch_to_fallback(self) -> None:
         """Switch to next fallback model after repeated 503/overload/404 errors."""
@@ -149,22 +160,28 @@ class GeminiAnalyzer(IGeminiAnalyzer):
         else:
             target_instruction = "Temukan SEMUA momen PALING VIRAL yang ada di video ini tanpa dibatasi (durasi per klip MINIMUM 45 detik — biarkan cerita/argumen SELESAI UTUH, jangan potong di tengah)."
 
-        prompt = f"""Kamu adalah AI analis video viral profesional. Tonton video ini dan analisis secara mendalam.
+        prompt = f"""Kamu adalah AI analis video viral profesional dengan kemampuan Agentic Video Understanding.
+Tonton dan jelajahi timeline video ini secara dinamis untuk menemukan momen-momen paling viral, bernilai emosional tinggi, dan berkualitas luar biasa.
 
 DURASI VIDEO: {video_duration:.1f} detik
 TARGET: {target_instruction}
 
+═══ METODE ANALISIS (AGENTIC VIDEO EXPLORATION) ═══
+- Manfaatkan navigasi timeline dinamis: periksa alur transkrip & audio untuk menemukan premis argumen atau cerita yang kuat.
+- Lakukan inspeksi visual mendalam pada ekspresi wajah (intensitas, emosi, eye-contact), reaksi pembicara, gestur tubuh, teks/slide, atau demonstrasi visual yang menarik perhatian.
+- Pastikan momen yang dipilih memiliki retensi visual tinggi (tidak monoton, menarik ditonton di 3 detik pertama).
+
 ═══ TUGAS 1: CLIP SELECTION ═══
 Identifikasi momen-momen yang:
-- Punya kekuatan emosional tinggi
+- Punya kekuatan emosional & retensi tinggi
 - Bisa berdiri sendiri tanpa konteks tambahan
-- Memicu komentar/share
-- Punya struktur cerita utuh (premis → konklusi)
+- Memicu komentar/share/diskusi
+- Punya struktur cerita utuh (premis → isi/konflik → konklusi)
 
-ATURAN:
+ATURAN TIMESTAMPS PRESISI:
 - Klip TIDAK BOLEH OVERLAP
-- 'start' = awal kalimat baru (jangan potong di tengah)
-- 'end' = setelah kalimat selesai utuh (+1 detik toleransi)
+- 'start' = tepat di awal kata pertama kalimat baru (jangan potong di tengah kata/gagasan)
+- 'end' = tepat setelah kalimat/punchline selesai tuntas (+1 detik toleransi)
 - Skor 1-100 berdasarkan potensi viral
 
 ═══ TUGAS 2: CREATIVE DIRECTION ═══
@@ -182,7 +199,7 @@ Tentukan visual identity berdasarkan tone video:
 Untuk setiap clip, buat hook text:
 - Maksimal 60 karakter
 - Bahasa SAMA dengan video
-- Brutal, singkat, bikin jempol berhenti
+- Brutal, singkat, bikin jempol berhenti di 3 detik pertama
 - OPEN LOOP (picu penasaran, jangan spoiler)
 
 OUTPUT FORMAT — RAW JSON (tanpa markdown):
@@ -352,9 +369,35 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             raise errors[-1]
         raise ValueError("Respons Gemini kosong dari semua key dan model (text-only)")
 
+    def _resolve_video_source(self, client: genai.Client, video_url: str) -> tuple[str, Optional[str]]:
+        """Resolve video input to (uri, mime_type).
+
+        Handles:
+        1. Direct URLs (YouTube, GCS, Cloud Storage, or pre-existing Google File URIs)
+        2. Local disk video files: Uploads to Gemini File API and waits for PROCESSING -> ACTIVE.
+        """
+        import os
+        if video_url.startswith("http://") or video_url.startswith("https://") or video_url.startswith("gs://"):
+            return video_url, "video/mp4"
+
+        if os.path.isfile(video_url):
+            logger.info(f"gemini_uploading_local_video: {video_url} to Google File API...")
+            video_file = client.files.upload(file=video_url)
+            poll_start = time.time()
+            while getattr(getattr(video_file, "state", None), "name", "") == "PROCESSING":
+                if time.time() - poll_start > 180:
+                    raise TimeoutError("Gemini file upload processing timeout (>180s)")
+                time.sleep(2)
+                video_file = client.files.get(name=video_file.name)
+            logger.info(f"gemini_local_video_active: uri={video_file.uri}")
+            return video_file.uri, getattr(video_file, "mime_type", "video/mp4")
+
+        return video_url, "video/mp4"
+
     def _generate_with_video(self, video_url: str, prompt: str, timeout: int = 180):
-        """Send YouTube URL + prompt to Gemini across ALL available keys AND top models concurrently.
-        4 keys x 2 models = 8 racing workers! Whichever combination responds first wins immediately.
+        """Send video (YouTube URL or File) + prompt to Gemini across ALL available keys AND top models concurrently.
+        Supports Agentic Video Understanding (dynamic timeline inspection, up to 88% token reduction)
+        with automatic fallback to static generate_content.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
@@ -362,10 +405,15 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         if not keys:
             raise RuntimeError("No Gemini API key configured")
 
-        contents = [
-            types.Part.from_uri(file_uri=video_url, mime_type="video/mp4"),
-            types.Part.from_text(text=prompt),
-        ]
+        # Models supporting agentic video understanding as per Google documentation
+        # (Gemini 3.7 Flash, 3.6 Flash, and 3.5 Flash Lite)
+        AGENTIC_CAPABLE_MODELS = {
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-latest",
+        }
+        use_agentic = getattr(settings, "GEMINI_VIDEO_PROCESSING", "agentic") == "agentic"
 
         # Race the top 2 models simultaneously across all keys (4 keys x 2 models = 8 workers)
         models_to_race = [
@@ -381,6 +429,62 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
 
         def _call(k: str, idx: int, m: str):
             client = genai.Client(api_key=k)
+            resolved_uri, mime = self._resolve_video_source(client, video_url)
+
+            # ── 1. Try Agentic Video Understanding via Interactions API ──
+            if use_agentic and any(cap in m for cap in AGENTIC_CAPABLE_MODELS):
+                try:
+                    video_input = {
+                        "type": "video",
+                        "uri": resolved_uri,
+                        "processing": "agentic",
+                    }
+                    if mime:
+                        video_input["mime_type"] = mime
+
+                    logger.debug(f"gemini_agentic_call: key[{idx}] model={m} processing=agentic")
+                    interaction = client.interactions.create(
+                        model=m,
+                        input=[
+                            video_input,
+                            {"type": "text", "text": prompt},
+                        ],
+                    )
+
+                    # Extract output text
+                    output_text = getattr(interaction, "output_text", None)
+                    steps = getattr(interaction, "steps", []) or []
+
+                    if not output_text and steps:
+                        for step in reversed(steps):
+                            if getattr(step, "type", "") == "model_output":
+                                content = getattr(step, "content", [])
+                                if isinstance(content, list):
+                                    for item in content:
+                                        if getattr(item, "type", "") == "text":
+                                            output_text = getattr(item, "text", "")
+                                            break
+                            if output_text:
+                                break
+
+                    if output_text and output_text.strip():
+                        p_calls = sum(1 for s in steps if getattr(s, "type", "") == "processing_call")
+                        logger.info(
+                            f"gemini_agentic_win: key[{idx}] model={m} responded! "
+                            f"dynamic_processing_calls={p_calls}, steps={len(steps)}"
+                        )
+                        return k, idx, m, InteractionResponseAdapter(text=output_text, steps=steps)
+                except Exception as agentic_err:
+                    logger.warning(
+                        f"gemini_agentic_failed: key[{idx}] with model={m} ({agentic_err}); "
+                        f"falling back to static generate_content..."
+                    )
+
+            # ── 2. Fallback / Standard Static Generate Content (1 FPS) ──
+            contents = [
+                types.Part.from_uri(file_uri=resolved_uri, mime_type=mime or "video/mp4"),
+                types.Part.from_text(text=prompt),
+            ]
             res = client.models.generate_content(
                 model=m,
                 contents=contents,
@@ -395,7 +499,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                     k, i, m = future_to_task[future]
                     try:
                         _, idx, m_used, response = future.result()
-                        if response and response.text:
+                        if response and getattr(response, "text", None):
                             logger.info(f"gemini_concurrent_win: key[{idx}] (...{k[-6:]}) with model={m_used} responded first!")
                             return response
                     except Exception as e:

@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.6-flash"
     GEMINI_FALLBACK_MODEL: str = "gemini-3.7-flash"
+    GEMINI_VIDEO_PROCESSING: str = "agentic"  # "agentic" (dynamic timeline + up to 88% token reduction) or "static" (fixed 1 FPS)
 
     # YouTube Data API v3 (for transcript/captions + search)
     YOUTUBE_API_KEY: str = ""
