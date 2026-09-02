@@ -89,7 +89,9 @@ def parse_broll_suggestions(
             else:
                 placement = "behind_person"
 
-        reason = " ".join(str(raw.get("reason") or "").split())[:200]
+        reason = " ".join(str(raw.get("reason") or raw.get("context") or "").split())[:300]
+        raw_queries = raw.get("search_queries") or []
+        search_queries = [str(q).strip() for q in raw_queries if str(q).strip()] if isinstance(raw_queries, list) else None
         parsed.append(BRollSuggestion(
             at_time=round(at_time, 3),
             keyword=keyword,
@@ -99,6 +101,7 @@ def parse_broll_suggestions(
             visual_category=visual_cat,
             motion_style=motion_style,
             placement=placement,
+            search_queries=search_queries,
         ))
 
     # Ensure dual tracks when AI only emits one placement type.

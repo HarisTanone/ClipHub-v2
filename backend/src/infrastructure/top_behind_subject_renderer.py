@@ -1144,13 +1144,13 @@ def pick_top_overlay_suggestions(
         is_still = _is_still_asset(s)
         score = 0
         if placement != "behind_person":
-            score += 2
-        if not is_still:
+            score += 3
+        if is_still:
             score += 1
         cat = getattr(s, "visual_category", None)
         cat_val = cat.value if hasattr(cat, "value") else str(cat or "")
         if cat_val in {"icon", "motion_graphic"}:
-            score -= 1
+            score += 2
         at = float(getattr(s, "at_time", 0))
         dur = float(getattr(s, "duration", 2.0))
         at, dur = snap_overlay_to_phrase(at, dur, words, clip_duration=clip_duration)

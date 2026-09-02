@@ -322,6 +322,40 @@ class TestClipScoutAISelector:
         assert "TRANSCRIPT CONTEXT" in prompt
         assert "anti aging" in prompt
 
+    def test_behind_person_allows_scenic_and_environmental_footage(self):
+        """Behind person should allow aesthetic cityscapes, landscapes, and timelapses."""
+        selector = ClipScoutAISelector()
+        candidates = [
+            VideoCandidate(
+                id="px_city", title="Modern city skyline timelapse night",
+                thumbnail_url="", source_url="", embed_url="",
+                platform="pexels", license="royalty-free",
+                duration_seconds=10, start_timestamp=0, relevance_score=0.85,
+            ),
+            VideoCandidate(
+                id="yt_talk", title="Podcast interview talking head host",
+                thumbnail_url="", source_url="", embed_url="",
+                platform="youtube", license="standard",
+                duration_seconds=60, start_timestamp=0, relevance_score=0.99,
+            ),
+        ]
+        kept = selector._filter_for_placement(candidates, "behind_person")
+        assert [c.id for c in kept] == ["px_city"]
+
+    def test_expand_search_queries_with_narrative_context(self):
+        """Search query expansion should incorporate narrative context words."""
+        from src.infrastructure.clipscout_client import _expand_search_queries
+
+        qs = _expand_search_queries(
+            "startup office",
+            placement="behind_person",
+            context="kami membangun perusahaan teknologi di Jakarta dengan modal terbatas",
+        )
+        assert any("startup office" in q.lower() for q in qs)
+        assert any("cinematic background" in q.lower() or "aesthetic" in q.lower() for q in qs)
+        # Context words from transcript expanded
+        assert any("perusahaan" in q.lower() or "teknologi" in q.lower() or "jakarta" in q.lower() for q in qs)
+
 
 # ─── Task 9.3: VideoSplicer Tests ─────────────────────────────────────────────
 

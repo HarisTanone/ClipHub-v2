@@ -185,11 +185,7 @@ def sanitize_stock_keyword(keyword: str, placement: str = "") -> str:
     base = " ".join(tokens) if tokens else raw
     # If still 1 weak word, pad visual framing (generic, not domain map)
     if len(base.split()) <= 1:
-        base = f"{base} close up object" if base else "object close up"
-    place = (placement or "").strip().lower()
-    behind = place in {"behind_person", "behind", "top_overlay", "overlay"}
-    if behind and "close up" not in base.lower() and "macro" not in base.lower():
-        base = f"{base} close up"
+        base = f"{base} footage" if base else "aesthetic footage"
     return " ".join(base.split())[:80]
 
 
@@ -199,10 +195,11 @@ def _expand_search_queries(
     category: str = "",
     entities: Optional[list[str]] = None,
     extra_queries: Optional[list[str]] = None,
+    context: str = "",
 ) -> list[str]:
-    """Multi-query variants for ClipScout from AI keyword + analisa seeds (ID+EN).
+    """Multi-query variants for ClipScout from AI keyword + narrative context + analisa seeds (ID+EN).
 
-    No hardcoded domain synonym table — extra_queries come from AI visual entities.
+    Generates rich, context-expanded search queries to find the most relevant stock footage.
     """
     locked = lock_keyword_to_entities(keyword, entities or [], placement=placement)
     base = locked or sanitize_stock_keyword(keyword, placement=placement)
@@ -216,29 +213,33 @@ def _expand_search_queries(
 
     queries: list[str] = [base]
 
-    # AI / analisa bilingual seeds (dynamic)
+    # Explicit extra queries from AI suggestions or analisa seeds
     for eq in extra_queries or []:
         eq = " ".join(str(eq or "").split())
         if eq and eq.lower() not in {q.lower() for q in queries}:
             queries.append(eq)
 
+    # Narrative context expansion: extract key descriptive words from context
+    clean_ctx = " ".join(str(context or "").split())
+    if clean_ctx:
+        ctx_words = [w for w in re.findall(r"[a-zA-Z0-9]+", clean_ctx) if len(w) >= 4]
+        for cw in ctx_words[:4]:
+            cw_lower = cw.lower()
+            if cw_lower not in lower and len(tokens) <= 3:
+                combo = f"{base} {cw}"
+                if combo.lower() not in {q.lower() for q in queries}:
+                    queries.append(combo)
+
+    # Contextual background / aesthetic queries for behind_person footage
+    if behind or cat in {"footage", "icon", "motion_graphic"}:
+        for variant in (f"{base} cinematic background", f"{base} aesthetic", f"{base} b-roll", f"{base} close up"):
+            if variant.lower() not in {q.lower() for q in queries}:
+                queries.append(variant)
+
     if len(tokens) >= 3:
         queries.append(" ".join(tokens[:3]))
     if len(tokens) >= 2:
         queries.append(" ".join(tokens[:2]))
-
-    # Behind-person / icon: fill-frame framing
-    if behind or cat in {"icon", "motion_graphic"}:
-        for suffix in ("close up", "macro detail", "isolated object", "fill frame"):
-            if suffix not in lower:
-                queries.append(f"{base} {suffix}")
-        scenic = {"skyline", "cityscape", "landscape", "aerial", "panorama"}
-        if any(s in lower for s in scenic):
-            core = [t for t in tokens if t.lower() not in scenic]
-            if core:
-                queries.insert(1, " ".join(core) + " close up")
-    elif "close up" not in lower and "closeup" not in lower:
-        queries.append(f"{base} close up")
 
     out: list[str] = []
     seen: set[str] = set()
@@ -260,7 +261,7 @@ def build_segments_from_suggestions(
 ) -> list[dict]:
     """Build ClipScout segment payloads from BRollSuggestion list.
 
-    Merges AI keyword + dynamic analisa seeds (ID+EN from visual entities).
+    Merges AI keyword + expanded narrative context + dynamic analisa seeds (ID+EN).
     """
     texts = [topic_text]
     for s in suggestions:
@@ -279,6 +280,14 @@ def build_segments_from_suggestions(
         placement = str(getattr(suggestion, "placement", "") or "")
         cat = getattr(suggestion, "visual_category", None)
         cat_val = cat.value if hasattr(cat, "value") else str(cat or "")
+        reason = str(getattr(suggestion, "reason", "") or "").strip()
+        sug_queries = getattr(suggestion, "search_queries", None) or []
+
+        merged_extra = list(sug_queries)
+        for eq in analisa_extra_queries or []:
+            if eq and eq not in merged_extra:
+                merged_extra.append(eq)
+
         locked = lock_keyword_to_entities(keyword, entities, placement=placement)
         if locked and locked != keyword:
             suggestion.keyword = locked
@@ -287,13 +296,17 @@ def build_segments_from_suggestions(
             placement=placement,
             category=cat_val,
             entities=entities,
-            extra_queries=list(analisa_extra_queries or []),
+            extra_queries=merged_extra,
+            context=reason or topic_text,
         )
         topic = locked or sanitize_stock_keyword(keyword, placement=placement) or keyword
 
+        # Rich text describing the exact narrative moment for semantic ClipScout search
+        full_text = f"{topic}: {reason}" if reason else topic
+
         segments.append({
             "id": str(i + 1),
-            "text": topic,
+            "text": full_text,
             "topic": topic,
             "searchQueries": queries or [topic],
             "startIndex": 0,
@@ -302,3 +315,4 @@ def build_segments_from_suggestions(
         })
 
     return segments
+

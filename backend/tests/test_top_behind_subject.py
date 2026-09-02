@@ -91,6 +91,37 @@ def test_pick_prefers_images_skips_blocked(tmp_path):
     assert isinstance(picks[0], TopOverlaySegment)
 
 
+def test_pick_prioritizes_video_footage_over_still_image(tmp_path):
+    img = tmp_path / "a.jpg"
+    vid = tmp_path / "b.mp4"
+    img.write_bytes(b"x")
+    vid.write_bytes(b"x")
+
+    def sug(path, fmt, at, dur, fallback=False):
+        return SimpleNamespace(
+            at_time=at,
+            duration=dur,
+            keyword="k",
+            asset_result=SimpleNamespace(
+                local_path=str(path),
+                asset_format=fmt,
+                is_fallback=fallback,
+                source_api="pexels",
+            ),
+            splice_segment=None,
+        )
+
+    picks = pick_top_overlay_suggestions(
+        [
+            sug(img, "jpg", 8.0, 2.0),
+            sug(vid, "video", 8.0, 2.0),
+        ],
+        max_per_clip=1,
+    )
+    assert len(picks) == 1
+    assert picks[0].asset_path == str(vid)
+
+
 def test_pick_skips_missing_and_fallback(tmp_path):
     p = tmp_path / "ok.png"
     p.write_bytes(b"x")

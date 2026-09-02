@@ -151,6 +151,7 @@ class BRollSuggestion:
     smart_crop_x: Optional[int] = None
     smart_crop_y: Optional[int] = None
     layout_mode: Optional[str] = None
+    search_queries: Optional[list[str]] = None
 
 
 @dataclass

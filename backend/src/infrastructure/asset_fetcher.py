@@ -194,8 +194,10 @@ class AssetFetcher(IAssetFetcher):
         analisa_extra_queries: bilingual seeds from json_analisa.
         """
         # Build search segments from suggestions (+ ID/EN analisa seeds)
+        topic_seed = " / ".join(analisa_extra_queries[:4]) if analisa_extra_queries else ""
         segments = build_segments_from_suggestions(
             suggestions,
+            topic_text=topic_seed,
             analisa_extra_queries=analisa_extra_queries,
         )
         if not segments:

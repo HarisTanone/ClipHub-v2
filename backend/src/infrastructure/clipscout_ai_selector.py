@@ -119,10 +119,6 @@ class ClipScoutAISelector:
         "person talking", "people talking", "man speaking", "woman speaking",
         "speech", "lecture", "webinar", "zoom call",
     )
-    _SCENIC_BAN = (
-        "skyline", "cityscape", "landscape", "aerial", "panorama",
-        "timelapse", "drone shot", "establishing shot",
-    )
 
     def _is_behind_placement(self, placement: str) -> bool:
         return (placement or "").strip().lower() in {
@@ -143,21 +139,17 @@ class ClipScoutAISelector:
         hay = self._candidate_hay(c)
         return any(b in hay for b in self._TALKING_HEAD_BAN)
 
-    def _is_scenic_filler(self, c: VideoCandidate) -> bool:
-        hay = self._candidate_hay(c)
-        return any(b in hay for b in self._SCENIC_BAN)
-
     def _filter_for_placement(
         self,
         candidates: list[VideoCandidate],
         placement: str,
     ) -> list[VideoCandidate]:
-        """Drop talking-head / scenic results for behind-person stock."""
+        """Drop competing talking-head results for behind-person stock."""
         if not self._is_behind_placement(placement):
             return candidates
         kept = [
             c for c in candidates
-            if not self._is_talking_head(c) and not self._is_scenic_filler(c)
+            if not self._is_talking_head(c)
         ]
         if kept and len(kept) < len(candidates):
             logger.info(
@@ -192,15 +184,17 @@ class ClipScoutAISelector:
         clean_kw = sanitize_stock_keyword(keyword, placement=placement) or keyword
         behind = self._is_behind_placement(placement)
         behind_rule = (
-            "\n9. PLACEMENT=behind_person: REJECT talking-heads, podcasts, interviews, "
-            "faces, speakers. Subject must be OBJECT/SCENE close-up only."
+            "\n9. PLACEMENT=behind_person: The footage sits in the background behind the presenter. "
+            "Select footage that is aesthetic, cinematic, and deeply relevant to the spoken narrative context "
+            "(environments, locations, offices, actions, concepts, timelapses, or objects). "
+            "REJECT competing talking heads, podcasts, or faces addressing camera directly."
             if behind else ""
         )
-        ctx = " ".join(str(context or "").split())[:240]
+        ctx = " ".join(str(context or "").split())[:600]
         ctx_block = (
-            f'\nTRANSCRIPT CONTEXT (prefer clips that fit this sentence): "{ctx}"\n'
-            "10. Prefer candidate whose on-screen subject supports the transcript context "
-            "when keyword match is tied."
+            f'\nTRANSCRIPT CONTEXT & NARRATIVE: "{ctx}"\n'
+            "10. Prioritize candidates whose visual subject directly supports the narrative context "
+            "and enhances the topic being spoken."
             if ctx else ""
         )
 
@@ -214,17 +208,18 @@ CANDIDATES:
 {candidates_text}
 SELECTION RULES (strict):
 1. Visual match FIRST: on-screen subject must match KEYWORD literally (object/action/scene). Reject generic pretty / unrelated B-roll.
-2. Prefer CLOSE-UP / FILL-FRAME of the subject over wide landscape/cityscape/talking-head.
+2. Match narrative context & atmosphere: on-screen visuals must support what the speaker is discussing.
 3. Prefer royalty-free license when relevance is close.
 4. Duration >= {required_duration:.1f}s preferred.
 5. Prefer pexels/pixabay over youtube when relevance is equal.
 6. For youtube: start_timestamp = second where keyword subject is most visible (not intro/logo).
-7. Reject mismatch hard (keyword "fuel nozzle" but clip is skyline / people talking / abstract).
-8. Prefer title/snippet that contains keyword tokens; reject pure scenic filler.{behind_rule}
+7. Reject mismatch hard (keyword "fuel nozzle" but clip is completely unrelated / abstract).
+8. Prefer title/snippet that aligns with keyword and narrative context.{behind_rule}
 
 OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
 {{"selected_id":"<exact ID from list>","start_timestamp":0,"reason":"one short sentence"}}
 """
+
 
     def _build_retry_prompt(
         self,
@@ -419,14 +414,6 @@ OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
             hits = sum(1 for t in ctx_tokens if t in hay)
             return hits / max(1, len(ctx_tokens))
 
-        def scenic_penalty(c: VideoCandidate) -> int:
-            hay = self._candidate_hay(c)
-            return 1 if any(s in hay for s in scenic) and token_hits(c) < 0.35 else 0
-
-        def closeup_bonus(c: VideoCandidate) -> int:
-            hay = self._candidate_hay(c)
-            return 1 if any(x in hay for x in ("close up", "closeup", "macro", "detail")) else 0
-
         def talking_penalty(c: VideoCandidate) -> int:
             return 1 if self._is_talking_head(c) else 0
 
@@ -447,13 +434,11 @@ OUTPUT — ONE raw JSON object only. No markdown fences. No prose before/after:
         def sort_key(c: VideoCandidate) -> tuple:
             license_score = 1 if c.license == "royalty-free" else 0
             platform_score = 1 if c.platform in ("pexels", "pixabay") else 0
-            # Two-pass: entity lock first, then keyword, then transcript context
+            # Context-first scoring: entity lock, keyword tokens, transcript context
             return (
                 entity_hits(c),
                 token_hits(c),
                 context_hits(c),
-                closeup_bonus(c),
-                -scenic_penalty(c),
                 -talking_penalty(c),
                 c.relevance_score,
                 license_score,

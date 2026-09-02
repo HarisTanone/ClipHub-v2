@@ -197,35 +197,34 @@ class GroqAnalyzer(IGroqAnalyzer):
             return {}
 
         # Dual tracks: full_frame splice + behind_person top overlay (unconstrained dynamic AI analysis)
-        prompt = f"""Kamu adalah visual director video pendek profesional. Analisa transkrip secara mendalam dan tentukan B-roll visual (baik full_frame footage maupun behind_person image/footage) yang dibutuhkan narasi transkrip secara bebas dan dinamis tanpa batasan kaku.
+        prompt = f"""Kamu adalah visual director video pendek profesional. Analisa transkrip secara mendalam dan tentukan B-roll visual (baik full_frame footage maupun behind_person footage/visual) yang dibutuhkan narasi transkrip secara bebas dan dinamis tanpa batasan kaku.
 
 TRANSKRIP:
 {chr(10).join(context_lines)}
 
 DUA MODE PLACEMENT (otomatis, dinamis):
 1) full_frame — stock VIDEO ganti layar penuh (clip→footage→clip). Person HILANG sementara. Pakai visual_category=footage.
-2) behind_person — stock IMAGE/icon di BELAKANG person (top half). Person TETAP kelihatan. Pakai visual_category=icon atau motion_graphic atau footage.
+2) behind_person — stock FOOTAGE video di BELAKANG person (top half background). Person TETAP kelihatan di depan. Visual harus sangat relevan dan memperluas konteks narasi cerita (misal: suasana kantor, perkotaan, alam, ruangan interior, aksi, konsep tematik, objek, ataupun visual sinematik estetis yang mengilustrasikan topik). Dilarang: talking head orang lain yang menatap kamera.
 
 ATURAN:
 - at_time WAJIB salah satu timestamp di transkrip; jangan sebelum detik 3.
 - JANGAN pakai waktu yang sama untuk full_frame dan behind_person (min jarak 4 detik).
 - Tentukan jumlah B-roll dan Behind Person yang pas sesuai alur cerita transkrip (sebanyak yang dibutuhkan konteks cerita).
-- keyword = query stock ENGLISH 3-8 kata, KONKRET visual dari konteks clip ini (analisa dinamis — jangan andalkan daftar kata domain tetap).
-  LANGKAH: (1) baca kalimat di timestamp (2) ekstrak 1 fakta visual UTAMA (3) terjemah 1:1 ke query stock literal.
-  Format: [concrete subject] [action OR state] [framing/detail]
-  JELEK: abstract mood "success", "lifestyle", "viral", "city skyline generic", 1 kata generic.
-  Dilarang: nama orang, brand, abstraksi, mood-only.
-  behind_person: CLOSE-UP object/icon/subject (fill frame). LARANG wide landscape/cityscape.
-  full_frame: boleh medium shot action; tetap mirror topik.
-- duration 2.5-3.2 detik (santai dan jelas terlihat).
-- visual_category: footage (video) | icon | motion_graphic | reaction
+- keyword = query stock ENGLISH 3-8 kata, KONKRET visual yang relevan dengan konteks narasi ini (analisa dinamis).
+  Format: [concrete subject] [action OR environment] [cinematic/framing detail]
+  Contoh: "modern office team collaboration", "luxury apartment living room interior", "crypto trading charts digital", "happy couple walking in park", "cinematic city street traffic night"
+  Dilarang: nama orang, brand, abstraksi kosong.
+- context = kalimat transkrip yang sedang diucapkan pada timestamp tersebut.
+- search_queries = array 2-4 variasi query pencarian bahasa Inggris yang memperluas konteks narasi.
+- duration 2.5-3.5 detik (santai dan jelas terlihat).
+- visual_category: footage (utamakan video footage) | icon | motion_graphic
 - placement: full_frame | behind_person
 - template: word_pop_typography | line_reveal_typography | particle_text_burst
 - motion_style: ken_burns | parallax_zoom | light_sweep | particle_float | depth_parallax | glitch_reveal | typewriter | stroke_draw
 
 
 OUTPUT RAW JSON:
-{{"items":[{{"at_time":12.5,"keyword":"concrete stock query from this transcript","duration":2.8,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography","motion_style":"ken_burns"}},{{"at_time":20.0,"keyword":"another concrete closeup object","duration":2.8,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
+{{"items":[{{"at_time":12.5,"keyword":"modern luxury house exterior","context":"saya memutuskan untuk membeli rumah impian saya","search_queries":["modern luxury house exterior","residential architectural villa","luxury property real estate"],"duration":2.8,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography","motion_style":"ken_burns"}}]}}"""
 
 
         try:
@@ -304,6 +303,16 @@ OUTPUT RAW JSON:
                     else "full_frame"
                 )
 
+            context_str = str(item.get("context") or item.get("reason") or "").strip()
+            if not context_str and sampled_segments:
+                closest_seg = min(sampled_segments, key=lambda s: abs(s.start - at_time))
+                if abs(closest_seg.start - at_time) <= 4.0:
+                    context_str = closest_seg.text.strip()
+            search_queries = [
+                str(q).strip() for q in (item.get("search_queries") or [])
+                if str(q).strip()
+            ]
+
             suggestions.append({
                 "at_time": round(at_time, 3),
                 "keyword": keyword,
@@ -311,11 +320,14 @@ OUTPUT RAW JSON:
                 "duration": round(duration, 3),
                 "visual_category": visual_category,
                 "placement": placement,
+                "reason": context_str,
+                "search_queries": search_queries,
             })
             if max_suggestions and len(suggestions) >= max_suggestions:
                 break
 
         return {"1": suggestions} if suggestions else {}
+
 
 
     async def analyze_visual_entities_for_clips(
@@ -818,7 +830,7 @@ OUTPUT RAW JSON only:
         seed_txt = ", ".join(seeds[:14]) if seeds else "(none — derive from transcript)"
         topic = " | ".join(x for x in (hook.strip(), reason.strip()) if x)[:300]
 
-        prompt = f"""Kamu visual director profesional untuk short clip. Tentukan B-roll visual (baik full_frame stock video maupun behind_person visual/icon) secara bebas dan dinamis sesuai alur narasi transkrip tanpa batasan kaku.
+        prompt = f"""Kamu visual director profesional untuk short clip. Tentukan B-roll visual (baik full_frame stock video maupun behind_person footage/visual) secara bebas dan dinamis sesuai alur narasi transkrip tanpa batasan kaku.
 
 CLIP #{rank} duration={duration:.1f}s
 HOOK/TOPIC: {topic or "(n/a)"}
@@ -829,21 +841,22 @@ TRANSKRIP BERTIMESTAMP (clip ini saja):
 
 PLACEMENT:
 1) full_frame — stock VIDEO ganti layar (person hilang). visual_category=footage
-2) behind_person — IMAGE/icon/footage di belakang person top-half. visual_category=icon|motion_graphic|footage
+2) behind_person — stock FOOTAGE video di belakang person (top-half background). Person tetap terlihat di depan. Visual harus sangat kontekstual, menarik, dan memperluas narasi cerita (suasana, tempat, ruangan, aksi, lingkungan, konsep tematik, ataupun visual sinematik). Dilarang: talking head orang lain menghadap kamera. visual_category=footage|icon|motion_graphic
 
 ATURAN:
 - at_time = timestamp dari transkrip di atas; min 3.0s; max duration-1
 - full_frame dan behind_person TIDAK boleh waktu sama (min jarak 4s)
 - Tentukan jumlah B-roll visual sebanyak yang dibutuhkan narasi cerita secara dinamis.
-- keyword = ENGLISH stock query 3-8 kata, KONKRET visual dari konteks clip ini (boleh refine seed di atas)
-  JELEK: abstract mood "success", "lifestyle", "viral", "city skyline generic"
-  behind_person: CLOSE-UP object fill-frame (bukan wide landscape)
-- duration 2.5-3.2s (santai dan jelas); min jarak 3.5s antar item placement sama
+- keyword = ENGLISH stock query 3-8 kata, KONKRET visual dari konteks clip ini (perluas dan perjelas narasi).
+  Contoh: "modern office team collaboration", "luxury house architecture", "financial market charts", "happy couple walking outdoors", "cinematic timelapse city lights"
+- context = kalimat transkrip yang sedang diucapkan pada timestamp tersebut.
+- search_queries = array 2-4 variasi query pencarian bahasa Inggris yang memperluas konteks narasi.
+- duration 2.5-3.5s (santai dan jelas); min jarak 3.5s antar item placement sama
 - placement + visual_category + template wajib
-- Analisa dinamis dari transkrip — jangan andalkan daftar kata domain tetap
+- Analisa dinamis dari transkrip — perluas konteks agar visual benar-benar sesuai dengan cerita.
 
 OUTPUT RAW JSON:
-{{"items":[{{"at_time":12.5,"keyword":"concrete stock query from this clip","duration":2.8,"visual_category":"footage","placement":"full_frame","template":"word_pop_typography"}},{{"at_time":22.0,"keyword":"another concrete closeup object","duration":2.8,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography"}}]}}
+{{"items":[{{"at_time":12.5,"keyword":"modern luxury house exterior","context":"saya memutuskan untuk membeli rumah impian saya","search_queries":["modern luxury house exterior","residential architectural villa","luxury property real estate"],"duration":2.8,"visual_category":"footage","placement":"behind_person","template":"word_pop_typography"}}]}}
 """
         try:
             raw = await asyncio.wait_for(
@@ -943,6 +956,21 @@ OUTPUT RAW JSON:
                 for e in items
             ):
                 continue
+
+            context_str = str(item.get("context") or item.get("reason") or "").strip()
+            if not context_str and words:
+                ctx_words = [
+                    str(w.get("word") or "").strip()
+                    for w in words
+                    if at_time - 1.5 <= float(w.get("start", 0) or 0) <= at_time + item_duration + 1.5
+                ]
+                context_str = " ".join(w for w in ctx_words if w).strip()
+
+            search_queries = [
+                str(q).strip() for q in (item.get("search_queries") or [])
+                if str(q).strip()
+            ]
+
             items.append({
                 "at_time": round(at_time, 3),
                 "keyword": keyword,
@@ -950,10 +978,13 @@ OUTPUT RAW JSON:
                 "visual_category": category,
                 "template": template if template in allowed_templates else "word_pop_typography",
                 "placement": placement,
+                "reason": context_str,
+                "search_queries": search_queries,
             })
             if max_items and len(items) >= max_items:
                 break
         return items
+
 
     @staticmethod
     def _fallback_broll_from_words(
@@ -989,6 +1020,7 @@ OUTPUT RAW JSON:
             kw = sanitize_stock_keyword(kw, placement="behind_person") or kw
             placement = "behind_person" if len(selected) % 2 else "full_frame"
             hold = min(2.25, max(0.8, duration - start - 0.1)) if duration > 0 else 1.5
+            ctx_snippet = " ".join(str(w.get("word") or "").strip() for w in words if abs(float(w.get("start", 0) or 0) - start) <= 2.5)
             selected.append({
                 "at_time": round(start, 3),
                 "keyword": kw[:80],
@@ -996,6 +1028,7 @@ OUTPUT RAW JSON:
                 "visual_category": "footage",
                 "template": "word_pop_typography",
                 "placement": placement,
+                "reason": ctx_snippet or kw,
             })
             if len(selected) >= max(0, int(limit)):
                 return sorted(selected, key=lambda item: item["at_time"])
@@ -1018,7 +1051,7 @@ OUTPUT RAW JSON:
                 continue
             content_words.append((index, raw, start))
 
-        candidates: list[tuple[float, float, str]] = []
+        candidates: list[tuple[float, float, str, str]] = []
         for position, (word_index, raw, start) in enumerate(content_words):
             phrase = [raw]
             for next_index, next_raw, next_start in content_words[position + 1:position + 3]:
@@ -1030,9 +1063,9 @@ OUTPUT RAW JSON:
             score = sum(len(part) for part in phrase) + unique_tokens * 3
             if any(char.isdigit() for char in keyword):
                 score += 8
-            candidates.append((float(score), start, keyword))
+            candidates.append((float(score), start, keyword, " ".join(phrase)))
 
-        for _score, start, keyword in sorted(candidates, reverse=True):
+        for _score, start, keyword, full_phrase in sorted(candidates, reverse=True):
             if any(abs(start - item["at_time"]) < min(8.0, max(1.5, duration * 0.2)) for item in selected):
                 continue
             placement = "behind_person" if len(selected) % 2 else "full_frame"
@@ -1044,7 +1077,9 @@ OUTPUT RAW JSON:
                 "visual_category": "footage",
                 "template": "word_pop_typography",
                 "placement": placement,
+                "reason": full_phrase or keyword,
             })
+
             if len(selected) >= max(0, int(limit)):
                 break
         return sorted(selected, key=lambda item: item["at_time"])
