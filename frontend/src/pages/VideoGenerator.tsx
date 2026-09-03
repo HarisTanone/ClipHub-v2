@@ -1574,14 +1574,14 @@ export function VideoGeneratorPage() {
         setTtsModels(response);
       } else {
         setTtsModels([
-          { model_id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", description: "⭐ Model terbaru, sangat ekspresif, respons cepat & intonasi natural (Free Tier)", free_tier: true },
+          { model_id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", description: "Model terbaru, sangat ekspresif, respons cepat & intonasi natural (Free Tier)", free_tier: true },
           { model_id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS", description: "Cepat, efisien, optimal untuk batch & volume tinggi (Free Tier)", free_tier: true },
           { model_id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS", description: "Kualitas studio audio tinggi, podcast & narasi mendalam", free_tier: false },
         ]);
       }
     } catch {
       setTtsModels([
-        { model_id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", description: "⭐ Model terbaru, sangat ekspresif, respons cepat & intonasi natural (Free Tier)", free_tier: true },
+        { model_id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", description: "Model terbaru, sangat ekspresif, respons cepat & intonasi natural (Free Tier)", free_tier: true },
         { model_id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS", description: "Cepat, efisien, optimal untuk batch & volume tinggi (Free Tier)", free_tier: true },
         { model_id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS", description: "Kualitas studio audio tinggi, podcast & narasi mendalam", free_tier: false },
       ]);

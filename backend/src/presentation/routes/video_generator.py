@@ -10,7 +10,7 @@ import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Any, Optional
 
 from src.config import settings
@@ -43,6 +43,36 @@ class GenerateVideoRequest(BaseModel):
     bgm_volume: float = Field(default=0.15, ge=0.0, le=0.5)
     source_video_url: Optional[str] = Field(default=None, max_length=1000, description="Optional source video URL (YouTube, MP4) to analyze with Gemini Agentic Video Understanding")
     agentic_understanding: bool = Field(default=True, description="Enable Gemini Agentic Video Understanding for dynamic timeline navigation and precision moment extraction")
+
+    @field_validator("source_video_url")
+    @classmethod
+    def validate_source_video_url(cls, v: Optional[str]) -> Optional[str]:
+        if not v or not v.strip():
+            return None
+        v = v.strip()
+        from urllib.parse import urlparse
+        import ipaddress
+
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("source_video_url must use http or https scheme")
+
+        hostname = (parsed.hostname or "").lower()
+        if not hostname:
+            raise ValueError("source_video_url must include a valid hostname")
+
+        if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            raise ValueError("source_video_url cannot target local services")
+
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                raise ValueError("source_video_url cannot target internal/private IP addresses")
+        except ValueError as e:
+            if "target internal/private" in str(e):
+                raise
+
+        return v
 
 
 class SearchSceneRequest(BaseModel):

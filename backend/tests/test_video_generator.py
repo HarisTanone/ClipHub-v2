@@ -647,5 +647,42 @@ def test_video_generator_agentic_video_persistence_and_routing(tmp_path):
     assert loaded.agentic_understanding is True
 
 
+def test_video_generator_source_video_url_ssrf_protection():
+    import pytest
+    from pydantic import ValidationError
+    from src.presentation.routes.video_generator import GenerateVideoRequest
+
+    # Valid external video URLs
+    req1 = GenerateVideoRequest(
+        topic="Valid AI Video",
+        source_video_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+    assert req1.source_video_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+    req2 = GenerateVideoRequest(
+        topic="Valid MP4 URL",
+        source_video_url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    )
+    assert req2.source_video_url is not None
+
+    # Invalid / Malicious / SSRF targets
+    malicious_urls = [
+        "file:///etc/passwd",
+        "ftp://example.com/video.mp4",
+        "http://localhost:8000/api/users",
+        "http://127.0.0.1:8000/admin",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.0.0.1/secret",
+        "http://192.168.1.1/router",
+    ]
+    for m_url in malicious_urls:
+        with pytest.raises(ValidationError):
+            GenerateVideoRequest(
+                topic="Malicious Request",
+                source_video_url=m_url,
+            )
+
+
+
 
 
