@@ -545,10 +545,9 @@ class ActiveSpeakerDetector:
         forehead_x, forehead_y = get_pt(self.FOREHEAD)
 
         # 5. Multi-modal anatomical center
-        # Nose tip = sagittal midline (35%), Eyes midpoint = interpupillary level (35%),
-        # Mouth = articulation center (20%), Chin-Forehead balance (10%)
-        anatomical_cx = 0.35 * nose_x + 0.35 * eyes_center_x + 0.20 * mouth_x + 0.10 * ((nose_x + mouth_x) / 2.0)
-        anatomical_cy = 0.40 * eyes_center_y + 0.30 * nose_y + 0.20 * mouth_y + 0.10 * chin_y
+        # Retina/Eyes (20%), Nose tip (20%), Lips & Speech Articulation (40%), Chin Balance (20%)
+        anatomical_cx = 0.20 * eyes_center_x + 0.20 * nose_x + 0.40 * mouth_x + 0.20 * chin_x
+        anatomical_cy = 0.20 * eyes_center_y + 0.20 * nose_y + 0.40 * mouth_y + 0.20 * chin_y
 
         face_w = abs(mr_x - ml_x) * 2.5
         face_h = abs(chin_y - forehead_y)
