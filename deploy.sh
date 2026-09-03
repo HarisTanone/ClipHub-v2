@@ -180,8 +180,8 @@ else
         sudo apt-get install -y nodejs 2>/dev/null
     fi
 
-    # Build tools for native modules
-    sudo apt-get install -y build-essential cmake 2>/dev/null || true
+    # Build tools for native modules & process management
+    sudo apt-get install -y build-essential cmake psmisc 2>/dev/null || true
 
     # FFmpeg development libraries (required by PyAV / faster-whisper)
     sudo apt-get install -y \
@@ -198,10 +198,13 @@ else
     echo "  [OK] System packages installed"
 fi
 
-# Always ensure aria2 is installed
+# Always ensure aria2 and psmisc (fuser) are installed
 if ! command -v aria2c &>/dev/null; then
     echo "  Installing aria2..."
     sudo apt-get install -y aria2 2>/dev/null || true
+fi
+if ! command -v fuser &>/dev/null; then
+    sudo apt-get install -y psmisc 2>/dev/null || true
 fi
 
 # Always ensure FFmpeg dev libs + build tools are present (needed by PyAV/faster-whisper)
@@ -770,6 +773,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Step 6: Systemd Services"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Resolve binary paths for systemd units
+NPX_BIN="$(command -v npx 2>/dev/null || echo '/usr/bin/npx')"
+NODE_BIN="$(command -v node 2>/dev/null || echo '/usr/bin/node')"
+
 # Backend service
 sudo tee /etc/systemd/system/autocliper-backend.service > /dev/null << EOF
 [Unit]
@@ -781,9 +788,9 @@ Type=simple
 User=$DEPLOY_USER
 WorkingDirectory=$BACKEND_DIR
 EnvironmentFile=-$BACKEND_DIR/.env
-Environment=PATH=$BACKEND_DIR/venv/bin:/usr/local/bin:/usr/bin
+Environment=PATH=$BACKEND_DIR/venv/bin:/usr/local/bin:/usr/bin:/bin
 # Kill any stale process on port before starting (prevents EADDRINUSE)
-ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $BACKEND_PORT/tcp 2>/dev/null || true'
+ExecStartPre=/bin/sh -c 'fuser -k $BACKEND_PORT/tcp 2>/dev/null || true'
 ExecStartPre=/bin/sleep 1
 ExecStart=$BACKEND_DIR/venv/bin/python -m uvicorn src.presentation.api:app --host 0.0.0.0 --port $BACKEND_PORT --workers ${BACKEND_WORKERS:-2}
 Restart=always
@@ -837,19 +844,18 @@ WorkingDirectory=$REMOTION_DIR
 Environment=REMOTION_SERVER_PORT=$REMOTION_PORT
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS="--max-old-space-size=3072 --expose-gc"
-Environment=PATH=/usr/local/bin:/usr/bin
+Environment=PATH=$REMOTION_DIR/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
 MemoryHigh=4G
 MemoryMax=5G
-# Kill any stale process on port and zombie chromium instances before starting
-ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $REMOTION_PORT/tcp 2>/dev/null || true'
-ExecStartPre=/bin/sh -c '/usr/bin/pkill -f "chrome-headless-shell.*remotion" 2>/dev/null || true'
+# Kill any stale process on port before starting (prevents EADDRINUSE)
+ExecStartPre=/bin/sh -c 'fuser -k $REMOTION_PORT/tcp 2>/dev/null || true'
 ExecStartPre=/bin/sleep 1
-ExecStart=/usr/bin/npx tsx src/server/index.ts
-ExecStop=/bin/sh -c '/usr/bin/fuser -k $REMOTION_PORT/tcp 2>/dev/null || true'
-ExecStopPost=/bin/sh -c '/usr/bin/pkill -f "chrome-headless-shell.*remotion" 2>/dev/null || true'
+ExecStart=$NPX_BIN --yes tsx src/server/index.ts
+ExecStop=/bin/sh -c 'fuser -k $REMOTION_PORT/tcp 2>/dev/null || true'
+ExecStopPost=/bin/sh -c 'pkill -9 -f "[c]hrome-headless-shell.*remotion" 2>/dev/null || true'
 Restart=always
 RestartSec=5
-# Give process time to release port on stop
+TimeoutStartSec=120
 TimeoutStopSec=10
 StandardOutput=journal
 StandardError=journal
@@ -872,10 +878,10 @@ WorkingDirectory=$HYPERFRAMES_DIR
 Environment=NODE_ENV=production
 Environment=HYPERFRAMES_SERVER_PORT=$HYPERFRAMES_PORT
 Environment=HYPERFRAMES_WORK_DIR=$HYPERFRAMES_DIR/work
-Environment=PATH=/usr/local/bin:/usr/bin
-ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $HYPERFRAMES_PORT/tcp 2>/dev/null || true'
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/bin/sh -c 'fuser -k $HYPERFRAMES_PORT/tcp 2>/dev/null || true'
 ExecStartPre=/bin/sleep 1
-ExecStart=/usr/bin/node src/server.mjs
+ExecStart=$NODE_BIN src/server.mjs
 Restart=always
 RestartSec=5
 TimeoutStopSec=10
@@ -901,9 +907,9 @@ Type=simple
 User=$DEPLOY_USER
 WorkingDirectory=$FRONTEND_DIR
 # Kill any stale process on port before starting (prevents EADDRINUSE)
-ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $FRONTEND_PORT/tcp 2>/dev/null || true'
+ExecStartPre=/bin/sh -c 'fuser -k $FRONTEND_PORT/tcp 2>/dev/null || true'
 ExecStartPre=/bin/sleep 1
-ExecStart=/usr/bin/npx --yes serve dist -l $FRONTEND_PORT -s --no-clipboard
+ExecStart=$NPX_BIN --yes serve dist -l $FRONTEND_PORT -s --no-clipboard
 Restart=always
 RestartSec=5
 TimeoutStopSec=10
@@ -980,6 +986,7 @@ sudo systemctl stop autocliper-telegram-bot 2>/dev/null || true
 sudo systemctl stop autocliper-tunnel 2>/dev/null || true
 sudo systemctl stop autocliper-backend 2>/dev/null || true
 sudo systemctl stop autocliper-frontend 2>/dev/null || true
+sudo pkill -9 -f "[c]hrome-headless-shell.*remotion" 2>/dev/null || true
 sleep 2
 
 echo "  Starting 9router..."
@@ -998,7 +1005,10 @@ if [ $NINE_ROUTER_READY -eq 0 ]; then
 fi
 
 echo "  Starting Remotion server (bundling compositions)..."
-sudo systemctl start autocliper-remotion
+if ! sudo systemctl start autocliper-remotion; then
+    echo "  [WARN] systemctl start autocliper-remotion returned non-zero status — checking journal:"
+    sudo journalctl -u autocliper-remotion -n 30 --no-pager 2>/dev/null || true
+fi
 REMOTION_READY=0
 for i in $(seq 1 60); do
     if curl -s "http://localhost:$REMOTION_PORT/health" 2>/dev/null | grep -q "healthy"; then
