@@ -96,6 +96,7 @@ Options:
   --force <true|false>     Force reprocess (default: false)
   --auto-post <true|false> Auto post ke social media setelah selesai
   --platforms <LIST>       Target platform (contoh: tiktok,instagram,youtube)
+  --post-qty <NUM>         Target jumlah video terbaik yang diposting (contoh: 5)
 
 Gunakan ac_list_presets.py untuk melihat daftar preset lengkap Anda.
 """)
@@ -111,6 +112,7 @@ def main():
     parser.add_argument("--force", default="false", help="Force reprocess (true/false)")
     parser.add_argument("--auto-post", default="false", help="Auto post to social media upon completion (true/false)")
     parser.add_argument("--platforms", default="", help="Target social media platforms (comma-separated, e.g. tiktok,instagram,youtube)")
+    parser.add_argument("--post-qty", type=int, default=None, help="Target jumlah video terbaik yang diposting (misal: 5)")
     parser.add_argument("--help-extended", action="store_true", help="Show extended help with preset IDs")
     
     if "--help-extended" in sys.argv:
@@ -140,6 +142,8 @@ def main():
         "auto_post_social": auto_post,
         "auto_post_platforms": ",".join(platforms),
     }
+    if args.post_qty and args.post_qty > 0:
+        payload["auto_post_clips_count"] = int(args.post_qty)
 
     # Embed full resolved style configurations if available
     if preset_obj:

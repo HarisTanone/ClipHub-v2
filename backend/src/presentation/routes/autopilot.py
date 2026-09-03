@@ -23,6 +23,7 @@ class UpdateAutopilotSettingsRequest(BaseModel):
     run_time: Optional[str] = Field(None, description="Waktu eksekusi autopilot harian (HH:MM WIB)")
     min_duration_sec: Optional[int] = Field(None, description="Durasi minimal video (detik)")
     max_duration_sec: Optional[int] = Field(None, description="Durasi maksimal video (detik)")
+    post_clips_count: Optional[int] = Field(None, ge=1, le=50, description="Target jumlah video/klip terbaik yang akan diposting setelah analisis selesai (default: 5)")
 
 
 class TriggerAutopilotRequest(BaseModel):

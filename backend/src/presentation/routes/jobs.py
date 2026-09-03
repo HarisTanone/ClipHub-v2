@@ -324,6 +324,7 @@ async def create_job(
         auto_post_account_ids=request.auto_post_account_ids,
         auto_post_schedule_mode=request.auto_post_schedule_mode,
         auto_post_custom_time=request.auto_post_custom_time,
+        auto_post_clips_count=request.auto_post_clips_count,
         # User ownership
         user_id=user.id,
         # V2 pipeline routing
@@ -466,6 +467,7 @@ async def create_job_from_upload(
             auto_post_account_ids=options.auto_post_account_ids,
             auto_post_schedule_mode=options.auto_post_schedule_mode,
             auto_post_custom_time=options.auto_post_custom_time,
+            auto_post_clips_count=options.auto_post_clips_count,
             user_id=user.id,
             is_superadmin=user.is_superadmin,
             source_type="upload",

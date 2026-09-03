@@ -1194,6 +1194,7 @@ export interface AutopilotSettings {
   min_duration_sec: number;
   max_duration_sec: number;
   max_daily_videos: number;
+  post_clips_count?: number;
   last_run_at?: string | null;
   last_job_id?: string | null;
   last_video_url?: string | null;

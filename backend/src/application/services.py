@@ -259,6 +259,7 @@ class JobService:
         auto_post_account_ids: Optional[list] = None,
         auto_post_schedule_mode: str = "ai",
         auto_post_custom_time: Optional[str] = None,
+        auto_post_clips_count: Optional[int] = None,
         # User ownership
         user_id: Optional[int] = None,
         # V2 pipeline routing
@@ -339,6 +340,8 @@ class JobService:
                     auto_post_account_ids = auto_post_account_ids or resolved_preset.get("auto_post_account_ids", [])
                     auto_post_schedule_mode = auto_post_schedule_mode or resolved_preset.get("auto_post_schedule_mode", "ai")
                     auto_post_custom_time = auto_post_custom_time or resolved_preset.get("auto_post_custom_time")
+                    if not auto_post_clips_count and resolved_preset.get("auto_post_clips_count"):
+                        auto_post_clips_count = resolved_preset.get("auto_post_clips_count")
         except Exception as e:
             logger.warning(f"Preset resolution failed for '{style_preset}': {e}")
 
@@ -419,6 +422,8 @@ class JobService:
             initial_clips_data["auto_post_account_ids"] = auto_post_account_ids or []
             initial_clips_data["auto_post_schedule_mode"] = auto_post_schedule_mode
             initial_clips_data["auto_post_custom_time"] = auto_post_custom_time
+            if auto_post_clips_count:
+                initial_clips_data["auto_post_clips_count"] = int(auto_post_clips_count)
 
         if is_upload_source:
             initial_clips_data["source"] = {
@@ -1206,6 +1211,7 @@ class JobService:
                     target_accs = (job.clips_data or {}).get("auto_post_account_ids") or None
                     sched_mode = (job.clips_data or {}).get("auto_post_schedule_mode", "ai")
                     custom_time = (job.clips_data or {}).get("auto_post_custom_time")
+                    clips_count_limit = (job.clips_data or {}).get("auto_post_clips_count")
                     asyncio.create_task(social_auto_post_service.auto_schedule_job_clips(
                         job_id=job_id,
                         clips=clips_list,
@@ -1215,6 +1221,7 @@ class JobService:
                         target_account_ids=target_accs,
                         schedule_mode=sched_mode,
                         custom_schedule_time=custom_time,
+                        max_clips=clips_count_limit,
                         notify_telegram=True,
                     ))
                 except Exception as e:

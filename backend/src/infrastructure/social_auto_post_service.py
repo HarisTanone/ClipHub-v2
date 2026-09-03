@@ -285,11 +285,40 @@ class SocialAutoPostService:
         target_account_ids: Optional[List[str]] = None,
         schedule_mode: str = "ai",
         custom_schedule_time: Optional[str] = None,
+        max_clips: Optional[int] = None,
         notify_telegram: bool = True,
     ) -> Dict[str, Any]:
         """Execute automated scheduling of video clips to social accounts via Google Drive & Repliz API."""
         if not clips:
             return {"success": False, "error": "Tidak ada klip untuk dijadwalkan"}
+
+        # Filter top N best clips based on virality score / views and likes potential
+        total_available_clips = len(clips)
+        if max_clips and int(max_clips) > 0 and len(clips) > int(max_clips):
+            limit_val = int(max_clips)
+            def clip_virality_sort_key(c):
+                raw_score = c.get("score")
+                if raw_score is None:
+                    raw_score = c.get("virality_score")
+                try:
+                    score_val = float(raw_score) if raw_score is not None else 0.0
+                except (ValueError, TypeError):
+                    score_val = 0.0
+                try:
+                    rank_val = int(c.get("rank", 999))
+                except (ValueError, TypeError):
+                    rank_val = 999
+                # Sort descending by score, ascending by rank
+                return (-score_val, rank_val)
+
+            sorted_by_virality = sorted(clips, key=clip_virality_sort_key)
+            selected_clips = sorted_by_virality[:limit_val]
+            selected_clips.sort(key=lambda c: int(c.get("rank", 0)))
+            logger.info(
+                f"auto_post: Filtered {total_available_clips} clips down to top {len(selected_clips)} viral clips "
+                f"(max_clips={limit_val}). Selected ranks: {[c.get('rank') for c in selected_clips]}"
+            )
+            clips = selected_clips
 
         # 1. Fetch available connected social accounts for this user
         all_accounts = await self.get_connected_accounts(user_id=user_id)
@@ -511,9 +540,11 @@ class SocialAutoPostService:
         if notify_telegram and scheduled_records:
             try:
                 from src.infrastructure.telegram_service import telegram_service
+                filter_note = f"🎯 <b>Seleksi AI:</b> {len(clips)} klip terbaik dari total {total_available_clips} klip (Potensi Views & Likes Tertinggi)\n" if total_available_clips > len(clips) else ""
                 msg = (
                     f"<b>AI Auto-Post Scheduled ({len(scheduled_records)} Postingan)</b>\n\n"
                     f"<b>Job:</b> <code>{job_id[:12]}</code>\n"
+                    f"{filter_note}"
                     f"<b>Mode:</b> {schedule_mode.upper()}\n\n"
                 )
                 for rec in scheduled_records[:6]:

@@ -1183,6 +1183,7 @@ class V2PipelineService:
                     target_accs = (job.clips_data or {}).get("auto_post_account_ids") or None
                     sched_mode = (job.clips_data or {}).get("auto_post_schedule_mode", "ai")
                     custom_time = (job.clips_data or {}).get("auto_post_custom_time")
+                    clips_count_limit = (job.clips_data or {}).get("auto_post_clips_count")
                     asyncio.create_task(social_auto_post_service.auto_schedule_job_clips(
                         job_id=job_id,
                         clips=clips_list,
@@ -1192,6 +1193,7 @@ class V2PipelineService:
                         target_account_ids=target_accs,
                         schedule_mode=sched_mode,
                         custom_schedule_time=custom_time,
+                        max_clips=clips_count_limit,
                         notify_telegram=True,
                     ))
                 except Exception as e:

@@ -43,6 +43,7 @@ class JobOptionsBase(BaseModel):
     auto_post_account_ids: Optional[list[str]] = None
     auto_post_schedule_mode: str = "ai"  # "ai" | "custom" | "instant"
     auto_post_custom_time: Optional[str] = None
+    auto_post_clips_count: Optional[int] = None  # Target quantity of best viral clips to post
 
     @field_validator("target_aspect_ratio")
     @classmethod

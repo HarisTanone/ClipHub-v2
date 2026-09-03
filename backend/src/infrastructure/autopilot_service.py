@@ -46,6 +46,7 @@ class AutopilotService:
                     min_duration_sec INTEGER NOT NULL DEFAULT 480,
                     max_duration_sec INTEGER NOT NULL DEFAULT 3600,
                     max_daily_videos INTEGER NOT NULL DEFAULT 1,
+                    post_clips_count INTEGER NOT NULL DEFAULT 5,
                     last_run_at TEXT DEFAULT NULL,
                     last_job_id TEXT DEFAULT NULL,
                     last_video_url TEXT DEFAULT NULL,
@@ -54,6 +55,13 @@ class AutopilotService:
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Migration: ensure post_clips_count column exists
+            try:
+                conn.execute("ALTER TABLE autopilot_settings ADD COLUMN post_clips_count INTEGER NOT NULL DEFAULT 5")
+                conn.commit()
+            except Exception:
+                pass
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS autopilot_runs (
@@ -135,6 +143,7 @@ class AutopilotService:
                     "min_duration_sec": 480,
                     "max_duration_sec": 3600,
                     "max_daily_videos": 1,
+                    "post_clips_count": 5,
                     "last_run_at": None,
                     "last_job_id": None,
                     "last_video_url": None,
@@ -162,6 +171,7 @@ class AutopilotService:
                 "min_duration_sec": r.get("min_duration_sec", 480),
                 "max_duration_sec": r.get("max_duration_sec", 3600),
                 "max_daily_videos": r.get("max_daily_videos", 1),
+                "post_clips_count": int(r.get("post_clips_count", 5) or 5),
                 "last_run_at": r.get("last_run_at"),
                 "last_job_id": r.get("last_job_id"),
                 "last_video_url": r.get("last_video_url"),
@@ -199,17 +209,18 @@ class AutopilotService:
                 min_dur = int(data.get("min_duration_sec", curr.get("min_duration_sec", 480)))
                 max_dur = int(data.get("max_duration_sec", curr.get("max_duration_sec", 3600)))
                 max_daily = 1
+                post_clips = max(1, min(50, int(data.get("post_clips_count", curr.get("post_clips_count", 5)))))
 
                 conn.execute("""
                     UPDATE autopilot_settings SET
                         enabled = ?, niche_query = ?, preset_slug = ?, target_platforms = ?,
                         target_account_ids = ?, schedule_mode = ?, custom_schedule_time = ?,
                         run_time = ?, min_duration_sec = ?, max_duration_sec = ?,
-                        max_daily_videos = ?, updated_at = ?
+                        max_daily_videos = ?, post_clips_count = ?, updated_at = ?
                     WHERE user_id = ?
                 """, (
                     enabled, niche, preset, platforms, acc_ids_str, sched_mode,
-                    custom_time, run_time, min_dur, max_dur, max_daily, now_str, user_id
+                    custom_time, run_time, min_dur, max_dur, max_daily, post_clips, now_str, user_id
                 ))
             else:
                 enabled = int(data.get("enabled", 0))
@@ -224,16 +235,17 @@ class AutopilotService:
                 min_dur = int(data.get("min_duration_sec", 480))
                 max_dur = int(data.get("max_duration_sec", 3600))
                 max_daily = 1
+                post_clips = max(1, min(50, int(data.get("post_clips_count", 5))))
 
                 conn.execute("""
                     INSERT INTO autopilot_settings (
                         user_id, enabled, niche_query, preset_slug, target_platforms,
                         target_account_ids, schedule_mode, custom_schedule_time,
-                        run_time, min_duration_sec, max_duration_sec, max_daily_videos, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        run_time, min_duration_sec, max_duration_sec, max_daily_videos, post_clips_count, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     user_id, enabled, niche, preset, platforms, acc_ids_str, sched_mode,
-                    custom_time, run_time, min_dur, max_dur, max_daily, now_str
+                    custom_time, run_time, min_dur, max_dur, max_daily, post_clips, now_str
                 ))
 
             conn.commit()
@@ -538,6 +550,7 @@ class AutopilotService:
             "auto_post_account_ids": target_accounts,
             "auto_post_schedule_mode": schedule_mode,
             "auto_post_custom_time": custom_schedule_time,
+            "auto_post_clips_count": int(settings.get("post_clips_count", 5) or 5),
         }
 
         # 6. Submit job to AutoCliper service
@@ -574,6 +587,7 @@ class AutopilotService:
             auto_post_account_ids=job_options.get("auto_post_account_ids", []),
             auto_post_schedule_mode=job_options.get("auto_post_schedule_mode", "ai"),
             auto_post_custom_time=job_options.get("auto_post_custom_time"),
+            auto_post_clips_count=job_options.get("auto_post_clips_count", 5),
         )
 
         job = created_res[0] if isinstance(created_res, tuple) else created_res

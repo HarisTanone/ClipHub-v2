@@ -45,11 +45,17 @@ def test_autopilot_settings_crud():
     assert updated["target_account_ids"] == ["acc_tt_1", "acc_ig_1"]
     assert updated["run_time"] == "09:30"
     assert updated["max_daily_videos"] == 1
+    assert updated["post_clips_count"] == 5
 
-    # 2. Get settings
+    # 2. Update post_clips_count specifically
+    updated_qty = service.update_settings(user_id=user_id, data={"post_clips_count": 7})
+    assert updated_qty["post_clips_count"] == 7
+
+    # 3. Get settings
     fetched = service.get_settings(user_id=user_id)
     assert fetched["niche_query"] == "podcast motivasi indonesia"
     assert fetched["preset_slug"] == "gaming-vibe-01"
+    assert fetched["post_clips_count"] == 7
 
 
 def test_strict_daily_quota_one_video_per_day():

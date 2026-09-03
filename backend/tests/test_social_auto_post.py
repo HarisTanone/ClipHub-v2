@@ -380,6 +380,66 @@ class TestSocialAutoPost(unittest.TestCase):
         self.assertEqual(res["data"]["totalDocs"], 0)
         self.assertEqual(len(res["data"]["docs"]), 0)
 
+    @patch("src.infrastructure.social_auto_post_service.find_final_clip")
+    @patch("src.infrastructure.social_auto_post_service.ensure_social_compliant_video")
+    @patch("src.infrastructure.social_auto_post_service.ensure_social_compliant_thumbnail")
+    @patch("src.infrastructure.social_auto_post_service.validate_social_media_constraints")
+    @patch("src.infrastructure.social_auto_post_service.gdrive_uploader")
+    @patch("src.infrastructure.social_auto_post_service.repliz_post")
+    def test_auto_schedule_job_clips_max_clips_virality_filtering(
+        self, mock_repliz_post, mock_gdrive, mock_val, mock_thumb, mock_video, mock_find
+    ):
+        """Verify that when max_clips is set (e.g. 5 out of 10), only top 5 clips with highest virality score are scheduled."""
+        mock_find.return_value = "/tmp/dummy_clip.mp4"
+        mock_video.return_value = "/tmp/dummy_clip.mp4"
+        mock_thumb.return_value = "/tmp/dummy_thumb.jpg"
+        mock_val.return_value = (True, "")
+        mock_gdrive.is_configured = True
+        mock_gdrive.upload_video.return_value = {"direct_link": "https://drive.google.com/uc?id=123"}
+        mock_repliz_post.return_value = {"_id": "sch_mock_123"}
+
+        # Mock connected accounts
+        with patch.object(self.service, "get_connected_accounts", new_callable=AsyncMock) as mock_accs:
+            mock_accs.return_value = [
+                {"account_id": "acc_tt_1", "platform": "tiktok", "name": "TikTok Channel"}
+            ]
+
+            with patch("os.path.exists", return_value=True):
+                # 10 clips with varying virality scores
+                clips = [
+                    {"rank": 1, "score": 85, "hook": "Clip 1"},
+                    {"rank": 2, "score": 70, "hook": "Clip 2"},
+                    {"rank": 3, "score": 95, "hook": "Clip 3"},  # Top 1
+                    {"rank": 4, "score": 60, "hook": "Clip 4"},
+                    {"rank": 5, "score": 92, "hook": "Clip 5"},  # Top 2
+                    {"rank": 6, "score": 88, "hook": "Clip 6"},  # Top 3
+                    {"rank": 7, "score": 50, "hook": "Clip 7"},
+                    {"rank": 8, "score": 86, "hook": "Clip 8"},  # Top 4
+                    {"rank": 9, "score": 65, "hook": "Clip 9"},
+                    {"rank": 10, "score": 84, "hook": "Clip 10"}, # Top 6
+                ]
+                # Out of the 10 clips, Top 5 by score are:
+                # Clip 3 (95), Clip 5 (92), Clip 6 (88), Clip 8 (86), Clip 1 (85)
+
+                res = asyncio.run(self.service.auto_schedule_job_clips(
+                    job_id="job_test_filter",
+                    clips=clips,
+                    output_dir="/tmp/test_output",
+                    user_id=1,
+                    target_platforms=["tiktok"],
+                    max_clips=5,
+                    notify_telegram=False,
+                ))
+
+                self.assertTrue(res["success"])
+                self.assertEqual(res["scheduled_count"], 5)
+                scheduled_ranks = [r["clip_rank"] for r in res["records"]]
+                # Verify exactly the 5 highest scoring clips were scheduled
+                self.assertEqual(sorted(scheduled_ranks), [1, 3, 5, 6, 8])
+                # Lower scoring clips (rank 2, 4, 7, 9, 10) must not be scheduled
+                for excluded_rank in [2, 4, 7, 9, 10]:
+                    self.assertNotIn(excluded_rank, scheduled_ranks)
+
 
 if __name__ == "__main__":
     unittest.main()

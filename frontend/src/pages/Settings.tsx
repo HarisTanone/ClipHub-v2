@@ -3415,7 +3415,7 @@ export function Settings() {
                       })}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-800/80">
                       <div>
                         <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
                         <Input
@@ -3438,12 +3438,43 @@ export function Settings() {
                             }
                           }}
                           options={[
-                            { value: "ai", label: "AI Same-Day Spread (Semua video hari ini disebar berkala di jam berbeda)" },
-                            { value: "instant", label: "Instant Post (Langsung tayang saat render selesai)" },
-                            { value: "custom", label: "Custom Schedule Time (Interval manual)" },
+                            { value: "ai", label: "AI Same-Day Spread (Sebar berkala)" },
+                            { value: "instant", label: "Instant Post (Langsung tayang)" },
+                            { value: "custom", label: "Custom Schedule Time" },
                           ]}
                         />
                       </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] text-zinc-400 block">Target Qty Video Diposting</label>
+                          <span className="text-[10px] text-violet-400 font-semibold">
+                            {autopilotSettings?.post_clips_count ?? 5} Klip
+                          </span>
+                        </div>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={50}
+                          value={autopilotSettings?.post_clips_count ?? 5}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (autopilotSettings && !isNaN(val)) {
+                              setAutopilotSettings({
+                                ...autopilotSettings,
+                                post_clips_count: Math.max(1, Math.min(50, val)),
+                              });
+                            }
+                          }}
+                          placeholder="5"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-violet-950/20 border border-violet-500/20 flex items-start gap-2 text-[11px] text-zinc-400">
+                      <Sparkles className="h-4 w-4 text-violet-400 shrink-0 mt-0.5" />
+                      <span>
+                        <strong className="text-zinc-200">Smart Virality Filter:</strong> Jika video menghasilkan banyak klip (misal 10 video), sistem hanya akan memilih <strong className="text-violet-300">{autopilotSettings?.post_clips_count ?? 5} klip terbaik</strong> dengan potensi views dan likes tertinggi (berdasarkan skor analisis AI) untuk diposting ke media sosial.
+                      </span>
                     </div>
                   </Card>
                 </div>
