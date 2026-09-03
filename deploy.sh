@@ -240,6 +240,27 @@ else
     echo "  [OK] 9router CLI installed"
 fi
 
+# Sanitize 9router database against deprecated models (e.g. Gemini 3.5 Flash -> Gemini 3.7 Flash)
+for db_path in "$DEPLOY_HOME/.9router/db/data.sqlite" "$HOME/.9router/db/data.sqlite"; do
+    if [ -f "$db_path" ]; then
+        python3 -c "
+import sqlite3, sys
+p = sys.argv[1]
+try:
+    con = sqlite3.connect(p)
+    cur = con.cursor()
+    cur.execute(\"UPDATE combos SET models = replace(models, 'ag/gemini-3.5-flash-high', 'gemini/gemini-3.7-flash')\")
+    cur.execute(\"UPDATE combos SET models = replace(models, 'ag/gemini-3.5-flash-low', 'gemini/gemini-3.7-flash')\")
+    cur.execute(\"UPDATE combos SET models = replace(models, 'ag/gemini-3.5-flash', 'gemini/gemini-3.7-flash')\")
+    con.commit()
+    con.close()
+    print(f'  [OK] 9router combos sanitized to Gemini 3.7 Flash: {p}')
+except Exception as e:
+    print(f'  [WARN] 9router sanitization skipped: {e}')
+" "$db_path" 2>/dev/null || true
+    fi
+done
+
 # ─── Step 2.6: System Font Provisioning ──────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

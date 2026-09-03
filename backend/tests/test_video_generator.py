@@ -683,6 +683,37 @@ def test_video_generator_source_video_url_ssrf_protection():
             )
 
 
+def test_nine_router_upstream_deprecation_rejection(monkeypatch):
+    import pytest
+    from unittest.mock import MagicMock
+    from src.infrastructure.nine_router_client import NineRouterClient, NineRouterError
+
+    client = NineRouterClient(base_url="http://127.0.0.1:20128/v1", max_retries=2)
+
+    # Mock response returning Antigravity deprecation text
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"choices": [{"message": {"content": "Gemini 3.5 Flash is no longer available. Please switch to Gemini 3.7 Flash in the latest version of Antigravity."}}]}'
+    mock_resp.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": "Gemini 3.5 Flash is no longer available. Please switch to Gemini 3.7 Flash in the latest version of Antigravity."
+                }
+            }
+        ]
+    }
+
+    monkeypatch.setattr("httpx.Client.post", lambda *args, **kwargs: mock_resp)
+
+    # Should raise NineRouterError after retries instead of returning the deprecation string
+    with pytest.raises(NineRouterError) as exc_info:
+        client._post_chat({"model": "CliperHub", "messages": [{"role": "user", "content": "hi"}]})
+
+    assert "upstream model error" in str(exc_info.value).lower()
+
+
+
 
 
 

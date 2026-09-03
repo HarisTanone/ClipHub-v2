@@ -111,7 +111,19 @@ class NineRouterClient:
                 if response.status_code >= 400:
                     raise NineRouterError(self._safe_error(response))
 
-                return self._extract_response_content(response)
+                content = self._extract_response_content(response)
+                content_strip = content.strip()
+                lowered = content_strip.lower()
+                if (
+                    ("is no longer available" in lowered or "please switch to" in lowered or "model not found" in lowered)
+                    and not (content_strip.startswith("{") and content_strip.endswith("}"))
+                ):
+                    last_error = f"Upstream model error: {content_strip}"
+                    logger.warning(f"nine_router: upstream model error on attempt {attempt + 1}: {content_strip}")
+                    self._sleep_before_retry(attempt, 503)
+                    continue
+
+                return content
 
             except httpx.TimeoutException as exc:
                 last_error = f"timeout: {exc}"

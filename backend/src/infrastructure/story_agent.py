@@ -272,6 +272,11 @@ class StoryAgent:
         client = get_nine_router_client()
         temp = 0.5 if attempt > 0 else 0.7
 
+        primary_model = settings.get_nine_router("NINE_ROUTER_PASS2_MODEL") or settings.nine_router_model
+        # Rotate model on repeated retry attempts to prevent stuck on a single broken upstream combo
+        model_candidates = [primary_model, "gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
+        model_to_use = model_candidates[attempt % len(model_candidates)] if attempt > 0 else primary_model
+
         for retry in range(self._max_retries):
             try:
                 return client.chat(
@@ -279,8 +284,7 @@ class StoryAgent:
                         {"role": "system", "content": STORY_SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
-                    model=settings.get_nine_router("NINE_ROUTER_PASS2_MODEL")
-                    or settings.nine_router_model,
+                    model=model_to_use,
                     temperature=temp,
                     max_tokens=8192,
                     response_format={"type": "json_object"},
@@ -308,12 +312,13 @@ class StoryAgent:
         if not keys:
             raise StoryGenerationError("No Gemini API key configured")
 
-        api_key = keys[0]
-        model = settings.GEMINI_MODEL
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-            f":generateContent?key={api_key}"
-        )
+        gemini_models = [
+            settings.GEMINI_MODEL or "gemini-2.5-flash",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+        ]
+        models_to_try = [m for i, m in enumerate(gemini_models) if m and m not in gemini_models[:i]]
 
         payload = {
             "contents": [
@@ -330,50 +335,45 @@ class StoryAgent:
             },
         }
 
+        last_gemini_err = ""
         for attempt in range(self._max_retries):
+            api_key = keys[attempt % len(keys)]
+            model = models_to_try[attempt % len(models_to_try)]
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+                f":generateContent?key={api_key}"
+            )
             try:
                 with httpx.Client(timeout=settings.GEMINI_TIMEOUT) as client:
                     resp = client.post(url, json=payload)
 
                 if resp.status_code == 429:
-                    if len(keys) > 1:
-                        api_key = keys[(attempt + 1) % len(keys)]
-                        url = (
-                            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-                            f":generateContent?key={api_key}"
-                        )
                     time.sleep(3 * (attempt + 1))
                     continue
 
                 if resp.status_code != 200:
-                    raise StoryGenerationError(
-                        f"Gemini API error {resp.status_code}: {resp.text[:200]}"
-                    )
+                    last_gemini_err = f"Gemini API error {resp.status_code}: {resp.text[:200]}"
+                    continue
 
                 data = resp.json()
                 candidates = data.get("candidates", [])
                 if not candidates:
-                    raise StoryGenerationError("Gemini returned no candidates")
+                    last_gemini_err = "Gemini returned no candidates"
+                    continue
 
                 content = candidates[0].get("content", {})
                 parts = content.get("parts", [])
                 if not parts:
-                    raise StoryGenerationError("Gemini returned empty parts")
+                    last_gemini_err = "Gemini returned empty parts"
+                    continue
 
                 return parts[0].get("text", "")
 
-            except httpx.TimeoutException:
-                if attempt >= self._max_retries - 1:
-                    raise StoryGenerationError("Gemini timeout")
-                time.sleep(2)
-            except StoryGenerationError:
-                raise
             except Exception as e:
-                if attempt >= self._max_retries - 1:
-                    raise StoryGenerationError(f"Gemini error: {e}")
-                time.sleep(2)
+                last_gemini_err = str(e)
+                time.sleep(1.5)
 
-        raise StoryGenerationError("Gemini max retries exceeded")
+        raise StoryGenerationError(f"Direct Gemini fallback failed: {last_gemini_err}")
 
     def _parse_response(self, raw: str, topic: str) -> dict:
         """Parse LLM JSON response to structured story dict with truncated JSON repair."""
