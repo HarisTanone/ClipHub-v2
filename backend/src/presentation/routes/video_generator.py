@@ -41,6 +41,8 @@ class GenerateVideoRequest(BaseModel):
     hook_style: Optional[dict[str, Any]] = Field(default=None, exclude=True)
     include_bgm: bool = Field(default=True, description="Mix background music when available")
     bgm_volume: float = Field(default=0.15, ge=0.0, le=0.5)
+    source_video_url: Optional[str] = Field(default=None, max_length=1000, description="Optional source video URL (YouTube, MP4) to analyze with Gemini Agentic Video Understanding")
+    agentic_understanding: bool = Field(default=True, description="Enable Gemini Agentic Video Understanding for dynamic timeline navigation and precision moment extraction")
 
 
 class SearchSceneRequest(BaseModel):
@@ -80,6 +82,8 @@ class JobStatusResponse(BaseModel):
     hook_style_config: dict[str, Any] = Field(default_factory=dict)
     include_bgm: bool = True
     bgm_volume: float = 0.15
+    source_video_url: Optional[str] = None
+    agentic_understanding: bool = True
     title: Optional[str] = None
     error: Optional[str] = None
     output_path: Optional[str] = None
@@ -179,6 +183,8 @@ async def generate_video(
         hook_style=req.hook_style_config or req.hook_style,
         include_bgm=req.include_bgm,
         bgm_volume=req.bgm_volume,
+        source_video_url=req.source_video_url,
+        agentic_understanding=req.agentic_understanding,
         user_id=user.id,
     )
 
@@ -223,6 +229,8 @@ async def plan_video(
         hook_style=req.hook_style_config or req.hook_style,
         include_bgm=req.include_bgm,
         bgm_volume=req.bgm_volume,
+        source_video_url=req.source_video_url,
+        agentic_understanding=req.agentic_understanding,
         user_id=user.id,
     )
     job.status = VideoGenStatus.PLANNING
@@ -761,6 +769,8 @@ def _job_to_response(job) -> JobStatusResponse:
         hook_style_config=job.hook_style,
         include_bgm=job.include_bgm,
         bgm_volume=job.bgm_volume,
+        source_video_url=getattr(job, "source_video_url", None),
+        agentic_understanding=getattr(job, "agentic_understanding", True),
         title=title,
         error=job.error,
         output_path=job.output_path,

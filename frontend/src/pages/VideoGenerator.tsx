@@ -102,6 +102,8 @@ export interface VideoJob {
   include_bgm: boolean;
   bgm_volume: number;
   title: string | null;
+  source_video_url?: string | null;
+  agentic_understanding?: boolean;
   error: string | null;
   output_path: string | null;
   created_at: number;
@@ -655,15 +657,15 @@ function VideoModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label="Video preview" className="relative w-full max-w-[390px]" onClick={(event) => event.stopPropagation()}>
-        <button type="button" aria-label="Close preview" onClick={onClose} className="absolute -top-10 right-0 rounded-lg p-1 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
+      <div role="dialog" aria-modal="true" aria-label="Video preview" className="relative w-full max-w-[320px] max-h-[90vh] flex flex-col" onClick={(event) => event.stopPropagation()}>
+        <button type="button" aria-label="Close preview" onClick={onClose} className="absolute -top-9 right-0 rounded-lg p-1 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
           <X className="h-5 w-5" />
         </button>
-        <div className="mb-3">
-          <p className="truncate text-sm font-medium text-zinc-100">{job.title || job.topic}</p>
-          <p className="text-xs text-zinc-500">{job.scenes_count || "—"} scenes · {job.target_duration}s target</p>
+        <div className="mb-2.5">
+          <p className="truncate text-xs font-semibold text-zinc-100">{job.title || job.topic}</p>
+          <p className="text-[11px] text-zinc-500">{job.scenes_count || "—"} scenes · {job.target_duration}s target</p>
         </div>
-        <div className="aspect-[9/16] overflow-hidden rounded-2xl border border-zinc-700 bg-black shadow-2xl">
+        <div className="aspect-[9/16] max-h-[68vh] overflow-hidden rounded-xl border border-zinc-700/80 bg-black shadow-2xl flex items-center justify-center">
           <video src={streamUrl} controls autoPlay playsInline preload="metadata" className="h-full w-full object-contain" />
         </div>
         <div className="mt-3 flex items-center gap-2">
@@ -1173,89 +1175,144 @@ function VideoCard({
   const processing = isProcessing(job.status);
 
   return (
-    <Card className="group overflow-hidden p-0 flex flex-col justify-between">
-      <button
-        type="button"
-        disabled={!completed}
-        onClick={() => completed && onPlay(job)}
-        className={cn(
-          "relative flex aspect-[9/16] w-full items-center justify-center bg-zinc-900 text-left",
-          completed && "cursor-pointer hover:brightness-75"
-        )}
-      >
+    <Card className="group overflow-hidden p-0 flex flex-col justify-between border border-zinc-800/80 bg-zinc-900/60 hover:border-violet-500/40 transition-all duration-200 shadow-xs hover:shadow-md">
+      {/* Compact Preview Banner (Constrained height h-40 sm:h-44, not oversized aspect-[9/16]) */}
+      <div className="relative h-40 sm:h-44 w-full overflow-hidden bg-zinc-950 flex items-center justify-center">
+        {/* Ambient Blurred Background from Thumbnail */}
         {job.thumbnail_url ? (
-          <img src={job.thumbnail_url} alt={job.title || job.topic} className="h-full w-full object-cover" />
+          <img
+            src={job.thumbnail_url}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 h-full w-full object-cover blur-md opacity-25 scale-110"
+          />
         ) : (
-          <Film className="h-10 w-10 text-zinc-700" />
+          <div className="absolute inset-0 bg-gradient-to-br from-violet-950/20 via-zinc-900 to-black opacity-60" />
         )}
 
-        {completed && (
-          <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20 pl-0.5 text-white backdrop-blur">
-              <Play className="h-6 w-6" />
+        {/* Centered Crisp 9:16 Miniature Vertical Phone Frame */}
+        <button
+          type="button"
+          disabled={!completed}
+          onClick={() => completed && onPlay(job)}
+          className={cn(
+            "relative z-10 h-32 sm:h-36 w-[72px] sm:w-[81px] rounded-lg overflow-hidden border border-white/15 bg-black shadow-lg flex items-center justify-center transition-transform duration-200",
+            completed ? "cursor-pointer group-hover:scale-105 group-hover:border-violet-400/60" : ""
+          )}
+        >
+          {job.thumbnail_url ? (
+            <img
+              src={job.thumbnail_url}
+              alt={job.title || job.topic}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <Film className="h-6 w-6 text-zinc-600" />
+          )}
+
+          {completed && (
+            <span className="absolute inset-0 flex items-center justify-center bg-black/35 opacity-80 group-hover:opacity-100 transition-opacity">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25 text-white backdrop-blur-xs shadow-md pl-0.5 group-hover:scale-110 transition-transform">
+                <Play className="h-4 w-4 fill-white" />
+              </span>
             </span>
-          </span>
-        )}
+          )}
 
-        {isAwaitingSelection && (
-          <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 p-3 text-center">
-            <Layers className="mb-2 h-7 w-7 text-amber-300" />
-            <span className="text-xs font-semibold text-amber-100">Footage Ready</span>
-            <span className="mt-0.5 text-[10px] text-zinc-300">Click Select Footage to review</span>
-          </span>
-        )}
-
-        {processing && (
-          <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/65">
-            <Loader2 className="mb-2 h-8 w-8 animate-spin text-violet-300" />
-            <span className="max-w-[80%] truncate text-center text-[11px] font-medium text-violet-100">
-              {job.step_label}
+          {isAwaitingSelection && (
+            <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 p-1 text-center">
+              <Layers className="h-5 w-5 text-amber-300 animate-pulse" />
+              <span className="text-[9px] font-semibold text-amber-200 mt-1 leading-tight">Ready</span>
             </span>
-            <span className="mt-0.5 text-[10px] text-zinc-400">{job.progress}%</span>
-          </span>
-        )}
+          )}
 
-        {job.status === "failed" && (
-          <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/65">
-            <AlertCircle className="mb-1 h-8 w-8 text-red-300" />
-            <span className="text-[11px] text-red-200">Generation failed</span>
-          </span>
-        )}
+          {processing && (
+            <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 p-1 text-center">
+              <Loader2 className="h-5 w-5 animate-spin text-violet-300" />
+              <span className="text-[9px] text-violet-200 mt-1">{job.progress}%</span>
+            </span>
+          )}
 
-        <span className="absolute left-2 top-2">
+          {job.status === "failed" && (
+            <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 p-1 text-center">
+              <AlertCircle className="h-5 w-5 text-red-400" />
+            </span>
+          )}
+        </button>
+
+        {/* Top Badges */}
+        <div className="absolute top-2 left-2 z-20">
           <StatusBadge status={job.status} />
-        </span>
-      </button>
-
-      <div className="p-3 space-y-2">
-        <div>
-          <p className="truncate text-xs font-medium text-zinc-200" title={job.title || job.topic}>
-            {job.title || job.topic}
-          </p>
-          <p className="mt-0.5 truncate text-[11px] text-zinc-500">
-            {job.target_duration}s · {job.scenes_count || "Planning"} scenes
-          </p>
         </div>
 
-        {processing && <ProgressIndicator progress={job.progress} stepLabel={job.step_label} />}
+        <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
+          {job.source_video_url && (
+            <span
+              className="rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-violet-300 border border-violet-500/30 backdrop-blur-xs flex items-center gap-1"
+              title="Generated using Gemini Agentic Video Understanding"
+            >
+              <Sparkles className="h-2.5 w-2.5" /> Source
+            </span>
+          )}
+          <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-zinc-300 border border-white/10 backdrop-blur-xs">
+            9:16
+          </span>
+        </div>
+
+        {/* Bottom Banner Pill */}
+        <div className="absolute bottom-1.5 left-2 right-2 z-20 flex items-center justify-between text-[10px] text-zinc-400 px-1">
+          <span className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-white/5 backdrop-blur-xs">
+            <Clock className="h-2.5 w-2.5 text-zinc-400" /> {job.target_duration}s
+          </span>
+          <span className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-white/5 backdrop-blur-xs">
+            <Layers className="h-2.5 w-2.5 text-zinc-400" /> {job.scenes_count || "—"} scenes
+          </span>
+        </div>
+      </div>
+
+      {/* Card Content & Actions */}
+      <div className="p-2.5 space-y-2">
+        <div>
+          <p
+            className="truncate text-xs font-semibold text-zinc-200 hover:text-white transition-colors"
+            title={job.title || job.topic}
+          >
+            {job.title || job.topic}
+          </p>
+          <div className="mt-0.5 flex items-center justify-between text-[10px] text-zinc-500">
+            <span className="truncate max-w-[120px]">
+              {job.voice ? `Voice: ${job.voice}` : "Default Voice"}
+            </span>
+            <span>
+              {job.created_at ? new Date(job.created_at * 1000).toLocaleDateString() : ""}
+            </span>
+          </div>
+        </div>
+
+        {processing && (
+          <div className="space-y-1">
+            <ProgressIndicator progress={job.progress} stepLabel={job.step_label} />
+          </div>
+        )}
+
         {job.error && (
-          <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-red-300" title={job.error}>
+          <p className="line-clamp-2 text-[10px] leading-3.5 text-red-400" title={job.error}>
             {job.error}
           </p>
         )}
 
         {/* Action Buttons */}
-        <div className="pt-1 flex items-center justify-between gap-1.5">
-          <div className="flex flex-wrap gap-1.5">
+        <div className="pt-1 flex items-center justify-between gap-1 border-t border-zinc-800/60">
+          <div className="flex flex-wrap items-center gap-1">
             {isAwaitingSelection && (
               <Button
                 type="button"
                 size="xs"
                 variant="primary"
                 onClick={() => onOpenStudio(job)}
-                icon={<Layers className="h-3 w-3" />}
+                className="h-6 px-2 text-[10px]"
+                icon={<Layers className="h-2.5 w-2.5" />}
               >
-                Select Footage
+                Studio
               </Button>
             )}
 
@@ -1266,7 +1323,8 @@ function VideoCard({
                   size="xs"
                   variant="outline"
                   onClick={() => onPlay(job)}
-                  icon={<Play className="h-3 w-3" />}
+                  className="h-6 px-2 text-[10px] text-zinc-200 hover:text-white"
+                  icon={<Play className="h-2.5 w-2.5 text-violet-400" />}
                 >
                   Watch
                 </Button>
@@ -1275,7 +1333,8 @@ function VideoCard({
                   size="xs"
                   variant="outline"
                   onClick={() => onDownload(job.job_id)}
-                  icon={<Download className="h-3 w-3" />}
+                  className="h-6 px-1.5 text-[10px] text-zinc-300"
+                  icon={<Download className="h-2.5 w-2.5" />}
                 >
                   Download
                 </Button>
@@ -1283,9 +1342,9 @@ function VideoCard({
                   type="button"
                   size="xs"
                   variant="outline"
-                  className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-300"
+                  className="h-6 px-1.5 text-[10px] text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
                   onClick={() => onPublishSocial?.(job)}
-                  icon={<Share2 className="h-3 w-3" />}
+                  icon={<Share2 className="h-2.5 w-2.5" />}
                 >
                   Post
                 </Button>
@@ -1300,7 +1359,8 @@ function VideoCard({
                 loading={isRetrying}
                 disabled={isRetrying}
                 onClick={() => onRetry(job.job_id)}
-                icon={<RotateCcw className="h-3 w-3" />}
+                className="h-6 px-2 text-[10px]"
+                icon={<RotateCcw className="h-2.5 w-2.5" />}
               >
                 Retry
               </Button>
@@ -1309,11 +1369,11 @@ function VideoCard({
 
           <button
             type="button"
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition ml-auto"
+            className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition ml-auto"
             onClick={() => onDelete(job.job_id)}
             title="Delete Job"
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="h-3 w-3" />
           </button>
         </div>
       </div>
@@ -1344,6 +1404,9 @@ export function VideoGeneratorPage() {
 
   // Basic narrative state
   const [topic, setTopic] = useState("");
+  const [sourceVideoUrl, setSourceVideoUrl] = useState("");
+  const [isAgenticVideoMode, setIsAgenticVideoMode] = useState(false);
+  const [agenticUnderstanding, setAgenticUnderstanding] = useState(true);
   const [targetDuration, setTargetDuration] = useState(65);
   const [ttsProvider, setTtsProvider] = useState<"gemini" | "deepgram">("gemini");
   const [ttsModel, setTtsModel] = useState<string>("gemini-3.1-flash-tts-preview");
@@ -1626,7 +1689,8 @@ export function VideoGeneratorPage() {
   // One-click quick generation (Auto mode)
   const handleQuickSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!topic.trim() || isSubmitting) return;
+    const effectiveTopic = topic.trim() || (isAgenticVideoMode && sourceVideoUrl.trim() ? "Source Video Highlights" : "");
+    if (!effectiveTopic || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
@@ -1634,7 +1698,7 @@ export function VideoGeneratorPage() {
       await fetchApi<VideoJob>("/api/video-generator/generate", {
         method: "POST",
         body: JSON.stringify({
-          topic: topic.trim(),
+          topic: effectiveTopic,
           target_duration: targetDuration,
           tts_provider: ttsProvider,
           tts_model: ttsProvider === "gemini" ? ttsModel : undefined,
@@ -1649,6 +1713,8 @@ export function VideoGeneratorPage() {
           subtitle_style_config: { ...subtitleStyle, engine: subtitleStyle.engine || "remotion" },
           include_bgm: includeBgm,
           bgm_volume: bgmVolume,
+          source_video_url: isAgenticVideoMode && sourceVideoUrl.trim() ? sourceVideoUrl.trim() : undefined,
+          agentic_understanding: agenticUnderstanding,
         }),
       });
       setPage(1);
@@ -1665,7 +1731,8 @@ export function VideoGeneratorPage() {
 
   // Studio Mode: Plan story + search footage, then open studio
   const handleStudioPlan = async () => {
-    if (!topic.trim() || isPlanning) return;
+    const effectiveTopic = topic.trim() || (isAgenticVideoMode && sourceVideoUrl.trim() ? "Source Video Highlights" : "");
+    if (!effectiveTopic || isPlanning) return;
 
     setIsPlanning(true);
     try {
@@ -1673,7 +1740,7 @@ export function VideoGeneratorPage() {
       const job = await fetchApi<VideoJob>("/api/video-generator/plan", {
         method: "POST",
         body: JSON.stringify({
-          topic: topic.trim(),
+          topic: effectiveTopic,
           target_duration: targetDuration,
           tts_provider: ttsProvider,
           tts_model: ttsProvider === "gemini" ? ttsModel : undefined,
@@ -1688,6 +1755,8 @@ export function VideoGeneratorPage() {
           subtitle_style_config: { ...subtitleStyle, engine: subtitleStyle.engine || "remotion" },
           include_bgm: includeBgm,
           bgm_volume: bgmVolume,
+          source_video_url: isAgenticVideoMode && sourceVideoUrl.trim() ? sourceVideoUrl.trim() : undefined,
+          agentic_understanding: agenticUnderstanding,
         }),
       });
       setPage(1);
@@ -1878,11 +1947,97 @@ export function VideoGeneratorPage() {
             <div className="grid gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(340px,1fr)]">
               {/* Left Column: Narrative, Audio, Format & Spec */}
               <div className="space-y-4">
+                {/* 0. Input Mode & Agentic Pipeline Selector */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3.5 sm:p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-violet-400" />
+                      <span className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
+                        Input Mode & AI Pipeline
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setIsAgenticVideoMode(false)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-md text-[11px] font-medium transition",
+                          !isAgenticVideoMode
+                            ? "bg-violet-600 text-white shadow-xs"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        )}
+                      >
+                        Topic Prompt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsAgenticVideoMode(true)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-md text-[11px] font-medium transition flex items-center gap-1.5",
+                          isAgenticVideoMode
+                            ? "bg-violet-600 text-white shadow-xs"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        )}
+                      >
+                        <Video className="h-3 w-3 text-violet-300" />
+                        Video Understanding
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Agentic Video Understanding Explainer & Input */}
+                  {isAgenticVideoMode && (
+                    <div className="space-y-2.5 pt-1">
+                      <div className="rounded-lg border border-violet-500/30 bg-violet-950/20 p-3 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-[11px] font-semibold text-violet-300 flex items-center gap-1.5">
+                            <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+                            Gemini 3.8 Flash Agentic Video Understanding
+                          </span>
+                          <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
+                            Up to 88% Fewer Tokens
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-zinc-400 leading-relaxed">
+                          Gemini dynamically navigates the video timeline, selectively inspecting audio and transcripts to pinpoint the highest-retention moments with exact timestamps.
+                        </p>
+                      </div>
+
+                      <div>
+                        <label htmlFor="source-video-url" className="block text-[11px] font-medium text-zinc-300 mb-1">
+                          Source Video URL (YouTube, Vimeo, or direct MP4)
+                        </label>
+                        <div className="relative">
+                          <input
+                            id="source-video-url"
+                            type="url"
+                            value={sourceVideoUrl}
+                            onChange={(e) => setSourceVideoUrl(e.target.value)}
+                            placeholder="https://www.youtube.com/watch?v=... or direct MP4 URL"
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3.5 py-2 pl-9 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60"
+                          />
+                          <Video className="h-4 w-4 text-zinc-500 absolute left-3 top-2.5" />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-0.5">
+                        <span className="text-[11px] text-zinc-400">
+                          Dynamic Timeline Navigation (Agentic Mode)
+                        </span>
+                        <Toggle
+                          checked={agenticUnderstanding}
+                          onChange={setAgenticUnderstanding}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* 1. Topic & Narrative Card */}
                 <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <label htmlFor="video-topic" className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                      Video Topic & Subject
+                      {isAgenticVideoMode ? "Focus Topic & Subject (Optional)" : "Video Topic & Subject"}
                     </label>
                     <span className="text-[11px] tabular-nums text-zinc-500 font-mono">{topic.length}/500</span>
                   </div>
@@ -2468,7 +2623,7 @@ export function VideoGeneratorPage() {
                   type="button"
                   size="md"
                   variant="outline"
-                  disabled={isPlanning || isSubmitting || !topic.trim()}
+                  disabled={isPlanning || isSubmitting || (!topic.trim() && !(isAgenticVideoMode && sourceVideoUrl.trim()))}
                   loading={isPlanning}
                   onClick={handleStudioPlan}
                   icon={<Layers className="h-4 w-4 text-zinc-300" />}
@@ -2480,7 +2635,7 @@ export function VideoGeneratorPage() {
                   type="submit"
                   size="md"
                   variant="primary"
-                  disabled={isSubmitting || isPlanning || !topic.trim()}
+                  disabled={isSubmitting || isPlanning || (!topic.trim() && !(isAgenticVideoMode && sourceVideoUrl.trim()))}
                   loading={isSubmitting}
                   icon={<Sparkles className="h-4 w-4" />}
                 >
@@ -2541,7 +2696,7 @@ export function VideoGeneratorPage() {
             </Card>
           ) : (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-3.5">
                 {jobs.map((job) => (
                   <VideoCard
                     key={job.job_id}

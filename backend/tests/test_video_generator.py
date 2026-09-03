@@ -630,4 +630,22 @@ async def test_step_render_video_with_hook_and_subtitles(tmp_path, monkeypatch):
     assert os.path.getsize(out_path) > 0
 
 
+def test_video_generator_agentic_video_persistence_and_routing(tmp_path):
+    generator = VideoGenerator(output_dir=str(tmp_path))
+    job = generator.create_job(
+        topic="AI in Healthcare",
+        source_video_url="https://www.youtube.com/watch?v=sample123",
+        agentic_understanding=True,
+    )
+    assert job.source_video_url == "https://www.youtube.com/watch?v=sample123"
+    assert job.agentic_understanding is True
+
+    # Check persistence and retrieval from SQLite
+    loaded = generator.get_job(job.job_id)
+    assert loaded is not None
+    assert loaded.source_video_url == "https://www.youtube.com/watch?v=sample123"
+    assert loaded.agentic_understanding is True
+
+
+
 

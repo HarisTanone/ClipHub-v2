@@ -69,6 +69,8 @@ class VideoGenJob:
     include_bgm: bool = True
     bgm_volume: float = field(default_factory=lambda: settings.VIDEO_GEN_BGM_VOLUME)
     title: Optional[str] = None
+    source_video_url: Optional[str] = None
+    agentic_understanding: bool = True
     # Results
     story: Optional[dict] = None
     scenes_with_footage: Optional[list] = None
@@ -147,6 +149,10 @@ class VideoGenerator:
                 cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN tts_provider TEXT DEFAULT 'elevenlabs'")
             if "tts_model" not in cols:
                 cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN tts_model TEXT DEFAULT 'eleven_multilingual_v2'")
+            if "source_video_url" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN source_video_url TEXT")
+            if "agentic_understanding" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN agentic_understanding INTEGER DEFAULT 1")
             conn.commit()
             conn.close()
         except Exception as exc:
@@ -173,8 +179,8 @@ class VideoGenerator:
                     subtitle_style_json, hook_enabled, custom_hook, hook_style_json,
                     include_bgm, bgm_volume, title, story_json, scenes_json,
                     timeline_json, output_path, error, created_at, completed_at,
-                    tts_provider, tts_model
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    tts_provider, tts_model, source_video_url, agentic_understanding
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     user_id=excluded.user_id,
                     topic=excluded.topic,
@@ -200,7 +206,9 @@ class VideoGenerator:
                     error=excluded.error,
                     completed_at=excluded.completed_at,
                     tts_provider=excluded.tts_provider,
-                    tts_model=excluded.tts_model
+                    tts_model=excluded.tts_model,
+                    source_video_url=excluded.source_video_url,
+                    agentic_understanding=excluded.agentic_understanding
             """, (
                 job.job_id,
                 job.user_id,
@@ -229,6 +237,8 @@ class VideoGenerator:
                 job.completed_at,
                 job.tts_provider,
                 job.tts_model,
+                job.source_video_url,
+                1 if job.agentic_understanding else 0,
             ))
             conn.commit()
             conn.close()
@@ -257,6 +267,8 @@ class VideoGenerator:
         )
         tts_provider = row["tts_provider"] if ("tts_provider" in row.keys() and row["tts_provider"]) else "gemini"
         tts_model = row["tts_model"] if ("tts_model" in row.keys() and row["tts_model"]) else "gemini-3.1-flash-tts-preview"
+        source_video_url = row["source_video_url"] if ("source_video_url" in row.keys()) else None
+        agentic_understanding = bool(row["agentic_understanding"]) if ("agentic_understanding" in row.keys() and row["agentic_understanding"] is not None) else True
 
         return VideoGenJob(
             job_id=row["job_id"],
@@ -278,6 +290,8 @@ class VideoGenerator:
             include_bgm=bool(row["include_bgm"]) if "include_bgm" in row.keys() and row["include_bgm"] is not None else True,
             bgm_volume=float(row["bgm_volume"]) if "bgm_volume" in row.keys() and row["bgm_volume"] is not None else settings.VIDEO_GEN_BGM_VOLUME,
             title=row["title"],
+            source_video_url=source_video_url,
+            agentic_understanding=agentic_understanding,
             story=story,
             scenes_with_footage=scenes,
             timeline=timeline,
@@ -305,6 +319,8 @@ class VideoGenerator:
         hook_style: Optional[dict[str, Any]] = None,
         include_bgm: bool = True,
         bgm_volume: Optional[float] = None,
+        source_video_url: Optional[str] = None,
+        agentic_understanding: bool = True,
         user_id: Optional[int] = None,
     ) -> VideoGenJob:
         """Create a new video generation job."""
@@ -342,6 +358,8 @@ class VideoGenerator:
                 if bgm_volume is None
                 else max(0.0, min(0.5, bgm_volume))
             ),
+            source_video_url=source_video_url.strip() if source_video_url and source_video_url.strip() else None,
+            agentic_understanding=agentic_understanding,
             user_id=user_id,
         )
         self._jobs[job_id] = job
@@ -497,7 +515,7 @@ class VideoGenerator:
             job.status = VideoGenStatus.SEARCHING_FOOTAGE
             job.progress = 20
             self._persist_job(job)
-            scenes = await self._step_search_footage(story, work_dir)
+            scenes = await self._step_search_footage(story, work_dir, job=job)
 
             # Step 2b: AI Video Director Curation Pass (LLM evaluates real candidates)
             from src.infrastructure.story_agent import StoryAgent
@@ -592,7 +610,7 @@ class VideoGenerator:
             job.status = VideoGenStatus.SEARCHING_FOOTAGE
             job.progress = 50
             self._persist_job(job)
-            scenes = await self._step_search_footage(story, work_dir)
+            scenes = await self._step_search_footage(story, work_dir, job=job)
 
             # AI Video Director Curation Pass for initial selection
             from src.infrastructure.story_agent import StoryAgent
@@ -724,17 +742,27 @@ class VideoGenerator:
     # ─── Pipeline Steps ────────────────────────────────────────────────────────
 
     async def _step_generate_story(self, job: VideoGenJob) -> dict:
-        """Step 1: AI generates structured story from topic."""
+        """Step 1: AI generates structured story from topic or understands source video."""
         from src.infrastructure.story_agent import StoryAgent, StoryGenerationError
 
         agent = StoryAgent()
 
-        story = await agent.generate_story(
-            topic=job.topic,
-            target_duration=job.target_duration,
-            num_scenes=job.num_scenes,
-            instructions=job.instructions,
-        )
+        if getattr(job, "source_video_url", None) and job.source_video_url.strip():
+            story = await agent.generate_story_from_video(
+                source_video_url=job.source_video_url.strip(),
+                topic=job.topic,
+                target_duration=job.target_duration,
+                num_scenes=job.num_scenes,
+                instructions=job.instructions,
+                use_agentic=getattr(job, "agentic_understanding", True),
+            )
+        else:
+            story = await agent.generate_story(
+                topic=job.topic,
+                target_duration=job.target_duration,
+                num_scenes=job.num_scenes,
+                instructions=job.instructions,
+            )
 
         if job.custom_hook and job.custom_hook.strip():
             story["hook"] = job.custom_hook.strip()
@@ -745,7 +773,7 @@ class VideoGenerator:
         )
         return story
 
-    async def _step_search_footage(self, story: dict, work_dir: str) -> list[dict]:
+    async def _step_search_footage(self, story: dict, work_dir: str, job: Optional[VideoGenJob] = None) -> list[dict]:
         """Step 2: Search YouTube and Pexels for footage per scene."""
         from src.infrastructure.youtube_search import YouTubeSearch
 
@@ -757,6 +785,27 @@ class VideoGenerator:
             results_per_scene=5,
             shorts_only=False,
         )
+
+        # If job has a source_video_url, inject it as primary candidate with exact timestamps
+        if job and getattr(job, "source_video_url", None) and job.source_video_url.strip():
+            for s in scenes:
+                ts_start = float(s.get("source_start_timestamp") or 0.0)
+                src_cand = {
+                    "video_id": "source_video",
+                    "title": f"Source Video ({ts_start:.1f}s)",
+                    "url": job.source_video_url.strip(),
+                    "thumbnail_url": "",
+                    "duration_seconds": 60,
+                    "view_count": 100000,
+                    "channel": "Source Video",
+                    "query": s.get("visual", ""),
+                    "platform": "youtube" if ("youtube.com" in job.source_video_url or "youtu.be" in job.source_video_url) else "direct",
+                    "start_timestamp": ts_start,
+                }
+                cands = [src_cand] + [c for c in s.get("footage_candidates", []) if c.get("video_id") != "source_video"]
+                s["footage_candidates"] = cands
+                s["selected_footage"] = src_cand
+                s["footage_source"] = src_cand
 
         total_candidates = sum(
             len(s.get("footage_candidates", [])) for s in scenes

@@ -51,10 +51,11 @@ class GeminiAnalyzer(IGeminiAnalyzer):
     def _switch_to_fallback(self) -> None:
         """Switch to next fallback model after repeated 503/overload/404 errors."""
         cascade = [
-            settings.GEMINI_MODEL or "gemini-3.6-flash",
+            settings.GEMINI_MODEL or "gemini-3.8-flash",
             settings.GEMINI_FALLBACK_MODEL or "gemini-3.7-flash",
-            "gemini-3.6-flash",
+            "gemini-3.8-flash",
             "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-flash-latest",
             "gemini-3.5-flash-lite",
             "gemini-flash-lite-latest",
@@ -406,8 +407,9 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             raise RuntimeError("No Gemini API key configured")
 
         # Models supporting agentic video understanding as per Google documentation
-        # (Gemini 3.7 Flash, 3.6 Flash, and 3.5 Flash Lite)
+        # (Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash, and 3.5 Flash Lite)
         AGENTIC_CAPABLE_MODELS = {
+            "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash-lite",

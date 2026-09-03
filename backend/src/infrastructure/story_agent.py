@@ -91,6 +91,42 @@ Important Guidelines:
 - First scene is the opening HOOK.
 - Final scene is a punchy, thought-provoking conclusion or takeaway. No CTAs."""
 
+STORY_FROM_VIDEO_PROMPT = """You are an elite AI video director using Gemini Agentic Video Understanding to watch, analyze, and condense this source video into a high-retention 9:16 vertical short-form video.
+
+SOURCE VIDEO ANALYSIS GOAL:
+1. Dynamically navigate the video timeline to extract the most powerful, viral, or educational moments, core arguments, and visual highlights.
+2. Condense the story into {num_scenes} compelling scenes totaling approximately {target_duration} seconds ({word_count} words of narration total).
+3. Identify precise timestamp intervals in the source video where relevant visual moments happen so we can slice footage directly from this source video!
+
+Topic / Focus Hint: "{topic}"
+Creative Direction & Instructions:
+{instructions}
+
+Output this exact JSON structure (raw JSON only, no markdown):
+{{
+  "title": "Catchy title (max 6 words)",
+  "hook": "Opening hook text (first 3 seconds, stops the scroll)",
+  "mood": "dramatic",
+  "target_duration": {target_duration},
+  "scenes": [
+    {{
+      "id": 1,
+      "narration": "Spoken narration for this scene (approx {words_per_scene} words)",
+      "visual": "Description of the visual moment seen in the source video",
+      "source_start_timestamp": 12.5,
+      "source_end_timestamp": 19.0,
+      "search_queries": [
+        "Primary entity query",
+        "Universal visual query in English",
+        "Action or camera motion query"
+      ],
+      "duration_estimate": 6.5,
+      "transition": "cut"
+    }}
+  ]
+}}
+"""
+
 
 class StoryAgent:
     """AI Story Generator — topic to structured scene breakdown.
@@ -100,6 +136,45 @@ class StoryAgent:
 
     def __init__(self):
         self._max_retries = 3
+
+    async def generate_story_from_video(
+        self,
+        source_video_url: str,
+        topic: str = "",
+        target_duration: int = 0,
+        num_scenes: int = 0,
+        instructions: str = "",
+        use_agentic: bool = True,
+    ) -> dict:
+        """Analyze a source video with Gemini Agentic Video Understanding to generate structured scenes."""
+        from src.infrastructure.gemini_analyzer import GeminiAnalyzer
+
+        if not target_duration:
+            target_duration = settings.VIDEO_GEN_TARGET_DURATION
+
+        if not num_scenes:
+            calculated_scenes = max(4, min(14, int(round(target_duration / 7.0))))
+            num_scenes = calculated_scenes
+
+        word_count = max(50, int(target_duration * 2.3))
+        words_per_scene = max(12, int(word_count / max(1, num_scenes)))
+        effective_topic = topic.strip() if topic and topic.strip() else "Key highlights & insights from video"
+
+        prompt = STORY_FROM_VIDEO_PROMPT.format(
+            topic=effective_topic,
+            target_duration=target_duration,
+            word_count=word_count,
+            num_scenes=num_scenes,
+            words_per_scene=words_per_scene,
+            instructions=instructions or "Extract the most engaging, viral, and valuable parts of the video.",
+        )
+
+        logger.info(f"story_agent: analyzing source video with Gemini (agentic={use_agentic}): {source_video_url}")
+        analyzer = GeminiAnalyzer()
+        raw_response = analyzer._generate_with_video(source_video_url, prompt)
+        story = self._parse_response(raw_response, effective_topic)
+        story = self._validate_and_fix(story, target_duration)
+        return story
 
     async def generate_story(
         self,
