@@ -30,6 +30,8 @@ import {
   DEFAULT_TEXT_EMPHASIS_STYLE,
   DEFAULT_WATERMARK_STYLE,
   DEFAULT_CTA_STYLE,
+  normaliseTextEmphasisStyle,
+  normaliseCtaStyle,
   type HookStyle,
   type SubtitleStyle,
   type TextEmphasisStyle,
@@ -496,6 +498,24 @@ export function Settings() {
   const [editorTe, setEditorTe] = useState<TextEmphasisStyle>(DEFAULT_TEXT_EMPHASIS_STYLE);
   const [editorWm, setEditorWm] = useState<WatermarkStyle>(DEFAULT_WATERMARK_STYLE);
   const [editorCta, setEditorCta] = useState<CtaStyle>(DEFAULT_CTA_STYLE);
+  const [editorBroll, setEditorBroll] = useState<Record<string, any>>({});
+  const [editorAutopost, setEditorAutopost] = useState<Record<string, any>>({});
+  const [editorActivePresetId, setEditorActivePresetId] = useState<number | undefined>(undefined);
+
+  const handleOpenStyleEditor = (preset?: any) => {
+    const p = preset || autopilotPresets.find(pr => pr.slug === autopilotSettings?.preset_slug || pr.name === autopilotSettings?.preset_slug) || autopilotPresets[0];
+    if (p) {
+      setEditorHook({ ...DEFAULT_HOOK_STYLE, ...(p.hook_style || {}) });
+      setEditorSub({ ...DEFAULT_SUBTITLE_STYLE, ...(p.subtitle_style || {}) });
+      setEditorTe(normaliseTextEmphasisStyle(p.text_emphasis_style));
+      setEditorWm({ ...DEFAULT_WATERMARK_STYLE, ...(p.watermark_style || {}) });
+      setEditorCta(normaliseCtaStyle(p.cta_style));
+      setEditorBroll(p.broll_style || {});
+      setEditorAutopost(p.autopost_style || {});
+      setEditorActivePresetId(typeof p.id === "number" ? p.id : undefined);
+    }
+    setShowStyleModal(true);
+  };
 
   // Dynamic Database System Config
   const [sysConfigItems, setSysConfigItems] = useState<SystemConfigItem[]>([]);
@@ -3254,7 +3274,7 @@ export function Settings() {
                           }
                         }}
                         presets={autopilotPresets}
-                        onOpenEditor={() => setShowStyleModal(true)}
+                        onOpenEditor={handleOpenStyleEditor}
                       />
                     </ErrorBoundary>
                   </Card>
@@ -3771,11 +3791,17 @@ export function Settings() {
             textEmphasisStyle={editorTe}
             watermarkStyle={editorWm}
             ctaStyle={editorCta}
+            brollStyle={editorBroll}
+            autopostStyle={editorAutopost}
             onHookChange={setEditorHook}
             onSubtitleChange={setEditorSub}
             onTextEmphasisChange={setEditorTe}
             onWatermarkChange={setEditorWm}
             onCtaChange={setEditorCta}
+            onBrollChange={setEditorBroll}
+            onAutopostChange={setEditorAutopost}
+            activePresetId={editorActivePresetId}
+            onPresetSelect={(id) => setEditorActivePresetId(id)}
             onPresetLoad={async (preset) => {
               if (preset.slug && autopilotSettings) {
                 const updated = { ...autopilotSettings, preset_slug: preset.slug };

@@ -22,6 +22,7 @@ export function OtherTab({
   aiTextEnabled,
   aspectRatio,
   canvasBackground,
+  initialSubTab,
 }: {
   hookStyle: HookStyle;
   textEmphasisStyle: TextEmphasisStyle;
@@ -36,8 +37,15 @@ export function OtherTab({
   aiTextEnabled: boolean;
   aspectRatio?: string;
   canvasBackground?: { mode: BackgroundMode; templateId: string; imageDataUrl: string | null } | null;
+  initialSubTab?: "transition" | "ai_text" | "watermark" | "cta";
 }) {
-  const [subTab, setSubTab] = useState<"transition" | "ai_text" | "watermark" | "cta">("transition");
+  const [subTab, setSubTab] = useState<"transition" | "ai_text" | "watermark" | "cta">(initialSubTab || "transition");
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
 
   useEffect(() => {
     if (!aiTextEnabled && subTab === "ai_text") setSubTab("transition");

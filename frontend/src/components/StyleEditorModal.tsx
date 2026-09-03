@@ -94,7 +94,7 @@ export function StyleEditorModal({
               canvasBackground={canvasBackground}
               isSuperadmin={isSuperadmin}
             />
-          ) : tab === "other" ? (
+          ) : (tab === "other" || tab === "transition" || tab === "ai_text") ? (
             <OtherTab
               hookStyle={hookStyle}
               textEmphasisStyle={textEmphasisStyle}
@@ -109,6 +109,7 @@ export function StyleEditorModal({
               aiTextEnabled={aiTextEnabled}
               aspectRatio={aspectRatio}
               canvasBackground={canvasBackground}
+              initialSubTab={tab === "transition" || tab === "ai_text" ? tab : undefined}
             />
           ) : (
             <SubtitleEditor
@@ -145,7 +146,7 @@ export function StyleEditorModal({
               <button type="button" onClick={() => setTab("subtitle")} className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-medium rounded-md transition-colors", tab === "subtitle" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
                 <Sparkles className="h-3 w-3 inline mr-1" />Subtitle
               </button>
-              <button type="button" onClick={() => setTab("other")} className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-medium rounded-md transition-colors", tab === "other" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
+              <button type="button" onClick={() => setTab("other")} className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-medium rounded-md transition-colors", (tab === "other" || tab === "transition" || tab === "ai_text") ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>
                 <Layers className="h-3 w-3 inline mr-1" />Other
               </button>
             </div>
@@ -202,7 +203,7 @@ export function StyleEditorModal({
               canvasBackground={canvasBackground}
               isSuperadmin={isSuperadmin}
             />
-          ) : tab === "other" ? (
+          ) : (tab === "other" || tab === "transition" || tab === "ai_text") ? (
             <OtherTab
               hookStyle={hookStyle}
               textEmphasisStyle={textEmphasisStyle}
@@ -217,6 +218,7 @@ export function StyleEditorModal({
               aiTextEnabled={aiTextEnabled}
               aspectRatio={aspectRatio}
               canvasBackground={canvasBackground}
+              initialSubTab={tab === "transition" || tab === "ai_text" ? tab : undefined}
             />
           ) : (
             <SubtitleEditor

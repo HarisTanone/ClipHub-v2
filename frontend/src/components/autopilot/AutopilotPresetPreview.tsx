@@ -24,8 +24,8 @@ import { HookPreviewRenderer } from "../style-editor/preview/HookPreviewRenderer
 export interface AutopilotPresetPreviewProps {
   selectedSlug: string;
   onSelectSlug: (slug: string) => void;
-  presets: Preset[];
-  onOpenEditor?: () => void;
+  presets?: Preset[];
+  onOpenEditor?: (preset?: Preset) => void;
 }
 
 export function AutopilotPresetPreview({
@@ -191,7 +191,7 @@ export function AutopilotPresetPreview({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={onOpenEditor}
+            onClick={() => onOpenEditor(activePreset || undefined)}
             className="h-7 text-[11px] text-violet-300 hover:text-violet-200 hover:bg-violet-950/40 border border-violet-500/30"
             icon={<Sliders className="h-3 w-3" />}
           >
@@ -230,7 +230,7 @@ export function AutopilotPresetPreview({
                   type="button"
                   size="xs"
                   variant="secondary"
-                  onClick={onOpenEditor}
+                  onClick={() => onOpenEditor(undefined)}
                   className="mt-2 text-[11px]"
                   icon={<Sliders className="h-3 w-3" />}
                 >
