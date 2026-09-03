@@ -3122,14 +3122,30 @@ class PodcastReframeEngine(IReframeEngine):
                     desired_right = box_to_use.x2 + margin
 
                     if (desired_right - desired_left) <= crop_w:
-                        # Face + margin fits in crop → center it properly
-                        crop_x = int((desired_left + desired_right) / 2 - crop_w / 2)
+                        # Cinematic Looking Room (Lead Room):
+                        # When speaker is angled (looking towards co-host), provide breathing room
+                        # in front of their gaze direction so they aren't staring into the crop edge.
+                        yaw = getattr(best_det, "yaw_deg", 0.0) or 0.0
+                        anchor_cx = float(cx)
+                        if abs(yaw) >= 10.0:
+                            lead_room = int(np.clip(yaw / 45.0, -1.0, 1.0) * (crop_w * 0.04))
+                            anchor_cx += lead_room
+
+                        # Primary: anchor crop window precisely on the multi-modal anatomical center
+                        crop_x = int(anchor_cx - crop_w / 2)
+
+                        # Safety boundary: clamp so face bbox + margin never gets clipped at either border
+                        if desired_right > crop_x + crop_w:
+                            crop_x = int(desired_right - crop_w)
+                        if desired_left < crop_x:
+                            crop_x = int(desired_left)
+
                         crop_x = max(0, min(crop_x, max_crop_x))
                         face_margin_applied = True
 
             if not face_margin_applied:
-                # Standard centering: place face center in middle of crop
-                crop_x = max(0, min(cx - crop_w // 2, max_crop_x))
+                # Standard centering: place anatomical center in middle of crop
+                crop_x = max(0, min(int(cx - crop_w / 2), max_crop_x))
 
             keyframes.append((t, crop_x, active_position_id, target_source))
 
@@ -3672,12 +3688,14 @@ class PodcastReframeEngine(IReframeEngine):
                 # Not enough room for transition — snap
                 expr = f"if(lt(t\\,{t_next:.2f})\\,{x_current}\\,{expr})"
             else:
-                # Smooth: hold → lerp → next
-                # lerp formula: x_current + (x_next - x_current) * min(1, (t - t_trans_start) / trans)
+                # Smooth cinematic camera: hold → smoothstep easing → next
+                # Smoothstep formula S(u) = u * u * (3 - 2 * u) ensures zero jerk at start and stop
                 delta = x_next - x_current
-                lerp_expr = f"{x_current}+{delta}*min(1\\,(t-{t_trans_start:.2f})/{trans:.2f})"
+                prog_expr = f"min(1\\,(t-{t_trans_start:.2f})/{trans:.2f})"
+                smoothstep_expr = f"{prog_expr}*{prog_expr}*(3-2*{prog_expr})"
+                lerp_expr = f"{x_current}+{delta}*{smoothstep_expr}"
                 # if t < t_trans_start → hold x_current
-                # elif t < t_next → lerp
+                # elif t < t_next → smoothstep lerp
                 # else → next expression
                 inner = f"if(lt(t\\,{t_trans_start:.2f})\\,{x_current}\\,if(lt(t\\,{t_next:.2f})\\,{lerp_expr}\\,{expr}))"
                 expr = inner
