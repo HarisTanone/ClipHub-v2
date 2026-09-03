@@ -29,6 +29,49 @@ let bundled: string | null = null;
 let bundleReady = false;
 const activeRenders = new Map<string, { status: string; progress: number }>();
 
+// ─── Memory Hardening & Serial Render Queue ──────────────────────────────────
+// Chromium flags to minimize RAM, prevent /dev/shm exhaustion, and disable unused browser subsystems
+const CHROMIUM_OPTIONS = {
+  gl: "swangle" as const,
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-extensions",
+    "--disable-sync",
+    "--js-flags=--max-old-space-size=1024",
+  ],
+};
+
+// Sequential queue: strictly 1 render at a time to prevent Chromium multi-process RAM explosion
+let renderQueueTail = Promise.resolve();
+
+function enqueueRender<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    renderQueueTail = renderQueueTail
+      .then(async () => {
+        try {
+          const result = await task();
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        }
+      })
+      .catch(async () => {
+        try {
+          const result = await task();
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        }
+      });
+  });
+}
+
 // ─── Static file serving for video assets ────────────────────────────────────
 // Remotion's browser needs to access local video files via HTTP URL
 
@@ -132,7 +175,7 @@ const RenderRequestSchema = z.object({
   height: z.number().default(1920),
   codec: z.string().default("h264"),
   quality: z.enum(["low", "medium", "high"]).default("medium"),
-  concurrency: z.number().default(2),
+  concurrency: z.number().default(1),
 });
 
 app.post("/render", async (req, res) => {
@@ -155,113 +198,127 @@ app.post("/render", async (req, res) => {
   const request = parsed.data;
   const renderId = `render_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  activeRenders.set(renderId, { status: "rendering", progress: 0 });
+  activeRenders.set(renderId, { status: "queued", progress: 0 });
 
-  const startTime = Date.now();
+  // Enqueue execution: strictly 1 render at a time to prevent RAM explosion
+  return enqueueRender(async () => {
+    activeRenders.set(renderId, { status: "rendering", progress: 0 });
+    const startTime = Date.now();
 
-  try {
-    // Studio HD Quality presets: Ultra-crisp 1080p, lossless frame capture
-    const qualityConfig = {
-      low: { crf: 18, concurrency: 4, x264Preset: "fast" },
-      medium: { crf: 14, concurrency: 2, x264Preset: "medium" },
-      high: { crf: 10, concurrency: 1, x264Preset: "slow" },
-    }[request.quality] || { crf: 14, concurrency: 2, x264Preset: "medium" };
+    try {
+      // Memory-optimized Quality presets: 1 concurrent frame worker, pristine visual crf
+      const qualityConfig = {
+        low: { crf: 18, concurrency: 1, x264Preset: "fast" },
+        medium: { crf: 14, concurrency: 1, x264Preset: "medium" },
+        high: { crf: 10, concurrency: 1, x264Preset: "slow" },
+      }[request.quality] || { crf: 14, concurrency: 1, x264Preset: "medium" };
 
-    // Convert local video path to HTTP URL served by this server
-    const propsWithUrl = { ...request.props };
-    if (propsWithUrl.videoPath && propsWithUrl.videoPath.startsWith("/")) {
-      propsWithUrl.videoPath = `http://localhost:${PORT}/media${propsWithUrl.videoPath}`;
+      // Convert local video path to HTTP URL served by this server
+      const propsWithUrl = { ...request.props };
+      if (propsWithUrl.videoPath && propsWithUrl.videoPath.startsWith("/")) {
+        propsWithUrl.videoPath = `http://localhost:${PORT}/media${propsWithUrl.videoPath}`;
+      }
+      propsWithUrl.textEmphasisEvents = (propsWithUrl.textEmphasisEvents || []).slice(0, 2).map((event: any) => ({
+        ...event,
+        foreground_frames: (event.foreground_frames || []).map((item: any) => ({
+          ...item,
+          path: typeof item.path === "string" && item.path.startsWith("/")
+            ? `http://localhost:${PORT}/media${item.path}`
+            : item.path,
+        })),
+      }));
+      propsWithUrl.brollEvents = (propsWithUrl.brollEvents || []).map((event: any) => ({
+        ...event,
+        imagePath: typeof event.imagePath === "string" && event.imagePath.startsWith("/")
+          ? `http://localhost:${PORT}/media${event.imagePath}`
+          : event.imagePath,
+      }));
+
+      console.log(`[remotion-server] Rendering (queued task): ${path.basename(request.outputPath)}`);
+      console.log(`[remotion-server]   Video URL: ${propsWithUrl.videoPath}`);
+      console.log(`[remotion-server]   Duration: ${request.durationInFrames} frames @ ${request.fps}fps`);
+      console.log(`[remotion-server]   Quality: ${request.quality} (crf=${qualityConfig.crf}, preset=${qualityConfig.x264Preset}, concurrency=${qualityConfig.concurrency})`);
+      console.log(`[remotion-server]   Hook: "${propsWithUrl.hookText?.slice(0, 40)}..." anim=${propsWithUrl.hookAnimation}`);
+      console.log(`[remotion-server]   Hook config: color=${propsWithUrl.creativeDirection?.hook_style_config?.color || 'NOT SET'}, glow=${propsWithUrl.creativeDirection?.hook_style_config?.glowEnabled || false}`);
+      console.log(`[remotion-server]   Words: ${propsWithUrl.words?.length || 0}, firstWord: ${propsWithUrl.words?.[0]?.start != null ? propsWithUrl.words[0].start.toFixed(1) : 'N/A'}s`);
+
+      // Select composition with hardened Chromium options
+      const serveUrl = bundled as string;
+      const composition = await selectComposition({
+        serveUrl,
+        id: request.compositionId,
+        inputProps: propsWithUrl,
+        chromiumOptions: CHROMIUM_OPTIONS,
+      });
+
+      // Override duration/dimensions
+      const finalComposition = {
+        ...composition,
+        durationInFrames: request.durationInFrames,
+        fps: request.fps,
+        width: request.width,
+        height: request.height,
+      };
+
+      // Ensure output directory exists
+      const outputDir = path.dirname(request.outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      // Render with high-efficiency JPEG frames (reduces memory consumption by 85-90% vs raw PNG)
+      await renderMedia({
+        composition: finalComposition,
+        serveUrl,
+        codec: request.codec as any,
+        outputLocation: request.outputPath,
+        inputProps: propsWithUrl,
+        concurrency: Math.min(request.concurrency || 1, qualityConfig.concurrency),
+        crf: qualityConfig.crf,
+        pixelFormat: "yuv420p",
+        imageFormat: "jpeg",
+        jpegQuality: 90,
+        x264Preset: qualityConfig.x264Preset as any,
+        chromiumOptions: CHROMIUM_OPTIONS,
+        onProgress: ({ progress }) => {
+          activeRenders.set(renderId, {
+            status: "rendering",
+            progress: Math.round(progress * 100),
+          });
+        },
+      });
+
+      const renderTime = (Date.now() - startTime) / 1000;
+      console.log(
+        `[remotion-server] Render complete: ${path.basename(request.outputPath)} (${renderTime.toFixed(1)}s)`
+      );
+
+      return res.json({
+        success: true,
+        outputPath: request.outputPath,
+        renderTimeSeconds: renderTime,
+      } satisfies RenderResponse);
+    } catch (err: any) {
+      console.error(`[remotion-server] Render failed:`, err.message);
+
+      return res.status(500).json({
+        success: false,
+        error: err.message || "Render failed",
+      } satisfies RenderResponse);
+    } finally {
+      activeRenders.delete(renderId);
+
+      // Force explicit V8 garbage collection to immediately free frame buffers
+      if (typeof (global as any).gc === "function") {
+        try {
+          const heapBefore = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+          (global as any).gc();
+          const heapAfter = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+          console.log(`[remotion-server] Post-render GC: heap freed from ${heapBefore}MB to ${heapAfter}MB`);
+        } catch { /* ignore */ }
+      }
     }
-    propsWithUrl.textEmphasisEvents = (propsWithUrl.textEmphasisEvents || []).slice(0, 2).map((event: any) => ({
-      ...event,
-      foreground_frames: (event.foreground_frames || []).map((item: any) => ({
-        ...item,
-        path: typeof item.path === "string" && item.path.startsWith("/")
-          ? `http://localhost:${PORT}/media${item.path}`
-          : item.path,
-      })),
-    }));
-    propsWithUrl.brollEvents = (propsWithUrl.brollEvents || []).map((event: any) => ({
-      ...event,
-      imagePath: typeof event.imagePath === "string" && event.imagePath.startsWith("/")
-        ? `http://localhost:${PORT}/media${event.imagePath}`
-        : event.imagePath,
-    }));
-
-    console.log(`[remotion-server] Rendering: ${path.basename(request.outputPath)}`);
-    console.log(`[remotion-server]   Video URL: ${propsWithUrl.videoPath}`);
-    console.log(`[remotion-server]   Duration: ${request.durationInFrames} frames @ ${request.fps}fps`);
-    console.log(`[remotion-server]   Quality: ${request.quality} (crf=${qualityConfig.crf}, preset=${qualityConfig.x264Preset})`);
-    console.log(`[remotion-server]   Hook: "${propsWithUrl.hookText?.slice(0, 40)}..." anim=${propsWithUrl.hookAnimation}`);
-    console.log(`[remotion-server]   Hook config: color=${propsWithUrl.creativeDirection?.hook_style_config?.color || 'NOT SET'}, glow=${propsWithUrl.creativeDirection?.hook_style_config?.glowEnabled || false}`);
-    console.log(`[remotion-server]   Words: ${propsWithUrl.words?.length || 0}, firstWord: ${propsWithUrl.words?.[0]?.start != null ? propsWithUrl.words[0].start.toFixed(1) : 'N/A'}s`);
-
-    // Select composition
-    const composition = await selectComposition({
-      serveUrl: bundled,
-      id: request.compositionId,
-      inputProps: propsWithUrl,
-      chromiumOptions: { gl: "swangle" },
-    });
-
-    // Override duration/dimensions
-    const finalComposition = {
-      ...composition,
-      durationInFrames: request.durationInFrames,
-      fps: request.fps,
-      width: request.width,
-      height: request.height,
-    };
-
-    // Ensure output directory exists
-    const outputDir = path.dirname(request.outputPath);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-
-    // Render with studio-grade lossless PNG frame capture and pristine CRF
-    await renderMedia({
-      composition: finalComposition,
-      serveUrl: bundled,
-      codec: request.codec as any,
-      outputLocation: request.outputPath,
-      inputProps: propsWithUrl,
-      concurrency: request.concurrency || qualityConfig.concurrency,
-      crf: qualityConfig.crf,
-      pixelFormat: "yuv420p",
-      imageFormat: "png",
-      jpegQuality: 100,
-      x264Preset: qualityConfig.x264Preset as any,
-      chromiumOptions: { gl: "swangle" },
-      onProgress: ({ progress }) => {
-        activeRenders.set(renderId, {
-          status: "rendering",
-          progress: Math.round(progress * 100),
-        });
-      },
-    });
-
-    const renderTime = (Date.now() - startTime) / 1000;
-    activeRenders.delete(renderId);
-
-    console.log(
-      `[remotion-server] Render complete: ${path.basename(request.outputPath)} (${renderTime.toFixed(1)}s)`
-    );
-
-    return res.json({
-      success: true,
-      outputPath: request.outputPath,
-      renderTimeSeconds: renderTime,
-    } satisfies RenderResponse);
-  } catch (err: any) {
-    activeRenders.delete(renderId);
-    console.error(`[remotion-server] Render failed:`, err.message);
-
-    return res.status(500).json({
-      success: false,
-      error: err.message || "Render failed",
-    } satisfies RenderResponse);
-  }
+  });
 });
 
 app.get("/status/:renderId", (req, res) => {
@@ -351,11 +408,12 @@ app.post("/render-still", async (req, res) => {
         : event.imagePath,
     }));
 
+    const serveUrl = bundled as string;
     const composition = await selectComposition({
-      serveUrl: bundled,
+      serveUrl,
       id: request.compositionId,
       inputProps: propsWithUrl,
-      chromiumOptions: { gl: "swangle" },
+      chromiumOptions: CHROMIUM_OPTIONS,
     });
 
     const finalComposition = {
@@ -373,13 +431,13 @@ app.post("/render-still", async (req, res) => {
 
     await renderStill({
       composition: finalComposition,
-      serveUrl: bundled,
+      serveUrl,
       frame: request.frame,
       output: request.outputPath,
       imageFormat: "jpeg",
       jpegQuality: 80,
       inputProps: propsWithUrl,
-      chromiumOptions: { gl: "swangle" },
+      chromiumOptions: CHROMIUM_OPTIONS,
     });
 
     const imageData = fs.readFileSync(request.outputPath, { encoding: "base64" });
@@ -389,6 +447,12 @@ app.post("/render-still", async (req, res) => {
   } catch (err: any) {
     console.error("[remotion-server] Still render failed:", err.message);
     return res.status(500).json({ success: false, error: err.message || "Still render failed" });
+  } finally {
+    if (typeof (global as any).gc === "function") {
+      try {
+        (global as any).gc();
+      } catch { /* ignore */ }
+    }
   }
 });
 

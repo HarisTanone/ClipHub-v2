@@ -836,12 +836,17 @@ User=$DEPLOY_USER
 WorkingDirectory=$REMOTION_DIR
 Environment=REMOTION_SERVER_PORT=$REMOTION_PORT
 Environment=NODE_ENV=production
+Environment=NODE_OPTIONS="--max-old-space-size=3072 --expose-gc"
 Environment=PATH=/usr/local/bin:/usr/bin
-# Kill any stale process on port before starting (prevents EADDRINUSE)
+MemoryHigh=4G
+MemoryMax=5G
+# Kill any stale process on port and zombie chromium instances before starting
 ExecStartPre=/bin/sh -c '/usr/bin/fuser -k $REMOTION_PORT/tcp 2>/dev/null || true'
+ExecStartPre=/bin/sh -c '/usr/bin/pkill -f "chrome-headless-shell.*remotion" 2>/dev/null || true'
 ExecStartPre=/bin/sleep 1
 ExecStart=/usr/bin/npx tsx src/server/index.ts
 ExecStop=/bin/sh -c '/usr/bin/fuser -k $REMOTION_PORT/tcp 2>/dev/null || true'
+ExecStopPost=/bin/sh -c '/usr/bin/pkill -f "chrome-headless-shell.*remotion" 2>/dev/null || true'
 Restart=always
 RestartSec=5
 # Give process time to release port on stop

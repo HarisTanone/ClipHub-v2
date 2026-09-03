@@ -314,7 +314,7 @@ class Settings(BaseSettings):
     REMOTION_PROJECT_PATH: str = "../remotion-renderer"
     REMOTION_SERVER_URL: str = "http://localhost:3002"
     REMOTION_SERVER_PORT: int = 3002
-    REMOTION_CONCURRENCY: int = 2
+    REMOTION_CONCURRENCY: int = 1
     REMOTION_QUALITY: str = "medium"  # low, medium, high
     REMOTION_ENABLE_THREEJS: bool = True
     REMOTION_ENABLE_AI_LAYER: bool = True

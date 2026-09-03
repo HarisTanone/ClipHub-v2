@@ -2248,8 +2248,8 @@ class V2PipelineService:
             resolution=res,
         )
 
-        # Parallel rendering: 2 clips max (prevents Remotion delayRender timeout on long clips)
-        render_semaphore = asyncio.Semaphore(2)
+        # Serial rendering: 1 clip max to prevent Chromium multi-process RAM exhaustion
+        render_semaphore = asyncio.Semaphore(1)
         render_errors: list[str] = []
         prosody_map = prosody_results or {}
 
