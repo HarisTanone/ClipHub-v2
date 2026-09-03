@@ -355,8 +355,14 @@ class PodcastReframeEngine(IReframeEngine):
             return {"output_path": output_path if success else video_path, "person_count": 0, "method": "center_crop"}
 
         content_profile = kwargs.get("content_profile") or {}
-        transition_style = str(kwargs.get("transition_style") or "cut").lower()
-        if transition_style not in self.VALID_TRANSITIONS:
+        raw_transition = str(kwargs.get("transition_style") or "cut").lower().strip()
+        if raw_transition in {"smooth", "kinetic", "pan"}:
+            transition_style = "slide"
+        elif raw_transition in {"fast_cuts", "instant"}:
+            transition_style = "cut"
+        elif raw_transition in self.VALID_TRANSITIONS:
+            transition_style = raw_transition
+        else:
             transition_style = "cut"
         try:
             transition_duration = float(kwargs.get("transition_duration", 0.35))
@@ -1279,6 +1285,46 @@ class PodcastReframeEngine(IReframeEngine):
 
                 # Filter: area ratio too small compared to largest track
                 if max_area > 0 and track_area / max_area < self.MIN_AREA_RATIO_TO_MAX:
+                    ghost_track_ids.add(track_id)
+                    continue
+
+                # Filter: extreme corner detection (ads, logos, channel watermarks)
+                track_cx = profile.get("x", 0)
+                track_cy = profile.get("y", 0)
+                if (
+                    track_cx < width * 0.07
+                    or track_cx > width * 0.93
+                    or track_cy < height * 0.07
+                    or track_cy > height * 0.93
+                ) and (max_area > 0 and track_area / max_area < 0.50):
+                    ghost_track_ids.add(track_id)
+                    continue
+
+                # Filter: table / desk / glass surface reflection
+                if track_cy > height * 0.70:
+                    for valid_id, valid_profile in sorted_by_area:
+                        if valid_id == track_id or valid_id in ghost_track_ids:
+                            continue
+                        v_cx = valid_profile.get("x", 0)
+                        v_cy = valid_profile.get("y", 0)
+                        if v_cy < height * 0.55 and abs(track_cx - v_cx) < width * 0.10:
+                            ghost_track_ids.add(track_id)
+                            break
+                    if track_id in ghost_track_ids:
+                        continue
+
+                # Filter: wall-mounted TV / framed portrait (floating in upper wall)
+                track_bottom_y = profile.get("y", 0) + profile.get("height", 0) / 2
+                max_bottom_y = max(
+                    (p.get("y", 0) + p.get("height", 0) / 2 for p in stable_position_profiles.values()),
+                    default=0,
+                )
+                if (
+                    len(stable_position_profiles) >= 2
+                    and max_bottom_y > height * 0.58
+                    and track_bottom_y < height * 0.50
+                    and track_area / max_area < 0.35
+                ):
                     ghost_track_ids.add(track_id)
                     continue
 
@@ -2306,30 +2352,23 @@ class PodcastReframeEngine(IReframeEngine):
                 or bbox.y1 >= crop_y + crop_h
             )
 
-        # Check if candidate targets intersect both rects (or in <=2 person scenes, any detection)
-        unique_seats = set(track_to_position.values()) if track_to_position else set()
-        is_few = (len(unique_seats) <= 2)
-
         for detection in frame_tracked:
-            det_seat = track_to_position.get(int(detection.track_id)) if track_to_position else None
-            is_candidate_target = (first_id is None or second_id is None or det_seat in (first_id, second_id))
-            if is_few or is_candidate_target:
-                box = getattr(detection, "face_bbox", None) or detection.bbox
-                if (
-                    intersects(detection.bbox, *first_rect)
-                    and intersects(detection.bbox, *second_rect)
-                ) or (
-                    box is not None
-                    and intersects(box, *first_rect)
-                    and intersects(box, *second_rect)
-                ):
-                    return False
-                # If the center of a target person is inside both crops, reject frame
-                if (
-                    first_rect[0] <= detection.bbox.center_x <= first_rect[0] + crop_w
-                    and second_rect[0] <= detection.bbox.center_x <= second_rect[0] + crop_w
-                ):
-                    return False
+            box = getattr(detection, "face_bbox", None) or detection.bbox
+            if (
+                intersects(detection.bbox, *first_rect)
+                and intersects(detection.bbox, *second_rect)
+            ) or (
+                box is not None
+                and intersects(box, *first_rect)
+                and intersects(box, *second_rect)
+            ):
+                return False
+            # If the center of ANY detection is inside both crops, reject frame
+            if (
+                first_rect[0] <= detection.bbox.center_x <= first_rect[0] + crop_w
+                and second_rect[0] <= detection.bbox.center_x <= second_rect[0] + crop_w
+            ):
+                return False
 
         if first_id is None or second_id is None or not track_to_position:
             return bool(frame_tracked)
@@ -2993,7 +3032,9 @@ class PodcastReframeEngine(IReframeEngine):
                 if 0 <= active_speaker < len(sorted_faces):
                     return int(sorted_faces[active_speaker]), None, active_speaker, "visible_index"
 
-        if not frame_faces:
+        if not frame_faces and not frame_tracked:
+            if last_center is not None:
+                return int(last_center), None, active_speaker, "last_center"
             return None, None, active_speaker, "no_face"
 
         if last_center is not None:
@@ -4014,6 +4055,14 @@ class PodcastReframeEngine(IReframeEngine):
         if containment >= 0.88 and c_ratio <= 0.22:
             return f"nest contain={containment:.3f} c_ratio={c_ratio:.3f}"
 
+        # Table / glass surface reflection check
+        if (
+            abs(ax - bx) < width * 0.08
+            and (ay > height * 0.68 or by > height * 0.68)
+            and abs(ay - by) > height * 0.18
+        ):
+            return f"table_reflection dx={abs(ax - bx):.1f} dy={abs(ay - by):.1f}"
+
         if (
             "face_x" in prof_a
             and "face_y" in prof_a
@@ -4804,6 +4853,35 @@ class PodcastReframeEngine(IReframeEngine):
                         f"wall_display/TV top={track_top_y:.0f} bottom={track_bottom_y:.0f}<{height * 0.52:.0f}"
                     )
                     continue
+
+                # 1b) Extreme corner detection (ads, logos, channel watermarks)
+                track_cx = profile.get("x", 0)
+                track_cy = profile.get("y", 0)
+                if (
+                    track_cx < width * 0.07
+                    or track_cx > width * 0.93
+                    or track_cy < height * 0.07
+                    or track_cy > height * 0.93
+                ) and (max_area > 0 and track_area / max_area < 0.50):
+                    ghost_track_ids.add(track_id)
+                    ghost_reasons[track_id] = f"corner_ad_or_logo cx={track_cx:.0f} cy={track_cy:.0f}"
+                    continue
+
+                # 1c) Table / desk / glass surface reflection
+                if track_cy > height * 0.70:
+                    is_refl = False
+                    for valid_id, valid_profile in sorted_by_area:
+                        if valid_id == track_id or valid_id in ghost_track_ids:
+                            continue
+                        v_cx = valid_profile.get("x", 0)
+                        v_cy = valid_profile.get("y", 0)
+                        if v_cy < height * 0.55 and abs(track_cx - v_cx) < width * 0.10:
+                            ghost_track_ids.add(track_id)
+                            ghost_reasons[track_id] = f"table_reflection under T{valid_id}"
+                            is_refl = True
+                            break
+                    if is_refl:
+                        continue
 
                 # 2) Hand / body motion check:
                 # If motion scores are available, a real person has living pixel motion (breathing, gesturing).

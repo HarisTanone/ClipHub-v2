@@ -327,7 +327,7 @@ def render_cta_overlay_image(
 
         card_margin_x = int(60 * scale_factor)
         card_w = width - (card_margin_x * 2)
-        card_h = int(130 * scale_factor)
+        card_h = int(140 * scale_factor)
 
         card_x = card_margin_x
         if position == "top":
@@ -367,13 +367,18 @@ def render_cta_overlay_image(
         )
 
         # Left Text: Headline + Subhead
-        left_x = card_x + int(32 * scale_factor)
+        left_x = card_x + int(34 * scale_factor)
         hl_bbox = c_draw.textbbox((0, 0), headline, font=bold_font)
         hl_h = hl_bbox[3] - hl_bbox[1]
 
         if subhead:
-            hl_y = card_y + (card_h - hl_h - int(28 * scale_factor)) // 2
-            sub_y = hl_y + hl_h + int(6 * scale_factor)
+            sub_bbox = c_draw.textbbox((0, 0), subhead, font=sub_font)
+            sub_h = sub_bbox[3] - sub_bbox[1]
+            text_gap = max(6, int(12 * scale_factor))
+            total_text_h = hl_h + sub_h + text_gap
+            start_y = card_y + (card_h - total_text_h) // 2
+            hl_y = start_y
+            sub_y = hl_y + hl_h + text_gap
             c_draw.text((left_x, hl_y), headline, font=bold_font, fill=(tr, tg, tb, 255))
             c_draw.text((left_x, sub_y), subhead, font=sub_font, fill=(148, 163, 184, 230))
         else:

@@ -737,7 +737,30 @@ class V2PipelineService:
                     logger.warning(f"[{job_id}] Global diarization skipped (fallback to per-clip): {e}")
 
             if flags.yolo_enabled and self._yolo_reframe:
-                reframe_style = (job.clips_data or {}).get("hook_style_config", {})
+                cd_data = job.clips_data or {}
+                hook_style_cfg = cd_data.get("hook_style_config", {})
+                reframe_cfg = cd_data.get("reframe_style", {}) or cd_data.get("reframe_config", {})
+                broll_cfg = cd_data.get("broll_style_config", {}) or cd_data.get("broll_config", {})
+                resolved_transition_style = (
+                    cd_data.get("transition_style")
+                    or cd_data.get("transitionStyle")
+                    or reframe_cfg.get("transition_style")
+                    or reframe_cfg.get("transitionStyle")
+                    or hook_style_cfg.get("transitionStyle")
+                    or hook_style_cfg.get("transition_style")
+                    or broll_cfg.get("transition_style")
+                    or broll_cfg.get("transitionStyle")
+                    or "slide"
+                )
+                resolved_transition_duration = float(
+                    cd_data.get("transition_duration")
+                    or cd_data.get("transitionDuration")
+                    or reframe_cfg.get("transition_duration")
+                    or reframe_cfg.get("transitionDuration")
+                    or hook_style_cfg.get("transitionDuration")
+                    or hook_style_cfg.get("transition_duration")
+                    or 0.35
+                )
                 valid_clips = [c for c in clips if trim_results.get(c.rank)]
                 total_valid = len(valid_clips)
 
@@ -763,8 +786,8 @@ class V2PipelineService:
                             job.target_aspect_ratio,
                             flags.autogrid_enabled,
                             content_profile=(job.clips_data or {}).get("content_profile", {}),
-                            transition_style=reframe_style.get("transitionStyle", "cut"),
-                            transition_duration=reframe_style.get("transitionDuration", 0.35),
+                            transition_style=resolved_transition_style,
+                            transition_duration=resolved_transition_duration,
                             global_diarization=global_diarization,
                             clip_start=clip.start,
                             clip_end=clip.end,
@@ -797,8 +820,8 @@ class V2PipelineService:
                                 job.target_aspect_ratio,
                                 flags.autogrid_enabled,
                                 content_profile=(job.clips_data or {}).get("content_profile", {}),
-                                transition_style=reframe_style.get("transitionStyle", "cut"),
-                                transition_duration=reframe_style.get("transitionDuration", 0.35),
+                                transition_style=resolved_transition_style,
+                                transition_duration=resolved_transition_duration,
                                 global_diarization=global_diarization,
                                 clip_start=clip.start,
                                 clip_end=clip.end,
@@ -850,8 +873,8 @@ class V2PipelineService:
                             job.target_aspect_ratio,
                             flags.autogrid_enabled,
                             content_profile=(job.clips_data or {}).get("content_profile", {}),
-                            transition_style=reframe_style.get("transitionStyle", "cut"),
-                            transition_duration=reframe_style.get("transitionDuration", 0.35),
+                            transition_style=resolved_transition_style,
+                            transition_duration=resolved_transition_duration,
                             global_diarization=global_diarization,
                             clip_start=clip.start,
                             clip_end=clip.end,

@@ -847,7 +847,7 @@ export function CtaEditor({
                 >
                   <div className="min-w-0 flex-1">
                     <p
-                      className="truncate font-bold leading-tight"
+                      className="truncate font-bold leading-snug"
                       style={{
                         fontSize: Math.max(9, Math.round(style.fontSize * 0.38)),
                         fontWeight: style.fontWeight as any,
@@ -857,7 +857,7 @@ export function CtaEditor({
                       {style.headline || "Follow For More"}
                     </p>
                     {(style.subhead || style.socialHandle) && (
-                      <p className="truncate text-[8px] text-zinc-400 mt-0.5 font-medium">
+                      <p className="truncate text-[8px] text-zinc-400 mt-1.5 font-medium leading-none">
                         {style.subhead || style.socialHandle}
                       </p>
                     )}

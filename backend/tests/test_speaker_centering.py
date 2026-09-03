@@ -858,6 +858,85 @@ def test_double_grid_vertical_clamp_uses_real_eye_level_and_protects_chin():
     # Chin should not be clipped: chin is inside crop
     assert crop_y + crop_h >= real_chin_y
 
+def test_autogrid_rejects_frame_when_same_person_enters_both_crops_with_three_tracks():
+    """Verify that _grid_frame_is_safe rejects frames where any person intersects both panels even when tracks > 2."""
+    engine = PodcastReframeEngine()
+    geometry = {
+        "crop_w": 1000,
+        "crop_h": 900,
+        "first_crop_x": 100,
+        "second_crop_x": 820,
+        "first_crop_y": 0,
+        "second_crop_y": 0,
+    }
+    # Track 3 is overlapping both crop windows [100, 1100] and [820, 1820]
+    overlapping_detection = TrackedDetection(3, BBox(900, 200, 1020, 360), 0)
+    safe = engine._grid_frame_is_safe(
+        [overlapping_detection],
+        geometry,
+        first_id=0,
+        second_id=1,
+        track_to_position={0: 0, 1: 1, 3: 2},
+    )
+    assert safe is False
+
+
+def test_ghost_elimination_rejects_table_surface_reflection():
+    """Verify that a track at y > 0.70*H aligned with a speaker at y < 0.55*H is eliminated as a table reflection."""
+    engine = PodcastReframeEngine()
+    # Track 0: Main speaker at (620, 400), size (200, 300)
+    # Track 1: Desk/table reflection at (622, 850), size (160, 180)
+    tracked = [
+        [
+            TrackedDetection(0, BBox(520, 250, 720, 550), frame_idx),
+            TrackedDetection(1, BBox(542, 760, 702, 940), frame_idx),
+        ]
+        for frame_idx in range(10)
+    ]
+    model = engine._build_position_model(tracked, width=1920, height=1080)
+    # Only track 0 should survive; track 1 (reflection) must be eliminated
+    assert model["person_count"] == 1
+    assert 0 in model["stable_positions"]
+    assert 1 not in model["stable_positions"]
+
+
+def test_ghost_elimination_rejects_corner_watermark_or_ad():
+    """Verify that corner watermark/ad logos (e.g. at x < 0.07*W) are eliminated from position profiles."""
+    engine = PodcastReframeEngine()
+    # Track 0: Main host at (960, 400)
+    # Track 1: Corner logo/avatar at (60, 50) -> x=60 is < 0.07 * 1920 (134px)
+    tracked = [
+        [
+            TrackedDetection(0, BBox(860, 250, 1060, 550), frame_idx),
+            TrackedDetection(1, BBox(20, 10, 100, 90), frame_idx),
+        ]
+        for frame_idx in range(10)
+    ]
+    model = engine._build_position_model(tracked, width=1920, height=1080)
+    assert model["person_count"] == 1
+    assert 0 in model["stable_positions"]
+    assert 1 not in model["stable_positions"]
+
+
+def test_panning_defaults_to_center_or_last_center_when_frame_is_empty():
+    """Verify that when frame has no detections or faces, panning holds last_center or uses neutral center."""
+    engine = PodcastReframeEngine()
+    cx, det, active_pos, source = engine._choose_panning_target_x(
+        frame_faces=[],
+        frame_tracked=[],
+        speaker_result=None,
+        frame_idx_approx=0,
+        position_targets={},
+        position_target_profiles={},
+        track_to_position={},
+        frame_width=1920,
+        frame_height=1080,
+        last_center=850,
+    )
+    # Must hold last_center (850) rather than pointing into dead space
+    assert cx == 850
+    assert source == "last_center"
+
 
 if __name__ == "__main__":
 

@@ -362,12 +362,12 @@ export const CTALayer: React.FC<{ cta?: CTAProps | null; clipDurationSec: number
         }}
       >
         {/* Left: Text Info */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
           <div
             style={{
               fontSize,
               fontWeight,
-              lineHeight: 1.2,
+              lineHeight: 1.25,
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -379,11 +379,12 @@ export const CTALayer: React.FC<{ cta?: CTAProps | null; clipDurationSec: number
           {subhead && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: Math.max(12, fontSize - 12),
+                marginTop: 8,
+                fontSize: Math.max(13, fontSize - 10),
                 fontWeight: 500,
-                opacity: 0.85,
+                opacity: 0.9,
                 color: "#94A3B8",
+                lineHeight: 1.2,
                 whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",

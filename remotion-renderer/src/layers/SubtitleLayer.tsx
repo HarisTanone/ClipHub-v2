@@ -665,6 +665,7 @@ function SubtitlePage({
           ) : page.tokens?.map((t, i) => {
             const startRel = (t.fromMs || 0) - (page.startMs || 0);
             const endRel = (t.toMs || 0) - (page.startMs || 0);
+            const isActive = timeInMs >= startRel && timeInMs < endRel;
             const isWordPop = lineTransition === "word_pop";
             const isTyping = lineTransition === "typing";
             if (isWordPop && !isActive) return null;
