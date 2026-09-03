@@ -175,7 +175,7 @@ export interface SubtitleStyle {
   wordSpacing: number;
   animationStyle: "pop" | "fade" | "slide" | "none";
   animationSpeed: number;
-  lineTransition: "word_pop" | "emphasis" | "line_reveal" | "karaoke";
+  lineTransition: "word_pop" | "emphasis" | "line_reveal" | "karaoke" | "typing";
   // Skia / Custom Shaders
   glowEnabled?: boolean;
   glowColor?: string;
@@ -600,6 +600,7 @@ const SUBTITLE_TRANSITION_META: Record<SubtitleStyle["lineTransition"], OptionMe
   emphasis: { label: "Big Keyword", mood: "Keyword hero", accent: "#FACC15", preview: "BIG", desc: "Kata terkuat dibuat besar seperti punchline." },
   line_reveal: { label: "Line Reveal", mood: "Editorial", accent: "#A78BFA", preview: "LINE", desc: "Baris muncul rapi seperti caption editorial." },
   karaoke: { label: "Karaoke", mood: "Smooth", accent: "#38BDF8", preview: "KARAOKE", desc: "Kata demi kata tersorot berurutan." },
+  typing: { label: "Typewriter", mood: "Dynamic typing", accent: "#10B981", preview: "TYPE...", desc: "Teks mengetik muncul kata demi kata dengan kursor aktif." },
 };
 
 const HIGHLIGHT_STYLE_META: Record<SubtitleStyle["highlightStyle"], OptionMeta> = {
