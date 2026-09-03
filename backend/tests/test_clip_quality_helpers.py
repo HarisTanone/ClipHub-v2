@@ -24,6 +24,23 @@ def test_smart_thumbnail_fallback_without_words():
     assert seek == 10.0  # 25% of 40
 
 
+def test_smart_thumbnail_seek_strictly_in_hook_window():
+    # Long clip (60s) with high-energy words far into the video (15s, 25s)
+    words = [
+        {"word": "halo", "start": 0.8, "end": 1.2},
+        {"word": "selamat", "start": 1.2, "end": 1.6},
+        {"word": "datang", "start": 1.6, "end": 2.0},
+        {"word": "SANGAT_LUAR_BIASA_HEBAT", "start": 15.0, "end": 18.0},
+        {"word": "FANTASTIS_BOMBASTIS", "start": 25.0, "end": 28.0},
+    ]
+    seek = smart_thumbnail_seek(words, duration=60.0, hook="Rahasia Sukses Ini")
+    # Must stay strictly inside the visible hook window [0.8, 2.5] and NOT jump to 15s or 25s
+    assert 0.8 <= seek <= 2.5
+    # Without hook, it would seek to mid-clip
+    seek_no_hook = smart_thumbnail_seek(words, duration=60.0, hook="")
+    assert seek_no_hook > 5.0
+
+
 def test_virality_breakdown_explainable_factors():
     v = virality_breakdown(
         score=80,

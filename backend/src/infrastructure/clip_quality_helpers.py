@@ -28,12 +28,50 @@ def smart_thumbnail_seek(
     words: list[dict] | None,
     duration: float,
     hook: str = "",
+    hook_duration: float = 3.0,
 ) -> float:
-    """Pick seek time for thumbnail: peak energy word mid-clip, not fixed 1s.
-
-    Priority: longest word in first 40% (hook face) → 25% of duration → 1.0s.
+    """Pick seek time for thumbnail.
+    
+    When hook text is present, ALWAYS capture within the fully visible hook window
+    [0.8s, min(hook_duration - 0.4, 2.5s)] so the thumbnail image guarantees displaying
+    the hook text and card clearly!
+    
+    When no hook is present, picks peak energy word mid-clip (first 45% or 25% fallback).
     """
     dur = max(0.5, float(duration or 1.0))
+    has_hook = bool(str(hook or "").strip())
+
+    if has_hook:
+        # Hook window: intro animation settles by ~0.6s, exit begins ~0.5s before hook_duration.
+        # Target sweet spot where hook typography and styling are 100% visible & stationary.
+        eff_hook_dur = max(1.0, float(hook_duration or 3.0))
+        h_start = min(0.8, dur * 0.3)
+        h_end = min(eff_hook_dur - 0.4, max(0.9, dur - 0.2), 2.5)
+        if h_end <= h_start:
+            h_end = min(h_start + 0.5, dur - 0.1)
+
+        best_t = min(1.2, (h_start + h_end) * 0.5)
+        best_score = -1.0
+
+        for w in (words or []):
+            try:
+                s = float(w.get("start", w.get("s", 0)) or 0)
+                e = float(w.get("end", w.get("e", s + 0.2)) or s + 0.2)
+                text = str(w.get("word", w.get("text", "")) or "")
+            except (TypeError, ValueError):
+                continue
+            mid = (s + e) * 0.5
+            if mid < h_start or mid > h_end:
+                continue
+            # Prefer longer spoken tokens in this hook window
+            score = (e - s) * 2.0 + min(len(text), 12) * 0.1
+            if score > best_score:
+                best_score = score
+                best_t = mid
+
+        return round(min(max(0.6, best_t), h_end), 2)
+
+    # Fallback for clips without a hook (e.g. general footage / no hook text)
     fallback = min(max(1.0, dur * 0.25), max(0.5, dur - 0.3))
     if not words:
         return round(fallback, 2)
@@ -63,10 +101,10 @@ def smart_thumbnail_seek(
 def generate_smart_thumbnail(
     video_path: str,
     thumb_path: str,
-    seek: float = 1.0,
-    width: int = 360,
+    seek: float = 1.2,
+    width: int = 1080,
 ) -> bool:
-    """ffmpeg single-frame thumb at smart seek. Returns True on success."""
+    """ffmpeg single-frame thumb at smart seek in high resolution. Returns True on success."""
     if not video_path or not os.path.exists(video_path):
         return False
     os.makedirs(os.path.dirname(thumb_path) or ".", exist_ok=True)
@@ -75,13 +113,13 @@ def generate_smart_thumbnail(
         "-ss", f"{max(0.0, float(seek)):.2f}",
         "-i", video_path,
         "-frames:v", "1",
-        "-vf", f"scale={width}:-1",
-        "-q:v", "3",
+        "-vf", f"scale='min({width},iw)':-2",
+        "-q:v", "2",
         thumb_path,
     ]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-        return r.returncode == 0 and os.path.exists(thumb_path)
+        return r.returncode == 0 and os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0
     except Exception as exc:
         logger.debug("smart_thumb fail: %s", exc)
         return False

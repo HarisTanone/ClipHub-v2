@@ -321,12 +321,24 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         if not is_valid and "minimum requirement of 3.0 seconds" in str(constraint_err):
             raise HTTPException(status_code=400, detail=constraint_err)
 
-    # 4b. Ensure local compliant thumbnail (captured at hook frame 1.5s)
+    # 4b. Ensure local compliant thumbnail (captured at hook frame ~1.2s)
     thumb_url = None
     comp_thumb = None
+    hook_seek = 1.2
     try:
         if not is_video_gen and body.clipRank is not None:
             rank_num = body.clipRank
+            # Read clip hook text if available to get optimal seek
+            try:
+                clip_info = (getattr(job_obj, "clips_data", None) or {}).get(str(rank_num)) or {}
+                c_hook = clip_info.get("hook") or ""
+                if c_hook:
+                    from src.infrastructure.clip_quality_helpers import smart_thumbnail_seek
+                    c_dur = float(clip_info.get("end", 0)) - float(clip_info.get("start", 0))
+                    hook_seek = smart_thumbnail_seek(clip_info.get("words") or [], c_dur, hook=c_hook)
+            except Exception:
+                pass
+
             thumb_dir = os.path.join(settings.OUTPUT_DIR, body.jobId, "thumbnail")
             os.makedirs(thumb_dir, exist_ok=True)
             candidate_thumb = os.path.join(thumb_dir, f"clip_{rank_num:02d}.jpg")
@@ -337,7 +349,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
                 thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
                 video_path=compliant_video,
                 output_path=os.path.join(thumb_dir, f"clip_{rank_num:02d}_social.jpg"),
-                seek=1.5,
+                seek=hook_seek,
             )
         elif is_video_gen:
             vg_thumb_out = os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, body.jobId, "thumb.jpg")
@@ -345,7 +357,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             comp_thumb = ensure_social_compliant_thumbnail(
                 video_path=compliant_video,
                 output_path=vg_thumb_out,
-                seek=1.5,
+                seek=hook_seek,
             )
     except Exception as e:
         logger.warning(f"Local thumbnail generation skipped: {e}")
@@ -446,6 +458,8 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         "customThumbnail": bool(thumb_url),
         "type": "video",
         "thumbnail": thumb_url or "",
+        "coverUrl": thumb_url or "",
+        "cover": thumb_url or "",
         "url": video_url,
     }
 
@@ -464,6 +478,8 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         "isAiGenerated": bool(body.isAiGenerated),
         "isDraft": bool(body.isDraft),
         "isAutoAddMusic": has_active_music,
+        "coverTimestampMs": int(max(0.5, float(hook_seek)) * 1000),
+        "coverTimestamp": round(hook_seek, 2),
         "collaborators": body.collaborators or [],
         "mentions": body.mentions or [],
         "music": {

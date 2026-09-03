@@ -22,6 +22,40 @@ class TestSocialCompliance(unittest.TestCase):
         """Verify non-existent paths return None without error."""
         self.assertIsNone(ensure_social_compliant_thumbnail(None, None))
 
+    @patch("subprocess.run")
+    def test_social_compliant_thumbnail_hook_sync(self, mock_run):
+        """Verify compliant thumbnail extraction captures hook at seek and syncs to candidate_thumb."""
+        with tempfile.TemporaryDirectory() as td:
+            dummy_video = os.path.join(td, "clip_01_final.mp4")
+            candidate_thumb = os.path.join(td, "clip_01.jpg")
+            social_thumb = os.path.join(td, "clip_01_social.jpg")
+            with open(dummy_video, "wb") as f:
+                f.write(b"dummy video")
+
+            def fake_ffmpeg(cmd, **kwargs):
+                out = cmd[-1]
+                with open(out, "wb") as f:
+                    f.write(b"dummy image content")
+                m = MagicMock()
+                m.returncode = 0
+                return m
+
+            mock_run.side_effect = fake_ffmpeg
+
+            res = ensure_social_compliant_thumbnail(
+                thumb_path=candidate_thumb,
+                video_path=dummy_video,
+                output_path=social_thumb,
+                seek=1.2,
+            )
+            self.assertEqual(res, social_thumb)
+            self.assertTrue(os.path.exists(social_thumb))
+            self.assertTrue(os.path.exists(candidate_thumb))
+            cmd_args = mock_run.call_args[0][0]
+            self.assertIn("-ss", cmd_args)
+            idx = cmd_args.index("-ss")
+            self.assertEqual(cmd_args[idx + 1], "1.20")
+
     def test_preset_resolver_default_fallback(self):
         """Verify resolve_preset('default') resolves to a valid preset dictionary instead of None."""
         res = resolve_preset("default", user_id=1)

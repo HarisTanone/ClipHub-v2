@@ -1059,21 +1059,32 @@ class JobService:
                     continue
                 rank = clip.rank
 
-                # Generate thumbnail from final video (seek to 1s)
+                # Generate thumbnail from final video (capturing hook moment)
                 final_path = f"{output_dir}/clip_{rank:02d}_final.mp4"
                 thumb_path = f"{thumb_dir}/clip_{rank:02d}.jpg"
                 if os.path.exists(final_path):
-                    thumb_cmd = [
-                        "ffmpeg", "-y", "-i", final_path,
-                        "-ss", "1", "-frames:v", "1",
-                        "-vf", "scale=360:-1",
-                        "-q:v", "3",
-                        thumb_path,
-                    ]
-                    try:
-                        await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
-                    except Exception:
-                        pass
+                    from src.infrastructure.clip_quality_helpers import (
+                        generate_smart_thumbnail,
+                        smart_thumbnail_seek,
+                    )
+                    words = self._get_words_for_clip(clip, clips_with_words)
+                    dur = max(0.5, float(clip.end) - float(clip.start))
+                    seek = smart_thumbnail_seek(words, dur, hook=clip.hook or "")
+                    ok = generate_smart_thumbnail(final_path, thumb_path, seek=seek, width=1080)
+                    if not ok:
+                        thumb_cmd = [
+                            "ffmpeg", "-y",
+                            "-ss", f"{max(0.2, float(seek)):.2f}",
+                            "-i", final_path,
+                            "-frames:v", "1",
+                            "-vf", "scale='min(1080,iw)':-2",
+                            "-q:v", "2",
+                            thumb_path,
+                        ]
+                        try:
+                            await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
+                        except Exception:
+                            pass
 
                 # Move raw clip to raw/ folder
                 raw_src = f"{output_dir}/clip_{rank:02d}.mp4"

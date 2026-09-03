@@ -362,6 +362,34 @@ class SocialAutoPostService:
             thumb_url = None
             public_backend = resolve_public_media_base_url()
 
+            # Calculate optimal seek inside hook window (default ~1.2s where hook is fully visible)
+            clip_hook_text = clip.get("hook") or ""
+            hook_seek = 1.2
+            if clip_hook_text:
+                from src.infrastructure.clip_quality_helpers import smart_thumbnail_seek
+                clip_words = clip.get("words") or []
+                clip_dur = max(0.5, float(clip.get("end", 0)) - float(clip.get("start", 0)))
+                hook_seek = smart_thumbnail_seek(clip_words, clip_dur, hook=clip_hook_text)
+
+            compliant_thumb = None
+            try:
+                thumb_dir = os.path.join(output_dir, "thumbnail")
+                os.makedirs(thumb_dir, exist_ok=True)
+                candidate_thumb = os.path.join(thumb_dir, f"clip_{rank:02d}.jpg")
+                if not os.path.exists(candidate_thumb):
+                    candidate_thumb = os.path.join(thumb_dir, f"clip_{rank:02d}_thumb.jpg")
+
+                social_thumb_path = os.path.join(thumb_dir, f"clip_{rank:02d}_social.jpg")
+
+                compliant_thumb = ensure_social_compliant_thumbnail(
+                    thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
+                    video_path=compliant_clip_file,
+                    output_path=social_thumb_path,
+                    seek=hook_seek,
+                )
+            except Exception as e:
+                logger.warning(f"auto_post: Thumbnail generation skipped for clip #{rank}: {e}")
+
             if public_backend:
                 video_url = f"{public_backend}/api/jobs/{job_id}/clips/{rank}/final"
                 thumb_url = f"{public_backend}/api/jobs/{job_id}/clips/{rank}/thumb"
@@ -374,25 +402,14 @@ class SocialAutoPostService:
                     logger.error(f"auto_post: GDrive upload failed for clip #{rank}: {e}")
                     errors.append(f"Clip #{rank} GDrive upload: {str(e)}")
 
-                try:
-                    thumb_dir = os.path.join(output_dir, "thumbnail")
-                    candidate_thumb = os.path.join(thumb_dir, f"clip_{rank:02d}.jpg")
-                    if not os.path.exists(candidate_thumb):
-                        candidate_thumb = os.path.join(thumb_dir, f"clip_{rank:02d}_thumb.jpg")
-
-                    compliant_thumb = ensure_social_compliant_thumbnail(
-                        thumb_path=candidate_thumb if os.path.exists(candidate_thumb) else None,
-                        video_path=compliant_clip_file,
-                        output_path=os.path.join(thumb_dir, f"clip_{rank:02d}_social.jpg"),
-                    )
-
-                    if compliant_thumb and os.path.exists(compliant_thumb):
+                if compliant_thumb and os.path.exists(compliant_thumb):
+                    try:
                         thumb_res = gdrive_uploader.upload_image(
                             compliant_thumb, filename=f"{job_id}_clip{rank}_thumb.jpg"
                         )
                         thumb_url = thumb_res.get("direct_link") or thumb_res.get("web_view_link")
-                except Exception as e:
-                    logger.warning(f"auto_post: Thumbnail upload skipped for clip #{rank}: {e}")
+                    except Exception as e:
+                        logger.warning(f"auto_post: Thumbnail GDrive upload failed for clip #{rank}: {e}")
 
             if not video_url:
                 logger.warning(f"auto_post: No public video URL for clip #{rank}. AUTOCLIPER_PUBLIC_URL or GDrive must be configured.")
@@ -437,6 +454,8 @@ class SocialAutoPostService:
                     "customThumbnail": bool(thumb_url),
                     "type": "video",
                     "thumbnail": thumb_url or "",
+                    "coverUrl": thumb_url or "",
+                    "cover": thumb_url or "",
                     "url": video_url,
                 }
 
@@ -451,6 +470,8 @@ class SocialAutoPostService:
                         "isAiGenerated": False,
                         "isDraft": False,
                         "isAutoAddMusic": False,
+                        "coverTimestampMs": int(max(0.5, float(hook_seek)) * 1000),
+                        "coverTimestamp": round(hook_seek, 2),
                         "collaborators": [],
                         "mentions": [],
                         "music": {"id": "", "artist": "", "name": "", "thumbnail": ""},

@@ -789,6 +789,7 @@ async def get_clip_thumb(
 
     # Check existing thumbnails
     thumb_candidates = [
+        f"{output_dir}/thumbnail/clip_{clip_rank:02d}_social.jpg",
         f"{output_dir}/thumbnail/clip_{clip_rank:02d}.jpg",
         f"{output_dir}/thumbnail/clip_{clip_rank}_thumb.jpg",
         f"{output_dir}/thumbnail/clip_{clip_rank:02d}_thumb.jpg",
@@ -817,18 +818,29 @@ async def get_clip_thumb(
     if not source_video:
         raise HTTPException(status_code=404, detail="No video source for thumbnail")
 
-    # Generate thumbnail at 2 seconds (or 1s for short clips)
+    # Generate thumbnail capturing hook moment (1.2s default)
     os.makedirs(f"{output_dir}/thumbnail", exist_ok=True)
     thumb_path = f"{output_dir}/thumbnail/clip_{clip_rank:02d}_thumb.jpg"
+
+    hook_seek = 1.2
+    try:
+        clip_data = (job.clips_data or {}).get(str(clip_rank)) if job else {}
+        c_hook = clip_data.get("hook") if isinstance(clip_data, dict) else ""
+        if c_hook:
+            from src.infrastructure.clip_quality_helpers import smart_thumbnail_seek
+            c_dur = float(clip_data.get("end", 0)) - float(clip_data.get("start", 0))
+            hook_seek = smart_thumbnail_seek(clip_data.get("words") or [], c_dur, hook=c_hook)
+    except Exception:
+        pass
 
     try:
         import asyncio
         result = await asyncio.to_thread(
             subprocess.run,
             [
-                "ffmpeg", "-y", "-ss", "2", "-i", source_video,
-                "-vframes", "1", "-q:v", "3",
-                "-vf", "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease",
+                "ffmpeg", "-y", "-ss", f"{hook_seek:.2f}", "-i", source_video,
+                "-vframes", "1", "-q:v", "2",
+                "-vf", "scale='min(1080,iw)':-2",
                 thumb_path,
             ],
             capture_output=True, timeout=10,
@@ -1305,6 +1317,8 @@ async def get_clip_detail(
         f"{output_dir}/clip_{clip_rank:02d}_final.mp4",
     )
     has_thumb = _find_file(
+        f"{output_dir}/thumbnail/clip_{clip_rank:02d}_social.jpg",
+        f"{output_dir}/thumbnail/clip_{clip_rank:02d}.jpg",
         f"{output_dir}/thumbnail/clip_{clip_rank}_thumb.jpg",
         f"{output_dir}/thumbnail/clip_{clip_rank:02d}_thumb.jpg",
         f"{output_dir}/clip_{clip_rank:02d}_thumb.jpg",
@@ -2116,6 +2130,7 @@ async def restyle_clip(
             except Exception as e:
                 logger.warning(f"[restyle] compatibility copy failed: {compatibility_path}: {e}")
         for thumbnail_path in (
+            f"{output_dir}/thumbnail/clip_{clip_rank:02d}_social.jpg",
             f"{output_dir}/thumbnail/clip_{clip_rank:02d}.jpg",
             f"{output_dir}/thumbnail/clip_{clip_rank}_thumb.jpg",
             f"{output_dir}/thumbnail/clip_{clip_rank:02d}_thumb.jpg",

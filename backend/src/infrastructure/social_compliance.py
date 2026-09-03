@@ -253,19 +253,19 @@ def ensure_social_compliant_thumbnail(
     thumb_path: Optional[str] = None,
     video_path: Optional[str] = None,
     output_path: Optional[str] = None,
-    seek: float = 1.5,
+    seek: float = 1.2,
     max_width: int = 1080,
     max_height: int = 1920,
 ) -> Optional[str]:
     """Ensure a compliant JPEG thumbnail capturing the hook text display when video_path is provided.
     
-    Extracts high quality frame at seek timestamp (default 1.5s when hook overlay is fully visible).
+    Extracts high quality frame at seek timestamp (default 1.2s when hook overlay is fully visible).
     """
     out_file = output_path
     if not out_file and video_path:
         out_file = os.path.splitext(video_path)[0] + "_thumb.jpg"
 
-    # If video_path is provided, extract directly from final video at the hook moment (1.5s)
+    # If video_path is provided, extract directly from final video at the hook moment (1.2s)
     if video_path and os.path.exists(video_path) and out_file:
         os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
         cmd = [
@@ -280,6 +280,13 @@ def ensure_social_compliant_thumbnail(
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
             if res.returncode == 0 and os.path.exists(out_file) and os.path.getsize(out_file) > 0:
+                # Synchronize with primary thumb_path so standard /thumb routes also serve the hook frame
+                if thumb_path and os.path.abspath(thumb_path) != os.path.abspath(out_file):
+                    try:
+                        import shutil
+                        shutil.copy2(out_file, thumb_path)
+                    except Exception:
+                        pass
                 return out_file
         except Exception as e:
             logger.warning(f"Failed to generate thumbnail at hook moment: {e}")
