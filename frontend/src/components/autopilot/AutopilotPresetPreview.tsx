@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Palette, Sparkles, Layers, Sliders, CheckCircle2, ChevronLeft, ChevronRight,
-  Eye, Play, Pause, Copy, Check, Download, Bookmark, Send, ShieldCheck
+  Eye, Play, Pause, Copy, Check, Download, Bookmark, Send, ShieldCheck,
+  Film, User, Clapperboard, Split, Megaphone, Image as ImageIcon, Share2, X as XIcon
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -313,47 +314,56 @@ export function AutopilotPresetPreview({
                         </p>
                         <div className="flex flex-wrap items-center gap-1 pt-1.5 border-t border-zinc-800/60 mt-1.5">
                           {hasTextEmp && (
-                            <span className="text-[8px] bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                            <span className="text-[8px] bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 inline-flex items-center gap-1 font-medium">
+                              <Sparkles className="h-2.5 w-2.5 shrink-0" />
                               AI Text
                             </span>
                           )}
                           {hasBroll && (
-                            <span className="text-[8px] bg-amber-500/15 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">
+                            <span className="text-[8px] bg-amber-500/15 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 inline-flex items-center gap-1 font-medium">
+                              <Film className="h-2.5 w-2.5 shrink-0" />
                               B-Roll
                             </span>
                           )}
                           {hasBehindPerson && (
-                            <span className="text-[8px] bg-blue-500/15 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/30">
+                            <span className="text-[8px] bg-blue-500/15 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/30 inline-flex items-center gap-1 font-medium">
+                              <User className="h-2.5 w-2.5 shrink-0" />
                               Behind 16:9
                             </span>
                           )}
                           {hasFloatingCard && (
-                            <span className="text-[8px] bg-purple-500/15 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">
+                            <span className="text-[8px] bg-purple-500/15 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30 inline-flex items-center gap-1 font-medium">
+                              <Layers className="h-2.5 w-2.5 shrink-0" />
                               Floating Card
                             </span>
                           )}
                           {hasCutaway && (
-                            <span className="text-[8px] bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30">
+                            <span className="text-[8px] bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30 inline-flex items-center gap-1 font-medium">
+                              <Clapperboard className="h-2.5 w-2.5 shrink-0" />
                               Cutaway
                             </span>
                           )}
                           {hasAutoGrid && (
-                            <span className="text-[8px] bg-cyan-500/15 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                            <span className="text-[8px] bg-cyan-500/15 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-500/30 inline-flex items-center gap-1 font-medium">
+                              <Split className="h-2.5 w-2.5 shrink-0" />
                               Auto-Grid
                             </span>
                           )}
                           {hasCta && (
-                            <span className="text-[8px] bg-violet-500/15 text-violet-300 px-1.5 py-0.5 rounded border border-violet-500/30">
+                            <span className="text-[8px] bg-violet-500/15 text-violet-300 px-1.5 py-0.5 rounded border border-violet-500/30 inline-flex items-center gap-1 font-medium">
+                              <Megaphone className="h-2.5 w-2.5 shrink-0" />
                               CTA
                             </span>
                           )}
                           {hasWatermark && (
-                            <span className="text-[8px] bg-sky-500/15 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/30">
+                            <span className="text-[8px] bg-sky-500/15 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/30 inline-flex items-center gap-1 font-medium">
+                              <ImageIcon className="h-2.5 w-2.5 shrink-0" />
                               Watermark
                             </span>
                           )}
                           {hasAutopost && (
-                            <span className="text-[8px] bg-rose-500/15 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30">
+                            <span className="text-[8px] bg-rose-500/15 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30 inline-flex items-center gap-1 font-medium">
+                              <Share2 className="h-2.5 w-2.5 shrink-0" />
                               Auto-Post
                             </span>
                           )}
@@ -668,14 +678,29 @@ export function AutopilotPresetPreview({
                   </div>
                   {activeHasBroll ? (
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium", activeHasBehindPerson ? "bg-blue-500/15 text-blue-300 border-blue-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
-                        {activeHasBehindPerson ? "✓ Behind Person 16:9" : "✗ Behind Person"}
+                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium inline-flex items-center gap-1", activeHasBehindPerson ? "bg-blue-500/15 text-blue-300 border-blue-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
+                        {activeHasBehindPerson ? (
+                          <Check className="h-2.5 w-2.5 shrink-0 text-blue-400" />
+                        ) : (
+                          <XIcon className="h-2.5 w-2.5 shrink-0 text-zinc-500" />
+                        )}
+                        <span>Behind Person 16:9</span>
                       </span>
-                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium", activeHasFloatingCard ? "bg-purple-500/15 text-purple-300 border-purple-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
-                        {activeHasFloatingCard ? "✓ Floating Object Card" : "✗ Floating Card"}
+                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium inline-flex items-center gap-1", activeHasFloatingCard ? "bg-purple-500/15 text-purple-300 border-purple-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
+                        {activeHasFloatingCard ? (
+                          <Check className="h-2.5 w-2.5 shrink-0 text-purple-400" />
+                        ) : (
+                          <XIcon className="h-2.5 w-2.5 shrink-0 text-zinc-500" />
+                        )}
+                        <span>Floating Object Card</span>
                       </span>
-                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium", activeHasCutaway ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
-                        {activeHasCutaway ? "✓ Full Frame Cutaway" : "✗ Cutaway"}
+                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium inline-flex items-center gap-1", activeHasCutaway ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
+                        {activeHasCutaway ? (
+                          <Check className="h-2.5 w-2.5 shrink-0 text-indigo-400" />
+                        ) : (
+                          <XIcon className="h-2.5 w-2.5 shrink-0 text-zinc-500" />
+                        )}
+                        <span>Full Frame Cutaway</span>
                       </span>
                     </div>
                   ) : (
@@ -702,8 +727,9 @@ export function AutopilotPresetPreview({
                   <span className="font-semibold text-zinc-200 truncate block">
                     {wmStyle.enabled ? (wmStyle.text || "@ClipHub") : "Tanpa Watermark"}
                   </span>
-                  <span className={cn("text-[8px] block mt-0.5 font-medium", autopostStyle?.enabled ? "text-rose-400" : "text-zinc-500")}>
-                    {autopostStyle?.enabled ? "🚀 Auto-Post Aktif" : "Manual Publish"}
+                  <span className={cn("text-[8px] mt-0.5 font-medium inline-flex items-center gap-1", autopostStyle?.enabled ? "text-rose-400" : "text-zinc-500")}>
+                    <Share2 className="h-2.5 w-2.5 shrink-0" />
+                    <span>{autopostStyle?.enabled ? "Auto-Post Aktif" : "Manual Publish"}</span>
                   </span>
                 </div>
               </div>
