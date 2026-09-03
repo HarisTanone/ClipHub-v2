@@ -421,8 +421,9 @@ class SkiaSubtitleRenderer:
                         concat_entries.append((empty_png, gap_dur))
                         cur_time = line_start
 
-                is_word_pop = style.get("line_transition") == "word_pop"
-                is_typing = style.get("line_transition") == "typing"
+                trans = style.get("line_transition") or style.get("lineTransition")
+                is_word_pop = trans == "word_pop"
+                is_typing = trans == "typing"
 
                 # Show full line, word pop, or typing reveal with active word highlighted as speech progresses
                 for w_idx, w in enumerate(line):

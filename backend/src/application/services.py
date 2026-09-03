@@ -353,8 +353,18 @@ class JobService:
                 initial_clips_data["broll_style_config"] = resolved_preset["broll_config"]
         if hook_style_config:
             initial_clips_data["hook_style_config"] = hook_style_config
+            if isinstance(hook_style_config, dict) and hook_style_config.get("engine"):
+                initial_clips_data["hook_engine"] = hook_style_config["engine"]
+        elif resolved_preset and resolved_preset.get("hook_engine"):
+            initial_clips_data["hook_engine"] = resolved_preset["hook_engine"]
+
         if subtitle_style_config:
             initial_clips_data["subtitle_style_config"] = subtitle_style_config
+            if isinstance(subtitle_style_config, dict) and subtitle_style_config.get("engine"):
+                initial_clips_data["subtitle_engine"] = subtitle_style_config["engine"]
+        elif resolved_preset and resolved_preset.get("subtitle_engine"):
+            initial_clips_data["subtitle_engine"] = resolved_preset["subtitle_engine"]
+
         if watermark_config:
             initial_clips_data["watermark_config"] = watermark_config
         if cta_config:

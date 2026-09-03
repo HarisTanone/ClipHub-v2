@@ -81,7 +81,9 @@ export function SubtitleEditor({
     { kind: "transition"; id: SubtitleStyle["lineTransition"]; meta: OptionMeta } |
     { kind: "animation"; id: SubtitleStyle["animationStyle"]; meta: OptionMeta }
   > = [
+    { kind: "transition", id: "karaoke", meta: SUBTITLE_TRANSITION_META.karaoke },
     { kind: "transition", id: "word_pop", meta: SUBTITLE_TRANSITION_META.word_pop },
+    { kind: "transition", id: "typing", meta: SUBTITLE_TRANSITION_META.typing },
     { kind: "transition", id: "emphasis", meta: SUBTITLE_TRANSITION_META.emphasis },
     { kind: "transition", id: "line_reveal", meta: SUBTITLE_TRANSITION_META.line_reveal },
     { kind: "animation", id: "pop", meta: SUBTITLE_ANIMATION_META.pop },
@@ -233,9 +235,11 @@ export function SubtitleEditor({
             </Section>
 
             <Section title="Line Transition">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                 {([
+                  { id: "karaoke", name: "Karaoke", desc: "Per-word highlight" },
                   { id: "word_pop", name: "Word Pop", desc: "Satu kata per frame" },
+                  { id: "typing", name: "Typewriter", desc: "Teks mengetik progresif" },
                   { id: "emphasis", name: "Emphasis", desc: "Highlight kata aktif" },
                   { id: "line_reveal", name: "Line Reveal", desc: "Full line timed" },
                 ] as const).map((mode) => (
@@ -406,10 +410,12 @@ export function SubtitleEditor({
             </Section>
 
             <Section title="Line Transition">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                 {([
                   { id: "karaoke", name: "Karaoke", desc: "Per-word highlight" },
                   { id: "word_pop", name: "Word Pop", desc: "Satu kata per frame" },
+                  { id: "typing", name: "Typewriter", desc: "Teks mengetik progresif" },
+                  { id: "emphasis", name: "Emphasis", desc: "Big keyword punchline" },
                   { id: "line_reveal", name: "Line Reveal", desc: "Full line reveal" },
                 ] as const).map((mode) => (
                   <button
@@ -923,7 +929,9 @@ export function SubtitleEditor({
                 const count = Math.max(1, Math.min(6, style.maxWordsPerLine || 4));
                 const words = sampleWords.slice(0, count);
                 const isWordPop = style.lineTransition === "word_pop";
-                const displayWords = isWordPop ? [words[activeWordIdx % words.length]] : words;
+                const isTyping = style.lineTransition === "typing";
+                const currentIdx = activeWordIdx % words.length;
+                const displayWords = isWordPop ? [words[currentIdx]] : isTyping ? words.slice(0, currentIdx + 1) : words;
 
                 return (
                   <div className="absolute left-0 right-0 flex justify-center px-3" style={{ top: `${posTop}%`, transform: "translateY(-50%)" }}>
@@ -937,7 +945,7 @@ export function SubtitleEditor({
                         <div style={{ width: "76%", height: 2, borderRadius: 99, backgroundColor: style.highlightColor, marginBottom: 5 }} />
                         <div className="flex flex-wrap justify-center" style={{ gap: style.wordSpacing * 0.5 }}>
                           {displayWords.map((w, i) => {
-                            const isHighlight = i === activeWordIdx % displayWords.length;
+                            const isHighlight = i === currentIdx;
                             return (
                               <span key={`${w}-${i}`} style={{ color: isHighlight ? style.highlightColor : style.color, fontSize: Math.max(style.fontSize * 0.35, 10), fontFamily: `'${style.fontFamily}', sans-serif`, fontWeight: isHighlight ? 900 : Number(style.fontWeight), letterSpacing: style.letterSpacing, textTransform: style.uppercase ? "uppercase" : style.capitalize ? "capitalize" : "none", WebkitTextStroke: style.strokeEnabled ? `${style.strokeWidth * 0.3}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `0 0 ${style.shadowBlur}px ${style.shadowColor}` : undefined }}>{w}</span>
                             );
@@ -947,7 +955,7 @@ export function SubtitleEditor({
                     ) : (
                       <div className={cn("flex flex-wrap justify-center", getSubAnimationClass(style.animationStyle))} style={{ gap: isWordPop ? 0 : style.wordSpacing * 0.5, backgroundColor: style.bgEnabled ? `${style.bgColor}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", padding: style.bgPadding * 0.4, borderRadius: style.bgRadius }}>
                         {displayWords.map((w, i) => {
-                          const isHighlight = isWordPop ? true : (i === activeWordIdx % displayWords.length);
+                          const isHighlight = isWordPop ? true : (i === currentIdx);
                           const isKeyword = style.highlightWords.includes(w);
                           const shouldHighlight = isHighlight || isKeyword;
                           const useDual = shouldHighlight && style.dualStyleEnabled;

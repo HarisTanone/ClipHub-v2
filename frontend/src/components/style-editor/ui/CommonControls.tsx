@@ -44,10 +44,25 @@ export function RangeInput({ label, min, max, value, onChange }: { label: string
   );
 }
 
-export function Checkbox({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function Checkbox({
+  label,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
-    <label className={cn("flex items-center gap-2.5 select-none transition-all py-1 px-1.5 rounded-md hover:bg-zinc-800/40", disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer")}>
-      <div className="relative flex items-center justify-center">
+    <label
+      className={cn(
+        "flex items-center gap-2.5 select-none transition-all py-1 px-1.5 rounded-lg hover:bg-zinc-800/40 group",
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+      )}
+    >
+      <div className="relative inline-flex items-center shrink-0">
         <input
           type="checkbox"
           checked={checked}
@@ -57,21 +72,29 @@ export function Checkbox({ label, checked, onChange, disabled }: { label: string
         />
         <div
           className={cn(
-            "w-4 h-4 rounded border flex items-center justify-center transition-all duration-150 shadow-sm",
+            "w-7 h-4 rounded-full transition-colors duration-200 ease-in-out relative border",
             checked
-              ? "bg-emerald-500 border-emerald-400 text-black shadow-emerald-500/20 shadow-md"
-              : "border-zinc-600 bg-zinc-900 peer-hover:border-zinc-400",
+              ? "bg-emerald-500 border-emerald-400 shadow-sm shadow-emerald-500/25"
+              : "bg-zinc-800 border-zinc-600 group-hover:border-zinc-500",
             disabled && "opacity-50"
           )}
         >
-          {checked && (
-            <svg className="w-2.5 h-2.5 stroke-[3] stroke-current" viewBox="0 0 12 12" fill="none">
-              <path d="M2.5 6L5 8.5L9.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
+          <div
+            className={cn(
+              "w-2.5 h-2.5 rounded-full transition-transform duration-200 ease-in-out absolute top-[2px] left-[2px] shadow-sm",
+              checked ? "translate-x-3 bg-zinc-950" : "translate-x-0 bg-zinc-300"
+            )}
+          />
         </div>
       </div>
-      <span className={cn("text-[11px] transition-colors", checked ? "text-zinc-200 font-medium" : "text-zinc-400")}>{label}</span>
+      <span
+        className={cn(
+          "text-[11px] transition-colors leading-tight",
+          checked ? "text-zinc-200 font-medium" : "text-zinc-400 group-hover:text-zinc-300"
+        )}
+      >
+        {label}
+      </span>
     </label>
   );
 }

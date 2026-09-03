@@ -2107,8 +2107,8 @@ class V2PipelineService:
             (job.clips_data or {}).get("text_emphasis_style_config")
         )
 
-        hook_engine = resolve_engine(hook_style_config)
-        sub_engine = resolve_engine(subtitle_style_config)
+        hook_engine = (job.clips_data or {}).get("hook_engine") or resolve_engine(hook_style_config)
+        sub_engine = (job.clips_data or {}).get("subtitle_engine") or resolve_engine(subtitle_style_config)
 
         logger.info(
             f"[{job_id}] Render style: hook_engine={hook_engine} "
