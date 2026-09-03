@@ -422,8 +422,9 @@ class SkiaSubtitleRenderer:
                         cur_time = line_start
 
                 is_word_pop = style.get("line_transition") == "word_pop"
+                is_typing = style.get("line_transition") == "typing"
 
-                # Show full line or single word pop with active word highlighted as speech progresses
+                # Show full line, word pop, or typing reveal with active word highlighted as speech progresses
                 for w_idx, w in enumerate(line):
                     w_start = max(0.0, float(w.get("start", 0)) + start_offset)
                     w_end = max(w_start + 0.08, float(w.get("end", 0)) + start_offset)
@@ -435,6 +436,13 @@ class SkiaSubtitleRenderer:
                             f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
                             if is_word_pop:
                                 concat_entries.append((empty_png, gap))
+                            elif is_typing:
+                                if w_idx > 0:
+                                    self._render_line_frame_pil(f_path, line[:w_idx], active_word_index=w_idx - 1, style=style, time_sec=cur_time)
+                                    concat_entries.append((f_path, gap))
+                                    frame_idx += 1
+                                else:
+                                    concat_entries.append((empty_png, gap))
                             else:
                                 self._render_line_frame_pil(f_path, line, active_word_index=None, style=style, time_sec=cur_time)
                                 concat_entries.append((f_path, gap))
@@ -443,8 +451,15 @@ class SkiaSubtitleRenderer:
 
                     dur = max(0.06, w_end - w_start)
                     f_path = os.path.join(tmp_dir, f"f_{frame_idx:04d}.png")
-                    words_to_render = [w] if is_word_pop else line
-                    active_idx = 0 if is_word_pop else w_idx
+                    if is_word_pop:
+                        words_to_render = [w]
+                        active_idx = 0
+                    elif is_typing:
+                        words_to_render = line[:w_idx + 1]
+                        active_idx = w_idx
+                    else:
+                        words_to_render = line
+                        active_idx = w_idx
                     self._render_line_frame_pil(f_path, words_to_render, active_word_index=active_idx, style=style, time_sec=w_start)
                     concat_entries.append((f_path, dur))
                     cur_time = w_end

@@ -508,6 +508,28 @@ class UnifiedFFmpegCompositor:
                         f":x=(w-text_w)/2:y={current_y}"
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                     )
+            elif config.line_transition == "typing":
+                for w_idx, w in enumerate(line):
+                    w_start = float(w.get("start", 0)) + offset + timing_adj
+                    next_w_start = (float(line[w_idx + 1].get("start", 0)) + offset + timing_adj) if (w_idx + 1 < len(line)) else line_end
+                    w_end = max(w_start + 0.08, next_w_start)
+                    typed_text = " ".join(str(item.get("word", "")).strip() for item in line[:w_idx + 1])
+                    if config.uppercase:
+                        typed_text = typed_text.upper()
+                    escaped_typed = self._escape_drawtext(typed_text)
+                    box_opt = f":box=1:boxcolor=black@{config.background_opacity}:boxborderw=8" if config.background_opacity > 0 else ""
+                    current_y = _get_y_for_time(w_start)
+                    filters.append(
+                        f"drawtext=text='{escaped_typed}'"
+                        f":fontsize={config.font_size}"
+                        f"{font_file_opt}"
+                        f":fontcolor={config.highlight_color or config.color}"
+                        f"{stroke_opt}"
+                        f"{shadow_opt}"
+                        f"{box_opt}"
+                        f":x=(w-text_w)/2:y={current_y}"
+                        f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
+                    )
             else:
                 # Karaoke/clean line rendering
                 line_text = " ".join(str(w.get("word", "")).strip() for w in line)

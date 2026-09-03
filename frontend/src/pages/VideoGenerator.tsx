@@ -377,7 +377,13 @@ function LiveVideoPreview({
   // Subtitle styling calculations
   const subPosTop = `${subtitleStyle.positionY ?? (subtitleStyle.position === "top" ? 18 : subtitleStyle.position === "center" ? 50 : 80)}%`;
   const isWordPop = subtitleStyle.lineTransition === "word_pop";
-  const displayWords = isWordPop ? [sampleWords[activeWordIdx % sampleWords.length]] : sampleWords;
+  const isTyping = subtitleStyle.lineTransition === "typing";
+  const currentSubIdx = activeWordIdx % sampleWords.length;
+  const displayWords = isWordPop
+    ? [sampleWords[currentSubIdx]]
+    : isTyping
+    ? sampleWords.slice(0, currentSubIdx + 1)
+    : sampleWords;
 
   const hasSubBg = subtitleStyle.bgEnabled || Boolean(subtitleStyle.bgColor && subtitleStyle.bgOpacity > 0);
   const subBgHex = subtitleStyle.bgColor || "#000000";
@@ -544,7 +550,7 @@ function LiveVideoPreview({
           >
             <div style={subContainerStyle}>
               {displayWords.map((w, idx) => {
-                const isActive = isWordPop ? true : idx === activeWordIdx % sampleWords.length;
+                const isActive = isWordPop ? true : idx === currentSubIdx;
                 const textFormatted = subtitleStyle.uppercase
                   ? w.toUpperCase()
                   : subtitleStyle.capitalize

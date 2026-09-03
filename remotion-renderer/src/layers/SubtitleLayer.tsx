@@ -665,9 +665,10 @@ function SubtitlePage({
           ) : page.tokens?.map((t, i) => {
             const startRel = (t.fromMs || 0) - (page.startMs || 0);
             const endRel = (t.toMs || 0) - (page.startMs || 0);
-            const isActive = startRel <= timeInMs && endRel > timeInMs;
             const isWordPop = lineTransition === "word_pop";
+            const isTyping = lineTransition === "typing";
             if (isWordPop && !isActive) return null;
+            if (isTyping && startRel > timeInMs) return null;
             const wordText = (t.text || "").trim();
             if (!wordText) return null;
             const isKeyword = Boolean(t.highlight) || highlightWords.includes(wordText.toLowerCase());

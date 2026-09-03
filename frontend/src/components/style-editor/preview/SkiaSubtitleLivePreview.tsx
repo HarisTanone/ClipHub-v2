@@ -54,7 +54,9 @@ export function SkiaSubtitleLivePreview({
           {(() => {
             const isWordPop = style.lineTransition === "word_pop";
             const isLineReveal = style.lineTransition === "line_reveal";
-            const displayWords = isWordPop ? [words[activeWordIdx % words.length]] : words;
+            const isTyping = style.lineTransition === "typing";
+            const currentIdx = activeWordIdx % words.length;
+            const displayWords = isWordPop ? [words[currentIdx]] : isTyping ? words.slice(0, currentIdx + 1) : words;
 
             // Card / Capsule background styles
             const hasBg = style.bgEnabled || presetId === "glassmorphism" || presetId === "clean_editorial" || presetId === "podcast_pro" || presetId === "modern_mono";

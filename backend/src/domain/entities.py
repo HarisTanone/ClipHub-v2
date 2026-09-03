@@ -574,7 +574,7 @@ class SubtitleStyleConfig:
     start_offset: float = 0.0
     timing_offset: float = 0.0
     word_padding: float = 0.05
-    line_transition: str = "word_pop"  # word_pop | emphasis | line_reveal | karaoke
+    line_transition: str = "word_pop"  # word_pop | emphasis | line_reveal | karaoke | typing
     animation_style: str = "pop"       # pop | fade | slide | none
     animation_speed: float = 1.0
     fade_in: float = 0.1

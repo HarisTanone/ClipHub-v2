@@ -344,7 +344,7 @@ export interface FFmpegSubtitlePreset {
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
-  lineTransition: "karaoke" | "word_pop" | "emphasis" | "line_reveal";
+  lineTransition: "karaoke" | "word_pop" | "emphasis" | "line_reveal" | "typing";
   strokeEnabled: boolean;
   strokeWidth: number;
   strokeColor: string;
@@ -678,7 +678,7 @@ export interface SkiaSubtitlePreset {
   fontSize: number;
   fontWeight: string;
   uppercase: boolean;
-  lineTransition: "karaoke" | "word_pop" | "emphasis" | "line_reveal";
+  lineTransition: "karaoke" | "word_pop" | "emphasis" | "line_reveal" | "typing";
   gradientEnabled?: boolean;
   gradientFrom?: string;
   gradientTo?: string;
