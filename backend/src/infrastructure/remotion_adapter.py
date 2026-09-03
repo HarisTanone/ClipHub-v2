@@ -63,6 +63,7 @@ class RemotionAdapter(IRemotionRenderer):
         text_emphasis_events: Optional[list[dict]] = None,
         broll_events: Optional[list[dict]] = None,
         cta: Optional[dict] = None,
+        watermark: Optional[dict] = None,
     ) -> RemotionRenderResult:
         """Render clip via Remotion server.
         
@@ -169,6 +170,7 @@ class RemotionAdapter(IRemotionRenderer):
                 "textEmphasisEvents": (text_emphasis_events or [])[:2],
                 "brollEvents": (broll_events or [])[:3],
                 "cta": cta,
+                "watermark": watermark,
                 "enableThreeJS": config.enable_threejs,
                 "enableAI": config.enable_ai_layer,
             },

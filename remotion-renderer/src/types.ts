@@ -210,6 +210,8 @@ export interface BrollStyleConfig {
 
 import type { CTAProps } from "./layers/CTALayer";
 export type { CTAProps };
+import type { WatermarkConfig } from "./layers/WatermarkLayer";
+export type { WatermarkConfig };
 
 /** Props for the main ClipComposition */
 export interface ClipCompositionProps {
@@ -222,6 +224,7 @@ export interface ClipCompositionProps {
   textEmphasisEvents?: TextEmphasisEvent[];
   brollEvents?: BrollEvent[];
   cta?: CTAProps | null;
+  watermark?: WatermarkConfig | null;
   enableThreeJS: boolean;
   enableAI: boolean;
 }

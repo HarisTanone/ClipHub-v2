@@ -8,6 +8,7 @@ import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 import { CTALayer } from "../layers/CTALayer";
+import { WatermarkLayer } from "../layers/WatermarkLayer";
 import { CanvasBackgroundLayer, videoFitStyle, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
 
 // ─── Font Loader ─────────────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   textEmphasisEvents = [],
   brollEvents = [],
   cta = null,
+  watermark = null,
   sceneGraph,
 }) => {
   const { fps, durationInFrames } = useVideoConfig();
@@ -191,6 +193,9 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
 
       {/* L5: End-card CTA — last 1.5s */}
       {cta && <CTALayer cta={cta} clipDurationSec={clipDurationSec} />}
+
+      {/* L6: Brand Watermark overlay */}
+      {watermark && <WatermarkLayer watermark={watermark} />}
     </AbsoluteFill>
   );
 };

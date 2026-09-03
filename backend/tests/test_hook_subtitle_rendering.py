@@ -243,3 +243,111 @@ def test_skia_subtitle_renderer_full_video_with_glow(tmp_path):
     )
     assert os.path.exists(out_video)
     assert os.path.getsize(out_video) > 0
+
+
+@pytest.mark.asyncio
+async def test_trim_all_clips_parallel(tmp_path):
+    """Verify _trim_all_clips trims clips concurrently."""
+    svc = V2PipelineService.__new__(V2PipelineService)
+    svc._renderer = MagicMock()
+
+    trimmed_ranks = []
+
+    async def mock_trim(video_path, clip, out_path, normalize_timestamps=False):
+        await asyncio.sleep(0.05)
+        trimmed_ranks.append(clip.rank)
+        return True
+
+    svc._renderer.trim_clip = mock_trim
+
+    clips = [
+        Clip(rank=1, start=0.0, end=10.0, score=90, hook="H1", reason="R1"),
+        Clip(rank=2, start=15.0, end=25.0, score=85, hook="H2", reason="R2"),
+        Clip(rank=3, start=30.0, end=40.0, score=80, hook="H3", reason="R3"),
+    ]
+
+    results = await svc._trim_all_clips(
+        job_id="test-job",
+        video_path="/dummy/video.mp4",
+        clips=clips,
+        output_dir=str(tmp_path),
+        normalize_timestamps=True,
+    )
+
+    assert len(results) == 3
+    assert all(results.values())
+    assert sorted(trimmed_ranks) == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_remotion_render_single_pass_cta_watermark(tmp_path):
+    """Verify _render_via_remotion passes CTA and Watermark to Remotion and skips post-FFmpeg re-encodes."""
+    from src.domain.interfaces_remotion import RemotionRenderResult
+
+    svc = V2PipelineService.__new__(V2PipelineService)
+    svc._repo = MagicMock()
+    svc._repo.update_status = AsyncMock()
+    svc._emit = MagicMock()
+    svc._emit_clip_progress = MagicMock()
+    svc._remotion_adapter = MagicMock()
+
+    # Track calls to Remotion render_clip
+    rendered_payloads = []
+
+    async def mock_render_clip(**kwargs):
+        rendered_payloads.append(kwargs)
+        # Create output file
+        out_p = kwargs["output_path"]
+        with open(out_p, "wb") as f:
+            f.write(b"video-data")
+        return RemotionRenderResult(success=True, output_path=out_p, render_time_seconds=1.2)
+
+    svc._remotion_adapter.render_clip = mock_render_clip
+
+    # Spy on _apply_cta and _apply_watermark
+    svc._apply_cta = AsyncMock()
+    svc._apply_watermark = AsyncMock()
+    svc._render_via_direct_engines = AsyncMock()
+    svc._build_broll_events = MagicMock(return_value=[])
+
+    out_dir = str(tmp_path)
+    base_clip = tmp_path / "clip_01.mp4"
+    base_clip.write_bytes(b"base-data")
+
+    clip = Clip(rank=1, start=0.0, end=10.0, score=90, hook="Test Hook", reason="Test Reason")
+    job = Job(
+        job_id="test-remotion-opt",
+        youtube_url="https://youtube.com/watch?v=dummy",
+        target_aspect_ratio="9:16",
+        broll_motion_style="none",
+        clips_data={
+            "cta_config": {"enabled": True, "headline": "Follow Us"},
+            "watermark_config": {"enabled": True, "text": "MyChannel"},
+        },
+    )
+
+    from src.domain.entities import CreativeDirection
+
+    await svc._render_via_remotion(
+        job=job,
+        job_id="test-remotion-opt",
+        clips=[clip],
+        clips_with_words={1: []},
+        creative_direction=CreativeDirection(),
+        output_dir=out_dir,
+        trim_results={1: True},
+        reframe_data={},
+        hook_style_config={"enabled": True, "engine": "remotion"},
+        subtitle_style_config={"enabled": True, "engine": "remotion"},
+    )
+
+    # 1. Remotion render_clip was called with cta and watermark
+    assert len(rendered_payloads) == 1
+    assert rendered_payloads[0]["cta"] == {"enabled": True, "headline": "Follow Us"}
+    assert rendered_payloads[0]["watermark"] is not None
+    assert rendered_payloads[0]["watermark"]["text"] == "MyChannel"
+
+    # 2. Post-Remotion FFmpeg re-encodes were skipped (single-pass composite)
+    svc._apply_cta.assert_not_called()
+    svc._apply_watermark.assert_not_called()
+

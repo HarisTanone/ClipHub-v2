@@ -47,28 +47,34 @@ const CHROMIUM_OPTIONS = {
   ],
 };
 
-// Sequential queue: strictly 1 render at a time to prevent Chromium multi-process RAM explosion
-let renderQueueTail = Promise.resolve();
+// Concurrency-controlled render queue
+const MAX_SERVER_CONCURRENCY = Math.max(1, Math.min(4, parseInt(process.env.REMOTION_CONCURRENCY || "2", 10)));
+let currentRunningRenders = 0;
+const renderQueue: Array<() => void> = [];
 
 function enqueueRender<T>(task: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    renderQueueTail = renderQueueTail
-      .then(async () => {
-        try {
-          const result = await task();
-          resolve(result);
-        } catch (err) {
-          reject(err);
+    const execute = async () => {
+      currentRunningRenders++;
+      try {
+        const result = await task();
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      } finally {
+        currentRunningRenders--;
+        if (renderQueue.length > 0 && currentRunningRenders < MAX_SERVER_CONCURRENCY) {
+          const next = renderQueue.shift();
+          if (next) next();
         }
-      })
-      .catch(async () => {
-        try {
-          const result = await task();
-          resolve(result);
-        } catch (err) {
-          reject(err);
-        }
-      });
+      }
+    };
+
+    if (currentRunningRenders < MAX_SERVER_CONCURRENCY) {
+      execute();
+    } else {
+      renderQueue.push(execute);
+    }
   });
 }
 
@@ -166,9 +172,11 @@ const RenderRequestSchema = z.object({
     hookAnimation: z.string().default("podcast_lower_third"),
     textEmphasisEvents: z.array(z.any()).max(2).default([]),
     brollEvents: z.array(z.any()).max(3).default([]),
+    cta: z.any().optional().nullable(),
+    watermark: z.any().optional().nullable(),
     enableThreeJS: z.boolean().default(false),
     enableAI: z.boolean().default(false),
-  }),
+  }).passthrough(),
   durationInFrames: z.number().int().positive(),
   fps: z.number().default(30),
   width: z.number().default(1080),
@@ -233,6 +241,16 @@ app.post("/render", async (req, res) => {
           ? `http://localhost:${PORT}/media${event.imagePath}`
           : event.imagePath,
       }));
+      if (
+        propsWithUrl.watermark &&
+        typeof propsWithUrl.watermark.imageDataUrl === "string" &&
+        propsWithUrl.watermark.imageDataUrl.startsWith("/")
+      ) {
+        propsWithUrl.watermark = {
+          ...propsWithUrl.watermark,
+          imageDataUrl: `http://localhost:${PORT}/media${propsWithUrl.watermark.imageDataUrl}`,
+        };
+      }
 
       console.log(`[remotion-server] Rendering (queued task): ${path.basename(request.outputPath)}`);
       console.log(`[remotion-server]   Video URL: ${propsWithUrl.videoPath}`);

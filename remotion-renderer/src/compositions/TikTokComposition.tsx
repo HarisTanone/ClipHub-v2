@@ -23,6 +23,7 @@ import { FramingTransitionLayer } from "../layers/FramingTransitionLayer";
 import { AITextLayer, HideDuringTextEmphasis } from "../layers/AITextLayer";
 import { BrollLayer, HideDuringBroll } from "../layers/BrollLayer";
 import { CTALayer } from "../layers/CTALayer";
+import { WatermarkLayer } from "../layers/WatermarkLayer";
 import { CanvasBackgroundLayer, videoFitStyle, videoSlotStyle } from "../layers/CanvasBackgroundLayer";
 
 const HIGHLIGHT_COLOR = "#39E508";
@@ -35,6 +36,7 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
   textEmphasisEvents = [],
   brollEvents = [],
   cta = null,
+  watermark = null,
   sceneGraph,
 }) => {
   const { fps, width, durationInFrames } = useVideoConfig();
@@ -166,6 +168,7 @@ export const TikTokComposition: React.FC<ClipCompositionProps> = ({
       </HideDuringTextEmphasis>
 
       {cta && <CTALayer cta={cta} clipDurationSec={clipDurationSec} />}
+      {watermark && <WatermarkLayer watermark={watermark} />}
     </AbsoluteFill>
   );
 };

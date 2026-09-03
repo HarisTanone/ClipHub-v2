@@ -1280,23 +1280,29 @@ class V2PipelineService:
         output_dir: str,
         normalize_timestamps: bool = False,
     ) -> dict[int, bool]:
-        """Trim all clips using FFmpeg."""
+        """Trim all clips concurrently using FFmpeg with bounded concurrency."""
         results = {}
-        for clip in clips:
+        max_trim_workers = max(2, min(4, os.cpu_count() or 4))
+        trim_sem = asyncio.Semaphore(max_trim_workers)
+
+        async def _trim_single(clip: Clip) -> None:
             out_path = f"{output_dir}/clip_{clip.rank:02d}.mp4"
-            try:
-                success = await self._renderer.trim_clip(
-                    video_path,
-                    clip,
-                    out_path,
-                    normalize_timestamps=normalize_timestamps,
-                )
-                results[clip.rank] = success
-                if not success:
-                    logger.warning(f"[{job_id}] Trim failed for clip {clip.rank}")
-            except Exception as e:
-                logger.warning(f"[{job_id}] Trim error clip {clip.rank}: {e}")
-                results[clip.rank] = False
+            async with trim_sem:
+                try:
+                    success = await self._renderer.trim_clip(
+                        video_path,
+                        clip,
+                        out_path,
+                        normalize_timestamps=normalize_timestamps,
+                    )
+                    results[clip.rank] = success
+                    if not success:
+                        logger.warning(f"[{job_id}] Trim failed for clip {clip.rank}")
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Trim error clip {clip.rank}: {e}")
+                    results[clip.rank] = False
+
+        await asyncio.gather(*[_trim_single(c) for c in clips])
         return results
 
     async def _apply_brolls(
@@ -2271,8 +2277,9 @@ class V2PipelineService:
             resolution=res,
         )
 
-        # Serial rendering: 1 clip max to prevent Chromium multi-process RAM exhaustion
-        render_semaphore = asyncio.Semaphore(1)
+        # Parallel rendering bounded by REMOTION_CONCURRENCY setting (default 2)
+        render_concurrency = max(1, min(int(getattr(settings, "REMOTION_CONCURRENCY", 2) or 2), 4))
+        render_semaphore = asyncio.Semaphore(render_concurrency)
         render_errors: list[str] = []
         prosody_map = prosody_results or {}
 
@@ -2333,7 +2340,11 @@ class V2PipelineService:
                 hook_style = (hook_style_config.get("animation", "")
                               or creative_direction.hook_animation or "podcast_lower_third")
 
-                cd_dict = asdict(creative_direction) if creative_direction else {}
+                cd_dict = (
+                    asdict(creative_direction)
+                    if hasattr(creative_direction, "__dataclass_fields__")
+                    else (dict(creative_direction) if isinstance(creative_direction, dict) else {})
+                )
                 cd_dict["hook_style_config"] = hook_style_config
                 cd_dict["subtitle_style_config"] = subtitle_style_config
                 cd_dict["text_emphasis_style_config"] = (
@@ -2389,6 +2400,10 @@ class V2PipelineService:
                     except Exception:
                         clip_cta = None
 
+                job_wm = (job.clips_data or {}).get("watermark_config") or getattr(job, "watermark_config", None)
+                from src.infrastructure.watermark_renderer import normalise_watermark_config, _is_enabled as _wm_is_enabled
+                clip_watermark = normalise_watermark_config(job_wm) if job_wm and _wm_is_enabled(job_wm.get("enabled")) else None
+
                 try:
                     result = await self._remotion_adapter.render_clip(
                         scene_graph={"clip_rank": clip.rank, "duration": clip.end - clip.start, "layers": []},
@@ -2403,6 +2418,7 @@ class V2PipelineService:
                         text_emphasis_events=clip.text_emphasis_events,
                         broll_events=self._build_broll_events(clip, job.broll_motion_style),
                         cta=clip_cta,
+                        watermark=clip_watermark,
                     )
                     if result.success:
                         # Non-Remotion layers (HyperFrames / Skia / FFmpeg) are pending. Do not expose an
@@ -2412,10 +2428,8 @@ class V2PipelineService:
                             or sub_eng in ("hyperframes", "ffmpeg", "skia")
                         )
                         if not has_pending_pass:
-                            # CTA End-Card (FFmpeg overlay/drawtext)
-                            await self._apply_cta(job, clip.rank, output_dir, out_path, job_id)
-                            # Watermark (FFmpeg overlay/drawtext) — final pass
-                            await self._apply_watermark(job, clip.rank, output_dir, out_path, job_id)
+                            # Remotion renders CTA and Watermark natively inside Chromium.
+                            # Eliminates 2 redundant full-video FFmpeg re-encodes per clip!
                             mark_clip_ready(output_dir, clip.rank)
                             self._emit_clip_progress(
                                 job_id=job_id,
@@ -2424,7 +2438,10 @@ class V2PipelineService:
                                 stage="Ready",
                                 eta_seconds=0,
                             )
-                        logger.info(f"[{job_id}] Remotion clip {clip.rank} ({result.render_time_seconds:.1f}s)")
+                        logger.info(
+                            f"[{job_id}] Remotion clip {clip.rank} rendered in {result.render_time_seconds:.1f}s "
+                            f"(single-pass composite: hook, subtitle, broll, cta={clip_cta is not None}, wm={clip_watermark is not None})"
+                        )
                     else:
                         message = f"clip {clip.rank}: {result.error_message or 'unknown Remotion error'}"
                         logger.warning(f"[{job_id}] Remotion failed {message}; falling back to direct FFmpeg rendering for clip {clip.rank}")

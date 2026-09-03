@@ -86,6 +86,7 @@ class IRemotionRenderer(ABC):
         text_emphasis_events: Optional[list[dict]] = None,
         broll_events: Optional[list[dict]] = None,
         cta: Optional[dict] = None,
+        watermark: Optional[dict] = None,
     ) -> RemotionRenderResult:
         """Render full clip composition via Remotion.
         

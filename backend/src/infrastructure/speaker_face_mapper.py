@@ -28,7 +28,26 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy.optimize import linear_sum_assignment
+try:
+    from scipy.optimize import linear_sum_assignment
+except ImportError:
+    def linear_sum_assignment(cost_matrix):
+        cost_matrix = np.asarray(cost_matrix)
+        rows, cols = cost_matrix.shape
+        row_ind, col_ind = [], []
+        used_cols = set()
+        for r in range(rows):
+            best_c = None
+            best_val = float("inf")
+            for c in range(cols):
+                if c not in used_cols and cost_matrix[r, c] < best_val:
+                    best_val = cost_matrix[r, c]
+                    best_c = c
+            if best_c is not None:
+                row_ind.append(r)
+                col_ind.append(best_c)
+                used_cols.add(best_c)
+        return np.array(row_ind), np.array(col_ind)
 
 from src.infrastructure.person_tracker import TrackedDetection
 from src.infrastructure.speaker_diarizer import DiarizationSegment
