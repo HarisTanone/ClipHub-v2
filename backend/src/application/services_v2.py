@@ -1636,17 +1636,24 @@ class V2PipelineService:
                     ev_end = float(clip_layout_events[idx + 1].get("time", clip_dur)) if idx + 1 < len(clip_layout_events) else clip_dur
                     blocked.append((ev_start, ev_end))
 
+            clip_framing_events = clip_reframe.get("framing_events") or []
+            shot_cuts = [
+                float(ev.get("time", 0.0))
+                for ev in (clip_layout_events + clip_framing_events)
+                if float(ev.get("time", 0.0)) > 0.1
+            ]
+
             segments = pick_top_overlay_suggestions(
                 clip.broll_suggestions,
                 max_per_clip=settings.TOP_OVERLAY_MAX_PER_CLIP,
                 blocked_ranges=blocked,
                 words=words_map.get(clip.rank) or [],
                 clip_duration=clip_dur,
+                shot_boundaries=shot_cuts,
             )
             if not segments:
                 clip.top_overlay_events = []
                 continue
-
 
             # Prefer already-spliced full-frame B-roll so top-behind is additive
             # (does not discard timeline splice when both effects run).
@@ -1663,10 +1670,12 @@ class V2PipelineService:
                 clip.top_overlay_events = []
                 continue
 
+            speaker_mode = "single" if clip_reframe.get("layout") == "single" else getattr(settings, "TOP_OVERLAY_SPEAKER_MASK_MODE", "dual_auto")
+            clip_renderer = TopBehindSubjectRenderer(speaker_mask_mode=speaker_mode)
 
             out_path = f"{output_dir}/clip_{clip.rank:02d}_top_overlay.mp4"
             try:
-                result = await renderer.apply_to_clip(
+                result = await clip_renderer.apply_to_clip(
                     video_path=input_path,
                     segments=segments,
                     output_path=out_path,
@@ -1972,11 +1981,21 @@ class V2PipelineService:
     ) -> None:
         """Analyze at most two emphasis events and prepare person masks."""
         job_data = job.clips_data or {}
-        if not bool(job_data.get("text_emphasis_enabled", False)):
+        raw_style_cfg = job_data.get("text_emphasis_style_config") or {}
+        style = normalise_text_emphasis_style(raw_style_cfg)
+        te_enabled = bool(
+            job_data.get("text_emphasis_enabled")
+            or getattr(job, "text_emphasis_enabled", False)
+            or (
+                raw_style_cfg
+                and raw_style_cfg.get("enabled", True) is not False
+                and (not style.get("effectMode") or style.get("effectMode") != "off")
+            )
+        )
+        if not te_enabled:
             logger.info(f"[{job_id}] AI cinematic text disabled by user")
             return
 
-        style = normalise_text_emphasis_style(job_data.get("text_emphasis_style_config"))
         durations = {clip.rank: max(0.0, clip.end - clip.start) for clip in clips}
         min_starts = {}
         blocked_ranges = {}
@@ -2009,14 +2028,6 @@ class V2PipelineService:
                 for suggestion in clip.broll_suggestions
                 if job.broll_enabled
             ]
-            for ev in getattr(clip, 'top_overlay_events', None) or []:
-                try:
-                    at = float(ev.get('at_time', 0))
-                    dur = float(ev.get('duration', 0))
-                except (TypeError, ValueError):
-                    continue
-                if dur > 0:
-                    blocked.append((at, at + dur))
 
             # Block CTA end-card window so AI Text never collides with CTA
             if cta_enabled and cta_duration > 0:
@@ -2328,17 +2339,21 @@ class V2PipelineService:
 
                 clip_reframe = reframe_data.get(clip.rank)
 
-                from src.infrastructure.hf_style_catalog import resolve_engine as _resolve_eng
-                hook_eng = _resolve_eng(hook_style_config)
+                hook_style = (
+                    (hook_style_config or {}).get("animation")
+                    or getattr(creative_direction, "hook_animation", None)
+                    or (creative_direction.get("hook_animation") if isinstance(creative_direction, dict) else None)
+                    or job.hook_style
+                    or "podcast_lower_third"
+                )
+                from src.infrastructure.hf_style_catalog import resolve_engine as _resolve_eng, REMOTION_HOOK_ANIMATIONS
+                hook_eng = _resolve_eng(hook_style_config) if hook_style_config else ("remotion" if hook_style in REMOTION_HOOK_ANIMATIONS else "remotion")
                 sub_eng = _resolve_eng(subtitle_style_config)
                 sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
                 # Remotion only renders hook & subtitles if engine is explicitly remotion.
                 # If engine is hyperframes, skia, or ffmpeg, it is handled exclusively by its dedicated pass.
                 remotion_hook_text = clip_hook if (hook_enabled and hook_eng == "remotion") else ""
                 remotion_words = clip_words if (sub_enabled and sub_eng == "remotion") else []
-
-                hook_style = (hook_style_config.get("animation", "")
-                              or creative_direction.hook_animation or "podcast_lower_third")
 
                 cd_dict = (
                     asdict(creative_direction)

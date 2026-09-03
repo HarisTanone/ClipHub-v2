@@ -97,16 +97,28 @@ def catalogue() -> dict[str, Any]:
     }
 
 
+REMOTION_HOOK_ANIMATIONS = {
+    "fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb",
+    "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer",
+    "bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse",
+    "breaking_tape", "mic_drop", "split_panel", "kinetic_stack", "glass_flash",
+    "marker_swipe", "signal_scan", "comment_reply", "search_prompt",
+    "countdown_list", "pov_stamp", "news_viralin_badge", "news_portal_pantau",
+    "news_offset_box", "brutalist_bracket", "quote_strip_tape", "paper_clip_scrap",
+    "trending_radar", "news_breaking_live",
+}
+
+
 def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     if not isinstance(cfg, dict):
         return "remotion"
 
-    # Auto-detect from animation, style, style_id, id, stylePreset, template, etc.
-    anim = str(
-        cfg.get("stylePreset")
+    # 1. Detect engine from explicit prefixes (e.g. skia_impact_badge, hf_template, ffmpeg_box)
+    raw_anim = str(
+        cfg.get("animation")
+        or cfg.get("stylePreset")
         or cfg.get("style_preset")
         or cfg.get("preset")
-        or cfg.get("animation")
         or cfg.get("style")
         or cfg.get("style_id")
         or cfg.get("id")
@@ -114,15 +126,29 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
         or ""
     ).lower().strip()
 
-    if anim.startswith("skia_") or anim.startswith("skia-") or anim.startswith("skia:"):
+    if raw_anim.startswith("skia_") or raw_anim.startswith("skia-") or raw_anim.startswith("skia:"):
         return "skia"
 
-    if anim.startswith("hf_") or anim.startswith("hook_") or anim.startswith("sub_"):
+    if raw_anim.startswith("hf_") or raw_anim.startswith("hook_") or raw_anim.startswith("sub_"):
         return "hyperframes"
 
-    if anim.startswith("ffmpeg_") or anim.startswith("ffmpeg:"):
+    if raw_anim.startswith("ffmpeg_") or raw_anim.startswith("ffmpeg:"):
         return "ffmpeg"
 
+    # 2. Hook animations natively rendered by Remotion HookLayer
+    hook_anim = str(cfg.get("animation") or "").lower().strip().replace(" ", "_").replace("-", "_")
+    if hook_anim in REMOTION_HOOK_ANIMATIONS:
+        # If user explicitly requested another engine for this hook, honor it
+        eng = str(cfg.get(key) or cfg.get("render_engine") or "").lower().strip()
+        if eng in ("skia", "canvaskit", "skia-python", "skia_python"):
+            return "skia"
+        if eng in ("hyperframes", "hf", "hyperframe"):
+            return "hyperframes"
+        if eng in ("ffmpeg", "drawtext"):
+            return "ffmpeg"
+        return "remotion"
+
+    # 3. Explicit engine specification
     eng = str(cfg.get(key) or cfg.get("render_engine") or "").lower().strip()
     if eng in ("remotion", "react", "motion", "remotion_renderer", "remotion-renderer", "web", "html"):
         return "remotion"
@@ -133,31 +159,7 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
     if eng in ("skia", "canvaskit", "skia-python", "skia_python"):
         return "skia"
 
-    # Remotion animation / preset lists (both hooks and subtitles supported natively by Remotion)
-    remotion_presets = {
-        # Subtitle visual presets & aliases
-        "classic", "dual_pop", "neon_pulse", "meme_impact", "editorial_banner",
-        "spotlight_keyword", "lower_third", "bubble_chat", "minimal_clean",
-        "breaking_tape", "quote_box", "documentary", "caption_strip", "word_tiles",
-        "gradient_glass", "comic_burst", "terminal_type", "bold_yellow",
-        "emphasis_orange", "emphasis_green", "neon", "big_impact", "slide_clean",
-        "glow_purple", "bold_impact", "bold_impact_stroke", "hormozi_pop",
-        "classic_karaoke", "devon_clean", "clean_editorial", "podcast_pro",
-        "podcast_dialogue", "kinetic_word_box", "neon_tube", "neon_glow",
-        "gradient_fill", "cinematic_slate", "cinematic_bar", "modern_mono",
-        "tech_mono", "comic_pop", "retro_chrome", "outline_stack", "fire_emphasis",
-        # Hook animation styles & cards
-        "fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb",
-        "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer",
-        "bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse",
-        "mic_drop", "split_panel", "kinetic_stack", "glass_flash", "marker_swipe",
-        "signal_scan", "comment_reply", "search_prompt", "countdown_list",
-        "pov_stamp", "news_viralin_badge", "news_portal_pantau", "news_offset_box",
-        "brutalist_bracket", "quote_strip_tape", "paper_clip_scrap",
-        "trending_radar", "news_breaking_live",
-    }
-
-    norm_anim = anim.replace(" ", "_").replace("-", "_")
+    norm_anim = raw_anim.replace(" ", "_").replace("-", "_")
 
     skia_explicit = (
         "glassmorphism", "clean_editorial", "podcast_pro", "kinetic_word_box",
@@ -166,17 +168,32 @@ def resolve_engine(cfg: dict | None, key: str = "engine") -> str:
         "neon_glow", "gradient_pill", "comic_pop", "cyberpunk", "minimal_clean",
         "split_duotone", "impact_yellow",
     )
-    if anim in skia_explicit or norm_anim in skia_explicit:
+    if raw_anim in skia_explicit or norm_anim in skia_explicit:
         return "skia"
 
     try:
         from src.infrastructure.subtitle_styles import SKIA_STYLES, FFMPEG_STYLES
-        if anim in SKIA_STYLES or norm_anim in SKIA_STYLES:
+        if raw_anim in SKIA_STYLES or norm_anim in SKIA_STYLES:
             return "skia"
-        if anim in FFMPEG_STYLES or norm_anim in FFMPEG_STYLES:
+        if raw_anim in FFMPEG_STYLES or norm_anim in FFMPEG_STYLES:
             return "ffmpeg"
     except Exception:
         pass
+
+    # Remotion animation / preset lists
+    remotion_presets = {
+        # Subtitle visual presets & aliases
+        "classic", "dual_pop", "neon_pulse", "meme_impact", "editorial_banner",
+        "spotlight_keyword", "lower_third", "bubble_chat",
+        "breaking_tape", "quote_box", "documentary", "caption_strip", "word_tiles",
+        "gradient_glass", "comic_burst", "terminal_type", "bold_yellow",
+        "emphasis_orange", "emphasis_green", "neon", "big_impact", "slide_clean",
+        "glow_purple", "bold_impact", "hormozi_pop",
+        "classic_karaoke", "devon_clean", "podcast_dialogue", "cinematic_bar",
+        "tech_mono", "fire_emphasis",
+        # Hook animation styles
+        *REMOTION_HOOK_ANIMATIONS,
+    }
 
     if norm_anim in remotion_presets:
         return "remotion"

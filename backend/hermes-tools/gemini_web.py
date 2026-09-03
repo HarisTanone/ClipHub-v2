@@ -576,7 +576,8 @@ def build_phase1_prompt(video_url: str, duration: float, max_clips: int) -> str:
         "- Punya kekuatan emosional tinggi\n"
         "- Bisa berdiri sendiri tanpa konteks tambahan\n"
         "- Memicu komentar/share\n"
-        "- Punya struktur cerita utuh\n\n"
+        "- Punya struktur cerita utuh\n"
+        "- Seleksi Pembicara Selektif (Selective User): prioritaskan pembicara utama yang sedang menyampaikan gagasan bernas secara stabil\n\n"
         "ATURAN:\n"
         "- Klip TIDAK BOLEH OVERLAP\n"
         "- start = awal kalimat baru\n"
@@ -627,14 +628,17 @@ def build_phase2_prompt(clips: list, duration: float) -> str:
         "- keyword: UPPERCASE maks 20 char\n"
         "- template: word_pop_typography / line_reveal_typography / "
         "particle_text_burst\n"
-        "- duration: 1.5 - 3.0 detik\n"
-        "- visual_category: footage / icon / motion_graphic / reaction\n\n"
+        "- duration: 2.0 - 2.8 detik (selaras dengan satu frasa utuh)\n"
+        "- visual_category: footage / icon / motion_graphic / reaction\n"
+        "- placement: behind_person | full_frame\n"
+        "  * behind_person: stock video di BELAKANG orang. Hanya di momen 1 pembicara stabil. DILARANG saat kamera cut / pergantian speaker!\n"
+        "  * full_frame: stock video menggantikan layar penuh (cutaway).\n\n"
         "OUTPUT - RAW JSON SAJA:\n"
         '{"clips": [{"rank": 1, "hook": "refined hook", '
         '"hook_alt": "alternative"}], '
         '"broll_suggestions": {"1": [{"at_time": 5.0, '
         '"keyword": "KEYWORD", "template": "word_pop_typography", '
-        '"duration": 2.0, "visual_category": "footage"}]}}'
+        '"duration": 2.2, "visual_category": "footage", "placement": "behind_person"}]}}'
     )
 
 

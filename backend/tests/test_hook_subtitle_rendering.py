@@ -351,3 +351,62 @@ async def test_remotion_render_single_pass_cta_watermark(tmp_path):
     svc._apply_cta.assert_not_called()
     svc._apply_watermark.assert_not_called()
 
+
+def test_resolve_engine_hook_animation_not_overridden_by_subtitle_preset():
+    from src.infrastructure.hf_style_catalog import resolve_engine
+
+    # When hook config has animation, it must resolve to remotion even if stylePreset is a skia subtitle preset
+    cfg = {
+        "animation": "podcast_lower_third",
+        "stylePreset": "clean_editorial",
+    }
+    assert resolve_engine(cfg) == "remotion"
+
+    cfg2 = {
+        "animation": "paper_clip_scrap",
+        "preset": "podcast_pro",
+    }
+    assert resolve_engine(cfg2) == "remotion"
+
+    cfg3 = {
+        "animation": "trending_radar",
+        "stylePreset": "minimal_clean",
+    }
+    assert resolve_engine(cfg3) == "remotion"
+
+
+def test_resolve_engine_explicit_precedence():
+    from src.infrastructure.hf_style_catalog import resolve_engine
+
+    # Explicit engine overrides for styles without prefix
+    assert resolve_engine({"engine": "remotion", "stylePreset": "clean_editorial"}) == "remotion"
+    assert resolve_engine({"engine": "skia", "animation": "paper_clip_scrap"}) == "skia"
+    assert resolve_engine({"engine": "ffmpeg", "animation": "paper_clip_scrap"}) == "ffmpeg"
+
+
+
+def test_text_emphasis_fallback_phrase_relaxed_overlap():
+    from src.infrastructure.text_emphasis import _find_fallback_phrase
+
+    words = [
+        {"word": "Halo", "start": 3.2, "end": 3.6},
+        {"word": "semuanya", "start": 3.6, "end": 4.1},
+        {"word": "selamat", "start": 4.1, "end": 4.5},
+        {"word": "datang", "start": 4.5, "end": 5.0},
+    ]
+    # Block the entire timeline so strict non-overlap fails
+    blocked_ranges = [(0.0, 10.0)]
+    fallback = _find_fallback_phrase(
+        words=words,
+        min_start=3.0,
+        duration=10.0,
+        blocked_ranges=blocked_ranges,
+        effect="hero_punch",
+    )
+    # Guaranteed fallback must return a valid event instead of None
+    assert fallback is not None
+    assert fallback["id"] == "emphasis_fallback"
+    assert fallback["effect"] == "hero_punch"
+    assert len(fallback["text"]) > 0
+
+

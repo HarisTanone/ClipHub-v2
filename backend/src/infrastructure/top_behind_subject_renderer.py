@@ -248,9 +248,20 @@ class TopBehindSubjectRenderer:
         self._subject_cache: dict[int, tuple[float, float]] = {}
         self._max_mask_components = 2
 
-        # Temporal smoothing state
+        # Temporal smoothing & tracking state
         self._prev_clean_mask: np.ndarray | None = None
         self._prev_mask_centroid: tuple[float, float] | None = None
+        self._prev_gray_frame: np.ndarray | None = None
+        self._active_track_box: tuple[float, float, float, float] | None = None
+        self._secondary_persistence: int = 0
+
+    def reset_temporal_state(self) -> None:
+        """Reset all temporal smoothing & tracking states (used on shot cuts / segment gaps)."""
+        self._prev_clean_mask = None
+        self._prev_mask_centroid = None
+        self._prev_gray_frame = None
+        self._active_track_box = None
+        self._secondary_persistence = 0
 
     # ─── Public Frame Compositor ────────────────────────────────────────────
 
@@ -270,15 +281,21 @@ class TopBehindSubjectRenderer:
         p = self._normalize_person_mask(person_mask, h, w)
         p = self._clean_person_mask(p, guide_frame=frame)
 
-        # 2. Adaptive Motion-Aware Temporal EMA Smoothing
+        # 2. Adaptive Motion-Aware Temporal EMA Smoothing with Cut-Aware Snap
         if (
             self._prev_clean_mask is not None
             and self._prev_clean_mask.shape == p.shape
         ):
             diff = np.abs(p - self._prev_clean_mask)
-            alpha_weight = np.where(diff < 0.12, 0.65, 0.15).astype(np.float32)
-            p = alpha_weight * self._prev_clean_mask + (1.0 - alpha_weight) * p
-            p = np.clip(p, 0.0, 1.0)
+            mean_diff = float(np.mean(diff))
+            # If the mask changed drastically across the frame (e.g. shot cut or sudden person switch),
+            # snap instantly without dragging a ghost/shadow of the old person!
+            if mean_diff > 0.28:
+                p = p
+            else:
+                alpha_weight = np.where(diff < 0.12, 0.65, 0.15).astype(np.float32)
+                p = alpha_weight * self._prev_clean_mask + (1.0 - alpha_weight) * p
+                p = np.clip(p, 0.0, 1.0)
         self._prev_clean_mask = p.copy()
 
         # 3. Layout person (natural 1:1 original crispness)
@@ -452,6 +469,33 @@ class TopBehindSubjectRenderer:
             self._apply_sync, video_path, segments, output_path, fps
         )
 
+    def _detect_shot_cut(self, frame: np.ndarray) -> bool:
+        """Detect camera cut / scene transition between consecutive frames (<0.3ms)."""
+        if frame is None or frame.size == 0:
+            return False
+        h, w = frame.shape[:2]
+        small = cv2.resize(frame, (120, 68), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+
+        if self._prev_gray_frame is None or self._prev_gray_frame.shape != gray.shape:
+            self._prev_gray_frame = gray
+            return False
+
+        diff = cv2.absdiff(gray, self._prev_gray_frame)
+        mean_diff = float(np.mean(diff))
+
+        hist1 = cv2.calcHist([self._prev_gray_frame], [0], None, [32], [0, 256])
+        hist2 = cv2.calcHist([gray], [0], None, [32], [0, 256])
+        cv2.normalize(hist1, hist1, 0, 1, cv2.NORM_MINMAX)
+        cv2.normalize(hist2, hist2, 0, 1, cv2.NORM_MINMAX)
+        corr = float(cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL))
+
+        self._prev_gray_frame = gray
+
+        # Hard camera cuts produce sharp correlation drop & significant pixel shift
+        is_cut = (corr < 0.50 and mean_diff > 25.0) or (corr < 0.70 and mean_diff > 45.0) or mean_diff > 65.0
+        return is_cut
+
     def _apply_sync(
         self,
         video_path: str,
@@ -550,8 +594,19 @@ class TopBehindSubjectRenderer:
                 if active is None:
                     pipe.stdin.write(frame.tobytes())
                     frame_idx += 1
-                    self._prev_clean_mask = None
+                    self.reset_temporal_state()
                     continue
+
+                # Real-time shot cut detection to prevent ghosting and lag between speakers
+                is_cut = self._detect_shot_cut(frame)
+                if is_cut:
+                    logger.debug(
+                        "top_overlay: shot cut detected at frame %d (t=%.2fs) — resetting temporal state",
+                        frame_idx,
+                        t,
+                    )
+                    self.reset_temporal_state()
+                    last_mask = np.zeros((height, width), dtype=np.float32)
 
                 seg, handle, is_vid, asset_id = active
                 overlay = self._read_overlay(handle, is_vid, width, height, asset_id=asset_id)
@@ -566,7 +621,7 @@ class TopBehindSubjectRenderer:
                 raw_time_alpha = min(t_in, t_out)
                 smooth_time_alpha = raw_time_alpha * raw_time_alpha * (3.0 - 2.0 * raw_time_alpha)
 
-                if frame_idx % self.mask_stride == 0 or last_mask.max() < 0.01:
+                if is_cut or frame_idx % self.mask_stride == 0 or last_mask.max() < 0.01:
                     last_mask = self._predict_person_mask(model, frame, height, width)
 
                 composite = self.render(
@@ -640,42 +695,96 @@ class TopBehindSubjectRenderer:
             p = cv2.resize(p, (w, h), interpolation=cv2.INTER_LINEAR)
         return np.clip(p, 0.0, 1.0)
 
+    def _solidify_body_and_attached_objects(
+        self,
+        binary: np.ndarray,
+        h: int,
+        w: int,
+    ) -> np.ndarray:
+        """Protect microphones, handheld items, lapels, and chest objects from being cut out.
+
+        Any object attached to, overlapping, or resting on the person's torso/body is
+        retained as solid foreground so background B-roll never leaks into microphones or body gaps.
+        """
+        if binary.max() == 0:
+            return binary
+
+        # 1. Connected components analysis
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        if n <= 1:
+            return binary
+
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        order = np.argsort(areas)[::-1]
+
+        if self.speaker_mask_mode in {"single", "selective"}:
+            keep_n = 1
+        else:
+            keep_n = min(int(self._max_mask_components), len(order))
+            if keep_n >= 2 and len(order) >= 2:
+                a0 = float(areas[order[0]])
+                a1 = float(areas[order[1]])
+                if a0 <= 0 or a1 / a0 < 0.20:
+                    keep_n = 1
+
+        keep_labels = [1 + int(order[i]) for i in range(keep_n)]
+        solid_binary = np.zeros((h, w), dtype=np.uint8)
+
+        for lbl in keep_labels:
+            comp_mask = (labels == lbl).astype(np.uint8)
+            cy0 = stats[lbl, cv2.CC_STAT_TOP]
+            ch_h = stats[lbl, cv2.CC_STAT_HEIGHT]
+            cy1 = min(h, cy0 + ch_h)
+
+            filled_comp = comp_mask.copy()
+
+            # Torso scanline bridge:
+            # A person's upper body / chest / torso is physically solid.
+            # Any 0 gap between the leftmost and rightmost non-zero pixels on row y
+            # represents a microphone (Shure SM7B, mic arm, lavalier), handheld item,
+            # clothing emblem, or necktie. Fill the gap completely!
+            for y in range(cy0, cy1):
+                row_pts = np.where(comp_mask[y, :] > 0)[0]
+                if len(row_pts) >= 2:
+                    x_min, x_max = int(row_pts[0]), int(row_pts[-1])
+                    filled_comp[y, x_min : x_max + 1] = 1
+
+            solid_binary = cv2.bitwise_or(solid_binary, (filled_comp * 255).astype(np.uint8))
+
+        # 2. Boundary-sealed floodfill for any cavity connected to image boundaries (e.g. mic stand coming from below)
+        pad = np.zeros((h + 4, w + 4), dtype=np.uint8)
+        pad[2 : h + 2, 2 : w + 2] = solid_binary
+        # Seal bottom border if the person touches or is near the bottom
+        pad[h + 2, :] = 255
+
+        flood = pad.copy()
+        ff_mask = np.zeros((h + 6, w + 6), dtype=np.uint8)
+        cv2.floodFill(flood, ff_mask, (0, 0), 128)
+        holes = (flood != 128) & (pad == 0)
+        pad[holes] = 255
+        sealed_binary = pad[2 : h + 2, 2 : w + 2]
+
+        # 3. Adaptive morphological close: bridge concavities/notches around chin, neck, and mic capsules
+        k_size = max(11, int(round(min(h, w) * 0.016))) | 1
+        k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+        closed = cv2.morphologyEx(sealed_binary, cv2.MORPH_CLOSE, k_close, iterations=1)
+
+        return closed
+
     def _clean_person_mask(self, p: np.ndarray, guide_frame: np.ndarray | None = None) -> np.ndarray:
-        """High-precision anti-aliased matte with Fast Guided Matting edge snap."""
+        """High-precision anti-aliased matte with microphone & object protection."""
         if p.max() < 0.01:
             return p
 
         h, w = p.shape[:2]
         binary = (p >= 0.40).astype(np.uint8) * 255
 
-        # 1. Connected components
-        n, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-        if n > 1:
-            areas = stats[1:, cv2.CC_STAT_AREA]
-            order = np.argsort(areas)[::-1]
-            keep_n = max(1, min(int(self._max_mask_components), len(order)))
-            if keep_n >= 2 and len(order) >= 2:
-                a0 = float(areas[order[0]])
-                a1 = float(areas[order[1]])
-                if a0 <= 0 or a1 / a0 < 0.25:
-                    keep_n = 1
-            keep_labels = {1 + int(order[i]) for i in range(keep_n)}
-            binary = np.where(np.isin(labels, list(keep_labels)), 255, 0).astype(np.uint8)
-
-        # 2. Fill internal holes
-        flood = binary.copy()
-        ff_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
-        cv2.floodFill(flood, ff_mask, (0, 0), 128)
-        holes = (flood != 128) & (binary == 0)
-        binary[holes] = 255
-
-        # 3. Morphological close
-        k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k3, iterations=1)
+        # Solidify body and attached objects (mic, stand, lapel, handheld items)
+        binary = self._solidify_body_and_attached_objects(binary, h, w)
 
         float_mask = (binary >= 128).astype(np.float32)
 
-        # 4. Fast Guided Filter
+        # Fast Guided Filter: snaps low-res YOLO mask to high-res image luminance edges
         if guide_frame is not None and guide_frame.shape[:2] == (h, w):
             gray = cv2.cvtColor(guide_frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
             float_mask = fast_guided_filter(gray, float_mask, r=6, eps=1e-3, subsample=2)
@@ -977,11 +1086,119 @@ class TopBehindSubjectRenderer:
             logger.debug("top_overlay: subject detect fail: %s", exc)
             return None
 
+    @staticmethod
+    def _compute_box_iou(b1: tuple[float, float, float, float], b2: tuple[float, float, float, float]) -> float:
+        x1 = max(b1[0], b2[0])
+        y1 = max(b1[1], b2[1])
+        x2 = min(b1[2], b2[2])
+        y2 = min(b1[3], b2[3])
+        inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        a1 = max(1.0, (b1[2] - b1[0]) * (b1[3] - b1[1]))
+        a2 = max(1.0, (b2[2] - b2[0]) * (b2[3] - b2[1]))
+        union = a1 + a2 - inter
+        return inter / max(1.0, union)
+
+    def _find_active_subject_index(
+        self,
+        boxes: list[tuple[float, float, float, float]],
+        areas: list[float],
+        h: int,
+        w: int,
+    ) -> int:
+        if not boxes:
+            return 0
+        if self._active_track_box is not None:
+            best_score = -1.0
+            best_idx = 0
+            for i, box in enumerate(boxes):
+                iou = self._compute_box_iou(box, self._active_track_box)
+                cx = (box[0] + box[2]) * 0.5 / max(1, w)
+                cy = (box[1] + box[3]) * 0.5 / max(1, h)
+                tcx = (self._active_track_box[0] + self._active_track_box[2]) * 0.5 / max(1, w)
+                tcy = (self._active_track_box[1] + self._active_track_box[3]) * 0.5 / max(1, h)
+                dist = math.hypot(cx - tcx, cy - tcy)
+                score = iou * 0.65 + max(0.0, 1.0 - dist) * 0.35
+                if score > best_score:
+                    best_score = score
+                    best_idx = i
+            if best_score > 0.20:
+                return best_idx
+
+        # New track or track lost: pick most central & prominent subject
+        max_area = max(areas) if areas else 1.0
+        best_score = -1.0
+        best_idx = 0
+        for i, (box, area) in enumerate(zip(boxes, areas)):
+            cx = (box[0] + box[2]) * 0.5 / max(1, w)
+            cy = (box[1] + box[3]) * 0.5 / max(1, h)
+            center_dist = abs(cx - 0.5)
+            center_score = max(0.0, 1.0 - center_dist * 1.6)
+            area_score = area / max_area
+            upper_bonus = 1.25 if cy < 0.65 else 0.85
+            score = area_score * 0.50 + center_score * 0.35 + upper_bonus * 0.15
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        return best_idx
+
+    def _filter_speaker_masks(
+        self,
+        masks: list[np.ndarray],
+        boxes: list[tuple[float, float, float, float]],
+        h: int,
+        w: int,
+    ) -> list[np.ndarray]:
+        """Selectively filter detected person masks based on speaker_mask_mode with temporal continuity."""
+        if not masks:
+            return []
+        if len(masks) == 1:
+            if boxes:
+                self._active_track_box = boxes[0]
+            return masks
+
+        areas = [float(m.sum()) for m in masks]
+        max_area = max(areas) if areas else 1.0
+
+        if self.speaker_mask_mode in {"single", "selective"}:
+            best_idx = self._find_active_subject_index(boxes, areas, h, w)
+            if boxes and best_idx < len(boxes):
+                self._active_track_box = boxes[best_idx]
+            return [masks[best_idx]]
+
+        # "dual_auto" mode:
+        # Keep primary + prominent secondary with temporal debounce / hysteresis
+        primary_idx = int(np.argmax(areas))
+        selected = [primary_idx]
+        if boxes and primary_idx < len(boxes):
+            self._active_track_box = boxes[primary_idx]
+
+        sorted_indices = np.argsort(areas)[::-1]
+        for idx in sorted_indices[1:]:
+            ratio = areas[idx] / max_area
+            if ratio >= 0.22:
+                selected.append(int(idx))
+                break
+
+        if len(selected) > 1:
+            self._secondary_persistence = min(10, self._secondary_persistence + 1)
+        else:
+            self._secondary_persistence = max(0, self._secondary_persistence - 1)
+
+        # Hysteresis: if secondary was present recently, debounce drops
+        if self._secondary_persistence > 0 and len(selected) == 1 and len(sorted_indices) > 1:
+            second_cand = int(sorted_indices[1])
+            if areas[second_cand] / max_area >= 0.15:
+                selected.append(second_cand)
+
+        return [masks[i] for i in selected]
+
     def _predict_person_mask(self, model, frame: np.ndarray, h: int, w: int) -> np.ndarray:
         try:
+            # Detect person (class 0) plus accessories/carried items to merge
+            classes_to_detect = [0, 24, 26, 27, 28, 39, 41, 63, 64, 65, 66, 67, 73, 76]
             results = model.predict(
                 source=frame,
-                classes=[0],
+                classes=classes_to_detect,
                 conf=self.seg_confidence,
                 verbose=False,
             )
@@ -992,23 +1209,42 @@ class TopBehindSubjectRenderer:
             if masks.size == 0:
                 return np.zeros((h, w), dtype=np.float32)
 
-            resized = []
-            for m in masks:
+            boxes_arr = result.boxes.xyxy.detach().cpu().numpy() if result.boxes is not None else []
+            classes_arr = result.boxes.cls.detach().cpu().numpy().astype(int) if result.boxes is not None else []
+
+            person_masks = []
+            person_boxes = []
+            object_masks = []
+
+            for i, m in enumerate(masks):
                 mm = m.astype(np.float32)
                 if mm.shape[:2] != (h, w):
                     mm = cv2.resize(mm, (w, h), interpolation=cv2.INTER_LINEAR)
-                resized.append(np.clip(mm, 0.0, 1.0))
+                mm = np.clip(mm, 0.0, 1.0)
+                cls_id = int(classes_arr[i]) if i < len(classes_arr) else 0
+                box = tuple(map(float, boxes_arr[i])) if i < len(boxes_arr) else (0.0, 0.0, float(w), float(h))
+                if cls_id == 0:
+                    person_masks.append(mm)
+                    person_boxes.append(box)
+                else:
+                    object_masks.append((mm, box))
 
-            if not resized:
+            if not person_masks:
                 return np.zeros((h, w), dtype=np.float32)
 
-            combined = np.zeros((h, w), dtype=np.float32)
-            areas = [float(m.sum()) for m in resized]
-            max_area = max(areas) if areas else 0.0
+            # Selective user / speaker mask filtering
+            filtered_person = self._filter_speaker_masks(person_masks, person_boxes, h, w)
 
-            for i, m in enumerate(resized):
-                if areas[i] >= max_area * 0.15:
-                    combined = np.maximum(combined, m)
+            combined = np.zeros((h, w), dtype=np.float32)
+            for m in filtered_person:
+                combined = np.maximum(combined, m)
+
+            # Merge any overlapping objects (e.g. laptop, phone, cup held by person)
+            for obj_m, _ in object_masks:
+                overlap = float(np.sum((combined > 0.3) & (obj_m > 0.3)))
+                obj_sum = float(np.sum(obj_m > 0.3))
+                if obj_sum > 0 and (overlap / obj_sum) >= 0.12:
+                    combined = np.maximum(combined, obj_m)
 
             return np.clip(combined, 0.0, 1.0)
 
@@ -1073,15 +1309,20 @@ def snap_overlay_to_phrase(
     duration: float,
     words: list[dict] | None,
     clip_duration: float = 0.0,
-    min_dur: float = 2.5,
-    max_dur: float = 3.2,
+    min_dur: float = 1.8,
+    max_dur: float = 2.8,
+    shot_boundaries: list[float] | None = None,
 ) -> tuple[float, float]:
-    """Snap behind-person window to nearby word/phrase bounds when available."""
+    """Snap behind-person window to nearby word/phrase bounds while avoiding speech pauses & shot cuts."""
     at = max(0.0, float(at_time or 0.0))
-    dur = float(np.clip(float(duration or 2.8), min_dur, max_dur))
+    dur = float(np.clip(float(duration or 2.2), min_dur, max_dur))
     if not words:
         if clip_duration > 0:
             dur = min(dur, max(0.4, clip_duration - at))
+        if shot_boundaries:
+            for cut in shot_boundaries:
+                if at < cut < at + dur:
+                    dur = max(0.4, cut - at - 0.05)
         return round(at, 3), round(max(0.4, dur), 3)
 
     starts = []
@@ -1099,6 +1340,10 @@ def snap_overlay_to_phrase(
     if abs(best[0] - at) > 0.8:
         if clip_duration > 0:
             dur = min(dur, max(0.4, clip_duration - at))
+        if shot_boundaries:
+            for cut in shot_boundaries:
+                if at < cut < at + dur:
+                    dur = max(0.4, cut - at - 0.05)
         return round(at, 3), round(max(min_dur, min(max_dur, dur)), 3)
 
     phrase_start = best[0]
@@ -1106,6 +1351,9 @@ def snap_overlay_to_phrase(
     for ws, we, _ in starts:
         if ws < phrase_start - 0.05:
             continue
+        # Pause detection (> 0.55s between words indicates sentence break or speaker handoff)
+        if ws - phrase_end > 0.55:
+            break
         if ws <= phrase_end + 0.35 and (ws - phrase_start) <= max_dur:
             phrase_end = max(phrase_end, we)
         if phrase_end - phrase_start >= max_dur:
@@ -1113,6 +1361,13 @@ def snap_overlay_to_phrase(
     phrase_start = max(0.0, phrase_start - 0.05)
     phrase_end = phrase_end + 0.12
     new_dur = float(np.clip(phrase_end - phrase_start, min_dur, max_dur))
+
+    # Avoid straddling shot cuts / scene transitions
+    if shot_boundaries:
+        for cut in shot_boundaries:
+            if phrase_start < cut < phrase_start + new_dur:
+                new_dur = max(0.4, cut - phrase_start - 0.05)
+
     if clip_duration > 0:
         new_dur = min(new_dur, max(0.4, clip_duration - phrase_start))
     return round(phrase_start, 3), round(max(0.4, new_dur), 3)
@@ -1124,6 +1379,7 @@ def pick_top_overlay_suggestions(
     blocked_ranges: list[tuple[float, float]] | None = None,
     words: list[dict] | None = None,
     clip_duration: float = 0.0,
+    shot_boundaries: list[float] | None = None,
 ) -> list[TopOverlaySegment]:
     """Pick BRollSuggestion rows for top-behind-person."""
     limit = max(1, max_per_clip) if max_per_clip is not None else 3
@@ -1153,7 +1409,9 @@ def pick_top_overlay_suggestions(
             score += 2
         at = float(getattr(s, "at_time", 0))
         dur = float(getattr(s, "duration", 2.0))
-        at, dur = snap_overlay_to_phrase(at, dur, words, clip_duration=clip_duration)
+        at, dur = snap_overlay_to_phrase(
+            at, dur, words, clip_duration=clip_duration, shot_boundaries=shot_boundaries
+        )
         if any(not (at + dur <= a or at >= b) for a, b in blocked):
             continue
         scored.append((score, at, dur, s, path, source))

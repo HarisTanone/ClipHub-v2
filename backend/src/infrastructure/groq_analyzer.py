@@ -204,11 +204,12 @@ TRANSKRIP:
 
 DUA MODE PLACEMENT (otomatis, dinamis):
 1) full_frame — stock VIDEO ganti layar penuh (clip→footage→clip). Person HILANG sementara. Pakai visual_category=footage.
-2) behind_person — stock FOOTAGE video di BELAKANG person (top half background). Person TETAP kelihatan di depan. Visual harus sangat relevan dan memperluas konteks narasi cerita (misal: suasana kantor, perkotaan, alam, ruangan interior, aksi, konsep tematik, objek, ataupun visual sinematik estetis yang mengilustrasikan topik). Dilarang: talking head orang lain yang menatap kamera.
+2) behind_person — stock FOOTAGE video di BELAKANG person (top half background). Person TETAP kelihatan di depan. Visual harus sangat relevan dan memperluas konteks narasi cerita (misal: suasana kantor, perkotaan, alam, ruangan interior, aksi, konsep tematik, objek, ataupun visual sinematik estetis yang mengilustrasikan topik). Wajib pada momen satu pembicara fokus yang stabil. Dilarang: talking head orang lain yang menatap kamera, dan DILARANG menempatkan di momen pergantian speaker atau perpindahan kamera.
 
 ATURAN:
 - at_time WAJIB salah satu timestamp di transkrip; jangan sebelum detik 3.
 - JANGAN pakai waktu yang sama untuk full_frame dan behind_person (min jarak 4 detik).
+- JANGAN taruh behind_person di momen pergantian antar-pembicara atau shot cut.
 - Tentukan jumlah B-roll dan Behind Person yang pas sesuai alur cerita transkrip (sebanyak yang dibutuhkan konteks cerita).
 - keyword = query stock ENGLISH 3-8 kata, KONKRET visual yang relevan dengan konteks narasi ini (analisa dinamis).
   Format: [concrete subject] [action OR environment] [cinematic/framing detail]
@@ -841,11 +842,12 @@ TRANSKRIP BERTIMESTAMP (clip ini saja):
 
 PLACEMENT:
 1) full_frame — stock VIDEO ganti layar (person hilang). visual_category=footage
-2) behind_person — stock FOOTAGE video di belakang person (top-half background). Person tetap terlihat di depan. Visual harus sangat kontekstual, menarik, dan memperluas narasi cerita (suasana, tempat, ruangan, aksi, lingkungan, konsep tematik, ataupun visual sinematik). Dilarang: talking head orang lain menghadap kamera. visual_category=footage|icon|motion_graphic
+2) behind_person — stock FOOTAGE video di belakang person (top-half background). Person tetap terlihat di depan. Visual harus sangat kontekstual, menarik, dan memperluas narasi cerita (suasana, tempat, ruangan, aksi, lingkungan, konsep tematik, ataupun visual sinematik). Wajib pada 1 pembicara fokus yang stabil. Dilarang: talking head orang lain menghadap kamera, dan DILARANG saat kamera cut / pergantian speaker. visual_category=footage|icon|motion_graphic
 
 ATURAN:
 - at_time = timestamp dari transkrip di atas; min 3.0s; max duration-1
 - full_frame dan behind_person TIDAK boleh waktu sama (min jarak 4s)
+- JANGAN taruh behind_person di momen pergantian antar-pembicara atau shot cut.
 - Tentukan jumlah B-roll visual sebanyak yang dibutuhkan narasi cerita secara dinamis.
 - keyword = ENGLISH stock query 3-8 kata, KONKRET visual dari konteks clip ini (perluas dan perjelas narasi).
   Contoh: "modern office team collaboration", "luxury house architecture", "financial market charts", "happy couple walking outdoors", "cinematic timelapse city lights"

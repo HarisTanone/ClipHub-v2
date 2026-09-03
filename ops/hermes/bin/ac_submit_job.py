@@ -63,7 +63,7 @@ def lookup_preset_full(name: str) -> dict | None:
                     "name": preset.get("name"),
                     "slug": preset.get("id"),
                     "hook_style": {
-                        "animation": preset.get("hook_animation", "zoom_in"),
+                        "animation": preset.get("hook_animation", "podcast_lower_third"),
                         "primary_color": preset.get("primary_color", "#FFFFFF"),
                         "secondary_color": preset.get("secondary_color", "#FFCC00"),
                     },
@@ -145,7 +145,12 @@ def main():
     if preset_obj:
         hook_style = preset_obj.get("hook_style") or preset_obj.get("hook_style_config")
         if hook_style and isinstance(hook_style, dict):
-            payload["hook_style_config"] = hook_style
+            hook_style_dict = dict(hook_style)
+            if not hook_style_dict.get("engine"):
+                hook_style_dict["engine"] = "remotion"
+            payload["hook_style_config"] = hook_style_dict
+            if hook_style_dict.get("animation"):
+                payload["hook_style"] = hook_style_dict["animation"]
         sub_style = preset_obj.get("subtitle_style") or preset_obj.get("subtitle_style_config")
         if sub_style and isinstance(sub_style, dict):
             payload["subtitle_style_config"] = sub_style
@@ -158,7 +163,12 @@ def main():
         te_style = preset_obj.get("text_emphasis_style") or preset_obj.get("text_emphasis_style_config")
         if te_style and isinstance(te_style, dict):
             payload["text_emphasis_style_config"] = te_style
-            payload["text_emphasis_enabled"] = bool(te_style.get("effectMode") and te_style.get("effectMode") != "off")
+            effect_mode = te_style.get("effectMode")
+            is_te_on = bool(
+                te_style.get("enabled", True) is not False
+                and (not effect_mode or effect_mode != "off")
+            )
+            payload["text_emphasis_enabled"] = is_te_on
         broll_style = preset_obj.get("broll_style") or preset_obj.get("broll_config")
         if broll_style and isinstance(broll_style, dict):
             payload["broll_enabled"] = bool(broll_style.get("enabled", True))

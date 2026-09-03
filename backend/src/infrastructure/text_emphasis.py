@@ -348,7 +348,11 @@ def anchor_text_emphasis_response(
         # Fallback: guarantee minimum 1 event per clip when AI returned nothing.
         if not accepted and max_events >= 1:
             fallback = _find_fallback_phrase(
-                words, min_start, duration, blocked.get(rank, [])
+                words,
+                min_start,
+                duration,
+                blocked.get(rank, []),
+                effect=mode if mode in ALLOWED_EFFECTS else "hero_punch",
             )
             if fallback is not None:
                 accepted.append(fallback)
@@ -363,12 +367,15 @@ def _find_fallback_phrase(
     min_start: float,
     duration: float,
     blocked_ranges: list[tuple[float, float]],
+    effect: str = "hero_punch",
 ) -> dict | None:
     """Find the best fallback phrase when AI returned 0 events for a clip.
 
     Scans all contiguous windows of 1-5 words that start after min_start,
     don't overlap blocked ranges, and picks the one with the longest combined
     word length (most "substantial" text). Works for short clips too.
+    If all windows overlap blocked ranges, a relaxed pass selects the window with
+    least overlap to guarantee AI text is not lost.
     """
     best: dict | None = None
     best_length = 0
@@ -416,12 +423,52 @@ def _find_fallback_phrase(
                     "start": round(start, 3),
                     "end": round(end, 3),
                     "text": text,
-                    "effect": "hero_punch",
+                    "effect": effect,
                     "position": "center",
                     "start_word": start_idx,
                     "end_word": end_idx,
                     "reason": "auto_fallback",
                 }
+
+    # Relaxed pass: if all windows collided with blocked ranges, choose candidate with minimal collision
+    if best is None and words:
+        least_overlap = float("inf")
+        for phrase_len in range(1, 5):
+            for start_idx in range(total - phrase_len + 1):
+                end_idx = start_idx + phrase_len - 1
+                phrase_words = words[start_idx:end_idx + 1]
+                if any(not str(w.get("word") or "").strip() for w in phrase_words):
+                    continue
+                start = max(0.0, _safe_float(phrase_words[0].get("start"), 0))
+                if start < min_start:
+                    continue
+                spoken_end = max(start, _safe_float(phrase_words[-1].get("end"), start))
+                end = min(duration, max(spoken_end + 0.35, start + min_hold))
+                end = min(end, start + max_hold, duration)
+                if end - start < 0.3:
+                    continue
+
+                overlap_dur = sum(
+                    max(0.0, min(end, b) - max(start, a))
+                    for a, b in blocked_ranges
+                )
+                if overlap_dur < least_overlap:
+                    least_overlap = overlap_dur
+                    text = " ".join(str(w.get("word") or "").strip() for w in phrase_words)
+                    text = re.sub(r"\s+([,.;:!?])", r"\1", text).strip()
+                    if text:
+                        best = {
+                            "id": "emphasis_fallback",
+                            "start": round(start, 3),
+                            "end": round(end, 3),
+                            "text": text,
+                            "effect": effect,
+                            "position": "center",
+                            "start_word": start_idx,
+                            "end_word": end_idx,
+                            "reason": "auto_fallback_relaxed",
+                        }
+
     return best
 
 

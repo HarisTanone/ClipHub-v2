@@ -543,6 +543,10 @@ class AutopilotService:
         # 6. Submit job to AutoCliper service
         from src.presentation.dependencies import get_job_service
         job_service = get_job_service()
+        hook_cfg = dict(job_options.get("hook_style_config") or {})
+        if hook_cfg and not hook_cfg.get("engine"):
+            hook_cfg["engine"] = resolved_preset.get("hook_engine", "remotion") if resolved_preset else "remotion"
+
         created_res = await job_service.create_job(
             youtube_url=video_url,
             user_id=user_id,
@@ -551,6 +555,8 @@ class AutopilotService:
             force_reprocess=job_options.get("force_reprocess", False),
             use_remotion=job_options.get("use_remotion", True),
             ai_layer_enabled=job_options.get("ai_layer_enabled", True),
+            hook_engine="v3",
+            hook_style=job_options.get("hook_style") or "",
             broll_enabled=job_options.get("broll_enabled", False),
             broll_image_overlay=job_options.get("broll_image_overlay", True),
             broll_behind_person=job_options.get("broll_behind_person", True),
@@ -558,7 +564,7 @@ class AutopilotService:
             broll_motion_style=job_options.get("broll_motion_style"),
             autogrid_enabled=job_options.get("autogrid_enabled", False),
             text_emphasis_enabled=job_options.get("text_emphasis_enabled", True),
-            hook_style_config=job_options.get("hook_style_config"),
+            hook_style_config=hook_cfg,
             subtitle_style_config=job_options.get("subtitle_style_config"),
             text_emphasis_style_config=job_options.get("text_emphasis_style_config"),
             watermark_config=job_options.get("watermark_config"),

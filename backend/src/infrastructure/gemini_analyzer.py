@@ -172,6 +172,7 @@ TARGET: {target_instruction}
 - Manfaatkan navigasi timeline dinamis: periksa alur transkrip & audio untuk menemukan premis argumen atau cerita yang kuat.
 - Lakukan inspeksi visual mendalam pada ekspresi wajah (intensitas, emosi, eye-contact), reaksi pembicara, gestur tubuh, teks/slide, atau demonstrasi visual yang menarik perhatian.
 - Pastikan momen yang dipilih memiliki retensi visual tinggi (tidak monoton, menarik ditonton di 3 detik pertama).
+- Analisis Pembicara Selektif (Selective User): identifikasi pembicara utama yang sedang menyampaikan gagasan bernas. Pilih segmen di mana pembicara aktif berbicara dengan kontinuitas yang jelas dan hindari potongan yang terputus di tengah pergantian pembicara/reaksi canggung.
 
 ═══ TUGAS 1: CLIP SELECTION ═══
 Identifikasi momen-momen yang:
@@ -218,7 +219,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         This is a TEXT-ONLY call (no video processing). Much cheaper and faster.
         Takes the clip timestamps and context from Phase 1, and focuses purely on:
         - Better hook alternatives
-        - Precise b-roll keyword/timing placement
+        - Precise b-roll keyword/timing placement with selective speaker awareness
         """
         # Build context from phase 1 clips
         clips_context = "\n".join([
@@ -230,7 +231,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
             for c in clips
         ])
 
-        prompt = f"""Kamu adalah copywriter viral dan motion graphics director. Tugasmu SPESIFIK:
+        prompt = f"""Kamu adalah copywriter viral dan visual/motion graphics director. Tugasmu SPESIFIK:
 
 ═══ KONTEKS ═══
 Video berdurasi {video_duration:.1f} detik telah dianalisis. Berikut clip yang terpilih:
@@ -243,13 +244,18 @@ Untuk SETIAP clip, buat hook yang LEBIH BAIK dari versi saat ini:
 - Bahasa yang sama
 - Beri juga hook_alt (versi alternatif)
 
-═══ TUGAS 2: B-ROLL TYPOGRAPHY PLACEMENT ═══
-Untuk SETIAP clip, tentukan 1-2 momen di mana motion typography harus muncul:
+═══ TUGAS 2: B-ROLL TYPOGRAPHY & FOOTAGE PLACEMENT ═══
+Untuk SETIAP clip, tentukan 1-2 momen visual B-roll:
 - "at_time": offset DALAM clip (detik dari awal clip, bukan dari awal video)
 - "keyword": kata/angka kunci yang ditampilkan (MAKS 20 karakter, UPPERCASE)
 - "template": "word_pop_typography" / "line_reveal_typography" / "particle_text_burst"
-- "duration": 1.5 - 3.0 detik
+- "duration": 2.0 - 2.8 detik (selaras dengan satu frasa utuh pembicara)
 - "visual_category": "footage" / "icon" / "motion_graphic" / "reaction"
+- "placement": "behind_person" | "full_frame"
+  * "behind_person": stock FOOTAGE video di BELAKANG orang (top-half background). Orang tetap terlihat jelas di depan.
+    PENTING: Gunakan HANYA pada momen di mana SATU pembicara fokus sedang berbicara dalam shot stabil.
+    DILARANG keras menempatkan behind_person di momen pergantian speaker, kamera cut, atau shot transisi antarpembicara.
+  * "full_frame": stock video menggantikan seluruh layar (cutaway) untuk mengilustrasikan konsep narasi secara menyeluruh.
 - "motion_style": PILIH SALAH SATU berdasarkan mood (dirender di Remotion):
   * "ken_burns" — dokumenter, narasi tenang (zoom+pan lambat)
   * "parallax_zoom" — inovasi/teknologi
@@ -262,19 +268,20 @@ Untuk SETIAP clip, tentukan 1-2 momen di mana motion typography harus muncul:
   * "word_pop" / "line_reveal" / "particle_burst" — punchy keyword (legacy)
 
 PANDUAN VISUAL_CATEGORY:
-- "footage": Tempat, aktivitas, objek fisik → video footage nyata
+- "footage": Tempat, aktivitas, objek fisik → video footage nyata (bisa behind_person atau full_frame)
 - "icon": Konsep abstrak, simbol, topik umum → icon/ikon vektor
 - "motion_graphic": Data, angka, statistik, proses → animasi grafis
 - "reaction": Ekspresi emosi, humor, surprise → sticker animasi
 
 TIPS B-ROLL PLACEMENT:
-- Tempatkan di momen paling impactful (angka, nama tempat, frasa kunci)
+- Tempatkan di momen paling impactful (angka, nama tempat, frasa kunci pembicara aktif)
 - Jangan di 3 detik pertama (area hook)
 - Jangan di akhir clip (biar ending clean)
+- Pastikan behind_person stabil dan tidak terpotong oleh perpindahan pembicara
 - Keyword harus memperkuat apa yang sedang dibicarakan
 
 OUTPUT FORMAT — RAW JSON (tanpa markdown):
-{{"clips": [{{"rank": 1, "hook": "<refined hook>", "hook_alt": "<alternative hook>"}}], "broll_suggestions": {{"1": [{{"at_time": <float>, "keyword": "<UPPERCASE>", "template": "<template>", "duration": <float>, "visual_category": "<category>"}}]}}}}"""
+{{"clips": [{{"rank": 1, "hook": "<refined hook>", "hook_alt": "<alternative hook>"}}], "broll_suggestions": {{"1": [{{"at_time": <float>, "keyword": "<UPPERCASE>", "template": "<template>", "duration": <float>, "visual_category": "<category>", "placement": "<behind_person|full_frame>"}}]}}}}"""
 
         result = self._call_text_only(prompt)
         return self._parse_response(result)

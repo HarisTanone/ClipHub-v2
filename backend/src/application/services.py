@@ -355,6 +355,9 @@ class JobService:
             initial_clips_data["hook_style_config"] = hook_style_config
             if isinstance(hook_style_config, dict) and hook_style_config.get("engine"):
                 initial_clips_data["hook_engine"] = hook_style_config["engine"]
+            else:
+                from src.infrastructure.hf_style_catalog import resolve_engine
+                initial_clips_data["hook_engine"] = resolve_engine(hook_style_config)
         elif resolved_preset and resolved_preset.get("hook_engine"):
             initial_clips_data["hook_engine"] = resolved_preset["hook_engine"]
 
@@ -362,6 +365,9 @@ class JobService:
             initial_clips_data["subtitle_style_config"] = subtitle_style_config
             if isinstance(subtitle_style_config, dict) and subtitle_style_config.get("engine"):
                 initial_clips_data["subtitle_engine"] = subtitle_style_config["engine"]
+            else:
+                from src.infrastructure.hf_style_catalog import resolve_engine
+                initial_clips_data["subtitle_engine"] = resolve_engine(subtitle_style_config)
         elif resolved_preset and resolved_preset.get("subtitle_engine"):
             initial_clips_data["subtitle_engine"] = resolved_preset["subtitle_engine"]
 
@@ -369,9 +375,17 @@ class JobService:
             initial_clips_data["watermark_config"] = watermark_config
         if cta_config:
             initial_clips_data["cta_config"] = cta_config
-        # Persist explicit false as well. This makes retries deterministic and
-        # preserves the opt-in contract even when defaults change later.
-        initial_clips_data["text_emphasis_enabled"] = bool(text_emphasis_enabled)
+        # Persist explicit false as well, but activate if style config has active effect
+        te_is_active = bool(
+            text_emphasis_enabled
+            or (
+                text_emphasis_style_config
+                and isinstance(text_emphasis_style_config, dict)
+                and text_emphasis_style_config.get("enabled", True) is not False
+                and (not text_emphasis_style_config.get("effectMode") or text_emphasis_style_config.get("effectMode") != "off")
+            )
+        )
+        initial_clips_data["text_emphasis_enabled"] = te_is_active
         if text_emphasis_style_config:
             initial_clips_data["text_emphasis_style_config"] = text_emphasis_style_config
         # B-roll sub-types (explicit false must persist)

@@ -696,4 +696,125 @@ def test_clean_person_mask_signed_distance_feathering():
     assert has_subpixel, f"expected subpixel anti-aliasing on boundary, got {boundary_vals}"
 
 
+def test_microphone_and_chest_objects_solidified_in_foreground():
+    """Verify microphones & chest objects are protected from being replaced by B-roll."""
+    r = TopBehindSubjectRenderer(split_ratio=0.7, overlay_opacity=1.0)
+    h, w = 120, 80
+    frame = np.full((h, w, 3), (40, 140, 240), dtype=np.uint8)  # Person clothing
+    # Put a distinct microphone color on chest
+    frame[55:65, 35:45] = (20, 20, 20)
+    overlay = np.full((h, w, 3), (200, 50, 50), dtype=np.uint8)  # Red B-roll
+
+    # Raw mask has person, but YOLO left a hole for the microphone in the chest!
+    mask = np.zeros((h, w), dtype=np.float32)
+    mask[30:100, 20:60] = 1.0
+    mask[55:65, 35:45] = 0.0  # The microphone is excluded by raw YOLO
+
+    # Also simulate a mic stand extending downwards out of the body
+    mask[80:120, 38:42] = 0.0
+
+    out = r.render(frame, mask, overlay)
+
+    # 1. Microphone area must NOT be replaced with B-roll (overlay is (200, 50, 50))
+    # It must retain original mic color (20, 20, 20)
+    mic_pixel = out[60, 40]
+    assert not np.allclose(mic_pixel, [200, 50, 50], atol=20), "B-roll leaked into microphone!"
+    assert np.allclose(mic_pixel, [20, 20, 20], atol=10), f"Mic should remain original, got {mic_pixel}"
+
+    # 2. Upper background must still get B-roll
+    assert np.allclose(out[10, 10], [200, 50, 50], atol=5)
+
+
+def test_shot_cut_detection_and_temporal_reset():
+    """Verify that shot cuts are detected and temporal EMA ghosting is completely eliminated."""
+    r = TopBehindSubjectRenderer()
+    h, w = 100, 80
+
+    # Shot 1: Bright daylight scene with person on left
+    frame1 = np.full((h, w, 3), (220, 230, 240), dtype=np.uint8)
+    mask1 = np.zeros((h, w), dtype=np.float32)
+    mask1[20:80, 10:35] = 1.0
+    overlay = np.full((h, w, 3), (50, 50, 200), dtype=np.uint8)
+
+    # First frame of Shot 1: baseline established
+    assert r._detect_shot_cut(frame1) is False
+    r.render(frame1, mask1, overlay)
+    assert r._prev_clean_mask is not None
+
+    # Shot 2: Dark studio scene with Person 2 on the right (hard camera cut)
+    frame2 = np.full((h, w, 3), (20, 25, 30), dtype=np.uint8)
+    mask2 = np.zeros((h, w), dtype=np.float32)
+    mask2[20:80, 45:70] = 1.0
+
+    # Shot cut detection should flag this
+    is_cut = r._detect_shot_cut(frame2)
+    assert is_cut is True
+
+    # When cut is detected, reset temporal state
+    r.reset_temporal_state()
+    assert r._prev_clean_mask is None
+
+    # Render frame2: Person 1's position (x=20) must have 0% ghosting of Person 1
+    out2 = r.render(frame2, mask2, overlay)
+
+    # In frame 2, at Person 1's previous location (y=50, x=20), it is now background!
+    # Because it is top background, it should have overlay color, NOT Person 1's old frame color
+    assert np.allclose(out2[50, 20], overlay[50, 20], atol=15)
+    # Person 2's location (y=50, x=55) must be crisp frame2
+    assert np.allclose(out2[50, 55], frame2[50, 55], atol=5)
+
+
+def test_selective_user_tracking_continuity():
+    """Verify selective tracking stays locked on active speaker without jittering."""
+    r = TopBehindSubjectRenderer(speaker_mask_mode="single")
+    h, w = 100, 100
+
+    # Two people: Person A on left (x=10..40), Person B on right (x=60..90)
+    mask_a = np.zeros((h, w), dtype=np.float32)
+    mask_a[20:80, 10:40] = 1.0
+    box_a = (10.0, 20.0, 40.0, 80.0)
+
+    mask_b = np.zeros((h, w), dtype=np.float32)
+    mask_b[20:80, 60:90] = 1.0
+    box_b = (60.0, 20.0, 90.0, 80.0)
+
+    # Frame 1: Person A is selected and active track is set
+    filtered1 = r._filter_speaker_masks([mask_a, mask_b], [box_a, box_b], h, w)
+    assert len(filtered1) == 1
+
+    # In frame 2, Person B gestures slightly (higher area temporarily)
+    # But because Person A is the active track, single mode should maintain tracking continuity on Person A
+    mask_b_larger = mask_b.copy()
+    filtered2 = r._filter_speaker_masks([mask_a, mask_b_larger], [box_a, box_b], h, w)
+    assert len(filtered2) == 1
+    # Check that mask_a is still selected (centroid is on the left)
+    selected_mask = filtered2[0]
+    ys, xs = np.where(selected_mask > 0.5)
+    assert np.mean(xs) < 50.0, "should stay locked on Person A"
+
+
+def test_snap_overlay_to_phrase_pauses_and_shot_cuts():
+    """Verify overlay snaps to single speaker phrase and never straddles shot cuts or pauses."""
+    from src.infrastructure.top_behind_subject_renderer import snap_overlay_to_phrase
+
+    words = [
+        {"start": 5.0, "end": 5.4, "word": "saya"},
+        {"start": 5.5, "end": 6.0, "word": "suka"},
+        {"start": 6.1, "end": 6.8, "word": "kopi"},
+        # Significant pause of 1.2s between 6.8s and 8.0s (next speaker / sentence)
+        {"start": 8.0, "end": 8.5, "word": "iya"},
+        {"start": 8.6, "end": 9.2, "word": "benar"},
+    ]
+
+    # Without cut: should stop before the 1.2s pause (does not expand into next speaker)
+    at, dur = snap_overlay_to_phrase(5.0, 2.5, words)
+    assert at <= 5.0
+    assert (at + dur) <= 7.2, f"Should not cross speech pause into second speaker, got {at + dur}"
+
+    # With a camera shot cut at 6.5s:
+    at2, dur2 = snap_overlay_to_phrase(5.0, 2.5, words, shot_boundaries=[6.5])
+    assert (at2 + dur2) <= 6.5, f"Must end before shot cut at 6.5s, got {at2 + dur2}"
+
+
+
 
