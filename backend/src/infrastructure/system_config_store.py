@@ -179,7 +179,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": "gemini-3.6-flash",
+        "default": "gemini-3.7-flash",
         "description": "Model primer Google Gemini",
     },
     "GEMINI_FALLBACK_MODEL": {
@@ -187,7 +187,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": "gemini-3.7-flash",
+        "default": "gemini-2.5-flash",
         "description": "Model cadangan Google Gemini",
     },
     "GROQ_API_KEY": {
