@@ -204,22 +204,24 @@ export const CTALayer: React.FC<{ cta?: CTAProps | null; clipDurationSec: number
     positionStyle.bottom = "7%";
   }
 
-  // Extract template & mode properties
-  const ctaType = cta.ctaType || "card";
+  // Extract template & mode properties (supports both camelCase and snake_case)
+  const anyCta = cta as any;
+  const ctaType = cta.ctaType || anyCta.cta_type || "card";
   const template = cta.template || "follow_badge";
-  const plainText = cta.text || cta.headline || "Follow Untuk Tips Berikutnya!";
-  const headline = cta.headline || cta.text || "Follow For More";
-  const subhead = cta.subhead || (cta.socialHandle || cta.handle ? (cta.socialHandle || cta.handle) : "");
-  const buttonText = cta.buttonText || (template === "subscribe_pill" ? "SUBSCRIBE" : template === "link_bio" ? "KLIK LINK" : template === "like_share" ? "BAGIKAN" : template === "comment_prompt" ? "KOMEN" : template === "custom_card" ? "JOIN NOW" : "FOLLOW");
-  const primaryColor = cta.primaryColor || (template === "subscribe_pill" ? "#EF4444" : template === "link_bio" ? "#3B82F6" : "#10B981");
-  const textColor = cta.textColor || "#FFFFFF";
-  const bgOpacity = typeof cta.bgOpacity === "number" ? cta.bgOpacity / 100 : 0.92;
-  const bgColor = cta.backgroundColor || "#0F172A";
-  const fontFamily = cta.fontFamily || "Poppins, Montserrat, sans-serif";
-  const fontSize = cta.fontSize || 26;
-  const fontWeight = cta.fontWeight || "700";
-  const bgBox = cta.bgBox !== false;
-  const selectedIcon = cta.selectedIcon || "tiktok";
+  const plainText = cta.text || anyCta.cta_text || cta.headline || "Follow Untuk Tips Berikutnya!";
+  const headline = cta.headline || anyCta.cta_headline || cta.text || "Follow For More";
+  const subhead = cta.subhead || (cta.socialHandle || cta.handle ? (cta.socialHandle || cta.handle) : (anyCta.social_handle || ""));
+  const buttonText = cta.buttonText || anyCta.button_text || (template === "subscribe_pill" ? "SUBSCRIBE" : template === "link_bio" ? "KLIK LINK" : template === "like_share" ? "BAGIKAN" : template === "comment_prompt" ? "KOMEN" : template === "custom_card" ? "JOIN NOW" : "FOLLOW");
+  const primaryColor = cta.primaryColor || anyCta.primary_color || (template === "subscribe_pill" ? "#EF4444" : template === "link_bio" ? "#3B82F6" : "#10B981");
+  const textColor = cta.textColor || anyCta.text_color || "#FFFFFF";
+  const rawBgOp = typeof cta.bgOpacity === "number" ? cta.bgOpacity : (typeof anyCta.bg_opacity === "number" ? anyCta.bg_opacity : 92);
+  const bgOpacity = rawBgOp / 100;
+  const bgColor = cta.backgroundColor || anyCta.background_color || anyCta.bg_color || "#0F172A";
+  const fontFamily = cta.fontFamily || anyCta.font_family || "Poppins, Montserrat, sans-serif";
+  const fontSize = cta.fontSize || anyCta.font_size || 26;
+  const fontWeight = cta.fontWeight || anyCta.font_weight || "700";
+  const bgBox = cta.bgBox !== false && anyCta.bg_box !== false;
+  const selectedIcon = cta.selectedIcon || anyCta.selected_icon || "tiktok";
 
   // Dynamic button state
   const isFollowed = (template === "follow_badge" || cta.socialPlatform === "tiktok") && local > 25;

@@ -14,24 +14,45 @@ from src.domain.interfaces import IAssetClient
 logger = logging.getLogger(__name__)
 
 
+import re
+
 ID_TO_EN_VISUAL_MAP = {
     "bitcoin": "bitcoin crypto digital currency trading chart",
     "kripto": "cryptocurrency trading investment screen",
     "saham": "stock market trading chart financial economy",
     "uang": "cash money wealth luxury finance counting",
+    "duit": "counting cash paper money wallet payment",
     "kaya": "wealth luxury lifestyle mansions sports car",
     "bisnis": "business meeting modern office professional strategy",
     "kantor": "modern startup office workspace computer working",
+    "kerja": "busy modern office person working on computer typing",
     "mobil": "luxury sports car driving highway dynamic",
     "motor": "motorcycle riding city speed road",
     "robot": "artificial intelligence robot future cyborg humanoid tech",
-    "ai": "artificial intelligence technology neural network modern future",
+    "ai": "artificial intelligence technology robot modern future",
     "koding": "coding software developer programming computer screen",
     "hacker": "cybersecurity programming code matrix dark terminal",
     "kopi": "espresso coffee cup barista pouring aesthetic",
     "makanan": "delicious gourmet food plating restaurant cooking",
     "olahraga": "workout gym fitness training athletic motivation",
     "lari": "running athlete marathon outdoor fitness",
+    "fight": "boxing workout athlete training sweat gym",
+    "lawan": "boxing athlete training gym determination",
+    "perjuangan": "athlete hard training working hard motivation",
+    "semangat": "energetic motivation athlete victory celebration",
+    "ibox": "apple store electronics smartphone retail shopping",
+    "iphone": "smartphone unboxing tech gadget mobile phone",
+    "apple": "modern technology smartphone laptop store",
+    "gadget": "modern electronics tech devices unboxing",
+    "hp": "smartphone mobile technology typing screen",
+    "kesempatan": "business opportunity meeting handshake success",
+    "peluang": "business growth strategy corporate meeting",
+    "toko": "retail store shopping boutique market",
+    "harga": "shopping payment cash counter retail price",
+    "ide": "creative brainstorm notebook writing coffee table",
+    "pikir": "person thinking contemplating focused work desk",
+    "solusi": "business team collaboration solution strategy",
+    "strategi": "business planning corporate meeting charts presentation",
     "gunung": "mountain landscape aerial nature sunset majestic",
     "pantai": "tropical beach ocean waves golden sunset drone",
     "hutan": "lush green forest nature aerial trees sunlight",
@@ -40,6 +61,9 @@ ID_TO_EN_VISUAL_MAP = {
     "sukses": "celebration victory success achievement motivation",
     "pusing": "stressed person working headache frustration burnout",
     "senang": "happy smiling energetic positive emotions lifestyle",
+    "podcast": "studio microphone broadcast headphones talking",
+    "wawancara": "podcast interview microphone studio conversation",
+    "bicara": "person talking in microphone professional podcast",
 }
 
 
@@ -48,8 +72,9 @@ def expand_visual_queries(keyword: str) -> list[str]:
     clean = keyword.lower().strip()
     queries = []
 
+    # Use regex word boundaries so 'ai' does not match 'pantai', 'sampai', 'baik', etc.
     for k, v in ID_TO_EN_VISUAL_MAP.items():
-        if k in clean:
+        if re.search(rf"\b{re.escape(k)}\b", clean):
             queries.append(v)
             break
 

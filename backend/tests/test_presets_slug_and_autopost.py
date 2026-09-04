@@ -350,3 +350,83 @@ async def test_list_and_get_presets_endpoint_sqlite_row_safety():
     finally:
         conn.close()
 
+
+@pytest.mark.asyncio
+async def test_preset_update_and_deduplication():
+    """Verify that updating a preset or saving with same name does not create duplicate slugs."""
+    from src.presentation.routes.presets import create_preset, update_preset, CreatePresetRequest
+    from src.presentation.auth_deps import CurrentUser
+
+    dummy_user = CurrentUser(user_id=1, email="admin@autocliper.com", role="superadmin", permissions=["*"])
+    test_slug = "test-no-dup-preset"
+
+    conn = get_dict_connection()
+    try:
+        conn.execute("DELETE FROM user_presets WHERE slug LIKE ?", (f"{test_slug}%",))
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        # 1. Create preset
+        req1 = CreatePresetRequest(
+            name="Test No Dup",
+            slug=test_slug,
+            hook_style={"animation": "pov_stamp", "badgeText": "VIRAL", "engine": "remotion"},
+            subtitle_style={"stylePreset": "outline_stack", "engine": "remotion"},
+            broll_style={"enabled": True, "autogrid_enabled": True},
+        )
+        res1 = await create_preset(req1, user=dummy_user)
+        assert res1["success"] is True
+        assert res1["slug"] == test_slug
+        preset_id = res1["id"]
+
+        # 2. Saving again with the same name or slug should UPDATE in place without creating -02
+        req2 = CreatePresetRequest(
+            name="Test No Dup",
+            slug=test_slug,
+            hook_style={"animation": "pov_stamp", "badgeText": "UPDATED_VIRAL", "engine": "remotion"},
+            subtitle_style={"stylePreset": "outline_stack", "engine": "remotion"},
+            broll_style={"enabled": False, "autogrid_enabled": False},
+        )
+        res2 = await create_preset(req2, user=dummy_user)
+        assert res2["success"] is True
+        assert res2["slug"] == test_slug
+        assert res2["id"] == preset_id  # same ID, not a duplicate!
+
+        # 3. Test explicit PUT update endpoint
+        req3 = CreatePresetRequest(
+            name="Test No Dup",
+            slug=test_slug,
+            hook_style={"animation": "pov_stamp", "badgeText": "PUT_VIRAL", "engine": "remotion"},
+            subtitle_style={"stylePreset": "outline_stack", "engine": "remotion"},
+            broll_style={"enabled": True, "autogrid_enabled": True},
+        )
+        res3 = await update_preset(preset_id, req3, user=dummy_user)
+        assert res3["success"] is True
+        assert res3["id"] == preset_id
+
+        # 4. Verify in DB only 1 row exists
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) as cnt FROM user_presets WHERE slug LIKE ?", (f"{test_slug}%",))
+            assert cur.fetchone()["cnt"] == 1
+
+            # Verify resolved data
+            resolved = resolve_preset(test_slug, user_id=1)
+            assert resolved["name"] == "Test No Dup"
+            assert resolved["hook_style_config"]["badgeText"] == "PUT_VIRAL"
+            assert resolved["broll_enabled"] is True
+            assert resolved["autogrid_enabled"] is True
+        finally:
+            conn.close()
+    finally:
+        conn = get_dict_connection()
+        try:
+            conn.execute("DELETE FROM user_presets WHERE slug LIKE ?", (f"{test_slug}%",))
+            conn.commit()
+        finally:
+            conn.close()
+
+

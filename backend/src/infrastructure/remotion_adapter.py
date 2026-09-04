@@ -517,21 +517,39 @@ class RemotionAdapter(IRemotionRenderer):
         # Start server
         try:
             logger.info(f"[Remotion] Starting server at {project_path}")
+            # Try 'npm run server' first
+            cmd = ["npm", "run", "server"]
             self._server_process = await asyncio.create_subprocess_exec(
-                "npm", "start",
+                *cmd,
                 cwd=project_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             
-            # Wait for server to be healthy
-            for _ in range(30):  # 30 seconds max
+            # Wait for server to be healthy (up to 45s for webpack bundle compilation on M1)
+            for i in range(45):
                 await asyncio.sleep(1)
+                # Check if process terminated prematurely
+                if self._server_process.returncode is not None:
+                    err = ""
+                    try:
+                        _, stderr = await asyncio.wait_for(self._server_process.communicate(), timeout=2.0)
+                        err = stderr.decode(errors="replace")
+                    except Exception:
+                        pass
+                    logger.warning(f"[Remotion] Process exited with code {self._server_process.returncode}: {err}. Retrying with npx tsx...")
+                    # Fallback launch directly via npx tsx
+                    self._server_process = await asyncio.create_subprocess_exec(
+                        "npx", "tsx", "src/server/index.ts",
+                        cwd=project_path,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
                 if await self.health_check():
-                    logger.info("[Remotion] Server started successfully")
+                    logger.info(f"[Remotion] Server started successfully after {i+1}s")
                     return True
             
-            logger.error("[Remotion] Server failed to start within 30s")
+            logger.error("[Remotion] Server failed to become healthy within 45s")
             return False
             
         except Exception as e:

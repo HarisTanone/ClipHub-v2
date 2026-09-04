@@ -207,17 +207,57 @@ async def get_preset_by_slug_or_id(slug_or_id: str, user: CurrentUser = Depends(
 
 @router.post("", status_code=201)
 async def create_preset(body: CreatePresetRequest, user: CurrentUser = Depends(get_current_user)):
-    """Save a new preset for the current user."""
+    """Save a new preset or update existing preset with the same slug/name for the current user."""
     name_clean = body.name.strip()
     if not name_clean:
         raise HTTPException(status_code=400, detail="Name is required")
 
     conn = get_dict_connection()
     try:
+        cur = conn.cursor()
         raw_slug = slugify(body.slug.strip()) if body.slug and body.slug.strip() else slugify(name_clean)
+
+        # Prevent duplicate presets: check if user already has a preset with same slug or name
+        cur.execute(
+            "SELECT id, slug FROM user_presets WHERE user_id = ? AND (slug = ? OR LOWER(name) = LOWER(?))",
+            (user.id, raw_slug, name_clean),
+        )
+        existing = cur.fetchone()
+        if existing:
+            # Update in place
+            cur.execute(
+                """UPDATE user_presets SET
+                    name = ?,
+                    hook_style = ?,
+                    subtitle_style = ?,
+                    text_emphasis_style = ?,
+                    watermark_style = ?,
+                    cta_style = ?,
+                    broll_style = ?,
+                    autopost_style = ?
+                   WHERE id = ?""",
+                (
+                    name_clean,
+                    json.dumps(body.hook_style),
+                    json.dumps(body.subtitle_style),
+                    json.dumps(body.text_emphasis_style),
+                    json.dumps(body.watermark_style),
+                    json.dumps(body.cta_style),
+                    json.dumps(body.broll_style),
+                    json.dumps(body.autopost_style),
+                    existing["id"],
+                ),
+            )
+            conn.commit()
+            return {
+                "success": True,
+                "id": existing["id"],
+                "slug": existing["slug"],
+                "message": f"Preset '{name_clean}' berhasil diperbarui dengan slug: {existing['slug']}",
+            }
+
         unique_slug = _generate_unique_slug(conn, raw_slug)
 
-        cur = conn.cursor()
         cur.execute(
             "INSERT INTO user_presets (user_id, name, slug, hook_style, subtitle_style, text_emphasis_style, watermark_style, cta_style, broll_style, autopost_style) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
@@ -239,6 +279,57 @@ async def create_preset(body: CreatePresetRequest, user: CurrentUser = Depends(g
             "id": cur.lastrowid,
             "slug": unique_slug,
             "message": f"Preset '{name_clean}' berhasil disimpan dengan slug: {unique_slug}",
+        }
+    finally:
+        conn.close()
+
+
+@router.put("/{preset_id}")
+async def update_preset(preset_id: int, body: CreatePresetRequest, user: CurrentUser = Depends(get_current_user)):
+    """Update an existing preset in place without duplicating."""
+    name_clean = body.name.strip()
+    if not name_clean:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id, slug, user_id FROM user_presets WHERE id = ?", (preset_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Preset not found")
+        if not user.is_superadmin and row["user_id"] != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to edit this preset")
+
+        cur.execute(
+            """UPDATE user_presets SET
+                name = ?,
+                hook_style = ?,
+                subtitle_style = ?,
+                text_emphasis_style = ?,
+                watermark_style = ?,
+                cta_style = ?,
+                broll_style = ?,
+                autopost_style = ?
+               WHERE id = ?""",
+            (
+                name_clean,
+                json.dumps(body.hook_style),
+                json.dumps(body.subtitle_style),
+                json.dumps(body.text_emphasis_style),
+                json.dumps(body.watermark_style),
+                json.dumps(body.cta_style),
+                json.dumps(body.broll_style),
+                json.dumps(body.autopost_style),
+                preset_id,
+            ),
+        )
+        conn.commit()
+        return {
+            "success": True,
+            "id": preset_id,
+            "slug": row["slug"],
+            "message": f"Preset '{name_clean}' berhasil diperbarui",
         }
     finally:
         conn.close()

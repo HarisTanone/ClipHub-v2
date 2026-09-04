@@ -165,3 +165,48 @@ class TestGeminiAgenticVideo(unittest.TestCase):
         )
         dumped = info.model_dump()
         self.assertEqual(dumped["gemini_video_processing"], "agentic")
+
+@pytest.mark.asyncio
+async def test_agentic_video_service_derive_queries_with_gemini():
+    from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
+    service = GeminiAgenticVideoService()
+    service._key_rotator._keys = ["test_key"]
+
+    mock_resp = MagicMock()
+    mock_resp.text = '{"queries": ["boxing gym workout", "focused entrepreneur office"]}'
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        queries = await service.derive_contextual_queries(
+            keyword="FIGHT TERUS",
+            subtitle_text="kalau bisnis kamu drop, kamu harus fight terus jangan nyerah",
+            context="motivasi bisnis",
+            placement="behind_person",
+        )
+
+        assert "boxing gym workout" in queries
+        assert "focused entrepreneur office" in queries
+        mock_client.models.generate_content.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_agentic_video_service_derive_queries_heuristic_fallback():
+    from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
+    service = GeminiAgenticVideoService()
+    service._key_rotator._keys = []
+
+    queries = await service.derive_contextual_queries(
+        keyword="bisnis",
+        subtitle_text="ada banyak kesempatan bisnis dan peluang di toko ini",
+        context="",
+        placement="behind_person",
+    )
+
+    assert len(queries) > 0
+    assert any("business" in q or "store" in q or "shop" in q for q in queries)
+
+
+

@@ -325,15 +325,30 @@ class JobService:
                 if not text_emphasis_style_config and resolved_preset.get("text_emphasis_style_config"):
                     text_emphasis_style_config = resolved_preset["text_emphasis_style_config"]
                     text_emphasis_enabled = text_emphasis_enabled or resolved_preset.get("text_emphasis_enabled", False)
-                if not broll_motion_style and resolved_preset.get("broll_config"):
-                    broll_cfg = resolved_preset.get("broll_config", {})
-                    if isinstance(broll_cfg, dict):
-                        broll_motion_style = broll_cfg.get("motion_style") or broll_motion_style
-                broll_enabled = broll_enabled or resolved_preset.get("broll_enabled", False)
-                broll_image_overlay = broll_image_overlay if broll_enabled else resolved_preset.get("broll_image_overlay", True)
-                broll_behind_person = broll_behind_person if broll_enabled else resolved_preset.get("broll_behind_person", True)
-                broll_video_footage = broll_video_footage if broll_enabled else resolved_preset.get("broll_video_footage", True)
-                autogrid_enabled = autogrid_enabled or resolved_preset.get("autogrid_enabled", False)
+                broll_cfg = resolved_preset.get("broll_config") or resolved_preset.get("broll_style_config") or {}
+                if isinstance(broll_cfg, dict):
+                    if not broll_motion_style and broll_cfg.get("motion_style"):
+                        broll_motion_style = broll_cfg.get("motion_style")
+                    if "enabled" in broll_cfg:
+                        broll_enabled = bool(broll_cfg["enabled"])
+                    elif "broll_enabled" in resolved_preset:
+                        broll_enabled = bool(resolved_preset["broll_enabled"])
+                    if "image_overlay" in broll_cfg:
+                        broll_image_overlay = bool(broll_cfg["image_overlay"])
+                    elif "broll_image_overlay" in resolved_preset:
+                        broll_image_overlay = bool(resolved_preset["broll_image_overlay"])
+                    if "behind_person" in broll_cfg:
+                        broll_behind_person = bool(broll_cfg["behind_person"])
+                    elif "broll_behind_person" in resolved_preset:
+                        broll_behind_person = bool(resolved_preset["broll_behind_person"])
+                    if "video_footage" in broll_cfg:
+                        broll_video_footage = bool(broll_cfg["video_footage"])
+                    elif "broll_video_footage" in resolved_preset:
+                        broll_video_footage = bool(resolved_preset["broll_video_footage"])
+                    if "autogrid_enabled" in broll_cfg:
+                        autogrid_enabled = bool(broll_cfg["autogrid_enabled"])
+                    elif "autogrid_enabled" in resolved_preset:
+                        autogrid_enabled = bool(resolved_preset["autogrid_enabled"])
                 if not auto_post_social and resolved_preset.get("auto_post_social"):
                     auto_post_social = True
                     auto_post_platforms = auto_post_platforms or resolved_preset.get("auto_post_platforms", "")
@@ -1090,6 +1105,17 @@ class JobService:
                             await asyncio.to_thread(subprocess.run, thumb_cmd, capture_output=True, text=True, timeout=15)
                         except Exception:
                             pass
+
+                    if os.path.exists(thumb_path):
+                        for alias in [
+                            f"{thumb_dir}/clip_{rank:02d}_thumb.jpg",
+                            f"{thumb_dir}/clip_{rank}_thumb.jpg",
+                            f"{thumb_dir}/clip_{rank:02d}_social.jpg",
+                        ]:
+                            try:
+                                shutil.copy2(thumb_path, alias)
+                            except Exception:
+                                pass
 
                 # Move raw clip to raw/ folder
                 raw_src = f"{output_dir}/clip_{rank:02d}.mp4"

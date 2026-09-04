@@ -185,7 +185,7 @@ def sanitize_stock_keyword(keyword: str, placement: str = "") -> str:
     base = " ".join(tokens) if tokens else raw
     # If still 1 weak word, pad visual framing (generic, not domain map)
     if len(base.split()) <= 1:
-        base = f"{base} footage" if base else "aesthetic footage"
+        base = f"{base} footage" if base else ""
     return " ".join(base.split())[:80]
 
 
@@ -230,9 +230,9 @@ def _expand_search_queries(
                 if combo.lower() not in {q.lower() for q in queries}:
                     queries.append(combo)
 
-    # Contextual background / aesthetic queries for behind_person footage
+    # Contextual background queries for behind_person footage (concrete framing, never generic abstract)
     if behind or cat in {"footage", "icon", "motion_graphic"}:
-        for variant in (f"{base} cinematic background", f"{base} aesthetic", f"{base} b-roll", f"{base} close up"):
+        for variant in (f"{base} cinematic background", f"{base} b-roll", f"{base} close up"):
             if variant.lower() not in {q.lower() for q in queries}:
                 queries.append(variant)
 

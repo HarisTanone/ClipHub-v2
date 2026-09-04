@@ -195,6 +195,17 @@ async def create_folder_structure(
                 except Exception:
                     pass
 
+            if os.path.exists(thumb_path):
+                for alias in [
+                    f"{thumb_dir}/clip_{rank:02d}_thumb.jpg",
+                    f"{thumb_dir}/clip_{rank}_thumb.jpg",
+                    f"{thumb_dir}/clip_{rank:02d}_social.jpg",
+                ]:
+                    try:
+                        shutil.copy2(thumb_path, alias)
+                    except Exception:
+                        pass
+
         raw_src = f"{output_dir}/clip_{rank:02d}.mp4"
         if os.path.exists(raw_src):
             shutil.copy2(raw_src, f"{raw_dir}/clip_{rank:02d}.mp4")

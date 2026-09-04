@@ -897,6 +897,34 @@ export const presets = {
     });
   },
 
+  async update(
+    id: number,
+    name: string,
+    hook_style: Record<string, any>,
+    subtitle_style: Record<string, any>,
+    text_emphasis_style: Record<string, any> = {},
+    watermark_style: Record<string, any> = {},
+    cta_style: Record<string, any> = {},
+    slug?: string,
+    broll_style: Record<string, any> = {},
+    autopost_style: Record<string, any> = {}
+  ): Promise<{ success: boolean; id: number; slug: string; message: string }> {
+    return request(`/api/presets/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        name,
+        slug: slug || undefined,
+        hook_style,
+        subtitle_style,
+        text_emphasis_style,
+        watermark_style,
+        cta_style,
+        broll_style,
+        autopost_style,
+      }),
+    });
+  },
+
   async remove(id: number): Promise<{ success: boolean; message: string }> {
     return request(`/api/presets/${id}`, { method: "DELETE" });
   },

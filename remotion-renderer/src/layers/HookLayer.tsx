@@ -142,19 +142,21 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
     : text;
   const renderedText = config.uppercase ? displayText.toUpperCase() : displayText;
 
-  // Style values
-  const fontFamily = config.fontFamily === "monospace" ? "monospace" : `'${config.fontFamily || "Poppins"}', sans-serif`;
-  const fontSize = config.fontSize || 48;
-  const fontWeight = Number(config.fontWeight || 800);
-  const color = config.color || "#FFFFFF";
-  const bgColor = config.bgColor || "#000000";
-  const bgOpacity = config.bgOpacity ?? 0.6;
-  const positionY = config.positionY ?? 50;
-  const textAlign = (config.textAlign || "center") as any;
-  const badgeEnabled = config.badgeEnabled !== false;
-  const badgeText = config.badgeText || "";
-  const decorativeElements = config.decorativeElements !== false;
-  const motionIntensity = Math.max(0, config.motionIntensity ?? 1);
+  // Style values (supports both camelCase and snake_case from DB/presets)
+  const anyCfg = config as any;
+  const rawFont = config.fontFamily || anyCfg.font_family || "Poppins";
+  const fontFamily = rawFont === "monospace" ? "monospace" : `'${rawFont}', sans-serif`;
+  const fontSize = config.fontSize || anyCfg.font_size || 48;
+  const fontWeight = Number(config.fontWeight || anyCfg.font_weight || 800);
+  const color = config.color || anyCfg.text_color || "#FFFFFF";
+  const bgColor = config.bgColor || anyCfg.bg_color || "#000000";
+  const bgOpacity = config.bgOpacity ?? anyCfg.bg_opacity ?? 0.6;
+  const positionY = config.positionY ?? anyCfg.position_y ?? 50;
+  const textAlign = (config.textAlign || anyCfg.text_align || "center") as any;
+  const badgeEnabled = config.badgeEnabled !== false && anyCfg.badge_enabled !== false;
+  const badgeText = config.badgeText || anyCfg.badge_text || "";
+  const decorativeElements = config.decorativeElements !== false && anyCfg.decorative_elements !== false;
+  const motionIntensity = Math.max(0, config.motionIntensity ?? anyCfg.motion_intensity ?? 1);
 
   // Text shadow (only when explicitly enabled)
   const shadows: string[] = [];
@@ -832,7 +834,7 @@ export const HookLayer: React.FC<HookLayerProps> = ({ text, config }) => {
       {/* Persistent creator point-of-view stamp */}
       {animation === "pov_stamp" && (() => {
         const entrance = spring({ frame, fps, config: { damping: 14, stiffness: 155, mass: 0.8 } });
-        const accent = config.boxColor || "#FB7185";
+        const accent = config.boxColor || (config as any).box_color || "#FB7185";
         const rotate = interpolate(frame, [0, 16], [-8, -2], { extrapolateRight: "clamp" });
         return (
           <AbsoluteFill>

@@ -249,45 +249,33 @@ def resolve_preset(
 
         slug_norm_dash = key.strip().lower().replace(" ", "-").replace("_", "-")
         slug_norm_under = key.strip().lower().replace(" ", "_").replace("-", "_")
+        slug_norm_space = key.strip().lower().replace("-", " ").replace("_", " ")
 
         row = None
         # 1. Search in user's own user_presets if user_id is provided
         if user_id is not None:
             query = (
                 "SELECT * FROM user_presets WHERE "
-                "(slug = ? OR slug = ? OR slug = ? OR LOWER(name) = LOWER(?)"
+                "(slug = ? OR slug = ? OR slug = ? OR LOWER(name) = ? OR LOWER(name) = ?"
                 + (" OR id = ?" if key.isdigit() else "")
                 + ") AND user_id = ?"
             )
-            params = [key, slug_norm_dash, slug_norm_under, key]
+            params = [key, slug_norm_dash, slug_norm_under, key.lower(), slug_norm_space]
             if key.isdigit():
                 params.append(int(key))
             params.append(user_id)
             cur.execute(query, tuple(params))
             row = cur.fetchone()
 
-        # 2. Global fallback in user_presets (accessible to superadmin & autopilot)
-        is_admin_or_system = (user_id is None or user_id == 1)
-        if not is_admin_or_system and user_id is not None:
-            try:
-                cur.execute(
-                    "SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?",
-                    (user_id,),
-                )
-                r_row = cur.fetchone()
-                if r_row and r_row["name"] == "superadmin":
-                    is_admin_or_system = True
-            except Exception:
-                pass
-
-        if not row and is_admin_or_system:
+        # 2. Global search in user_presets across all users (accessible to Autopilot, CLI, & Telegram)
+        if not row:
             query_global = (
                 "SELECT * FROM user_presets WHERE "
-                "(slug = ? OR slug = ? OR slug = ? OR LOWER(name) = LOWER(?)"
+                "(slug = ? OR slug = ? OR slug = ? OR LOWER(name) = ? OR LOWER(name) = ?"
                 + (" OR id = ?" if key.isdigit() else "")
-                + ") ORDER BY id DESC LIMIT 1"
+                + ") ORDER BY (user_id = 1) DESC, id DESC LIMIT 1"
             )
-            params_g = [key, slug_norm_dash, slug_norm_under, key]
+            params_g = [key, slug_norm_dash, slug_norm_under, key.lower(), slug_norm_space]
             if key.isdigit():
                 params_g.append(int(key))
             cur.execute(query_global, tuple(params_g))
@@ -295,7 +283,7 @@ def resolve_preset(
             if row:
                 logger.info(
                     f"preset_resolver: resolved preset '{key}' globally from user_presets "
-                    f"(id: {row['id']}, owner user_id: {row['user_id']})"
+                    f"(id: {row['id']}, name: '{row['name']}', owner user_id: {row['user_id']})"
                 )
 
         if row:
@@ -336,17 +324,8 @@ def resolve_preset(
                 "transition_duration": 0.35,
             }
 
-        # 4. If specified preset not found, fall back to user's own latest preset
-        if user_id is not None:
-            cur.execute(
-                "SELECT * FROM user_presets WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-                (user_id,),
-            )
-            last_user_p = cur.fetchone()
-            if last_user_p:
-                logger.info(f"preset_resolver: falling back to user's own active preset '{last_user_p['name']}' ({last_user_p['slug']})")
-                return _format_user_preset_row(last_user_p)
-
+        # 4. If specified preset not found, log warning and return standard studio default
+        logger.warning(f"preset_resolver: Preset '{key}' not found in database. Falling back to clean Studio Default.")
         return _get_builtin_default_preset()
     except Exception as e:
         logger.warning(f"preset_resolver error for '{key}': {e}")
@@ -460,8 +439,8 @@ def _format_user_preset_row(row) -> Dict[str, Any]:
         "broll_behind_person": bool(broll_style.get("behind_person", True)) if broll_style else True,
         "broll_video_footage": bool(broll_style.get("video_footage", True)) if broll_style else True,
         "autogrid_enabled": bool(broll_style.get("autogrid_enabled", False)) if broll_style else False,
-        "transition_style": merged_hook_style.get("transitionStyle", "cut"),
-        "transition_duration": float(merged_hook_style.get("transitionDuration", 0.35) or 0.35),
+        "transition_style": merged_hook_style.get("transitionStyle") or merged_hook_style.get("transition_style") or "cut",
+        "transition_duration": float(merged_hook_style.get("transitionDuration") or merged_hook_style.get("transition_duration") or 0.35),
         "hook_engine": merged_hook_style.get("engine", "remotion"),
         "subtitle_engine": merged_subtitle_style.get("engine", "remotion"),
         "autopost_config": autopost_style,

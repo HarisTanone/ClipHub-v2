@@ -90,6 +90,35 @@ export function PresetsTab({
     setTimeout(() => setStatusMsg(""), 2500);
   }
 
+  const currentActivePreset = userPresets.find((p) => p.id === activePresetId);
+
+  async function handleUpdateActive() {
+    if (!currentActivePreset) return;
+    setSaving(true);
+    try {
+      const res = await presetsApi.update(
+        currentActivePreset.id,
+        currentActivePreset.name,
+        hookStyle,
+        subtitleStyle,
+        textEmphasisStyle,
+        watermarkStyle,
+        ctaStyle,
+        currentActivePreset.slug,
+        brollStyle || {},
+        autopostStyle || {}
+      );
+      setStatusMsg(`Berhasil memperbarui preset "${currentActivePreset.name}"!`);
+      setTimeout(() => setStatusMsg(""), 3000);
+      const list = await presetsApi.list();
+      setUserPresets(list);
+    } catch (e: any) {
+      setStatusMsg("Gagal memperbarui preset: " + (e?.message || ""));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSave() {
     if (!saveName.trim()) return;
     setSaving(true);
@@ -185,7 +214,24 @@ export function PresetsTab({
             <span className={cn("px-1.5 py-0.5 rounded", brollStyle?.enabled ? "bg-amber-500/20 text-amber-300" : "bg-zinc-800/60 text-zinc-500")}>B-roll</span>
             <span className={cn("px-1.5 py-0.5 rounded", brollStyle?.autogrid_enabled ? "bg-cyan-500/20 text-cyan-300" : "bg-zinc-800/60 text-zinc-500")}>Auto-Grid</span>
           </div>
-          <Button type="button" size="sm" loading={saving} onClick={handleSave} icon={<Save className="h-3.5 w-3.5" />}>Simpan Preset</Button>
+          <div className="flex items-center gap-2">
+            {currentActivePreset && (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                loading={saving}
+                onClick={handleUpdateActive}
+                className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-950/40 text-xs"
+                icon={<Save className="h-3.5 w-3.5" />}
+              >
+                Perbarui Preset "{currentActivePreset.name}"
+              </Button>
+            )}
+            <Button type="button" size="sm" loading={saving} onClick={handleSave} icon={<Save className="h-3.5 w-3.5" />}>
+              {currentActivePreset ? "Simpan Sebagai Baru" : "Simpan Preset"}
+            </Button>
+          </div>
         </div>
         {statusMsg && <p className="text-[11px] text-emerald-400 mt-2 font-medium">{statusMsg}</p>}
       </div>

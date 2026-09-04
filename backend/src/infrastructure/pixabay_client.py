@@ -13,11 +13,17 @@ from src.domain.interfaces import IAssetClient
 
 logger = logging.getLogger(__name__)
 
+BANNED_VIDEO_IDS = {"9038", 9038}
+BANNED_TAGS = {"nerve cell", "neuron", "synapse", "brain cells"}
+
 
 class PixabayClient(IAssetClient):
     """Pixabay Video API client — fallback footage source for B-roll overlay."""
 
     BASE_URL = "https://pixabay.com/api/videos/"
+    BANNED_VIDEO_IDS = BANNED_VIDEO_IDS
+    BANNED_TAGS = BANNED_TAGS
+
 
     def __init__(self, download_dir: str = ""):
         self._api_key = settings.PIXABAY_API_KEY
@@ -34,29 +40,35 @@ class PixabayClient(IAssetClient):
             logger.warning("[PixabayClient] No API key configured, skipping.")
             return None
 
+        from src.infrastructure.pexels_client import expand_visual_queries
+        queries = expand_visual_queries(keyword)
+
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(
-                    self.BASE_URL,
-                    params={
-                        "key": self._api_key,
-                        "q": keyword,
-                        "video_type": "film",
-                        "min_width": 720,
-                        "per_page": 5,
-                    },
-                )
+                hits = []
+                for q in queries:
+                    response = await client.get(
+                        self.BASE_URL,
+                        params={
+                            "key": self._api_key,
+                            "q": q,
+                            "video_type": "film",
+                            "min_width": 720,
+                            "per_page": 5,
+                        },
+                    )
 
-                if response.status_code == 429:
-                    logger.warning("[PixabayClient] Rate limited (HTTP 429).")
-                    return None
+                    if response.status_code == 429:
+                        logger.warning("[PixabayClient] Rate limited (HTTP 429).")
+                        return None
 
-                if response.status_code != 200:
-                    logger.warning(f"[PixabayClient] API error: HTTP {response.status_code}")
-                    return None
+                    if response.status_code != 200:
+                        continue
 
-                data = response.json()
-                hits = data.get("hits", [])
+                    data = response.json()
+                    hits = data.get("hits", [])
+                    if hits:
+                        break
 
                 if not hits:
                     logger.debug(f"[PixabayClient] No results for '{keyword}'")
@@ -93,6 +105,21 @@ class PixabayClient(IAssetClient):
             logger.error(f"[PixabayClient] Unexpected error: {e}")
             return None
 
+    def filter_banned_hits(self, hits: list[dict]) -> list[dict]:
+        """Filter out banned video IDs and abstract tags."""
+        filtered = []
+        for hit in hits:
+            video_id = hit.get("id", 0)
+            if str(video_id) in BANNED_VIDEO_IDS or video_id in BANNED_VIDEO_IDS:
+                logger.warning(f"[PixabayClient] Rejecting banned video ID: {video_id}")
+                continue
+            tags = str(hit.get("tags", "")).lower()
+            if any(banned in tags for banned in BANNED_TAGS):
+                logger.warning(f"[PixabayClient] Rejecting abstract banned tags '{tags}' for video {video_id}")
+                continue
+            filtered.append(hit)
+        return filtered
+
     def _select_best_video(self, hits: list[dict]) -> Optional[tuple[str, int]]:
         """Pick highest resolution video under 1920px, shortest duration under 10s.
 
@@ -109,12 +136,15 @@ class PixabayClient(IAssetClient):
         best_id: int = 0
         best_score: float = -1  # higher is better (resolution)
 
-        for hit in hits:
+        valid_hits = self.filter_banned_hits(hits)
+        for hit in valid_hits:
+            video_id = hit.get("id", 0)
+
+
             duration = hit.get("duration", 0)
             if duration > MAX_DURATION:
                 continue
 
-            video_id = hit.get("id", 0)
             videos = hit.get("videos", {})
 
             # Try resolution tiers from highest to lowest

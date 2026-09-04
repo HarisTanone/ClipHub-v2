@@ -52,6 +52,8 @@ interface SubtitleConfig {
   position?: string;
   positionY?: number;
   layoutEvents?: Array<{ time: number; layout: "single" | "double" }>;
+  reframeLayout?: string;
+  reframe_layout?: string;
   gridPositionY?: number;
   maxWidthPct?: number;
   maxWidth?: number;
@@ -215,13 +217,16 @@ export const resolveSubtitlePositionY = (config: SubtitleConfig): number => {
 };
 
 export const resolveLayoutAtTime = (
-  events: Array<{ time: number; layout: "single" | "double" }> | undefined,
+  events: Array<{ time: number; layout: "single" | "double" | string }> | undefined,
   timeSeconds: number,
 ): "single" | "double" => {
+  if (!events || events.length === 0) return "single";
+  const sorted = [...events].sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0));
   let layout: "single" | "double" = "single";
-  for (const event of events || []) {
-    if (!Number.isFinite(event.time) || event.time > timeSeconds) break;
-    layout = event.layout === "double" ? "double" : "single";
+  for (const event of sorted) {
+    if (!Number.isFinite(event.time) || event.time > timeSeconds + 0.001) break;
+    const l = String(event.layout || "").trim().toLowerCase();
+    layout = (l === "double" || l === "grid" || l === "2-grid" || l === "split") ? "double" : "single";
   }
   return layout;
 };
@@ -329,7 +334,9 @@ export const SubtitleLayer: React.FC<SubtitleLayerProps> = ({ words, config, fps
         const endFrame = Math.min(naturalEnd, nextStartFrame);
         const durationInFrames = endFrame - startFrame;
         if (durationInFrames <= 0) return null;
-        const pageLayout = resolveLayoutAtTime(config.layoutEvents, page.startMs / 1000);
+        const pageLayout = config.layoutEvents && config.layoutEvents.length > 0
+          ? resolveLayoutAtTime(config.layoutEvents, page.startMs / 1000)
+          : (["double", "grid", "2-grid", "split"].includes(String(config.reframeLayout || (config as any).reframe_layout || "").toLowerCase()) ? "double" : "single");
         const pagePositionY = pageLayout === "double"
           ? clamp(config.gridPositionY ?? 50, 8, 94)
           : positionY;

@@ -795,6 +795,9 @@ class V2PipelineService:
                         reframe_data[clip.rank] = result
                     except Exception as e:
                         logger.warning(f"[{job_id}] YOLO reframe failed clip {clip.rank}: {e}")
+            if job.clips_data is None:
+                job.clips_data = {}
+            job.clips_data["reframe_data"] = reframe_data
             self._emit(job_id, 8, "yolo_reframe", "complete")
 
             # ═══ Step 8.1: Person-First Shadow Mode (parallel comparison) ═══
@@ -1021,6 +1024,8 @@ class V2PipelineService:
                 creative_direction=creative_direction,
                 output_dir=output_dir,
                 trim_results=trim_results,
+                reframe_data=reframe_data,
+                clips_with_words=clips_with_words,
             )
 
             # ═══ Step 11.5: Optional sparse AI cinematic text ═══
@@ -1315,6 +1320,8 @@ class V2PipelineService:
         creative_direction: CreativeDirection,
         output_dir: str,
         trim_results: dict[int, bool],
+        reframe_data: Optional[dict] = None,
+        clips_with_words: Optional[dict[int, list[dict]]] = None,
     ) -> None:
         """Apply optional B-roll before Remotion renders hooks and subtitles."""
         self._emit(job_id, 11, "broll", "start")
@@ -1323,15 +1330,27 @@ class V2PipelineService:
             self._emit(job_id, 11, "broll", "complete")
             return
 
-        # Stamp clip topic (hook/reason) onto suggestions for entity lock + pass-2 context.
+        words_map = clips_with_words or getattr(self, "_last_clips_with_words", None) or {}
         suggestions: list[BRollSuggestion] = []
         for clip in clips:
             topic = " ".join(
                 x for x in (clip.hook or "", clip.reason or "") if x
             ).strip()
+            clip_words = words_map.get(clip.rank) or []
             for suggestion in clip.broll_suggestions:
                 if topic and not (suggestion.reason or "").strip():
                     suggestion.reason = topic[:200]
+                s_start = float(suggestion.at_time)
+                s_end = s_start + float(suggestion.duration)
+                spoken = [
+                    str(w.get("word", "")).strip()
+                    for w in clip_words
+                    if w.get("start") is not None
+                    and float(w.get("start", 0)) <= s_end + 0.5
+                    and float(w.get("end", w.get("start", 0))) >= s_start - 0.5
+                ]
+                if spoken and not getattr(suggestion, "subtitle_text", ""):
+                    suggestion.subtitle_text = " ".join(spoken)
                 suggestions.append(suggestion)
         if not suggestions:
             logger.info(f"[{job_id}] Auto B-roll enabled, but no relevant suggestions were found")
@@ -1533,7 +1552,7 @@ class V2PipelineService:
         # Full-frame splice stays as-is. Additionally place image/video assets
         # behind the person in the top ~50% only. Runs on base/reframed (or
         # already-spliced) clip so both effects can coexist on different times.
-        reframe_data = (job.clips_data or {}).get("reframe_data")
+        ref_data = reframe_data or (job.clips_data or {}).get("reframe_data")
         if (
             settings.TOP_OVERLAY_ENABLED
             and job.target_aspect_ratio == "9:16"
@@ -1545,8 +1564,8 @@ class V2PipelineService:
                 clips=clips,
                 output_dir=output_dir,
                 trim_results=trim_results,
-                clips_with_words=getattr(self, "_last_clips_with_words", None),
-                reframe_data=reframe_data,
+                clips_with_words=clips_with_words or getattr(self, "_last_clips_with_words", None),
+                reframe_data=ref_data,
             )
 
         # ─── Step 10.8: Object image+text overlay (noun → stock photo card) ──
@@ -1608,9 +1627,21 @@ class V2PipelineService:
             clip_reframe = ref_dict.get(clip.rank) or {}
             clip_dur = max(0.0, float(clip.end) - float(clip.start))
 
-            # Suppress all behind-person overlays if clip is completely static double-grid
-            if clip_reframe.get("layout") in ("double", "grid", "2-grid", "split") and not clip_reframe.get("layout_events"):
-                logger.info(f"[{job_id}] Top overlay suppressed for clip {clip.rank} (static double grid active)")
+            clip_layout_events = sorted(
+                (clip_reframe.get("layout_events") or []),
+                key=lambda x: float(x.get("time", 0.0)),
+            )
+
+            # Suppress all behind-person overlays if clip is completely double-grid
+            is_all_double = (
+                str(clip_reframe.get("layout", "")).lower() in ("double", "grid", "2-grid", "split")
+                and (
+                    not clip_layout_events
+                    or all(str(e.get("layout", "")).lower() in ("double", "grid", "2-grid", "split") for e in clip_layout_events)
+                )
+            )
+            if is_all_double:
+                logger.info(f"[{job_id}] Top overlay strictly suppressed for clip {clip.rank} (double grid active)")
                 clip.top_overlay_events = []
                 continue
 
@@ -1631,9 +1662,8 @@ class V2PipelineService:
 
             # Block times when auto-grid / double layout is active
             # (Behind-person overlays are strictly suppressed during double-grid segments)
-            clip_layout_events = clip_reframe.get("layout_events") or []
             for idx, ev in enumerate(clip_layout_events):
-                if ev.get("layout") in ("double", "grid", "2-grid", "split"):
+                if str(ev.get("layout", "")).lower() in ("double", "grid", "2-grid", "split"):
                     ev_start = float(ev.get("time", 0.0))
                     ev_end = float(clip_layout_events[idx + 1].get("time", clip_dur)) if idx + 1 < len(clip_layout_events) else clip_dur
                     blocked.append((ev_start, ev_end))
@@ -2392,10 +2422,14 @@ class V2PipelineService:
                     ):
                         if clip_reframe.get(key) is not None:
                             cd_dict[key] = clip_reframe[key]
-                if "transition_style" not in cd_dict and hook_style_config.get("transitionStyle"):
-                    cd_dict["transition_style"] = hook_style_config.get("transitionStyle")
-                if "transition_duration" not in cd_dict and hook_style_config.get("transitionDuration") is not None:
-                    cd_dict["transition_duration"] = hook_style_config.get("transitionDuration")
+                if "transition_style" not in cd_dict:
+                    t_style = hook_style_config.get("transitionStyle") or hook_style_config.get("transition_style")
+                    if t_style:
+                        cd_dict["transition_style"] = t_style
+                if "transition_duration" not in cd_dict:
+                    t_dur = hook_style_config.get("transitionDuration") or hook_style_config.get("transition_duration")
+                    if t_dur is not None:
+                        cd_dict["transition_duration"] = t_dur
 
                 # Prosody punch: energy peaks → zoom_events for Remotion
                 prosody = prosody_map.get(clip.rank)

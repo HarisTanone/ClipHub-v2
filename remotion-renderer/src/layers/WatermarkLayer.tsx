@@ -43,10 +43,11 @@ export const WatermarkLayer: React.FC<{ watermark?: WatermarkConfig | null }> = 
     return null;
   }
 
-  const type = watermark.type || "text";
-  const opacity = Math.max(0, Math.min(100, watermark.opacity ?? 60)) / 100;
-  const position = watermark.position || "bottom-right";
-  const marginPct = Math.max(0, Math.min(20, watermark.marginPct ?? 3)) / 100;
+  const anyWm = watermark as any;
+  const type = watermark.type || anyWm.watermark_type || "text";
+  const opacity = Math.max(0, Math.min(100, watermark.opacity ?? anyWm.opacity ?? 60)) / 100;
+  const position = watermark.position || anyWm.watermark_position || "bottom-right";
+  const marginPct = Math.max(0, Math.min(20, watermark.marginPct ?? anyWm.margin_pct ?? 3)) / 100;
   const marginX = width * marginPct;
   const marginY = height * marginPct;
 
@@ -91,15 +92,16 @@ export const WatermarkLayer: React.FC<{ watermark?: WatermarkConfig | null }> = 
     justifyContent: "center",
   };
 
-  if (type === "image" && watermark.imageDataUrl) {
-    const sizePct = Math.max(5, Math.min(80, watermark.sizePct ?? 20)) / 100;
+  const imgUrl = watermark.imageDataUrl || anyWm.image_data_url || anyWm.image_url;
+  if (type === "image" && imgUrl) {
+    const sizePct = Math.max(5, Math.min(80, watermark.sizePct ?? anyWm.size_pct ?? 20)) / 100;
     const imgWidth = Math.round(width * sizePct);
 
     return (
       <AbsoluteFill style={{ pointerEvents: "none" }}>
         <div style={containerStyle}>
           <Img
-            src={watermark.imageDataUrl}
+            src={imgUrl}
             style={{
               width: `${imgWidth}px`,
               height: "auto",
@@ -113,15 +115,15 @@ export const WatermarkLayer: React.FC<{ watermark?: WatermarkConfig | null }> = 
   }
 
   // Text watermark
-  const text = watermark.text || "";
+  const text = watermark.text || anyWm.watermark_text || "";
   if (!text.trim()) {
     return null;
   }
 
-  const fontFamily = watermark.fontFamily || "Inter, sans-serif";
-  const fontSize = watermark.fontSize || Math.round(width * 0.035);
-  const fontWeight = watermark.fontWeight || "600";
-  const color = watermark.color || "#FFFFFF";
+  const fontFamily = watermark.fontFamily || anyWm.font_family || "Inter, sans-serif";
+  const fontSize = watermark.fontSize || anyWm.font_size || Math.round(width * 0.035);
+  const fontWeight = watermark.fontWeight || anyWm.font_weight || "600";
+  const color = watermark.color || anyWm.text_color || anyWm.color || "#FFFFFF";
 
   return (
     <AbsoluteFill style={{ pointerEvents: "none" }}>

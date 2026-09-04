@@ -683,15 +683,14 @@ class SkiaSubtitleRenderer:
         # Position calculation with Auto-Grid Dynamic Centering
         default_pos_y = float(style.get("position_y") if style.get("position_y") is not None else style.get("position_y_pct", 78))
         layout_events = style.get("layout_events") or []
-        autogrid_enabled = bool(style.get("autogrid_enabled", True))
 
-        if autogrid_enabled and layout_events and time_sec is not None:
+        if layout_events and time_sec is not None:
             active_layout = self._get_layout_at_time(layout_events, time_sec)
             if active_layout in ("double", "grid", "2-grid", "split"):
                 pos_y_pct = float(style.get("grid_position_y") or 50.0)
             else:
                 pos_y_pct = default_pos_y
-        elif autogrid_enabled and style.get("reframe_layout") in ("double", "grid", "2-grid", "split") and not layout_events:
+        elif str(style.get("reframe_layout") or "").lower() in ("double", "grid", "2-grid", "split") and not layout_events:
             pos_y_pct = float(style.get("grid_position_y") or 50.0)
         else:
             pos_y_pct = default_pos_y

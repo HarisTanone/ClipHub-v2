@@ -84,14 +84,16 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
   const hook = useHookConfig(creativeDirection, hookAnimation);
   const subtitle = useSubtitleConfig(creativeDirection);
   const hasLayoutEvents = Array.isArray(creativeDirection.layout_events) && creativeDirection.layout_events.length > 0;
+  const isDoubleLayout = ["double", "grid", "2-grid", "split"].includes(String(creativeDirection.reframe_layout || "").toLowerCase());
+  const gridCenterY = 50;
   const subtitleConfig = hasLayoutEvents
     ? {
         ...subtitle.config,
         layoutEvents: creativeDirection.layout_events,
-        gridPositionY: creativeDirection.subtitle_position_y ?? 50,
+        gridPositionY: gridCenterY,
       }
-    : creativeDirection.reframe_layout === "double"
-      ? { ...subtitle.config, position: "center", positionY: creativeDirection.subtitle_position_y ?? 50 }
+    : isDoubleLayout
+      ? { ...subtitle.config, position: "center", positionY: gridCenterY, gridPositionY: gridCenterY }
       : subtitle.config;
 
   const isHookActive = Boolean(hookText && hook.config.enabled !== false);
@@ -113,8 +115,18 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
 
   // ─── Zoom events from prosody analysis ───────────────────────────
   const zoomEvents = creativeDirection.zoom_events || [];
-  const transitionStyle = hook.config.transitionStyle || creativeDirection.transition_style || "cut";
-  const transitionDuration = hook.config.transitionDuration || creativeDirection.transition_duration || 0.35;
+  const transitionStyle =
+    hook.config.transitionStyle ||
+    (hook.config as any).transition_style ||
+    creativeDirection.transition_style ||
+    (creativeDirection as any).transitionStyle ||
+    "cut";
+  const transitionDuration =
+    hook.config.transitionDuration ??
+    (hook.config as any).transition_duration ??
+    creativeDirection.transition_duration ??
+    (creativeDirection as any).transitionDuration ??
+    0.35;
   const canvas = creativeDirection.canvas_config;
   const hasCanvas = Boolean(canvas && canvas.layout);
 
@@ -182,10 +194,10 @@ export const ClipComposition: React.FC<ClipCompositionProps> = ({
       )}
 
 
-      {/* L4: Hook overlay — highest z-index */}
+      {/* L4: Hook overlay — highest priority overlay (zIndex: 10) */}
       {isHookActive && (
         <Sequence from={0} durationInFrames={hookDurationFrames + Math.floor(fps * 0.5)}>
-          <AbsoluteFill style={{ zIndex: 3 }}>
+          <AbsoluteFill style={{ zIndex: 10 }}>
             <HookLayer text={hookText} config={hook.config} />
           </AbsoluteFill>
         </Sequence>

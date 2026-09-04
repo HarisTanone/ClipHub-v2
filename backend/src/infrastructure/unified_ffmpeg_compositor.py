@@ -447,12 +447,11 @@ class UnifiedFFmpegCompositor:
         else:
             y_pos = "(h*0.75-text_h/2)"
 
-        autogrid_enabled = bool(style.get("autogrid_enabled", True)) if isinstance(style, dict) else True
         layout_events = style.get("layout_events") or [] if isinstance(style, dict) else []
 
         def _get_y_for_time(time_sec: float) -> str:
-            if not autogrid_enabled:
-                return y_pos
+            # Dynamic auto-centering: whenever layout is double/grid, position at center (50%)
+            # When single grid, immediately return to original configured y_pos
             if layout_events:
                 curr = "single"
                 for ev in sorted(layout_events, key=lambda x: float(x.get("time", 0.0))):
@@ -461,9 +460,11 @@ class UnifiedFFmpegCompositor:
                     else:
                         break
                 if curr in ("double", "grid", "2-grid", "split"):
-                    return "(h*0.50-text_h/2)"
-            elif isinstance(style, dict) and style.get("reframe_layout") in ("double", "grid", "2-grid", "split"):
-                return "(h*0.50-text_h/2)"
+                    grid_y = float(style.get("grid_position_y") or 50.0)
+                    return f"(h*{grid_y / 100.0:.2f}-text_h/2)"
+            elif isinstance(style, dict) and str(style.get("reframe_layout") or "").lower() in ("double", "grid", "2-grid", "split"):
+                grid_y = float(style.get("grid_position_y") or 50.0)
+                return f"(h*{grid_y / 100.0:.2f}-text_h/2)"
             return y_pos
 
         # Group words into lines

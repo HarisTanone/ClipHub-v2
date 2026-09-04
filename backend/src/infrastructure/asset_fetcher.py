@@ -27,6 +27,7 @@ from src.infrastructure.broll_subject_analyzer import BrollSubjectAnalyzer
 from src.infrastructure.pexels_client import PexelsClient
 from src.infrastructure.pixabay_client import PixabayClient
 from src.infrastructure.iconify_client import IconifyClient
+from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
 from src.infrastructure.giphy_client import GiphyClient
 from src.infrastructure.lottie_library import LottieLibrary
 
@@ -71,6 +72,7 @@ class AssetFetcher(IAssetFetcher):
         self._downloader = FootageDownloader()
         self._processor = FootageProcessor()
         self._subject_analyzer = BrollSubjectAnalyzer()
+        self._agentic_service = GeminiAgenticVideoService()
 
         # Client chains per category (first = primary, rest = fallbacks)
         self._client_chains: dict[str, list[IAssetClient]] = {
@@ -350,13 +352,17 @@ class AssetFetcher(IAssetFetcher):
                             timeout=self._timeout,
                         )
                         if result and not result.is_fallback:
-                            self._cache.put(keyword, category_str, result)
-                            suggestion.asset_result = result
-                            logger.info(
-                                f"[AssetFetcher] Resolved: {keyword} -> "
-                                f"{result.source_api} ({result.asset_format}, query='{query}')"
-                            )
-                            return
+                            if str(getattr(result, "asset_id", "")) not in {"9038", 9038} and self._agentic_service.verify_candidate(
+                                candidate_title=str(getattr(result, "metadata", {}).get("title", "")),
+                                candidate_tags=str(getattr(result, "metadata", {}).get("tags", "")),
+                            ):
+                                self._cache.put(keyword, category_str, result)
+                                suggestion.asset_result = result
+                                logger.info(
+                                    f"[AssetFetcher] Resolved: {keyword} -> "
+                                    f"{result.source_api} ({result.asset_format}, query='{query}')"
+                                )
+                                return
                     except asyncio.TimeoutError:
                         logger.warning(
                             f"[AssetFetcher] Timeout: {client.__class__.__name__} for '{query}'"
@@ -368,9 +374,52 @@ class AssetFetcher(IAssetFetcher):
                         )
                         break
 
-            # 4. All clients failed — fallback mode
+            # 3b. Secondary attempt via Gemini Agentic Subtitle Reasoning:
+            # When primary keyword fails, understand the spoken subtitle text at that moment
+            sub_queries = await self._extract_subtitle_queries(suggestion)
+            if sub_queries:
+                for client in chain:
+                    for s_query in sub_queries:
+                        if s_query in queries:
+                            continue
+                        try:
+                            result = await asyncio.wait_for(
+                                client.search(s_query),
+                                timeout=self._timeout,
+                            )
+                            if result and not result.is_fallback:
+                                if str(getattr(result, "asset_id", "")) not in {"9038", 9038} and self._agentic_service.verify_candidate(
+                                    candidate_title=str(getattr(result, "metadata", {}).get("title", "")),
+                                    candidate_tags=str(getattr(result, "metadata", {}).get("tags", "")),
+                                ):
+                                    self._cache.put(keyword, category_str, result)
+                                    suggestion.asset_result = result
+                                    logger.info(
+                                        f"[AssetFetcher] Resolved via Gemini Agentic Subtitle Context: '{keyword}' -> "
+                                        f"{result.source_api} ({result.asset_format}, query='{s_query}')"
+                                    )
+                                    return
+                        except Exception as e:
+                            logger.debug(f"[AssetFetcher] Subtitle query '{s_query}' failed: {e}")
+                            break
+
+            # 4. All clients failed — fallback mode (skip B-roll, do NOT use random cached footage)
             suggestion.asset_result = AssetResult.fallback()
-            logger.info(f"[AssetFetcher] Fallback: {keyword} ({category_str}) — no asset found")
+            logger.info(f"[AssetFetcher] Fallback: {keyword} ({category_str}) — no relevant asset found, skipping")
+
+    async def _extract_subtitle_queries(self, suggestion: BRollSuggestion) -> list[str]:
+        """Extract visual search queries via Gemini Agentic Subtitle Understanding."""
+        sub_text = str(getattr(suggestion, "subtitle_text", "") or "").strip()
+        reason = str(getattr(suggestion, "reason", "") or "").strip()
+        keyword = str(getattr(suggestion, "keyword", "") or "").strip()
+        placement = str(getattr(suggestion, "placement", "behind_person") or "behind_person")
+
+        return await self._agentic_service.derive_contextual_queries(
+            keyword=keyword,
+            subtitle_text=sub_text,
+            context=reason,
+            placement=placement,
+        )
 
     def _build_query(
         self, keyword: str, creative_direction: Optional[CreativeDirection], category_str: str

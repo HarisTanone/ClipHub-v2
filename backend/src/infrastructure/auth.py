@@ -164,8 +164,13 @@ class GeminiKeyRotator:
         return len(self._keys)
 
     @property
+    def keys(self) -> list[str]:
+        return list(self._keys)
+
+    @property
     def current_index(self) -> int:
         return self._current_index
+
 
     def get_current_key(self) -> Optional[str]:
         """Get current active API key. Returns None if no keys available."""

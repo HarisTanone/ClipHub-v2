@@ -6,6 +6,7 @@
     "dev": "npx remotion studio",
     "build": "tsc --noEmit",
     "render": "npx remotion render ClipComposition",
+    "start": "tsx src/server/index.ts",
     "server": "tsx src/server/index.ts",
     "server:dev": "tsx watch src/server/index.ts",
     "test": "vitest run",

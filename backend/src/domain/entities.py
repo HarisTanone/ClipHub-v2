@@ -152,6 +152,7 @@ class BRollSuggestion:
     smart_crop_y: Optional[int] = None
     layout_mode: Optional[str] = None
     search_queries: Optional[list[str]] = None
+    subtitle_text: str = ""
 
 
 @dataclass
@@ -661,6 +662,7 @@ class SubtitleStyleConfig:
             "bgRadius": "bg_radius",
             "bgPadding": "bg_padding",
             "positionY": "position_y",
+            "subtitle_position_y": "position_y",
             "strokeEnabled": "stroke_enabled",
             "strokeColor": "stroke_color",
             "strokeWidth": "stroke_width",
