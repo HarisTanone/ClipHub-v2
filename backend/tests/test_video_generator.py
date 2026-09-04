@@ -605,7 +605,7 @@ async def test_step_render_video_with_hook_and_subtitles(tmp_path, monkeypatch):
     )
 
     # Mock scene preparation and concatenation to use our dummy video/audio
-    async def mock_prepare(entry, clips_dir):
+    async def mock_prepare(entry, clips_dir, *args, **kwargs):
         return dummy_concat
 
     async def mock_concat(scene_clips, concat_path):

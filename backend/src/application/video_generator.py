@@ -1300,9 +1300,13 @@ class VideoGenerator:
         clips_dir = os.path.join(work_dir, "clips")
         os.makedirs(clips_dir, exist_ok=True)
 
+        aspect_ratio = getattr(job, "aspect_ratio", "9:16") or "9:16"
         scene_clips = []
         for entry in timeline:
-            clip_path = await self._prepare_scene_clip(entry, clips_dir)
+            try:
+                clip_path = await self._prepare_scene_clip(entry, clips_dir, aspect_ratio=aspect_ratio)
+            except TypeError:
+                clip_path = await self._prepare_scene_clip(entry, clips_dir)
             scene_clips.append(clip_path)
 
         # Step 6b: Concatenate all scene clips
@@ -1769,16 +1773,27 @@ class VideoGenerator:
 
         return None
 
-    async def _prepare_scene_clip(self, entry: dict, clips_dir: str) -> str:
-        """Prepare a single scene clip: trim footage to match TTS duration, scale to 9:16."""
+    async def _prepare_scene_clip(self, entry: dict, clips_dir: str, aspect_ratio: str = "9:16") -> str:
+        """Prepare a single scene clip: trim footage to match TTS duration, scale to target aspect ratio."""
         scene_id = entry["scene_id"]
         duration = entry["duration"]
         footage_path = entry.get("footage_path")
 
         clip_path = os.path.join(clips_dir, f"clip_{scene_id:03d}.mp4")
 
+        scale_crop = (
+            "scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+            "crop=1920:1080,"
+        ) if aspect_ratio == "16:9" else (
+            "scale=1080:1080:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+            "crop=1080:1080,"
+        ) if aspect_ratio == "1:1" else (
+            "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+            "crop=1080:1920,"
+        )
+
         if footage_path and os.path.exists(footage_path):
-            # Trim and scale footage to 1080x1920 (9:16), seeking to agentic moment
+            # Trim and scale footage to target aspect ratio, seeking to agentic moment
             start_ts = float(entry.get("start_timestamp") or 0.0)
             from src.infrastructure.gpu_encoder import get_video_encoder_args
             cmd = [
@@ -1788,18 +1803,8 @@ class VideoGenerator:
                 "-i", footage_path,
                 "-t", str(duration),
                 "-vf", (
-                    (
-                        "scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
-                        "crop=1920:1080,"
-                    ) if getattr(job, "aspect_ratio", "9:16") == "16:9" else (
-                        "scale=1080:1080:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
-                        "crop=1080:1080,"
-                    ) if getattr(job, "aspect_ratio", "9:16") == "1:1" else (
-                        "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
-                        "crop=1080:1920,"
-                    )
-                ) + (
-                    "unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
+                    scale_crop
+                    + "unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
                     "setsar=1"
                 ),
 
@@ -1825,12 +1830,13 @@ class VideoGenerator:
         else:
             logger.info(f"video_gen: scene {scene_id} no footage, using black frame")
 
-        # Fallback: generate black frame with matching duration
+        # Fallback: generate black frame with matching duration and resolution
         from src.infrastructure.gpu_encoder import get_video_encoder_args
+        res = "1920x1080" if aspect_ratio == "16:9" else "1080x1080" if aspect_ratio == "1:1" else "1080x1920"
         cmd = [
             "ffmpeg", "-y",
             "-f", "lavfi",
-            "-i", f"color=c=black:s=1080x1920:d={duration}:r=30",
+            "-i", f"color=c=black:s={res}:d={duration}:r=30",
             *get_video_encoder_args("medium"),
             "-pix_fmt", "yuv420p",
             clip_path,
