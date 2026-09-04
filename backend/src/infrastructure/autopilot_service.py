@@ -25,7 +25,10 @@ YTDLP_TIMEOUT = int(os.environ.get("YTDLP_SEARCH_TIMEOUT", "45"))
 
 class AutopilotService:
     def __init__(self):
+        self._run_lock = asyncio.Lock()
+        self._last_scheduled_runs: dict[tuple[int, str], bool] = {}
         self._ensure_tables()
+
 
     def _ensure_tables(self):
         """Ensure autopilot_settings and autopilot_runs tables exist."""
@@ -267,13 +270,27 @@ class AutopilotService:
         conn = get_dict_connection()
         try:
             cur = conn.cursor()
+            # 1. Expire abandoned reservations older than 15 minutes
+            fifteen_mins_ago = (now_wib - dt.timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                cur.execute("""
+                    UPDATE autopilot_runs
+                    SET status = 'failed', video_title = '[TIMEOUT] Waktu pencarian video habis'
+                    WHERE status = 'reserving' AND created_at < ?
+                """, (fifteen_mins_ago,))
+                conn.commit()
+            except Exception:
+                pass
+
+            # 2. Count active runs and pending reservations for today
             cur.execute("""
                 SELECT COUNT(*) as run_count
                 FROM autopilot_runs
-                WHERE user_id = ? AND run_date = ? AND status IN ('submitted', 'completed')
+                WHERE user_id = ? AND run_date = ? AND status IN ('reserving', 'in_progress', 'submitted', 'completed')
             """, (user_id, today_date))
             row = cur.fetchone()
             today_runs = row["run_count"] if row else 0
+
 
             cur.execute("""
                 SELECT * FROM autopilot_runs
@@ -443,226 +460,273 @@ class AutopilotService:
     ) -> dict:
         """Execute autonomous discovery, clipping, and auto-post pipeline.
 
-        Enforces enabled check, pipeline availability check, and max 1 video/day quota unless force=True.
+        Enforces enabled check, pipeline availability check, and strict atomic max 1 video/day quota unless force=True.
         """
-        self._ensure_tables()
-        settings = self.get_settings(user_id)
+        async with self._run_lock:
+            self._ensure_tables()
+            settings = self.get_settings(user_id)
 
-        # 0. Check if user enabled autopilot
-        if not force and not settings.get("enabled"):
-            logger.info(f"autopilot: Skipped run for user {user_id}. Autopilot is disabled for this user.")
-            return {
-                "success": False,
-                "status": "disabled",
-                "message": f"Hermes Autopilot belum diaktifkan untuk pengguna ini.",
-            }
+            # 0. Check if user enabled autopilot
+            if not force and not settings.get("enabled"):
+                logger.info(f"autopilot: Skipped run for user {user_id}. Autopilot is disabled for this user.")
+                return {
+                    "success": False,
+                    "status": "disabled",
+                    "message": f"Hermes Autopilot belum diaktifkan untuk pengguna ini.",
+                }
 
-        # 1. Check if server pipeline is already busy with another video
-        if not force and self.is_pipeline_busy():
-            logger.info(f"autopilot: Pipeline is currently busy processing another job. Deferring run for user {user_id}.")
-            return {
-                "success": False,
-                "status": "pipeline_busy",
-                "message": "Server sedang memproses video lain. Antrean autopilot akan menunggu hingga proses yang sedang berjalan selesai.",
-            }
+            # 1. Check if server pipeline is already busy with another video
+            if not force and self.is_pipeline_busy():
+                logger.info(f"autopilot: Pipeline is currently busy processing another job. Deferring run for user {user_id}.")
+                return {
+                    "success": False,
+                    "status": "pipeline_busy",
+                    "message": "Server sedang memproses video lain. Antrean autopilot akan menunggu hingga proses yang sedang berjalan selesai.",
+                }
 
-        # 2. Check daily quota
-        can_run, reason, quota_info = self.can_run_today(user_id)
-        if not can_run and not force:
-            logger.info(f"autopilot: Skipped run for user {user_id}. {reason}")
-            return {
-                "success": False,
-                "status": "quota_exceeded",
-                "message": reason,
-                "quota": quota_info,
-            }
+            # 2. Check daily quota
+            can_run, reason, quota_info = self.can_run_today(user_id)
+            if not can_run and not force:
+                logger.info(f"autopilot: Skipped run for user {user_id}. {reason}")
+                return {
+                    "success": False,
+                    "status": "quota_exceeded",
+                    "message": reason,
+                    "quota": quota_info,
+                }
 
-        # 3. Pick candidate video
-        candidate = self.pick_best_candidate(user_id)
-        if not candidate:
-            logger.warning(f"autopilot: No fresh candidate video found for niche '{settings.get('niche_query')}'.")
-            return {
-                "success": False,
-                "status": "no_candidate_found",
-                "message": f"Tidak ditemukan video baru yang belum pernah diproses untuk topik '{settings.get('niche_query')}'.",
-            }
+            now_wib = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))
+            today_date = now_wib.date().isoformat()
+            now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
 
-        video_url = candidate["url"]
-        video_title = candidate["title"]
-        virality_score = candidate.get("virality_score", 75.0)
-        now_wib = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))
-        today_date = now_wib.date().isoformat()
-        logger.info(
-            f"autopilot: Selected video '{video_title}' ({video_url}) score={virality_score} for user {user_id} via {trigger_source}"
-        )
+            # Immediate Atomic Quota Reservation at second 0 to prevent concurrent race conditions
+            reservation_id = None
+            if not force:
+                conn = get_dict_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO autopilot_runs (
+                            user_id, run_date, youtube_url, video_title, virality_score,
+                            job_id, status, trigger_source, created_at
+                        ) VALUES (?, ?, 'pending_discovery', 'Mencari video viral YouTube...', 0, 'reserving', 'reserving', ?, ?)
+                    """, (user_id, today_date, trigger_source, now_iso))
 
-        # 4. Resolve preset style layers
-        from src.infrastructure.preset_resolver import resolve_preset
-        preset_slug = str(preset_override or settings.get("preset_slug", "default")).strip() or "default"
-        resolved_preset = resolve_preset(preset_slug, user_id=user_id)
-        # If preset is default/active or falls back to builtin_default, automatically check if user has custom active preset
-        if not resolved_preset or resolved_preset.get("source") == "builtin_default":
-            fallback_p = resolve_preset("active", user_id=user_id)
-            if fallback_p and fallback_p.get("source") != "builtin_default":
-                resolved_preset = fallback_p
-                preset_slug = resolved_preset.get("slug") or preset_slug
-                logger.info(f"autopilot: Automatically resolved active user preset '{resolved_preset.get('name')}' ({preset_slug})")
-        elif resolved_preset:
-            preset_slug = resolved_preset.get("slug") or preset_slug
+                    conn.commit()
+                    reservation_id = cur.lastrowid
+                finally:
+                    conn.close()
 
-        # 5. Prepare AutoCliper job options
-        target_platforms = [p.strip().lower() for p in settings.get("target_platforms", "tiktok,instagram,youtube").split(",") if p.strip()]
-        target_accounts = settings.get("target_account_ids", [])
-        if not target_accounts and resolved_preset and resolved_preset.get("auto_post_account_ids"):
-            target_accounts = resolved_preset.get("auto_post_account_ids")
-
-        schedule_mode = settings.get("schedule_mode", "ai")
-        custom_schedule_time = settings.get("custom_schedule_time") if schedule_mode == "custom" else None
-        broll_style = resolved_preset.get("broll_config") or resolved_preset.get("broll_style_config") or {}
-        broll_motion_style = broll_style.get("motion_style") if isinstance(broll_style, dict) else None
-
-        job_options = {
-            "youtube_url": video_url,
-            "target_aspect_ratio": "9:16",
-            "style_preset": preset_slug,
-            "force_reprocess": False,
-            "use_remotion": True,
-            "pipeline_version": "v2",
-            "hook_style": resolved_preset.get("hook_style_config", {}).get("animation") if resolved_preset else None,
-            "ai_layer_enabled": True,
-            # B-roll & Auto-Grid layers from resolved preset
-            "broll_enabled": resolved_preset.get("broll_enabled", False) if resolved_preset else False,
-            "broll_image_overlay": resolved_preset.get("broll_image_overlay", True) if resolved_preset else True,
-            "broll_behind_person": resolved_preset.get("broll_behind_person", True) if resolved_preset else True,
-            "broll_video_footage": resolved_preset.get("broll_video_footage", True) if resolved_preset else True,
-            "broll_motion_style": broll_motion_style,
-            "autogrid_enabled": resolved_preset.get("autogrid_enabled", False) if resolved_preset else False,
-            # Text & Hook & Subtitle layers from resolved preset
-            "text_emphasis_enabled": resolved_preset.get("text_emphasis_enabled", True) if resolved_preset else True,
-            "hook_style_config": resolved_preset.get("hook_style_config", {}) if resolved_preset else {},
-            "subtitle_style_config": resolved_preset.get("subtitle_style_config", {}) if resolved_preset else {},
-            "text_emphasis_style_config": resolved_preset.get("text_emphasis_style_config", {}) if resolved_preset else {},
-            "watermark_config": resolved_preset.get("watermark_config", {}) if resolved_preset else {},
-            "cta_config": resolved_preset.get("cta_config", {}) if resolved_preset else {},
-            # AI Auto-Post configurations
-            "auto_post_social": True,
-            "auto_post_platforms": ",".join(target_platforms),
-            "auto_post_account_ids": target_accounts,
-            "auto_post_schedule_mode": schedule_mode,
-            "auto_post_custom_time": custom_schedule_time,
-            "auto_post_clips_count": int(settings.get("post_clips_count", 5) or 5),
-        }
-
-        # 6. Submit job to AutoCliper service
-        from src.presentation.dependencies import get_job_service
-        job_service = get_job_service()
-        hook_cfg = dict(job_options.get("hook_style_config") or {})
-        if hook_cfg and not hook_cfg.get("engine"):
-            hook_cfg["engine"] = resolved_preset.get("hook_engine", "remotion") if resolved_preset else "remotion"
-
-        sub_cfg = dict(job_options.get("subtitle_style_config") or {})
-        if sub_cfg and not sub_cfg.get("engine"):
-            sub_cfg["engine"] = resolved_preset.get("subtitle_engine", "remotion") if resolved_preset else "remotion"
-
-        created_res = await job_service.create_job(
-            youtube_url=video_url,
-            user_id=user_id,
-            target_aspect_ratio=job_options.get("target_aspect_ratio", "9:16"),
-            style_preset=job_options.get("style_preset", "default"),
-            force_reprocess=job_options.get("force_reprocess", False),
-            use_remotion=job_options.get("use_remotion", True),
-            ai_layer_enabled=job_options.get("ai_layer_enabled", True),
-            hook_engine="v3",
-            hook_style=job_options.get("hook_style") or "",
-            broll_enabled=job_options.get("broll_enabled", False),
-            broll_image_overlay=job_options.get("broll_image_overlay", True),
-            broll_behind_person=job_options.get("broll_behind_person", True),
-            broll_video_footage=job_options.get("broll_video_footage", True),
-            broll_motion_style=job_options.get("broll_motion_style"),
-            autogrid_enabled=job_options.get("autogrid_enabled", False),
-            text_emphasis_enabled=job_options.get("text_emphasis_enabled", True),
-            hook_style_config=hook_cfg,
-            subtitle_style_config=sub_cfg,
-            text_emphasis_style_config=job_options.get("text_emphasis_style_config"),
-            watermark_config=job_options.get("watermark_config"),
-            cta_config=job_options.get("cta_config"),
-            auto_post_social=job_options.get("auto_post_social", False),
-            auto_post_platforms=job_options.get("auto_post_platforms", ""),
-            auto_post_account_ids=job_options.get("auto_post_account_ids", []),
-            auto_post_schedule_mode=job_options.get("auto_post_schedule_mode", "ai"),
-            auto_post_custom_time=job_options.get("auto_post_custom_time"),
-            auto_post_clips_count=job_options.get("auto_post_clips_count", 5),
-        )
-
-        job = created_res[0] if isinstance(created_res, tuple) else created_res
-        job_id = getattr(job, "id", None) or getattr(job, "job_id", str(job))
-
-        # 7. Record run in database
-        now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
-        conn = get_dict_connection()
-        run_id = None
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO autopilot_runs (
-                    user_id, run_date, youtube_url, video_title, virality_score,
-                    job_id, status, trigger_source, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'submitted', ?, ?)
-            """, (
-                user_id, today_date, video_url, video_title, virality_score,
-                job_id, trigger_source, now_iso
-            ))
-            run_id = cur.lastrowid
-
-            conn.execute("""
-                UPDATE autopilot_settings SET
-                    last_run_at = ?,
-                    last_job_id = ?,
-                    last_video_url = ?,
-                    last_video_title = ?,
-                    updated_at = ?
-                WHERE user_id = ?
-            """, (now_iso, job_id, video_url, video_title, now_iso, user_id))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"autopilot: Failed to record run in database: {e}")
-        finally:
-            conn.close()
-
-        # 8. Notify Telegram if enabled
-        if notify_telegram:
             try:
-                from src.infrastructure.telegram_notifier import send_telegram_broadcast
-                sched_desc = "Optimal AI Posting" if schedule_mode == "ai" else f"Mulai {custom_schedule_time or '09:00'}"
-                caption_text = (
-                    f"🤖 <b>Hermes Autopilot — Job Hari Ini Dijalankan!</b>\n\n"
-                    f"👤 <b>User ID:</b> {user_id}\n"
-                    f"🎬 <b>Judul:</b> {video_title}\n"
-                    f"📈 <b>Virality Score:</b> {virality_score}/100\n"
-                    f"🎨 <b>Preset:</b> {preset_slug}\n"
-                    f"📱 <b>Target Platform:</b> {','.join(target_platforms).upper()}\n"
-                    f"⏰ <b>Jadwal:</b> {sched_desc}\n"
-                    f"🆔 <b>Job ID:</b> <code>{job_id}</code>\n\n"
-                    f"<i>Sistem sedang memproses video YouTube menjadi Shorts/TikTok portrait dan akan otomatis dijadwalkan ke Repliz setelah selesai.</i>"
-                )
-                await send_telegram_broadcast(caption_text)
-            except Exception as e:
-                logger.warning(f"autopilot: Failed to send Telegram report: {e}")
+                # 3. Pick candidate video
+                candidate = self.pick_best_candidate(user_id)
+                if not candidate:
+                    if reservation_id:
+                        conn = get_dict_connection()
+                        try:
+                            conn.execute("UPDATE autopilot_runs SET status='failed', video_title='Tidak ditemukan video baru' WHERE id=?", (reservation_id,))
+                            conn.commit()
+                        finally:
+                            conn.close()
+                    logger.warning(f"autopilot: No fresh candidate video found for niche '{settings.get('niche_query')}'.")
+                    return {
+                        "success": False,
+                        "status": "no_candidate_found",
+                        "message": f"Tidak ditemukan video baru yang belum pernah diproses untuk topik '{settings.get('niche_query')}'.",
+                    }
 
-        return {
-            "success": True,
-            "status": "submitted",
-            "job_id": job_id,
-            "run_id": run_id,
-            "video": candidate,
-            "video_url": video_url,
-            "video_title": video_title,
-            "virality_score": virality_score,
-            "preset_slug": preset_slug,
-            "preset_name": resolved_preset.get("name") if resolved_preset else preset_slug,
-            "platforms": target_platforms,
-            "message": f"Autopilot berhasil memproses video '{video_title}' (Job ID: {job_id})",
-        }
+                video_url = candidate["url"]
+                video_title = candidate["title"]
+                virality_score = candidate.get("virality_score", 75.0)
+                logger.info(
+                    f"autopilot: Selected video '{video_title}' ({video_url}) score={virality_score} for user {user_id} via {trigger_source}"
+                )
+
+                # 4. Resolve preset style layers
+                from src.infrastructure.preset_resolver import resolve_preset
+                preset_slug = str(preset_override or settings.get("preset_slug", "default")).strip() or "default"
+                resolved_preset = resolve_preset(preset_slug, user_id=user_id)
+                if not resolved_preset or resolved_preset.get("source") == "builtin_default":
+                    fallback_p = resolve_preset("active", user_id=user_id)
+                    if fallback_p and fallback_p.get("source") != "builtin_default":
+                        resolved_preset = fallback_p
+                        preset_slug = resolved_preset.get("slug") or preset_slug
+                        logger.info(f"autopilot: Automatically resolved active user preset '{resolved_preset.get('name')}' ({preset_slug})")
+                elif resolved_preset:
+                    preset_slug = resolved_preset.get("slug") or preset_slug
+
+                # 5. Prepare AutoCliper job options
+                target_platforms = [p.strip().lower() for p in settings.get("target_platforms", "tiktok,instagram,youtube").split(",") if p.strip()]
+                target_accounts = settings.get("target_account_ids", [])
+                if not target_accounts and resolved_preset and resolved_preset.get("auto_post_account_ids"):
+                    target_accounts = resolved_preset.get("auto_post_account_ids")
+
+                schedule_mode = settings.get("schedule_mode", "ai")
+                custom_schedule_time = settings.get("custom_schedule_time") if schedule_mode == "custom" else None
+                broll_style = resolved_preset.get("broll_config") or resolved_preset.get("broll_style_config") or {}
+                broll_motion_style = broll_style.get("motion_style") if isinstance(broll_style, dict) else None
+
+                job_options = {
+                    "youtube_url": video_url,
+                    "target_aspect_ratio": "9:16",
+                    "style_preset": preset_slug,
+                    "force_reprocess": False,
+                    "use_remotion": True,
+                    "pipeline_version": "v2",
+                    "hook_style": resolved_preset.get("hook_style_config", {}).get("animation") if resolved_preset else None,
+                    "ai_layer_enabled": True,
+                    # B-roll & Auto-Grid layers from resolved preset
+                    "broll_enabled": resolved_preset.get("broll_enabled", False) if resolved_preset else False,
+                    "broll_image_overlay": resolved_preset.get("broll_image_overlay", True) if resolved_preset else True,
+                    "broll_behind_person": resolved_preset.get("broll_behind_person", True) if resolved_preset else True,
+                    "broll_video_footage": resolved_preset.get("broll_video_footage", True) if resolved_preset else True,
+                    "broll_motion_style": broll_motion_style,
+                    "autogrid_enabled": resolved_preset.get("autogrid_enabled", False) if resolved_preset else False,
+                    # Text & Hook & Subtitle layers from resolved preset
+                    "text_emphasis_enabled": resolved_preset.get("text_emphasis_enabled", True) if resolved_preset else True,
+                    "hook_style_config": resolved_preset.get("hook_style_config", {}) if resolved_preset else {},
+                    "subtitle_style_config": resolved_preset.get("subtitle_style_config", {}) if resolved_preset else {},
+                    "text_emphasis_style_config": resolved_preset.get("text_emphasis_style_config", {}) if resolved_preset else {},
+                    "watermark_config": resolved_preset.get("watermark_config", {}) if resolved_preset else {},
+                    "cta_config": resolved_preset.get("cta_config", {}) if resolved_preset else {},
+                    # AI Auto-Post configurations
+                    "auto_post_social": True,
+                    "auto_post_platforms": ",".join(target_platforms),
+                    "auto_post_account_ids": target_accounts,
+                    "auto_post_schedule_mode": schedule_mode,
+                    "auto_post_custom_time": custom_schedule_time,
+                    "auto_post_clips_count": int(settings.get("post_clips_count", 5) or 5),
+                }
+
+                # 6. Submit job to AutoCliper service
+                from src.presentation.dependencies import get_job_service
+                job_service = get_job_service()
+                hook_cfg = dict(job_options.get("hook_style_config") or {})
+                if hook_cfg and not hook_cfg.get("engine"):
+                    hook_cfg["engine"] = resolved_preset.get("hook_engine", "remotion") if resolved_preset else "remotion"
+
+                sub_cfg = dict(job_options.get("subtitle_style_config") or {})
+                if sub_cfg and not sub_cfg.get("engine"):
+                    sub_cfg["engine"] = resolved_preset.get("subtitle_engine", "remotion") if resolved_preset else "remotion"
+
+                created_res = await job_service.create_job(
+                    youtube_url=video_url,
+                    user_id=user_id,
+                    target_aspect_ratio=job_options.get("target_aspect_ratio", "9:16"),
+                    style_preset=job_options.get("style_preset", "default"),
+                    force_reprocess=job_options.get("force_reprocess", False),
+                    use_remotion=job_options.get("use_remotion", True),
+                    ai_layer_enabled=job_options.get("ai_layer_enabled", True),
+                    hook_engine="v3",
+                    hook_style=job_options.get("hook_style") or "",
+                    broll_enabled=job_options.get("broll_enabled", False),
+                    broll_image_overlay=job_options.get("broll_image_overlay", True),
+                    broll_behind_person=job_options.get("broll_behind_person", True),
+                    broll_video_footage=job_options.get("broll_video_footage", True),
+                    broll_motion_style=job_options.get("broll_motion_style"),
+                    autogrid_enabled=job_options.get("autogrid_enabled", False),
+                    text_emphasis_enabled=job_options.get("text_emphasis_enabled", True),
+                    hook_style_config=hook_cfg,
+                    subtitle_style_config=sub_cfg,
+                    text_emphasis_style_config=job_options.get("text_emphasis_style_config"),
+                    watermark_config=job_options.get("watermark_config"),
+                    cta_config=job_options.get("cta_config"),
+                    auto_post_social=job_options.get("auto_post_social", False),
+                    auto_post_platforms=job_options.get("auto_post_platforms", ""),
+                    auto_post_account_ids=job_options.get("auto_post_account_ids", []),
+                    auto_post_schedule_mode=job_options.get("auto_post_schedule_mode", "ai"),
+                    auto_post_custom_time=job_options.get("auto_post_custom_time"),
+                    auto_post_clips_count=job_options.get("auto_post_clips_count", 5),
+                )
+
+                job = created_res[0] if isinstance(created_res, tuple) else created_res
+                job_id = getattr(job, "id", None) or getattr(job, "job_id", str(job))
+
+                # 7. Finalize run in database
+                conn = get_dict_connection()
+                run_id = reservation_id
+                try:
+                    cur = conn.cursor()
+                    if reservation_id:
+                        cur.execute("""
+                            UPDATE autopilot_runs SET
+                                youtube_url = ?,
+                                video_title = ?,
+                                virality_score = ?,
+                                job_id = ?,
+                                status = 'submitted'
+                            WHERE id = ?
+                        """, (video_url, video_title, virality_score, job_id, reservation_id))
+                    else:
+                        cur.execute("""
+                            INSERT INTO autopilot_runs (
+                                user_id, run_date, youtube_url, video_title, virality_score,
+                                job_id, status, trigger_source, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, 'submitted', ?, ?)
+                        """, (
+                            user_id, today_date, video_url, video_title, virality_score,
+                            job_id, trigger_source, now_iso
+                        ))
+                        run_id = cur.lastrowid
+
+                    conn.execute("""
+                        UPDATE autopilot_settings SET
+                            last_run_at = ?,
+                            last_job_id = ?,
+                            last_video_url = ?,
+                            last_video_title = ?,
+                            updated_at = ?
+                        WHERE user_id = ?
+                    """, (now_iso, job_id, video_url, video_title, now_iso, user_id))
+                    conn.commit()
+                except Exception as e:
+                    logger.error(f"autopilot: Failed to record run in database: {e}")
+                finally:
+                    conn.close()
+
+                # 8. Notify Telegram if enabled
+                if notify_telegram:
+                    try:
+                        from src.infrastructure.telegram_notifier import send_telegram_broadcast
+                        sched_desc = "Optimal AI Posting" if schedule_mode == "ai" else f"Mulai {custom_schedule_time or '09:00'}"
+                        caption_text = (
+                            f"🤖 <b>Hermes Autopilot — Job Hari Ini Dijalankan!</b>\n\n"
+                            f"👤 <b>User ID:</b> {user_id}\n"
+                            f"🎬 <b>Judul:</b> {video_title}\n"
+                            f"📈 <b>Virality Score:</b> {virality_score}/100\n"
+                            f"🎨 <b>Preset:</b> {preset_slug}\n"
+                            f"📱 <b>Target Platform:</b> {','.join(target_platforms).upper()}\n"
+                            f"⏰ <b>Jadwal:</b> {sched_desc}\n"
+                            f"🆔 <b>Job ID:</b> <code>{job_id}</code>\n\n"
+                            f"<i>Sistem sedang memproses video YouTube menjadi Shorts/TikTok portrait dan akan otomatis dijadwalkan ke Repliz setelah selesai.</i>"
+                        )
+                        await send_telegram_broadcast(caption_text)
+                    except Exception as e:
+                        logger.warning(f"autopilot: Failed to send Telegram report: {e}")
+
+                return {
+                    "success": True,
+                    "status": "submitted",
+                    "job_id": job_id,
+                    "run_id": run_id,
+                    "video": candidate,
+                    "video_url": video_url,
+                    "video_title": video_title,
+                    "virality_score": virality_score,
+                    "preset_slug": preset_slug,
+                    "preset_name": resolved_preset.get("name") if resolved_preset else preset_slug,
+                    "platforms": target_platforms,
+                    "message": f"Autopilot berhasil memproses video '{video_title}' (Job ID: {job_id})",
+                }
+            except Exception as exc:
+                if reservation_id:
+                    conn = get_dict_connection()
+                    try:
+                        conn.execute("UPDATE autopilot_runs SET status='failed', video_title=? WHERE id=?", (f"Gagal: {str(exc)[:100]}", reservation_id))
+                        conn.commit()
+                    finally:
+                        conn.close()
+                raise
 
     def get_history(self, user_id: int = 1, limit: int = 20) -> list[dict]:
         """Get recent autopilot execution history."""
@@ -743,13 +807,19 @@ class AutopilotService:
             except Exception:
                 norm_run_time = "05:00"
 
+            today_date = now_wib.date().isoformat()
             if current_hm == norm_run_time:
+                # Prevent duplicate daemon runs within the same calendar day for the same user
+                if self._last_scheduled_runs.get((user_id, today_date)):
+                    continue
+
                 if self.is_pipeline_busy():
                     logger.info(f"autopilot_daemon: Server pipeline is busy. Waiting before processing user {user_id}.")
                     return
 
                 can_run, reason, _ = self.can_run_today(user_id)
                 if can_run:
+                    self._last_scheduled_runs[(user_id, today_date)] = True
                     logger.info(f"autopilot_daemon: Triggering scheduled daily run for user {user_id} at {current_hm} WIB...")
                     try:
                         res = await self.run_autopilot_step(
@@ -763,6 +833,7 @@ class AutopilotService:
                             break
                     except Exception as step_err:
                         logger.error(f"autopilot_daemon: Error running autopilot step for user {user_id}: {step_err}", exc_info=True)
+
 
 
 # Singleton instance

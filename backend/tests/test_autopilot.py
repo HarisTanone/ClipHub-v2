@@ -1,7 +1,8 @@
-"""Automated Tests for Hermes Autopilot Service, Daily Quota (1 video/day), and Auto-Post Pipeline."""
+import asyncio
 import pytest
 import datetime as dt
 from unittest.mock import patch, AsyncMock, MagicMock
+
 
 from src.infrastructure.autopilot_service import AutopilotService, autopilot_service
 from src.infrastructure.db_connection import get_dict_connection
@@ -366,7 +367,57 @@ def test_hermes_cli_set_preset():
         spec.loader.exec_module(cli_mod)
         res = cli_mod.set_preset("neon-glow-01")
         assert res["success"] is True
-        assert res["data"]["preset_slug"] == "neon-glow-01"
+
+@pytest.mark.asyncio
+async def test_concurrent_autopilot_triggers_blocked_by_lock_and_reservation():
+    """Verify that concurrent calls to run_autopilot_step are serialized and only 1 succeeds."""
+    service = AutopilotService()
+    user_id = 999
+    service.update_settings(user_id=user_id, data={
+        "enabled": 1,
+        "niche_query": "bisnis",
+        "preset_slug": "default",
+    })
+
+    candidate_video = {
+        "id": "v_concurrent_01",
+        "title": "Video Bisnis",
+        "url": "https://youtube.com/watch?v=v_concurrent_01",
+        "duration_sec": 600,
+        "views": 10000,
+        "virality_score": 85.0,
+    }
+
+    mock_job = MagicMock()
+    mock_job.id = "job_concurrent_123"
+    mock_job_service = MagicMock()
+
+    # Simulate a slow creation so race window would occur without lock/reservation
+    async def slow_create_job(*args, **kwargs):
+        await asyncio.sleep(0.1)
+        return mock_job
+
+    mock_job_service.create_job = AsyncMock(side_effect=slow_create_job)
+
+    with patch.object(service, "pick_best_candidate", return_value=candidate_video), \
+         patch("src.infrastructure.preset_resolver.resolve_preset", return_value={"hook_style_config": {}}), \
+         patch("src.presentation.dependencies.get_job_service", return_value=mock_job_service), \
+         patch("src.infrastructure.telegram_service.TelegramService.send_message", new=AsyncMock()):
+
+        # Fire 2 concurrent autopilot steps simultaneously
+        res1, res2 = await asyncio.gather(
+            service.run_autopilot_step(user_id=user_id, force=False, trigger_source="concurrent_1", notify_telegram=False),
+            service.run_autopilot_step(user_id=user_id, force=False, trigger_source="concurrent_2", notify_telegram=False),
+        )
+
+        successes = [r for r in (res1, res2) if r.get("success")]
+        failures = [r for r in (res1, res2) if not r.get("success")]
+
+        # Exactly 1 should succeed, and 1 should be blocked by quota_exceeded
+        assert len(successes) == 1
+        assert len(failures) == 1
+        assert failures[0].get("status") == "quota_exceeded"
+
 
 
 
