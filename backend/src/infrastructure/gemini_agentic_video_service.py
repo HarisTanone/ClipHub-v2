@@ -171,16 +171,32 @@ class GeminiAgenticVideoService:
         """Synchronous worker for Video Understanding via Interactions API or Files API."""
         import base64
         keys = self._key_rotator.keys
-        errors = []
-
-        models_to_try = [
-            self._model,
-            self._fallback_model,
+        # Agentic video mode is officially supported on:
+        # Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash, 3.5 Flash Lite
+        AGENTIC_SUPPORTED_MODELS = {
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
-            "gemini-2.5-flash",
-        ]
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+        }
+
+        if processing_mode == "agentic":
+            models_to_try = [
+                self._model if self._model in AGENTIC_SUPPORTED_MODELS else "gemini-3.7-flash",
+                "gemini-3.7-flash",
+                "gemini-3.8-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash-lite",
+                self._fallback_model,
+            ]
+        else:
+            models_to_try = [
+                self._model,
+                self._fallback_model,
+                "gemini-2.5-flash",
+                "gemini-3.7-flash",
+            ]
         models_to_try = list(dict.fromkeys([m for m in models_to_try if m]))
 
         # Check input type
@@ -263,15 +279,21 @@ class GeminiAgenticVideoService:
 
                 # 2. Call Interactions API with text prompt placed AFTER video input
                 for model_id in models_to_try:
+                    is_agentic_supported = model_id in AGENTIC_SUPPORTED_MODELS
+                    curr_mode = processing_mode if is_agentic_supported else "static"
+                    curr_video_input = dict(video_input)
+                    if not is_agentic_supported and curr_video_input.get("processing") == "agentic":
+                        curr_video_input["processing"] = {"type": "static"}
+
                     try:
                         logger.info(
                             f"[GeminiVideoUnderstanding] Calling interactions.create model={model_id} "
-                            f"mode={processing_mode} resolution={media_resolution}..."
+                            f"mode={curr_mode} resolution={media_resolution}..."
                         )
                         interaction = client.interactions.create(
                             model=model_id,
                             input=[
-                                video_input,
+                                curr_video_input,
                                 {"type": "text", "text": prompt},
                             ],
                         )
