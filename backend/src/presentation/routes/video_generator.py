@@ -683,7 +683,7 @@ async def list_tts_providers(
         TTSProviderOption(
             id="gemini",
             name="Google Gemini (Flash TTS)",
-            description="⭐ Native Indonesian & English speech synthesis with rich expressive regional styles (Free Tier & Pro)",
+            description="Native Indonesian & English speech synthesis with rich expressive regional styles (Free Tier & Pro)",
             is_configured=bool(gemini_key and str(gemini_key).strip()),
             default_model="gemini-3.1-flash-tts-preview",
             default_voice="Kore",
@@ -830,7 +830,7 @@ async def list_voices(
                     accent=v.get("accent"),
                     language=v.get("language"),
                     country=v.get("country") or "Indonesia / Global",
-                    flag=v.get("flag") or "🇮🇩",
+                    flag=v.get("flag") or "ID",
                     preview_url=f"/api/video-generator/voices/preview?voice={model_key}&provider=gemini",
                     voice_id=v.get("voice_id"),
                     style_id=v.get("style_id"),
@@ -851,7 +851,7 @@ async def list_voices(
                     accent="american",
                     language="en",
                     country="United States",
-                    flag="🇺🇸",
+                    flag="US",
                     preview_url=f"/api/video-generator/voices/preview?voice={model}&provider=deepgram",
                     voice_id=key,
                     style_id=None,
@@ -987,12 +987,18 @@ def _raise_invalid_range(file_size: int) -> None:
 async def get_trending_topics_endpoint(
     region: str = Query("ID", description="Country code (e.g. ID, US, GLOBAL)"),
     limit: int = Query(5, ge=1, le=10, description="Number of topics to return (3-5)"),
+    refresh: bool = Query(False, description="Bypass cache and fetch fresh trending topics"),
     user: CurrentUser = Depends(get_current_user),
 ):
     """Fetch multi-source trending topics synthesized by Gemini for viral short videos."""
     from src.infrastructure.hermes_trending_service import hermes_trending_service
 
-    topics = await hermes_trending_service.get_trending_topics(region=region, limit=limit)
+    topics = await hermes_trending_service.get_trending_topics(
+        region=region,
+        count=limit,
+        limit=limit,
+        use_cache=not refresh,
+    )
     return {"region": region, "count": len(topics), "topics": topics}
 
 

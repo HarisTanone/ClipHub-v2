@@ -34,7 +34,7 @@ def _detect_nvenc() -> bool:
 
 _nvenc_available = _detect_nvenc()
 if _nvenc_available:
-    logger.info("gpu_encoder: NVENC (h264_nvenc) detected ✓")
+    logger.info("gpu_encoder: NVENC (h264_nvenc) detected [OK]")
 else:
     logger.info("gpu_encoder: NVENC not available, using libx264")
 

@@ -1167,13 +1167,19 @@ async def reprocess_job(
     service: JobService = Depends(get_job_service),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Create a fresh tracked job using the failed job's source and settings."""
+    """Create a fresh tracked job using the previous job's source and settings.
+    
+    Allowed for failed, timed-out, or completed jobs.
+    """
     old = await service.get_job(job_id)
     if not old:
         raise HTTPException(status_code=404, detail="Job not found")
     await _check_job_ownership(old, user)
-    if old.status.value not in {"failed", "timeout"}:
-        raise HTTPException(status_code=409, detail="Only failed or timed-out jobs can be reprocessed")
+    if old.status.value not in {"failed", "timeout", "completed"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reprocess a job that is currently in progress. Wait for it to complete, fail, or cancel it first.",
+        )
 
     source_type, source_label = _source_from_clips_data(old.clips_data, old.youtube_url)
     source = (old.clips_data or {}).get("source", {}) if isinstance(old.clips_data, dict) else {}

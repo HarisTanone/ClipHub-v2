@@ -98,6 +98,10 @@ export function JobDetail() {
 
   async function handleReprocess() {
     if (!jobId) return;
+    if (data?.status === "completed") {
+      const ok = window.confirm("Proses ulang video ini untuk mengekstrak dan menghasilkan klip baru?");
+      if (!ok) return;
+    }
     setIsReprocessing(true);
     try {
       const next = await jobs.reprocess(jobId);
@@ -179,7 +183,17 @@ export function JobDetail() {
             {!isTerminal && (
               <Button variant="danger" size="sm" onClick={handleCancel}>Cancel</Button>
             )}
-            {(data.status === "failed" || data.status === "timeout") && <Button size="sm" onClick={handleReprocess} loading={isReprocessing} icon={<RefreshCw className="h-3.5 w-3.5" />}>Reprocess</Button>}
+            {isTerminal && (
+              <Button
+                variant={data.status === "completed" ? "outline" : "primary"}
+                size="sm"
+                onClick={handleReprocess}
+                loading={isReprocessing}
+                icon={<RefreshCw className="h-3.5 w-3.5" />}
+              >
+                {data.status === "completed" ? "Reprocess Video" : "Reprocess"}
+              </Button>
+            )}
           </div>
         </div>
 

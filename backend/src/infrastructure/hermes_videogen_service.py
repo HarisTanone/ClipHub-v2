@@ -358,6 +358,7 @@ class HermesVideoGenService:
             hook_style = {"animation": "skia_impact_badge", "fontSize": 54, "bgColor": "#FACC15", "color": "#000000"}
             subtitle_style = {"fontFamily": "Montserrat", "fontSize": 52, "fontWeight": "800", "positionY": 84}
 
+            preset = None
             try:
                 from src.presentation.routes.presets import _get_preset_by_slug
                 preset = _get_preset_by_slug(user_id, preset_slug)
@@ -369,7 +370,7 @@ class HermesVideoGenService:
             except Exception as pe:
                 logger.debug(f"hermes_videogen: preset resolution skipped: {pe}")
 
-            # Prepare Watermark Config
+            # Prepare Watermark Config (manual settings take precedence, otherwise fallback to existing preset)
             watermark_config = None
             if settings_dict.get("watermark_enabled") and settings_dict.get("watermark_text"):
                 watermark_config = {
@@ -381,8 +382,19 @@ class HermesVideoGenService:
                     "color": "#FFFFFF",
                     "opacity": 75,
                 }
+            elif preset and preset.get("watermark_style") and preset["watermark_style"].get("enabled"):
+                wm = preset["watermark_style"]
+                watermark_config = {
+                    "enabled": True,
+                    "type": wm.get("type", "text"),
+                    "text": (wm.get("text") or "").strip(),
+                    "position": wm.get("position", "top-right"),
+                    "fontSize": wm.get("fontSize", 24),
+                    "color": wm.get("color", "#FFFFFF"),
+                    "opacity": wm.get("opacity", 75),
+                }
 
-            # Prepare CTA Config
+            # Prepare CTA Config (manual settings take precedence, otherwise fallback to existing preset)
             cta_config = None
             if settings_dict.get("cta_enabled"):
                 cta_config = {
@@ -391,6 +403,15 @@ class HermesVideoGenService:
                     "buttonText": settings_dict.get("cta_button_text") or "FOLLOW",
                     "ctaType": "card",
                     "duration": 3.0,
+                }
+            elif preset and preset.get("cta_style") and preset["cta_style"].get("enabled"):
+                cs = preset["cta_style"]
+                cta_config = {
+                    "enabled": True,
+                    "headline": cs.get("headline") or "Follow for more",
+                    "buttonText": cs.get("buttonText") or "FOLLOW",
+                    "ctaType": cs.get("ctaType", "card"),
+                    "duration": float(cs.get("duration", 3.0)),
                 }
 
             created_jobs = []
@@ -574,7 +595,7 @@ class HermesVideoGenService:
             else "Komen pendapat kamu di bawah dan follow untuk update seru berikutnya!" if region == "ID" else "Share your thoughts in the comments and follow for more!"
         )
 
-        caption = f"{hook} 🔥\n\n{angle_desc}{cta_phrase}\n\n{hashtags_str}"
+        caption = f"{hook}\n\n{angle_desc}{cta_phrase}\n\n{hashtags_str}"
         return title[:100], caption, [t.lstrip("#") for t in final_tags]
 
     async def _dispatch_social_autopost(
@@ -727,14 +748,14 @@ class HermesVideoGenService:
                 return
 
             text = (
-                f"🚀 <b>Hermes Video Generator — Trending Batch Selesai!</b>\n\n"
-                f"📍 <b>Region Target:</b> {region}\n"
-                f"📊 <b>Total Video Dibuat:</b> {len(successful_runs)}\n\n"
+                f"<b>[Hermes Video Generator] Trending Batch Selesai</b>\n\n"
+                f"<b>Region Target:</b> {region}\n"
+                f"<b>Total Video Dibuat:</b> {len(successful_runs)}\n\n"
             )
             for i, r in enumerate(successful_runs, 1):
                 text += f"{i}. <b>{r['topic']}</b>\n"
                 if r.get("social_posts", 0) > 0:
-                    text += f"   📲 Auto-post dijadwalkan ke {r['social_posts']} platform sosial.\n"
+                    text += f"   Auto-post dijadwalkan ke {r['social_posts']} platform sosial.\n"
 
             await telegram_service.send_message(text)
         except Exception as e:

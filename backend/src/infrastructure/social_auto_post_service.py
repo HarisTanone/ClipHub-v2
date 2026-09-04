@@ -540,7 +540,7 @@ class SocialAutoPostService:
         if notify_telegram and scheduled_records:
             try:
                 from src.infrastructure.telegram_service import telegram_service
-                filter_note = f"🎯 <b>Seleksi AI:</b> {len(clips)} klip terbaik dari total {total_available_clips} klip (Potensi Views & Likes Tertinggi)\n" if total_available_clips > len(clips) else ""
+                filter_note = f"<b>Seleksi AI:</b> {len(clips)} klip terbaik dari total {total_available_clips} klip (Potensi Views & Likes Tertinggi)\n" if total_available_clips > len(clips) else ""
                 msg = (
                     f"<b>AI Auto-Post Scheduled ({len(scheduled_records)} Postingan)</b>\n\n"
                     f"<b>Job:</b> <code>{job_id[:12]}</code>\n"

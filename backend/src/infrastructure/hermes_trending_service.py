@@ -498,13 +498,17 @@ class HermesTrendingService:
         sources: Optional[list[str]] = None,
         niche_focus: str = "",
         use_cache: bool = True,
+        limit: Optional[int] = None,
     ) -> list[dict[str, Any]]:
         """Get curated 3-5 trending video topics for the target region.
 
         Combines Google Trends, YouTube, and TikTok, then curates with Gemini.
+        Supports both `count` and `limit` for seamless API compatibility.
         """
+        if limit is not None:
+            count = limit
         region_clean = (region or "ID").upper().strip()
-        count = max(3, min(count, 5))
+        count = max(3, min(count, 10))
         cache_key = f"{region_clean}:{count}:{niche_focus.strip()}"
 
         now = time.time()

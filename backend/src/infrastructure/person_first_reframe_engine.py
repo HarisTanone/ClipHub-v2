@@ -417,7 +417,7 @@ class PersonFirstReframeEngine(IReframeEngine):
                     if sliced and sliced.segments:
                         diarization_result = sliced
                         logger.info(
-                            f"person_first_reframe: ✓ using GLOBAL diarization cache sliced for [{clip_start:.2f}s - {clip_end:.2f}s] "
+                            f"person_first_reframe: [OK] using GLOBAL diarization cache sliced for [{clip_start:.2f}s - {clip_end:.2f}s] "
                             f"({diarization_result.speaker_count} speakers, {len(diarization_result.segments)} segments)"
                         )
                 except Exception as e:
@@ -483,7 +483,7 @@ class PersonFirstReframeEngine(IReframeEngine):
                 track_to_position=tracked_data.get("track_to_position"),
             )
 
-            logger.info("person_first_reframe: ✓ using DIARIZATION speaker detection")
+            logger.info("person_first_reframe: [OK] using DIARIZATION speaker detection")
             return speaker_result
 
         except Exception as e:

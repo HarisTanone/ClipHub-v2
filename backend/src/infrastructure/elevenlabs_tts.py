@@ -51,43 +51,43 @@ DEFAULT_ELEVENLABS_MODELS = [
 ]
 
 def _map_country_and_flag(language: str = "", accent: str = "") -> tuple[str, str]:
-    """Map language/accent to standard country name and flag emoji."""
+    """Map language/accent to standard country name and country code."""
     acc = (accent or "").lower()
     lang = (language or "").lower()
 
     if "indonesia" in acc or "indonesia" in lang or lang == "id":
-        return ("Indonesia", "🇮🇩")
+        return ("Indonesia", "ID")
     if "british" in acc or "uk" in acc or "england" in acc or lang == "en-gb":
-        return ("United Kingdom", "🇬🇧")
+        return ("United Kingdom", "GB")
     if "australian" in acc or "australia" in acc or lang == "en-au":
-        return ("Australia", "🇦🇺")
+        return ("Australia", "AU")
     if "american" in acc or "us" in acc or "usa" in acc or lang == "en-us":
-        return ("United States", "🇺🇸")
+        return ("United States", "US")
     if "canadian" in acc or "canada" in acc or lang == "en-ca":
-        return ("Canada", "🇨🇦")
+        return ("Canada", "CA")
     if "indian" in acc or "india" in acc or "hi" in lang:
-        return ("India", "🇮🇳")
+        return ("India", "IN")
     if "japanese" in acc or "japan" in acc or "ja" in lang:
-        return ("Japan", "🇯🇵")
+        return ("Japan", "JP")
     if "german" in acc or "germany" in acc or "de" in lang:
-        return ("Germany", "🇩🇪")
+        return ("Germany", "DE")
     if "french" in acc or "france" in acc or "fr" in lang:
-        return ("France", "🇫🇷")
+        return ("France", "FR")
     if "spanish" in acc or "spain" in acc or "es" in lang:
-        return ("Spain", "🇪🇸")
+        return ("Spain", "ES")
     if "italian" in acc or "italy" in acc or "it" in lang:
-        return ("Italy", "🇮🇹")
+        return ("Italy", "IT")
     if "korean" in acc or "korea" in acc or "ko" in lang:
-        return ("South Korea", "🇰🇷")
+        return ("South Korea", "KR")
     if "chinese" in acc or "china" in acc or "zh" in lang:
-        return ("China", "🇨🇳")
+        return ("China", "CN")
     if "arabic" in acc or "arab" in acc or "ar" in lang:
-        return ("Middle East", "🇸🇦")
+        return ("Middle East", "SA")
     if "portuguese" in acc or "brazil" in acc or "pt" in lang:
-        return ("Brazil / Portugal", "🇧🇷")
+        return ("Brazil / Portugal", "BR")
     if "filipino" in acc or "philippines" in acc or "fil" in lang:
-        return ("Philippines", "🇵🇭")
-    return ("Global / Multi", "🌐")
+        return ("Philippines", "PH")
+    return ("Global / Multi", "GLOBAL")
 
 
 # Fallback default voices if API is unreachable
@@ -100,7 +100,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "indonesian",
         "language": "id",
         "country": "Indonesia",
-        "flag": "🇮🇩",
+        "flag": "ID",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/pNInz6obpgDQGcFmaJgB/d6905d7a-dd26-4187-bfff-1bd3a5ea7cac.mp3",
     },
     {
@@ -111,7 +111,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "american",
         "language": "en",
         "country": "United States",
-        "flag": "🇺🇸",
+        "flag": "US",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/21m00Tcm4TlvDq8ikWAM/b11eb610-c128-4420-ba31-744037eb89e1.mp3",
     },
     {
@@ -122,7 +122,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "american",
         "language": "en",
         "country": "United States",
-        "flag": "🇺🇸",
+        "flag": "US",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/AZnzlk1XvdvUeBnXmlld/507e1507-7590-482d-8472-7360c704f057.mp3",
     },
     {
@@ -133,7 +133,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "american",
         "language": "en",
         "country": "United States",
-        "flag": "🇺🇸",
+        "flag": "US",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/EXAVITQu4vr4xnSDxMaL/01d5ee4e-7255-46c5-ab1a-619ab5478440.mp3",
     },
     {
@@ -144,7 +144,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "american",
         "language": "en",
         "country": "United States",
-        "flag": "🇺🇸",
+        "flag": "US",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/ErXwobaYiN019PkySvjV/38d8f8f0-0412-42c2-b52b-4e08bf60cb7d.mp3",
     },
     {
@@ -155,7 +155,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "american",
         "language": "en",
         "country": "United States",
-        "flag": "🇺🇸",
+        "flag": "US",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/MF3mGyEYCl7XYWbV9V6O/d86c7104-e53b-4c55-83e9-38b4df568019.mp3",
     },
     {
@@ -166,7 +166,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "american",
         "language": "en",
         "country": "United States",
-        "flag": "🇺🇸",
+        "flag": "US",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/TxGEqnHWrfWFTfGW9XjX/a0e5b746-13cb-4f81-a9c4-a5e2f75d5069.mp3",
     },
     {
@@ -177,7 +177,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "american",
         "language": "en",
         "country": "United States",
-        "flag": "🇺🇸",
+        "flag": "US",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/pNInz6obpgDQGcFmaJgB/d6905d7a-dd26-4187-bfff-1bd3a5ea7cac.mp3",
     },
     {
@@ -188,7 +188,7 @@ DEFAULT_ELEVENLABS_VOICES = [
         "accent": "american",
         "language": "en",
         "country": "United States",
-        "flag": "🇺🇸",
+        "flag": "US",
         "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/yoZ06aMxZJJ28mfd3POQ/c69e20a7-bc63-4ce2-a08b-626a427f71aa.mp3",
     },
 ]

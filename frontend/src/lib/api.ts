@@ -1391,9 +1391,12 @@ export const hermesVideoGenApi = {
   },
   async getTrendingTopics(
     region: string = "ID",
-    limit: number = 5
+    limit: number = 5,
+    refresh: boolean = false
   ): Promise<{ region: string; count: number; topics: TrendingTopicItem[] }> {
-    return request(`/api/video-generator/trending-topics?region=${encodeURIComponent(region)}&limit=${limit}`);
+    const q = new URLSearchParams({ region, limit: String(limit) });
+    if (refresh) q.set("refresh", "true");
+    return request(`/api/video-generator/trending-topics?${q.toString()}`);
   },
 };
 

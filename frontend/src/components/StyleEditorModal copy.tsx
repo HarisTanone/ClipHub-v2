@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2, Loader2, Quote, Megaphone, Bell, Share2, ThumbsUp, Link2, MessageSquare, ArrowUpRight, UserPlus, Plus, Clock, Info, Heart, Star, RotateCcw, Copy } from "lucide-react";
+import { X, Type, Sparkles, Bookmark, Trash2, Save, Download, ChevronLeft, ChevronRight, MoveRight, Layers, Zap, Clapperboard, Upload, Image as ImageIcon, Palette, Check, EyeOff, Scissors, Maximize2, Loader2, Quote, Megaphone, Bell, Share2, ThumbsUp, Link2, MessageSquare, ArrowUpRight, UserPlus, Plus, Clock, Info, Heart, Star, RotateCcw, Copy, Search } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FeatureLock } from "@/components/ui/FeatureLock";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -3973,9 +3973,9 @@ export function HookPreviewRenderer({
           <div className="absolute inset-0" style={{ backgroundColor: style.bgColor, opacity: style.bgOpacity }} />
           <div className="absolute left-4 right-4" style={{ top: posTop, transform: "translateY(-50%)" }}>
             <div style={{ display: "grid", gridTemplateColumns: "28px 1fr 26px", alignItems: "center", gap: 8, borderRadius: 999, padding: "10px 13px", background: `${style.boxColor || "#0F172A"}${Math.round((style.boxOpacity || 0.94) * 255).toString(16).padStart(2, "0")}`, border: `1px solid ${accent}66`, boxShadow: `0 0 22px ${accent}22` }}>
-              <span style={{ color: accent, fontSize: 17 }}>⌕</span>
+              <Search style={{ color: accent, width: 17, height: 17 }} />
               <p style={{ ...baseTextStyle, color: style.color, fontSize: Math.max(fontSize * 0.72, 12), textAlign: "left", textShadow }}> {text}</p>
-              <span style={{ color: accent, fontSize: 14 }}>↗</span>
+              <ArrowUpRight style={{ color: accent, width: 14, height: 14 }} />
             </div>
           </div>
         </>

@@ -690,14 +690,14 @@ class AutopilotService:
                         from src.infrastructure.telegram_notifier import send_telegram_broadcast
                         sched_desc = "Optimal AI Posting" if schedule_mode == "ai" else f"Mulai {custom_schedule_time or '09:00'}"
                         caption_text = (
-                            f"🤖 <b>Hermes Autopilot — Job Hari Ini Dijalankan!</b>\n\n"
-                            f"👤 <b>User ID:</b> {user_id}\n"
-                            f"🎬 <b>Judul:</b> {video_title}\n"
-                            f"📈 <b>Virality Score:</b> {virality_score}/100\n"
-                            f"🎨 <b>Preset:</b> {preset_slug}\n"
-                            f"📱 <b>Target Platform:</b> {','.join(target_platforms).upper()}\n"
-                            f"⏰ <b>Jadwal:</b> {sched_desc}\n"
-                            f"🆔 <b>Job ID:</b> <code>{job_id}</code>\n\n"
+                            f"<b>[AUTOPILOT] Hermes Autopilot — Job Hari Ini Dijalankan!</b>\n\n"
+                            f"<b>User ID:</b> {user_id}\n"
+                            f"<b>Judul:</b> {video_title}\n"
+                            f"<b>Virality Score:</b> {virality_score}/100\n"
+                            f"<b>Preset:</b> {preset_slug}\n"
+                            f"<b>Target Platform:</b> {','.join(target_platforms).upper()}\n"
+                            f"<b>Jadwal:</b> {sched_desc}\n"
+                            f"<b>Job ID:</b> <code>{job_id}</code>\n\n"
                             f"<i>Sistem sedang memproses video YouTube menjadi Shorts/TikTok portrait dan akan otomatis dijadwalkan ke Repliz setelah selesai.</i>"
                         )
                         await send_telegram_broadcast(caption_text)

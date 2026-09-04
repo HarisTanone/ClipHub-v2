@@ -1658,20 +1658,12 @@ class VideoGenerator:
         title_words = set("".join(c for c in w if c.isalnum()) for w in title_lower.split() if len(w) > 2)
         cand_query_words = set("".join(c for c in w if c.isalnum()) for w in candidate.get("query", "").lower().split() if len(w) > 2)
 
-        # 0. Negative Category Conflict Filtering (e.g. Food scene matching Insect/Pest video)
-        FOOD_KEYWORDS = {
-            "tepung", "flour", "makanan", "food", "sayur", "vegetable", "buah", "fruit",
-            "kacang", "nut", "snack", "bread", "roti", "rice", "nasi", "sugar", "gula",
-            "meat", "daging", "drink", "beverage", "minuman", "diet", "nutrition", "baking", "dough",
-        }
-        INSECT_KEYWORDS = {
-            "wasp", "bee", "hornet", "insect", "bug", "beetle", "pest", "grasshopper",
-            "locust", "spider", "fly", "caterpillar", "worm", "reptile", "snake", "lizard",
-        }
-        scene_blob = f"{visual} {scene.get('narration', '')} {' '.join(scene.get('search_queries', []))}".lower()
-        cand_blob = f"{title_lower} {candidate.get('query', '')}".lower()
-        if any(k in scene_blob for k in FOOD_KEYWORDS) and any(k in cand_blob for k in INSECT_KEYWORDS):
-            return -50.0
+        # 0. Dynamic Negative Keyword Filtering (using scene-defined avoid keywords)
+        avoid_keywords = set(scene.get("avoid_keywords", [])) | set(scene.get("negative_keywords", []))
+        if avoid_keywords:
+            cand_blob = f"{title_lower} {candidate.get('query', '')}".lower()
+            if any(k.lower() in cand_blob for k in avoid_keywords if k.strip()):
+                return -50.0
 
         # 1. Named Entity Exact Match Bonus (e.g. "Salatiga" or "Jawa Tengah" in YouTube title)
         entity_overlap = len(entity_terms & title_words)

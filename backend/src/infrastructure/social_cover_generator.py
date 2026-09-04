@@ -1,7 +1,7 @@
 """Social Cover Generator for TikTok, Instagram Reels, and YouTube Shorts.
 
 Generates high-retention, viral-optimized thumbnail covers featuring:
-- Eye-catching Category Badge (e.g., "🔥 TRENDING HARI INI", "FAKTA MENGEJUTKAN")
+- Eye-catching Category Badge (e.g., "TRENDING HARI INI", "FAKTA MENGEJUTKAN")
 - High-contrast Bold Hook Box (Anton / Montserrat typography in yellow/black or white/red)
 - Secondary Topic Caption & Context
 - Dynamic Hashtag Pills (#Topic #Keyword #FYP)
@@ -164,7 +164,7 @@ def generate_social_cover(
         hook_text: Big bold headline / hook sentence
         caption_text: Sub-headline or topic explanation
         hashtags: Dynamic hashtags list or string
-        category_badge: Header badge label (e.g. '🔥 TRENDING', 'FAKTA MENARIK')
+        category_badge: Header badge label (e.g. 'TRENDING', 'FAKTA MENARIK')
         aspect_ratio: '9:16', '16:9', '1:1', or '4:5'
         watermark_text: Branding account watermark (e.g. '@cliperhub')
         include_play_indicator: Draw subtle TikTok 'Tap to Watch' play cue
@@ -240,8 +240,8 @@ def generate_social_cover(
     canvas = Image.alpha_composite(canvas, overlay)
     draw = ImageDraw.Draw(canvas)
 
-    # 3. Top Category Badge ("🔥 TRENDING HARI INI")
-    badge_text = category_badge or "🔥 TRENDING HARI INI"
+    # 3. Top Category Badge ("TRENDING HARI INI")
+    badge_text = category_badge or "TRENDING HARI INI"
     badge_font_size = int(target_width * 0.038)  # ~41px on 1080w
     badge_font = _load_font(SECONDARY_FONTS, badge_font_size)
 
@@ -386,7 +386,7 @@ def generate_social_cover(
         # "TAP TO WATCH" Subtitle Cue
         cue_font_size = int(target_width * 0.028)  # ~30px
         cue_font = _load_font(SECONDARY_FONTS, cue_font_size)
-        cue_text = "KLIK UNTUK NONTON ▶"
+        cue_text = "KLIK UNTUK NONTON"
         cue_bbox = draw.textbbox((0, 0), cue_text, font=cue_font)
         cue_w = cue_bbox[2] - cue_bbox[0]
         draw.text(

@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Film,
   Globe,
+  MapPin,
   Layers,
   Loader2,
   Palette,
@@ -1594,26 +1595,31 @@ function TrendingRadarModal({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 px-5 py-3 bg-zinc-950/40">
           <div className="flex flex-wrap items-center gap-1.5">
             {[
-              { id: "ID", label: "🇮🇩 Indonesia" },
-              { id: "GLOBAL", label: "🌐 Worldwide" },
-              { id: "US", label: "🇺🇸 United States" },
-              { id: "MY", label: "🇲🇾 Malaysia" },
-              { id: "SG", label: "🇸🇬 Singapore" },
-              { id: "GB", label: "🇬🇧 UK" },
-              { id: "JP", label: "🇯🇵 Japan" },
+              { id: "ID", label: "Indonesia", isGlobal: false },
+              { id: "GLOBAL", label: "Worldwide", isGlobal: true },
+              { id: "US", label: "United States", isGlobal: false },
+              { id: "MY", label: "Malaysia", isGlobal: false },
+              { id: "SG", label: "Singapore", isGlobal: false },
+              { id: "GB", label: "UK", isGlobal: false },
+              { id: "JP", label: "Japan", isGlobal: false },
             ].map((r) => (
               <button
                 key={r.id}
                 type="button"
                 onClick={() => onRegionChange(r.id)}
                 className={cn(
-                  "rounded-lg px-2.5 py-1 text-xs font-medium transition",
+                  "rounded-lg px-2.5 py-1 text-xs font-medium transition inline-flex items-center gap-1.5",
                   region === r.id
                     ? "bg-amber-500/20 text-amber-200 border border-amber-500/40 shadow-xs"
                     : "border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
                 )}
               >
-                {r.label}
+                {r.isGlobal ? (
+                  <Globe className="h-3 w-3 text-amber-400" />
+                ) : (
+                  <MapPin className="h-3 w-3 text-zinc-400" />
+                )}
+                <span>{r.label}</span>
               </button>
             ))}
           </div>
@@ -2032,10 +2038,10 @@ export function VideoGeneratorPage() {
     }
   }, []);
 
-  const loadTrendingTopics = useCallback(async (region = trendingRegion) => {
+  const loadTrendingTopics = useCallback(async (region = trendingRegion, refresh = false) => {
     setIsLoadingTrending(true);
     try {
-      const data = await hermesVideoGenApi.getTrendingTopics(region, 5);
+      const data = await hermesVideoGenApi.getTrendingTopics(region, 5, refresh);
       setTrendingTopics(data.topics || []);
     } catch (err) {
       console.error("Failed to load trending topics:", err);
@@ -2852,20 +2858,20 @@ export function VideoGeneratorPage() {
                             }}
                             className="bg-transparent text-zinc-200 outline-none cursor-pointer text-xs"
                           >
-                            <option value="ID" className="bg-zinc-900">🇮🇩 Indonesia (ID)</option>
-                            <option value="GLOBAL" className="bg-zinc-900">🌐 Worldwide (Global)</option>
-                            <option value="US" className="bg-zinc-900">🇺🇸 United States (US)</option>
-                            <option value="MY" className="bg-zinc-900">🇲🇾 Malaysia (MY)</option>
-                            <option value="SG" className="bg-zinc-900">🇸🇬 Singapore (SG)</option>
-                            <option value="GB" className="bg-zinc-900">🇬🇧 United Kingdom (GB)</option>
-                            <option value="JP" className="bg-zinc-900">🇯🇵 Japan (JP)</option>
+                            <option value="ID" className="bg-zinc-900">Indonesia (ID)</option>
+                            <option value="GLOBAL" className="bg-zinc-900">Worldwide (Global)</option>
+                            <option value="US" className="bg-zinc-900">United States (US)</option>
+                            <option value="MY" className="bg-zinc-900">Malaysia (MY)</option>
+                            <option value="SG" className="bg-zinc-900">Singapore (SG)</option>
+                            <option value="GB" className="bg-zinc-900">United Kingdom (GB)</option>
+                            <option value="JP" className="bg-zinc-900">Japan (JP)</option>
                           </select>
                         </div>
 
                         {/* Refresh Button */}
                         <button
                           type="button"
-                          onClick={() => loadTrendingTopics(trendingRegion)}
+                          onClick={() => loadTrendingTopics(trendingRegion, true)}
                           disabled={isLoadingTrending}
                           className="flex items-center justify-center h-6 w-6 rounded-md border border-zinc-800 bg-zinc-900/80 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition"
                           title="Refresh topik trending dari YouTube Data API, Google Trends & TikTok"
@@ -2918,7 +2924,7 @@ export function VideoGeneratorPage() {
                         <span>Belum ada data trending terkini.</span>
                         <button
                           type="button"
-                          onClick={() => loadTrendingTopics(trendingRegion)}
+                          onClick={() => loadTrendingTopics(trendingRegion, true)}
                           className="text-amber-400 underline hover:text-amber-300"
                         >
                           Muat Sekarang
@@ -3835,7 +3841,7 @@ export function VideoGeneratorPage() {
           setTrendingRegion(reg);
           void loadTrendingTopics(reg);
         }}
-        onRefresh={() => loadTrendingTopics(trendingRegion)}
+        onRefresh={() => loadTrendingTopics(trendingRegion, true)}
         onSelectTopic={handleSelectTrendingTopic}
       />
 
