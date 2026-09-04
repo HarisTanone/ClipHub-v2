@@ -719,7 +719,7 @@ class PodcastReframeEngine(IReframeEngine):
                     if sliced and sliced.segments:
                         diarization_result = sliced
                         logger.info(
-                            f"podcast_reframe: ✓ using GLOBAL diarization cache sliced for [{clip_start:.2f}s - {clip_end:.2f}s] "
+                            f"podcast_reframe: [OK] using GLOBAL diarization cache sliced for [{clip_start:.2f}s - {clip_end:.2f}s] "
                             f"({diarization_result.speaker_count} speakers, {len(diarization_result.segments)} segments)"
                         )
                 except Exception as e:
@@ -802,10 +802,10 @@ class PodcastReframeEngine(IReframeEngine):
             )
 
             if mapping_result.is_reliable:
-                logger.info("podcast_reframe: ✓ using DIARIZATION-based speaker detection")
+                logger.info("podcast_reframe: [OK] using DIARIZATION-based speaker detection")
             else:
                 logger.info(
-                    "podcast_reframe: ✓ DIARIZATION soft-map "
+                    "podcast_reframe: [OK] DIARIZATION soft-map "
                     f"(conf={mapping_result.overall_confidence:.2f}) — "
                     "lip/head still available as secondary if needed"
                 )

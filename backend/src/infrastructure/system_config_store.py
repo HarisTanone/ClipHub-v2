@@ -1586,3 +1586,23 @@ def seed_system_settings_defaults():
         conn.commit()
     finally:
         conn.close()
+
+
+def get_gemini_api_keys() -> list[str]:
+    """Retrieve all available Gemini API keys from database settings or configuration."""
+    from src.config import settings
+
+    keys: list[str] = []
+    db_val = get_system_setting("GEMINI_API_KEY")
+    if db_val and str(db_val).strip():
+        for k in str(db_val).split(","):
+            cleaned = k.strip()
+            if cleaned and cleaned not in keys:
+                keys.append(cleaned)
+    for k in (getattr(settings, "gemini_api_keys", []) or []):
+        if k and k not in keys:
+            keys.append(k)
+    if not keys and getattr(settings, "GEMINI_API_KEY", ""):
+        keys.append(settings.GEMINI_API_KEY)
+    return keys
+

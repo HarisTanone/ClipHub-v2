@@ -100,7 +100,7 @@ class GroqAnalyzer(IGroqAnalyzer):
         "[musik]", "[music]", "[tepuk tangan]", "[applause]",
         "[silence]", "[hening]", "[tertawa]", "[laughter]",
         "[sound effect]", "[sfx]", "[no speech]",
-        "♪", "♫", "🎵", "🎶",
+        "\u266a", "\u266b", "\U0001f3b5", "\U0001f3b6",
     ]
     # Minimum ratio of actual words vs total text to consider as speech
     MIN_SPEECH_RATIO = 0.3
