@@ -52,19 +52,33 @@ class FootageDownloader:
 
         Automatically routes:
         - Direct HTTP/HTTPS stream download (Pexels, Pixabay, CDN)
-        - yt-dlp with section extraction (YouTube)
+        - Social video downloader via yt-dlp (YouTube Shorts, TikTok, Instagram, Threads, X)
         """
         if not url:
             return None
 
         vid_id = str(video_id or f"scene_{scene_id}")
+
+        # Check if URL is direct media link (e.g. .mp4, .webm, Pexels/Pixabay CDN)
+        is_direct = (
+            url.endswith((".mp4", ".mov", ".webm", ".mkv"))
+            or "images.pexels.com" in url
+            or "cdn.pixabay.com" in url
+            or (platform and platform.lower() in ("pexels", "pixabay"))
+        ) and not any(soc in url for soc in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "threads.net", "twitter.com", "x.com"])
+
         is_yt = (
             (platform and platform.lower() == "youtube")
             or "youtube.com" in url
             or "youtu.be" in url
         )
 
-        if is_yt:
+        if is_direct:
+            return await self._download_direct(
+                url=url,
+                video_id=vid_id,
+            )
+        elif is_yt:
             return await self._download_youtube(
                 url=url,
                 start_ts=int(start_time),
@@ -72,9 +86,12 @@ class FootageDownloader:
                 video_id=vid_id,
             )
         else:
-            return await self._download_direct(
+            return await self._download_social_ytdlp(
                 url=url,
+                start_ts=int(start_time),
+                duration_needed=duration,
                 video_id=vid_id,
+                platform=platform or "social",
             )
 
     async def download(
@@ -93,7 +110,7 @@ class FootageDownloader:
         """
         try:
             if isinstance(candidate, dict):
-                platform = candidate.get("platform", "pexels")
+                platform = candidate.get("platform", "youtube")
                 url = (
                     candidate.get("embed_url")
                     or candidate.get("url")
@@ -170,65 +187,142 @@ class FootageDownloader:
 
         return None
 
-    async def _download_youtube(
-        self, url: str, start_ts: int, duration_needed: float, video_id: str
+    async def _download_social_ytdlp(
+        self,
+        url: str,
+        start_ts: int,
+        duration_needed: float,
+        video_id: str,
+        platform: str = "youtube",
     ) -> Optional[str]:
-        """Download YouTube segment via yt-dlp.
+        """Download video segment from YouTube, TikTok, Instagram, Threads, X via yt-dlp.
 
-        Uses --download-sections to extract only the needed segment,
-        minimizing download size and time.
+        Tries section extraction first when supported, with robust fallback to full short download + local ffmpeg trim.
         """
         if not url:
             return None
 
-        filename = f"footage_yt_{video_id.replace('/', '_')}_{uuid4().hex[:6]}.mp4"
+        clean_id = str(video_id).replace("/", "_")
+        filename = f"footage_{platform}_{clean_id}_{uuid4().hex[:6]}.mp4"
         temp_path = os.path.join(self._output_dir, filename)
+        raw_full_path = os.path.join(self._output_dir, f"raw_{filename}")
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
 
-        # yt-dlp section format: *start-end (seconds)
-        end_ts = start_ts + int(duration_needed) + 3  # Extra 3s buffer for trim
-        section = f"*{start_ts}-{end_ts}"
+        is_yt = "youtube.com" in url or "youtu.be" in url
 
-        cmd = [
+        # 1. For YouTube: try --download-sections first
+        if is_yt and start_ts > 0:
+            end_ts = start_ts + int(duration_needed) + 3
+            section = f"*{start_ts}-{end_ts}"
+            cmd = [
+                "yt-dlp",
+                "--geo-bypass",
+                "--extractor-args", "youtube:player_client=android,web,web_creator,ios",
+                "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+                "--download-sections", section,
+                "--merge-output-format", "mp4",
+                "--no-playlist",
+                "--no-warnings",
+                "-o", temp_path,
+                url,
+            ]
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+                if proc.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                    size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+                    logger.info(f"footage_dl: YouTube section downloaded ({size_mb:.1f}MB)")
+                    return temp_path
+            except Exception as e:
+                logger.debug(f"footage_dl: yt-dlp section download failed ({e}), falling back to full download...")
+
+        # 2. Direct full video download (essential for TikTok, Instagram Reels, Shorts, X, Threads)
+        cmd_full = [
             "yt-dlp",
             "--geo-bypass",
-            "--extractor-args", "youtube:player_client=android,web,web_creator,ios",
             "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
-            "--download-sections", section,
             "--merge-output-format", "mp4",
             "--no-playlist",
             "--no-warnings",
-            "-o", temp_path,
+            "-o", raw_full_path,
             url,
         ]
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd,
+                *cmd_full,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=75)
 
-            if proc.returncode == 0 and os.path.exists(temp_path):
-                size_mb = os.path.getsize(temp_path) / (1024 * 1024)
-                if size_mb > settings.BROLL_MAX_FOOTAGE_SIZE_MB:
-                    logger.warning(f"footage_dl: YouTube download too large ({size_mb:.1f}MB)")
-                    os.remove(temp_path)
-                    return None
-                logger.info(f"footage_dl: YouTube segment downloaded ({size_mb:.1f}MB)")
-                return temp_path
+            if proc.returncode == 0 and os.path.exists(raw_full_path) and os.path.getsize(raw_full_path) > 0:
+                # Trim locally using ffmpeg to the desired start_ts and duration
+                trim_cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(max(0, start_ts)),
+                    "-i", raw_full_path,
+                    "-t", str(duration_needed + 2.0),
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "22",
+                    "-c:a", "aac",
+                    "-pix_fmt", "yuv420p",
+                    temp_path,
+                ]
+                trim_proc = await asyncio.create_subprocess_exec(
+                    *trim_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(trim_proc.communicate(), timeout=30)
+
+                if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                    size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+                    logger.info(f"footage_dl: {platform} video downloaded and trimmed ({size_mb:.1f}MB)")
+                    if os.path.exists(raw_full_path):
+                        try:
+                            os.remove(raw_full_path)
+                        except Exception:
+                            pass
+                    return temp_path
+                else:
+                    # Fallback to the raw downloaded video if trim failed
+                    os.rename(raw_full_path, temp_path)
+                    return temp_path
             else:
                 error_msg = stderr.decode(errors="replace")[:200] if stderr else "unknown error"
-                logger.warning(f"footage_dl: yt-dlp failed (rc={proc.returncode}): {error_msg}")
+                logger.warning(f"footage_dl: yt-dlp failed for {platform} (rc={proc.returncode}): {error_msg}")
 
         except asyncio.TimeoutError:
             logger.warning(f"footage_dl: yt-dlp timed out for {url}")
-        except FileNotFoundError:
-            logger.warning("footage_dl: yt-dlp not found in PATH")
         except Exception as exc:
-            logger.warning(f"footage_dl: YouTube download error: {exc}")
+            logger.warning(f"footage_dl: {platform} download error: {exc}")
 
+        if os.path.exists(raw_full_path):
+            try:
+                os.remove(raw_full_path)
+            except Exception:
+                pass
         if os.path.exists(temp_path):
-            os.remove(temp_path)
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
         return None
+
+    async def _download_youtube(
+        self, url: str, start_ts: int, duration_needed: float, video_id: str
+    ) -> Optional[str]:
+        """Download YouTube segment via yt-dlp."""
+        return await self._download_social_ytdlp(
+            url=url,
+            start_ts=start_ts,
+            duration_needed=duration_needed,
+            video_id=video_id,
+            platform="youtube",
+        )

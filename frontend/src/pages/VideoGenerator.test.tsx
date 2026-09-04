@@ -46,6 +46,22 @@ vi.mock("@/components/StyleEditorModal", () => ({
 vi.mock("@/lib/api", () => ({
   API_BASE: "http://localhost:8000",
   getToken: () => "test-token",
+  hermesVideoGenApi: {
+    getTrendingTopics: vi.fn().mockResolvedValue({
+      region: "ID",
+      topics: [
+        {
+          topic: "AI Agents Revolution",
+          angle: "Viral tech breakdown",
+          hook: "Can AI really replace coding?",
+          key_points: ["Autonomous agents", "Prompt engineering", "Future of jobs"],
+          recommended_cta: "Follow for daily AI updates",
+          search_keywords: ["AI", "Tech", "Coding"],
+          source: "YouTube + Google Trends",
+        },
+      ],
+    }),
+  },
 }));
 
 describe("VideoGeneratorPage", () => {

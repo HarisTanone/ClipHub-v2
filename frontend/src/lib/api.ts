@@ -1279,3 +1279,122 @@ export const autopilotApi = {
   },
 };
 
+// ─── Hermes Video Generator Auto-Post Types & API ────────────────────────────
+
+export interface TrendingTopicItem {
+  topic: string;
+  angle: string;
+  hook: string;
+  key_points: string[];
+  recommended_cta: string;
+  search_keywords: string[];
+  source?: string;
+  traffic_estimate?: string;
+  region?: string;
+  category?: string;
+}
+
+export interface HermesVideoGenSettings {
+  id?: number;
+  user_id?: number;
+  enabled: boolean;
+  target_region: string;
+  daily_video_count: number;
+  trending_sources: string;
+  niche_focus: string;
+  voice: string;
+  tts_provider: string;
+  tts_model: string;
+  target_duration: number;
+  aspect_ratio: string;
+  preset_slug: string;
+  hook_enabled: boolean;
+  subtitles_enabled: boolean;
+  ai_text_enabled: boolean;
+  thumbnail_enabled: boolean;
+  watermark_enabled: boolean;
+  watermark_text: string;
+  transition_style: string;
+  cta_enabled: boolean;
+  cta_headline: string;
+  cta_button_text: string;
+  cta_text?: string;
+  target_platforms: string;
+  target_account_ids: string[];
+  schedule_mode: string;
+  run_time: string;
+  today_videos_created?: number;
+  last_run_date?: string | null;
+  last_run_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface HermesVideoGenQuota {
+  today_created: number;
+  daily_target: number;
+  remaining: number;
+  used_today?: number;
+  daily_limit?: number;
+  remaining_today?: number;
+  run_date: string;
+}
+
+export interface HermesVideoGenRun {
+  id: number;
+  user_id: number;
+  run_date: string;
+  topic?: string;
+  trending_topic?: string;
+  source?: string;
+  trending_source?: string;
+  video_job_id: string;
+  status: "completed" | "failed" | "processing";
+  video_url?: string | null;
+  thumbnail_url?: string | null;
+  social_posts_scheduled: number;
+  trigger_source: string;
+  error_message?: string | null;
+  created_at: string;
+}
+
+export interface HermesVideoGenStatusResponse {
+  success: boolean;
+  data: HermesVideoGenSettings;
+  quota: HermesVideoGenQuota;
+  can_run_today: boolean;
+  status_message?: string;
+}
+
+export const hermesVideoGenApi = {
+  async getSettings(): Promise<HermesVideoGenStatusResponse> {
+    return request<HermesVideoGenStatusResponse>("/api/hermes-videogen/settings");
+  },
+  async updateSettings(data: Partial<HermesVideoGenSettings>): Promise<HermesVideoGenStatusResponse> {
+    return request<HermesVideoGenStatusResponse>("/api/hermes-videogen/settings", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  async triggerRun(params?: {
+    force?: boolean;
+    region_override?: string;
+    count_override?: number;
+  }): Promise<{ success: boolean; message: string; quota?: HermesVideoGenQuota }> {
+    return request("/api/hermes-videogen/run", {
+      method: "POST",
+      body: JSON.stringify(params || {}),
+    });
+  },
+  async getHistory(limit: number = 20): Promise<{ success: boolean; total: number; items: HermesVideoGenRun[] }> {
+    return request(`/api/hermes-videogen/history?limit=${limit}`);
+  },
+  async getTrendingTopics(
+    region: string = "ID",
+    limit: number = 5
+  ): Promise<{ region: string; count: number; topics: TrendingTopicItem[] }> {
+    return request(`/api/video-generator/trending-topics?region=${encodeURIComponent(region)}&limit=${limit}`);
+  },
+};
+
+

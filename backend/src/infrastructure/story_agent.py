@@ -53,6 +53,7 @@ Rules for High Retention & Target Duration Compliance:
 
 STORY_USER_PROMPT = """Create a dynamic, rich vertical video script about: "{topic}"
 
+Target Language: {language_directive}
 Target duration: {target_duration} seconds (approximately {word_count} words of narration total)
 Number of scenes to generate: {num_scenes} scenes
 
@@ -71,7 +72,7 @@ Output this exact JSON structure:
       "narration": "The spoken narration for this scene (rich, descriptive storytelling, approximately {words_per_scene} words)",
       "visual": "Concrete description of the exact visual footage, archive photos, camera movement, and aesthetic to display",
       "search_queries": [
-        "Local entity + location specific query (e.g. Salatiga aerial drone Jawa Tengah 4k)",
+        "Primary search query matching target language (e.g. Salatiga aerial drone Jawa Tengah 4k viral shorts)",
         "Universal English visual stock query (e.g. vintage dutch colonial building architecture)",
         "Cinematic motion / drone query (e.g. drone flyover highland mountain green city)",
         "Mood / atmosphere / detail query (e.g. misty cool mountain landscape morning)"
@@ -83,10 +84,11 @@ Output this exact JSON structure:
 }}
 
 Important Guidelines:
+- Language Compliance: Obey the Target Language strictly for title, hook, and all scene narrations.
 - Follow the Creative Direction meticulously in scene breakdown, narration tone, and visual cues.
 - Search Queries: 
-  * Query 1: Exact location or primary entity in Indonesian/English (e.g. Salatiga aerial drone Jawa Tengah, rokok kretek rokok).
-  * Query 2-4: Concrete, high-accuracy universal ENGLISH visual stock keywords for Pexels & Pixabay (e.g. smartphone electronics retail store, modern business office desk working, boxing workout athlete gym, fresh coffee cup barista). Translate any local terms or food/objects into standard English nouns so stock footage matches 100%.
+  * Query 1: Exact location or primary entity in the target language (e.g. for Indonesian: Salatiga drone sejuk viral, soto ayam resep asli).
+  * Query 2-4: Concrete, high-accuracy universal visual stock keywords in English for Pexels & Pixabay (e.g. smartphone electronics retail store, modern business office desk working, fresh coffee cup barista).
 - Narration Volume: Ensure all {num_scenes} scenes have complete, engaging storytelling sentences (total ~{word_count} words across the script).
 - First scene is the opening HOOK.
 - Final scene is a punchy, thought-provoking conclusion or takeaway. No CTAs."""
@@ -211,8 +213,30 @@ class StoryAgent:
         word_count = max(50, int(target_duration * 2.3))
         words_per_scene = max(12, int(word_count / max(1, num_scenes)))
 
+        from src.infrastructure.language_detector import detect_language
+
+        resolved_lang = (language or "").strip().lower()
+        if not resolved_lang or resolved_lang in ("auto", "default"):
+            resolved_lang = detect_language(topic, instructions)
+        elif resolved_lang in ("indonesian", "id", "indonesia"):
+            resolved_lang = "id"
+        else:
+            resolved_lang = "en"
+
+        if resolved_lang == "id":
+            language_directive = (
+                "BAHASA INDONESIA. Wajib seluruh judul, hook, dan narasi cerita ditulis dalam Bahasa Indonesia yang alami, "
+                "menarik, dan viral untuk audiens Indonesia. Query 1 wajib kueri footage lokal Indonesia (TikTok, Shorts, Reels) "
+                "dengan nama entitas nyata & tagar (e.g. Salatiga drone aerial Jawa Tengah viral shorts)."
+            )
+        else:
+            language_directive = (
+                "ENGLISH. All titles, hooks, and scene narrations must be in English for an international audience."
+            )
+
         prompt = STORY_USER_PROMPT.format(
             topic=topic,
+            language_directive=language_directive,
             target_duration=target_duration,
             word_count=word_count,
             num_scenes=num_scenes,

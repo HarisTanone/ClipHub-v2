@@ -71,7 +71,20 @@ class VideoGenJob:
     title: Optional[str] = None
     source_video_url: Optional[str] = None
     agentic_understanding: bool = True
+    language: Optional[str] = "id"
+    video_processing_mode: Optional[str] = "agentic"
+    media_resolution: Optional[str] = "low"
+    fps: Optional[float] = None
+    start_offset: Optional[float] = None
+    end_offset: Optional[float] = None
+    watermark_config: Optional[dict] = None
+    transition: Optional[str] = "dissolve"
+    cta_config: Optional[dict] = None
+    ai_text_config: Optional[dict] = None
+    thumbnail_url: Optional[str] = None
+    aspect_ratio: str = "9:16"
     # Results
+
     story: Optional[dict] = None
     scenes_with_footage: Optional[list] = None
     timeline: Optional[list] = None
@@ -153,6 +166,28 @@ class VideoGenerator:
                 cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN source_video_url TEXT")
             if "agentic_understanding" not in cols:
                 cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN agentic_understanding INTEGER DEFAULT 1")
+            if "language" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN language TEXT DEFAULT 'id'")
+            if "video_processing_mode" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN video_processing_mode TEXT DEFAULT 'agentic'")
+            if "media_resolution" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN media_resolution TEXT DEFAULT 'low'")
+            if "fps" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN fps REAL")
+            if "start_offset" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN start_offset REAL")
+            if "end_offset" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN end_offset REAL")
+            if "watermark_config" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN watermark_config TEXT")
+            if "transition" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN transition TEXT DEFAULT 'dissolve'")
+            if "cta_config" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN cta_config TEXT")
+            if "ai_text_config" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN ai_text_config TEXT")
+            if "thumbnail_url" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN thumbnail_url TEXT")
             conn.commit()
             conn.close()
         except Exception as exc:
@@ -171,6 +206,9 @@ class VideoGenerator:
             timeline_json = json.dumps(job.timeline) if job.timeline else None
             subtitle_style_json = json.dumps(job.subtitle_style) if job.subtitle_style else None
             hook_style_json = json.dumps(job.hook_style) if job.hook_style else None
+            watermark_config_json = json.dumps(job.watermark_config) if job.watermark_config else None
+            cta_config_json = json.dumps(job.cta_config) if job.cta_config else None
+            ai_text_config_json = json.dumps(job.ai_text_config) if job.ai_text_config else None
 
             cur.execute("""
                 INSERT INTO video_generator_jobs (
@@ -179,8 +217,10 @@ class VideoGenerator:
                     subtitle_style_json, hook_enabled, custom_hook, hook_style_json,
                     include_bgm, bgm_volume, title, story_json, scenes_json,
                     timeline_json, output_path, error, created_at, completed_at,
-                    tts_provider, tts_model, source_video_url, agentic_understanding
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    tts_provider, tts_model, source_video_url, agentic_understanding, language,
+                    video_processing_mode, media_resolution, fps, start_offset, end_offset,
+                    watermark_config, transition, cta_config, ai_text_config, thumbnail_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     user_id=excluded.user_id,
                     topic=excluded.topic,
@@ -208,7 +248,18 @@ class VideoGenerator:
                     tts_provider=excluded.tts_provider,
                     tts_model=excluded.tts_model,
                     source_video_url=excluded.source_video_url,
-                    agentic_understanding=excluded.agentic_understanding
+                    agentic_understanding=excluded.agentic_understanding,
+                    language=excluded.language,
+                    video_processing_mode=excluded.video_processing_mode,
+                    media_resolution=excluded.media_resolution,
+                    fps=excluded.fps,
+                    start_offset=excluded.start_offset,
+                    end_offset=excluded.end_offset,
+                    watermark_config=excluded.watermark_config,
+                    transition=excluded.transition,
+                    cta_config=excluded.cta_config,
+                    ai_text_config=excluded.ai_text_config,
+                    thumbnail_url=excluded.thumbnail_url
             """, (
                 job.job_id,
                 job.user_id,
@@ -239,6 +290,17 @@ class VideoGenerator:
                 job.tts_model,
                 job.source_video_url,
                 1 if job.agentic_understanding else 0,
+                job.language or "id",
+                job.video_processing_mode or "agentic",
+                job.media_resolution or "low",
+                job.fps,
+                job.start_offset,
+                job.end_offset,
+                watermark_config_json,
+                job.transition or "dissolve",
+                cta_config_json,
+                ai_text_config_json,
+                job.thumbnail_url or "",
             ))
             conn.commit()
             conn.close()
@@ -269,6 +331,17 @@ class VideoGenerator:
         tts_model = row["tts_model"] if ("tts_model" in row.keys() and row["tts_model"]) else "gemini-3.1-flash-tts-preview"
         source_video_url = row["source_video_url"] if ("source_video_url" in row.keys()) else None
         agentic_understanding = bool(row["agentic_understanding"]) if ("agentic_understanding" in row.keys() and row["agentic_understanding"] is not None) else True
+        language = row["language"] if ("language" in row.keys() and row["language"]) else "id"
+        video_processing_mode = row["video_processing_mode"] if ("video_processing_mode" in row.keys() and row["video_processing_mode"]) else "agentic"
+        media_resolution = row["media_resolution"] if ("media_resolution" in row.keys() and row["media_resolution"]) else "low"
+        fps = float(row["fps"]) if ("fps" in row.keys() and row["fps"] is not None) else None
+        start_offset = float(row["start_offset"]) if ("start_offset" in row.keys() and row["start_offset"] is not None) else None
+        end_offset = float(row["end_offset"]) if ("end_offset" in row.keys() and row["end_offset"] is not None) else None
+        watermark_config = json.loads(row["watermark_config"]) if ("watermark_config" in row.keys() and row["watermark_config"]) else None
+        transition = row["transition"] if ("transition" in row.keys() and row["transition"]) else "dissolve"
+        cta_config = json.loads(row["cta_config"]) if ("cta_config" in row.keys() and row["cta_config"]) else None
+        ai_text_config = json.loads(row["ai_text_config"]) if ("ai_text_config" in row.keys() and row["ai_text_config"]) else None
+        thumbnail_url = row["thumbnail_url"] if ("thumbnail_url" in row.keys()) else None
 
         return VideoGenJob(
             job_id=row["job_id"],
@@ -292,6 +365,17 @@ class VideoGenerator:
             title=row["title"],
             source_video_url=source_video_url,
             agentic_understanding=agentic_understanding,
+            language=language,
+            video_processing_mode=video_processing_mode,
+            media_resolution=media_resolution,
+            fps=fps,
+            start_offset=start_offset,
+            end_offset=end_offset,
+            watermark_config=watermark_config,
+            transition=transition,
+            cta_config=cta_config,
+            ai_text_config=ai_text_config,
+            thumbnail_url=thumbnail_url,
             story=story,
             scenes_with_footage=scenes,
             timeline=timeline,
@@ -321,10 +405,34 @@ class VideoGenerator:
         bgm_volume: Optional[float] = None,
         source_video_url: Optional[str] = None,
         agentic_understanding: bool = True,
+        language: Optional[str] = None,
+        video_processing_mode: Optional[str] = "agentic",
+        media_resolution: Optional[str] = "low",
+        fps: Optional[float] = None,
+        start_offset: Optional[float] = None,
+        end_offset: Optional[float] = None,
+        watermark_config: Optional[dict[str, Any]] = None,
+        transition: Optional[str] = "dissolve",
+        cta_config: Optional[dict[str, Any]] = None,
+        ai_text_config: Optional[dict[str, Any]] = None,
+        aspect_ratio: str = "9:16",
         user_id: Optional[int] = None,
     ) -> VideoGenJob:
+
         """Create a new video generation job."""
         job_id = uuid4().hex[:12]
+
+        # Automatic language detection
+        from src.infrastructure.language_detector import detect_language
+        if not language or language.strip().lower() in ("auto", "default"):
+            resolved_language = detect_language(topic, instructions)
+        elif language.strip().lower() in ("indonesian", "id", "indonesia"):
+            resolved_language = "id"
+        elif language.strip().lower() == "english":
+            resolved_language = "en"
+        else:
+            resolved_language = language.strip().lower()
+
         resolved_provider = (tts_provider or getattr(settings, "VIDEO_GEN_TTS_PROVIDER", "gemini") or "gemini").lower()
         if "deepgram" in resolved_provider:
             resolved_provider = "deepgram"
@@ -360,6 +468,16 @@ class VideoGenerator:
             ),
             source_video_url=source_video_url.strip() if source_video_url and source_video_url.strip() else None,
             agentic_understanding=agentic_understanding,
+            language=resolved_language,
+            video_processing_mode=video_processing_mode or "agentic",
+            media_resolution=media_resolution or "low",
+            fps=fps,
+            start_offset=start_offset,
+            end_offset=end_offset,
+            watermark_config=watermark_config,
+            transition=transition or "dissolve",
+            cta_config=cta_config,
+            ai_text_config=ai_text_config,
             user_id=user_id,
         )
         self._jobs[job_id] = job
@@ -547,6 +665,32 @@ class VideoGenerator:
                     scene["footage_source"] = scenes_dl[i].get("footage_source")
 
             job.scenes_with_footage = scenes
+            job.progress = 60
+            self._persist_job(job)
+
+            # Step 4b: Gemini Agentic Video Understanding Alignment Pass
+            if getattr(job, "agentic_understanding", True):
+                logger.info(f"video_gen [{job.job_id}]: running Gemini Agentic Video Understanding alignment pass...")
+                try:
+                    from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
+                    agentic_svc = GeminiAgenticVideoService()
+                    for scene in scenes:
+                        f_path = scene.get("footage_path")
+                        if f_path and os.path.exists(f_path):
+                            await agentic_svc.align_scene_footage(
+                                scene=scene,
+                                local_footage_path=f_path,
+                                topic=job.topic,
+                                processing_mode=getattr(job, "video_processing_mode", "agentic") or "agentic",
+                                media_resolution=getattr(job, "media_resolution", "low") or "low",
+                                fps=getattr(job, "fps", None),
+                                start_offset=getattr(job, "start_offset", None),
+                                end_offset=getattr(job, "end_offset", None),
+                            )
+                except Exception as ag_err:
+                    logger.warning(f"video_gen [{job.job_id}]: agentic alignment pass fallback ({ag_err})")
+
+            job.scenes_with_footage = scenes
             job.progress = 70
             self._persist_job(job)
 
@@ -655,10 +799,16 @@ class VideoGenerator:
         if not target_scene:
             raise ValueError(f"Scene {scene_id} not found in job {job_id}")
 
-        from src.infrastructure.youtube_search import YouTubeSearch
+        from src.infrastructure.social_footage_searcher import SocialFootageSearcher
 
-        yt = YouTubeSearch()
-        candidates = await yt.search_for_single_scene(target_scene, custom_query=query, results_per_query=6)
+        searcher = SocialFootageSearcher()
+        is_id = (getattr(job, "language", "id") or "id").lower() == "id"
+        candidates = await searcher.search_for_single_scene(
+            target_scene,
+            is_indonesian=is_id,
+            results_per_platform=3,
+            custom_query=query,
+        )
         target_scene["footage_candidates"] = candidates
         job.scenes_with_footage = scenes
         self._persist_job(job)
@@ -701,6 +851,32 @@ class VideoGenerator:
                     scene["footage_source"] = scenes_dl[i].get("footage_source")
 
             scenes = scenes_input
+            job.scenes_with_footage = scenes
+            job.progress = 65
+            self._persist_job(job)
+
+            # Step 4b: Gemini Agentic Video Understanding Alignment Pass
+            if getattr(job, "agentic_understanding", True):
+                logger.info(f"video_gen [{job_id}]: running Gemini Agentic Video Understanding alignment pass on selected scenes...")
+                try:
+                    from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
+                    agentic_svc = GeminiAgenticVideoService()
+                    for scene in scenes:
+                        f_path = scene.get("footage_path")
+                        if f_path and os.path.exists(f_path):
+                            await agentic_svc.align_scene_footage(
+                                scene=scene,
+                                local_footage_path=f_path,
+                                topic=job.topic,
+                                processing_mode=getattr(job, "video_processing_mode", "agentic") or "agentic",
+                                media_resolution=getattr(job, "media_resolution", "low") or "low",
+                                fps=getattr(job, "fps", None),
+                                start_offset=getattr(job, "start_offset", None),
+                                end_offset=getattr(job, "end_offset", None),
+                            )
+                except Exception as ag_err:
+                    logger.warning(f"video_gen [{job_id}]: agentic alignment pass fallback ({ag_err})")
+
             job.scenes_with_footage = scenes
             job.progress = 75
             self._persist_job(job)
@@ -762,6 +938,7 @@ class VideoGenerator:
                 target_duration=job.target_duration,
                 num_scenes=job.num_scenes,
                 instructions=job.instructions,
+                language=getattr(job, "language", "id") or "id",
             )
 
         if job.custom_hook and job.custom_hook.strip():
@@ -769,21 +946,22 @@ class VideoGenerator:
 
         logger.info(
             f"video_gen [{job.job_id}]: story generated — "
-            f"'{story.get('title', '')}', {len(story.get('scenes', []))} scenes"
+            f"'{story.get('title', '')}', {len(story.get('scenes', []))} scenes (language={getattr(job, 'language', 'id')})"
         )
         return story
 
     async def _step_search_footage(self, story: dict, work_dir: str, job: Optional[VideoGenJob] = None) -> list[dict]:
-        """Step 2: Search YouTube and Pexels for footage per scene."""
-        from src.infrastructure.youtube_search import YouTubeSearch
+        """Step 2: Search multi-platform footage (YouTube Shorts, TikTok, Instagram, Threads, X, stock) per scene."""
+        from src.infrastructure.social_footage_searcher import SocialFootageSearcher
 
-        yt = YouTubeSearch()
+        searcher = SocialFootageSearcher()
         scenes = story.get("scenes", [])
+        is_id = (getattr(job, "language", "id") or "id").lower() == "id" if job else True
 
-        scenes = await yt.search_for_scenes(
+        scenes = await searcher.search_for_scenes(
             scenes=scenes,
-            results_per_scene=5,
-            shorts_only=False,
+            is_indonesian=is_id,
+            results_per_platform=3,
         )
 
         # If job has a source_video_url, inject it as primary candidate with exact timestamps
@@ -1094,6 +1272,7 @@ class VideoGenerator:
                 "tts_path": audio_path,
                 "start_time": current_time,
                 "duration": duration,
+                "start_timestamp": float(scene.get("start_timestamp") or 0.0),
                 "transition": scene.get("transition", "cut"),
                 "visual": scene.get("visual", ""),
             }
@@ -1128,7 +1307,10 @@ class VideoGenerator:
 
         # Step 6b: Concatenate all scene clips
         concat_path = os.path.join(work_dir, "concat_video.mp4")
-        await self._concat_clips(scene_clips, concat_path)
+        try:
+            await self._concat_clips(scene_clips, concat_path, transition=job.transition)
+        except TypeError:
+            await self._concat_clips(scene_clips, concat_path)
 
         # Step 6c: Merge TTS audio with timed silence for missing scene narration.
         merged_audio_path = os.path.join(work_dir, "narration_full.mp3")
@@ -1348,9 +1530,92 @@ class VideoGenerator:
                     except Exception as hook_err:
                         logger.warning(f"video_gen [{job.job_id}]: failed to burn hook overlay: {hook_err}")
 
+        # Step 6g: Watermark overlay
+        if job.watermark_config and os.path.exists(output_path):
+            try:
+                from src.infrastructure.watermark_renderer import apply_watermark_if_configured
+                await apply_watermark_if_configured(
+                    config=job.watermark_config,
+                    output_dir=work_dir,
+                    clip_rank=1,
+                    final_path=output_path,
+                    fonts_dir="assets/fonts",
+                    job_id=job.job_id,
+                )
+                logger.info(f"video_gen [{job.job_id}]: successfully applied watermark")
+            except Exception as wm_err:
+                logger.warning(f"video_gen [{job.job_id}]: watermark application failed: {wm_err}")
+
+        # Step 6h: Call to Action (CTA) overlay / end-card
+        if job.cta_config and os.path.exists(output_path):
+            try:
+                from src.infrastructure.cta_renderer import apply_cta_if_configured
+                await apply_cta_if_configured(
+                    config=job.cta_config,
+                    output_dir=work_dir,
+                    clip_rank=1,
+                    final_path=output_path,
+                    fonts_dir="assets/fonts",
+                    job_id=job.job_id,
+                )
+                logger.info(f"video_gen [{job.job_id}]: successfully applied CTA end-card")
+            except Exception as cta_err:
+                logger.warning(f"video_gen [{job.job_id}]: CTA application failed: {cta_err}")
+
+        # Step 6i: Extract crisp keyframe thumbnail at 00:00:01 and render viral TikTok cover
+        try:
+            thumb_filename = f"thumbnail_{job.job_id}.jpg"
+            thumb_path = os.path.join(work_dir, thumb_filename)
+            thumb_cmd = [
+                "ffmpeg", "-y",
+                "-ss", "00:00:01",
+                "-i", output_path,
+                "-vframes", "1",
+                "-q:v", "2",
+                thumb_path,
+            ]
+            await self._run_ffmpeg(thumb_cmd, timeout=30)
+            if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+                # Enhance thumbnail into high-CTR TikTok cover with Hook, Caption, and Hashtags
+                try:
+                    from src.infrastructure.social_cover_generator import generate_social_cover
+                    hook_for_cover = (
+                        job.custom_hook
+                        or (job.story or {}).get("hook")
+                        or (job.story or {}).get("title")
+                        or job.topic
+                    )
+                    caption_for_cover = (
+                        (job.story or {}).get("title")
+                        if (job.story or {}).get("title") != hook_for_cover
+                        else job.topic
+                    )
+                    wm_text = None
+                    if job.watermark_config and job.watermark_config.get("enabled"):
+                        wm_text = job.watermark_config.get("text")
+
+                    generate_social_cover(
+                        base_image_path=thumb_path,
+                        output_path=thumb_path,
+                        hook_text=hook_for_cover,
+                        caption_text=caption_for_cover,
+                        hashtags=None,  # Generates dynamic tags from topic keywords
+                        aspect_ratio=getattr(job, "aspect_ratio", "9:16") or "9:16",
+                        watermark_text=wm_text,
+                        include_play_indicator=True,
+                    )
+                except Exception as cover_err:
+                    logger.warning(f"video_gen [{job.job_id}]: social cover enhancement fallback ({cover_err})")
+
+                job.thumbnail_url = f"/api/video-generator/jobs/{job.job_id}/thumbnail"
+                self._persist_job(job)
+                logger.info(f"video_gen [{job.job_id}]: generated viral social thumbnail cover -> {thumb_path}")
+        except Exception as th_err:
+            logger.debug(f"video_gen [{job.job_id}]: thumbnail extraction error: {th_err}")
+
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
         logger.info(
-            f"video_gen [{job.job_id}]: final video {size_mb:.1f}MB (Subtitles={job.subtitles_enabled}, Hook={job.hook_enabled}) → {output_path}"
+            f"video_gen [{job.job_id}]: final video {size_mb:.1f}MB (Subtitles={job.subtitles_enabled}, Hook={job.hook_enabled}, Watermark={bool(job.watermark_config)}, CTA={bool(job.cta_config)}) → {output_path}"
         )
 
         return output_path
@@ -1521,19 +1786,31 @@ class VideoGenerator:
         clip_path = os.path.join(clips_dir, f"clip_{scene_id:03d}.mp4")
 
         if footage_path and os.path.exists(footage_path):
-            # Trim and scale footage to 1080x1920 (9:16)
+            # Trim and scale footage to 1080x1920 (9:16), seeking to agentic moment
+            start_ts = float(entry.get("start_timestamp") or 0.0)
             from src.infrastructure.gpu_encoder import get_video_encoder_args
             cmd = [
                 "ffmpeg", "-y",
+                "-ss", str(max(0.0, start_ts)),
                 "-stream_loop", "-1",
                 "-i", footage_path,
                 "-t", str(duration),
                 "-vf", (
-                    "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
-                    "crop=1080:1920,"
+                    (
+                        "scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+                        "crop=1920:1080,"
+                    ) if getattr(job, "aspect_ratio", "9:16") == "16:9" else (
+                        "scale=1080:1080:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+                        "crop=1080:1080,"
+                    ) if getattr(job, "aspect_ratio", "9:16") == "1:1" else (
+                        "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
+                        "crop=1080:1920,"
+                    )
+                ) + (
                     "unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
                     "setsar=1"
                 ),
+
                 *get_video_encoder_args("medium"),
                 "-an",  # No audio from footage
                 "-r", "30",
@@ -1578,8 +1855,8 @@ class VideoGenerator:
 
         return clip_path
 
-    async def _concat_clips(self, clips: list[str], output_path: str) -> None:
-        """Concatenate video clips using FFmpeg concat demuxer."""
+    async def _concat_clips(self, clips: list[str], output_path: str, transition: Optional[str] = "dissolve") -> None:
+        """Concatenate video clips using FFmpeg concat filter."""
         # Filter only existing clips
         valid_clips = [c for c in clips if c and os.path.exists(c)]
 

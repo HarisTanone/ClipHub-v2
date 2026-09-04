@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield,
@@ -15,7 +15,11 @@ import { RangeSlider } from "@/components/ui/RangeSlider";
 import { useToast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
-import { system, storage, systemConfig, autopilotApi, presetsApi, socialApi, type AutopilotSettings, type AutopilotQuotaInfo, type SystemConfigItem, API_BASE, getToken } from "@/lib/api";
+import {
+  system, storage, systemConfig, autopilotApi, hermesVideoGenApi, presetsApi, socialApi,
+  type AutopilotSettings, type AutopilotQuotaInfo, type HermesVideoGenSettings,
+  type HermesVideoGenQuota, type HermesVideoGenRun, type SystemConfigItem, API_BASE, getToken
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SectionDescription } from "@/components/reframe/SectionDescription";
 import { ImagePreviewPanel } from "@/components/reframe/ImagePreviewPanel";
@@ -478,7 +482,7 @@ export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram" | "autopilot" | "system_config">("general");
+  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram" | "autopilot" | "hermes_video_gen" | "system_config">("general");
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -492,6 +496,18 @@ export function Settings() {
   const [isLoadingAutopilot, setIsLoadingAutopilot] = useState<boolean>(false);
   const [isSavingAutopilot, setIsSavingAutopilot] = useState<boolean>(false);
   const [isRunningAutopilot, setIsRunningAutopilot] = useState<boolean>(false);
+
+  // Hermes Video Generator Auto-Post State
+  const [hermesVideogenSettings, setHermesVideogenSettings] = useState<HermesVideoGenSettings | null>(null);
+  const [hermesVideogenQuota, setHermesVideogenQuota] = useState<HermesVideoGenQuota | null>(null);
+  const [hermesVideogenCanRun, setHermesVideogenCanRun] = useState<boolean>(true);
+  const [hermesVideogenPresets, setHermesVideogenPresets] = useState<any[]>([]);
+  const [hermesVideogenPlatforms, setHermesVideogenPlatforms] = useState<any>({});
+  const [hermesVideogenHistory, setHermesVideogenHistory] = useState<HermesVideoGenRun[]>([]);
+  const [isLoadingHermesVideogen, setIsLoadingHermesVideogen] = useState<boolean>(false);
+  const [isSavingHermesVideogen, setIsSavingHermesVideogen] = useState<boolean>(false);
+  const [isRunningHermesVideogen, setIsRunningHermesVideogen] = useState<boolean>(false);
+
   const [showStyleModal, setShowStyleModal] = useState<boolean>(false);
   const [editorHook, setEditorHook] = useState<HookStyle>(DEFAULT_HOOK_STYLE);
   const [editorSub, setEditorSub] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
@@ -998,7 +1014,11 @@ export function Settings() {
     if (tab === "autopilot") {
       loadAutopilotData();
     }
+    if (tab === "hermes_video_gen") {
+      loadHermesVideoGenData();
+    }
   }, [isSuperadmin, tab, sysConfigUnmask]);
+
 
   async function loadAutopilotData() {
     setIsLoadingAutopilot(true);
@@ -1088,7 +1108,69 @@ export function Settings() {
     }
   }
 
+  async function loadHermesVideoGenData() {
+    setIsLoadingHermesVideogen(true);
+    try {
+      const [res, presetsRes, platsRes, histRes] = await Promise.all([
+        hermesVideoGenApi.getSettings(),
+        presetsApi.list(isSuperadmin).catch(() => ({ presets: [] })),
+        socialApi.getPlatformsStatus().catch(() => ({ platforms: [] })),
+        hermesVideoGenApi.getHistory(20).catch(() => ({ items: [] })),
+      ]);
+      if (res && res.data) {
+        setHermesVideogenSettings(res.data);
+        setHermesVideogenQuota(res.quota);
+        setHermesVideogenCanRun(res.can_run_today);
+      }
+      const rawPresets = (presetsRes as any)?.data || (presetsRes as any)?.presets || (Array.isArray(presetsRes) ? presetsRes : []);
+      setHermesVideogenPresets(Array.isArray(rawPresets) ? rawPresets : []);
+      const rawPlats = (platsRes as any)?.platforms || platsRes || {};
+      setHermesVideogenPlatforms(rawPlats);
+      const rawHist = histRes?.items || (Array.isArray(histRes) ? histRes : []);
+      setHermesVideogenHistory(Array.isArray(rawHist) ? rawHist : []);
+    } catch (e: any) {
+      toast.error("Gagal memuat pengaturan Hermes Video Generator: " + (e?.message || ""));
+    } finally {
+      setIsLoadingHermesVideogen(false);
+    }
+  }
+
+  async function handleSaveHermesVideoGen() {
+    if (!hermesVideogenSettings) return;
+    setIsSavingHermesVideogen(true);
+    try {
+      const res = await hermesVideoGenApi.updateSettings(hermesVideogenSettings);
+      if (res && res.data) {
+        setHermesVideogenSettings(res.data);
+        setHermesVideogenQuota(res.quota);
+        setHermesVideogenCanRun(res.can_run_today);
+        toast.success("Pengaturan Hermes Video Generator Auto-Post berhasil disimpan!");
+      }
+    } catch (e: any) {
+      toast.error("Gagal menyimpan Hermes Video Generator: " + (e?.message || ""));
+    } finally {
+      setIsSavingHermesVideogen(false);
+    }
+  }
+
+  async function handleTriggerHermesVideoGen(force: boolean = false) {
+    setIsRunningHermesVideogen(true);
+    try {
+      toast.info("Memulai pencarian trending & render video Hermes...");
+      const res = await hermesVideoGenApi.triggerRun({ force });
+      if (res.success) {
+        toast.success(res.message || "Hermes Video Generator telah dijalankan di background!");
+        setTimeout(() => loadHermesVideoGenData(), 3000);
+      }
+    } catch (e: any) {
+      toast.error("Gagal menjalankan Hermes Video Generator: " + (e?.message || ""));
+    } finally {
+      setIsRunningHermesVideogen(false);
+    }
+  }
+
   async function loadSystemConfig(unmask: boolean = false) {
+
     setIsLoadingSysConfig(true);
     try {
       const res = await systemConfig.get(unmask);
@@ -1209,6 +1291,7 @@ export function Settings() {
     | "models"
     | "telegram"
     | "autopilot"
+    | "hermes_video_gen"
     | "system_config";
 
   interface SettingsTabItem {
@@ -1232,6 +1315,7 @@ export function Settings() {
       tabs: [
         { id: "general", label: "General", icon: <SlidersHorizontal className="h-4 w-4" />, desc: "Preferensi render & format video default", badge: "All Users" },
         { id: "autopilot", label: "Hermes Autopilot", icon: <Bot className="h-4 w-4" />, badge: "1 Video/Hari", desc: "Automasi pemotongan video harian" },
+        { id: "hermes_video_gen", label: "Hermes Video Gen Auto-Post", icon: <Video className="h-4 w-4" />, badge: "3-5 Video/Hari", desc: "Cari trending & auto-post video AI" },
         { id: "render", label: "Render Engine", icon: <Film className="h-4 w-4" />, desc: "Mesin render Remotion, 3D, & AI Layer", badge: "All Users" },
         { id: "reframe", label: "Reframe Tuning", icon: <Cpu className="h-4 w-4" />, badge: isSuperadmin ? "Global Defaults" : "Personal", desc: "AI Face Tracking, AutoGrid Zoom, & Ghost Filter" },
         { id: "hyperframes", label: "HyperFrames Hook", icon: <Sparkles className="h-4 w-4" />, badge: isSuperadmin ? "Global Defaults" : "Personal", desc: "Animasi hook teks headline bergerak" },
@@ -1399,6 +1483,22 @@ export function Settings() {
                   {autopilotCanRun ? "Jalankan Hari Ini (1 Video)" : "Kuota Hari Ini Terpenuhi"}
                 </Button>
                 <Button onClick={handleSaveAutopilot} loading={isSavingAutopilot} icon={<Save className="h-3.5 w-3.5" />} size="sm">
+                  Save
+                </Button>
+              </div>
+            ) : tab === "hermes_video_gen" ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => handleTriggerHermesVideoGen(false)}
+                  loading={isRunningHermesVideogen}
+                  disabled={!hermesVideogenCanRun}
+                  size="sm"
+                  variant="outline"
+                  icon={<Play className="h-3.5 w-3.5" />}
+                >
+                  {hermesVideogenCanRun ? `Jalankan Sekarang (${hermesVideogenQuota?.remaining ?? 3} Video)` : "Kuota Hari Ini Terpenuhi"}
+                </Button>
+                <Button onClick={handleSaveHermesVideoGen} loading={isSavingHermesVideogen} icon={<Save className="h-3.5 w-3.5" />} size="sm">
                   Save
                 </Button>
               </div>
@@ -3607,6 +3707,616 @@ export function Settings() {
           </div>
         )}
 
+        {tab === "hermes_video_gen" && (
+          <div className="space-y-4">
+            {/* Header info banner */}
+            <div className="rounded-xl border border-cyan-500/30 bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-zinc-900/60 p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-300">
+                  <Video className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                    Hermes Video Generator — Trending Discovery &amp; Auto-Post
+                    <Badge variant="default" className="text-[9px] uppercase font-bold text-cyan-300 border-cyan-500/30 bg-cyan-500/10">
+                      3-5 Video/Hari
+                    </Badge>
+                  </h2>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                    Hermes memindai YouTube Data API v3, Google Trends, TikTok, dan Gemini AI untuk menemukan topik paling ramai setiap hari, lalu memprosesnya menjadi video lengkap (Hook, Subtitle, AI Text, Thumbnail, Watermark, Transition, &amp; CTA) dan otomatis memposting ke akun sosial media terpilih.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant={hermesVideogenCanRun ? "success" : "warning"}
+                  className="px-3 py-1 text-xs font-semibold"
+                >
+                  {hermesVideogenQuota ? `${hermesVideogenQuota.today_created || 0}/${hermesVideogenQuota.daily_target || 3} Video Hari Ini` : "Kuota Harian: 3-5 Video"}
+                </Badge>
+              </div>
+            </div>
+
+            {isLoadingHermesVideogen ? (
+              <Card className="p-8 text-center">
+                <RefreshCw className="h-6 w-6 text-cyan-400 animate-spin mx-auto mb-2" />
+                <p className="text-xs text-zinc-400">Memuat konfigurasi Hermes Video Generator Auto-Post...</p>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                {/* Left Column: Settings Form */}
+                <div className="lg:col-span-7 space-y-4">
+                  {/* Master Switch Card */}
+                  <Card className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "h-10 w-10 rounded-xl flex items-center justify-center transition-colors border",
+                          hermesVideogenSettings?.enabled
+                            ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400"
+                            : "bg-zinc-800/80 border-zinc-700 text-zinc-500"
+                        )}>
+                          <Zap className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-zinc-100">Aktifkan Hermes Video Generator Auto-Post</span>
+                            <Badge variant={hermesVideogenSettings?.enabled ? "success" : "default"}>
+                              {hermesVideogenSettings?.enabled ? "AKTIF" : "NONAKTIF"}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-zinc-400 mt-0.5">
+                            {hermesVideogenSettings?.enabled
+                              ? `Berjalan otomatis setiap hari pada jam ${hermesVideogenSettings.run_time || "06:00"} WIB (${hermesVideogenSettings.daily_video_count || 3} video/hari)`
+                              : "Aktifkan untuk mulai mencari topik trending dan merender video harian otomatis."}
+                          </p>
+                        </div>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={hermesVideogenSettings?.enabled || false}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, enabled: e.target.checked });
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                      </label>
+                    </div>
+                  </Card>
+
+                  {/* Target Region & Daily Quota */}
+                  <Card className="p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Globe className="h-3.5 w-3.5 text-cyan-400" />
+                      Target Wilayah &amp; Kuota Video Harian
+                    </h3>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Negara / Region Sumber Trending</label>
+                        <Select
+                          value={hermesVideogenSettings?.target_region || "ID"}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, target_region: e.target.value });
+                            }
+                          }}
+                          options={[
+                            { value: "ID", label: "🇮🇩 Indonesia (Top Trending Lokal)" },
+                            { value: "GLOBAL", label: "🌍 Worldwide / Global (Internasional)" },
+                            { value: "US", label: "🇺🇸 United States" },
+                            { value: "MY", label: "🇲🇾 Malaysia" },
+                            { value: "SG", label: "🇸🇬 Singapore" },
+                            { value: "JP", label: "🇯🇵 Japan" },
+                            { value: "GB", label: "🇬🇧 United Kingdom" },
+                          ]}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Jumlah Video per Hari (3 - 5)</label>
+                        <Select
+                          value={String(hermesVideogenSettings?.daily_video_count || 3)}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({
+                                ...hermesVideogenSettings,
+                                daily_video_count: parseInt(e.target.value) || 3,
+                              });
+                            }
+                          }}
+                          options={[
+                            { value: "3", label: "3 Video / Hari (Rekomendasi Default)" },
+                            { value: "4", label: "4 Video / Hari" },
+                            { value: "5", label: "5 Video / Hari (Maksimal)" },
+                          ]}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] text-zinc-400 block mb-1">Niche / Topik Khusus (Opsional)</label>
+                      <Input
+                        placeholder="Contoh: Teknologi, Fakta Unik, AI, Bisnis, Kesehatan (kosongkan untuk general trending)"
+                        value={hermesVideogenSettings?.niche_focus || ""}
+                        onChange={(e) => {
+                          if (hermesVideogenSettings) {
+                            setHermesVideogenSettings({ ...hermesVideogenSettings, niche_focus: e.target.value });
+                          }
+                        }}
+                      />
+                    </div>
+                  </Card>
+
+                  {/* Multi-source Signals */}
+                  <Card className="p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Activity className="h-3.5 w-3.5 text-cyan-400" />
+                      Multi-Source Sinyal Trending (Tanpa Terpaku 1 Sumber)
+                    </h3>
+                    <p className="text-[11px] text-zinc-400">
+                      Hermes mengumpulkan trending topic dari berbagai platform teratas untuk memastikan topik benar-benar sedang ramai:
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {[
+                        { id: "google", label: "Google Trends / Pytrends", desc: "Volume pencarian real-time" },
+                        { id: "youtube", label: "YouTube Data API v3", desc: "Grafik video viral & mostPopular" },
+                        { id: "tiktok", label: "TikTok Trending Search", desc: "Topik ramai di FYP TikTok" },
+                        { id: "gemini", label: "Gemini AI Synthesis", desc: "Kurasi sudut pandang & hook viral" },
+                      ].map((src) => {
+                        const currentSources = (hermesVideogenSettings?.trending_sources || "google,youtube,tiktok,gemini").split(",").map(s => s.trim().toLowerCase());
+                        const isChecked = currentSources.includes(src.id);
+
+                        return (
+                          <label
+                            key={src.id}
+                            className={cn(
+                              "flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all",
+                              isChecked
+                                ? "bg-cyan-500/10 border-cyan-500/30 text-zinc-100"
+                                : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (!hermesVideogenSettings) return;
+                                let updated: string[];
+                                if (e.target.checked) {
+                                  updated = Array.from(new Set([...currentSources, src.id]));
+                                } else {
+                                  updated = currentSources.filter(s => s !== src.id);
+                                }
+                                if (updated.length === 0) updated = ["google"]; // at least one
+                                setHermesVideogenSettings({
+                                  ...hermesVideogenSettings,
+                                  trending_sources: updated.join(","),
+                                });
+                              }}
+                              className="mt-0.5 rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-3.5 w-3.5"
+                            />
+                            <div>
+                              <div className="text-xs font-semibold">{src.label}</div>
+                              <div className="text-[10px] text-zinc-400">{src.desc}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </Card>
+
+                  {/* Brand & Video Pipeline Elements */}
+                  <Card className="p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+                      Elemen Video Lengkap (Hook, Subtitle, AI Text, Thumbnail, Watermark, Transition, CTA)
+                    </h3>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Aspek Rasio Output</label>
+                        <Select
+                          value={hermesVideogenSettings?.aspect_ratio || "9:16"}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, aspect_ratio: e.target.value });
+                            }
+                          }}
+                          options={[
+                            { value: "9:16", label: "9:16 (Vertical Shorts / TikTok / Reels)" },
+                            { value: "16:9", label: "16:9 (Horizontal YouTube Standar)" },
+                            { value: "1:1", label: "1:1 (Square Feed Instagram)" },
+                          ]}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Gaya Transisi Antar Scene</label>
+                        <Select
+                          value={hermesVideogenSettings?.transition_style || "dissolve"}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, transition_style: e.target.value });
+                            }
+                          }}
+                          options={[
+                            { value: "dissolve", label: "Cross Dissolve (Halus)" },
+                            { value: "fade", label: "Fade to Black" },
+                            { value: "slideleft", label: "Slide Left (Dinamis)" },
+                            { value: "zoom", label: "Zoom In (Viral Style)" },
+                            { value: "pixelize", label: "Pixelate Effect" },
+                            { value: "none", label: "Direct Cut (Tanpa transisi)" },
+                          ]}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Checkbox grid for features */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                      <label className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={hermesVideogenSettings?.hook_enabled ?? true}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, hook_enabled: e.target.checked });
+                            }
+                          }}
+                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                        />
+                        <span>⚡ Hook Visual</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={hermesVideogenSettings?.subtitles_enabled ?? true}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, subtitles_enabled: e.target.checked });
+                            }
+                          }}
+                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                        />
+                        <span>💬 Subtitle AI</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={hermesVideogenSettings?.ai_text_enabled ?? true}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, ai_text_enabled: e.target.checked });
+                            }
+                          }}
+                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                        />
+                        <span>✨ AI Text Overlay</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={hermesVideogenSettings?.thumbnail_enabled ?? true}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, thumbnail_enabled: e.target.checked });
+                            }
+                          }}
+                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                        />
+                        <span>🖼️ Auto Thumbnail</span>
+                      </label>
+                    </div>
+
+                    {/* Watermark Config Row */}
+                    <div className="pt-2 border-t border-zinc-800/80 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-xs font-medium text-zinc-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={hermesVideogenSettings?.watermark_enabled ?? false}
+                            onChange={(e) => {
+                              if (hermesVideogenSettings) {
+                                setHermesVideogenSettings({ ...hermesVideogenSettings, watermark_enabled: e.target.checked });
+                              }
+                            }}
+                            className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                          />
+                          <span>Terapkan Watermark Branding</span>
+                        </label>
+                      </div>
+
+                      {hermesVideogenSettings?.watermark_enabled && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <Input
+                            placeholder="Teks Watermark (contoh: @cliperhub atau Channel Anda)"
+                            value={hermesVideogenSettings?.watermark_text || ""}
+                            onChange={(e) => {
+                              if (hermesVideogenSettings) {
+                                setHermesVideogenSettings({ ...hermesVideogenSettings, watermark_text: e.target.value });
+                              }
+                            }}
+                          />
+                          <p className="text-[10px] text-zinc-400 self-center">
+                            Posisi: Kanan Atas (Top-Right) dengan opacity 80% &amp; shadow tipis.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* CTA Outro Config Row */}
+                    <div className="pt-2 border-t border-zinc-800/80 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-xs font-medium text-zinc-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={hermesVideogenSettings?.cta_enabled ?? true}
+                            onChange={(e) => {
+                              if (hermesVideogenSettings) {
+                                setHermesVideogenSettings({ ...hermesVideogenSettings, cta_enabled: e.target.checked });
+                              }
+                            }}
+                            className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                          />
+                          <span>Terapkan Outro Call-To-Action (CTA) di Akhir Video</span>
+                        </label>
+                      </div>
+
+                      {hermesVideogenSettings?.cta_enabled && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-zinc-400 block mb-0.5">Headline Ajakan (CTA)</label>
+                            <Input
+                              placeholder="Contoh: Follow untuk info viral harian!"
+                              value={hermesVideogenSettings?.cta_headline || hermesVideogenSettings?.cta_text || "Follow for more"}
+                              onChange={(e) => {
+                                if (hermesVideogenSettings) {
+                                  setHermesVideogenSettings({
+                                    ...hermesVideogenSettings,
+                                    cta_headline: e.target.value,
+                                    cta_text: e.target.value,
+                                  });
+                                }
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-zinc-400 block mb-0.5">Teks Tombol CTA</label>
+                            <Input
+                              placeholder="FOLLOW, KLIK LINK, COBA SEKARANG"
+                              value={hermesVideogenSettings?.cta_button_text || "FOLLOW"}
+                              onChange={(e) => {
+                                if (hermesVideogenSettings) {
+                                  setHermesVideogenSettings({ ...hermesVideogenSettings, cta_button_text: e.target.value });
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+
+                  {/* Social Auto-Post & Schedule Settings */}
+                  <Card className="p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Send className="h-3.5 w-3.5 text-cyan-400" />
+                      Target Akun Media Sosial &amp; Auto-Post
+                    </h3>
+
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-zinc-400">
+                        Pilih platform media sosial untuk otomatis memposting video trending yang telah selesai diproses:
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {[
+                          { id: "tiktok", label: "TikTok", icon: "🎵" },
+                          { id: "instagram", label: "Instagram Reels", icon: "📸" },
+                          { id: "youtube", label: "YouTube Shorts", icon: "▶️" },
+                        ].map((plat) => {
+                          const currentPlats = (hermesVideogenSettings?.target_platforms || "tiktok,instagram,youtube").split(",").map(p => p.trim().toLowerCase());
+                          const isChecked = currentPlats.includes(plat.id);
+
+                          return (
+                            <label
+                              key={plat.id}
+                              className={cn(
+                                "flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all",
+                                isChecked
+                                  ? "bg-cyan-500/10 border-cyan-500/30 text-zinc-100"
+                                  : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (!hermesVideogenSettings) return;
+                                  let updated: string[];
+                                  if (e.target.checked) {
+                                    updated = Array.from(new Set([...currentPlats, plat.id]));
+                                  } else {
+                                    updated = currentPlats.filter(p => p !== plat.id);
+                                  }
+                                  setHermesVideogenSettings({
+                                    ...hermesVideogenSettings,
+                                    target_platforms: updated.join(","),
+                                  });
+                                }}
+                                className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                              />
+                              <span className="text-sm">{plat.icon}</span>
+                              <span className="text-xs font-semibold">{plat.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80">
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
+                        <Input
+                          type="time"
+                          value={hermesVideogenSettings?.run_time || "06:00"}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, run_time: e.target.value });
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Mode Jadwal Post</label>
+                        <Select
+                          value={hermesVideogenSettings?.schedule_mode || "ai"}
+                          onChange={(e) => {
+                            if (hermesVideogenSettings) {
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, schedule_mode: e.target.value });
+                            }
+                          }}
+                          options={[
+                            { value: "ai", label: "AI Same-Day Spread (Sebar otomatis di jam ramai audiens)" },
+                            { value: "instant", label: "Instant Post (Langsung tayang saat video selesai)" },
+                            { value: "custom", label: "Custom Time" },
+                          ]}
+                        />
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+
+                {/* Right Column: Execution & History */}
+                <div className="lg:col-span-5 space-y-4">
+                  {/* Execution Control Card */}
+                  <Card className="p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Play className="h-3.5 w-3.5 text-cyan-400" />
+                      Status Eksekusi &amp; Manual Trigger
+                    </h3>
+
+                    <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-400">Target Harian:</span>
+                        <span className="font-semibold text-zinc-200">{hermesVideogenSettings?.daily_video_count || 3} Video / Hari</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-400">Video Dibuat Hari Ini:</span>
+                        <span className="font-semibold text-cyan-400">{hermesVideogenQuota?.today_created || 0} Video</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-400">Sisa Kuota:</span>
+                        <span className="font-semibold text-emerald-400">{hermesVideogenQuota?.remaining ?? (hermesVideogenSettings?.daily_video_count || 3)} Video</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-400">Terakhir Dijalankan:</span>
+                        <span className="font-mono text-[10px] text-zinc-400">{hermesVideogenSettings?.last_run_at || "Belum pernah"}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 pt-1">
+                      <Button
+                        onClick={() => handleTriggerHermesVideoGen(false)}
+                        loading={isRunningHermesVideogen}
+                        disabled={!hermesVideogenCanRun}
+                        className="w-full"
+                        variant="primary"
+                        icon={<Play className="h-4 w-4" />}
+                      >
+                        {hermesVideogenCanRun
+                          ? `Jalankan Sekarang (${hermesVideogenQuota?.remaining ?? (hermesVideogenSettings?.daily_video_count || 3)} Video)`
+                          : "Kuota Hari Ini Sudah Terpenuhi"}
+                      </Button>
+
+                      {!hermesVideogenCanRun && (
+                        <Button
+                          onClick={() => handleTriggerHermesVideoGen(true)}
+                          loading={isRunningHermesVideogen}
+                          className="w-full text-xs text-zinc-400 hover:text-zinc-200"
+                          variant="ghost"
+                          size="sm"
+                        >
+                          Paksa Jalankan Ulang (Force Run)
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+
+                  {/* History of Runs Card */}
+                  <Card className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Film className="h-3.5 w-3.5 text-zinc-400" />
+                        Riwayat Video Trending &amp; Auto-Post
+                      </span>
+                      <Button
+                        onClick={loadHermesVideoGenData}
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
+                        icon={<RefreshCw className="h-2.5 w-2.5" />}
+                      >
+                        Refresh
+                      </Button>
+                    </div>
+
+                    {hermesVideogenHistory.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-zinc-500">
+                        Belum ada riwayat video dari Hermes Video Generator.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                        {hermesVideogenHistory.map((run) => (
+                          <div
+                            key={run.id}
+                            className="p-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 text-xs space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-zinc-200 text-[11px] truncate max-w-[220px]" title={run.topic || run.trending_topic}>
+                                {run.topic || run.trending_topic || "Trending Video"}
+                              </span>
+                              <Badge
+                                variant={run.status === "completed" ? "success" : run.status === "failed" ? "error" : "warning"}
+                                className="text-[9px]"
+                              >
+                                {run.status}
+                              </Badge>
+                            </div>
+
+                            <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                              <span>Sumber: {run.source || run.trending_source || "Multi-source"}</span>
+                              <span className="text-cyan-400 font-mono">Job #{run.video_job_id}</span>
+                            </div>
+
+                            {run.social_posts_scheduled > 0 && (
+                              <div className="text-[10px] text-emerald-400 flex items-center gap-1">
+                                <Check className="h-3 w-3" />
+                                <span>{run.social_posts_scheduled} postingan media sosial terjadwal</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "system_config" && (
           <div className="max-w-6xl space-y-4">
             {/* Header info banner */}
@@ -3858,7 +4568,7 @@ export function Settings() {
   );
 }
 
-function FeatureToggle({ icon, label, desc, active, onToggle }: { icon: React.ReactNode; label: string; desc?: string; active: boolean; onToggle: () => void }) {
+function FeatureToggle({ icon, label, desc, active, onToggle }: { icon: ReactNode; label: string; desc?: string; active: boolean; onToggle: () => void }) {
   return (
     <button type="button" onClick={onToggle} className="w-full flex items-center justify-between rounded-lg border border-zinc-800/60 px-3 py-2.5 hover:border-zinc-700 transition-colors text-left">
       <div className="flex items-center gap-2 min-w-0">

@@ -8,14 +8,15 @@ GET  /video-generator/voices    — list available TTS voices
 """
 import os
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Any, Optional
 
 from src.config import settings
 from src.application.video_generator import VideoGenStatus
-from src.presentation.auth_deps import CurrentUser, require_superadmin
+from src.presentation.auth_deps import CurrentUser, require_superadmin, get_current_user
+
 
 router = APIRouter(prefix="/video-generator", tags=["video-generator"])
 
@@ -41,8 +42,19 @@ class GenerateVideoRequest(BaseModel):
     hook_style: Optional[dict[str, Any]] = Field(default=None, exclude=True)
     include_bgm: bool = Field(default=True, description="Mix background music when available")
     bgm_volume: float = Field(default=0.15, ge=0.0, le=0.5)
-    source_video_url: Optional[str] = Field(default=None, max_length=1000, description="Optional source video URL (YouTube, MP4) to analyze with Gemini Agentic Video Understanding")
-    agentic_understanding: bool = Field(default=True, description="Enable Gemini Agentic Video Understanding for dynamic timeline navigation and precision moment extraction")
+    source_video_url: Optional[str] = Field(default=None, max_length=1000, description="Optional source video URL (YouTube, GCS, or MP4) to analyze with Gemini Video Understanding")
+    agentic_understanding: bool = Field(default=True, description="Enable Gemini Video Understanding for dynamic timeline navigation and precision moment extraction")
+    language: Optional[str] = Field(default=None, max_length=20, description="Target language ('id', 'en', or 'auto')")
+    video_processing_mode: Optional[str] = Field(default="agentic", description="Gemini video processing mode: 'agentic' (dynamic timeline navigation) or 'static' (frame-by-frame 1 FPS)")
+    media_resolution: Optional[str] = Field(default="low", description="Multimodal media resolution: 'low' (~66 tokens/frame, fast) or 'high' (~258 tokens/frame, fine detail)")
+    fps: Optional[float] = Field(default=None, ge=0.1, le=30.0, description="Custom frame rate sampling for static processing mode (e.g. 0.5 for 1 frame every 2s)")
+    start_offset: Optional[float] = Field(default=None, ge=0.0, description="Clipping start offset in seconds for static processing mode")
+    end_offset: Optional[float] = Field(default=None, ge=0.0, description="Clipping end offset in seconds for static processing mode")
+    watermark_config: Optional[dict[str, Any]] = Field(default=None, description="Brand watermark configuration (text/image overlay)")
+    transition: Optional[str] = Field(default="dissolve", description="Scene transition style ('dissolve', 'fade', 'wipeleft', 'slideleft', 'cut')")
+    cta_config: Optional[dict[str, Any]] = Field(default=None, description="Call to Action outro card configuration")
+    ai_text_config: Optional[dict[str, Any]] = Field(default=None, description="AI text emphasis / kinetic typography overlay")
+    aspect_ratio: Optional[str] = Field(default="9:16", description="Video aspect ratio: '9:16', '16:9', or '1:1'")
 
     @field_validator("source_video_url")
     @classmethod
@@ -50,12 +62,19 @@ class GenerateVideoRequest(BaseModel):
         if not v or not v.strip():
             return None
         v = v.strip()
+        # Allow local uploaded file path if safe and exists or in storage directory
+        if v.startswith("/") and (os.path.exists(v) or "source_videos" in v or "uploads" in v):
+            return v
+
         from urllib.parse import urlparse
         import ipaddress
 
         parsed = urlparse(v)
+        if parsed.scheme in ("gs", "gcs"):
+            return v
+
         if parsed.scheme not in ("http", "https"):
-            raise ValueError("source_video_url must use http or https scheme")
+            raise ValueError("source_video_url must use http, https, or gs scheme")
 
         hostname = (parsed.hostname or "").lower()
         if not hostname:
@@ -90,6 +109,11 @@ class RenderSelectedRequest(BaseModel):
     subtitle_style_config: Optional[dict[str, Any]] = None
     include_bgm: Optional[bool] = None
     bgm_volume: Optional[float] = None
+    aspect_ratio: Optional[str] = None
+    watermark_config: Optional[dict[str, Any]] = None
+    transition: Optional[str] = None
+    cta_config: Optional[dict[str, Any]] = None
+    ai_text_config: Optional[dict[str, Any]] = None
 
 
 class JobStatusResponse(BaseModel):
@@ -114,7 +138,19 @@ class JobStatusResponse(BaseModel):
     bgm_volume: float = 0.15
     source_video_url: Optional[str] = None
     agentic_understanding: bool = True
+    language: Optional[str] = "id"
+    video_processing_mode: Optional[str] = "agentic"
+    media_resolution: Optional[str] = "low"
+    fps: Optional[float] = None
+    start_offset: Optional[float] = None
+    end_offset: Optional[float] = None
+    watermark_config: Optional[dict[str, Any]] = None
+    transition: Optional[str] = "dissolve"
+    cta_config: Optional[dict[str, Any]] = None
+    ai_text_config: Optional[dict[str, Any]] = None
+    aspect_ratio: Optional[str] = "9:16"
     title: Optional[str] = None
+
     error: Optional[str] = None
     output_path: Optional[str] = None
     created_at: float
@@ -172,9 +208,9 @@ class TTSProviderOption(BaseModel):
 async def generate_video(
     req: GenerateVideoRequest,
     background_tasks: BackgroundTasks,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Start a video generation job in one-click auto mode (superuser only)."""
+    """Start a video generation job in one-click auto mode."""
     if not settings.VIDEO_GEN_ENABLED:
         raise HTTPException(status_code=503, detail="Video Generator is disabled")
 
@@ -215,6 +251,16 @@ async def generate_video(
         bgm_volume=req.bgm_volume,
         source_video_url=req.source_video_url,
         agentic_understanding=req.agentic_understanding,
+        language=req.language,
+        video_processing_mode=req.video_processing_mode,
+        media_resolution=req.media_resolution,
+        fps=req.fps,
+        start_offset=req.start_offset,
+        end_offset=req.end_offset,
+        watermark_config=req.watermark_config,
+        transition=req.transition,
+        cta_config=req.cta_config,
+        ai_text_config=req.ai_text_config,
         user_id=user.id,
     )
 
@@ -226,9 +272,9 @@ async def generate_video(
 async def plan_video(
     req: GenerateVideoRequest,
     background_tasks: BackgroundTasks,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Start interactive planning: generates script & searches footage candidates (superuser only)."""
+    """Start interactive planning: generates script & searches footage candidates."""
     if not settings.VIDEO_GEN_ENABLED:
         raise HTTPException(status_code=503, detail="Video Generator is disabled")
 
@@ -261,6 +307,16 @@ async def plan_video(
         bgm_volume=req.bgm_volume,
         source_video_url=req.source_video_url,
         agentic_understanding=req.agentic_understanding,
+        language=req.language,
+        video_processing_mode=req.video_processing_mode,
+        media_resolution=req.media_resolution,
+        fps=req.fps,
+        start_offset=req.start_offset,
+        end_offset=req.end_offset,
+        watermark_config=req.watermark_config,
+        transition=req.transition,
+        cta_config=req.cta_config,
+        ai_text_config=req.ai_text_config,
         user_id=user.id,
     )
     job.status = VideoGenStatus.PLANNING
@@ -269,13 +325,68 @@ async def plan_video(
     return _job_to_response(job)
 
 
+@router.post("/upload-source-video")
+async def upload_source_video(
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Upload a source video directly to analyze with Gemini Video Understanding (Files API or Inline Data)."""
+    import json
+    from pathlib import Path
+    import re
+    import subprocess
+    import uuid
+
+    ext = Path(file.filename or "").suffix.lower()
+    ALLOWED_EXTS = {".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v"}
+    if ext not in ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Format file '{ext}' tidak didukung. Format yang diizinkan: {', '.join(sorted(ALLOWED_EXTS))}",
+        )
+
+    upload_dir = Path(settings.STORAGE_PATH) / "source_videos"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(file.filename or "video").stem)[:60]
+    out_name = f"{safe_name}_{uuid.uuid4().hex[:8]}{ext}"
+    dest_path = upload_dir / out_name
+
+    content = await file.read()
+    dest_path.write_bytes(content)
+    size_bytes = len(content)
+
+    duration = 0.0
+    try:
+        res = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(dest_path)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if res.returncode == 0:
+            dur_data = json.loads(res.stdout or "{}")
+            duration = float(dur_data.get("format", {}).get("duration", 0.0))
+    except Exception:
+        pass
+
+    return {
+        "file_path": str(dest_path),
+        "filename": file.filename,
+        "size_bytes": size_bytes,
+        "duration": duration,
+        "duration_mm_ss": f"{int(duration//60):02d}:{int(duration%60):02d}",
+        "is_inline_eligible": size_bytes < 20 * 1024 * 1024,
+    }
+
+
 @router.post("/jobs/{job_id}/search-scene")
 async def search_scene(
     job_id: str,
     req: SearchSceneRequest,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Search alternative footage candidates for a specific scene (superuser only)."""
+    """Search alternative footage candidates for a specific scene."""
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
@@ -290,9 +401,9 @@ async def search_scene(
 async def render_selected(
     req: RenderSelectedRequest,
     background_tasks: BackgroundTasks,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Start rendering with user-selected footage candidates for each scene (superuser only)."""
+    """Start rendering with user-selected footage candidates for each scene."""
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
@@ -314,6 +425,16 @@ async def render_selected(
         job.include_bgm = req.include_bgm
     if req.bgm_volume is not None:
         job.bgm_volume = req.bgm_volume
+    if req.aspect_ratio is not None:
+        job.aspect_ratio = req.aspect_ratio
+    if req.watermark_config is not None:
+        job.watermark_config = req.watermark_config
+    if req.transition is not None:
+        job.transition = req.transition
+    if req.cta_config is not None:
+        job.cta_config = req.cta_config
+    if req.ai_text_config is not None:
+        job.ai_text_config = req.ai_text_config
 
     vg._persist_job(job)
 
@@ -325,9 +446,9 @@ async def render_selected(
 async def list_jobs(
     page: int = 1,
     limit: int = 8,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """List all video generation jobs with pagination (superuser only).
+    """List all video generation jobs with pagination.
     
     Default page=1, limit=8 (2 rows of 4 videos).
     """
@@ -355,9 +476,9 @@ async def list_jobs(
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(
     job_id: str,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Get video generation job status (superuser only)."""
+    """Get video generation job status."""
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
@@ -372,9 +493,9 @@ async def get_job_status(
 @router.get("/jobs/{job_id}/download")
 async def download_video(
     job_id: str,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Download the final generated video (superuser only)."""
+    """Download the final generated video."""
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
@@ -522,9 +643,9 @@ async def stream_video(
 @router.get("/jobs/{job_id}/story")
 async def get_job_story(
     job_id: str,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Get the generated story/script for a job (superuser only)."""
+    """Get the generated story/script for a job."""
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
@@ -542,7 +663,7 @@ async def get_job_story(
 
 @router.get("/tts-providers", response_model=list[TTSProviderOption])
 async def list_tts_providers(
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """List available TTS providers and their configuration status."""
     from src.infrastructure.system_config_store import get_system_setting
@@ -580,7 +701,7 @@ async def list_tts_providers(
 
 @router.get("/models", response_model=list[TTSModelOption])
 async def list_models(
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Fetch available text-to-speech models from Gemini TTS."""
     from src.infrastructure.gemini_tts import GeminiTTS
@@ -624,7 +745,7 @@ async def preview_voice(
     authorization: Optional[str] = Header(None),
 ):
     """Generate and stream a voice preview sample on the fly (cached)."""
-    from src.infrastructure.auth import decode_access_token, is_superadmin
+    from src.infrastructure.auth import decode_access_token
 
     # Support either Bearer header or token query param (for HTML Audio elements)
     jwt_token = token
@@ -635,8 +756,8 @@ async def preview_voice(
         raise HTTPException(status_code=401, detail="Authentication token required (?token=)")
 
     payload = decode_access_token(jwt_token)
-    if not payload or not is_superadmin(payload.get("role", "")):
-        raise HTTPException(status_code=403, detail="Superadmin access required")
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
 
     cache_dir = os.path.join(getattr(settings, "VIDEO_GEN_OUTPUT_DIR", "tmp/video_generator"), "voice_previews")
     os.makedirs(cache_dir, exist_ok=True)
@@ -687,7 +808,7 @@ async def preview_voice(
 async def list_voices(
     provider: Optional[str] = Query(None, description="gemini or deepgram"),
     language: Optional[str] = Query(None, description="id, en, or all"),
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """List available TTS voices for Gemini and/or Deepgram."""
     results: list[VoiceOption] = []
@@ -801,6 +922,16 @@ def _job_to_response(job) -> JobStatusResponse:
         bgm_volume=job.bgm_volume,
         source_video_url=getattr(job, "source_video_url", None),
         agentic_understanding=getattr(job, "agentic_understanding", True),
+        language=getattr(job, "language", "id") or "id",
+        video_processing_mode=getattr(job, "video_processing_mode", "agentic") or "agentic",
+        media_resolution=getattr(job, "media_resolution", "low") or "low",
+        fps=getattr(job, "fps", None),
+        start_offset=getattr(job, "start_offset", None),
+        end_offset=getattr(job, "end_offset", None),
+        watermark_config=getattr(job, "watermark_config", None),
+        transition=getattr(job, "transition", "dissolve") or "dissolve",
+        cta_config=getattr(job, "cta_config", None),
+        ai_text_config=getattr(job, "ai_text_config", None),
         title=title,
         error=job.error,
         output_path=job.output_path,
@@ -808,7 +939,7 @@ def _job_to_response(job) -> JobStatusResponse:
         completed_at=job.completed_at,
         scenes_count=scenes_count,
         estimated_duration=estimated_duration,
-        thumbnail_url=thumbnail_url,
+        thumbnail_url=getattr(job, "thumbnail_url", None) or thumbnail_url,
         scenes=job.scenes_with_footage,
     )
 
@@ -850,3 +981,40 @@ def _raise_invalid_range(file_size: int) -> None:
         detail="Requested range not satisfiable",
         headers={"Content-Range": f"bytes */{file_size}"},
     )
+
+
+@router.get("/trending-topics")
+async def get_trending_topics_endpoint(
+    region: str = Query("ID", description="Country code (e.g. ID, US, GLOBAL)"),
+    limit: int = Query(5, ge=1, le=10, description="Number of topics to return (3-5)"),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Fetch multi-source trending topics synthesized by Gemini for viral short videos."""
+    from src.infrastructure.hermes_trending_service import hermes_trending_service
+
+    topics = await hermes_trending_service.get_trending_topics(region=region, limit=limit)
+    return {"region": region, "count": len(topics), "topics": topics}
+
+
+@router.get("/jobs/{job_id}/thumbnail")
+async def get_job_thumbnail(
+    job_id: str,
+    token: Optional[str] = None,
+):
+    """Get the keyframe thumbnail for a generated video."""
+    from starlette.responses import FileResponse
+    from src.application.video_generator import get_video_generator
+
+    vg = get_video_generator()
+    job = vg.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    thumb_path = os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, f"thumbnail_{job_id}.jpg")
+    if os.path.exists(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg")
+
+    if job.thumbnail_url and os.path.exists(job.thumbnail_url):
+        return FileResponse(job.thumbnail_url, media_type="image/jpeg")
+
+    raise HTTPException(status_code=404, detail="Thumbnail not found")

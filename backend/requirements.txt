@@ -49,6 +49,7 @@ supervision>=0.18.0
 google-generativeai>=0.8.0
 soundfile>=0.12.0
 opencv-python-headless>=4.8.0
+Pillow>=10.0.0
 
 # NOTE: torch, torchvision, dan torchaudio diinstall manual via script
 # menggunakan --index-url https://download.pytorch.org/whl/cu121

@@ -37,6 +37,11 @@ import {
   Radio,
   Wand2,
   Compass,
+  Upload,
+  FileVideo,
+  Cloud,
+  Info,
+  TrendingUp,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -54,7 +59,14 @@ import {
   type SubtitleStyle,
 } from "@/components/StyleEditorModal";
 import { ScheduleModal } from "@/components/ScheduleModal";
-import { API_BASE, getToken, presets as presetsApi, type Preset } from "@/lib/api";
+import {
+  API_BASE,
+  getToken,
+  presets as presetsApi,
+  hermesVideoGenApi,
+  type Preset,
+  type TrendingTopicItem,
+} from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +94,13 @@ export interface SceneItem {
   footage_candidates?: FootageCandidate[];
   selected_footage?: FootageCandidate | null;
   footage_source?: FootageCandidate | null;
+  start_timestamp?: number;
+  end_timestamp?: number;
+  start_mm_ss?: string;
+  end_mm_ss?: string;
+  alignment_score?: number;
+  visual_summary?: string;
+  alignment_reasoning?: string;
 }
 
 export interface VideoJob {
@@ -104,6 +123,12 @@ export interface VideoJob {
   title: string | null;
   source_video_url?: string | null;
   agentic_understanding?: boolean;
+  language?: string;
+  video_processing_mode?: string;
+  media_resolution?: string;
+  fps?: number | null;
+  start_offset?: number | null;
+  end_offset?: number | null;
   error: string | null;
   output_path: string | null;
   created_at: number;
@@ -112,6 +137,11 @@ export interface VideoJob {
   estimated_duration: number | null;
   thumbnail_url: string | null;
   scenes?: SceneItem[];
+  aspect_ratio?: string;
+  watermark_config?: Record<string, unknown>;
+  transition?: string;
+  cta_config?: Record<string, unknown>;
+  ai_text_config?: Record<string, unknown>;
 }
 
 interface VoiceOption {
@@ -314,6 +344,15 @@ function LiveVideoPreview({
   topic,
   onCustomizeHook,
   onCustomizeSubtitle,
+  aspectRatio = "9:16",
+  watermarkEnabled = false,
+  watermarkText = "",
+  watermarkPosition = "bottom-right",
+  watermarkOpacity = 0.75,
+  ctaEnabled = false,
+  ctaHeadline = "",
+  ctaButtonText = "",
+  aiTextEnabled = true,
 }: {
   hookEnabled: boolean;
   customHook: string;
@@ -323,6 +362,15 @@ function LiveVideoPreview({
   topic: string;
   onCustomizeHook: () => void;
   onCustomizeSubtitle: () => void;
+  aspectRatio?: string;
+  watermarkEnabled?: boolean;
+  watermarkText?: string;
+  watermarkPosition?: string;
+  watermarkOpacity?: number;
+  ctaEnabled?: boolean;
+  ctaHeadline?: string;
+  ctaButtonText?: string;
+  aiTextEnabled?: boolean;
 }) {
   const [activeWordIdx, setActiveWordIdx] = useState(0);
   const [previewMode, setPreviewMode] = useState<"full" | "hook" | "subtitles">("full");
@@ -455,13 +503,24 @@ function LiveVideoPreview({
         </button>
       </div>
 
-      {/* Realistic Smartphone Mockup */}
-      <div className="relative aspect-[9/16] w-[230px] sm:w-[250px] shrink-0 overflow-hidden rounded-[32px] border-[5px] border-zinc-800/90 bg-zinc-950 shadow-2xl ring-1 ring-white/15">
-        {/* Dynamic Island Notch */}
-        <div className="absolute left-1/2 top-2 z-30 flex h-4 w-20 -translate-x-1/2 items-center justify-between rounded-full bg-black px-2.5 border border-zinc-800/80 shadow-md">
-          <div className="h-1.5 w-1.5 rounded-full bg-zinc-700" />
-          <div className="h-1.5 w-1.5 rounded-full bg-emerald-500/70" />
-        </div>
+      {/* Realistic Device Mockup Frame */}
+      <div
+        className={cn(
+          "relative shrink-0 overflow-hidden rounded-[32px] border-[5px] border-zinc-800/90 bg-zinc-950 shadow-2xl ring-1 ring-white/15 transition-all duration-300",
+          aspectRatio === "16:9"
+            ? "aspect-[16/9] w-[310px] sm:w-[350px]"
+            : aspectRatio === "1:1"
+            ? "aspect-square w-[240px] sm:w-[260px]"
+            : "aspect-[9/16] w-[230px] sm:w-[250px]"
+        )}
+      >
+        {/* Dynamic Island Notch (visible in vertical 9:16) */}
+        {aspectRatio === "9:16" && (
+          <div className="absolute left-1/2 top-2 z-30 flex h-4 w-20 -translate-x-1/2 items-center justify-between rounded-full bg-black px-2.5 border border-zinc-800/80 shadow-md">
+            <div className="h-1.5 w-1.5 rounded-full bg-zinc-700" />
+            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500/70" />
+          </div>
+        )}
 
         {/* Top Status Bar */}
         <div className="absolute left-0 right-0 top-1.5 z-20 flex items-center justify-between px-5 text-[9px] font-medium text-zinc-400">
@@ -487,31 +546,33 @@ function LiveVideoPreview({
           <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/85" />
         </div>
 
-        {/* Right Side Social Overlay (TikTok / Reels style) */}
-        <div className="absolute right-2 bottom-16 z-20 flex flex-col items-center gap-3">
-          <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-zinc-800 text-[10px] font-bold text-white shadow-md">
-            AI
+        {/* Right Side Social Overlay (TikTok / Reels style for 9:16) */}
+        {aspectRatio === "9:16" && (
+          <div className="absolute right-2 bottom-16 z-20 flex flex-col items-center gap-3">
+            <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-zinc-800 text-[10px] font-bold text-white shadow-md">
+              AI
+            </div>
+            <div className="flex flex-col items-center">
+              <Heart className="h-4 w-4 text-rose-500 fill-rose-500 drop-shadow-md" />
+              <span className="text-[8px] font-medium text-white/90 drop-shadow">184K</span>
+            </div>
+            <div className="flex flex-col items-center">
+              <MessageSquare className="h-4 w-4 text-white drop-shadow-md" />
+              <span className="text-[8px] font-medium text-white/90 drop-shadow">1.4K</span>
+            </div>
+            <div className="flex flex-col items-center">
+              <Bookmark className="h-4 w-4 text-amber-400 fill-amber-400 drop-shadow-md" />
+              <span className="text-[8px] font-medium text-white/90 drop-shadow">12K</span>
+            </div>
+            <div className="flex flex-col items-center">
+              <Share2 className="h-4 w-4 text-white drop-shadow-md" />
+            </div>
+            {/* Spinning Music Vinyl */}
+            <div className="relative flex h-6 w-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 shadow-md animate-[spin_4s_linear_infinite]">
+              <Music className="h-3 w-3 text-violet-300" />
+            </div>
           </div>
-          <div className="flex flex-col items-center">
-            <Heart className="h-4 w-4 text-rose-500 fill-rose-500 drop-shadow-md" />
-            <span className="text-[8px] font-medium text-white/90 drop-shadow">184K</span>
-          </div>
-          <div className="flex flex-col items-center">
-            <MessageSquare className="h-4 w-4 text-white drop-shadow-md" />
-            <span className="text-[8px] font-medium text-white/90 drop-shadow">1.4K</span>
-          </div>
-          <div className="flex flex-col items-center">
-            <Bookmark className="h-4 w-4 text-amber-400 fill-amber-400 drop-shadow-md" />
-            <span className="text-[8px] font-medium text-white/90 drop-shadow">12K</span>
-          </div>
-          <div className="flex flex-col items-center">
-            <Share2 className="h-4 w-4 text-white drop-shadow-md" />
-          </div>
-          {/* Spinning Music Vinyl */}
-          <div className="relative flex h-6 w-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 shadow-md animate-[spin_4s_linear_infinite]">
-            <Music className="h-3 w-3 text-violet-300" />
-          </div>
-        </div>
+        )}
 
         {/* Bottom Metadata Safe Area */}
         <div className="absolute left-3 right-12 bottom-3 z-20 space-y-1 text-left">
@@ -595,6 +656,43 @@ function LiveVideoPreview({
                 );
               })}
             </div>
+          </div>
+        ) : null}
+
+        {/* Watermark Branding */}
+        {watermarkEnabled && watermarkText.trim() ? (
+          <div
+            className={cn(
+              "absolute z-25 px-2 py-0.5 rounded text-[9px] font-mono font-semibold tracking-wider pointer-events-none select-none shadow-xs",
+              watermarkPosition === "top-left" && "top-8 left-3",
+              watermarkPosition === "top-right" && "top-8 right-3",
+              watermarkPosition === "bottom-left" && "bottom-14 left-3",
+              (!watermarkPosition || watermarkPosition === "bottom-right") && "bottom-14 right-3"
+            )}
+            style={{
+              color: "rgba(255, 255, 255, 0.95)",
+              backgroundColor: "rgba(0, 0, 0, 0.55)",
+              opacity: watermarkOpacity ?? 0.75,
+            }}
+          >
+            {watermarkText.trim()}
+          </div>
+        ) : null}
+
+        {/* Call to Action (CTA) Outro Preview */}
+        {ctaEnabled ? (
+          <div className="absolute inset-x-3 bottom-12 z-25 flex flex-col items-center gap-1 rounded-xl bg-gradient-to-r from-violet-600/90 to-indigo-600/90 p-2 text-center text-white shadow-lg backdrop-blur-xs">
+            <span className="text-[10px] font-bold line-clamp-1">{ctaHeadline || "Follow & Subscribe!"}</span>
+            <span className="rounded-full bg-white px-2 py-0.5 text-[8px] font-bold text-zinc-900 shadow-xs">
+              {ctaButtonText || "Follow Sekarang"}
+            </span>
+          </div>
+        ) : null}
+
+        {/* AI Motion Text Badge */}
+        {aiTextEnabled ? (
+          <div className="absolute top-8 left-3 z-20 flex items-center gap-1 rounded-full bg-violet-500/20 border border-violet-500/40 px-1.5 py-0.5 text-[8px] text-violet-200">
+            <Sparkles className="h-2 w-2" /> AI Motion
           </div>
         ) : null}
       </div>
@@ -987,6 +1085,46 @@ function SceneFootageStudioModal({
                           <span className="text-zinc-400 font-medium">Visual cue:</span> {scene.visual}
                         </p>
                       )}
+                      {/* Gemini Video Understanding Alignment Summary */}
+                      {(scene.alignment_score !== undefined || scene.start_mm_ss || scene.visual_summary) && (
+                        <div className="rounded-lg border border-violet-500/30 bg-violet-950/20 p-2.5 space-y-1 text-xs">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5 font-medium text-violet-300">
+                              <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+                              <span>Gemini Video Alignment</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {scene.alignment_score !== undefined && (
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded text-[10px] font-bold border",
+                                  scene.alignment_score >= 8
+                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                    : scene.alignment_score >= 5
+                                    ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                                    : "bg-red-500/20 text-red-300 border-red-500/30"
+                                )}>
+                                  Score {scene.alignment_score.toFixed(1)}/10
+                                </span>
+                              )}
+                              {(scene.start_mm_ss || scene.start_timestamp !== undefined) && (
+                                <span className="font-mono text-[10px] bg-black/40 px-2 py-0.5 rounded border border-white/10 text-zinc-300">
+                                  Interval: {scene.start_mm_ss || `${scene.start_timestamp?.toFixed(1)}s`} - {scene.end_mm_ss || `${scene.end_timestamp?.toFixed(1)}s`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {scene.visual_summary && (
+                            <p className="text-[11px] text-zinc-300">
+                              <span className="text-zinc-500 font-medium">Visual:</span> {scene.visual_summary}
+                            </p>
+                          )}
+                          {scene.alignment_reasoning && (
+                            <p className="text-[10px] text-zinc-400 italic">
+                              "{scene.alignment_reasoning}"
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1038,18 +1176,35 @@ function SceneFootageStudioModal({
                             scene.selected_footage?.video_id === cand.video_id ||
                             scene.selected_footage?.url === cand.url;
 
+                          const pLower = (cand.platform || "").toLowerCase();
                           const platformLabel =
-                            cand.platform === "pexels"
+                            pLower === "pexels"
                               ? "Pexels"
-                              : cand.platform === "pixabay"
+                              : pLower === "pixabay"
                               ? "Pixabay"
+                              : pLower === "tiktok"
+                              ? "TikTok"
+                              : pLower === "instagram"
+                              ? "Reels"
+                              : pLower === "threads"
+                              ? "Threads"
+                              : pLower === "twitter" || pLower === "x"
+                              ? "X"
                               : "YouTube";
 
                           const platformColor =
-                            cand.platform === "pexels"
+                            pLower === "pexels"
                               ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/30"
-                              : cand.platform === "pixabay"
+                              : pLower === "pixabay"
                               ? "bg-sky-950/80 text-sky-300 border-sky-500/30"
+                              : pLower === "tiktok"
+                              ? "bg-cyan-950/80 text-cyan-300 border-cyan-500/30"
+                              : pLower === "instagram"
+                              ? "bg-pink-950/80 text-pink-300 border-pink-500/30"
+                              : pLower === "threads"
+                              ? "bg-zinc-800 text-zinc-200 border-zinc-600"
+                              : pLower === "twitter" || pLower === "x"
+                              ? "bg-slate-900 text-slate-200 border-slate-700"
                               : "bg-red-950/80 text-red-300 border-red-500/30";
 
                           return (
@@ -1248,9 +1403,10 @@ function VideoCard({
           {job.source_video_url && (
             <span
               className="rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-violet-300 border border-violet-500/30 backdrop-blur-xs flex items-center gap-1"
-              title="Generated using Gemini Agentic Video Understanding"
+              title={`Gemini Video Understanding (${job.video_processing_mode || "agentic"}, ${job.media_resolution || "low"} res)`}
             >
-              <Sparkles className="h-2.5 w-2.5" /> Source
+              <Sparkles className="h-2.5 w-2.5" />
+              {job.video_processing_mode === "static" ? "Static Vision" : "Agentic Vision"}
             </span>
           )}
           <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-zinc-300 border border-white/10 backdrop-blur-xs">
@@ -1383,13 +1539,203 @@ function VideoCard({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-const TOPIC_IDEAS = [
-  "How deep-sea animals withstand extreme ocean pressure",
-  "Why airplanes avoid flying over the Pacific Ocean",
-  "The psychology behind why we procrastinate hard tasks",
-  "How ancient builders engineered earthquake-proof pyramids",
-  "Can AI really replace human software engineers in 2026?",
-];
+function TrendingRadarModal({
+  isOpen,
+  onClose,
+  topics,
+  isLoading,
+  region,
+  onRegionChange,
+  onRefresh,
+  onSelectTopic,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  topics: TrendingTopicItem[];
+  isLoading: boolean;
+  region: string;
+  onRegionChange: (reg: string) => void;
+  onRefresh: () => void;
+  onSelectTopic: (t: TrendingTopicItem) => void;
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4">
+      <div className="relative w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl overflow-hidden">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4 bg-zinc-900/90">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <Flame className="h-5 w-5 fill-amber-400" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-zinc-100 flex items-center gap-2">
+                Hermes Trending Radar
+                <span className="text-[10px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                  Multi-Source Real-Time
+                </span>
+              </h3>
+              <p className="text-xs text-zinc-400">
+                Agregasi algoritma YouTube Data API v3, Google Trends, TikTok & Gemini AI
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Region & Actions Filter Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 px-5 py-3 bg-zinc-950/40">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { id: "ID", label: "🇮🇩 Indonesia" },
+              { id: "GLOBAL", label: "🌐 Worldwide" },
+              { id: "US", label: "🇺🇸 United States" },
+              { id: "MY", label: "🇲🇾 Malaysia" },
+              { id: "SG", label: "🇸🇬 Singapore" },
+              { id: "GB", label: "🇬🇧 UK" },
+              { id: "JP", label: "🇯🇵 Japan" },
+            ].map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => onRegionChange(r.id)}
+                className={cn(
+                  "rounded-lg px-2.5 py-1 text-xs font-medium transition",
+                  region === r.id
+                    ? "bg-amber-500/20 text-amber-200 border border-amber-500/40 shadow-xs"
+                    : "border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                )}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isLoading}
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-1 text-xs text-zinc-300 hover:border-zinc-700 hover:text-white transition"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", isLoading && "animate-spin text-amber-400")} />
+            <span>{isLoading ? "Memindai..." : "Pindai Ulang"}</span>
+          </button>
+        </div>
+
+        {/* Modal Body: Topic Cards List */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-3.5">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
+              <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
+              <p className="text-sm font-medium text-zinc-200">
+                Menghubungkan ke YouTube Data API, Google Trends & TikTok...
+              </p>
+              <p className="text-xs text-zinc-500 max-w-sm">
+                Gemini AI sedang memvalidasi topik paling ramai, menganalisis hook viral, dan menyusun poin pembahasan.
+              </p>
+            </div>
+          ) : topics.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center space-y-2">
+              <AlertCircle className="h-8 w-8 text-zinc-500" />
+              <p className="text-sm text-zinc-300">Belum ada topik trending untuk wilayah ini.</p>
+              <Button size="sm" variant="outline" onClick={onRefresh}>
+                Coba Pindai Lagi
+              </Button>
+            </div>
+          ) : (
+            topics.map((t, idx) => (
+              <div
+                key={idx}
+                className="group relative rounded-xl border border-zinc-800/90 bg-zinc-900/60 p-4 hover:border-amber-500/50 hover:bg-zinc-900 transition-all space-y-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 border border-amber-500/30 text-xs font-bold text-amber-300">
+                      #{idx + 1}
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-bold text-zinc-100 group-hover:text-amber-200 transition-colors">
+                        {t.topic}
+                      </h4>
+                      <p className="text-xs text-zinc-400 mt-0.5">{t.angle}</p>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="primary"
+                    onClick={() => {
+                      onSelectTopic(t);
+                      onClose();
+                    }}
+                    icon={<Sparkles className="h-3 w-3" />}
+                  >
+                    Gunakan Topik
+                  </Button>
+                </div>
+
+                {/* Hook Box */}
+                {t.hook && (
+                  <div className="rounded-lg border border-violet-500/20 bg-violet-950/20 px-3 py-2 text-xs">
+                    <span className="font-semibold text-violet-300">Suggested Hook: </span>
+                    <span className="text-zinc-200 font-medium italic">"{t.hook}"</span>
+                  </div>
+                )}
+
+                {/* Key Points */}
+                {t.key_points && t.key_points.length > 0 && (
+                  <div className="space-y-1 text-xs text-zinc-400">
+                    <span className="font-medium text-zinc-300">Poin Pembahasan Narasi:</span>
+                    <ul className="list-disc list-inside space-y-0.5 pl-1">
+                      {t.key_points.map((pt, ptIdx) => (
+                        <li key={ptIdx}>{pt}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Metadata Tags */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-zinc-800/60 text-[10px]">
+                  {t.source && (
+                    <span className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-300 font-medium">
+                      Sumber: {t.source}
+                    </span>
+                  )}
+                  {t.traffic_estimate && (
+                    <span className="rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 px-2 py-0.5">
+                      Estimasi: {t.traffic_estimate}
+                    </span>
+                  )}
+                  {t.search_keywords && t.search_keywords.map((kw, kwIdx) => (
+                    <span key={kwIdx} className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-zinc-400">
+                      #{kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="flex items-center justify-between border-t border-zinc-800 px-5 py-3 bg-zinc-900/90 text-xs text-zinc-500">
+          <span>Menampilkan {topics.length} topik trending harian paling ramai.</span>
+          <Button size="xs" variant="outline" onClick={onClose}>
+            Tutup
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const CREATIVE_TONES = [
   { label: "Viral Hook", prompt: "Fast-paced viral storytelling with punchy surprising facts." },
@@ -1407,6 +1753,68 @@ export function VideoGeneratorPage() {
   const [sourceVideoUrl, setSourceVideoUrl] = useState("");
   const [isAgenticVideoMode, setIsAgenticVideoMode] = useState(false);
   const [agenticUnderstanding, setAgenticUnderstanding] = useState(true);
+  const [videoInputMethod, setVideoInputMethod] = useState<"youtube" | "upload" | "cloud">("youtube");
+  const [videoProcessingMode, setVideoProcessingMode] = useState<"agentic" | "static">("agentic");
+  const [mediaResolution, setMediaResolution] = useState<"low" | "high">("low");
+  const [staticFps, setStaticFps] = useState<number>(1.0);
+  const [startOffsetStr, setStartOffsetStr] = useState<string>("");
+  const [endOffsetStr, setEndOffsetStr] = useState<string>("");
+  const [uploadedVideoFile, setUploadedVideoFile] = useState<{
+    filename: string;
+    size_bytes: number;
+    duration: number;
+    duration_mm_ss: string;
+    is_inline_eligible: boolean;
+  } | null>(null);
+  const [isUploadingSourceVideo, setIsUploadingSourceVideo] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const parseMmSsToSeconds = (val: string): number | undefined => {
+    if (!val || !val.trim()) return undefined;
+    const parts = val.trim().split(":");
+    if (parts.length === 2) {
+      const m = parseFloat(parts[0]);
+      const s = parseFloat(parts[1]);
+      if (!isNaN(m) && !isNaN(s)) return m * 60 + s;
+    }
+    const n = parseFloat(val);
+    return isNaN(n) ? undefined : n;
+  };
+
+  const handleUploadSourceVideo = async (file: File) => {
+    if (!file) return;
+    setIsUploadingSourceVideo(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/video-generator/upload-source-video`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Upload failed" }));
+        throw new Error(err.detail || "Gagal mengunggah video");
+      }
+      const data = await res.json();
+      setSourceVideoUrl(data.file_path);
+      setUploadedVideoFile({
+        filename: data.filename,
+        size_bytes: data.size_bytes,
+        duration: data.duration,
+        duration_mm_ss: data.duration_mm_ss,
+        is_inline_eligible: data.is_inline_eligible,
+      });
+      toast.success(`Video '${file.name}' siap dianalisis Gemini!`);
+    } catch (err: any) {
+      toast.error(err.message || "Gagal mengunggah video");
+    } finally {
+      setIsUploadingSourceVideo(false);
+    }
+  };
   const [targetDuration, setTargetDuration] = useState(65);
   const [ttsProvider, setTtsProvider] = useState<"gemini" | "deepgram">("gemini");
   const [ttsModel, setTtsModel] = useState<string>("gemini-3.1-flash-tts-preview");
@@ -1442,6 +1850,24 @@ export function VideoGeneratorPage() {
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [showStyleEditor, setShowStyleEditor] = useState(false);
   const [activeStyleTab, setActiveStyleTab] = useState<"presets" | "hook" | "subtitle">("subtitle");
+
+  // Dynamic Trending Topics state (Multi-source Hermes engine)
+  const [trendingTopics, setTrendingTopics] = useState<TrendingTopicItem[]>([]);
+  const [isLoadingTrending, setIsLoadingTrending] = useState(false);
+  const [trendingRegion, setTrendingRegion] = useState("ID");
+  const [showTrendingModal, setShowTrendingModal] = useState(false);
+
+  // Aspect Ratio & Visual Elements state
+  const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("9:16");
+  const [transitionStyle, setTransitionStyle] = useState<string>("fade");
+  const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(false);
+  const [watermarkText, setWatermarkText] = useState<string>("");
+  const [watermarkPosition, setWatermarkPosition] = useState<string>("bottom-right");
+  const [watermarkOpacity, setWatermarkOpacity] = useState<number>(0.75);
+  const [ctaEnabled, setCtaEnabled] = useState<boolean>(false);
+  const [ctaHeadline, setCtaHeadline] = useState<string>("Follow & Subscribe untuk Konten Menarik Lainnya!");
+  const [ctaButtonText, setCtaButtonText] = useState<string>("Follow Sekarang");
+  const [aiTextEnabled, setAiTextEnabled] = useState<boolean>(true);
 
   // Job and list state
   const [voices, setVoices] = useState<VoiceOption[]>([]);
@@ -1606,13 +2032,41 @@ export function VideoGeneratorPage() {
     }
   }, []);
 
+  const loadTrendingTopics = useCallback(async (region = trendingRegion) => {
+    setIsLoadingTrending(true);
+    try {
+      const data = await hermesVideoGenApi.getTrendingTopics(region, 5);
+      setTrendingTopics(data.topics || []);
+    } catch (err) {
+      console.error("Failed to load trending topics:", err);
+    } finally {
+      setIsLoadingTrending(false);
+    }
+  }, [trendingRegion]);
+
+  const handleSelectTrendingTopic = (t: TrendingTopicItem) => {
+    setTopic(t.topic);
+    if (t.hook) {
+      setCustomHook(t.hook);
+    }
+    const points = t.key_points && t.key_points.length > 0 ? `Poin pembahasan: ${t.key_points.join(", ")}.` : "";
+    const angleText = t.angle ? ` Angle: ${t.angle}.` : "";
+    const kwText = t.search_keywords && t.search_keywords.length > 0 ? ` Keywords: ${t.search_keywords.join(", ")}.` : "";
+    setInstructions(`${angleText}${points}${kwText}`.trim());
+    if (t.recommended_cta) {
+      setCtaHeadline(t.recommended_cta);
+    }
+    toast.success(`Topik "${t.topic}" dipilih! Hook & narasi disesuaikan.`);
+  };
+
   useEffect(() => {
     void loadJobs();
     void loadVoices();
     void loadTTSModels();
     void loadTTSProviders();
     void loadUserPresets();
-  }, [loadJobs, loadVoices, loadTTSModels, loadTTSProviders, loadUserPresets]);
+    void loadTrendingTopics();
+  }, [loadJobs, loadVoices, loadTTSModels, loadTTSProviders, loadUserPresets, loadTrendingTopics]);
 
   useEffect(() => {
     localStorage.setItem("autocliper_video_generator_hook_enabled", String(hookEnabled));
@@ -1713,8 +2167,27 @@ export function VideoGeneratorPage() {
           subtitle_style_config: { ...subtitleStyle, engine: subtitleStyle.engine || "remotion" },
           include_bgm: includeBgm,
           bgm_volume: bgmVolume,
+          aspect_ratio: aspectRatio,
+          transition: transitionStyle,
+          watermark_config: watermarkEnabled && watermarkText.trim() ? {
+            text: watermarkText.trim(),
+            position: watermarkPosition,
+            opacity: watermarkOpacity,
+          } : undefined,
+          cta_config: ctaEnabled && ctaHeadline.trim() ? {
+            headline: ctaHeadline.trim(),
+            button_text: ctaButtonText.trim(),
+          } : undefined,
+          ai_text_config: {
+            enabled: aiTextEnabled,
+          },
           source_video_url: isAgenticVideoMode && sourceVideoUrl.trim() ? sourceVideoUrl.trim() : undefined,
           agentic_understanding: agenticUnderstanding,
+          video_processing_mode: isAgenticVideoMode ? videoProcessingMode : "agentic",
+          media_resolution: isAgenticVideoMode ? mediaResolution : "low",
+          fps: isAgenticVideoMode && videoProcessingMode === "static" ? staticFps : undefined,
+          start_offset: isAgenticVideoMode && videoProcessingMode === "static" ? parseMmSsToSeconds(startOffsetStr) : undefined,
+          end_offset: isAgenticVideoMode && videoProcessingMode === "static" ? parseMmSsToSeconds(endOffsetStr) : undefined,
         }),
       });
       setPage(1);
@@ -1755,8 +2228,27 @@ export function VideoGeneratorPage() {
           subtitle_style_config: { ...subtitleStyle, engine: subtitleStyle.engine || "remotion" },
           include_bgm: includeBgm,
           bgm_volume: bgmVolume,
+          aspect_ratio: aspectRatio,
+          transition: transitionStyle,
+          watermark_config: watermarkEnabled && watermarkText.trim() ? {
+            text: watermarkText.trim(),
+            position: watermarkPosition,
+            opacity: watermarkOpacity,
+          } : undefined,
+          cta_config: ctaEnabled && ctaHeadline.trim() ? {
+            headline: ctaHeadline.trim(),
+            button_text: ctaButtonText.trim(),
+          } : undefined,
+          ai_text_config: {
+            enabled: aiTextEnabled,
+          },
           source_video_url: isAgenticVideoMode && sourceVideoUrl.trim() ? sourceVideoUrl.trim() : undefined,
           agentic_understanding: agenticUnderstanding,
+          video_processing_mode: isAgenticVideoMode ? videoProcessingMode : "agentic",
+          media_resolution: isAgenticVideoMode ? mediaResolution : "low",
+          fps: isAgenticVideoMode && videoProcessingMode === "static" ? staticFps : undefined,
+          start_offset: isAgenticVideoMode && videoProcessingMode === "static" ? parseMmSsToSeconds(startOffsetStr) : undefined,
+          end_offset: isAgenticVideoMode && videoProcessingMode === "static" ? parseMmSsToSeconds(endOffsetStr) : undefined,
         }),
       });
       setPage(1);
@@ -1784,6 +2276,20 @@ export function VideoGeneratorPage() {
         subtitle_style_config: { ...subtitleStyle, engine: subtitleStyle.engine || "remotion" },
         include_bgm: includeBgm,
         bgm_volume: bgmVolume,
+        aspect_ratio: aspectRatio,
+        transition: transitionStyle,
+        watermark_config: watermarkEnabled && watermarkText.trim() ? {
+          text: watermarkText.trim(),
+          position: watermarkPosition,
+          opacity: watermarkOpacity,
+        } : undefined,
+        cta_config: ctaEnabled && ctaHeadline.trim() ? {
+          headline: ctaHeadline.trim(),
+          button_text: ctaButtonText.trim(),
+        } : undefined,
+        ai_text_config: {
+          enabled: aiTextEnabled,
+        },
       }),
     });
     setPage(1);
@@ -1811,19 +2317,21 @@ export function VideoGeneratorPage() {
       anchor.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
-      toast.error(errorMessage(error, "Download failed."));
+      toast.error(errorMessage(error, "Failed to download video."));
     }
   };
 
-  const handleRetry = async (jobId: string) => {
+  const handleRetryJob = async (jobId: string) => {
     if (isRetrying) return;
     setIsRetrying(jobId);
     try {
-      const updatedJob = await fetchApi<VideoJob>(`/api/video-generator/jobs/${jobId}/retry`, { method: "POST" });
-      setJobs((prev) => prev.map((j) => (j.job_id === jobId ? updatedJob : j)));
-      toast.success("Retrying video generation in background.");
+      await fetchApi<VideoJob>(`/api/video-generator/jobs/${jobId}/retry`, {
+        method: "POST",
+      });
+      toast.success("Retrying video generation.");
+      void loadJobs();
     } catch (error) {
-      toast.error(errorMessage(error, "Unable to retry this job."));
+      toast.error(errorMessage(error, "Failed to retry job."));
     } finally {
       setIsRetrying(null);
     }
@@ -1859,22 +2367,16 @@ export function VideoGeneratorPage() {
     setShowStyleEditor(true);
   };
 
-  const topicSuggestions = [
-    "How deep-sea animals withstand extreme ocean pressure",
-    "The mystery of the developer who pushed 10,000 commits at night",
-    "Why airplanes avoid flying over the Pacific Ocean",
-    "The psychology of why we procrastinate hard tasks",
-    "How ancient builders engineered earthquake-proof pyramids",
-  ];
 
-  if (!user?.is_superadmin) {
+
+  if (!user) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <Card className="max-w-sm p-8 text-center">
-          <AlertCircle className="mx-auto mb-3 h-10 w-10 text-red-400" />
-          <p className="text-sm font-medium text-zinc-200">Superadmin access required</p>
+          <AlertCircle className="mx-auto mb-3 h-10 w-10 text-amber-400" />
+          <p className="text-sm font-medium text-zinc-200">Silakan login terlebih dahulu</p>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
-            Video Generator uses external AI, TTS, and rendering resources.
+            Anda perlu login untuk membuat dan mengelola video AI.
           </p>
         </Card>
       </div>
@@ -1987,47 +2489,319 @@ export function VideoGeneratorPage() {
 
                   {/* Agentic Video Understanding Explainer & Input */}
                   {isAgenticVideoMode && (
-                    <div className="space-y-2.5 pt-1">
+                    <div className="space-y-3.5 pt-1">
+                      {/* Explainer Banner */}
                       <div className="rounded-lg border border-violet-500/30 bg-violet-950/20 p-3 space-y-1.5">
                         <div className="flex items-center justify-between gap-2 flex-wrap">
                           <span className="text-[11px] font-semibold text-violet-300 flex items-center gap-1.5">
                             <Sparkles className="h-3.5 w-3.5 text-violet-400" />
-                            Gemini 3.8 Flash Agentic Video Understanding
+                            Gemini 3.8 Flash Video Understanding
                           </span>
                           <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
                             Up to 88% Fewer Tokens
                           </span>
                         </div>
                         <p className="text-[11px] text-zinc-400 leading-relaxed">
-                          Gemini dynamically navigates the video timeline, selectively inspecting audio and transcripts to pinpoint the highest-retention moments with exact timestamps.
+                          Gemini mengeksplorasi timeline video secara dinamis menggunakan multimodal audio & visual reasoning untuk menyelaraskan narasi dengan segmen footage paling viral dan relevan.
                         </p>
                       </div>
 
-                      <div>
-                        <label htmlFor="source-video-url" className="block text-[11px] font-medium text-zinc-300 mb-1">
-                          Source Video URL (YouTube, Vimeo, or direct MP4)
-                        </label>
-                        <div className="relative">
-                          <input
-                            id="source-video-url"
-                            type="url"
-                            value={sourceVideoUrl}
-                            onChange={(e) => setSourceVideoUrl(e.target.value)}
-                            placeholder="https://www.youtube.com/watch?v=... or direct MP4 URL"
-                            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3.5 py-2 pl-9 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60"
-                          />
-                          <Video className="h-4 w-4 text-zinc-500 absolute left-3 top-2.5" />
+                      {/* 1. Input Method Tabs */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-medium text-zinc-300">
+                            Metode Input Video:
+                          </label>
+                          <span className="text-[10px] text-zinc-500">File API, Inline Data, atau YouTube</span>
                         </div>
+                        <div className="grid grid-cols-3 gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 p-1">
+                          <button
+                            type="button"
+                            onClick={() => setVideoInputMethod("youtube")}
+                            className={cn(
+                              "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[11px] font-medium transition",
+                              videoInputMethod === "youtube"
+                                ? "bg-violet-600 text-white shadow-xs"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            )}
+                          >
+                            <Video className="h-3.5 w-3.5" />
+                            YouTube URL
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVideoInputMethod("upload")}
+                            className={cn(
+                              "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[11px] font-medium transition",
+                              videoInputMethod === "upload"
+                                ? "bg-violet-600 text-white shadow-xs"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            )}
+                          >
+                            <Upload className="h-3.5 w-3.5" />
+                            Upload File
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVideoInputMethod("cloud")}
+                            className={cn(
+                              "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[11px] font-medium transition",
+                              videoInputMethod === "cloud"
+                                ? "bg-violet-600 text-white shadow-xs"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            )}
+                          >
+                            <Cloud className="h-3.5 w-3.5" />
+                            Cloud Storage
+                          </button>
+                        </div>
+
+                        {/* YouTube URL input */}
+                        {videoInputMethod === "youtube" && (
+                          <div className="relative">
+                            <input
+                              id="source-video-url"
+                              type="url"
+                              value={sourceVideoUrl}
+                              onChange={(e) => setSourceVideoUrl(e.target.value)}
+                              placeholder="https://www.youtube.com/watch?v=... (Preview Mode)"
+                              className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3.5 py-2 pl-9 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60"
+                            />
+                            <Video className="h-4 w-4 text-zinc-500 absolute left-3 top-2.5" />
+                          </div>
+                        )}
+
+                        {/* Direct File Upload input */}
+                        {videoInputMethod === "upload" && (
+                          <div className="space-y-2">
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept=".mp4,.mov,.webm,.avi,.mkv"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) void handleUploadSourceVideo(f);
+                              }}
+                            />
+                            {uploadedVideoFile ? (
+                              <div className="flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-2.5 text-xs">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <FileVideo className="h-4 w-4 text-emerald-400 shrink-0" />
+                                  <div className="min-w-0">
+                                    <p className="font-medium text-emerald-200 truncate">{uploadedVideoFile.filename}</p>
+                                    <div className="flex items-center gap-2 text-[10px] text-zinc-400">
+                                      <span>{(uploadedVideoFile.size_bytes / 1024 / 1024).toFixed(1)} MB</span>
+                                      {uploadedVideoFile.duration_mm_ss && <span>• {uploadedVideoFile.duration_mm_ss}</span>}
+                                      <span className={cn(
+                                        "px-1.5 py-0.2 rounded border font-mono",
+                                        uploadedVideoFile.is_inline_eligible
+                                          ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
+                                          : "bg-blue-500/20 text-blue-300 border-blue-500/30"
+                                      )}>
+                                        {uploadedVideoFile.is_inline_eligible ? "Inline Data (<20MB)" : "Google Files API"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="text-[11px] text-zinc-400 hover:text-white px-2 py-1 rounded bg-zinc-800 transition shrink-0"
+                                >
+                                  Ganti Video
+                                </button>
+                              </div>
+                            ) : (
+                              <div
+                                onClick={() => fileInputRef.current?.click()}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  const f = e.dataTransfer.files?.[0];
+                                  if (f) void handleUploadSourceVideo(f);
+                                }}
+                                className="border border-dashed border-zinc-700 hover:border-violet-500/60 bg-zinc-950/40 rounded-lg p-4 text-center cursor-pointer transition group"
+                              >
+                                {isUploadingSourceVideo ? (
+                                  <div className="flex flex-col items-center justify-center space-y-2 py-1">
+                                    <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
+                                    <span className="text-xs text-zinc-300">Mengunggah file & memeriksa durasi video...</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center space-y-1.5 py-1">
+                                    <Upload className="h-5 w-5 text-zinc-500 group-hover:text-violet-400 transition" />
+                                    <p className="text-xs text-zinc-300 font-medium">
+                                      Klik atau drag & drop file video di sini
+                                    </p>
+                                    <p className="text-[10px] text-zinc-500">
+                                      MP4, MOV, WEBM (File &lt;20MB otomatis menggunakan Inline Data, &ge;20MB via Google Files API)
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Cloud Storage input */}
+                        {videoInputMethod === "cloud" && (
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={sourceVideoUrl}
+                              onChange={(e) => setSourceVideoUrl(e.target.value)}
+                              placeholder="gs://cloud-samples-data/generative-ai/video/... (GCS URI)"
+                              className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3.5 py-2 pl-9 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60"
+                            />
+                            <Cloud className="h-4 w-4 text-zinc-500 absolute left-3 top-2.5" />
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex items-center justify-between pt-0.5">
-                        <span className="text-[11px] text-zinc-400">
-                          Dynamic Timeline Navigation (Agentic Mode)
-                        </span>
-                        <Toggle
-                          checked={agenticUnderstanding}
-                          onChange={setAgenticUnderstanding}
-                        />
+                      {/* 2. Processing Mode Selector (Agentic vs Static) */}
+                      <div className="space-y-1.5 pt-1 border-t border-zinc-800/60">
+                        <label className="text-[11px] font-medium text-zinc-300 block">
+                          Mode Pemrosesan Gemini:
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div
+                            onClick={() => {
+                              setVideoProcessingMode("agentic");
+                              setAgenticUnderstanding(true);
+                            }}
+                            className={cn(
+                              "rounded-lg border p-2.5 cursor-pointer transition text-left space-y-1",
+                              videoProcessingMode === "agentic"
+                                ? "border-violet-500 bg-violet-500/10 ring-1 ring-violet-500"
+                                : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700"
+                            )}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-violet-200 flex items-center gap-1">
+                                <Sparkles className="h-3 w-3 text-violet-400" />
+                                Agentic Mode
+                              </span>
+                              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono">
+                                Disarankan
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-zinc-400 leading-tight">
+                              Eksplorasi timeline dinamis, hemat hingga 88% token, sinkronisasi narasi otomatis.
+                            </p>
+                          </div>
+
+                          <div
+                            onClick={() => {
+                              setVideoProcessingMode("static");
+                              setAgenticUnderstanding(false);
+                            }}
+                            className={cn(
+                              "rounded-lg border p-2.5 cursor-pointer transition text-left space-y-1",
+                              videoProcessingMode === "static"
+                                ? "border-violet-500 bg-violet-500/10 ring-1 ring-violet-500"
+                                : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700"
+                            )}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1">
+                                <SlidersHorizontal className="h-3 w-3 text-zinc-400" />
+                                Static Mode
+                              </span>
+                              <span className="text-[9px] bg-zinc-800 text-zinc-400 px-1.5 py-0.2 rounded font-mono">
+                                Custom FPS
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-zinc-400 leading-tight">
+                              Sampling frame tetap (1 FPS / kustom) dan opsi clipping interval MM:SS.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Static Sub-Controls */}
+                        {videoProcessingMode === "static" && (
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 space-y-2.5 mt-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[11px] text-zinc-400">Sampling Frame Rate (FPS):</span>
+                              <div className="flex items-center gap-1">
+                                {[0.5, 1.0, 2.0].map((f) => (
+                                  <button
+                                    key={f}
+                                    type="button"
+                                    onClick={() => setStaticFps(f)}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded text-[10px] font-medium border transition",
+                                      staticFps === f
+                                        ? "bg-violet-600 text-white border-violet-500"
+                                        : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white"
+                                    )}
+                                  >
+                                    {f} FPS
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 mb-0.5">Start Offset (MM:SS):</label>
+                                <input
+                                  type="text"
+                                  placeholder="00:00"
+                                  value={startOffsetStr}
+                                  onChange={(e) => setStartOffsetStr(e.target.value)}
+                                  className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-700"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 mb-0.5">End Offset (MM:SS):</label>
+                                <input
+                                  type="text"
+                                  placeholder="01:30"
+                                  value={endOffsetStr}
+                                  onChange={(e) => setEndOffsetStr(e.target.value)}
+                                  className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-700"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 3. Media Resolution Selector */}
+                      <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-xs">
+                        <div className="space-y-0.5">
+                          <span className="text-[11px] font-medium text-zinc-300 block">Media Resolution:</span>
+                          <span className="text-[10px] text-zinc-500">
+                            {mediaResolution === "low" ? "Low (~66 token/frame, cepat & hemat)" : "High (~258 token/frame, detail tajam)"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setMediaResolution("low")}
+                            className={cn(
+                              "px-2.5 py-1 rounded text-[10px] font-medium transition",
+                              mediaResolution === "low"
+                                ? "bg-violet-600 text-white shadow-xs"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            )}
+                          >
+                            Low (Disarankan)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMediaResolution("high")}
+                            className={cn(
+                              "px-2.5 py-1 rounded text-[10px] font-medium transition",
+                              mediaResolution === "high"
+                                ? "bg-violet-600 text-white shadow-xs"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            )}
+                          >
+                            High Detail
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -2052,20 +2826,105 @@ export function VideoGeneratorPage() {
                     className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900/60 px-3.5 py-2.5 text-sm leading-6 text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-violet-500/60"
                   />
 
-                  {/* Topic Quick Ideas */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-0.5">Try idea:</span>
-                    {TOPIC_IDEAS.map((idea, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setTopic(idea)}
-                        className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 transition truncate max-w-[210px]"
-                        title={idea}
-                      >
-                        {idea.length > 30 ? `${idea.slice(0, 28)}...` : idea}
-                      </button>
-                    ))}
+                  {/* Dynamic Trending Topics (Hermes Multi-Source Engine) */}
+                  <div className="rounded-lg border border-amber-500/20 bg-amber-950/15 p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Flame className="h-4 w-4 text-amber-400 fill-amber-400" />
+                        <span className="text-xs font-semibold text-amber-200">
+                          Topik Trending Hari Ini (Real-Time)
+                        </span>
+                        <span className="text-[10px] text-amber-400/80 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded font-mono">
+                          {trendingTopics.length} Topik
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {/* Region Selector */}
+                        <div className="flex items-center gap-1 bg-zinc-900/90 border border-zinc-800 rounded-md px-2 py-0.5 text-[11px]">
+                          <Globe className="h-3 w-3 text-zinc-400" />
+                          <select
+                            value={trendingRegion}
+                            onChange={(e) => {
+                              const newReg = e.target.value;
+                              setTrendingRegion(newReg);
+                              void loadTrendingTopics(newReg);
+                            }}
+                            className="bg-transparent text-zinc-200 outline-none cursor-pointer text-xs"
+                          >
+                            <option value="ID" className="bg-zinc-900">🇮🇩 Indonesia (ID)</option>
+                            <option value="GLOBAL" className="bg-zinc-900">🌐 Worldwide (Global)</option>
+                            <option value="US" className="bg-zinc-900">🇺🇸 United States (US)</option>
+                            <option value="MY" className="bg-zinc-900">🇲🇾 Malaysia (MY)</option>
+                            <option value="SG" className="bg-zinc-900">🇸🇬 Singapore (SG)</option>
+                            <option value="GB" className="bg-zinc-900">🇬🇧 United Kingdom (GB)</option>
+                            <option value="JP" className="bg-zinc-900">🇯🇵 Japan (JP)</option>
+                          </select>
+                        </div>
+
+                        {/* Refresh Button */}
+                        <button
+                          type="button"
+                          onClick={() => loadTrendingTopics(trendingRegion)}
+                          disabled={isLoadingTrending}
+                          className="flex items-center justify-center h-6 w-6 rounded-md border border-zinc-800 bg-zinc-900/80 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition"
+                          title="Refresh topik trending dari YouTube Data API, Google Trends & TikTok"
+                        >
+                          <RefreshCw className={cn("h-3 w-3", isLoadingTrending && "animate-spin text-amber-400")} />
+                        </button>
+
+                        {/* Modal opener button */}
+                        <button
+                          type="button"
+                          onClick={() => setShowTrendingModal(true)}
+                          className="flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300 hover:bg-amber-500/20 transition"
+                        >
+                          <TrendingUp className="h-3 w-3" />
+                          <span>Detail Analisis</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Trending Pills */}
+                    {isLoadingTrending ? (
+                      <div className="flex items-center gap-2 py-1 text-xs text-zinc-500">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                        <span>Menganalisis YouTube Data API, Google Trends & TikTok...</span>
+                      </div>
+                    ) : trendingTopics.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        {trendingTopics.map((t, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => handleSelectTrendingTopic(t)}
+                            className="group flex items-center gap-1.5 rounded-md border border-zinc-800/80 bg-zinc-900/80 px-2.5 py-1 text-[11px] text-zinc-300 hover:border-amber-500/50 hover:bg-zinc-800/90 hover:text-white transition truncate max-w-[280px]"
+                            title={`${t.topic} — ${t.angle}`}
+                          >
+                            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-amber-500/20 text-[9px] font-bold text-amber-300">
+                              {idx + 1}
+                            </span>
+                            <span className="truncate">{t.topic}</span>
+                            {t.source && (
+                              <span className="text-[9px] text-zinc-500 font-mono">
+                                ({t.source.split(" ")[0]})
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between text-xs text-zinc-500 py-0.5">
+                        <span>Belum ada data trending terkini.</span>
+                        <button
+                          type="button"
+                          onClick={() => loadTrendingTopics(trendingRegion)}
+                          className="text-amber-400 underline hover:text-amber-300"
+                        >
+                          Muat Sekarang
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Directorial Tone Chips */}
@@ -2384,10 +3243,58 @@ export function VideoGeneratorPage() {
                     <div className="flex items-center gap-2">
                       <Film className="h-4 w-4 text-violet-400" />
                       <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
-                        Video Format & Pacing
+                        Video Format & Visual Elements
                       </h3>
                     </div>
-                    <span className="text-[11px] text-zinc-500 font-mono">9:16 · 1080×1920</span>
+                    <span className="text-[11px] text-zinc-500 font-mono">
+                      {aspectRatio === "9:16" ? "9:16 · 1080×1920" : aspectRatio === "16:9" ? "16:9 · 1920×1080" : "1:1 · 1080×1080"}
+                    </span>
+                  </div>
+
+                  {/* Aspect Ratio Selector (Portrait, Landscape, Square) */}
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-zinc-300">Aspect Ratio</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAspectRatio("9:16")}
+                        className={cn(
+                          "flex flex-col items-center justify-center gap-1 rounded-lg border py-2 px-2 text-xs font-medium transition",
+                          aspectRatio === "9:16"
+                            ? "border-violet-500/60 bg-violet-500/15 text-zinc-100 shadow-xs"
+                            : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                        )}
+                      >
+                        <span className="font-semibold">9:16 Portrait</span>
+                        <span className="text-[10px] text-zinc-500">Shorts / TikTok / Reels</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAspectRatio("16:9")}
+                        className={cn(
+                          "flex flex-col items-center justify-center gap-1 rounded-lg border py-2 px-2 text-xs font-medium transition",
+                          aspectRatio === "16:9"
+                            ? "border-violet-500/60 bg-violet-500/15 text-zinc-100 shadow-xs"
+                            : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                        )}
+                      >
+                        <span className="font-semibold">16:9 Landscape</span>
+                        <span className="text-[10px] text-zinc-500">YouTube / Web</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAspectRatio("1:1")}
+                        className={cn(
+                          "flex flex-col items-center justify-center gap-1 rounded-lg border py-2 px-2 text-xs font-medium transition",
+                          aspectRatio === "1:1"
+                            ? "border-violet-500/60 bg-violet-500/15 text-zinc-100 shadow-xs"
+                            : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                        )}
+                      >
+                        <span className="font-semibold">1:1 Square</span>
+                        <span className="text-[10px] text-zinc-500">Instagram Feed</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Duration Picker */}
@@ -2413,6 +3320,119 @@ export function VideoGeneratorPage() {
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Scene Transitions */}
+                  <div>
+                    <label htmlFor="video-transition" className="mb-1.5 block text-xs font-medium text-zinc-300">
+                      Transisi Antar Adegan
+                    </label>
+                    <select
+                      id="video-transition"
+                      value={transitionStyle}
+                      onChange={(e) => setTransitionStyle(e.target.value)}
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-violet-500/60"
+                    >
+                      <option value="fade">Fade (Smooth Crossfade)</option>
+                      <option value="dissolve">Dissolve (Cinematic Blend)</option>
+                      <option value="slideleft">Slide Left (Dynamic Flow)</option>
+                      <option value="zoom">Zoom (Punchy Kinetic Cut)</option>
+                      <option value="pixelize">Pixelize (Digital Pixel Glitch)</option>
+                      <option value="none">None (Clean Hard Cut)</option>
+                    </select>
+                  </div>
+
+                  {/* AI Text Overlay Toggle */}
+                  <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-3">
+                    <Toggle
+                      checked={aiTextEnabled}
+                      onChange={setAiTextEnabled}
+                      label="AI Text Overlay & Motion Keywords"
+                      description="Menyorot poin penting dari script narasi dengan animasi teks kinetik."
+                    />
+                  </div>
+
+                  {/* Watermark Branding Card */}
+                  <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-3 space-y-2.5">
+                    <Toggle
+                      checked={watermarkEnabled}
+                      onChange={setWatermarkEnabled}
+                      label="Watermark & Channel Branding"
+                      description="Tambahkan watermark identitas channel/brand pada video."
+                    />
+                    {watermarkEnabled && (
+                      <div className="grid gap-2.5 pt-1 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-[11px] text-zinc-400">Teks Watermark</label>
+                          <input
+                            type="text"
+                            value={watermarkText}
+                            onChange={(e) => setWatermarkText(e.target.value)}
+                            placeholder="@mychannel"
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500/60 font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-zinc-400">Posisi Watermark</label>
+                          <select
+                            value={watermarkPosition}
+                            onChange={(e) => setWatermarkPosition(e.target.value)}
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100 outline-none focus:border-violet-500/60"
+                          >
+                            <option value="bottom-right">Kanan Bawah (Default)</option>
+                            <option value="bottom-left">Kiri Bawah</option>
+                            <option value="top-right">Kanan Atas</option>
+                            <option value="top-left">Kiri Atas</option>
+                          </select>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <RangeSlider
+                            label="Opasitas Watermark"
+                            value={watermarkOpacity}
+                            min={0.1}
+                            max={1.0}
+                            step={0.05}
+                            onChange={setWatermarkOpacity}
+                            suffix=""
+                            description="Tingkat transparansi teks watermark."
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Call to Action (CTA) Outro Card */}
+                  <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-3 space-y-2.5">
+                    <Toggle
+                      checked={ctaEnabled}
+                      onChange={setCtaEnabled}
+                      label="Call to Action (CTA) Outro Card"
+                      description="Tampilkan kartu penutup ajakan aksi (Follow, Like, Share) di detik akhir."
+                    />
+                    {ctaEnabled && (
+                      <div className="grid gap-2.5 pt-1 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-[11px] text-zinc-400">Teks Headline CTA</label>
+                          <input
+                            type="text"
+                            value={ctaHeadline}
+                            onChange={(e) => setCtaHeadline(e.target.value)}
+                            placeholder="Follow untuk konten menarik lainnya!"
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500/60"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-zinc-400">Teks Tombol CTA</label>
+                          <input
+                            type="text"
+                            value={ctaButtonText}
+                            onChange={(e) => setCtaButtonText(e.target.value)}
+                            placeholder="Follow Sekarang"
+                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500/60"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Footage Cuts Dropdown */}
@@ -2457,7 +3477,9 @@ export function VideoGeneratorPage() {
 
                 {/* 4. Subtle Specs Bar */}
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3.5 py-2.5 text-[11px] text-zinc-400">
-                  <span className="font-mono text-zinc-300">1080×1920 9:16</span>
+                  <span className="font-mono text-zinc-300">
+                    {aspectRatio === "9:16" ? "1080×1920 (9:16)" : aspectRatio === "16:9" ? "1920×1080 (16:9)" : "1080×1080 (1:1)"}
+                  </span>
                   <span className="text-zinc-700">•</span>
                   <span>
                     {ttsProvider === "gemini" ? "Google Gemini TTS" : "Deepgram Aura"} ({speed}×)
@@ -2470,20 +3492,38 @@ export function VideoGeneratorPage() {
                   <span className={subtitlesEnabled ? "text-violet-300" : "text-zinc-600"}>
                     {subtitlesEnabled ? `${subtitleStyle.maxWordsPerLine || 3}w Captions` : "No Captions"}
                   </span>
+                  <span className="text-zinc-700">•</span>
+                  <span className="text-zinc-400 capitalize">
+                    Transisi: {transitionStyle}
+                  </span>
+                  {watermarkEnabled && watermarkText && (
+                    <>
+                      <span className="text-zinc-700">•</span>
+                      <span className="text-violet-300">Watermark: {watermarkText}</span>
+                    </>
+                  )}
+                  {ctaEnabled && (
+                    <>
+                      <span className="text-zinc-700">•</span>
+                      <span className="text-amber-300">CTA Outro</span>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Right Column: Visual Studio (Live 9:16 Preview + Hook + Subtitles Controls) */}
+              {/* Right Column: Visual Studio (Live Preview + Hook + Subtitles Controls) */}
               <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
                 <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal className="h-4 w-4 text-violet-400" />
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">Visual & Audio Studio</h3>
                   </div>
-                  <span className="text-[11px] text-zinc-400 font-mono bg-zinc-900/80 border border-zinc-800 px-2 py-0.5 rounded-md">1080×1920 · 9:16</span>
+                  <span className="text-[11px] text-zinc-400 font-mono bg-zinc-900/80 border border-zinc-800 px-2 py-0.5 rounded-md">
+                    {aspectRatio === "9:16" ? "1080×1920 · 9:16" : aspectRatio === "16:9" ? "1920×1080 · 16:9" : "1080×1080 · 1:1"}
+                  </span>
                 </div>
 
-                {/* Live 9:16 Canvas Preview */}
+                {/* Live Canvas Preview */}
                 <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3 shadow-inner">
                   <LiveVideoPreview
                     hookEnabled={hookEnabled}
@@ -2494,6 +3534,15 @@ export function VideoGeneratorPage() {
                     topic={topic}
                     onCustomizeHook={() => openEditorFor("hook")}
                     onCustomizeSubtitle={() => openEditorFor("subtitle")}
+                    aspectRatio={aspectRatio}
+                    watermarkEnabled={watermarkEnabled}
+                    watermarkText={watermarkText}
+                    watermarkPosition={watermarkPosition}
+                    watermarkOpacity={watermarkOpacity}
+                    ctaEnabled={ctaEnabled}
+                    ctaHeadline={ctaHeadline}
+                    ctaButtonText={ctaButtonText}
+                    aiTextEnabled={aiTextEnabled}
                   />
                 </div>
 
@@ -2704,7 +3753,7 @@ export function VideoGeneratorPage() {
                     onPlay={setActiveJob}
                     onDownload={handleDownload}
                     onPublishSocial={setPublishJob}
-                    onRetry={handleRetry}
+                    onRetry={handleRetryJob}
                     onDelete={handleDeleteJob}
                     onOpenStudio={setStudioJob}
                     isRetrying={isRetrying === job.job_id}
@@ -2774,6 +3823,21 @@ export function VideoGeneratorPage() {
           onUpdateJob={handleUpdateStudioJob}
         />
       )}
+
+      {/* Hermes Trending Radar Modal (Multi-Source Real-Time Analysis) */}
+      <TrendingRadarModal
+        isOpen={showTrendingModal}
+        onClose={() => setShowTrendingModal(false)}
+        topics={trendingTopics}
+        isLoading={isLoadingTrending}
+        region={trendingRegion}
+        onRegionChange={(reg) => {
+          setTrendingRegion(reg);
+          void loadTrendingTopics(reg);
+        }}
+        onRefresh={() => loadTrendingTopics(trendingRegion)}
+        onSelectTopic={handleSelectTrendingTopic}
+      />
 
       {/* Schedule / Post to Social Media Modal */}
       {publishJob && (

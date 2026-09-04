@@ -32,6 +32,8 @@ from src.presentation.routes.video_generator import router as video_gen_router
 from src.presentation.routes.analyze import router as analyze_router
 from src.presentation.routes.telegram import router as telegram_router
 from src.presentation.routes.autopilot import router as autopilot_router
+from src.presentation.routes.hermes_videogen import router as hermes_videogen_router
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -205,14 +207,16 @@ async def lifespan(app: FastAPI):
 
     # ─── Start background tasks ───────────────────────────────────────────
     from src.infrastructure.autopilot_service import autopilot_service
+    from src.infrastructure.hermes_videogen_service import hermes_videogen_service
     alerting_task = asyncio.create_task(
         _alerting_service.monitor_loop(get_queue_depth=lambda: _job_queue.pending_count)
     )
     auto_scale_task = asyncio.create_task(_auto_scale_loop())
     autopilot_task = asyncio.create_task(autopilot_service.start_scheduler_loop())
+    hermes_videogen_task = asyncio.create_task(hermes_videogen_service.start_scheduler_loop())
 
     logger.info("Server started — local pipeline mode")
-    logger.info("Background tasks started: AlertingService, AutoScaleAdvisor, AutopilotDaemon")
+    logger.info("Background tasks started: AlertingService, AutoScaleAdvisor, AutopilotDaemon, HermesVideoGenDaemon")
 
     yield
 
@@ -220,7 +224,8 @@ async def lifespan(app: FastAPI):
     alerting_task.cancel()
     auto_scale_task.cancel()
     autopilot_task.cancel()
-    for task in (alerting_task, auto_scale_task, autopilot_task):
+    hermes_videogen_task.cancel()
+    for task in (alerting_task, auto_scale_task, autopilot_task, hermes_videogen_task):
         try:
             await task
         except asyncio.CancelledError:
@@ -294,6 +299,8 @@ app.include_router(video_gen_router, prefix="/api")
 app.include_router(analyze_router, prefix="/api")
 app.include_router(telegram_router, prefix="/api")
 app.include_router(autopilot_router, prefix="/api")
+app.include_router(hermes_videogen_router, prefix="/api")
+
 
 
 @app.get("/health")
