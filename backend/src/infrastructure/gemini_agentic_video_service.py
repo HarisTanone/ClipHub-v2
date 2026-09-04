@@ -281,17 +281,17 @@ class GeminiAgenticVideoService:
                         agentic_calls_count = 0
 
                         if hasattr(interaction, "steps"):
-                            for step in getattr(interaction, "steps", []):
+                            for step in (getattr(interaction, "steps", None) or []):
                                 stype = getattr(step, "type", "")
                                 if stype == "thought":
-                                    for item in getattr(step, "summary", []):
+                                    for item in (getattr(step, "summary", None) or []):
                                         t = getattr(item, "text", "")
                                         if t:
                                             thought_steps.append(t)
                                 elif stype in ("processing_call", "processing_result"):
                                     agentic_calls_count += 1
                                 elif stype == "model_output" and not output_text:
-                                    for item in getattr(step, "content", []):
+                                    for item in (getattr(step, "content", None) or []):
                                         if getattr(item, "type", "") == "text":
                                             output_text = getattr(item, "text", "")
                                             break
