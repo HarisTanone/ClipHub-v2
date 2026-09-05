@@ -90,6 +90,8 @@ export interface FootageCandidate {
   query?: string;
   platform?: string;
   media_type?: "video" | "image";
+  is_hd?: boolean;
+  quality?: string;
 }
 
 export interface SceneItem {
@@ -1333,6 +1335,13 @@ function SceneFootageStudioModal({
                                   <div className="absolute top-1.5 right-1.5 h-5 w-5 rounded-full bg-violet-500 text-white flex items-center justify-center shadow">
                                     <Check className="h-3.5 w-3.5 stroke-[3]" />
                                   </div>
+                                )}
+
+                                {/* HD Quality Badge */}
+                                {(cand.is_hd !== false || cand.quality) && (
+                                  <span className="absolute top-1 left-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40 backdrop-blur-xs">
+                                    {cand.quality || "HD 720p+"}
+                                  </span>
                                 )}
 
                                 {/* Platform badge */}

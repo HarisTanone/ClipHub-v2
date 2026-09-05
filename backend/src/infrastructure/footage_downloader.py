@@ -241,7 +241,7 @@ class FootageDownloader:
                 "yt-dlp",
                 "--geo-bypass",
                 "--extractor-args", "youtube:player_client=android,web,web_creator,ios",
-                "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+                "-f", "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo[height>=720]+bestaudio/best[height>=720]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
                 "--download-sections", section,
                 "--merge-output-format", "mp4",
                 "--no-playlist",
@@ -267,7 +267,7 @@ class FootageDownloader:
         cmd_full = [
             "yt-dlp",
             "--geo-bypass",
-            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+            "-f", "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo[height>=720]+bestaudio/best[height>=720]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "--merge-output-format", "mp4",
             "--no-playlist",
             "--no-warnings",
@@ -284,7 +284,7 @@ class FootageDownloader:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=75)
 
             if proc.returncode == 0 and os.path.exists(raw_full_path) and os.path.getsize(raw_full_path) > 0:
-                # Trim locally using ffmpeg to the desired start_ts and duration
+                # Trim locally using ffmpeg to the desired start_ts and duration with high CRF fidelity
                 trim_cmd = [
                     "ffmpeg", "-y",
                     "-ss", str(max(0, start_ts)),
@@ -292,7 +292,7 @@ class FootageDownloader:
                     "-t", str(duration_needed + 2.0),
                     "-c:v", "libx264",
                     "-preset", "veryfast",
-                    "-crf", "22",
+                    "-crf", "19",
                     "-c:a", "aac",
                     "-pix_fmt", "yuv420p",
                     temp_path,

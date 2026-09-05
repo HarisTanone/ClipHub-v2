@@ -3843,6 +3843,9 @@ export function Settings() {
                     <Badge variant="default" className="text-[9px] uppercase font-bold text-cyan-300 border-cyan-500/30 bg-cyan-500/10">
                       3-5 Video/Hari
                     </Badge>
+                    <Badge variant="default" className="text-[9px] uppercase font-bold text-amber-300 border-amber-500/30 bg-amber-500/10">
+                      Footage HD (720p+)
+                    </Badge>
                   </h2>
                   <p className="text-[11px] text-zinc-400 mt-0.5">
                     Hermes memindai YouTube Data API v3, Google Trends, TikTok, dan Gemini AI untuk menemukan topik paling ramai setiap hari, lalu memprosesnya menjadi video lengkap (Hook, Subtitle, AI Text, Thumbnail, Watermark, Transition, &amp; CTA) dan otomatis memposting ke akun sosial media terpilih.

@@ -79,6 +79,8 @@ class YouTubeResult:
     duration_seconds: int = 0
     view_count: int = 0
     url: str = ""
+    is_hd: bool = True
+    quality: str = "HD"
 
     def __post_init__(self):
         if not self.url:
@@ -138,8 +140,9 @@ class YouTubeSearch:
         order: str = "relevance",
         published_after: Optional[str] = None,
         region_code: str = "",
+        video_definition: str = "high",
     ) -> YouTubeSearchResult:
-        """Search YouTube for videos.
+        """Search YouTube for videos (defaults to high definition HD 720p+).
 
         Args:
             query: Search keywords.
@@ -148,6 +151,7 @@ class YouTubeSearch:
             order: Sort by 'relevance', 'date', 'viewCount', 'rating'.
             published_after: ISO date filter (e.g. '2024-01-01T00:00:00Z').
             region_code: ISO country code (e.g. 'US', 'ID').
+            video_definition: 'high' for HD (720p+), 'any' for all resolutions.
 
         Returns:
             YouTubeSearchResult with list of video candidates.
@@ -165,6 +169,9 @@ class YouTubeSearch:
             "order": order,
             "key": self._api_key,
         }
+
+        if video_definition:
+            params["videoDefinition"] = video_definition
 
         if shorts_only:
             params["videoDuration"] = "short"
@@ -265,21 +272,25 @@ class YouTubeSearch:
                     files = v.get("video_files", [])
                     best_file = None
 
-                    # Prioritize 1080x1920 Full HD / 720p HD portrait files
-                    portrait_hd = [
+                    # Prioritize Full HD 1080p and HD 720p portrait/landscape files (start from 720p minimum)
+                    hd_files = [
                         f for f in files
                         if f.get("link") and (
-                            (f.get("width", 0) <= 2160 and f.get("height", 0) >= 1080)
+                            (min(f.get("width", 0), f.get("height", 0)) >= 720)
+                            or (f.get("height", 0) >= 720 or f.get("width", 0) >= 1280)
                             or (f.get("quality") == "hd")
                         )
                     ]
-                    if portrait_hd:
-                        best_file = max(portrait_hd, key=lambda x: x.get("height", 0))
+                    if hd_files:
+                        best_file = max(hd_files, key=lambda x: (x.get("height", 0) * x.get("width", 0)))
                     else:
-                        hd_files = [f for f in files if f.get("link") and (f.get("quality") == "hd" or f.get("height", 0) >= 720)]
-                        best_file = max(hd_files, key=lambda x: x.get("height", 0)) if hd_files else (files[0] if files else None)
+                        best_file = files[0] if files else None
 
                     if best_file and best_file.get("link"):
+                        h_val = int(best_file.get("height", 0))
+                        w_val = int(best_file.get("width", 0))
+                        is_hd = (min(h_val, w_val) >= 720) or h_val >= 720 or best_file.get("quality") == "hd"
+                        q_label = "4K" if min(h_val, w_val) >= 2160 else ("1080p" if min(h_val, w_val) >= 1080 else ("720p" if is_hd else "SD"))
                         results.append({
                             "video_id": f"pexels_{v['id']}",
                             "title": f"Pexels Stock: {clean_q.title()}",
@@ -292,6 +303,10 @@ class YouTubeSearch:
                             "platform": "pexels",
                             "media_type": "video",
                             "start_timestamp": 0.0,
+                            "is_hd": is_hd,
+                            "quality": q_label,
+                            "height": h_val,
+                            "width": w_val,
                         })
                 return results
         except Exception as exc:
@@ -337,6 +352,8 @@ class YouTubeSearch:
                             "platform": "pexels",
                             "media_type": "image",
                             "start_timestamp": 0.0,
+                            "is_hd": True,
+                            "quality": "HD",
                         })
                 return results
         except Exception as exc:
@@ -364,6 +381,7 @@ class YouTubeSearch:
                         "q": clean_q,
                         "video_type": "film",
                         "min_width": 720,
+                        "min_height": 720,
                         "per_page": min(max_results, 10),
                     },
                 )
@@ -373,9 +391,14 @@ class YouTubeSearch:
                 results = []
                 for v in data.get("hits", []):
                     videos = v.get("videos", {})
+                    # Prefer HD tiers: large (1080p) or medium (720p)
                     chosen = videos.get("large") or videos.get("medium") or videos.get("small") or {}
                     link = chosen.get("url")
                     if link:
+                        h_val = int(chosen.get("height", 0))
+                        w_val = int(chosen.get("width", 0))
+                        is_hd = (min(h_val, w_val) >= 720) or max(h_val, w_val) >= 1280 or h_val >= 720 or chosen.get("quality") == "hd"
+                        q_label = "1080p" if max(h_val, w_val) >= 1920 else ("720p" if is_hd else "SD")
                         results.append({
                             "video_id": f"pixabay_{v['id']}",
                             "title": f"Pixabay Stock: {v.get('tags', clean_q).title()}",
@@ -388,6 +411,10 @@ class YouTubeSearch:
                             "platform": "pixabay",
                             "media_type": "video",
                             "start_timestamp": 0.0,
+                            "is_hd": is_hd,
+                            "quality": q_label,
+                            "height": h_val,
+                            "width": w_val,
                         })
                 return results
         except Exception as exc:
@@ -437,6 +464,8 @@ class YouTubeSearch:
                             "platform": "pixabay",
                             "media_type": "image",
                             "start_timestamp": 0.0,
+                            "is_hd": True,
+                            "quality": "HD",
                         })
                 return results
         except Exception as exc:
@@ -499,6 +528,8 @@ class YouTubeSearch:
                         "platform": "wikimedia",
                         "media_type": "image",
                         "start_timestamp": 0.0,
+                        "is_hd": True,
+                        "quality": "HD",
                     })
                 return results
         except Exception as exc:

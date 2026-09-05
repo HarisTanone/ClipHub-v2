@@ -1700,13 +1700,23 @@ class VideoGenerator:
             except Exception as cta_err:
                 logger.warning(f"video_gen [{job.job_id}]: CTA application failed: {cta_err}")
 
-        # Step 6i: Extract crisp keyframe thumbnail at 00:00:01 and render viral TikTok cover
+        # Step 6i: Extract crisp keyframe thumbnail directly from the Hook segment
         try:
             thumb_filename = f"thumbnail_{job.job_id}.jpg"
             thumb_path = os.path.join(work_dir, thumb_filename)
+
+            # Determine best timestamp where Hook is fully visible and animated
+            # Hook starts at 0.0s and lasts for hook_duration (typically 2.5 - 3.0s).
+            # At 00:00:01.000, any entrance animation has fully settled and the selected
+            # hook title/styling is 100% visible, crisp, and clear.
+            hook_duration = 3.0
+            if isinstance(job.hook_style, dict):
+                hook_duration = float(job.hook_style.get("duration", 3.0) or 3.0)
+            hook_ss = "00:00:01.000" if (job.hook_enabled and hook_duration >= 1.0) else "00:00:00.500"
+
             thumb_cmd = [
                 "ffmpeg", "-y",
-                "-ss", "00:00:01",
+                "-ss", hook_ss,
                 "-i", output_path,
                 "-vframes", "1",
                 "-q:v", "2",
@@ -1714,40 +1724,11 @@ class VideoGenerator:
             ]
             await self._run_ffmpeg(thumb_cmd, timeout=30)
             if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
-                # Enhance thumbnail into high-CTR TikTok cover with Hook, Caption, and Hashtags
-                try:
-                    from src.infrastructure.social_cover_generator import generate_social_cover
-                    hook_for_cover = (
-                        job.custom_hook
-                        or (job.story or {}).get("hook")
-                        or (job.story or {}).get("title")
-                        or job.topic
-                    )
-                    caption_for_cover = (
-                        (job.story or {}).get("title")
-                        if (job.story or {}).get("title") != hook_for_cover
-                        else job.topic
-                    )
-                    wm_text = None
-                    if job.watermark_config and job.watermark_config.get("enabled"):
-                        wm_text = job.watermark_config.get("text")
-
-                    generate_social_cover(
-                        base_image_path=thumb_path,
-                        output_path=thumb_path,
-                        hook_text=hook_for_cover,
-                        caption_text=caption_for_cover,
-                        hashtags=None,  # Generates dynamic tags from topic keywords
-                        aspect_ratio=getattr(job, "aspect_ratio", "9:16") or "9:16",
-                        watermark_text=wm_text,
-                        include_play_indicator=True,
-                    )
-                except Exception as cover_err:
-                    logger.warning(f"video_gen [{job.job_id}]: social cover enhancement fallback ({cover_err})")
-
+                # Use directly the pure video frame containing the selected Hook.
+                # Do NOT overlay duplicate boxes, badges, hashtags, or play buttons.
                 job.thumbnail_url = f"/api/video-generator/jobs/{job.job_id}/thumbnail"
                 self._persist_job(job)
-                logger.info(f"video_gen [{job.job_id}]: generated viral social thumbnail cover -> {thumb_path}")
+                logger.info(f"video_gen [{job.job_id}]: clean hook thumbnail generated -> {thumb_path}")
         except Exception as th_err:
             logger.debug(f"video_gen [{job.job_id}]: thumbnail extraction error: {th_err}")
 
@@ -1855,6 +1836,14 @@ class VideoGenerator:
         for kw in stock_keywords:
             if kw in title_lower:
                 score += 1.2
+        # 7. HD Resolution priority (start from 720p minimum)
+        is_hd = candidate.get("is_hd", True)
+        cand_quality = str(candidate.get("quality", "")).lower()
+        height = int(candidate.get("height") or 0)
+        if is_hd or "hd" in cand_quality or "1080" in cand_quality or "720" in cand_quality or height >= 720:
+            score += 2.5
+        elif height > 0 and height < 720:
+            score -= 4.0
 
         return score
 

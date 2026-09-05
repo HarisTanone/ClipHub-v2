@@ -56,15 +56,15 @@ class SocialFootageSearcher:
 
         search_tag = ""
         if platform == "tiktok":
-            search_tag = "tiktok #fyp" + (" #indonesia" if is_indonesian else "")
+            search_tag = "tiktok #fyp HD" + (" #indonesia" if is_indonesian else "")
         elif platform == "instagram":
-            search_tag = "instagram reels" + (" #indonesia" if is_indonesian else "")
+            search_tag = "instagram reels HD" + (" #indonesia" if is_indonesian else "")
         elif platform == "x" or platform == "twitter":
-            search_tag = "twitter video"
+            search_tag = "twitter video HD"
         elif platform == "threads":
-            search_tag = "threads video"
+            search_tag = "threads video HD"
         else:
-            search_tag = "shorts #shorts" + (" #indonesia" if is_indonesian else "")
+            search_tag = "shorts #shorts HD" + (" #indonesia" if is_indonesian else "")
 
         full_query = f"{clean_q} {search_tag}".strip()
         cmd = [
@@ -105,6 +105,12 @@ class SocialFootageSearcher:
                         if duration > 300:
                             continue
 
+                        h = int(item.get("height") or 0)
+                        w = int(item.get("width") or 0)
+                        format_str = str(item.get("format_note", "") or item.get("format", "")).lower()
+                        is_hd = (h >= 720 or w >= 720 or "hd" in format_str or "720" in format_str or "1080" in format_str or "4k" in format_str)
+                        q_label = f"{h}p" if h > 0 else ("HD" if is_hd else "SD")
+
                         results.append({
                             "video_id": f"{platform}_{vid_id}",
                             "title": item.get("title") or f"{platform.title()} Video: {clean_q}",
@@ -117,6 +123,10 @@ class SocialFootageSearcher:
                             "platform": platform,
                             "media_type": "video",
                             "start_timestamp": 0.0,
+                            "is_hd": is_hd,
+                            "quality": q_label,
+                            "height": h,
+                            "width": w,
                         })
                     except Exception:
                         continue
@@ -150,7 +160,7 @@ class SocialFootageSearcher:
 
         tasks = []
 
-        # 1. YouTube Shorts via YouTube Data API
+        # 1. YouTube Shorts via YouTube Data API (HD only)
         region = "ID" if is_indonesian else "US"
         tasks.append(
             self._yt_search.search(
@@ -158,6 +168,7 @@ class SocialFootageSearcher:
                 max_results=results_per_platform,
                 shorts_only=True,
                 region_code=region,
+                video_definition="high",
             )
         )
 
@@ -234,6 +245,8 @@ class SocialFootageSearcher:
                                 "platform": "youtube",
                                 "media_type": "video",
                                 "start_timestamp": 0.0,
+                                "is_hd": getattr(r, "is_hd", True),
+                                "quality": getattr(r, "quality", "HD"),
                             })
 
         logger.info(

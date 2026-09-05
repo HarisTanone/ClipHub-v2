@@ -1223,26 +1223,43 @@ async def get_trending_topics_endpoint(
 async def get_job_thumbnail(
     job_id: str,
     token: Optional[str] = None,
+    refresh: bool = Query(False),
 ):
-    """Get the keyframe thumbnail for a generated video, with dynamic extraction fallback."""
+    """Get the keyframe thumbnail for a generated video directly from the Hook segment."""
     from starlette.responses import FileResponse
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
     job = vg.get_job(job_id)
 
-    # 1. Check direct thumbnail candidate paths
+    video_path = _find_job_video_path(job_id, job.output_path if job else None)
+
+    # 1. If refresh requested and video exists, re-extract clean Hook frame immediately
+    if refresh and video_path and os.path.exists(video_path):
+        out_thumb = os.path.join(os.path.dirname(video_path), f"thumbnail_{job_id}.jpg")
+        try:
+            import subprocess
+            subprocess.run([
+                "ffmpeg", "-y", "-ss", "00:00:01.000",
+                "-i", video_path,
+                "-vframes", "1",
+                "-q:v", "2",
+                out_thumb
+            ], capture_output=True, timeout=10)
+            if os.path.exists(out_thumb) and os.path.getsize(out_thumb) > 0:
+                return FileResponse(out_thumb, media_type="image/jpeg")
+        except Exception:
+            pass
+
+    # 2. Check direct thumbnail candidate paths
     out_dir = settings.VIDEO_GEN_OUTPUT_DIR
     thumb_candidates = [
         os.path.join(out_dir, job_id, f"thumbnail_{job_id}.jpg"),
         os.path.join(out_dir, job_id, "thumbnail.jpg"),
         os.path.join(out_dir, job_id, "thumb.jpg"),
-        os.path.join(out_dir, job_id, f"cover_{job_id}.jpg"),
-        os.path.join(out_dir, job_id, "cover.jpg"),
         os.path.join("data", "video_generator_output", job_id, f"thumbnail_{job_id}.jpg"),
         os.path.join("data", "video_generator_output", job_id, "thumbnail.jpg"),
         os.path.join("data", "video_generator_output", job_id, "thumb.jpg"),
-        os.path.join("data", "video_generator_output", job_id, f"cover_{job_id}.jpg"),
         os.path.join("backend", "data", "video_generator_output", job_id, f"thumbnail_{job_id}.jpg"),
         os.path.join("backend", "data", "video_generator_output", job_id, "thumb.jpg"),
         os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "thumbnail", "clip_01.jpg"),
@@ -1253,14 +1270,13 @@ async def get_job_thumbnail(
         if tp and os.path.exists(tp) and os.path.getsize(tp) > 0:
             return FileResponse(tp, media_type="image/jpeg")
 
-    # 2. Extract on-the-fly from video if thumbnail file is missing
-    video_path = _find_job_video_path(job_id, job.output_path if job else None)
+    # 3. Extract on-the-fly from video if thumbnail file is missing
     if video_path and os.path.exists(video_path):
         out_thumb = os.path.join(os.path.dirname(video_path), f"thumbnail_{job_id}.jpg")
         try:
             import subprocess
             subprocess.run([
-                "ffmpeg", "-y", "-ss", "00:00:01",
+                "ffmpeg", "-y", "-ss", "00:00:01.000",
                 "-i", video_path,
                 "-vframes", "1",
                 "-q:v", "2",

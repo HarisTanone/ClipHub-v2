@@ -704,6 +704,8 @@ class StoryAgent:
                     "title": c.get("title", "")[:80],
                     "platform": c.get("platform", ""),
                     "query": c.get("query", ""),
+                    "quality": c.get("quality", "HD"),
+                    "is_hd": bool(c.get("is_hd", True)),
                 })
             curation_payload.append({
                 "scene_id": s.get("id"),
@@ -719,6 +721,7 @@ class StoryAgent:
             "You are an award-winning short-form video director and documentary film editor.\n"
             "Evaluate the candidate stock footage (videos and high-res photos) for each scene and pick the ONE option that best matches "
             "the visual goal, narrative context, and mood of that scene.\n"
+            "HD Quality Rule: ALWAYS prioritize High Definition (HD, 720p minimum, 1080p Full HD, 4K) footage. Never choose blurry or low-resolution clips.\n"
             "Visual Pacing Rule: Curate an engaging hybrid mix between dynamic video clips and high-resolution still photos "
             "across the timeline (keep Hook dynamic with video, and blend photos and videos across scenes for visual rhythm).\n\n"
             f"Scenes and Candidates:\n{json.dumps(curation_payload, indent=2)}\n\n"
