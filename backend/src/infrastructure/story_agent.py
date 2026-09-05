@@ -700,6 +700,7 @@ class StoryAgent:
                 cand_summaries.append({
                     "option_index": idx,
                     "video_id": c.get("video_id"),
+                    "media_type": c.get("media_type", "video"),
                     "title": c.get("title", "")[:80],
                     "platform": c.get("platform", ""),
                     "query": c.get("query", ""),
@@ -715,9 +716,11 @@ class StoryAgent:
             return scenes
 
         prompt = (
-            "You are an award-winning video director and documentary film editor.\n"
-            "Evaluate the candidate stock videos for each scene and pick the ONE option that best matches "
-            "the visual goal, narrative context, and mood of that scene.\n\n"
+            "You are an award-winning short-form video director and documentary film editor.\n"
+            "Evaluate the candidate stock footage (videos and high-res photos) for each scene and pick the ONE option that best matches "
+            "the visual goal, narrative context, and mood of that scene.\n"
+            "Visual Pacing Rule: Curate an engaging hybrid mix between dynamic video clips and high-resolution still photos "
+            "across the timeline (keep Hook dynamic with video, and blend photos and videos across scenes for visual rhythm).\n\n"
             f"Scenes and Candidates:\n{json.dumps(curation_payload, indent=2)}\n\n"
             "Output JSON mapping scene_id to the chosen option_index and reasoning:\n"
             '{\n  "curation": [\n    {"scene_id": 1, "chosen_option_index": 0, "reason": "Accurately depicts dark ocean submarine"}\n  ]\n}'

@@ -43,6 +43,7 @@ import {
   Cloud,
   Info,
   TrendingUp,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -83,6 +84,7 @@ export interface FootageCandidate {
   channel: string;
   query?: string;
   platform?: string;
+  media_type?: "video" | "image";
 }
 
 export interface SceneItem {
@@ -1095,22 +1097,30 @@ function SceneFootageStudioModal({
                               <span>Gemini Video Alignment</span>
                             </div>
                             <div className="flex items-center gap-1.5">
-                              {scene.alignment_score !== undefined && (
-                                <span className={cn(
-                                  "px-2 py-0.5 rounded text-[10px] font-bold border",
-                                  scene.alignment_score >= 8
-                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
-                                    : scene.alignment_score >= 5
-                                    ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
-                                    : "bg-red-500/20 text-red-300 border-red-500/30"
-                                )}>
-                                  Score {scene.alignment_score.toFixed(1)}/10
+                              {scene.selected_footage?.media_type === "image" || scene.visual_summary?.includes("photo") || scene.visual_summary?.includes("Photo") ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30 flex items-center gap-1">
+                                  <ImageIcon className="h-3 w-3" /> Photo B-roll (Quota Saved)
                                 </span>
-                              )}
-                              {(scene.start_mm_ss || scene.start_timestamp !== undefined) && (
-                                <span className="font-mono text-[10px] bg-black/40 px-2 py-0.5 rounded border border-white/10 text-zinc-300">
-                                  Interval: {scene.start_mm_ss || `${scene.start_timestamp?.toFixed(1)}s`} - {scene.end_mm_ss || `${scene.end_timestamp?.toFixed(1)}s`}
-                                </span>
+                              ) : (
+                                <>
+                                  {scene.alignment_score !== undefined && (
+                                    <span className={cn(
+                                      "px-2 py-0.5 rounded text-[10px] font-bold border",
+                                      scene.alignment_score >= 8
+                                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                        : scene.alignment_score >= 5
+                                        ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                                        : "bg-red-500/20 text-red-300 border-red-500/30"
+                                    )}>
+                                      Score {scene.alignment_score.toFixed(1)}/10
+                                    </span>
+                                  )}
+                                  {(scene.start_mm_ss || scene.start_timestamp !== undefined) && (
+                                    <span className="font-mono text-[10px] bg-black/40 px-2 py-0.5 rounded border border-white/10 text-zinc-300">
+                                      Interval: {scene.start_mm_ss || `${scene.start_timestamp?.toFixed(1)}s`} - {scene.end_mm_ss || `${scene.end_timestamp?.toFixed(1)}s`}
+                                    </span>
+                                  )}
+                                </>
                               )}
                             </div>
                           </div>
@@ -1178,11 +1188,14 @@ function SceneFootageStudioModal({
                             scene.selected_footage?.url === cand.url;
 
                           const pLower = (cand.platform || "").toLowerCase();
+                          const isImage = cand.media_type === "image" || (!cand.duration_seconds && pLower === "wikimedia");
                           const platformLabel =
                             pLower === "pexels"
-                              ? "Pexels"
+                              ? (isImage ? "Pexels Photo" : "Pexels")
                               : pLower === "pixabay"
-                              ? "Pixabay"
+                              ? (isImage ? "Pixabay Photo" : "Pixabay")
+                              : pLower === "wikimedia"
+                              ? "Wikimedia"
                               : pLower === "tiktok"
                               ? "TikTok"
                               : pLower === "instagram"
@@ -1194,10 +1207,12 @@ function SceneFootageStudioModal({
                               : "YouTube";
 
                           const platformColor =
-                            pLower === "pexels"
-                              ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/30"
+                            pLower === "wikimedia"
+                              ? "bg-amber-950/80 text-amber-300 border-amber-500/30"
+                              : pLower === "pexels"
+                              ? (isImage ? "bg-teal-950/80 text-teal-300 border-teal-500/30" : "bg-emerald-950/80 text-emerald-300 border-emerald-500/30")
                               : pLower === "pixabay"
-                              ? "bg-sky-950/80 text-sky-300 border-sky-500/30"
+                              ? (isImage ? "bg-indigo-950/80 text-indigo-300 border-indigo-500/30" : "bg-sky-950/80 text-sky-300 border-sky-500/30")
                               : pLower === "tiktok"
                               ? "bg-cyan-950/80 text-cyan-300 border-cyan-500/30"
                               : pLower === "instagram"
@@ -1229,7 +1244,7 @@ function SceneFootageStudioModal({
                                   />
                                 ) : (
                                   <div className="h-full w-full flex items-center justify-center text-zinc-700">
-                                    <Film className="h-6 w-6" />
+                                    {isImage ? <ImageIcon className="h-6 w-6" /> : <Film className="h-6 w-6" />}
                                   </div>
                                 )}
 
@@ -1250,11 +1265,15 @@ function SceneFootageStudioModal({
                                   {platformLabel}
                                 </span>
 
-                                {cand.duration_seconds > 0 && (
+                                {isImage ? (
+                                  <span className="absolute bottom-1 right-1 px-1.5 py-0.2 rounded text-[9px] font-medium bg-black/80 text-teal-300 flex items-center gap-0.5 border border-teal-500/30">
+                                    <ImageIcon className="h-2.5 w-2.5" /> Photo
+                                  </span>
+                                ) : cand.duration_seconds > 0 ? (
                                   <span className="absolute bottom-1 right-1 px-1.5 py-0.2 rounded text-[9px] tabular-nums bg-black/75 text-zinc-300">
                                     {cand.duration_seconds}s
                                   </span>
-                                )}
+                                ) : null}
                               </div>
 
                               {/* Card Content */}

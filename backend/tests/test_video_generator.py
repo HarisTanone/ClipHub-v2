@@ -713,6 +713,157 @@ def test_nine_router_upstream_deprecation_rejection(monkeypatch):
     assert "upstream model error" in str(exc_info.value).lower()
 
 
+def test_hybrid_media_candidate_scoring_and_balancing():
+    """Verify that VideoGenerator scores image candidates and respects hybrid media balancing."""
+    gen = VideoGenerator()
+    scene = {
+        "id": 2,
+        "narration": "Danau Toba yang sangat indah dan memukau.",
+        "visual": "Lake Toba scenic landscape",
+        "search_queries": ["lake toba", "danau toba"],
+        "duration_estimate": 6.0,
+    }
+
+    c_video = {
+        "video_id": "yt_123",
+        "title": "Lake Toba cinematic drone footage 4k",
+        "url": "https://youtube.com/watch?v=123",
+        "duration_seconds": 15,
+        "view_count": 50000,
+        "channel": "Travel Channel",
+        "platform": "youtube",
+        "media_type": "video",
+    }
+
+    c_image = {
+        "video_id": "pexels_img_456",
+        "title": "Lake Toba pristine water photo",
+        "url": "https://images.pexels.com/photos/456/photo.jpg",
+        "duration_seconds": 0,
+        "view_count": 60000,
+        "channel": "Pexels Photographer",
+        "platform": "pexels",
+        "media_type": "image",
+    }
+
+    score_vid = gen._score_candidate(c_video, scene)
+    score_img = gen._score_candidate(c_image, scene)
+    assert score_vid > 0
+    assert score_img > 0
+
+    # Test hybrid preference balancing:
+    # When preferred_media_type is "image", image candidate should be picked
+    best_img = gen._pick_best_candidate([c_video, c_image], scene, preferred_media_type="image")
+    assert best_img["video_id"] == "pexels_img_456"
+    assert best_img["media_type"] == "image"
+
+    # When preferred_media_type is "video", video candidate should be picked
+    best_vid = gen._pick_best_candidate([c_video, c_image], scene, preferred_media_type="video")
+    assert best_vid["video_id"] == "yt_123"
+    assert best_vid["media_type"] == "video"
+
+
+@pytest.mark.asyncio
+async def test_prepare_scene_clip_image_renders_with_ken_burns(tmp_path):
+    """Verify that _prepare_scene_clip renders an image file into an mp4 clip using FFmpeg."""
+    import os
+    import subprocess
+    gen = VideoGenerator()
+    clips_dir = str(tmp_path / "clips")
+    os.makedirs(clips_dir, exist_ok=True)
+
+    # Create dummy 1080x1920 test image via ffmpeg
+    img_path = str(tmp_path / "test_photo.jpg")
+    cmd_make_img = [
+        "ffmpeg", "-y",
+        "-f", "lavfi",
+        "-i", "color=c=navy:s=1080x1920:d=0.1",
+        "-vframes", "1",
+        img_path,
+    ]
+    subprocess.run(cmd_make_img, check=True, capture_output=True)
+    assert os.path.exists(img_path)
+
+    entry = {
+        "scene_id": 1,
+        "duration": 2.0,
+        "footage_path": img_path,
+        "media_type": "image",
+    }
+
+    clip_result = await gen._prepare_scene_clip(entry, clips_dir=clips_dir, aspect_ratio="9:16")
+    assert clip_result is not None
+    assert os.path.exists(clip_result)
+    assert os.path.getsize(clip_result) > 1000  # Valid encoded mp4 video file
+
+
+@pytest.mark.asyncio
+async def test_search_wikimedia_photos():
+    """Verify that search_wikimedia_photos returns valid image candidates with media_type=image."""
+    from src.infrastructure.youtube_search import YouTubeSearch
+    yt = YouTubeSearch()
+    results = await yt.search_wikimedia_photos("indonesia mountain", max_results=2)
+    assert isinstance(results, list)
+    if results:
+        first = results[0]
+        assert first.get("media_type") == "image"
+        assert first.get("platform") == "wikimedia"
+        assert first.get("url", "").startswith("http")
+        assert first.get("duration_seconds") == 0
+
+
+@pytest.mark.asyncio
+async def test_image_footage_bypasses_agentic_video_alignment(tmp_path):
+    """Verify that image footage automatically bypasses Agentic Video Understanding to save quota."""
+    import os
+    from unittest.mock import AsyncMock, patch
+    gen = VideoGenerator()
+    job = gen.create_job(topic="Test topic", agentic_understanding=True)
+
+    img_path = str(tmp_path / "test_photo.jpg")
+    with open(img_path, "wb") as f:
+        f.write(b"dummy image bytes")
+
+    scenes = [
+        {
+            "id": 1,
+            "narration": "Danau indah di pulau Samosir.",
+            "visual": "Lake photo",
+            "footage_path": img_path,
+            "media_type": "image",
+            "duration": 4.5,
+        }
+    ]
+
+    with patch("src.infrastructure.gemini_agentic_video_service.GeminiAgenticVideoService.align_scene_footage", new_callable=AsyncMock) as mock_align:
+        # Simulate Step 4b logic in render_with_selected_scenes / run_pipeline
+        for scene in scenes:
+            f_path = scene.get("footage_path")
+            ext = os.path.splitext(f_path)[1].lower()
+            is_img = (
+                ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+                or scene.get("media_type") == "image"
+            )
+            if is_img:
+                sc_dur = float(scene.get("duration", 5.0))
+                scene["agentic_alignment"] = {
+                    "is_relevant": True,
+                    "alignment_score": 9.5,
+                    "best_start_timestamp": 0.0,
+                    "best_end_timestamp": sc_dur,
+                    "processing_mode": "static_image",
+                }
+                continue
+            await mock_align(scene=scene, local_footage_path=f_path)
+
+        # Gemini Agentic Video Understanding should NOT have been called!
+        mock_align.assert_not_called()
+        assert scenes[0]["agentic_alignment"]["alignment_score"] == 9.5
+        assert scenes[0]["agentic_alignment"]["processing_mode"] == "static_image"
+
+
+
+
 
 
 

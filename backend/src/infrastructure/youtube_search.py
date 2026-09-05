@@ -94,6 +94,28 @@ class YouTubeSearchResult:
     error: Optional[str] = None
 
 
+def _get_pexels_api_key() -> str:
+    try:
+        from src.infrastructure.system_config_store import get_config_value
+        val = get_config_value("PEXELS_API_KEY")
+        if val:
+            return str(val).strip()
+    except Exception:
+        pass
+    return (getattr(settings, "PEXELS_API_KEY", "") or "").strip()
+
+
+def _get_pixabay_api_key() -> str:
+    try:
+        from src.infrastructure.system_config_store import get_config_value
+        val = get_config_value("PIXABAY_API_KEY")
+        if val:
+            return str(val).strip()
+    except Exception:
+        pass
+    return (getattr(settings, "PIXABAY_API_KEY", "") or "").strip()
+
+
 class YouTubeSearch:
     """YouTube Data API v3 search client.
 
@@ -215,13 +237,14 @@ class YouTubeSearch:
             logger.error(f"youtube_search: unexpected error: {exc}")
             return YouTubeSearchResult(query=query, error=str(exc))
 
+
     async def search_pexels(
         self,
         query: str,
         max_results: int = 4,
     ) -> list[dict]:
         """Search Pexels video API if configured."""
-        api_key = settings.PEXELS_API_KEY
+        api_key = _get_pexels_api_key()
         if not api_key:
             return []
 
@@ -267,10 +290,57 @@ class YouTubeSearch:
                             "channel": v.get("user", {}).get("name", "Pexels Creator"),
                             "query": clean_q,
                             "platform": "pexels",
+                            "media_type": "video",
+                            "start_timestamp": 0.0,
                         })
                 return results
         except Exception as exc:
             logger.debug(f"pexels_search: failed for query '{query}': {exc}")
+            return []
+
+    async def search_pexels_photos(
+        self,
+        query: str,
+        max_results: int = 4,
+    ) -> list[dict]:
+        """Search Pexels Photo API for high-resolution portrait images."""
+        api_key = _get_pexels_api_key()
+        if not api_key:
+            return []
+
+        clean_q = simplify_stock_query(query) or query
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    "https://api.pexels.com/v1/search",
+                    headers={"Authorization": api_key},
+                    params={"query": clean_q, "orientation": "portrait", "per_page": min(max_results, 10)},
+                )
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                results = []
+                for p in data.get("photos", []):
+                    src = p.get("src", {})
+                    img_url = src.get("large2x") or src.get("portrait") or src.get("large") or src.get("original")
+                    if img_url:
+                        results.append({
+                            "video_id": f"pexels_img_{p['id']}",
+                            "title": p.get("alt") or f"Pexels Photo: {clean_q.title()}",
+                            "url": img_url,
+                            "thumbnail_url": src.get("medium") or src.get("small") or img_url,
+                            "duration_seconds": 0,
+                            "view_count": 60000,
+                            "channel": p.get("photographer", "Pexels Photographer"),
+                            "query": clean_q,
+                            "platform": "pexels",
+                            "media_type": "image",
+                            "start_timestamp": 0.0,
+                        })
+                return results
+        except Exception as exc:
+            logger.debug(f"pexels_photos_search: failed for query '{query}': {exc}")
             return []
 
     async def search_pixabay(
@@ -279,7 +349,7 @@ class YouTubeSearch:
         max_results: int = 4,
     ) -> list[dict]:
         """Search Pixabay video API if configured."""
-        api_key = settings.PIXABAY_API_KEY
+        api_key = _get_pixabay_api_key()
         if not api_key:
             return []
 
@@ -316,10 +386,123 @@ class YouTubeSearch:
                             "channel": v.get("user", "Pixabay Creator"),
                             "query": clean_q,
                             "platform": "pixabay",
+                            "media_type": "video",
+                            "start_timestamp": 0.0,
                         })
                 return results
         except Exception as exc:
             logger.debug(f"pixabay_search: failed for query '{query}': {exc}")
+            return []
+
+    async def search_pixabay_photos(
+        self,
+        query: str,
+        max_results: int = 4,
+    ) -> list[dict]:
+        """Search Pixabay Photo API for vertical/portrait photos."""
+        api_key = _get_pixabay_api_key()
+        if not api_key:
+            return []
+
+        clean_q = simplify_stock_query(query) or query
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    "https://pixabay.com/api/",
+                    params={
+                        "key": api_key,
+                        "q": clean_q,
+                        "image_type": "photo",
+                        "orientation": "vertical",
+                        "per_page": min(max_results, 10),
+                    },
+                )
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                results = []
+                for hit in data.get("hits", []):
+                    img_url = hit.get("largeImageURL") or hit.get("webformatURL")
+                    if img_url:
+                        results.append({
+                            "video_id": f"pixabay_img_{hit['id']}",
+                            "title": f"Pixabay Photo: {hit.get('tags', clean_q).title()}",
+                            "url": img_url,
+                            "thumbnail_url": hit.get("webformatURL") or hit.get("previewURL") or img_url,
+                            "duration_seconds": 0,
+                            "view_count": hit.get("views", 15000),
+                            "channel": hit.get("user", "Pixabay Photographer"),
+                            "query": clean_q,
+                            "platform": "pixabay",
+                            "media_type": "image",
+                            "start_timestamp": 0.0,
+                        })
+                return results
+        except Exception as exc:
+            logger.debug(f"pixabay_photos_search: failed for query '{query}': {exc}")
+            return []
+
+    async def search_wikimedia_photos(
+        self,
+        query: str,
+        max_results: int = 4,
+    ) -> list[dict]:
+        """Search Wikimedia Commons for free open-access high-resolution images."""
+        clean_q = simplify_stock_query(query) or query
+        clean_q = clean_q.strip()
+        if not clean_q:
+            return []
+
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                resp = await client.get(
+                    "https://commons.wikimedia.org/w/api.php",
+                    params={
+                        "action": "query",
+                        "generator": "search",
+                        "gsrnamespace": "6",
+                        "gsrsearch": clean_q,
+                        "gsrlimit": min(max_results, 8),
+                        "prop": "imageinfo",
+                        "iiprop": "url|size|mime",
+                        "format": "json",
+                    },
+                    headers={"User-Agent": "ClipHub/2.0 (VideoGenerator; automated bot)"},
+                )
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                pages = data.get("query", {}).get("pages", {})
+                results = []
+                for pid, page in pages.items():
+                    info_list = page.get("imageinfo", [])
+                    if not info_list:
+                        continue
+                    info = info_list[0]
+                    mime = info.get("mime", "")
+                    if not mime.startswith("image/"):
+                        continue
+                    img_url = info.get("url")
+                    if not img_url:
+                        continue
+                    title = page.get("title", f"Wikimedia Image: {clean_q}").replace("File:", "").replace(".jpg", "").replace(".png", "")
+                    results.append({
+                        "video_id": f"wikimedia_img_{pid}",
+                        "title": title.title()[:80],
+                        "url": img_url,
+                        "thumbnail_url": img_url,
+                        "duration_seconds": 0,
+                        "view_count": 25000,
+                        "channel": "Wikimedia Commons",
+                        "query": clean_q,
+                        "platform": "wikimedia",
+                        "media_type": "image",
+                        "start_timestamp": 0.0,
+                    })
+                return results
+        except Exception as exc:
+            logger.debug(f"wikimedia_photos_search: failed for query '{query}': {exc}")
             return []
 
     async def search_for_single_scene(
@@ -337,13 +520,16 @@ class YouTubeSearch:
         seen_ids = set()
 
         tasks = []
-        # Parallel tasks: Pexels, Pixabay, YouTube across all queries (up to 4)
+        # Parallel tasks: Pexels (video + photo), Pixabay (video + photo), Wikimedia, YouTube across all queries (up to 4)
         for q in queries[:4]:
             if not q or not isinstance(q, str) or not q.strip():
                 continue
             clean_q = q.strip()
-            tasks.append(self.search_pexels(clean_q, max_results=5))
-            tasks.append(self.search_pixabay(clean_q, max_results=5))
+            tasks.append(self.search_pexels(clean_q, max_results=4))
+            tasks.append(self.search_pixabay(clean_q, max_results=4))
+            tasks.append(self.search_pexels_photos(clean_q, max_results=3))
+            tasks.append(self.search_pixabay_photos(clean_q, max_results=3))
+            tasks.append(self.search_wikimedia_photos(clean_q, max_results=3))
             tasks.append(self.search(query=clean_q, max_results=max(results_per_query, 6), shorts_only=False))
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -352,7 +538,7 @@ class YouTubeSearch:
             if isinstance(resp, Exception) or not resp:
                 continue
             if isinstance(resp, list):
-                # Pexels or Pixabay list of dicts
+                # Pexels, Pixabay, or Wikimedia list of dicts
                 for r in resp:
                     if r.get("video_id") not in seen_ids:
                         seen_ids.add(r["video_id"])
@@ -373,6 +559,8 @@ class YouTubeSearch:
                             "channel": r.channel,
                             "query": resp.query,
                             "platform": "youtube",
+                            "media_type": "video",
+                            "start_timestamp": 0.0,
                         })
 
         return all_candidates

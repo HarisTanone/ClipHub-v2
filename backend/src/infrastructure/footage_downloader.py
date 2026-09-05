@@ -59,13 +59,21 @@ class FootageDownloader:
 
         vid_id = str(video_id or f"scene_{scene_id}")
 
-        # Check if URL is direct media link (e.g. .mp4, .webm, Pexels/Pixabay CDN)
+        # Check if URL is direct media link (e.g. .mp4, .webm, .jpg, .png, Pexels/Pixabay/Wikimedia CDN)
+        url_lower = url.lower()
+        is_image_url = (
+            any(url_lower.endswith(ext) or f"{ext}?" in url_lower for ext in [".jpg", ".jpeg", ".png", ".webp", ".bmp"])
+            or "wikimedia.org" in url_lower
+            or (platform and platform.lower() in ("wikimedia", "unsplash"))
+            or ("_img_" in vid_id)
+        )
         is_direct = (
-            url.endswith((".mp4", ".mov", ".webm", ".mkv"))
-            or "images.pexels.com" in url
-            or "cdn.pixabay.com" in url
-            or (platform and platform.lower() in ("pexels", "pixabay"))
-        ) and not any(soc in url for soc in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "threads.net", "twitter.com", "x.com"])
+            is_image_url
+            or any(url_lower.endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv"])
+            or "images.pexels.com" in url_lower
+            or "cdn.pixabay.com" in url_lower
+            or (platform and platform.lower() in ("pexels", "pixabay", "wikimedia", "unsplash"))
+        ) and not any(soc in url_lower for soc in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "threads.net", "twitter.com", "x.com"])
 
         is_yt = (
             (platform and platform.lower() == "youtube")
@@ -74,6 +82,12 @@ class FootageDownloader:
         )
 
         if is_direct:
+            if is_image_url:
+                return await self._download_direct(
+                    url=url,
+                    video_id=vid_id,
+                    is_image=True,
+                )
             return await self._download_direct(
                 url=url,
                 video_id=vid_id,
@@ -142,8 +156,8 @@ class FootageDownloader:
             logger.warning(f"footage_dl: download failed for '{cand_id}': {exc}")
             return None
 
-    async def _download_direct(self, url: str, video_id: str) -> Optional[str]:
-        """Stream download from direct video URL (Pexels/Pixabay).
+    async def _download_direct(self, url: str, video_id: str, is_image: bool = False) -> Optional[str]:
+        """Stream download from direct media URL (Pexels/Pixabay/Wikimedia video or photo).
 
         Downloads chunk-by-chunk to disk without buffering entire file in memory.
         Enforces max file size limit.
@@ -151,12 +165,21 @@ class FootageDownloader:
         if not url:
             return None
 
-        filename = f"footage_raw_{video_id.replace('/', '_')}_{uuid4().hex[:6]}.mp4"
+        # Determine appropriate file extension
+        ext = ".jpg" if is_image else ".mp4"
+        url_clean = url.split("?")[0].lower()
+        for candidate_ext in [".png", ".webp", ".jpeg", ".jpg", ".webm", ".mov", ".mp4"]:
+            if url_clean.endswith(candidate_ext):
+                ext = ".jpg" if candidate_ext == ".jpeg" else candidate_ext
+                break
+
+        filename = f"footage_raw_{video_id.replace('/', '_')}_{uuid4().hex[:6]}{ext}"
         temp_path = os.path.join(self._output_dir, filename)
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
 
         try:
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            headers = {"User-Agent": "ClipHub/2.0 (VideoGenerator; media fetcher)"}
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=headers) as client:
                 async with client.stream("GET", url) as response:
                     response.raise_for_status()
                     total_bytes = 0
@@ -176,7 +199,7 @@ class FootageDownloader:
 
             if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                 logger.info(
-                    f"footage_dl: downloaded {total_bytes // 1024}KB from {url[:60]}..."
+                    f"footage_dl: downloaded {total_bytes // 1024}KB from {url[:60]}... (ext={ext})"
                 )
                 return temp_path
 

@@ -750,6 +750,36 @@ class VideoGenerator:
                     for scene in scenes:
                         f_path = scene.get("footage_path")
                         if f_path and os.path.exists(f_path):
+                            ext = os.path.splitext(f_path)[1].lower()
+                            is_img = (
+                                ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+                                or scene.get("media_type") == "image"
+                                or (isinstance(scene.get("selected_footage"), dict) and scene.get("selected_footage", {}).get("media_type") == "image")
+                                or (isinstance(scene.get("footage_source"), dict) and scene.get("footage_source", {}).get("media_type") == "image")
+                            )
+                            if is_img:
+                                sc_dur = float(scene.get("duration", 5.0) or scene.get("duration_estimate", 5.0) or 5.0)
+                                logger.info(
+                                    f"video_gen [{job.job_id}]: scene {scene.get('id')} uses high-res image B-roll — "
+                                    f"bypassing Agentic Video Understanding to save Gemini quota/credits."
+                                )
+                                scene["agentic_alignment"] = {
+                                    "is_relevant": True,
+                                    "alignment_score": 9.5,
+                                    "best_start_timestamp": 0.0,
+                                    "best_end_timestamp": sc_dur,
+                                    "best_start_mm_ss": "00:00",
+                                    "best_end_mm_ss": f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}",
+                                    "visual_summary": "High-resolution portrait photo B-roll",
+                                    "reasoning": "Static image footage (no video cut alignment required, quota preserved)",
+                                    "processing_mode": "static_image",
+                                }
+                                scene["start_timestamp"] = 0.0
+                                scene["end_timestamp"] = sc_dur
+                                scene["start_mm_ss"] = "00:00"
+                                scene["end_mm_ss"] = f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}"
+                                continue
+
                             await agentic_svc.align_scene_footage(
                                 scene=scene,
                                 local_footage_path=f_path,
@@ -834,11 +864,12 @@ class VideoGenerator:
             story_agent = StoryAgent()
             scenes = await story_agent.curate_scene_footages(scenes)
 
-            # Pre-select top candidate for any unassigned scenes
-            for scene in scenes:
+            # Pre-select top candidate for any unassigned scenes with balanced hybrid mix (video + photos)
+            for idx, scene in enumerate(scenes):
                 candidates = scene.get("footage_candidates", [])
                 if candidates and not scene.get("selected_footage"):
-                    best = self._pick_best_candidate(candidates, scene) or candidates[0]
+                    pref_type = "video" if idx % 2 == 0 else "image"
+                    best = self._pick_best_candidate(candidates, scene, preferred_media_type=pref_type) or candidates[0]
                     scene["selected_footage"] = best
                     scene["footage_source"] = best
 
@@ -937,6 +968,36 @@ class VideoGenerator:
                     for scene in scenes:
                         f_path = scene.get("footage_path")
                         if f_path and os.path.exists(f_path):
+                            ext = os.path.splitext(f_path)[1].lower()
+                            is_img = (
+                                ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+                                or scene.get("media_type") == "image"
+                                or (isinstance(scene.get("selected_footage"), dict) and scene.get("selected_footage", {}).get("media_type") == "image")
+                                or (isinstance(scene.get("footage_source"), dict) and scene.get("footage_source", {}).get("media_type") == "image")
+                            )
+                            if is_img:
+                                sc_dur = float(scene.get("duration", 5.0) or scene.get("duration_estimate", 5.0) or 5.0)
+                                logger.info(
+                                    f"video_gen [{job_id}]: scene {scene.get('id')} uses high-res image B-roll — "
+                                    f"bypassing Agentic Video Understanding to save Gemini quota/credits."
+                                )
+                                scene["agentic_alignment"] = {
+                                    "is_relevant": True,
+                                    "alignment_score": 9.5,
+                                    "best_start_timestamp": 0.0,
+                                    "best_end_timestamp": sc_dur,
+                                    "best_start_mm_ss": "00:00",
+                                    "best_end_mm_ss": f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}",
+                                    "visual_summary": "High-resolution portrait photo B-roll",
+                                    "reasoning": "Static image footage (no video cut alignment required, quota preserved)",
+                                    "processing_mode": "static_image",
+                                }
+                                scene["start_timestamp"] = 0.0
+                                scene["end_timestamp"] = sc_dur
+                                scene["start_mm_ss"] = "00:00"
+                                scene["end_mm_ss"] = f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}"
+                                continue
+
                             await agentic_svc.align_scene_footage(
                                 scene=scene,
                                 local_footage_path=f_path,
@@ -1770,12 +1831,20 @@ class VideoGenerator:
         elif views > 1000:
             score += 0.5
 
-        # 5. Duration preference: prefer videos with enough footage for full scene length
-        dur = candidate.get("duration_seconds", 0)
-        if dur >= target_duration:
-            score += 1.5
-        elif dur >= target_duration * 0.7:
-            score += 0.8
+        # 5. Duration / Media type preference
+        is_image = (
+            candidate.get("media_type") == "image"
+            or any(candidate.get("url", "").lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"])
+        )
+        if is_image:
+            # Images provide crisp zero-render-fail b-roll matching scene duration
+            score += 2.0
+        else:
+            dur = candidate.get("duration_seconds", 0)
+            if dur >= target_duration:
+                score += 1.5
+            elif dur >= target_duration * 0.7:
+                score += 0.8
 
         # 6. Stock & Documentary keywords bonus
         stock_keywords = [
@@ -1789,12 +1858,27 @@ class VideoGenerator:
 
         return score
 
-    def _pick_best_candidate(self, candidates: list[dict], scene: dict) -> Optional[dict]:
-        """Score and pick the best footage candidate for a scene."""
+    def _pick_best_candidate(
+        self,
+        candidates: list[dict],
+        scene: dict,
+        preferred_media_type: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Score and pick the best footage candidate for a scene, with hybrid media balancing."""
         if not candidates:
             return None
 
-        scored = [(self._score_candidate(c, scene), c) for c in candidates if isinstance(c, dict)]
+        valid = [c for c in candidates if isinstance(c, dict)]
+        if not valid:
+            return None
+
+        pool = valid
+        if preferred_media_type:
+            matching = [c for c in valid if c.get("media_type", "video") == preferred_media_type]
+            if matching:
+                pool = matching
+
+        scored = [(self._score_candidate(c, scene), c) for c in pool]
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[0][1] if scored else None
 
@@ -1865,41 +1949,106 @@ class VideoGenerator:
             "crop=1080:1920,"
         )
 
+        ext = os.path.splitext(footage_path)[1].lower() if footage_path else ""
+        is_image = (
+            ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+            or entry.get("media_type") == "image"
+            or (isinstance(entry.get("selected_footage"), dict) and entry.get("selected_footage", {}).get("media_type") == "image")
+            or (isinstance(entry.get("footage_source"), dict) and entry.get("footage_source", {}).get("media_type") == "image")
+        )
+
         if footage_path and os.path.exists(footage_path):
-            # Trim and scale footage to target aspect ratio, seeking to agentic moment
-            start_ts = float(entry.get("start_timestamp") or 0.0)
             from src.infrastructure.gpu_encoder import get_video_encoder_args
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(max(0.0, start_ts)),
-                "-stream_loop", "-1",
-                "-i", footage_path,
-                "-t", str(duration),
-                "-vf", (
-                    scale_crop
-                    + "unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
-                    "setsar=1"
-                ),
+            if is_image:
+                # High-res image footage: render with Ken Burns slow zoompan motion at 30 fps
+                logger.debug(f"video_gen: rendering scene {scene_id} image clip with Ken Burns motion...")
+                res = "1920x1080" if aspect_ratio == "16:9" else "1080x1080" if aspect_ratio == "1:1" else "1080x1920"
+                total_frames = max(30, int(duration * 30))
+                kenburns_filter = (
+                    f"{scale_crop}"
+                    f"zoompan=z='min(zoom+0.0006,1.08)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={res}:fps=30,"
+                    f"unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,setsar=1"
+                )
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-loop", "1",
+                    "-i", footage_path,
+                    "-t", str(duration),
+                    "-vf", kenburns_filter,
+                    *get_video_encoder_args("medium"),
+                    "-an",
+                    "-r", "30",
+                    "-pix_fmt", "yuv420p",
+                    clip_path,
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=90)
 
-                *get_video_encoder_args("medium"),
-                "-an",  # No audio from footage
-                "-r", "30",
-                "-pix_fmt", "yuv420p",
-                clip_path,
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+                # Fallback to simple static scale if zoompan filter fails
+                if not (os.path.exists(clip_path) and os.path.getsize(clip_path) > 0):
+                    fallback_cmd = [
+                        "ffmpeg", "-y",
+                        "-loop", "1",
+                        "-i", footage_path,
+                        "-t", str(duration),
+                        "-vf", f"{scale_crop}unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,setsar=1",
+                        *get_video_encoder_args("medium"),
+                        "-an",
+                        "-r", "30",
+                        "-pix_fmt", "yuv420p",
+                        clip_path,
+                    ]
+                    proc_fb = await asyncio.create_subprocess_exec(
+                        *fallback_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await asyncio.wait_for(proc_fb.communicate(), timeout=60)
 
-            if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
-                logger.debug(f"video_gen: scene {scene_id} clip from footage OK")
-                return clip_path
+                if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
+                    logger.debug(f"video_gen: scene {scene_id} clip from image OK")
+                    return clip_path
+                else:
+                    err = stderr.decode(errors="replace")[:200] if stderr else ""
+                    logger.warning(f"video_gen: scene {scene_id} image encode failed: {err}")
             else:
-                err = stderr.decode(errors="replace")[:200] if stderr else ""
-                logger.warning(f"video_gen: scene {scene_id} footage encode failed: {err}")
+                # Video footage: trim and scale footage to target aspect ratio, seeking to agentic moment
+                start_ts = float(entry.get("start_timestamp") or 0.0)
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(max(0.0, start_ts)),
+                    "-stream_loop", "-1",
+                    "-i", footage_path,
+                    "-t", str(duration),
+                    "-vf", (
+                        scale_crop
+                        + "unsharp=lx=3:ly=3:la=0.4:cx=3:cy=3:ca=0.2,"
+                        "setsar=1"
+                    ),
+
+                    *get_video_encoder_args("medium"),
+                    "-an",  # No audio from footage
+                    "-r", "30",
+                    "-pix_fmt", "yuv420p",
+                    clip_path,
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+
+                if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
+                    logger.debug(f"video_gen: scene {scene_id} clip from footage OK")
+                    return clip_path
+                else:
+                    err = stderr.decode(errors="replace")[:200] if stderr else ""
+                    logger.warning(f"video_gen: scene {scene_id} footage encode failed: {err}")
         else:
             logger.info(f"video_gen: scene {scene_id} no footage, using black frame")
 

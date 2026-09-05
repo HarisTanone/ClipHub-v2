@@ -115,6 +115,7 @@ class SocialFootageSearcher:
                             "channel": item.get("uploader") or item.get("channel") or f"{platform.title()} Creator",
                             "query": clean_q,
                             "platform": platform,
+                            "media_type": "video",
                             "start_timestamp": 0.0,
                         })
                     except Exception:
@@ -190,10 +191,13 @@ class SocialFootageSearcher:
             )
         )
 
-        # 5. Pexels and Pixabay clean stock (universal secondary B-roll)
+        # 5. Pexels and Pixabay clean stock videos & photos + Wikimedia (universal secondary B-roll)
         stock_q = clean_queries[1] if len(clean_queries) > 1 else primary_query
         tasks.append(self._yt_search.search_pexels(stock_q, max_results=3))
         tasks.append(self._yt_search.search_pixabay(stock_q, max_results=3))
+        tasks.append(self._yt_search.search_pexels_photos(stock_q, max_results=3))
+        tasks.append(self._yt_search.search_pixabay_photos(stock_q, max_results=3))
+        tasks.append(self._yt_search.search_wikimedia_photos(stock_q, max_results=3))
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -228,6 +232,7 @@ class SocialFootageSearcher:
                                 "channel": r.channel,
                                 "query": resp.query,
                                 "platform": "youtube",
+                                "media_type": "video",
                                 "start_timestamp": 0.0,
                             })
 
