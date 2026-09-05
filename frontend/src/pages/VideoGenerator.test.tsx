@@ -40,6 +40,8 @@ vi.mock("@/components/StyleEditorModal", () => ({
     maxWordsPerLine: 3,
     lineTransition: "word_pop",
   },
+  DEFAULT_CTA_STYLE: { enabled: false, headline: "", buttonText: "" },
+  DEFAULT_WATERMARK_STYLE: { enabled: false, text: "", position: "bottom-right", opacity: 80 },
   StyleEditorModal: () => null,
 }));
 
@@ -74,7 +76,7 @@ describe("VideoGeneratorPage", () => {
       if (url.endsWith("/api/video-generator/voices")) {
         return Promise.resolve(new Response(JSON.stringify([{ key: "orion", model: "aura-2-orion-en" }]), { status: 200 }));
       }
-      if (url.endsWith("/api/video-generator/jobs")) {
+      if (url.includes("/api/video-generator/jobs")) {
         return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
       }
       if (url.endsWith("/api/video-generator/generate") && init?.method === "POST") {

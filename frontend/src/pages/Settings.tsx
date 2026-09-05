@@ -1304,6 +1304,34 @@ export function Settings() {
     }
   }
 
+  async function handleDownloadHermesVideo(videoJobId: string | number) {
+    const vId = String(videoJobId).trim();
+    if (!vId) return;
+    try {
+      const token = getToken() || "";
+      const downloadUrl = `${API_BASE}/api/video-generator/jobs/${vId}/download${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+      toast.info(`Mengunduh video Job #${vId}...`);
+      const res = await fetch(downloadUrl, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        throw new Error(`Download gagal (${res.status}): ${res.statusText || "File tidak ditemukan"}`);
+      }
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `hermes_video_${vId}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+      toast.success(`Video Job #${vId} berhasil diunduh!`);
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal mengunduh video");
+    }
+  }
+
   async function loadSystemConfig(unmask: boolean = false) {
 
     setIsLoadingSysConfig(true);
@@ -4615,17 +4643,17 @@ export function Settings() {
                                     className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20 text-[10px] font-medium transition"
                                   >
                                     <Eye className="h-3 w-3" />
-                                    <span>Pratinjau Video</span>
+                                    <span>Lihat Video</span>
                                   </button>
-                                  <a
-                                    href={`${API_BASE}/api/video-generator/jobs/${run.video_job_id}/download?token=${getToken() || ""}`}
-                                    download
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadHermesVideo(run.video_job_id)}
                                     className="flex items-center justify-center gap-1 py-1 px-2.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-zinc-100 text-[10px] font-medium transition"
                                     title="Unduh file MP4"
                                   >
                                     <Download className="h-3 w-3" />
-                                    <span>Unduh</span>
-                                  </a>
+                                    <span>Download</span>
+                                  </button>
                                 </div>
                               )}
                             </div>
@@ -4937,13 +4965,13 @@ export function Settings() {
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800/80">
-                <a
-                  href={`${API_BASE}/api/video-generator/jobs/${previewVideoJobId}/download?token=${getToken() || ""}`}
-                  download
+                <button
+                  type="button"
+                  onClick={() => previewVideoJobId && handleDownloadHermesVideo(previewVideoJobId)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-zinc-950 transition shadow-sm"
                 >
-                  <Download className="h-3.5 w-3.5" /> Unduh Video
-                </a>
+                  <Download className="h-3.5 w-3.5" /> Download Video
+                </button>
                 <Button
                   variant="outline"
                   size="sm"

@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import fc from 'fast-check';
 import { RangeSlider } from '@/components/ui/RangeSlider';
 
@@ -359,7 +360,7 @@ describe('Property 3: ReframeTuning Save Payload Matches Interface (Preservation
     }));
 
     const { Settings } = await import('@/pages/Settings');
-    render(<Settings />);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
 
     // Navigate to reframe tab
     const reframeTab = screen.getAllByText('Reframe Tuning')[0];

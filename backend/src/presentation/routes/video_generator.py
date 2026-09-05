@@ -514,7 +514,7 @@ async def render_selected(
 @router.get("/jobs", response_model=JobListResponse)
 async def list_jobs(
     page: int = 1,
-    limit: int = 8,
+    limit: int = 10,
     status: Optional[str] = None,
     all_users: bool = True,
     user_id: Optional[int] = None,
@@ -575,30 +575,62 @@ async def get_job_status(
 
 
 def _find_job_video_path(job_id: str, job_output_path: Optional[str] = None) -> Optional[str]:
-    """Find video file on disk across known candidate locations."""
+    """Find video file on disk across known candidate locations with maximum resilience."""
     candidates = []
     if job_output_path:
         candidates.append(job_output_path)
         if not os.path.isabs(job_output_path):
             candidates.append(os.path.abspath(job_output_path))
+            backend_base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            candidates.append(os.path.join(backend_base, job_output_path))
 
     out_dir = settings.VIDEO_GEN_OUTPUT_DIR
     candidates.extend([
         os.path.join(out_dir, job_id, f"final_{job_id}.mp4"),
         os.path.join(out_dir, job_id, f"output_{job_id}.mp4"),
+        os.path.join(out_dir, job_id, f"{job_id}.mp4"),
         os.path.join(out_dir, job_id, "final.mp4"),
         os.path.join(out_dir, job_id, "output.mp4"),
         os.path.join(out_dir, f"final_{job_id}.mp4"),
+        os.path.join(out_dir, f"output_{job_id}.mp4"),
         os.path.join(out_dir, f"{job_id}.mp4"),
         os.path.join("data", "video_generator_output", job_id, f"final_{job_id}.mp4"),
+        os.path.join("data", "video_generator_output", job_id, f"output_{job_id}.mp4"),
+        os.path.join("data", "video_generator_output", job_id, f"{job_id}.mp4"),
+        os.path.join("data", "video_generator_output", job_id, "final.mp4"),
+        os.path.join("data", "video_generator_output", job_id, "output.mp4"),
         os.path.join("data", "video_generator_output", f"final_{job_id}.mp4"),
         os.path.join("data", "video_generator_output", f"{job_id}.mp4"),
+        os.path.join("backend", "data", "video_generator_output", job_id, f"final_{job_id}.mp4"),
+        os.path.join("backend", "data", "video_generator_output", job_id, "final.mp4"),
+        os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, f"final_{job_id}.mp4"),
+        os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "final.mp4"),
+        os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "final", "clip_01_final.mp4"),
+        os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "clip_01_final.mp4"),
+        os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "clip_01.mp4"),
         os.path.join("data", "output", job_id, "final.mp4"),
         os.path.join("data", "output", job_id, "output.mp4"),
     ])
     for p in candidates:
         if p and os.path.exists(p) and os.path.getsize(p) > 0:
             return p
+
+    # Directory inspection fallback: if job directory exists, find first non-empty mp4
+    search_dirs = [
+        os.path.join(out_dir, job_id),
+        os.path.join("data", "video_generator_output", job_id),
+        os.path.join("backend", "data", "video_generator_output", job_id),
+        os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id),
+    ]
+    for sdir in search_dirs:
+        if os.path.isdir(sdir):
+            mp4s = [os.path.join(sdir, f) for f in os.listdir(sdir) if f.endswith(".mp4")]
+            # Sort final/output first
+            mp4s.sort(key=lambda x: (0 if "final" in x else 1 if "output" in x else 2))
+            for fpath in mp4s:
+                if os.path.getsize(fpath) > 0:
+                    return fpath
+
     return None
 
 
@@ -675,17 +707,15 @@ async def download_video(
 
     vg = get_video_generator()
     job = vg.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
 
-    if eff_user and not eff_user.is_superadmin and job.user_id and job.user_id != eff_user.id:
+    if eff_user and not eff_user.is_superadmin and job and job.user_id and job.user_id != eff_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to download this video")
 
-    file_path = _find_job_video_path(job_id, job.output_path)
+    file_path = _find_job_video_path(job_id, job.output_path if job else None)
     if not file_path:
         raise HTTPException(status_code=404, detail=f"Output file for job {job_id} not found")
 
-    filename = f"video_{job.job_id}.mp4"
+    filename = f"video_{job.job_id if job else job_id}.mp4"
     return FileResponse(
         path=file_path,
         media_type="video/mp4",
@@ -1202,10 +1232,21 @@ async def get_job_thumbnail(
     job = vg.get_job(job_id)
 
     # 1. Check direct thumbnail candidate paths
+    out_dir = settings.VIDEO_GEN_OUTPUT_DIR
     thumb_candidates = [
-        os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, f"thumbnail_{job_id}.jpg"),
-        os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, "thumbnail.jpg"),
-        os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, "thumb.jpg"),
+        os.path.join(out_dir, job_id, f"thumbnail_{job_id}.jpg"),
+        os.path.join(out_dir, job_id, "thumbnail.jpg"),
+        os.path.join(out_dir, job_id, "thumb.jpg"),
+        os.path.join(out_dir, job_id, f"cover_{job_id}.jpg"),
+        os.path.join(out_dir, job_id, "cover.jpg"),
+        os.path.join("data", "video_generator_output", job_id, f"thumbnail_{job_id}.jpg"),
+        os.path.join("data", "video_generator_output", job_id, "thumbnail.jpg"),
+        os.path.join("data", "video_generator_output", job_id, "thumb.jpg"),
+        os.path.join("data", "video_generator_output", job_id, f"cover_{job_id}.jpg"),
+        os.path.join("backend", "data", "video_generator_output", job_id, f"thumbnail_{job_id}.jpg"),
+        os.path.join("backend", "data", "video_generator_output", job_id, "thumb.jpg"),
+        os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "thumbnail", "clip_01.jpg"),
+        os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "clip_01_thumb.jpg"),
         job.thumbnail_url if (job and job.thumbnail_url) else None,
     ]
     for tp in thumb_candidates:

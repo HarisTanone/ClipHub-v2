@@ -445,6 +445,9 @@ export interface JobSummary {
   youtube_url: string;
   source_type?: string;
   source_label?: string;
+  user_id?: number | null;
+  user_email?: string | null;
+  user_name?: string | null;
   video_title: string;
   status: string;
   video_duration: number | null;
@@ -475,6 +478,9 @@ export interface JobResponse {
   youtube_url: string;
   source_type?: string;
   source_label?: string;
+  user_id?: number | null;
+  user_email?: string | null;
+  user_name?: string | null;
   status: string;
   video_duration: number | null;
   render_progress: string | null;
@@ -545,6 +551,9 @@ export interface JobDetailResponse {
     youtube_url: string;
     source_type?: string;
     source_label?: string;
+    user_id?: number | null;
+    user_email?: string | null;
+    user_name?: string | null;
     status: string;
     video_duration: number | null;
     style_preset: string | null;

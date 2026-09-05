@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 let isSuperadmin = true;
 
@@ -51,7 +52,7 @@ describe("Settings server test gate", () => {
 
   it("is visible to superadmin and can trigger test.sh in no-deploy mode", async () => {
     const { Settings } = await import("@/pages/Settings");
-    render(<Settings />);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
     fireEvent.click(screen.getAllByText("Test & Deploy")[0]);
     await waitFor(() => expect(screen.getByTestId("test-run-log")).toHaveTextContent("waiting"));
 
@@ -65,7 +66,7 @@ describe("Settings server test gate", () => {
   it("is hidden from non-superadmin users", async () => {
     isSuperadmin = false;
     const { Settings } = await import("@/pages/Settings");
-    render(<Settings />);
+    render(<MemoryRouter><Settings /></MemoryRouter>);
     expect(screen.queryByText("Test & Deploy")).not.toBeInTheDocument();
   });
 });

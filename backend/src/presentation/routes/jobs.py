@@ -95,6 +95,43 @@ def _source_from_clips_data(clips_data: dict | None, fallback_url: str) -> tuple
     return "youtube", fallback_url
 
 
+def _get_users_map(user_ids: set[int]) -> dict[int, dict[str, str]]:
+    """Batch-lookup user email and name for given user_ids."""
+    clean_ids = [uid for uid in user_ids if uid and isinstance(uid, int)]
+    if not clean_ids:
+        return {}
+    from src.infrastructure.db_connection import get_dict_connection
+    res = {}
+    try:
+        conn = get_dict_connection()
+        try:
+            cur = conn.cursor()
+            placeholders = ",".join("?" for _ in clean_ids)
+            cur.execute(f"SELECT id, email, full_name FROM users WHERE id IN ({placeholders})", tuple(clean_ids))
+            for row in cur.fetchall():
+                email = row["email"] or ""
+                name = row["full_name"] or (email.split("@")[0] if email else f"User #{row['id']}")
+                res[row["id"]] = {
+                    "user_email": email,
+                    "user_name": name,
+                }
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return res
+
+
+def _get_user_info(user_id: Optional[int]) -> tuple[Optional[str], Optional[str]]:
+    """Lookup user email and display name for a single user_id."""
+    if not user_id:
+        return None, None
+    m = _get_users_map({user_id})
+    if user_id in m:
+        return m[user_id]["user_email"], m[user_id]["user_name"]
+    return None, None
+
+
 def _probe_video_duration(video_path: str) -> float:
     """Return video duration in seconds using ffprobe."""
     result = subprocess.run(
@@ -531,8 +568,12 @@ async def get_job(
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
     await _check_job_ownership(job, user)
     source_type, source_label = _source_from_clips_data(job.clips_data, job.youtube_url)
+    user_email, user_name = _get_user_info(job.user_id)
     return JobResponse(
         job_id=job.job_id,
+        user_id=job.user_id,
+        user_email=user_email,
+        user_name=user_name,
         youtube_url=job.youtube_url,
         source_type=source_type,
         source_label=source_label,
@@ -666,11 +707,13 @@ async def get_clip_final(
         # Check Video Generator job
         try:
             from src.application.video_generator import get_video_generator
+            from src.presentation.routes.video_generator import _find_job_video_path
 
             vg = get_video_generator()
             vg_job = vg.get_job(job_id)
-            if vg_job and vg_job.output_path and os.path.exists(vg_job.output_path):
-                final_path = vg_job.output_path
+            vg_path = _find_job_video_path(job_id, vg_job.output_path if vg_job else None)
+            if vg_path and os.path.exists(vg_path):
+                final_path = vg_path
         except Exception:
             pass
 
@@ -779,24 +822,33 @@ async def get_clip_thumb(
         # Check Video Generator job
         try:
             from src.application.video_generator import get_video_generator
+            from src.presentation.routes.video_generator import _find_job_video_path
 
             vg = get_video_generator()
             vg_job = vg.get_job(job_id)
-            if vg_job:
-                vg_thumb_dir = os.path.join(
-                    getattr(settings, "VIDEO_GEN_OUTPUT_DIR", "tmp/video_gen"),
-                    job_id,
-                )
-                vg_thumb = os.path.join(vg_thumb_dir, "thumb.jpg")
-                if os.path.exists(vg_thumb):
+            vg_out_dir = getattr(settings, "VIDEO_GEN_OUTPUT_DIR", "tmp/video_gen")
+            vg_thumb_candidates = [
+                os.path.join(vg_out_dir, job_id, f"thumbnail_{job_id}.jpg"),
+                os.path.join(vg_out_dir, job_id, "thumbnail.jpg"),
+                os.path.join(vg_out_dir, job_id, "thumb.jpg"),
+                os.path.join(vg_out_dir, job_id, f"cover_{job_id}.jpg"),
+                os.path.join("data", "video_generator_output", job_id, f"thumbnail_{job_id}.jpg"),
+                os.path.join("data", "video_generator_output", job_id, "thumbnail.jpg"),
+                os.path.join("data", "video_generator_output", job_id, "thumb.jpg"),
+                os.path.join("backend", "data", "video_generator_output", job_id, f"thumbnail_{job_id}.jpg"),
+                os.path.join("backend", "data", "video_generator_output", job_id, "thumb.jpg"),
+            ]
+            for tp in vg_thumb_candidates:
+                if os.path.exists(tp) and os.path.getsize(tp) > 0:
                     return FileResponse(
-                        vg_thumb,
+                        tp,
                         media_type="image/jpeg",
                         filename=f"vg_{job_id}_thumb.jpg",
                     )
-                if vg_job.output_path and os.path.exists(vg_job.output_path):
-                    output_dir = vg_thumb_dir
-                    source_video = vg_job.output_path
+            vg_path = _find_job_video_path(job_id, vg_job.output_path if vg_job else None)
+            if vg_path and os.path.exists(vg_path):
+                source_video = vg_path
+                output_dir = os.path.dirname(vg_path)
         except Exception:
             pass
 
@@ -1014,15 +1066,22 @@ async def list_jobs(
         result = await session.execute(query)
         models = result.scalars().all()
 
+    user_ids = {model.user_id for model in models if getattr(model, "user_id", None)}
+    users_map = _get_users_map(user_ids)
+
     jobs = []
     for model in models:
         source_type, source_label = _source_from_clips_data(model.clips_data, model.youtube_url)
         # Check for active restyle/operations
         operations = (model.clips_data or {}).get("operations", {}) if isinstance(model.clips_data, dict) else {}
         active_ops = [op for op in operations.values() if isinstance(op, dict) and op.get("status") == "running"]
+        uid = getattr(model, "user_id", None)
+        u_info = users_map.get(uid, {}) if uid else {}
         jobs.append({
             "job_id": model.job_id,
-            "user_id": getattr(model, "user_id", None),
+            "user_id": uid,
+            "user_email": u_info.get("user_email"),
+            "user_name": u_info.get("user_name"),
             "youtube_url": model.youtube_url,
             "source_type": source_type,
             "source_label": source_label,
@@ -1140,10 +1199,14 @@ async def get_job_detail(
             "top_overlay_events": clip.get("top_overlay_events") or [],
         })
 
+    user_email, user_name = _get_user_info(job.user_id)
     return {
         "success": True,
         "data": {
             "job_id": job.job_id,
+            "user_id": job.user_id,
+            "user_email": user_email,
+            "user_name": user_name,
             "youtube_url": job.youtube_url,
             "source_type": source_type,
             "source_label": source_label,

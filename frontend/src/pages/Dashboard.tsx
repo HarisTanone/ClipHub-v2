@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle, FileVideo, Type, Layers, Scan, Frame, Clapperboard, Zap, Palette, Wand2, Download } from "lucide-react";
+import { PlusCircle, Activity, CheckCircle, XCircle, Clock, RefreshCw, Inbox, Search, ChevronLeft, ChevronRight, Trash2, SlidersHorizontal, Film, Radio, Sparkles, PlayCircle, FileVideo, Type, Layers, Scan, Frame, Clapperboard, Zap, Palette, Wand2, Download, User } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -67,6 +67,8 @@ export function Dashboard() {
       list = list.filter((j) =>
         (j.video_title || "").toLowerCase().includes(q) ||
         (j.source_label || "").toLowerCase().includes(q) ||
+        (j.user_name || "").toLowerCase().includes(q) ||
+        (j.user_email || "").toLowerCase().includes(q) ||
         j.youtube_url.toLowerCase().includes(q) ||
         j.job_id.toLowerCase().includes(q)
       );
@@ -268,6 +270,12 @@ export function Dashboard() {
                         {job.pipeline_version && <span className={job.pipeline_version === "v2" ? "text-blue-400" : "text-emerald-400"}>{job.pipeline_version.toUpperCase()}</span>}
                         <span>{job.clips_success}/{job.clips_total || 0} clips</span>
                         <span>{formatTimeAgo(job.created_at)}</span>
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-zinc-400 truncate">
+                        <User className="h-3 w-3 shrink-0 text-zinc-500" />
+                        <span className="truncate" title={job.user_email || undefined}>
+                          Diproses: <span className="font-medium text-zinc-300">{job.user_name || job.user_email || (job.user_id ? `User #${job.user_id}` : "Unknown")}</span>
+                        </span>
                       </div>
                     </div>
 

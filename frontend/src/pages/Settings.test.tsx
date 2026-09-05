@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { RangeSlider } from '@/components/ui/RangeSlider';
 
@@ -65,7 +66,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
     it('should have NO description paragraph in Sampling & Detection section explaining pipeline stage', async () => {
       // Validates: Requirement 1.6 - sections show only title with no explanatory text
       const { Settings } = await import('@/pages/Settings');
-      const { container } = render(<Settings />);
+      const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
 
       // Click the Reframe Tuning tab
       const reframeTab = screen.getAllByText('Reframe Tuning')[0];
@@ -94,7 +95,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
     it('should have NO description paragraph in Auto Grid section explaining split-screen composition', async () => {
       // Validates: Requirement 1.6
       const { Settings } = await import('@/pages/Settings');
-      const { container } = render(<Settings />);
+      const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
 
       const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
@@ -115,7 +116,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
     it('should have NO description paragraph in Ghost Detection section explaining false-positive filtering', async () => {
       // Validates: Requirement 1.6
       const { Settings } = await import('@/pages/Settings');
-      const { container } = render(<Settings />);
+      const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
 
       const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
@@ -181,7 +182,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
     it('should show NO inline description below any slider in the Reframe Tuning tab', async () => {
       // Validates: Requirement 1.5
       const { Settings } = await import('@/pages/Settings');
-      const { container } = render(<Settings />);
+      const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
 
       const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
@@ -203,7 +204,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
     it('should have NO old SVG preview for Sampling & Detection section (replaced by image preview)', async () => {
       // Validates: Requirement 1.2 — old SVGs intentionally removed in Phase 2
       const { Settings } = await import('@/pages/Settings');
-      const { container } = render(<Settings />);
+      const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
 
       const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
@@ -217,7 +218,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
     it('should have NO old SVG preview for Auto Grid section (replaced by image preview)', async () => {
       // Validates: Requirement 1.3 — old SVGs intentionally removed in Phase 2
       const { Settings } = await import('@/pages/Settings');
-      const { container } = render(<Settings />);
+      const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
 
       const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);
@@ -231,7 +232,7 @@ describe('Bug Condition: Reframe Tuning Tab Missing Descriptions, Tooltips, and 
     it('should have NO old SVG preview for Ghost Detection section (replaced by image preview)', async () => {
       // Validates: Requirement 1.4 — old SVGs intentionally removed in Phase 2
       const { Settings } = await import('@/pages/Settings');
-      const { container } = render(<Settings />);
+      const { container } = render(<MemoryRouter><Settings /></MemoryRouter>);
 
       const reframeTab = screen.getAllByText('Reframe Tuning')[0];
       fireEvent.click(reframeTab);

@@ -130,6 +130,9 @@ class JobResponse(BaseModel):
     youtube_url: str
     source_type: str = "youtube"
     source_label: Optional[str] = None
+    user_id: Optional[int] = None
+    user_email: Optional[str] = None
+    user_name: Optional[str] = None
     status: str
     video_duration: Optional[float] = None
     render_progress: Optional[str] = None

@@ -163,6 +163,12 @@ export function JobDetail() {
                 <span className="font-mono text-zinc-400">{jobShort}</span>
                 <span>{data.target_aspect_ratio || "9:16"}</span>
                 <span>{createdDate}</span>
+                {(data.user_name || data.user_email || data.user_id) && (
+                  <span className="inline-flex items-center gap-1 text-zinc-300 bg-zinc-800/80 border border-zinc-700/60 px-2 py-0.5 rounded-md">
+                    <User className="h-3 w-3 text-emerald-400" />
+                    <span>Diproses: <strong className="text-zinc-200">{data.user_name || data.user_email || `User #${data.user_id}`}</strong></span>
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -295,6 +301,15 @@ export function JobDetail() {
                       : `${(videoMeta.view_count / 1000).toFixed(0)}K`} views
                   </span>
                 )}
+                {(data.user_name || data.user_email || data.user_id) && (
+                  <span className="flex items-center gap-1 text-emerald-400/90 font-medium">
+                    <User className="h-3 w-3 text-emerald-400" />
+                    Diproses oleh: {data.user_name || data.user_email || `User #${data.user_id}`}
+                    {data.user_email && data.user_name && data.user_name !== data.user_email && (
+                      <span className="text-zinc-500 font-normal">({data.user_email})</span>
+                    )}
+                  </span>
+                )}
               </div>
               {videoMeta.description && (
                 <p className="text-[11px] leading-relaxed text-zinc-600 line-clamp-2">{videoMeta.description}</p>
@@ -310,6 +325,12 @@ export function JobDetail() {
               <div className="min-w-0">
                 <p className="text-[11px] text-zinc-500 mb-0.5">{isUploadSource ? "Upload Video" : "Source"}</p>
                 <p className="text-sm text-zinc-300 truncate">{sourceLabel}</p>
+                {(data.user_name || data.user_email || data.user_id) && (
+                  <p className="mt-1 flex items-center gap-1 text-[11px] text-emerald-400/90">
+                    <User className="h-3 w-3 text-emerald-400" />
+                    <span>Diproses oleh: <strong className="text-zinc-200">{data.user_name || data.user_email || `User #${data.user_id}`}</strong>{data.user_email && data.user_name && data.user_name !== data.user_email ? ` (${data.user_email})` : ""}</span>
+                  </p>
+                )}
               </div>
             </div>
             {!isUploadSource && (

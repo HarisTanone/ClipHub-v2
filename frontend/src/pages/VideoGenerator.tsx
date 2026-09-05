@@ -2076,7 +2076,7 @@ export function VideoGeneratorPage() {
 
   const loadJobs = useCallback(async (targetPage = page) => {
     try {
-      const response = await fetchApi<JobListResponse>(`/api/video-generator/jobs?page=${targetPage}&limit=8`);
+      const response = await fetchApi<JobListResponse>(`/api/video-generator/jobs?page=${targetPage}&limit=10`);
       setJobs(response.items || []);
       setTotalJobs(response.total || 0);
       setPage(response.page || 1);
@@ -3892,7 +3892,7 @@ export function VideoGeneratorPage() {
               {totalPages > 1 && (
                 <div className="mt-4 flex items-center justify-between gap-3">
                   <p className="text-xs tabular-nums text-zinc-500">
-                    Showing {(page - 1) * 8 + 1}&ndash;{Math.min(page * 8, totalJobs)} of {totalJobs}
+                    Showing {(page - 1) * 10 + 1}&ndash;{Math.min(page * 10, totalJobs)} of {totalJobs}
                   </p>
                   <div className="flex items-center gap-2">
                     <Button
