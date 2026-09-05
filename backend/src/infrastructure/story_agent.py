@@ -332,7 +332,10 @@ class StoryAgent:
         """Fallback: call Gemini directly."""
         import httpx
 
-        keys = settings.gemini_api_keys
+        from src.infrastructure.auth import get_gemini_key_rotator, is_gemini_rate_limit_error
+
+        rotator = get_gemini_key_rotator()
+        keys = rotator.get_available_keys()
         if not keys:
             raise StoryGenerationError("No Gemini API key configured")
 
@@ -361,7 +364,8 @@ class StoryAgent:
 
         last_gemini_err = ""
         for attempt in range(self._max_retries):
-            api_key = keys[attempt % len(keys)]
+            available_keys = rotator.get_available_keys()
+            api_key = available_keys[0] if available_keys else keys[attempt % len(keys)]
             model = models_to_try[attempt % len(models_to_try)]
             url = (
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
@@ -372,7 +376,8 @@ class StoryAgent:
                     resp = client.post(url, json=payload)
 
                 if resp.status_code == 429:
-                    time.sleep(3 * (attempt + 1))
+                    rotator.mark_rate_limited(key=api_key, retry_after=60.0)
+                    time.sleep(1)
                     continue
 
                 if resp.status_code != 200:

@@ -76,8 +76,8 @@ class GeminiAgenticVideoService:
     }
 
     def __init__(self):
-        from src.infrastructure.auth import GeminiKeyRotator
-        self._key_rotator = GeminiKeyRotator()
+        from src.infrastructure.auth import get_gemini_key_rotator
+        self._key_rotator = get_gemini_key_rotator()
         self._model = settings.GEMINI_MODEL or "gemini-3.8-flash"
         self._fallback_model = settings.GEMINI_FALLBACK_MODEL or "gemini-3.7-flash"
 
@@ -118,7 +118,7 @@ class GeminiAgenticVideoService:
                 "media_resolution": media_resolution,
             }
 
-        keys = self._key_rotator.keys
+        keys = self._key_rotator.get_available_keys()
         if not keys:
             logger.warning("[GeminiAgenticVideo] No Gemini API key configured, using default timestamps")
             return {
@@ -170,7 +170,7 @@ class GeminiAgenticVideoService:
     ) -> dict[str, Any]:
         """Synchronous worker for Video Understanding via Interactions API or Files API."""
         import base64
-        keys = self._key_rotator.keys
+        keys = self._key_rotator.get_available_keys()
         # Agentic video mode is officially supported on:
         # Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash, 3.5 Flash Lite
         AGENTIC_SUPPORTED_MODELS = {
@@ -231,9 +231,17 @@ class GeminiAgenticVideoService:
         else:
             processing_spec = "agentic"
 
+        from src.infrastructure.auth import is_gemini_rate_limit_error
+
+        errors: list[Any] = []
         for k in keys:
+            if self._key_rotator.is_key_rate_limited(k):
+                logger.info(f"[GeminiVideoUnderstanding] Skipping key ...{k[-6:]} (in rate limit cooldown)")
+                continue
+
             client = genai.Client(api_key=k)
             video_file = None
+            key_dead = False
             try:
                 # 1. Prepare video input
                 if is_url:
@@ -279,6 +287,8 @@ class GeminiAgenticVideoService:
 
                 # 2. Call Interactions API with text prompt placed AFTER video input
                 for model_id in models_to_try:
+                    if key_dead:
+                        break
                     is_agentic_supported = model_id in AGENTIC_SUPPORTED_MODELS
                     curr_mode = processing_mode if is_agentic_supported else "static"
                     curr_video_input = dict(video_input)
@@ -288,7 +298,7 @@ class GeminiAgenticVideoService:
                     try:
                         logger.info(
                             f"[GeminiVideoUnderstanding] Calling interactions.create model={model_id} "
-                            f"mode={curr_mode} resolution={media_resolution}..."
+                            f"mode={curr_mode} resolution={media_resolution} (key ...{k[-6:]})..."
                         )
                         interaction = client.interactions.create(
                             model=model_id,
@@ -330,11 +340,22 @@ class GeminiAgenticVideoService:
                             )
                             return parsed
                     except Exception as interaction_err:
+                        is_rl, retry_sec = is_gemini_rate_limit_error(interaction_err)
+                        if is_rl:
+                            logger.warning(
+                                f"[GeminiVideoUnderstanding] interactions.create hit 429 on key ...{k[-6:]} ({model_id}) "
+                                f"(cooldown {retry_sec:.1f}s). Rotating key immediately..."
+                            )
+                            self._key_rotator.mark_rate_limited(key=k, retry_after=retry_sec)
+                            key_dead = True
+                            errors.append(interaction_err)
+                            break  # IMMEDIATELY skip to next key, do not retry same dead key!
+
                         logger.warning(
                             f"[GeminiVideoUnderstanding] interactions.create on {model_id} failed: {interaction_err}. "
                             f"Trying generate_content fallback..."
                         )
-                        # Fallback to generate_content
+                        # Fallback to generate_content ONLY if NOT 429
                         try:
                             contents = []
                             if video_file:
@@ -358,10 +379,23 @@ class GeminiAgenticVideoService:
                                 logger.info(f"[GeminiVideoUnderstanding] generate_content fallback success ({model_id})")
                                 return parsed
                         except Exception as gen_err:
+                            is_rl_gen, retry_sec_gen = is_gemini_rate_limit_error(gen_err)
+                            if is_rl_gen:
+                                logger.warning(
+                                    f"[GeminiVideoUnderstanding] generate_content fallback hit 429 on key ...{k[-6:]} ({model_id}) "
+                                    f"(cooldown {retry_sec_gen:.1f}s). Rotating key immediately..."
+                                )
+                                self._key_rotator.mark_rate_limited(key=k, retry_after=retry_sec_gen)
+                                key_dead = True
+                                errors.append(gen_err)
+                                break
                             errors.append(gen_err)
                             continue
 
             except Exception as key_err:
+                is_rl, retry_sec = is_gemini_rate_limit_error(key_err)
+                if is_rl:
+                    self._key_rotator.mark_rate_limited(key=k, retry_after=retry_sec)
                 logger.warning(f"[GeminiVideoUnderstanding] Key failed: {key_err}")
                 errors.append(key_err)
                 continue
@@ -513,7 +547,7 @@ class GeminiAgenticVideoService:
         if not combined_speech and not kw:
             return []
 
-        keys = self._key_rotator.keys
+        keys = self._key_rotator.get_available_keys()
         if keys:
             prompt = f"""Kamu visual researcher & director video pendek profesional dengan kemampuan Agentic Video Understanding.
 Tugasmu adalah menganalisa ucapan pembicara pada potongan video berikut, memahami konteks topiknya secara mendalam, dan merumuskan 3-4 kueri pencarian video stock bahasa Inggris (Pexels/Pixabay) yang SANGAT KONKRET dan RELEVAN untuk ditampilkan sebagai B-roll ({placement}).
@@ -532,7 +566,11 @@ PANDUAN VISUAL CONCRETE (SANGAT PENTING):
 OUTPUT RAW JSON ONLY (tanpa markdown):
 {{"queries": ["english query 1", "english query 2", "english query 3"]}}"""
 
+            from src.infrastructure.auth import is_gemini_rate_limit_error
+
             for k in keys:
+                if self._key_rotator.is_key_rate_limited(k):
+                    continue
                 try:
                     client = genai.Client(api_key=k)
                     response = await asyncio.to_thread(
@@ -560,7 +598,12 @@ OUTPUT RAW JSON ONLY (tanpa markdown):
                             )
                             return clean_queries
                 except Exception as exc:
-                    logger.debug(f"[GeminiAgenticVideo] Key failed: {exc}")
+                    is_rl, retry_sec = is_gemini_rate_limit_error(exc)
+                    if is_rl:
+                        logger.warning(f"[GeminiAgenticVideo] Key ...{k[-6:]} hit 429 in derive_queries ({retry_sec:.1f}s), rotating...")
+                        self._key_rotator.mark_rate_limited(key=k, retry_after=retry_sec)
+                    else:
+                        logger.debug(f"[GeminiAgenticVideo] Key failed: {exc}")
                     continue
 
         return self._fallback_heuristic_queries(kw, combined_speech)

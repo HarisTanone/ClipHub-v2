@@ -209,4 +209,107 @@ async def test_agentic_video_service_derive_queries_heuristic_fallback():
     assert any("business" in q or "store" in q or "shop" in q for q in queries)
 
 
+def test_gemini_rate_limit_error_detection():
+    from src.infrastructure.auth import is_gemini_rate_limit_error
+
+    err_msg = (
+        "Error code: 429 - {'error': {'message': 'You exceeded your current quota, please check your plan and billing details. "
+        "For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. "
+        "* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.7-flash\\n"
+        "Please retry in 49.65878073s.', 'code': 'too_many_requests'}}"
+    )
+    is_rl, retry_sec = is_gemini_rate_limit_error(Exception(err_msg))
+    assert is_rl is True
+    assert 50.0 <= retry_sec <= 55.0
+
+    # Non-rate limit error
+    is_rl_normal, retry_normal = is_gemini_rate_limit_error(ValueError("Invalid JSON"))
+    assert is_rl_normal is False
+    assert retry_normal == 0.0
+
+
+def test_gemini_key_rotator_behavior():
+    from src.infrastructure.auth import GeminiKeyRotator
+
+    rotator = GeminiKeyRotator(keys=["key_alpha", "key_beta", "key_gamma"])
+    rotator.reset()
+
+    # Initial order
+    avail = rotator.get_available_keys()
+    assert avail == ["key_alpha", "key_beta", "key_gamma"]
+    assert rotator.get_current_key() == "key_alpha"
+
+    # Mark key_alpha rate-limited
+    rotator.mark_rate_limited(key="key_alpha", retry_after=30.0)
+    assert rotator.is_key_rate_limited("key_alpha") is True
+    assert rotator.is_key_rate_limited("key_beta") is False
+
+    # Healthy keys prioritized first
+    avail_after = rotator.get_available_keys()
+    assert avail_after[0] == "key_beta"
+    assert avail_after[1] == "key_gamma"
+    assert avail_after[2] == "key_alpha"
+    assert rotator.get_current_key() == "key_beta"
+
+    # Mark key_beta rate-limited too
+    rotator.mark_rate_limited(key="key_beta", retry_after=30.0)
+    avail_third = rotator.get_available_keys()
+    assert avail_third[0] == "key_gamma"
+    assert rotator.get_current_key() == "key_gamma"
+
+    rotator.reset()
+
+
+def test_agentic_video_service_auto_rotates_on_429(tmp_path):
+    from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
+    from src.infrastructure.auth import GeminiKeyRotator
+
+    service = GeminiAgenticVideoService()
+    test_keys = ["gemini_key_1", "gemini_key_2"]
+    service._key_rotator = GeminiKeyRotator(keys=test_keys)
+    service._key_rotator.reset()
+
+    dummy_video = tmp_path / "test.mp4"
+    dummy_video.write_bytes(b"fake video data 1234567890")
+
+    mock_resp = MagicMock()
+    mock_resp.output_text = '{"is_relevant": true, "alignment_score": 8.8, "best_start_timestamp": 2.0, "best_end_timestamp": 6.0, "best_start_mm_ss": "00:02", "best_end_mm_ss": "00:06"}'
+    mock_resp.steps = []
+
+    created_clients = {}
+
+    def mock_client_factory(api_key):
+        client = MagicMock()
+        if api_key == "gemini_key_1":
+            # Simulate 429 quota error on key 1
+            client.interactions.create.side_effect = Exception(
+                "Error code: 429 - {'error': {'message': 'Quota exceeded. Please retry in 45s.', 'code': 'too_many_requests'}}"
+            )
+        else:
+            # Key 2 succeeds
+            client.interactions.create.return_value = mock_resp
+
+        created_clients[api_key] = client
+        return client
+
+    with patch("google.genai.Client", side_effect=mock_client_factory):
+        res = service._analyze_alignment_sync(
+            video_path=str(dummy_video),
+            prompt="Find best interval",
+            target_duration=4.0,
+            timeout=10,
+            processing_mode="agentic",
+        )
+
+        assert res["alignment_score"] == 8.8
+        assert res["best_start_timestamp"] == 2.0
+        # Key 1 was rate limited and rotated
+        assert service._key_rotator.is_key_rate_limited("gemini_key_1") is True
+        # Key 1 should NOT have called generate_content fallback
+        assert created_clients["gemini_key_1"].models.generate_content.called is False
+        # Key 2 was called and succeeded
+        assert created_clients["gemini_key_2"].interactions.create.called is True
+
+
+
 

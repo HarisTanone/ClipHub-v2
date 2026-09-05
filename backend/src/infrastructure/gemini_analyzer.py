@@ -34,8 +34,8 @@ class InteractionResponseAdapter:
 
 class GeminiAnalyzer(IGeminiAnalyzer):
     def __init__(self):
-        from src.infrastructure.auth import GeminiKeyRotator
-        self._key_rotator = GeminiKeyRotator()
+        from src.infrastructure.auth import get_gemini_key_rotator
+        self._key_rotator = get_gemini_key_rotator()
         self._model = settings.GEMINI_MODEL
         self._fallback_model = settings.GEMINI_FALLBACK_MODEL
         self._video_processing = getattr(settings, "GEMINI_VIDEO_PROCESSING", "agentic")
@@ -315,6 +315,14 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
                     self._switch_to_fallback()
                     continue
 
+                from src.infrastructure.auth import is_gemini_rate_limit_error
+                is_rl, retry_sec = is_gemini_rate_limit_error(e)
+                if is_rl:
+                    curr_k = self._key_rotator.get_current_key()
+                    if curr_k:
+                        self._key_rotator.mark_rate_limited(key=curr_k, retry_after=retry_sec)
+                    self._init_client()
+
                 if "503" in error_str or "unavailable" in error_str or "high demand" in error_str or "429" in error_str:
                     self._consecutive_503 += 1
                     logger.warning(f"Model {self._model} overloaded/exhausted across keys ({e}); switching fallback...")
@@ -332,7 +340,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         """Call Gemini with text-only prompt racing across all keys and top models concurrently."""
         from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
-        keys = settings.gemini_api_keys or ([self._key_rotator.get_current_key()] if self._key_rotator.get_current_key() else [])
+        keys = self._key_rotator.get_available_keys() or settings.gemini_api_keys
         if not keys:
             raise RuntimeError("No Gemini API key configured")
 
@@ -410,7 +418,7 @@ OUTPUT FORMAT — RAW JSON (tanpa markdown):
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
-        keys = settings.gemini_api_keys or ([self._key_rotator.get_current_key()] if self._key_rotator.get_current_key() else [])
+        keys = self._key_rotator.get_available_keys() or settings.gemini_api_keys
         if not keys:
             raise RuntimeError("No Gemini API key configured")
 

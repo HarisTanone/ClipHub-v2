@@ -440,10 +440,11 @@ class HermesTrendingService:
         return results
 
     async def _call_gemini_json(self, system_prompt: str, user_prompt: str) -> Optional[str]:
-        """Call Gemini model via Direct API or 9Router."""
-        from src.infrastructure.system_config_store import get_gemini_api_keys
+        """Call Gemini model via Direct API with automatic key rotation."""
+        from src.infrastructure.auth import get_gemini_key_rotator, is_gemini_rate_limit_error
 
-        keys = get_gemini_api_keys()
+        rotator = get_gemini_key_rotator()
+        keys = rotator.get_available_keys()
         if not keys and getattr(settings, "GEMINI_API_KEY", ""):
             keys = [settings.GEMINI_API_KEY]
 
@@ -472,7 +473,9 @@ class HermesTrendingService:
         }
 
         for model in models:
-            for key in keys[:3]:
+            for key in keys:
+                if rotator.is_key_rate_limited(key):
+                    continue
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
                 try:
                     async with httpx.AsyncClient(timeout=25) as client:
@@ -484,7 +487,12 @@ class HermesTrendingService:
                             parts = candidates[0].get("content", {}).get("parts", [])
                             if parts:
                                 return parts[0].get("text", "")
-                except Exception:
+                    elif resp.status_code == 429:
+                        rotator.mark_rate_limited(key=key, retry_after=60.0)
+                except Exception as ex:
+                    is_rl, retry_sec = is_gemini_rate_limit_error(ex)
+                    if is_rl:
+                        rotator.mark_rate_limited(key=key, retry_after=retry_sec)
                     continue
 
         return None

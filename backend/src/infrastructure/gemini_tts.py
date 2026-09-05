@@ -262,13 +262,17 @@ class GeminiTTS:
         self._key_index = 0
 
     def _get_api_key(self) -> str:
-        keys = _get_gemini_api_keys()
-        if not keys:
-            raise RuntimeError(
-                "Gemini API Key tidak ditemukan. Pastikan GEMINI_API_KEY sudah dikonfigurasi di Settings atau .env."
-            )
-        key = keys[self._key_index % len(keys)]
-        self._key_index += 1
+        from src.infrastructure.auth import get_gemini_key_rotator
+        rotator = get_gemini_key_rotator()
+        key = rotator.get_current_key()
+        if not key:
+            keys = _get_gemini_api_keys()
+            if not keys:
+                raise RuntimeError(
+                    "Gemini API Key tidak ditemukan. Pastikan GEMINI_API_KEY sudah dikonfigurasi di Settings atau .env."
+                )
+            key = keys[self._key_index % len(keys)]
+            self._key_index += 1
         return key
 
     @classmethod
@@ -464,6 +468,12 @@ class GeminiTTS:
                         clean_model = "gemini-2.5-flash-preview-tts"
                         continue
                     last_error = f"HTTP {resp.status_code}: {err_msg[:100]}"
+                elif resp.status_code == 429:
+                    from src.infrastructure.auth import get_gemini_key_rotator
+                    get_gemini_key_rotator().mark_rate_limited(key=api_key, retry_after=60.0)
+                    logger.warning(f"gemini_tts: attempt {attempt + 1} HTTP 429 rate limited on key ...{api_key[-6:]}")
+                    last_error = "HTTP 429 Too Many Requests"
+                    continue
                 else:
                     logger.warning(
                         f"gemini_tts: attempt {attempt + 1} HTTP {resp.status_code}: {resp.text[:200]}"
