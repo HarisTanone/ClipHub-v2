@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield,
   Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot,
@@ -492,10 +492,35 @@ export type SettingsTabId =
   | "hermes_video_gen"
   | "system_config";
 
-export function getTabFromRoute(sec?: string, subSec?: string): SettingsTabId {
+export function getTabFromRoute(sec?: string, subSec?: string, pathname?: string): SettingsTabId {
+  // 1. Direct pathname check (foolproof regardless of router nesting)
+  if (pathname) {
+    const clean = pathname.toLowerCase();
+    if (clean.includes("/settings/hermes/videogen") || clean.endsWith("/videogen")) {
+      return "hermes_video_gen";
+    }
+    if (clean.includes("/settings/hermes/autopilot") || clean.endsWith("/autopilot")) {
+      return "autopilot";
+    }
+    if (clean.includes("/settings/render")) return "render";
+    if (clean.includes("/settings/reframe")) return "reframe";
+    if (clean.includes("/settings/hyperframes")) return "hyperframes";
+    if (clean.includes("/settings/object")) return "object";
+    if (clean.includes("/settings/telegram")) return "telegram";
+    if (clean.includes("/settings/system")) return "system_config";
+    if (clean.includes("/settings/models")) return "models";
+    if (clean.includes("/settings/users")) return "users";
+    if (clean.includes("/settings/testing")) return "testing";
+    if (clean.includes("/settings/general")) return "general";
+  }
+
+  // 2. SubSection check
+  if (subSec === "videogen" || subSec === "hermes_video_gen") return "hermes_video_gen";
+  if (subSec === "autopilot") return "autopilot";
+
+  // 3. Section check
   if (sec === "hermes") {
     if (subSec === "videogen") return "hermes_video_gen";
-    if (subSec === "autopilot") return "autopilot";
     return "autopilot";
   }
   if (sec === "autopilot") return "autopilot";
@@ -517,9 +542,10 @@ export function Settings() {
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
   const { section, subSection } = useParams<{ section?: string; subSection?: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
 
-  const tab = getTabFromRoute(section, subSection);
+  const tab = getTabFromRoute(section, subSection, location.pathname);
 
   function setTab(newTab: SettingsTabId) {
     switch (newTab) {
@@ -1401,12 +1427,24 @@ export function Settings() {
 
   const navCategories: SettingsCategory[] = [
     {
+      id: "general",
+      label: "General",
+      tabs: [
+        { id: "general", label: "General", icon: <SlidersHorizontal className="h-4 w-4" />, desc: "Preferensi render & format video default", badge: "All Users" },
+      ],
+    },
+    {
+      id: "hermes",
+      label: "Hermes Automation",
+      tabs: [
+        { id: "autopilot", label: "Autopilot Clipper", icon: <Bot className="h-4 w-4" />, badge: "1 Video/Hari", desc: "Automasi pemotongan video harian" },
+        { id: "hermes_video_gen", label: "Video Gen Auto-Post", icon: <Video className="h-4 w-4" />, badge: "3-5 Video/Hari", desc: "Cari trending & auto-post video AI" },
+      ],
+    },
+    {
       id: "studio",
       label: "Studio & Rendering",
       tabs: [
-        { id: "general", label: "General", icon: <SlidersHorizontal className="h-4 w-4" />, desc: "Preferensi render & format video default", badge: "All Users" },
-        { id: "autopilot", label: "Hermes Autopilot", icon: <Bot className="h-4 w-4" />, badge: "1 Video/Hari", desc: "Automasi pemotongan video harian" },
-        { id: "hermes_video_gen", label: "Hermes Video Gen Auto-Post", icon: <Video className="h-4 w-4" />, badge: "3-5 Video/Hari", desc: "Cari trending & auto-post video AI" },
         { id: "render", label: "Render Engine", icon: <Film className="h-4 w-4" />, desc: "Mesin render Remotion, 3D, & AI Layer", badge: "All Users" },
         { id: "reframe", label: "Reframe Tuning", icon: <Cpu className="h-4 w-4" />, badge: isSuperadmin ? "Global Defaults" : "Personal", desc: "AI Face Tracking, AutoGrid Zoom, & Ghost Filter" },
         { id: "hyperframes", label: "HyperFrames Hook", icon: <Sparkles className="h-4 w-4" />, badge: isSuperadmin ? "Global Defaults" : "Personal", desc: "Animasi hook teks headline bergerak" },
@@ -1594,6 +1632,31 @@ export function Settings() {
               </Button>
             )}
           </div>
+        </div>
+
+        {/* Mobile Horizontal Tab Selector (< md) */}
+        <div className="md:hidden flex items-center gap-1.5 overflow-x-auto pb-2 mb-3 border-b border-zinc-800/60 scrollbar-none shrink-0">
+          {allTabs.map((t) => {
+            const isActive = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors shrink-0",
+                  isActive
+                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold"
+                    : "bg-zinc-900/80 text-zinc-400 border border-zinc-800 hover:text-zinc-200"
+                )}
+              >
+                <span className={cn("shrink-0", isActive ? "text-cyan-400" : "text-zinc-500")}>
+                  {t.icon}
+                </span>
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Tab content */}

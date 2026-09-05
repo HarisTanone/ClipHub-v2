@@ -61,8 +61,10 @@ export default function App() {
           <Route path="social" element={<SocialAccounts />} />
           <Route path="video-generator" element={<VideoGeneratorPage />} />
           <Route path="settings" element={<Navigate to="/settings/general" replace />} />
-          <Route path="settings/:section" element={<Settings />} />
+          <Route path="settings/hermes" element={<Navigate to="/settings/hermes/autopilot" replace />} />
           <Route path="settings/hermes/:subSection" element={<Settings />} />
+          <Route path="settings/:section" element={<Settings />} />
+          <Route path="settings/:section/:subSection" element={<Settings />} />
         </Route>
       </Routes>
     </>
