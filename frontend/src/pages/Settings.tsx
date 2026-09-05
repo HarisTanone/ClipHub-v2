@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import {
   Save, Server, Cpu, Sparkles, Film, UserPlus, Trash2, AlertTriangle, Shield,
   Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot,
@@ -478,11 +478,91 @@ async function fetchTestVideo(): Promise<Blob | null> {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+export type SettingsTabId =
+  | "general"
+  | "render"
+  | "users"
+  | "reframe"
+  | "object"
+  | "hyperframes"
+  | "testing"
+  | "models"
+  | "telegram"
+  | "autopilot"
+  | "hermes_video_gen"
+  | "system_config";
+
+export function getTabFromRoute(sec?: string, subSec?: string): SettingsTabId {
+  if (sec === "hermes") {
+    if (subSec === "videogen") return "hermes_video_gen";
+    if (subSec === "autopilot") return "autopilot";
+    return "autopilot";
+  }
+  if (sec === "autopilot") return "autopilot";
+  if (sec === "hermes_video_gen" || sec === "videogen") return "hermes_video_gen";
+  if (sec === "render") return "render";
+  if (sec === "reframe") return "reframe";
+  if (sec === "hyperframes") return "hyperframes";
+  if (sec === "object") return "object";
+  if (sec === "telegram") return "telegram";
+  if (sec === "system" || sec === "system_config") return "system_config";
+  if (sec === "models") return "models";
+  if (sec === "users") return "users";
+  if (sec === "testing") return "testing";
+  return "general";
+}
+
 export function Settings() {
   const toast = useToast();
   const { user } = useAuth();
   const isSuperadmin = user?.is_superadmin || false;
-  const [tab, setTab] = useState<"general" | "render" | "users" | "reframe" | "object" | "hyperframes" | "testing" | "models" | "telegram" | "autopilot" | "hermes_video_gen" | "system_config">("general");
+  const { section, subSection } = useParams<{ section?: string; subSection?: string }>();
+  const navigate = useNavigate();
+
+  const tab = getTabFromRoute(section, subSection);
+
+  function setTab(newTab: SettingsTabId) {
+    switch (newTab) {
+      case "general":
+        navigate("/settings/general");
+        break;
+      case "autopilot":
+        navigate("/settings/hermes/autopilot");
+        break;
+      case "hermes_video_gen":
+        navigate("/settings/hermes/videogen");
+        break;
+      case "render":
+        navigate("/settings/render");
+        break;
+      case "reframe":
+        navigate("/settings/reframe");
+        break;
+      case "hyperframes":
+        navigate("/settings/hyperframes");
+        break;
+      case "object":
+        navigate("/settings/object");
+        break;
+      case "telegram":
+        navigate("/settings/telegram");
+        break;
+      case "system_config":
+        navigate("/settings/system");
+        break;
+      case "models":
+        navigate("/settings/models");
+        break;
+      case "users":
+        navigate("/settings/users");
+        break;
+      case "testing":
+        navigate("/settings/testing");
+        break;
+      default:
+        navigate("/settings/general");
+    }
+  }
   const [health, setHealth] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -1305,20 +1385,6 @@ export function Settings() {
   }
 
 
-  type SettingsTabId =
-    | "general"
-    | "render"
-    | "users"
-    | "reframe"
-    | "object"
-    | "hyperframes"
-    | "testing"
-    | "models"
-    | "telegram"
-    | "autopilot"
-    | "hermes_video_gen"
-    | "system_config";
-
   interface SettingsTabItem {
     id: SettingsTabId;
     label: string;
@@ -1373,118 +1439,25 @@ export function Settings() {
   const activeCategory: SettingsCategory | undefined = navCategories.find((c) => c.tabs.some((t) => t.id === tab));
 
   return (
-    <div className="flex h-full min-h-0 flex-col lg:flex-row gap-4">
-      {/* ─── Desktop Sidebar Nav ─── */}
-      <aside className="hidden lg:flex w-64 shrink-0 flex-col bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-3.5 backdrop-blur-md overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center gap-3 pb-3 border-b border-zinc-800/80 mb-3">
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500/20 to-indigo-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300">
-            <SlidersHorizontal className="h-4 w-4" />
-          </div>
-          <div>
-            <h1 className="text-sm font-semibold text-zinc-100">Settings</h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={cn("h-1.5 w-1.5 rounded-full", isSuperadmin ? "bg-emerald-400" : "bg-zinc-400")} />
-              <span className="text-[10px] text-zinc-400 font-medium">
-                {isSuperadmin ? "Superadmin Mode" : "User Preferences"}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Categories list */}
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-0.5 scrollbar-thin">
-          {navCategories.map((group) => (
-            <div key={group.id} className="space-y-1">
-              <p className="px-2 text-[10px] font-bold text-zinc-400 tracking-wider uppercase">
-                {group.label}
-              </p>
-              <div className="space-y-0.5">
-                {group.tabs.map((t) => {
-                  const isActive = tab === t.id;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setTab(t.id)}
-                      className={cn(
-                        "w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-medium transition-all text-left group",
-                        isActive
-                          ? "bg-zinc-800 text-zinc-100 border border-zinc-700/80 shadow-sm"
-                          : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 border border-transparent"
-                      )}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className={cn("shrink-0 transition-colors", isActive ? "text-violet-400" : "text-zinc-500 group-hover:text-zinc-300")}>
-                          {t.icon}
-                        </span>
-                        <span className="truncate">{t.label}</span>
-                      </div>
-                      {t.badge && (
-                        <span
-                          className={cn(
-                            "text-[9px] font-semibold px-1.5 py-0.5 rounded border shrink-0",
-                            isActive
-                              ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
-                              : "bg-zinc-900 text-zinc-400 border-zinc-800"
-                          )}
-                        >
-                          {t.badge}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </aside>
-
-      {/* ─── Mobile Category & Tabs Selector (< lg) ─── */}
-      <div className="lg:hidden shrink-0 space-y-2 bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-3 backdrop-blur-md">
-        <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="h-4 w-4 text-violet-400" />
-            <h1 className="text-sm font-semibold text-zinc-100">Settings</h1>
-          </div>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
-            {isSuperadmin ? "Superadmin" : "User"}
-          </span>
-        </div>
-
-        <div className="flex flex-wrap gap-1.5">
-          {allTabs.map((t) => {
-            const isActive = tab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all",
-                  isActive
-                    ? "bg-zinc-800 border-zinc-700 text-zinc-100 shadow-sm"
-                    : "bg-zinc-900/60 border-zinc-800/60 text-zinc-400 hover:text-zinc-200"
-                )}
-              >
-                <span className={cn(isActive ? "text-violet-400" : "text-zinc-500")}>{t.icon}</span>
-                <span>{t.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
+    <div className="flex h-full min-h-0 flex-col w-full">
       {/* ─── Main Content Pane ─── */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-zinc-950/50 border border-zinc-800/80 rounded-2xl p-4 sm:p-5 backdrop-blur-md overflow-hidden">
-        {/* Top Sticky Bar */}
+      <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-zinc-950/50 border border-zinc-800/80 rounded-2xl p-4 sm:p-5 md:p-6 backdrop-blur-md overflow-hidden">
+        {/* Top Header Bar with Breadcrumbs & Actions */}
         <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 pb-3.5 mb-4 border-b border-zinc-800/80">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-zinc-400">{activeCategory?.label}</span>
+              <span className="text-xs font-medium text-zinc-500">Settings</span>
               <span className="text-zinc-600">/</span>
-              <h2 className="text-sm sm:text-base font-semibold text-zinc-100">{activeTabMeta.label}</h2>
+              {activeCategory && (
+                <>
+                  <span className="text-xs font-medium text-zinc-400">{activeCategory.label}</span>
+                  <span className="text-zinc-600">/</span>
+                </>
+              )}
+              <h2 className="text-sm sm:text-base font-semibold text-zinc-100 flex items-center gap-2">
+                <span className="text-cyan-400">{activeTabMeta.icon}</span>
+                {activeTabMeta.label}
+              </h2>
               {activeTabMeta.badge && (
                 <Badge variant="default" className="text-[9px]">
                   {activeTabMeta.badge}

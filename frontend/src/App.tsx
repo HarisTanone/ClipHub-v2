@@ -60,7 +60,9 @@ export default function App() {
           <Route path="jobs/:jobId/clips/:rank" element={<ClipViewer />} />
           <Route path="social" element={<SocialAccounts />} />
           <Route path="video-generator" element={<VideoGeneratorPage />} />
-          <Route path="settings" element={<Settings />} />
+          <Route path="settings" element={<Navigate to="/settings/general" replace />} />
+          <Route path="settings/:section" element={<Settings />} />
+          <Route path="settings/hermes/:subSection" element={<Settings />} />
         </Route>
       </Routes>
     </>
