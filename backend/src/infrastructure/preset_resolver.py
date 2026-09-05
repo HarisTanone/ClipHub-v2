@@ -267,8 +267,8 @@ def resolve_preset(
             cur.execute(query, tuple(params))
             row = cur.fetchone()
 
-        # 2. Global search in user_presets across all users (accessible to Autopilot, CLI, & Telegram)
-        if not row:
+        # 2. Global search in user_presets across all users (when user_id is None or admin user_id == 1)
+        if not row and (user_id is None or user_id == 1):
             query_global = (
                 "SELECT * FROM user_presets WHERE "
                 "(slug = ? OR slug = ? OR slug = ? OR LOWER(name) = ? OR LOWER(name) = ?"

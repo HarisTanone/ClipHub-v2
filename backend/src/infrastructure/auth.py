@@ -98,12 +98,12 @@ def has_permission(user_role: str, user_permissions: list[str], required_permiss
     """Check if user has required permission.
 
     Supports:
-    - Superadmin bypass (user_role == "superadmin")
+    - Superadmin/superuser bypass
     - Full wildcard ("*" or "system:admin")
     - Scope wildcard (e.g. "jobs:*" satisfies "jobs:create", "jobs:read", etc.)
     - Exact permission match (e.g. "jobs:create")
     """
-    if user_role == "superadmin":
+    if is_superadmin(user_role):
         return True
     if not user_permissions:
         return False
@@ -120,21 +120,24 @@ def has_permission(user_role: str, user_permissions: list[str], required_permiss
 
 def has_any_permission(user_role: str, user_permissions: list[str], *required_permissions: str) -> bool:
     """Check if user has AT LEAST ONE of the required permissions."""
-    if user_role == "superadmin":
+    if is_superadmin(user_role):
         return True
     return any(has_permission(user_role, user_permissions, p) for p in required_permissions)
 
 
 def has_all_permissions(user_role: str, user_permissions: list[str], *required_permissions: str) -> bool:
     """Check if user has ALL of the required permissions."""
-    if user_role == "superadmin":
+    if is_superadmin(user_role):
         return True
     return all(has_permission(user_role, user_permissions, p) for p in required_permissions)
 
 
 def is_superadmin(role: str) -> bool:
-    """Check if role is superadmin (top-tier, unrestricted access)."""
-    return role == "superadmin"
+    """Check if role is superadmin or superuser (top-tier, unrestricted access)."""
+    if not role or not isinstance(role, str):
+        return False
+    r = role.strip().lower()
+    return r in ("superadmin", "superuser", "super_admin", "super_user")
 
 
 # ─── Gemini Multi-Key Rotation ───────────────────────────────────────────────

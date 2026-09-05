@@ -554,6 +554,7 @@ class VideoGenerator:
         user_id: Optional[int] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        status: Optional[str] = None,
     ) -> list[VideoGenJob]:
         db_jobs: list[VideoGenJob] = []
         try:
@@ -561,10 +562,30 @@ class VideoGenerator:
             conn = get_dict_connection()
             cur = conn.cursor()
             query = "SELECT * FROM video_generator_jobs"
+            where_clauses: list[str] = []
             params: list[Any] = []
             if user_id is not None:
-                query += " WHERE user_id = ?"
+                where_clauses.append("user_id = ?")
                 params.append(user_id)
+            if status:
+                s_clean = status.strip().lower()
+                if s_clean in ("processing", "in_progress", "active"):
+                    where_clauses.append("status NOT IN ('completed', 'failed')")
+                elif s_clean in ("queued", "pending", "antrian"):
+                    where_clauses.append("status IN ('pending', 'queued', 'planning')")
+                elif s_clean in ("failed", "gagal"):
+                    where_clauses.append("status = 'failed'")
+                elif "," in status:
+                    parts = [x.strip() for x in status.split(",") if x.strip()]
+                    placeholders = ", ".join(["?"] * len(parts))
+                    where_clauses.append(f"status IN ({placeholders})")
+                    params.extend(parts)
+                else:
+                    where_clauses.append("status = ?")
+                    params.append(status)
+
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
             query += " ORDER BY created_at DESC"
             if limit is not None:
                 query += " LIMIT ? OFFSET ?"
@@ -583,21 +604,57 @@ class VideoGenerator:
             jobs = list(self._jobs.values())
             if user_id is not None:
                 jobs = [j for j in jobs if j.user_id == user_id]
+            if status:
+                s_clean = status.strip().lower()
+                def _match_status(job_item):
+                    st = job_item.status.value if hasattr(job_item.status, "value") else str(job_item.status)
+                    if s_clean in ("processing", "in_progress", "active"):
+                        return st not in ("completed", "failed")
+                    elif s_clean in ("queued", "pending", "antrian"):
+                        return st in ("pending", "queued", "planning")
+                    elif s_clean in ("failed", "gagal"):
+                        return st == "failed"
+                    elif "," in status:
+                        parts = [x.strip() for x in status.split(",") if x.strip()]
+                        return st in parts
+                    return st == status
+                jobs = [j for j in jobs if _match_status(j)]
+
             sorted_jobs = sorted(jobs, key=lambda j: j.created_at, reverse=True)
             if limit is not None:
                 return sorted_jobs[offset : offset + limit]
             return sorted_jobs
 
-    def count_jobs(self, user_id: Optional[int] = None) -> int:
+    def count_jobs(self, user_id: Optional[int] = None, status: Optional[str] = None) -> int:
         try:
             from src.infrastructure.db_connection import get_dict_connection
             conn = get_dict_connection()
             cur = conn.cursor()
             query = "SELECT COUNT(*) as count FROM video_generator_jobs"
+            where_clauses: list[str] = []
             params: list[Any] = []
             if user_id is not None:
-                query += " WHERE user_id = ?"
+                where_clauses.append("user_id = ?")
                 params.append(user_id)
+            if status:
+                s_clean = status.strip().lower()
+                if s_clean in ("processing", "in_progress", "active"):
+                    where_clauses.append("status NOT IN ('completed', 'failed')")
+                elif s_clean in ("queued", "pending", "antrian"):
+                    where_clauses.append("status IN ('pending', 'queued', 'planning')")
+                elif s_clean in ("failed", "gagal"):
+                    where_clauses.append("status = 'failed'")
+                elif "," in status:
+                    parts = [x.strip() for x in status.split(",") if x.strip()]
+                    placeholders = ", ".join(["?"] * len(parts))
+                    where_clauses.append(f"status IN ({placeholders})")
+                    params.extend(parts)
+                else:
+                    where_clauses.append("status = ?")
+                    params.append(status)
+
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
             cur.execute(query, tuple(params))
             row = cur.fetchone()
             conn.close()
@@ -605,9 +662,25 @@ class VideoGenerator:
                 return int(row["count"])
         except Exception as exc:
             logger.warning(f"video_gen: failed to count jobs from DB: {exc}")
+        jobs = list(self._jobs.values())
         if user_id is not None:
-            return len([j for j in self._jobs.values() if j.user_id == user_id])
-        return len(self._jobs)
+            jobs = [j for j in jobs if j.user_id == user_id]
+        if status:
+            s_clean = status.strip().lower()
+            def _match_status(job_item):
+                st = job_item.status.value if hasattr(job_item.status, "value") else str(job_item.status)
+                if s_clean in ("processing", "in_progress", "active"):
+                    return st not in ("completed", "failed")
+                elif s_clean in ("queued", "pending", "antrian"):
+                    return st in ("pending", "queued", "planning")
+                elif s_clean in ("failed", "gagal"):
+                    return st == "failed"
+                elif "," in status:
+                    parts = [x.strip() for x in status.split(",") if x.strip()]
+                    return st in parts
+                return st == status
+            jobs = [j for j in jobs if _match_status(j)]
+        return len(jobs)
 
     async def run_pipeline(self, job_id: str) -> VideoGenJob:
         """Execute the full video generation pipeline (one-click auto mode)."""

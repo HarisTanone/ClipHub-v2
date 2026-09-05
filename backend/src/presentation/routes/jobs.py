@@ -253,8 +253,8 @@ def _ensure_preview_quality_variant(final_path: str, quality: str) -> str:
     return variant_path
 
 
-async def _check_job_ownership(job, user: CurrentUser, allow_superadmin: bool = False):
-    """Verify user owns this job strictly unless allow_superadmin is explicitly requested."""
+async def _check_job_ownership(job, user: CurrentUser, allow_superadmin: bool = True):
+    """Verify user owns this job strictly unless user is superadmin."""
     if allow_superadmin and user.is_superadmin:
         return
     if job.user_id and job.user_id != user.id:
@@ -936,19 +936,21 @@ async def list_jobs(
     status: str = None,
     limit: int = 20,
     offset: int = 0,
-    all_users: bool = False,
+    all_users: bool = True,
+    user_id: Optional[int] = None,
     service: JobService = Depends(get_job_service),
     user: CurrentUser = Depends(get_current_user),
 ):
     """List jobs with optional status filter and pagination.
 
     Query params:
-    - status: Filter by status (e.g. 'completed', 'failed', 'processing')
+    - status: Filter by status (e.g. 'completed', 'failed', 'processing', 'queued', comma-separated)
     - limit: Max results (default 20, max 100)
     - offset: Pagination offset
-    - all_users: If True and caller is superadmin, returns jobs from all users.
+    - all_users: If caller is superadmin, controls viewing all users (default True).
+    - user_id: Specific user_id to filter by (superadmin only).
 
-    Default: Strict per-user isolation (every user only sees their own jobs).
+    Superadmin sees all jobs across all users by default. Regular users strictly see their own jobs.
     """
     from sqlalchemy import select, func, desc
     from src.infrastructure.database import JobModel, async_session
@@ -958,19 +960,38 @@ async def list_jobs(
     async with async_session() as session:
         query = select(JobModel).order_by(desc(JobModel.created_at))
 
-        if status:
-            query = query.where(JobModel.status == status)
+        def _apply_status(q):
+            if not status:
+                return q
+            s_clean = status.strip().lower()
+            if s_clean in ("processing", "in_progress", "active"):
+                return q.where(JobModel.status.notin_(["completed", "failed", "timeout"]))
+            elif s_clean in ("queued", "pending", "antrian"):
+                return q.where(JobModel.status.in_(["validating", "preparing", "queued", "pending"]))
+            elif s_clean in ("failed", "gagal"):
+                return q.where(JobModel.status.in_(["failed", "timeout"]))
+            elif "," in status:
+                parts = [x.strip() for x in status.split(",") if x.strip()]
+                return q.where(JobModel.status.in_(parts))
+            else:
+                return q.where(JobModel.status == status)
 
-        # Strict user isolation: by default, each user only sees their own jobs (even superadmin)
-        if not (user.is_superadmin and all_users):
-            query = query.where(JobModel.user_id == user.id)
+        def _apply_user(q):
+            if user.is_superadmin:
+                if user_id is not None:
+                    return q.where(JobModel.user_id == user_id)
+                elif not all_users:
+                    return q.where(JobModel.user_id == user.id)
+                return q
+            return q.where(JobModel.user_id == user.id)
+
+        query = _apply_status(query)
+        query = _apply_user(query)
 
         # Count total
         count_query = select(func.count()).select_from(JobModel)
-        if status:
-            count_query = count_query.where(JobModel.status == status)
-        if not (user.is_superadmin and all_users):
-            count_query = count_query.where(JobModel.user_id == user.id)
+        count_query = _apply_status(count_query)
+        count_query = _apply_user(count_query)
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0
 
@@ -987,6 +1008,7 @@ async def list_jobs(
         active_ops = [op for op in operations.values() if isinstance(op, dict) and op.get("status") == "running"]
         jobs.append({
             "job_id": model.job_id,
+            "user_id": getattr(model, "user_id", None),
             "youtube_url": model.youtube_url,
             "source_type": source_type,
             "source_label": source_label,
@@ -1137,6 +1159,7 @@ async def cancel_job(
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
 
     terminal_statuses = {"completed", "failed", "timeout"}
     if job.status.value in terminal_statuses:
@@ -1463,6 +1486,7 @@ async def edit_clip_hook(
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
 
     if not job.clips_data or "clips" not in job.clips_data:
         raise HTTPException(status_code=400, detail="Job has no clips data")
@@ -1542,6 +1566,7 @@ async def edit_clip_style(
     job = await service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    await _check_job_ownership(job, user)
 
     if not job.clips_data or "clips" not in job.clips_data:
         raise HTTPException(status_code=400, detail="Job has no clips data")

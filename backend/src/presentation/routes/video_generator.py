@@ -118,6 +118,7 @@ class RenderSelectedRequest(BaseModel):
 
 class JobStatusResponse(BaseModel):
     job_id: str
+    user_id: Optional[int] = None
     topic: str
     status: str
     progress: int
@@ -390,6 +391,12 @@ async def search_scene(
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
+    job = vg.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not user.is_superadmin and job.user_id and job.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Job not found")
+
     try:
         candidates = await vg.search_scene_footage(job_id, req.scene_id, req.query)
         return {"scene_id": req.scene_id, "candidates": candidates}
@@ -409,6 +416,8 @@ async def render_selected(
     vg = get_video_generator()
     job = vg.get_job(req.job_id)
     if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not user.is_superadmin and job.user_id and job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
 
     if req.hook_enabled is not None:
@@ -446,11 +455,14 @@ async def render_selected(
 async def list_jobs(
     page: int = 1,
     limit: int = 8,
+    status: Optional[str] = None,
+    all_users: bool = True,
+    user_id: Optional[int] = None,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """List all video generation jobs with pagination.
+    """List all video generation jobs with pagination and optional status filter.
     
-    Default page=1, limit=8 (2 rows of 4 videos).
+    Superadmin sees all jobs across all users by default. Regular users strictly see their own jobs.
     """
     from src.application.video_generator import get_video_generator
     import math
@@ -459,9 +471,19 @@ async def list_jobs(
     safe_limit = max(1, min(100, limit))
     offset = (safe_page - 1) * safe_limit
 
+    if user.is_superadmin:
+        if user_id is not None:
+            filter_user_id = user_id
+        elif not all_users:
+            filter_user_id = user.id
+        else:
+            filter_user_id = None
+    else:
+        filter_user_id = user.id
+
     vg = get_video_generator()
-    total = vg.count_jobs()
-    jobs = vg.list_jobs(limit=safe_limit, offset=offset)
+    total = vg.count_jobs(user_id=filter_user_id, status=status)
+    jobs = vg.list_jobs(user_id=filter_user_id, limit=safe_limit, offset=offset, status=status)
     total_pages = max(1, math.ceil(total / safe_limit)) if total > 0 else 1
 
     return JobListResponse(
@@ -486,6 +508,8 @@ async def get_job_status(
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    if not user.is_superadmin and job.user_id and job.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Job not found")
 
     return _job_to_response(job)
 
@@ -502,6 +526,8 @@ async def download_video(
     job = vg.get_job(job_id)
 
     if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not user.is_superadmin and job.user_id and job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
 
     if job.status != VideoGenStatus.COMPLETED:
@@ -522,14 +548,16 @@ async def download_video(
 async def retry_video(
     job_id: str,
     background_tasks: BackgroundTasks,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Retry a failed video generation job in place with the same settings (superuser only)."""
+    """Retry a failed video generation job in place with the same settings (superuser or owner)."""
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
     job = vg.get_job(job_id)
     if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not user.is_superadmin and job.user_id and job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != VideoGenStatus.FAILED:
         raise HTTPException(status_code=400, detail="Only failed jobs can be retried")
@@ -548,14 +576,16 @@ async def retry_video(
 @router.delete("/jobs/{job_id}")
 async def delete_job(
     job_id: str,
-    user: CurrentUser = Depends(require_superadmin()),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Delete a video generation job and all its artifacts (superuser only)."""
+    """Delete a video generation job and all its artifacts (superuser or owner)."""
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
     job = vg.get_job(job_id)
     if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not user.is_superadmin and job.user_id and job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
 
     vg.delete_job(job_id)
@@ -584,14 +614,19 @@ async def stream_video(
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    if not is_superadmin(payload.get("role", "")):
-        raise HTTPException(status_code=403, detail="Superadmin access required")
+    user_role = payload.get("role", "")
+    token_user_id = payload.get("sub") or payload.get("user_id")
 
     vg = get_video_generator()
     job = vg.get_job(job_id)
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    is_super = is_superadmin(user_role)
+    is_owner = job.user_id and str(job.user_id) == str(token_user_id)
+    if not is_super and not is_owner:
+        raise HTTPException(status_code=403, detail="Superadmin or owner access required")
 
     if job.status != VideoGenStatus.COMPLETED:
         raise HTTPException(status_code=400, detail=f"Job not completed (status: {job.status})")
@@ -652,6 +687,8 @@ async def get_job_story(
     job = vg.get_job(job_id)
 
     if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not user.is_superadmin and job.user_id and job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
 
     return {
@@ -903,6 +940,7 @@ def _job_to_response(job) -> JobStatusResponse:
 
     return JobStatusResponse(
         job_id=job.job_id,
+        user_id=getattr(job, "user_id", None),
         topic=job.topic,
         status=status_val,
         progress=job.progress,
