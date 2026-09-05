@@ -4236,7 +4236,7 @@ export function Settings() {
                       Pilih platform media sosial untuk otomatis memposting video trending yang telah selesai diproses. Jika satu platform memiliki beberapa akun terhubung (misalnya 2 akun TikTok), Anda dapat mencentang akun spesifik yang ingin diposting:
                     </p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       {[
                         { id: "tiktok", name: "TikTok", icon: Film },
                         { id: "instagram", name: "Instagram Reels", icon: Camera },
@@ -4253,16 +4253,19 @@ export function Settings() {
                           <div
                             key={plat.id}
                             className={cn(
-                              "p-3 rounded-xl border text-xs transition-all flex flex-col justify-between",
+                              "p-3 rounded-xl border text-xs transition-all flex flex-col justify-between min-w-0",
                               !isConnected
-                                ? "bg-zinc-950/40 border-zinc-800/60 opacity-60 cursor-not-allowed"
+                                ? "bg-zinc-950/40 border-zinc-800/60 opacity-65"
                                 : isChecked
-                                ? "bg-cyan-950/30 border-cyan-500/50 text-cyan-200 shadow-sm"
-                                : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                                ? "bg-cyan-950/30 border-cyan-500/50 text-cyan-200 shadow-sm shadow-cyan-950/20"
+                                : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/80"
                             )}
                           >
-                            <div className="flex items-center justify-between gap-2">
-                              <label className={cn("flex items-center gap-2 select-none", isConnected ? "cursor-pointer" : "cursor-not-allowed")}>
+                            <div className="flex items-center justify-between gap-2 min-w-0">
+                              <label className={cn(
+                                "flex items-center gap-2 select-none min-w-0",
+                                isConnected ? "cursor-pointer" : "cursor-not-allowed"
+                              )}>
                                 <input
                                   type="checkbox"
                                   disabled={!isConnected}
@@ -4280,22 +4283,30 @@ export function Settings() {
                                       target_platforms: updated.filter(Boolean).join(","),
                                     });
                                   }}
-                                  className="rounded border-zinc-700 text-cyan-500 focus:ring-cyan-500/30 h-3.5 w-3.5 disabled:opacity-40"
+                                  className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-4 w-4 shrink-0 disabled:opacity-40"
                                 />
-                                <IconComp className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-                                <span className={cn("font-medium truncate", !isConnected ? "text-zinc-500" : isChecked ? "text-cyan-200" : "text-zinc-300")}>
+                                <div className={cn(
+                                  "w-6 h-6 rounded-md flex items-center justify-center shrink-0",
+                                  isChecked ? "bg-cyan-500/20 text-cyan-300" : isConnected ? "bg-zinc-800 text-zinc-400" : "bg-zinc-900 text-zinc-600"
+                                )}>
+                                  <IconComp className="h-3.5 w-3.5" />
+                                </div>
+                                <span className={cn(
+                                  "font-medium text-xs truncate",
+                                  !isConnected ? "text-zinc-500" : isChecked ? "text-cyan-100 font-semibold" : "text-zinc-300"
+                                )}>
                                   {plat.name}
                                 </span>
                               </label>
 
                               {isConnected ? (
-                                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-medium shrink-0">
+                                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium shrink-0 whitespace-nowrap">
                                   {platInfo.count} Akun
                                 </span>
                               ) : (
                                 <Link
                                   to="/social"
-                                  className="inline-flex items-center gap-1 text-[9px] text-amber-400 hover:text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 shrink-0"
+                                  className="inline-flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 shrink-0 whitespace-nowrap hover:bg-amber-500/20 transition-colors"
                                 >
                                   <span>Belum Terhubung</span>
                                   <ExternalLink className="h-2.5 w-2.5" />
@@ -4305,8 +4316,8 @@ export function Settings() {
 
                             {/* Multi-Account Selector when platform has accounts & is checked */}
                             {isConnected && isChecked && platInfo.accounts.length > 0 && (
-                              <div className="mt-2.5 pt-2 border-t border-zinc-800/80 space-y-1.5 pl-5">
-                                <span className="text-[10px] text-zinc-400 font-medium block">Pilih Akun {plat.name}:</span>
+                              <div className="mt-2.5 pt-2 border-t border-cyan-500/20 space-y-1.5 pl-6">
+                                <span className="text-[10px] text-cyan-400/80 font-medium block">Pilih Akun {plat.name}:</span>
                                 <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
                                   {platInfo.accounts.map((acc: any) => {
                                     const accId = String(acc.account_id || acc.id || acc._id);
@@ -4337,7 +4348,7 @@ export function Settings() {
                                               target_account_ids: updatedAccs,
                                             });
                                           }}
-                                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-3 w-3"
+                                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-3 w-3 shrink-0"
                                         />
                                         <span className="truncate">{acc.name || acc.username} {acc.username ? `(@${acc.username})` : ""}</span>
                                       </label>
@@ -4351,7 +4362,7 @@ export function Settings() {
                       })}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-zinc-800/80">
                       <div>
                         <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
                         <Input
@@ -4363,6 +4374,7 @@ export function Settings() {
                             }
                           }}
                         />
+                        <p className="text-[10px] text-zinc-500 mt-1">Waktu mulai pemindaian tren dan perenderan video harian.</p>
                       </div>
 
                       <div>
@@ -4375,14 +4387,38 @@ export function Settings() {
                             }
                           }}
                           options={[
-                            { value: "ai", label: "AI Same-Day Spread (Sebar otomatis di jam ramai audiens)" },
-                            { value: "instant", label: "Instant Post (Langsung tayang saat video selesai)" },
-                            { value: "custom", label: "Custom Time" },
+                            { value: "ai", label: "AI Same-Day Spread (Optimal)" },
+                            { value: "instant", label: "Instant Post (Langsung Tayang)" },
+                            { value: "custom", label: "Custom Time (Sesuai Jam Eksekusi)" },
                           ]}
                         />
+                        <p className="text-[10px] text-zinc-500 mt-1">
+                          {hermesVideogenSettings?.schedule_mode === "instant"
+                            ? "Video langsung diposting segera setelah perenderan selesai."
+                            : hermesVideogenSettings?.schedule_mode === "custom"
+                            ? "Video diposting tepat sesuai jam eksekusi harian."
+                            : "AI menyebarkan jadwal post di jam prime-time audiens hari ini."}
+                        </p>
                       </div>
                     </div>
                   </Card>
+
+                  {/* Save Settings Action Bar */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 shadow-sm">
+                    <div className="flex items-center gap-2 text-xs text-zinc-400">
+                      <Check className="h-3.5 w-3.5 text-cyan-400" />
+                      <span>Simpan pengaturan setelah mengatur target akun &amp; jadwal.</span>
+                    </div>
+                    <Button
+                      onClick={handleSaveHermesVideoGen}
+                      loading={isSavingHermesVideogen}
+                      icon={<Save className="h-3.5 w-3.5" />}
+                      size="sm"
+                      variant="primary"
+                    >
+                      Simpan Pengaturan Hermes
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Right Column: Execution & History */}
