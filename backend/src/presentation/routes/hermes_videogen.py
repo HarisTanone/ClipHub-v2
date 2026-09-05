@@ -1,8 +1,8 @@
 """REST API routes for Hermes Video Generator Auto-Post configuration and execution."""
 import logging
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Union
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from src.presentation.auth_deps import CurrentUser, get_current_user
 from src.infrastructure.hermes_videogen_service import hermes_videogen_service
@@ -13,29 +13,43 @@ router = APIRouter(prefix="/hermes-videogen", tags=["Hermes VideoGen"])
 
 
 class UpdateHermesVideoGenSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     enabled: Optional[bool] = None
     target_region: Optional[str] = Field(None, description="Country/region code (ID, GLOBAL, US, JP, KR, etc.)")
     daily_video_count: Optional[int] = Field(None, ge=1, le=10, description="Jumlah video per hari (default: 3, range 3-5)")
-    sources: Optional[List[str]] = Field(None, description="Sumber trending: google_trends, youtube, tiktok, gemini")
+    trending_sources: Optional[Union[List[str], str]] = Field(None, description="Sumber trending: google, youtube, tiktok, gemini")
+    sources: Optional[Union[List[str], str]] = Field(None, description="Alias untuk trending_sources")
+    niche_focus: Optional[str] = None
+    voice: Optional[str] = None
+    tts_provider: Optional[str] = None
+    tts_model: Optional[str] = None
+    target_duration: Optional[int] = None
     aspect_ratio: Optional[str] = Field(None, description="9:16 (vertical), 16:9 (horizontal), 1:1 (square)")
+    preset_slug: Optional[str] = None
+    hook_enabled: Optional[bool] = None
+    hook_style: Optional[str] = None
+    subtitles_enabled: Optional[bool] = None
+    subtitle_preset: Optional[str] = None
+    ai_text_enabled: Optional[bool] = None
+    ai_text_preset: Optional[str] = None
+    thumbnail_enabled: Optional[bool] = None
     watermark_enabled: Optional[bool] = None
     watermark_text: Optional[str] = None
     watermark_position: Optional[str] = None
     watermark_opacity: Optional[float] = None
-    subtitles_enabled: Optional[bool] = None
-    subtitle_preset: Optional[str] = None
-    hook_enabled: Optional[bool] = None
-    hook_style: Optional[str] = None
-    ai_text_enabled: Optional[bool] = None
-    ai_text_preset: Optional[str] = None
     transitions_enabled: Optional[bool] = None
+    transition_style: Optional[str] = None
     transition_type: Optional[str] = None
     cta_enabled: Optional[bool] = None
+    cta_headline: Optional[str] = None
+    cta_button_text: Optional[str] = None
     cta_text: Optional[str] = None
-    target_platforms: Optional[List[str]] = None
-    target_account_ids: Optional[List[str]] = None
+    target_platforms: Optional[Union[List[str], str]] = None
+    target_account_ids: Optional[Union[List[str], str]] = None
     schedule_mode: Optional[str] = Field(None, description="ai, custom, instant")
-    schedule_times: Optional[List[str]] = None
+    schedule_times: Optional[Union[List[str], str]] = None
+    run_time: Optional[str] = None
 
 
 class TriggerHermesVideoGenRequest(BaseModel):

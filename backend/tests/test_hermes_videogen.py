@@ -122,3 +122,72 @@ async def test_videogen_cycle_execution():
             assert len(history) >= 1
             assert history[0]["status"] == "completed"
             assert history[0]["topic"] == "Trending Topic 1"
+
+
+def test_hermes_settings_payload_validation():
+    """Verify UpdateHermesVideoGenSettingsRequest and update_settings with comma-separated string & list."""
+    from src.presentation.routes.hermes_videogen import UpdateHermesVideoGenSettingsRequest
+
+    # Exact payload from frontend error report
+    frontend_payload = {
+        "user_id": 5,
+        "enabled": True,
+        "target_region": "ID",
+        "daily_video_count": 3,
+        "ai_text_enabled": True,
+        "aspect_ratio": "9:16",
+        "cta_button_text": "FOLLOW",
+        "cta_enabled": True,
+        "cta_headline": "Follow for more",
+        "cta_text": "Follow for more",
+        "hook_enabled": True,
+        "last_run_at": None,
+        "last_run_date": None,
+        "niche_focus": "",
+        "preset_slug": "default",
+        "run_time": "04:00",
+        "schedule_mode": "ai",
+        "subtitles_enabled": True,
+        "target_account_ids": ["6a9bca8162caae1e0411e31b"],
+        "target_duration": 65,
+        "target_platforms": "tiktok,instagram,youtube",
+        "thumbnail_enabled": True,
+        "today_videos_created": 0,
+        "transition_style": "dissolve",
+        "trending_sources": "google,youtube,tiktok,gemini",
+        "tts_model": "gemini-3.1-flash-tts-preview",
+        "tts_provider": "gemini",
+        "voice": "Kore",
+        "watermark_enabled": False,
+        "watermark_text": "",
+    }
+
+    # 1. Pydantic validation must succeed with comma-separated string
+    req = UpdateHermesVideoGenSettingsRequest(**frontend_payload)
+    assert req.target_platforms == "tiktok,instagram,youtube"
+    assert req.trending_sources == "google,youtube,tiktok,gemini"
+
+    # 2. Service update must succeed
+    user_id = 99995
+    updated = hermes_videogen_service.update_settings(user_id, req.model_dump(exclude_unset=True))
+    assert updated["target_platforms"] == "tiktok,instagram,youtube"
+    assert updated["trending_sources"] == "google,youtube,tiktok,gemini"
+    assert updated["target_account_ids"] == ["6a9bca8162caae1e0411e31b"]
+    assert updated["voice"] == "Kore"
+    assert updated["tts_provider"] == "gemini"
+    assert updated["tts_model"] == "gemini-3.1-flash-tts-preview"
+    assert updated["run_time"] == "04:00"
+
+    # 3. Pydantic validation and service update must also succeed with list formats
+    list_payload = {
+        "target_platforms": ["tiktok", "instagram"],
+        "trending_sources": ["google", "youtube"],
+        "daily_video_count": 4,
+    }
+    req2 = UpdateHermesVideoGenSettingsRequest(**list_payload)
+    assert req2.target_platforms == ["tiktok", "instagram"]
+    updated2 = hermes_videogen_service.update_settings(user_id, req2.model_dump(exclude_unset=True))
+    assert updated2["target_platforms"] == "tiktok,instagram"
+    assert updated2["trending_sources"] == "google,youtube"
+    assert updated2["daily_video_count"] == 4
+

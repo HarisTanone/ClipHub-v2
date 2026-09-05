@@ -132,6 +132,12 @@ class HermesVideoGenService:
                 except Exception:
                     d["target_account_ids"] = []
                 d["cta_text"] = d.get("cta_headline", "")
+                for bf in [
+                    "enabled", "hook_enabled", "subtitles_enabled",
+                    "ai_text_enabled", "thumbnail_enabled", "watermark_enabled", "cta_enabled"
+                ]:
+                    if bf in d:
+                        d[bf] = bool(d[bf])
                 return d
         finally:
             conn.close()
@@ -175,17 +181,44 @@ class HermesVideoGenService:
         current = self.get_settings(user_id)
         if "cta_text" in data and "cta_headline" not in data:
             data["cta_headline"] = data["cta_text"]
+        if "sources" in data and ("trending_sources" not in data or not data.get("trending_sources")):
+            data["trending_sources"] = data["sources"]
+        if "transition_type" in data and ("transition_style" not in data or not data.get("transition_style")):
+            data["transition_style"] = data["transition_type"]
         current.update(data)
 
         # Normalize target_account_ids
         target_accs = current.get("target_account_ids")
         if isinstance(target_accs, list):
             target_accs_json = json.dumps(target_accs)
+        elif isinstance(target_accs, str):
+            if target_accs.strip().startswith("["):
+                target_accs_json = target_accs.strip()
+            else:
+                target_accs_json = json.dumps([x.strip() for x in target_accs.split(",") if x.strip()])
         else:
             target_accs_json = "[]"
 
         # Constrain daily_video_count between 3 and 5
         daily_count = max(3, min(int(current.get("daily_video_count") or 3), 5))
+
+        # Normalize target_platforms
+        platforms = current.get("target_platforms")
+        if isinstance(platforms, list):
+            target_platforms_str = ",".join(str(p).strip() for p in platforms if str(p).strip())
+        elif isinstance(platforms, str):
+            target_platforms_str = platforms.strip()
+        else:
+            target_platforms_str = "tiktok,instagram,youtube"
+
+        # Normalize trending_sources
+        trending_srcs = current.get("trending_sources")
+        if isinstance(trending_srcs, list):
+            trending_sources_str = ",".join(str(s).strip() for s in trending_srcs if str(s).strip())
+        elif isinstance(trending_srcs, str):
+            trending_sources_str = trending_srcs.strip()
+        else:
+            trending_sources_str = "google,youtube,tiktok,gemini"
 
         conn = get_dict_connection()
         try:
@@ -231,7 +264,7 @@ class HermesVideoGenService:
                 1 if current.get("enabled") else 0,
                 current.get("target_region") or "ID",
                 daily_count,
-                current.get("trending_sources") or "google,youtube,tiktok,gemini",
+                trending_sources_str,
                 current.get("niche_focus") or "",
                 current.get("voice") or "Kore",
                 current.get("tts_provider") or "gemini",
@@ -249,7 +282,7 @@ class HermesVideoGenService:
                 1 if current.get("cta_enabled") else 0,
                 current.get("cta_headline") or "Follow for more",
                 current.get("cta_button_text") or "FOLLOW",
-                current.get("target_platforms") or "tiktok,instagram,youtube",
+                target_platforms_str,
                 target_accs_json,
                 current.get("schedule_mode") or "ai",
                 current.get("run_time") or "06:00",

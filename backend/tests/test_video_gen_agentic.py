@@ -79,6 +79,9 @@ async def test_social_footage_searcher_routes_platforms(monkeypatch):
         "duration_seconds": 15,
     }])
     mock_yt.search_pixabay = AsyncMock(return_value=[])
+    mock_yt.search_pexels_photos = AsyncMock(return_value=[])
+    mock_yt.search_pixabay_photos = AsyncMock(return_value=[])
+    mock_yt.search_wikimedia_photos = AsyncMock(return_value=[])
     searcher._yt_search = mock_yt
 
     # Mock ytdlp platform search
