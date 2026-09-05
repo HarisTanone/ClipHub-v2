@@ -3314,454 +3314,483 @@ export function Settings() {
                 <p className="text-xs text-zinc-400">Memuat pengaturan Hermes Autopilot...</p>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                {/* Left Column: Configuration */}
-                <div className="lg:col-span-7 space-y-4">
-                  {/* Master Switch Card */}
-                  <Card className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "h-10 w-10 rounded-xl flex items-center justify-center transition-colors border",
-                          autopilotSettings?.enabled
-                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                            : "bg-zinc-800/80 border-zinc-700 text-zinc-500"
-                        )}>
-                          <Zap className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-zinc-100">Hermes Autopilot Daemon</span>
-                            <Badge variant={autopilotSettings?.enabled ? "success" : "default"}>
-                              {autopilotSettings?.enabled ? "AKTIF" : "NONAKTIF"}
-                            </Badge>
+              <div className="space-y-5">
+                {/* 1. TOP ROW: Master Daemon & Niche (Col-7) | Status Kuota & Manual Trigger (Col-5) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  <div className="lg:col-span-7 space-y-4">
+                    {/* Master Switch Card */}
+                    <Card className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "h-10 w-10 rounded-xl flex items-center justify-center transition-colors border",
+                            autopilotSettings?.enabled
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                              : "bg-zinc-800/80 border-zinc-700 text-zinc-500"
+                          )}>
+                            <Zap className="h-5 w-5" />
                           </div>
-                          <p className="text-[11px] text-zinc-400 mt-0.5">
-                            {autopilotSettings?.enabled
-                              ? `Berjalan otomatis setiap hari pada jam ${autopilotSettings.run_time || "05:00"} WIB`
-                              : "Otomasi nonaktif. Aktifkan sakelar untuk menjalankan pencarian dan posting harian otomatis."}
-                          </p>
-                        </div>
-                      </div>
-
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={autopilotSettings?.enabled || false}
-                          onChange={(e) => {
-                            if (autopilotSettings) {
-                              setAutopilotSettings({ ...autopilotSettings, enabled: e.target.checked });
-                            }
-                          }}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
-                      </label>
-                    </div>
-                  </Card>
-
-                  {/* Niche & Search Settings */}
-                  <Card className="p-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <Film className="h-4 w-4 text-violet-400" />
-                      <h3 className="text-xs font-semibold text-zinc-200">1. Niche &amp; Topik Pencarian YouTube Viral</h3>
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] text-zinc-400 block mb-1">Keywords / Niche Query</label>
-                      <Input
-                        value={autopilotSettings?.niche_query || ""}
-                        onChange={(e) => {
-                          if (autopilotSettings) {
-                            setAutopilotSettings({ ...autopilotSettings, niche_query: e.target.value });
-                          }
-                        }}
-                        placeholder="Contoh: podcast bisnis, motivasi indonesia, tips trading crypto"
-                      />
-                    </div>
-
-                    {/* Quick Niche Pills */}
-                    <div>
-                      <span className="text-[10px] text-zinc-500 block mb-1.5">Rekomendasi Niche Cepat:</span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          "podcast bisnis",
-                          "motivasi hidup",
-                          "tips investasi saham",
-                          "gym motivation",
-                          "ai tech news",
-                          "self improvement",
-                        ].map((niche) => (
-                          <button
-                            key={niche}
-                            type="button"
-                            onClick={() => {
-                              if (autopilotSettings) {
-                                setAutopilotSettings({ ...autopilotSettings, niche_query: niche });
-                              }
-                            }}
-                            className={cn(
-                              "px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
-                              autopilotSettings?.niche_query === niche
-                                ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
-                                : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-zinc-200"
-                            )}
-                          >
-                            + {niche}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* Visual Style Preset Selection & Live 5-Layer Preview */}
-                  <Card className="p-4">
-                    <ErrorBoundary fallbackTitle="Pratinjau Preset Hermes Autopilot">
-                      <AutopilotPresetPreview
-                        selectedSlug={autopilotSettings?.preset_slug || "default"}
-                        onSelectSlug={async (slug) => {
-                          if (autopilotSettings) {
-                            const updated = { ...autopilotSettings, preset_slug: slug };
-                            setAutopilotSettings(updated);
-                            try {
-                              const res = await autopilotApi.updateSettings(updated);
-                              if (res && res.data) {
-                                setAutopilotSettings(res.data);
-                                toast.success(`Preset '${slug}' aktif & tersimpan untuk Hermes Autopilot!`);
-                              }
-                            } catch (e: any) {
-                              console.warn("Auto-save autopilot preset failed:", e);
-                            }
-                          }
-                        }}
-                        presets={autopilotPresets}
-                        onOpenEditor={handleOpenStyleEditor}
-                      />
-                    </ErrorBoundary>
-                  </Card>
-
-                  {/* Social Media Target & Schedule Time */}
-                  <Card className="p-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4 text-violet-400" />
-                        <h3 className="text-xs font-semibold text-zinc-200">3. Target Platform Auto-Post &amp; Waktu Jalan</h3>
-                      </div>
-                      <Link
-                        to="/social"
-                        className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1 hover:underline"
-                      >
-                        <span>Kelola Akun Sosial</span>
-                        <ExternalLink className="h-3 w-3" />
-                      </Link>
-                    </div>
-
-                    <p className="text-[11px] text-zinc-400">
-                      Hanya platform yang sudah terhubung di menu Social Accounts yang dapat dipilih. Platform yang belum terhubung akan berstatus readonly sampai akun Anda hubungkan.
-                    </p>
-
-                    {/* Platform Checkboxes & Multi-Account Breakdown */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
-                      {[
-                        { id: "tiktok", name: "TikTok" },
-                        { id: "instagram", name: "Instagram Reels" },
-                        { id: "youtube", name: "YouTube Shorts" },
-                        { id: "facebook", name: "Facebook" },
-                        { id: "threads", name: "Threads" },
-                        { id: "linkedin", name: "LinkedIn" },
-                      ].map((plat) => {
-                        const platInfo = getAutopilotPlatInfo(plat.id);
-                        const isConnected = platInfo.connected;
-                        const currentPlats = (autopilotSettings?.target_platforms || "").toLowerCase().split(",").map(p => p.trim());
-                        const isChecked = isConnected && currentPlats.includes(plat.id);
-
-                        return (
-                          <div
-                            key={plat.id}
-                            className={cn(
-                              "p-3 rounded-xl border text-xs transition-all flex flex-col justify-between",
-                              !isConnected
-                                ? "bg-zinc-950/40 border-zinc-800/60 opacity-60 cursor-not-allowed"
-                                : isChecked
-                                ? "bg-violet-950/30 border-violet-500/50 text-violet-200 shadow-sm"
-                                : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <label className={cn("flex items-center gap-2 select-none", isConnected ? "cursor-pointer" : "cursor-not-allowed")}>
-                                <input
-                                  type="checkbox"
-                                  disabled={!isConnected}
-                                  checked={isChecked}
-                                  onChange={(e) => {
-                                    if (!autopilotSettings || !isConnected) return;
-                                    let updated: string[];
-                                    if (e.target.checked) {
-                                      updated = Array.from(new Set([...currentPlats, plat.id]));
-                                    } else {
-                                      updated = currentPlats.filter(p => p !== plat.id);
-                                    }
-                                    setAutopilotSettings({
-                                      ...autopilotSettings,
-                                      target_platforms: updated.filter(Boolean).join(","),
-                                    });
-                                  }}
-                                  className="rounded border-zinc-700 text-violet-600 focus:ring-violet-500 h-3.5 w-3.5 disabled:opacity-40"
-                                />
-                                <span className={cn("font-medium truncate", !isConnected ? "text-zinc-500" : isChecked ? "text-violet-200" : "text-zinc-300")}>
-                                  {plat.name}
-                                </span>
-                              </label>
-
-                              {isConnected ? (
-                                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-medium shrink-0">
-                                  {platInfo.count} Akun
-                                </span>
-                              ) : (
-                                <Link
-                                  to="/social"
-                                  className="inline-flex items-center gap-1 text-[9px] text-amber-400 hover:text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 shrink-0"
-                                >
-                                  <span>Belum Terhubung</span>
-                                  <ExternalLink className="h-2.5 w-2.5" />
-                                </Link>
-                              )}
-                            </div>
-
-                            {/* Multi-Account Selector when platform has multiple accounts & is checked */}
-                            {isConnected && isChecked && platInfo.accounts.length > 1 && (
-                              <div className="mt-2.5 pt-2 border-t border-zinc-800/80 space-y-1.5 pl-5">
-                                <span className="text-[10px] text-zinc-400 font-medium block">Pilih Akun {plat.name}:</span>
-                                <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
-                                  {platInfo.accounts.map((acc: any) => {
-                                    const accId = String(acc.account_id || acc.id || acc._id);
-                                    const currentAccIds = Array.isArray(autopilotSettings?.target_account_ids)
-                                      ? autopilotSettings.target_account_ids
-                                      : [];
-                                    const isAccSelected = currentAccIds.length === 0 || currentAccIds.includes(accId);
-
-                                    return (
-                                      <label key={accId} className="flex items-center gap-2 text-[10px] text-zinc-300 hover:text-zinc-100 cursor-pointer select-none">
-                                        <input
-                                          type="checkbox"
-                                          checked={isAccSelected}
-                                          onChange={(e) => {
-                                            if (!autopilotSettings) return;
-                                            let updatedAccs: string[];
-                                            if (e.target.checked) {
-                                              updatedAccs = currentAccIds.length === 0
-                                                ? [accId]
-                                                : Array.from(new Set([...currentAccIds, accId]));
-                                            } else {
-                                              const allPlatIds = platInfo.accounts.map((a: any) => String(a.account_id || a.id || a._id));
-                                              const baseList = currentAccIds.length === 0 ? allPlatIds : currentAccIds;
-                                              updatedAccs = baseList.filter((id: string) => id !== accId);
-                                            }
-                                            setAutopilotSettings({
-                                              ...autopilotSettings,
-                                              target_account_ids: updatedAccs,
-                                            });
-                                          }}
-                                          className="rounded border-zinc-700 bg-zinc-800 text-violet-500 focus:ring-violet-500/30 h-3 w-3"
-                                        />
-                                        <span className="truncate">{acc.name || acc.username} {acc.username ? `(@${acc.username})` : ""}</span>
-                                      </label>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-800/80">
-                      <div>
-                        <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
-                        <Input
-                          type="time"
-                          value={autopilotSettings?.run_time || "05:00"}
-                          onChange={(e) => {
-                            if (autopilotSettings) {
-                              setAutopilotSettings({ ...autopilotSettings, run_time: e.target.value });
-                            }
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] text-zinc-400 block mb-1">Mode Jadwal Post</label>
-                        <Select
-                          value={autopilotSettings?.schedule_mode || "ai"}
-                          onChange={(e) => {
-                            if (autopilotSettings) {
-                              setAutopilotSettings({ ...autopilotSettings, schedule_mode: e.target.value });
-                            }
-                          }}
-                          options={[
-                            { value: "ai", label: "AI Same-Day Spread (Sebar berkala)" },
-                            { value: "instant", label: "Instant Post (Langsung tayang)" },
-                            { value: "custom", label: "Custom Schedule Time" },
-                          ]}
-                        />
-                      </div>
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-[11px] text-zinc-400 block">Target Qty Video Diposting</label>
-                          <span className="text-[10px] text-violet-400 font-semibold">
-                            {autopilotSettings?.post_clips_count ?? 5} Klip
-                          </span>
-                        </div>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={50}
-                          value={autopilotSettings?.post_clips_count ?? 5}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            if (autopilotSettings && !isNaN(val)) {
-                              setAutopilotSettings({
-                                ...autopilotSettings,
-                                post_clips_count: Math.max(1, Math.min(50, val)),
-                              });
-                            }
-                          }}
-                          placeholder="5"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="p-2.5 rounded-lg bg-violet-950/20 border border-violet-500/20 flex items-start gap-2 text-[11px] text-zinc-400">
-                      <Sparkles className="h-4 w-4 text-violet-400 shrink-0 mt-0.5" />
-                      <span>
-                        <strong className="text-zinc-200">Smart Virality Filter:</strong> Jika video menghasilkan banyak klip (misal 10 video), sistem hanya akan memilih <strong className="text-violet-300">{autopilotSettings?.post_clips_count ?? 5} klip terbaik</strong> dengan potensi views dan likes tertinggi (berdasarkan skor analisis AI) untuk diposting ke media sosial.
-                      </span>
-                    </div>
-                  </Card>
-                </div>
-
-                {/* Right Column: Today's Status & History */}
-                <div className="lg:col-span-5 space-y-4">
-                  {/* Today Run Trigger Card */}
-                  <Card className="p-4 border-violet-500/20 bg-gradient-to-b from-violet-950/20 to-zinc-900/60">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                        <Activity className="h-3.5 w-3.5 text-violet-400" />
-                        Status Kuota Hari Ini
-                      </span>
-                      <Badge variant={autopilotCanRun ? "success" : "default"}>
-                        {autopilotQuota ? `${autopilotQuota.today_runs}/${autopilotQuota.max_daily_videos} Video` : "1 Video/Hari"}
-                      </Badge>
-                    </div>
-
-                    <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 space-y-2 mb-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-400">Status Kesiapan:</span>
-                        <span className={cn("font-medium flex items-center gap-1", autopilotCanRun ? "text-emerald-400" : "text-amber-400")}>
-                          {autopilotCanRun ? (
-                            <>
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              <span>Siap Eksekusi</span>
-                            </>
-                          ) : (
-                            <>
-                              <Clock className="h-3.5 w-3.5" />
-                              <span>Kuota Hari Ini Terpenuhi</span>
-                            </>
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-400">Jadwal Harian:</span>
-                        <span className="text-zinc-200">{autopilotSettings?.run_time || "05:00"} WIB</span>
-                      </div>
-                      {autopilotSettings?.last_video_title && (
-                        <div className="pt-1 border-t border-zinc-800/80">
-                          <span className="text-[10px] text-zinc-500 block mb-0.5">Video Terakhir:</span>
-                          <p className="text-xs text-zinc-300 line-clamp-2 font-medium">
-                            {autopilotSettings.last_video_title}
-                          </p>
-                          {autopilotSettings.last_job_id && (
-                            <span className="text-[10px] text-violet-400 font-mono mt-0.5 block">
-                              Job #{autopilotSettings.last_job_id}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <Button
-                        onClick={() => handleTriggerAutopilot(false)}
-                        loading={isRunningAutopilot}
-                        disabled={!autopilotCanRun}
-                        className="w-full"
-                        variant="primary"
-                        icon={<Play className="h-4 w-4" />}
-                      >
-                        {autopilotCanRun ? "Jalankan Autopilot Hari Ini (1 Video)" : "Kuota Hari Ini Selesai"}
-                      </Button>
-
-                      {!autopilotCanRun && (
-                        <Button
-                          onClick={() => handleTriggerAutopilot(true)}
-                          loading={isRunningAutopilot}
-                          className="w-full text-xs text-zinc-400 hover:text-zinc-200"
-                          variant="ghost"
-                          size="sm"
-                        >
-                          Paksa Jalankan Ulang (Force Run)
-                        </Button>
-                      )}
-                    </div>
-                  </Card>
-
-                  {/* Recent Autopilot Runs */}
-                  <Card className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                        <Film className="h-3.5 w-3.5 text-zinc-400" />
-                        Riwayat Eksekusi Harian
-                      </span>
-                      <Button
-                        onClick={loadAutopilotData}
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-[10px]"
-                        icon={<RefreshCw className="h-2.5 w-2.5" />}
-                      >
-                        Refresh
-                      </Button>
-                    </div>
-
-                    {autopilotHistory.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-zinc-500">
-                        Belum ada riwayat eksekusi Autopilot.
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                        {autopilotHistory.map((run: any) => (
-                          <div
-                            key={run.id}
-                            className="p-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 text-xs space-y-1"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold text-zinc-200 text-[11px] truncate max-w-[200px]" title={run.video_title}>
-                                {run.video_title || "YouTube Video"}
-                              </span>
-                              <Badge variant={run.status === "completed" ? "success" : run.status === "submitted" ? "warning" : "error"} className="text-[9px]">
-                                {run.status}
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-zinc-100">Hermes Autopilot Daemon</span>
+                              <Badge variant={autopilotSettings?.enabled ? "success" : "default"}>
+                                {autopilotSettings?.enabled ? "AKTIF" : "NONAKTIF"}
                               </Badge>
                             </div>
-                            <div className="flex items-center justify-between text-[10px] text-zinc-400">
-                              <span>Tanggal: {run.run_date}</span>
-                              <span className="text-violet-400 font-mono">Job #{run.job_id}</span>
-                            </div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5">
+                              {autopilotSettings?.enabled
+                                ? `Berjalan otomatis setiap hari pada jam ${autopilotSettings.run_time || "05:00"} WIB`
+                                : "Otomasi nonaktif. Aktifkan sakelar untuk menjalankan pencarian dan posting harian otomatis."}
+                            </p>
                           </div>
-                        ))}
+                        </div>
+
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={autopilotSettings?.enabled || false}
+                            onChange={(e) => {
+                              if (autopilotSettings) {
+                                setAutopilotSettings({ ...autopilotSettings, enabled: e.target.checked });
+                              }
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                        </label>
                       </div>
-                    )}
-                  </Card>
+                    </Card>
+
+                    {/* Niche & Search Settings */}
+                    <Card className="p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Film className="h-4 w-4 text-violet-400" />
+                        <h3 className="text-xs font-semibold text-zinc-200">1. Niche &amp; Topik Pencarian YouTube Viral</h3>
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Keywords / Niche Query</label>
+                        <Input
+                          value={autopilotSettings?.niche_query || ""}
+                          onChange={(e) => {
+                            if (autopilotSettings) {
+                              setAutopilotSettings({ ...autopilotSettings, niche_query: e.target.value });
+                            }
+                          }}
+                          placeholder="Contoh: podcast bisnis, motivasi indonesia, tips trading crypto"
+                        />
+                      </div>
+
+                      {/* Quick Niche Pills */}
+                      <div>
+                        <span className="text-[10px] text-zinc-500 block mb-1.5">Rekomendasi Niche Cepat:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            "podcast bisnis",
+                            "motivasi hidup",
+                            "tips investasi saham",
+                            "gym motivation",
+                            "ai tech news",
+                            "self improvement",
+                          ].map((niche) => (
+                            <button
+                              key={niche}
+                              type="button"
+                              onClick={() => {
+                                if (autopilotSettings) {
+                                  setAutopilotSettings({ ...autopilotSettings, niche_query: niche });
+                                }
+                              }}
+                              className={cn(
+                                "px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
+                                autopilotSettings?.niche_query === niche
+                                  ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
+                                  : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-zinc-200"
+                              )}
+                            >
+                              + {niche}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+
+                  <div className="lg:col-span-5 space-y-4">
+                    {/* Today Run Trigger Card */}
+                    <Card className="p-4 border-violet-500/20 bg-gradient-to-b from-violet-950/20 to-zinc-900/60">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                          <Activity className="h-3.5 w-3.5 text-violet-400" />
+                          Status Kuota Hari Ini
+                        </span>
+                        <Badge variant={autopilotCanRun ? "success" : "default"}>
+                          {autopilotQuota ? `${autopilotQuota.today_runs}/${autopilotQuota.max_daily_videos} Video` : "1 Video/Hari"}
+                        </Badge>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 space-y-2 mb-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-zinc-400">Status Kesiapan:</span>
+                          <span className={cn("font-medium flex items-center gap-1", autopilotCanRun ? "text-emerald-400" : "text-amber-400")}>
+                            {autopilotCanRun ? (
+                              <>
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span>Siap Eksekusi</span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock className="h-3.5 w-3.5" />
+                                <span>Kuota Hari Ini Terpenuhi</span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-zinc-400">Jadwal Harian:</span>
+                          <span className="text-zinc-200">{autopilotSettings?.run_time || "05:00"} WIB</span>
+                        </div>
+                        {autopilotSettings?.last_video_title && (
+                          <div className="pt-1 border-t border-zinc-800/80">
+                            <span className="text-[10px] text-zinc-500 block mb-0.5">Video Terakhir:</span>
+                            <p className="text-xs text-zinc-300 line-clamp-2 font-medium">
+                              {autopilotSettings.last_video_title}
+                            </p>
+                            {autopilotSettings.last_job_id && (
+                              <span className="text-[10px] text-violet-400 font-mono mt-0.5 block">
+                                Job #{autopilotSettings.last_job_id}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Button
+                          onClick={() => handleTriggerAutopilot(false)}
+                          loading={isRunningAutopilot}
+                          disabled={!autopilotCanRun}
+                          className="w-full"
+                          variant="primary"
+                          icon={<Play className="h-4 w-4" />}
+                        >
+                          {autopilotCanRun ? "Jalankan Autopilot Hari Ini (1 Video)" : "Kuota Hari Ini Selesai"}
+                        </Button>
+
+                        {!autopilotCanRun && (
+                          <Button
+                            onClick={() => handleTriggerAutopilot(true)}
+                            loading={isRunningAutopilot}
+                            className="w-full text-xs text-zinc-400 hover:text-zinc-200"
+                            variant="ghost"
+                            size="sm"
+                          >
+                            Paksa Jalankan Ulang (Force Run)
+                          </Button>
+                        )}
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+
+                {/* 2. DEDICATED FULL-WIDTH SECTION: Preset Style Visual & Interactive 9:16 Preview (Hook, Subtitle, CTA) */}
+                <Card className="p-4 sm:p-5">
+                  <ErrorBoundary fallbackTitle="Pratinjau Preset Hermes Autopilot">
+                    <AutopilotPresetPreview
+                      selectedSlug={autopilotSettings?.preset_slug || "default"}
+                      onSelectSlug={async (slug) => {
+                        if (autopilotSettings) {
+                          const updated = { ...autopilotSettings, preset_slug: slug };
+                          setAutopilotSettings(updated);
+                          try {
+                            const res = await autopilotApi.updateSettings(updated);
+                            if (res && res.data) {
+                              setAutopilotSettings(res.data);
+                              toast.success(`Preset '${slug}' aktif & tersimpan untuk Hermes Autopilot!`);
+                            }
+                          } catch (e: any) {
+                            console.warn("Auto-save autopilot preset failed:", e);
+                          }
+                        }
+                      }}
+                      presets={autopilotPresets}
+                      onOpenEditor={handleOpenStyleEditor}
+                      accentColor="violet"
+                      title="2. Preset Style Visual & Live Preview (Hook, Subtitle, CTA)"
+                      subTitle="Pilih Style Preset di sebelah kiri untuk melihat visual Hook, Subtitle, dan CTA secara interaktif di layar 9:16 sebelah kanan."
+                    />
+                  </ErrorBoundary>
+                </Card>
+
+                {/* 3. BOTTOM ROW: Target Platform Auto-Post & Schedule (Col-7) | Riwayat Eksekusi (Col-5) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  <div className="lg:col-span-7 space-y-4">
+                    {/* Social Media Target & Schedule Time */}
+                    <Card className="p-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Globe className="h-4 w-4 text-violet-400" />
+                          <h3 className="text-xs font-semibold text-zinc-200">3. Target Platform Auto-Post &amp; Waktu Jalan</h3>
+                        </div>
+                        <Link
+                          to="/social"
+                          className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1 hover:underline"
+                        >
+                          <span>Kelola Akun Sosial</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      </div>
+
+                      <p className="text-[11px] text-zinc-400">
+                        Hanya platform yang sudah terhubung di menu Social Accounts yang dapat dipilih. Platform yang belum terhubung akan berstatus readonly sampai akun Anda hubungkan.
+                      </p>
+
+                      {/* Platform Checkboxes & Multi-Account Breakdown */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                        {[
+                          { id: "tiktok", name: "TikTok" },
+                          { id: "instagram", name: "Instagram Reels" },
+                          { id: "youtube", name: "YouTube Shorts" },
+                          { id: "facebook", name: "Facebook" },
+                          { id: "threads", name: "Threads" },
+                          { id: "linkedin", name: "LinkedIn" },
+                        ].map((plat) => {
+                          const platInfo = getAutopilotPlatInfo(plat.id);
+                          const isConnected = platInfo.connected;
+                          const currentPlats = (autopilotSettings?.target_platforms || "").toLowerCase().split(",").map(p => p.trim());
+                          const isChecked = isConnected && currentPlats.includes(plat.id);
+
+                          return (
+                            <div
+                              key={plat.id}
+                              className={cn(
+                                "p-3 rounded-xl border text-xs transition-all flex flex-col justify-between",
+                                !isConnected
+                                  ? "bg-zinc-950/40 border-zinc-800/60 opacity-60 cursor-not-allowed"
+                                  : isChecked
+                                  ? "bg-violet-950/30 border-violet-500/50 text-violet-200 shadow-sm"
+                                  : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <label className={cn("flex items-center gap-2 select-none", isConnected ? "cursor-pointer" : "cursor-not-allowed")}>
+                                  <input
+                                    type="checkbox"
+                                    disabled={!isConnected}
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      if (!autopilotSettings || !isConnected) return;
+                                      let updated: string[];
+                                      if (e.target.checked) {
+                                        updated = Array.from(new Set([...currentPlats, plat.id]));
+                                      } else {
+                                        updated = currentPlats.filter(p => p !== plat.id);
+                                      }
+                                      setAutopilotSettings({
+                                        ...autopilotSettings,
+                                        target_platforms: updated.filter(Boolean).join(","),
+                                      });
+                                    }}
+                                    className="rounded border-zinc-700 text-violet-600 focus:ring-violet-500 h-3.5 w-3.5 disabled:opacity-40"
+                                  />
+                                  <span className={cn("font-medium truncate", !isConnected ? "text-zinc-500" : isChecked ? "text-violet-200" : "text-zinc-300")}>
+                                    {plat.name}
+                                  </span>
+                                </label>
+
+                                {isConnected ? (
+                                  <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-medium shrink-0">
+                                    {platInfo.count} Akun
+                                  </span>
+                                ) : (
+                                  <Link
+                                    to="/social"
+                                    className="inline-flex items-center gap-1 text-[9px] text-amber-400 hover:text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 shrink-0"
+                                  >
+                                    <span>Belum Terhubung</span>
+                                    <ExternalLink className="h-2.5 w-2.5" />
+                                  </Link>
+                                )}
+                              </div>
+
+                              {/* Multi-Account Selector when platform has multiple accounts & is checked */}
+                              {isConnected && isChecked && platInfo.accounts.length > 1 && (
+                                <div className="mt-2.5 pt-2 border-t border-zinc-800/80 space-y-1.5 pl-5">
+                                  <span className="text-[10px] text-zinc-400 font-medium block">Pilih Akun {plat.name}:</span>
+                                  <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                                    {platInfo.accounts.map((acc: any) => {
+                                      const accId = String(acc.account_id || acc.id || acc._id);
+                                      const currentAccIds = Array.isArray(autopilotSettings?.target_account_ids)
+                                        ? autopilotSettings.target_account_ids
+                                        : [];
+                                      const isAccSelected = currentAccIds.length === 0 || currentAccIds.includes(accId);
+
+                                      return (
+                                        <label key={accId} className="flex items-center gap-2 text-[10px] text-zinc-300 hover:text-zinc-100 cursor-pointer select-none">
+                                          <input
+                                            type="checkbox"
+                                            checked={isAccSelected}
+                                            onChange={(e) => {
+                                              if (!autopilotSettings) return;
+                                              let updatedAccs: string[];
+                                              if (e.target.checked) {
+                                                updatedAccs = currentAccIds.length === 0
+                                                  ? [accId]
+                                                  : Array.from(new Set([...currentAccIds, accId]));
+                                              } else {
+                                                const allPlatIds = platInfo.accounts.map((a: any) => String(a.account_id || a.id || a._id));
+                                                const baseList = currentAccIds.length === 0 ? allPlatIds : currentAccIds;
+                                                updatedAccs = baseList.filter((id: string) => id !== accId);
+                                              }
+                                              setAutopilotSettings({
+                                                ...autopilotSettings,
+                                                target_account_ids: updatedAccs,
+                                              });
+                                            }}
+                                            className="rounded border-zinc-700 bg-zinc-800 text-violet-500 focus:ring-violet-500/30 h-3 w-3"
+                                          />
+                                          <span className="truncate">{acc.name || acc.username} {acc.username ? `(@${acc.username})` : ""}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-800/80">
+                        <div>
+                          <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
+                          <Input
+                            type="time"
+                            value={autopilotSettings?.run_time || "05:00"}
+                            onChange={(e) => {
+                              if (autopilotSettings) {
+                                setAutopilotSettings({ ...autopilotSettings, run_time: e.target.value });
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] text-zinc-400 block mb-1">Mode Jadwal Post</label>
+                          <Select
+                            value={autopilotSettings?.schedule_mode || "ai"}
+                            onChange={(e) => {
+                              if (autopilotSettings) {
+                                setAutopilotSettings({ ...autopilotSettings, schedule_mode: e.target.value });
+                              }
+                            }}
+                            options={[
+                              { value: "ai", label: "AI Same-Day Spread (Sebar berkala)" },
+                              { value: "instant", label: "Instant Post (Langsung tayang)" },
+                              { value: "custom", label: "Custom Schedule Time" },
+                            ]}
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] text-zinc-400 block">Target Qty Video Diposting</label>
+                            <span className="text-[10px] text-violet-400 font-semibold">
+                              {autopilotSettings?.post_clips_count ?? 5} Klip
+                            </span>
+                          </div>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={autopilotSettings?.post_clips_count ?? 5}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              if (autopilotSettings && !isNaN(val)) {
+                                setAutopilotSettings({
+                                  ...autopilotSettings,
+                                  post_clips_count: Math.max(1, Math.min(50, val)),
+                                });
+                              }
+                            }}
+                            placeholder="5"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-violet-950/20 border border-violet-500/20 flex items-start gap-2 text-[11px] text-zinc-400">
+                        <Sparkles className="h-4 w-4 text-violet-400 shrink-0 mt-0.5" />
+                        <span>
+                          <strong className="text-zinc-200">Smart Virality Filter:</strong> Jika video menghasilkan banyak klip (misal 10 video), sistem hanya akan memilih <strong className="text-violet-300">{autopilotSettings?.post_clips_count ?? 5} klip terbaik</strong> dengan potensi views dan likes tertinggi (berdasarkan skor analisis AI) untuk diposting ke media sosial.
+                        </span>
+                      </div>
+                    </Card>
+
+                    {/* Save Settings Action Bar */}
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 shadow-sm">
+                      <div className="flex items-center gap-2 text-xs text-zinc-400">
+                        <Check className="h-3.5 w-3.5 text-violet-400" />
+                        <span>Simpan seluruh konfigurasi Autopilot (niche, target akun, jadwal &amp; kuota).</span>
+                      </div>
+                      <Button
+                        onClick={handleSaveAutopilot}
+                        loading={isSavingAutopilot}
+                        icon={<Save className="h-3.5 w-3.5" />}
+                        size="sm"
+                        variant="primary"
+                      >
+                        Simpan Pengaturan Autopilot
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: History */}
+                  <div className="lg:col-span-5 space-y-4">
+                    {/* Recent Autopilot Runs */}
+                    <Card className="p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                          <Film className="h-3.5 w-3.5 text-zinc-400" />
+                          Riwayat Eksekusi Harian
+                        </span>
+                        <Button
+                          onClick={loadAutopilotData}
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[10px]"
+                          icon={<RefreshCw className="h-2.5 w-2.5" />}
+                        >
+                          Refresh
+                        </Button>
+                      </div>
+
+                      {autopilotHistory.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-zinc-500">
+                          Belum ada riwayat eksekusi Autopilot.
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                          {autopilotHistory.map((run: any) => (
+                            <div
+                              key={run.id}
+                              className="p-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 text-xs space-y-1"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-zinc-200 text-[11px] truncate max-w-[200px]" title={run.video_title}>
+                                  {run.video_title || "YouTube Video"}
+                                </span>
+                                <Badge variant={run.status === "completed" ? "success" : run.status === "submitted" ? "warning" : "error"} className="text-[9px]">
+                                  {run.status}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                                <span>Tanggal: {run.run_date}</span>
+                                <span className="text-violet-400 font-mono">Job #{run.job_id}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
+                  </div>
                 </div>
               </div>
             )}
@@ -3769,9 +3798,9 @@ export function Settings() {
         )}
 
         {tab === "hermes_video_gen" && (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {/* Header info banner */}
-            <div className="rounded-xl border border-cyan-500/30 bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-zinc-900/60 p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+            <div className="rounded-xl border border-cyan-500/30 bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-zinc-900/60 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shadow-lg">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-300">
                   <Video className="h-5 w-5" />
@@ -3805,368 +3834,421 @@ export function Settings() {
                 <p className="text-xs text-zinc-400">Memuat konfigurasi Hermes Video Generator Auto-Post...</p>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                {/* Left Column: Settings Form */}
-                <div className="lg:col-span-7 space-y-4">
-                  {/* Master Switch Card */}
-                  <Card className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "h-10 w-10 rounded-xl flex items-center justify-center transition-colors border",
-                          hermesVideogenSettings?.enabled
-                            ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400"
-                            : "bg-zinc-800/80 border-zinc-700 text-zinc-500"
-                        )}>
-                          <Zap className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-zinc-100">Aktifkan Hermes Video Generator Auto-Post</span>
-                            <Badge variant={hermesVideogenSettings?.enabled ? "success" : "default"}>
-                              {hermesVideogenSettings?.enabled ? "AKTIF" : "NONAKTIF"}
-                            </Badge>
+              <div className="space-y-5">
+                {/* 1. TOP ROW: Master Switch & Trending Discovery (Col-7) | Status Kuota & Manual Run (Col-5) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  <div className="lg:col-span-7 space-y-4">
+                    {/* Master Switch Card */}
+                    <Card className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "h-10 w-10 rounded-xl flex items-center justify-center transition-colors border",
+                            hermesVideogenSettings?.enabled
+                              ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400"
+                              : "bg-zinc-800/80 border-zinc-700 text-zinc-500"
+                          )}>
+                            <Zap className="h-5 w-5" />
                           </div>
-                          <p className="text-[11px] text-zinc-400 mt-0.5">
-                            {hermesVideogenSettings?.enabled
-                              ? `Berjalan otomatis setiap hari pada jam ${hermesVideogenSettings.run_time || "06:00"} WIB (${hermesVideogenSettings.daily_video_count || 3} video/hari)`
-                              : "Aktifkan untuk mulai mencari topik trending dan merender video harian otomatis."}
-                          </p>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-zinc-100">Aktifkan Hermes Video Generator Auto-Post</span>
+                              <Badge variant={hermesVideogenSettings?.enabled ? "success" : "default"}>
+                                {hermesVideogenSettings?.enabled ? "AKTIF" : "NONAKTIF"}
+                              </Badge>
+                            </div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5">
+                              {hermesVideogenSettings?.enabled
+                                ? `Berjalan otomatis setiap hari pada jam ${hermesVideogenSettings.run_time || "06:00"} WIB (${hermesVideogenSettings.daily_video_count || 3} video/hari)`
+                                : "Aktifkan untuk mulai mencari topik trending dan merender video harian otomatis."}
+                            </p>
+                          </div>
+                        </div>
+
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={hermesVideogenSettings?.enabled || false}
+                            onChange={(e) => {
+                              if (hermesVideogenSettings) {
+                                setHermesVideogenSettings({ ...hermesVideogenSettings, enabled: e.target.checked });
+                              }
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                        </label>
+                      </div>
+                    </Card>
+
+                    {/* Target Region & Daily Quota */}
+                    <Card className="p-4 space-y-3">
+                      <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Globe className="h-3.5 w-3.5 text-cyan-400" />
+                        Target Wilayah &amp; Kuota Video Harian
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[11px] text-zinc-400 block mb-1">Negara / Region Sumber Trending</label>
+                          <Select
+                            value={hermesVideogenSettings?.target_region || "ID"}
+                            onChange={(e) => {
+                              if (hermesVideogenSettings) {
+                                setHermesVideogenSettings({ ...hermesVideogenSettings, target_region: e.target.value });
+                              }
+                            }}
+                            options={[
+                              { value: "ID", label: "Indonesia (Top Trending Lokal)" },
+                              { value: "GLOBAL", label: "Worldwide / Global (Internasional)" },
+                              { value: "US", label: "United States" },
+                              { value: "MY", label: "Malaysia" },
+                              { value: "SG", label: "Singapore" },
+                              { value: "JP", label: "Japan" },
+                              { value: "GB", label: "United Kingdom" },
+                            ]}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] text-zinc-400 block mb-1">Jumlah Video per Hari (3 - 5)</label>
+                          <Select
+                            value={String(hermesVideogenSettings?.daily_video_count || 3)}
+                            onChange={(e) => {
+                              if (hermesVideogenSettings) {
+                                setHermesVideogenSettings({
+                                  ...hermesVideogenSettings,
+                                  daily_video_count: parseInt(e.target.value) || 3,
+                                });
+                              }
+                            }}
+                            options={[
+                              { value: "3", label: "3 Video / Hari (Rekomendasi Default)" },
+                              { value: "4", label: "4 Video / Hari" },
+                              { value: "5", label: "5 Video / Hari (Maksimal)" },
+                            ]}
+                          />
                         </div>
                       </div>
 
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={hermesVideogenSettings?.enabled || false}
+                      <div>
+                        <label className="text-[11px] text-zinc-400 block mb-1">Niche / Topik Khusus (Opsional)</label>
+                        <Input
+                          placeholder="Contoh: Teknologi, Fakta Unik, AI, Bisnis, Kesehatan (kosongkan untuk general trending)"
+                          value={hermesVideogenSettings?.niche_focus || ""}
                           onChange={(e) => {
                             if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, enabled: e.target.checked });
+                              setHermesVideogenSettings({ ...hermesVideogenSettings, niche_focus: e.target.value });
                             }
                           }}
-                          className="sr-only peer"
                         />
-                        <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
-                      </label>
-                    </div>
-                  </Card>
+                      </div>
+                    </Card>
 
-                  {/* Target Region & Daily Quota */}
-                  <Card className="p-4 space-y-3">
+                    {/* Multi-source Signals */}
+                    <Card className="p-4 space-y-3">
+                      <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Activity className="h-3.5 w-3.5 text-cyan-400" />
+                        Multi-Source Sinyal Trending (Kombinasi Platform)
+                      </h3>
+                      <p className="text-[11px] text-zinc-400">
+                        Hermes mengumpulkan trending topic dari berbagai platform teratas untuk memastikan topik relevan dan viral:
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {[
+                          { id: "google", label: "Google Trends / Pytrends", desc: "Volume pencarian real-time" },
+                          { id: "youtube", label: "YouTube Data API v3", desc: "Grafik video viral & mostPopular" },
+                          { id: "tiktok", label: "TikTok Trending Search", desc: "Topik ramai di FYP TikTok" },
+                          { id: "gemini", label: "Gemini AI Synthesis", desc: "Kurasi sudut pandang & hook viral" },
+                        ].map((src) => {
+                          const currentSources = (hermesVideogenSettings?.trending_sources || "google,youtube,tiktok,gemini").split(",").map(s => s.trim().toLowerCase());
+                          const isChecked = currentSources.includes(src.id);
+
+                          return (
+                            <label
+                              key={src.id}
+                              className={cn(
+                                "flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all",
+                                isChecked
+                                  ? "bg-cyan-500/10 border-cyan-500/30 text-zinc-100"
+                                  : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (!hermesVideogenSettings) return;
+                                  let updated: string[];
+                                  if (e.target.checked) {
+                                    updated = Array.from(new Set([...currentSources, src.id]));
+                                  } else {
+                                    updated = currentSources.filter(s => s !== src.id);
+                                  }
+                                  if (updated.length === 0) updated = ["google"];
+                                  setHermesVideogenSettings({
+                                    ...hermesVideogenSettings,
+                                    trending_sources: updated.join(","),
+                                  });
+                                }}
+                                className="mt-0.5 rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-3.5 w-3.5"
+                              />
+                              <div>
+                                <div className="text-xs font-semibold">{src.label}</div>
+                                <div className="text-[10px] text-zinc-400">{src.desc}</div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </Card>
+                  </div>
+
+                  <div className="lg:col-span-5 space-y-4">
+                    {/* Execution Control Card */}
+                    <Card className="p-4 border-cyan-500/20 bg-gradient-to-b from-cyan-950/20 to-zinc-900/60 space-y-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                          <Play className="h-3.5 w-3.5 text-cyan-400" />
+                          Status Eksekusi &amp; Manual Trigger
+                        </span>
+                        <Badge variant={hermesVideogenCanRun ? "success" : "default"}>
+                          {hermesVideogenQuota ? `${hermesVideogenQuota.today_created || 0}/${hermesVideogenQuota.daily_target || 3} Video` : "Kuota: 3-5 Video"}
+                        </Badge>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-400">Target Harian:</span>
+                          <span className="font-semibold text-zinc-200">{hermesVideogenSettings?.daily_video_count || 3} Video / Hari</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-400">Video Dibuat Hari Ini:</span>
+                          <span className="font-semibold text-cyan-400">{hermesVideogenQuota?.today_created || 0} Video</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-400">Sisa Kuota Hari Ini:</span>
+                          <span className="font-semibold text-emerald-400">{hermesVideogenQuota?.remaining ?? (hermesVideogenSettings?.daily_video_count || 3)} Video</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-400">Terakhir Dijalankan:</span>
+                          <span className="font-mono text-[10px] text-zinc-400">{hermesVideogenSettings?.last_run_at || "Belum pernah"}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-1">
+                        <Button
+                          onClick={() => handleTriggerHermesVideoGen(false)}
+                          loading={isRunningHermesVideogen}
+                          disabled={!hermesVideogenCanRun}
+                          className="w-full"
+                          variant="primary"
+                          icon={<Play className="h-4 w-4" />}
+                        >
+                          {hermesVideogenCanRun
+                            ? `Jalankan Sekarang (${hermesVideogenQuota?.remaining ?? (hermesVideogenSettings?.daily_video_count || 3)} Video)`
+                            : "Kuota Hari Ini Sudah Terpenuhi"}
+                        </Button>
+
+                        {!hermesVideogenCanRun && (
+                          <Button
+                            onClick={() => handleTriggerHermesVideoGen(true)}
+                            loading={isRunningHermesVideogen}
+                            className="w-full text-xs text-zinc-400 hover:text-zinc-200"
+                            variant="ghost"
+                            size="sm"
+                          >
+                            Paksa Jalankan Ulang (Force Run)
+                          </Button>
+                        )}
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+
+                {/* 2. DEDICATED FULL-WIDTH SECTION: Preset Style Visual & Interactive 9:16 Preview (Hook, Subtitle, CTA) */}
+                <Card className="p-4 sm:p-5">
+                  <ErrorBoundary fallbackTitle="Pratinjau Preset Hermes Video Generator">
+                    <AutopilotPresetPreview
+                      selectedSlug={hermesVideogenSettings?.preset_slug || "default"}
+                      onSelectSlug={async (slug) => {
+                        if (hermesVideogenSettings) {
+                          const chosenPreset = hermesVideogenPresets.find(p => p.slug === slug || p.name === slug);
+                          const updated: any = {
+                            ...hermesVideogenSettings,
+                            preset_slug: slug,
+                          };
+                          if (chosenPreset) {
+                            if (chosenPreset.target_aspect_ratio) {
+                              updated.aspect_ratio = chosenPreset.target_aspect_ratio;
+                            }
+                            if (chosenPreset.watermark_style) {
+                              updated.watermark_enabled = Boolean(chosenPreset.watermark_style.enabled);
+                              if (chosenPreset.watermark_style.text) {
+                                updated.watermark_text = chosenPreset.watermark_style.text;
+                              }
+                            }
+                            if (chosenPreset.cta_style) {
+                              updated.cta_enabled = Boolean(chosenPreset.cta_style.enabled);
+                              if (chosenPreset.cta_style.headline) {
+                                updated.cta_headline = chosenPreset.cta_style.headline;
+                              }
+                              if (chosenPreset.cta_style.buttonText) {
+                                updated.cta_button_text = chosenPreset.cta_style.buttonText;
+                              }
+                            }
+                          }
+                          setHermesVideogenSettings(updated);
+                          try {
+                            const res = await hermesVideoGenApi.updateSettings(updated);
+                            if (res && res.data) {
+                              setHermesVideogenSettings(res.data);
+                            }
+                            toast.success(`Preset '${chosenPreset?.name || slug}' aktif & tersimpan untuk Hermes Video Generator!`);
+                          } catch (e: any) {
+                            console.warn("Auto-save hermes videogen preset failed:", e);
+                            toast.info(`Preset '${chosenPreset?.name || slug}' dipilih. Klik 'Simpan Pengaturan Hermes' untuk menyimpan.`);
+                          }
+                        }
+                      }}
+                      presets={hermesVideogenPresets}
+                      onOpenEditor={handleOpenStyleEditor}
+                      accentColor="cyan"
+                      title="2. Preset Style Visual & Live Preview (Hook, Subtitle, CTA)"
+                      subTitle="Pilih Style Preset di sebelah kiri untuk melihat visual Hook, Subtitle, dan CTA secara interaktif di layar 9:16 sebelah kanan. Format dan rasio otomatis disinkronkan."
+                    />
+                  </ErrorBoundary>
+                </Card>
+
+                {/* 3. FULL-WIDTH PIPELINE OVERRIDES & BRANDING */}
+                <Card className="p-4 sm:p-5 space-y-4">
+                  <div className="flex items-center justify-between">
                     <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                      <Globe className="h-3.5 w-3.5 text-cyan-400" />
-                      Target Wilayah &amp; Kuota Video Harian
+                      <Sparkles className="h-4 w-4 text-cyan-400" />
+                      3. Elemen Video Pipeline &amp; Pengaturan Tambahan
                     </h3>
+                    <span className="text-[11px] text-zinc-400">
+                      Preset aktif: <strong className="text-cyan-300">{hermesVideogenPresets.find(p => p.slug === hermesVideogenSettings?.preset_slug || p.name === hermesVideogenSettings?.preset_slug)?.name || hermesVideogenSettings?.preset_slug || "Default"}</strong>
+                    </span>
+                  </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[11px] text-zinc-400 block mb-1">Negara / Region Sumber Trending</label>
-                        <Select
-                          value={hermesVideogenSettings?.target_region || "ID"}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, target_region: e.target.value });
-                            }
-                          }}
-                          options={[
-                            { value: "ID", label: "Indonesia (Top Trending Lokal)" },
-                            { value: "GLOBAL", label: "Worldwide / Global (Internasional)" },
-                            { value: "US", label: "United States" },
-                            { value: "MY", label: "Malaysia" },
-                            { value: "SG", label: "Singapore" },
-                            { value: "JP", label: "Japan" },
-                            { value: "GB", label: "United Kingdom" },
-                          ]}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[11px] text-zinc-400 block mb-1">Jumlah Video per Hari (3 - 5)</label>
-                        <Select
-                          value={String(hermesVideogenSettings?.daily_video_count || 3)}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({
-                                ...hermesVideogenSettings,
-                                daily_video_count: parseInt(e.target.value) || 3,
-                              });
-                            }
-                          }}
-                          options={[
-                            { value: "3", label: "3 Video / Hari (Rekomendasi Default)" },
-                            { value: "4", label: "4 Video / Hari" },
-                            { value: "5", label: "5 Video / Hari (Maksimal)" },
-                          ]}
-                        />
-                      </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[11px] text-zinc-400 block mb-1">Aspek Rasio Output</label>
+                      <Select
+                        value={hermesVideogenSettings?.aspect_ratio || "9:16"}
+                        onChange={(e) => {
+                          if (hermesVideogenSettings) {
+                            setHermesVideogenSettings({ ...hermesVideogenSettings, aspect_ratio: e.target.value });
+                          }
+                        }}
+                        options={[
+                          { value: "9:16", label: "9:16 (Vertical Shorts / TikTok / Reels)" },
+                          { value: "16:9", label: "16:9 (Horizontal YouTube Standar)" },
+                          { value: "1:1", label: "1:1 (Square Feed Instagram)" },
+                        ]}
+                      />
                     </div>
 
                     <div>
-                      <label className="text-[11px] text-zinc-400 block mb-1">Niche / Topik Khusus (Opsional)</label>
-                      <Input
-                        placeholder="Contoh: Teknologi, Fakta Unik, AI, Bisnis, Kesehatan (kosongkan untuk general trending)"
-                        value={hermesVideogenSettings?.niche_focus || ""}
+                      <label className="text-[11px] text-zinc-400 block mb-1">Gaya Transisi Antar Scene</label>
+                      <Select
+                        value={hermesVideogenSettings?.transition_style || "dissolve"}
                         onChange={(e) => {
                           if (hermesVideogenSettings) {
-                            setHermesVideogenSettings({ ...hermesVideogenSettings, niche_focus: e.target.value });
+                            setHermesVideogenSettings({ ...hermesVideogenSettings, transition_style: e.target.value });
                           }
                         }}
+                        options={[
+                          { value: "dissolve", label: "Cross Dissolve (Halus)" },
+                          { value: "fade", label: "Fade to Black" },
+                          { value: "slideleft", label: "Slide Left (Dinamis)" },
+                          { value: "zoom", label: "Zoom In (Viral Style)" },
+                          { value: "pixelize", label: "Pixelate Effect" },
+                          { value: "none", label: "Direct Cut (Tanpa transisi)" },
+                        ]}
                       />
                     </div>
-                  </Card>
+                  </div>
 
-                  {/* Multi-source Signals */}
-                  <Card className="p-4 space-y-3">
-                    <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                      <Activity className="h-3.5 w-3.5 text-cyan-400" />
-                      Multi-Source Sinyal Trending (Tanpa Terpaku 1 Sumber)
-                    </h3>
-                    <p className="text-[11px] text-zinc-400">
-                      Hermes mengumpulkan trending topic dari berbagai platform teratas untuk memastikan topik benar-benar sedang ramai:
-                    </p>
+                  {/* Checkbox grid for features */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                    <label className="flex items-center gap-2 p-2.5 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={hermesVideogenSettings?.hook_enabled ?? true}
+                        onChange={(e) => {
+                          if (hermesVideogenSettings) {
+                            setHermesVideogenSettings({ ...hermesVideogenSettings, hook_enabled: e.target.checked });
+                          }
+                        }}
+                        className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                      />
+                      <span className="inline-flex items-center gap-1.5">
+                        <Zap className="h-3.5 w-3.5 text-amber-400" />
+                        Hook Visual
+                      </span>
+                    </label>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[
-                        { id: "google", label: "Google Trends / Pytrends", desc: "Volume pencarian real-time" },
-                        { id: "youtube", label: "YouTube Data API v3", desc: "Grafik video viral & mostPopular" },
-                        { id: "tiktok", label: "TikTok Trending Search", desc: "Topik ramai di FYP TikTok" },
-                        { id: "gemini", label: "Gemini AI Synthesis", desc: "Kurasi sudut pandang & hook viral" },
-                      ].map((src) => {
-                        const currentSources = (hermesVideogenSettings?.trending_sources || "google,youtube,tiktok,gemini").split(",").map(s => s.trim().toLowerCase());
-                        const isChecked = currentSources.includes(src.id);
+                    <label className="flex items-center gap-2 p-2.5 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={hermesVideogenSettings?.subtitles_enabled ?? true}
+                        onChange={(e) => {
+                          if (hermesVideogenSettings) {
+                            setHermesVideogenSettings({ ...hermesVideogenSettings, subtitles_enabled: e.target.checked });
+                          }
+                        }}
+                        className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                      />
+                      <span className="inline-flex items-center gap-1.5">
+                        <MessageSquare className="h-3.5 w-3.5 text-blue-400" />
+                        Subtitle AI
+                      </span>
+                    </label>
 
-                        return (
-                          <label
-                            key={src.id}
-                            className={cn(
-                              "flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all",
-                              isChecked
-                                ? "bg-cyan-500/10 border-cyan-500/30 text-zinc-100"
-                                : "bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                            )}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                if (!hermesVideogenSettings) return;
-                                let updated: string[];
-                                if (e.target.checked) {
-                                  updated = Array.from(new Set([...currentSources, src.id]));
-                                } else {
-                                  updated = currentSources.filter(s => s !== src.id);
-                                }
-                                if (updated.length === 0) updated = ["google"]; // at least one
-                                setHermesVideogenSettings({
-                                  ...hermesVideogenSettings,
-                                  trending_sources: updated.join(","),
-                                });
-                              }}
-                              className="mt-0.5 rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-3.5 w-3.5"
-                            />
-                            <div>
-                              <div className="text-xs font-semibold">{src.label}</div>
-                              <div className="text-[10px] text-zinc-400">{src.desc}</div>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </Card>
+                    <label className="flex items-center gap-2 p-2.5 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={hermesVideogenSettings?.ai_text_enabled ?? true}
+                        onChange={(e) => {
+                          if (hermesVideogenSettings) {
+                            setHermesVideogenSettings({ ...hermesVideogenSettings, ai_text_enabled: e.target.checked });
+                          }
+                        }}
+                        className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                      />
+                      <span className="inline-flex items-center gap-1.5">
+                        <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+                        AI Text Overlay
+                      </span>
+                    </label>
 
-                  {/* Brand & Video Pipeline Elements */}
-                  <Card className="p-4 space-y-3">
-                    <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                      <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
-                      Elemen Video Lengkap (Hook, Subtitle, AI Text, Thumbnail, Watermark, Transition, CTA)
-                    </h3>
+                    <label className="flex items-center gap-2 p-2.5 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={hermesVideogenSettings?.thumbnail_enabled ?? true}
+                        onChange={(e) => {
+                          if (hermesVideogenSettings) {
+                            setHermesVideogenSettings({ ...hermesVideogenSettings, thumbnail_enabled: e.target.checked });
+                          }
+                        }}
+                        className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
+                      />
+                      <span className="inline-flex items-center gap-1.5">
+                        <ImageIcon className="h-3.5 w-3.5 text-emerald-400" />
+                        Auto Thumbnail
+                      </span>
+                    </label>
+                  </div>
 
-                    {/* Style Preset Selector (Existing Presets) */}
-                    <div className="p-3 rounded-lg bg-cyan-950/20 border border-cyan-500/30 space-y-2">
+                  {/* Watermark & CTA Configurations in 2 columns */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-zinc-800/80">
+                    {/* Watermark Config */}
+                    <div className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/30 space-y-2.5">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5">
-                          <Palette className="h-3.5 w-3.5 text-cyan-400" />
-                          Template Style Preset (Existing)
-                        </label>
-                        <span className="text-[10px] text-zinc-400">
-                          {hermesVideogenPresets.length} Preset Tersedia
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400">
-                        Pilih Style Preset yang sudah ada agar elemen desain (Font subtitle, hook visual, watermark, CTA outro, &amp; rasio) otomatis diambil dari template tersebut tanpa perlu setting ulang manual:
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                        <Select
-                          value={hermesVideogenSettings?.preset_slug || "default"}
-                          onChange={(e) => {
-                            const chosenSlug = e.target.value;
-                            if (!hermesVideogenSettings) return;
-                            const chosenPreset = hermesVideogenPresets.find(p => p.slug === chosenSlug || p.name === chosenSlug);
-
-                            const newSettings: any = {
-                              ...hermesVideogenSettings,
-                              preset_slug: chosenSlug,
-                            };
-
-                            // Auto-sync watermark, CTA, and aspect ratio from existing preset
-                            if (chosenPreset) {
-                              if (chosenPreset.target_aspect_ratio) {
-                                newSettings.aspect_ratio = chosenPreset.target_aspect_ratio;
-                              }
-                              if (chosenPreset.watermark_style) {
-                                newSettings.watermark_enabled = Boolean(chosenPreset.watermark_style.enabled);
-                                if (chosenPreset.watermark_style.text) {
-                                  newSettings.watermark_text = chosenPreset.watermark_style.text;
-                                }
-                              }
-                              if (chosenPreset.cta_style) {
-                                newSettings.cta_enabled = Boolean(chosenPreset.cta_style.enabled);
-                                if (chosenPreset.cta_style.headline) {
-                                  newSettings.cta_headline = chosenPreset.cta_style.headline;
-                                }
-                                if (chosenPreset.cta_style.buttonText) {
-                                  newSettings.cta_button_text = chosenPreset.cta_style.buttonText;
-                                }
-                              }
-                            }
-
-                            setHermesVideogenSettings(newSettings);
-                            if (chosenPreset) {
-                              toast.success(`Konfigurasi otomatis disinkronkan dari preset "${chosenPreset.name}"!`);
-                            }
-                          }}
-                          options={[
-                            { value: "default", label: "Default System (Preset Standar)" },
-                            ...hermesVideogenPresets.map((p) => ({
-                              value: p.slug || p.name,
-                              label: `${p.name} (${p.target_aspect_ratio || "9:16"})`,
-                            })),
-                          ]}
-                        />
-
-                        {hermesVideogenSettings?.preset_slug && hermesVideogenSettings.preset_slug !== "default" && (
-                          <div className="text-[11px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
-                            <span>Preset aktif: <strong>{hermesVideogenPresets.find(p => p.slug === hermesVideogenSettings.preset_slug || p.name === hermesVideogenSettings.preset_slug)?.name || hermesVideogenSettings.preset_slug}</strong></span>
-                            <span className="text-[10px] text-zinc-400">Sinkron otomatis</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[11px] text-zinc-400 block mb-1">Aspek Rasio Output</label>
-                        <Select
-                          value={hermesVideogenSettings?.aspect_ratio || "9:16"}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, aspect_ratio: e.target.value });
-                            }
-                          }}
-                          options={[
-                            { value: "9:16", label: "9:16 (Vertical Shorts / TikTok / Reels)" },
-                            { value: "16:9", label: "16:9 (Horizontal YouTube Standar)" },
-                            { value: "1:1", label: "1:1 (Square Feed Instagram)" },
-                          ]}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[11px] text-zinc-400 block mb-1">Gaya Transisi Antar Scene</label>
-                        <Select
-                          value={hermesVideogenSettings?.transition_style || "dissolve"}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, transition_style: e.target.value });
-                            }
-                          }}
-                          options={[
-                            { value: "dissolve", label: "Cross Dissolve (Halus)" },
-                            { value: "fade", label: "Fade to Black" },
-                            { value: "slideleft", label: "Slide Left (Dinamis)" },
-                            { value: "zoom", label: "Zoom In (Viral Style)" },
-                            { value: "pixelize", label: "Pixelate Effect" },
-                            { value: "none", label: "Direct Cut (Tanpa transisi)" },
-                          ]}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Checkbox grid for features */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                      <label className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={hermesVideogenSettings?.hook_enabled ?? true}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, hook_enabled: e.target.checked });
-                            }
-                          }}
-                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
-                        />
-                        <span className="inline-flex items-center gap-1.5">
-                          <Zap className="h-3.5 w-3.5 text-amber-400" />
-                          Hook Visual
-                        </span>
-                      </label>
-
-                      <label className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={hermesVideogenSettings?.subtitles_enabled ?? true}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, subtitles_enabled: e.target.checked });
-                            }
-                          }}
-                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
-                        />
-                        <span className="inline-flex items-center gap-1.5">
-                          <MessageSquare className="h-3.5 w-3.5 text-blue-400" />
-                          Subtitle AI
-                        </span>
-                      </label>
-
-                      <label className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={hermesVideogenSettings?.ai_text_enabled ?? true}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, ai_text_enabled: e.target.checked });
-                            }
-                          }}
-                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
-                        />
-                        <span className="inline-flex items-center gap-1.5">
-                          <Sparkles className="h-3.5 w-3.5 text-purple-400" />
-                          AI Text Overlay
-                        </span>
-                      </label>
-
-                      <label className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-300 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={hermesVideogenSettings?.thumbnail_enabled ?? true}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, thumbnail_enabled: e.target.checked });
-                            }
-                          }}
-                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
-                        />
-                        <span className="inline-flex items-center gap-1.5">
-                          <ImageIcon className="h-3.5 w-3.5 text-emerald-400" />
-                          Auto Thumbnail
-                        </span>
-                      </label>
-                    </div>
-
-                    {/* Watermark Config Row */}
-                    <div className="pt-2 border-t border-zinc-800/80 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-2 text-xs font-medium text-zinc-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-xs font-semibold text-zinc-200 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={hermesVideogenSettings?.watermark_enabled ?? false}
@@ -4177,12 +4259,15 @@ export function Settings() {
                             }}
                             className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
                           />
-                          <span>Terapkan Watermark Branding</span>
+                          <span>Watermark Branding</span>
                         </label>
+                        <Badge variant={hermesVideogenSettings?.watermark_enabled ? "success" : "default"} className="text-[9px]">
+                          {hermesVideogenSettings?.watermark_enabled ? "AKTIF" : "OFF"}
+                        </Badge>
                       </div>
 
                       {hermesVideogenSettings?.watermark_enabled && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="space-y-2 pt-1">
                           <Input
                             placeholder="Teks Watermark (contoh: @cliperhub atau Channel Anda)"
                             value={hermesVideogenSettings?.watermark_text || ""}
@@ -4192,17 +4277,17 @@ export function Settings() {
                               }
                             }}
                           />
-                          <p className="text-[10px] text-zinc-400 self-center">
+                          <p className="text-[10px] text-zinc-400">
                             Posisi: Kanan Atas (Top-Right) dengan opacity 80% &amp; shadow tipis.
                           </p>
                         </div>
                       )}
                     </div>
 
-                    {/* CTA Outro Config Row */}
-                    <div className="pt-2 border-t border-zinc-800/80 space-y-2">
+                    {/* CTA Outro Config */}
+                    <div className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/30 space-y-2.5">
                       <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-2 text-xs font-medium text-zinc-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-xs font-semibold text-zinc-200 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={hermesVideogenSettings?.cta_enabled ?? true}
@@ -4213,12 +4298,15 @@ export function Settings() {
                             }}
                             className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 h-3.5 w-3.5"
                           />
-                          <span>Terapkan Outro Call-To-Action (CTA) di Akhir Video</span>
+                          <span>Outro Call-To-Action (CTA)</span>
                         </label>
+                        <Badge variant={hermesVideogenSettings?.cta_enabled ? "success" : "default"} className="text-[9px]">
+                          {hermesVideogenSettings?.cta_enabled ? "AKTIF" : "OFF"}
+                        </Badge>
                       </div>
 
                       {hermesVideogenSettings?.cta_enabled && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                           <div>
                             <label className="text-[10px] text-zinc-400 block mb-0.5">Headline Ajakan (CTA)</label>
                             <Input
@@ -4250,326 +4338,276 @@ export function Settings() {
                         </div>
                       )}
                     </div>
-                  </Card>
+                  </div>
+                </Card>
 
-                  {/* Social Auto-Post & Schedule Settings */}
-                  <Card className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                        <Send className="h-3.5 w-3.5 text-cyan-400" />
-                        Target Akun Media Sosial &amp; Auto-Post
-                      </h3>
-                      <Link
-                        to="/social"
-                        className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 hover:underline"
-                      >
-                        <span>Kelola Akun Sosial</span>
-                        <ExternalLink className="h-3 w-3" />
-                      </Link>
-                    </div>
+                {/* 4. BOTTOM ROW: Target Social Accounts (Col-7) | Riwayat Video Trending (Col-5) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  <div className="lg:col-span-7 space-y-4">
+                    {/* Social Auto-Post & Schedule Settings */}
+                    <Card className="p-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Send className="h-4 w-4 text-cyan-400" />
+                          <h3 className="text-xs font-semibold text-zinc-200">4. Target Akun Media Sosial &amp; Auto-Post</h3>
+                        </div>
+                        <Link
+                          to="/social"
+                          className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 hover:underline"
+                        >
+                          <span>Kelola Akun Sosial</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      </div>
 
-                    <p className="text-[11px] text-zinc-400">
-                      Pilih platform media sosial untuk otomatis memposting video trending yang telah selesai diproses. Jika satu platform memiliki beberapa akun terhubung (misalnya 2 akun TikTok), Anda dapat mencentang akun spesifik yang ingin diposting:
-                    </p>
+                      <p className="text-[11px] text-zinc-400">
+                        Pilih platform media sosial untuk otomatis memposting video trending yang telah selesai diproses. Anda dapat mencentang akun spesifik yang ingin diposting jika memiliki lebih dari 1 akun:
+                      </p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                      {[
-                        { id: "tiktok", name: "TikTok", icon: Film },
-                        { id: "instagram", name: "Instagram Reels", icon: Camera },
-                        { id: "youtube", name: "YouTube Shorts", icon: Play },
-                        { id: "facebook", name: "Facebook", icon: Share2 },
-                      ].map((plat) => {
-                        const platInfo = getHermesVideogenPlatInfo(plat.id);
-                        const isConnected = platInfo.connected;
-                        const currentPlats = (hermesVideogenSettings?.target_platforms || "tiktok,instagram,youtube").toLowerCase().split(",").map(p => p.trim());
-                        const isChecked = isConnected && currentPlats.includes(plat.id);
-                        const IconComp = plat.icon;
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                        {[
+                          { id: "tiktok", name: "TikTok", icon: Film },
+                          { id: "instagram", name: "Instagram Reels", icon: Camera },
+                          { id: "youtube", name: "YouTube Shorts", icon: Play },
+                          { id: "facebook", name: "Facebook", icon: Share2 },
+                        ].map((plat) => {
+                          const platInfo = getHermesVideogenPlatInfo(plat.id);
+                          const isConnected = platInfo.connected;
+                          const currentPlats = (hermesVideogenSettings?.target_platforms || "tiktok,instagram,youtube").toLowerCase().split(",").map(p => p.trim());
+                          const isChecked = isConnected && currentPlats.includes(plat.id);
+                          const IconComp = plat.icon;
 
-                        return (
-                          <div
-                            key={plat.id}
-                            className={cn(
-                              "p-3 rounded-xl border text-xs transition-all flex flex-col justify-between min-w-0",
-                              !isConnected
-                                ? "bg-zinc-950/40 border-zinc-800/60 opacity-65"
-                                : isChecked
-                                ? "bg-cyan-950/30 border-cyan-500/50 text-cyan-200 shadow-sm shadow-cyan-950/20"
-                                : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/80"
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-2 min-w-0">
-                              <label className={cn(
-                                "flex items-center gap-2 select-none min-w-0",
-                                isConnected ? "cursor-pointer" : "cursor-not-allowed"
-                              )}>
-                                <input
-                                  type="checkbox"
-                                  disabled={!isConnected}
-                                  checked={isChecked}
-                                  onChange={(e) => {
-                                    if (!hermesVideogenSettings || !isConnected) return;
-                                    let updated: string[];
-                                    if (e.target.checked) {
-                                      updated = Array.from(new Set([...currentPlats, plat.id]));
-                                    } else {
-                                      updated = currentPlats.filter(p => p !== plat.id);
-                                    }
-                                    setHermesVideogenSettings({
-                                      ...hermesVideogenSettings,
-                                      target_platforms: updated.filter(Boolean).join(","),
-                                    });
-                                  }}
-                                  className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-4 w-4 shrink-0 disabled:opacity-40"
-                                />
-                                <div className={cn(
-                                  "w-6 h-6 rounded-md flex items-center justify-center shrink-0",
-                                  isChecked ? "bg-cyan-500/20 text-cyan-300" : isConnected ? "bg-zinc-800 text-zinc-400" : "bg-zinc-900 text-zinc-600"
+                          return (
+                            <div
+                              key={plat.id}
+                              className={cn(
+                                "p-3 rounded-xl border text-xs transition-all flex flex-col justify-between min-w-0",
+                                !isConnected
+                                  ? "bg-zinc-950/40 border-zinc-800/60 opacity-65 cursor-not-allowed"
+                                  : isChecked
+                                  ? "bg-cyan-950/30 border-cyan-500/50 text-cyan-200 shadow-sm shadow-cyan-950/20"
+                                  : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/80"
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2 min-w-0">
+                                <label className={cn(
+                                  "flex items-center gap-2 select-none min-w-0",
+                                  isConnected ? "cursor-pointer" : "cursor-not-allowed"
                                 )}>
-                                  <IconComp className="h-3.5 w-3.5" />
+                                  <input
+                                    type="checkbox"
+                                    disabled={!isConnected}
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      if (!hermesVideogenSettings || !isConnected) return;
+                                      let updated: string[];
+                                      if (e.target.checked) {
+                                        updated = Array.from(new Set([...currentPlats, plat.id]));
+                                      } else {
+                                        updated = currentPlats.filter(p => p !== plat.id);
+                                      }
+                                      setHermesVideogenSettings({
+                                        ...hermesVideogenSettings,
+                                        target_platforms: updated.filter(Boolean).join(","),
+                                      });
+                                    }}
+                                    className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-4 w-4 shrink-0 disabled:opacity-40"
+                                  />
+                                  <div className={cn(
+                                    "w-6 h-6 rounded-md flex items-center justify-center shrink-0",
+                                    isChecked ? "bg-cyan-500/20 text-cyan-300" : isConnected ? "bg-zinc-800 text-zinc-400" : "bg-zinc-900 text-zinc-600"
+                                  )}>
+                                    <IconComp className="h-3.5 w-3.5" />
+                                  </div>
+                                  <span className={cn(
+                                    "font-medium text-xs truncate",
+                                    !isConnected ? "text-zinc-500" : isChecked ? "text-cyan-100 font-semibold" : "text-zinc-300"
+                                  )}>
+                                    {plat.name}
+                                  </span>
+                                </label>
+
+                                {isConnected ? (
+                                  <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium shrink-0 whitespace-nowrap">
+                                    {platInfo.count} Akun
+                                  </span>
+                                ) : (
+                                  <Link
+                                    to="/social"
+                                    className="inline-flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 shrink-0 whitespace-nowrap hover:bg-amber-500/20 transition-colors"
+                                  >
+                                    <span>Belum Terhubung</span>
+                                    <ExternalLink className="h-2.5 w-2.5" />
+                                  </Link>
+                                )}
+                              </div>
+
+                              {/* Multi-Account Selector when platform has accounts & is checked */}
+                              {isConnected && isChecked && platInfo.accounts.length > 0 && (
+                                <div className="mt-2.5 pt-2 border-t border-cyan-500/20 space-y-1.5 pl-6">
+                                  <span className="text-[10px] text-cyan-400/80 font-medium block">Pilih Akun {plat.name}:</span>
+                                  <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                                    {platInfo.accounts.map((acc: any) => {
+                                      const accId = String(acc.account_id || acc.id || acc._id);
+                                      const currentAccIds = Array.isArray(hermesVideogenSettings?.target_account_ids)
+                                        ? hermesVideogenSettings.target_account_ids
+                                        : [];
+                                      const isAccSelected = currentAccIds.length === 0 || currentAccIds.includes(accId);
+
+                                      return (
+                                        <label key={accId} className="flex items-center gap-2 text-[10px] text-zinc-300 hover:text-zinc-100 cursor-pointer select-none">
+                                          <input
+                                            type="checkbox"
+                                            checked={isAccSelected}
+                                            onChange={(e) => {
+                                              if (!hermesVideogenSettings) return;
+                                              let updatedAccs: string[];
+                                              if (e.target.checked) {
+                                                updatedAccs = currentAccIds.length === 0
+                                                  ? [accId]
+                                                  : Array.from(new Set([...currentAccIds, accId]));
+                                              } else {
+                                                const allPlatIds = platInfo.accounts.map((a: any) => String(a.account_id || a.id || a._id));
+                                                const baseList = currentAccIds.length === 0 ? allPlatIds : currentAccIds;
+                                                updatedAccs = baseList.filter((id: string) => id !== accId);
+                                              }
+                                              setHermesVideogenSettings({
+                                                ...hermesVideogenSettings,
+                                                target_account_ids: updatedAccs,
+                                              });
+                                            }}
+                                            className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-3 w-3 shrink-0"
+                                          />
+                                          <span className="truncate">{acc.name || acc.username} {acc.username ? `(@${acc.username})` : ""}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                                <span className={cn(
-                                  "font-medium text-xs truncate",
-                                  !isConnected ? "text-zinc-500" : isChecked ? "text-cyan-100 font-semibold" : "text-zinc-300"
-                                )}>
-                                  {plat.name}
-                                </span>
-                              </label>
-
-                              {isConnected ? (
-                                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium shrink-0 whitespace-nowrap">
-                                  {platInfo.count} Akun
-                                </span>
-                              ) : (
-                                <Link
-                                  to="/social"
-                                  className="inline-flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 shrink-0 whitespace-nowrap hover:bg-amber-500/20 transition-colors"
-                                >
-                                  <span>Belum Terhubung</span>
-                                  <ExternalLink className="h-2.5 w-2.5" />
-                                </Link>
                               )}
                             </div>
-
-                            {/* Multi-Account Selector when platform has accounts & is checked */}
-                            {isConnected && isChecked && platInfo.accounts.length > 0 && (
-                              <div className="mt-2.5 pt-2 border-t border-cyan-500/20 space-y-1.5 pl-6">
-                                <span className="text-[10px] text-cyan-400/80 font-medium block">Pilih Akun {plat.name}:</span>
-                                <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
-                                  {platInfo.accounts.map((acc: any) => {
-                                    const accId = String(acc.account_id || acc.id || acc._id);
-                                    const currentAccIds = Array.isArray(hermesVideogenSettings?.target_account_ids)
-                                      ? hermesVideogenSettings.target_account_ids
-                                      : [];
-                                    const isAccSelected = currentAccIds.length === 0 || currentAccIds.includes(accId);
-
-                                    return (
-                                      <label key={accId} className="flex items-center gap-2 text-[10px] text-zinc-300 hover:text-zinc-100 cursor-pointer select-none">
-                                        <input
-                                          type="checkbox"
-                                          checked={isAccSelected}
-                                          onChange={(e) => {
-                                            if (!hermesVideogenSettings) return;
-                                            let updatedAccs: string[];
-                                            if (e.target.checked) {
-                                              updatedAccs = currentAccIds.length === 0
-                                                ? [accId]
-                                                : Array.from(new Set([...currentAccIds, accId]));
-                                            } else {
-                                              const allPlatIds = platInfo.accounts.map((a: any) => String(a.account_id || a.id || a._id));
-                                              const baseList = currentAccIds.length === 0 ? allPlatIds : currentAccIds;
-                                              updatedAccs = baseList.filter((id: string) => id !== accId);
-                                            }
-                                            setHermesVideogenSettings({
-                                              ...hermesVideogenSettings,
-                                              target_account_ids: updatedAccs,
-                                            });
-                                          }}
-                                          className="rounded border-zinc-700 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/30 h-3 w-3 shrink-0"
-                                        />
-                                        <span className="truncate">{acc.name || acc.username} {acc.username ? `(@${acc.username})` : ""}</span>
-                                      </label>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-zinc-800/80">
-                      <div>
-                        <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
-                        <Input
-                          type="time"
-                          value={hermesVideogenSettings?.run_time || "06:00"}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, run_time: e.target.value });
-                            }
-                          }}
-                        />
-                        <p className="text-[10px] text-zinc-500 mt-1">Waktu mulai pemindaian tren dan perenderan video harian.</p>
+                          );
+                        })}
                       </div>
 
-                      <div>
-                        <label className="text-[11px] text-zinc-400 block mb-1">Mode Jadwal Post</label>
-                        <Select
-                          value={hermesVideogenSettings?.schedule_mode || "ai"}
-                          onChange={(e) => {
-                            if (hermesVideogenSettings) {
-                              setHermesVideogenSettings({ ...hermesVideogenSettings, schedule_mode: e.target.value });
-                            }
-                          }}
-                          options={[
-                            { value: "ai", label: "AI Same-Day Spread (Optimal)" },
-                            { value: "instant", label: "Instant Post (Langsung Tayang)" },
-                            { value: "custom", label: "Custom Time (Sesuai Jam Eksekusi)" },
-                          ]}
-                        />
-                        <p className="text-[10px] text-zinc-500 mt-1">
-                          {hermesVideogenSettings?.schedule_mode === "instant"
-                            ? "Video langsung diposting segera setelah perenderan selesai."
-                            : hermesVideogenSettings?.schedule_mode === "custom"
-                            ? "Video diposting tepat sesuai jam eksekusi harian."
-                            : "AI menyebarkan jadwal post di jam prime-time audiens hari ini."}
-                        </p>
-                      </div>
-                    </div>
-                  </Card>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-zinc-800/80">
+                        <div>
+                          <label className="text-[11px] text-zinc-400 block mb-1">Jam Eksekusi Harian (WIB)</label>
+                          <Input
+                            type="time"
+                            value={hermesVideogenSettings?.run_time || "06:00"}
+                            onChange={(e) => {
+                              if (hermesVideogenSettings) {
+                                setHermesVideogenSettings({ ...hermesVideogenSettings, run_time: e.target.value });
+                              }
+                            }}
+                          />
+                          <p className="text-[10px] text-zinc-500 mt-1">Waktu mulai pemindaian tren dan perenderan video harian.</p>
+                        </div>
 
-                  {/* Save Settings Action Bar */}
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 shadow-sm">
-                    <div className="flex items-center gap-2 text-xs text-zinc-400">
-                      <Check className="h-3.5 w-3.5 text-cyan-400" />
-                      <span>Simpan pengaturan setelah mengatur target akun &amp; jadwal.</span>
-                    </div>
-                    <Button
-                      onClick={handleSaveHermesVideoGen}
-                      loading={isSavingHermesVideogen}
-                      icon={<Save className="h-3.5 w-3.5" />}
-                      size="sm"
-                      variant="primary"
-                    >
-                      Simpan Pengaturan Hermes
-                    </Button>
-                  </div>
-                </div>
+                        <div>
+                          <label className="text-[11px] text-zinc-400 block mb-1">Mode Jadwal Post</label>
+                          <Select
+                            value={hermesVideogenSettings?.schedule_mode || "ai"}
+                            onChange={(e) => {
+                              if (hermesVideogenSettings) {
+                                setHermesVideogenSettings({ ...hermesVideogenSettings, schedule_mode: e.target.value });
+                              }
+                            }}
+                            options={[
+                              { value: "ai", label: "AI Same-Day Spread (Optimal)" },
+                              { value: "instant", label: "Instant Post (Langsung Tayang)" },
+                              { value: "custom", label: "Custom Time (Sesuai Jam Eksekusi)" },
+                            ]}
+                          />
+                          <p className="text-[10px] text-zinc-500 mt-1">
+                            {hermesVideogenSettings?.schedule_mode === "instant"
+                              ? "Video langsung diposting segera setelah perenderan selesai."
+                              : hermesVideogenSettings?.schedule_mode === "custom"
+                              ? "Video diposting tepat sesuai jam eksekusi harian."
+                              : "AI menyebarkan jadwal post di jam prime-time audiens hari ini."}
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
 
-                {/* Right Column: Execution & History */}
-                <div className="lg:col-span-5 space-y-4">
-                  {/* Execution Control Card */}
-                  <Card className="p-4 space-y-3">
-                    <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                      <Play className="h-3.5 w-3.5 text-cyan-400" />
-                      Status Eksekusi &amp; Manual Trigger
-                    </h3>
-
-                    <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800 text-xs space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-400">Target Harian:</span>
-                        <span className="font-semibold text-zinc-200">{hermesVideogenSettings?.daily_video_count || 3} Video / Hari</span>
+                    {/* Save Settings Action Bar */}
+                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800 shadow-sm">
+                      <div className="flex items-center gap-2 text-xs text-zinc-400">
+                        <Check className="h-3.5 w-3.5 text-cyan-400" />
+                        <span>Simpan seluruh konfigurasi Hermes Video Generator.</span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-400">Video Dibuat Hari Ini:</span>
-                        <span className="font-semibold text-cyan-400">{hermesVideogenQuota?.today_created || 0} Video</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-400">Sisa Kuota:</span>
-                        <span className="font-semibold text-emerald-400">{hermesVideogenQuota?.remaining ?? (hermesVideogenSettings?.daily_video_count || 3)} Video</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-400">Terakhir Dijalankan:</span>
-                        <span className="font-mono text-[10px] text-zinc-400">{hermesVideogenSettings?.last_run_at || "Belum pernah"}</span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2 pt-1">
                       <Button
-                        onClick={() => handleTriggerHermesVideoGen(false)}
-                        loading={isRunningHermesVideogen}
-                        disabled={!hermesVideogenCanRun}
-                        className="w-full"
+                        onClick={handleSaveHermesVideoGen}
+                        loading={isSavingHermesVideogen}
+                        icon={<Save className="h-3.5 w-3.5" />}
+                        size="sm"
                         variant="primary"
-                        icon={<Play className="h-4 w-4" />}
                       >
-                        {hermesVideogenCanRun
-                          ? `Jalankan Sekarang (${hermesVideogenQuota?.remaining ?? (hermesVideogenSettings?.daily_video_count || 3)} Video)`
-                          : "Kuota Hari Ini Sudah Terpenuhi"}
+                        Simpan Pengaturan Hermes
                       </Button>
+                    </div>
+                  </div>
 
-                      {!hermesVideogenCanRun && (
+                  {/* Right Column: History of Runs */}
+                  <div className="lg:col-span-5 space-y-4">
+                    <Card className="p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                          <Film className="h-3.5 w-3.5 text-zinc-400" />
+                          Riwayat Video Trending &amp; Auto-Post
+                        </span>
                         <Button
-                          onClick={() => handleTriggerHermesVideoGen(true)}
-                          loading={isRunningHermesVideogen}
-                          className="w-full text-xs text-zinc-400 hover:text-zinc-200"
+                          onClick={loadHermesVideoGenData}
                           variant="ghost"
                           size="sm"
+                          className="h-6 px-2 text-[10px]"
+                          icon={<RefreshCw className="h-2.5 w-2.5" />}
                         >
-                          Paksa Jalankan Ulang (Force Run)
+                          Refresh
                         </Button>
-                      )}
-                    </div>
-                  </Card>
-
-                  {/* History of Runs Card */}
-                  <Card className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                        <Film className="h-3.5 w-3.5 text-zinc-400" />
-                        Riwayat Video Trending &amp; Auto-Post
-                      </span>
-                      <Button
-                        onClick={loadHermesVideoGenData}
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-[10px]"
-                        icon={<RefreshCw className="h-2.5 w-2.5" />}
-                      >
-                        Refresh
-                      </Button>
-                    </div>
-
-                    {hermesVideogenHistory.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-zinc-500">
-                        Belum ada riwayat video dari Hermes Video Generator.
                       </div>
-                    ) : (
-                      <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                        {hermesVideogenHistory.map((run) => (
-                          <div
-                            key={run.id}
-                            className="p-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 text-xs space-y-1.5"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold text-zinc-200 text-[11px] truncate max-w-[220px]" title={run.topic || run.trending_topic}>
-                                {run.topic || run.trending_topic || "Trending Video"}
-                              </span>
-                              <Badge
-                                variant={run.status === "completed" ? "success" : run.status === "failed" ? "error" : "warning"}
-                                className="text-[9px]"
-                              >
-                                {run.status}
-                              </Badge>
-                            </div>
 
-                            <div className="flex items-center justify-between text-[10px] text-zinc-400">
-                              <span>Sumber: {run.source || run.trending_source || "Multi-source"}</span>
-                              <span className="text-cyan-400 font-mono">Job #{run.video_job_id}</span>
-                            </div>
-
-                            {run.social_posts_scheduled > 0 && (
-                              <div className="text-[10px] text-emerald-400 flex items-center gap-1">
-                                <Check className="h-3 w-3" />
-                                <span>{run.social_posts_scheduled} postingan media sosial terjadwal</span>
+                      {hermesVideogenHistory.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-zinc-500">
+                          Belum ada riwayat video dari Hermes Video Generator.
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                          {hermesVideogenHistory.map((run) => (
+                            <div
+                              key={run.id}
+                              className="p-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 text-xs space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-zinc-200 text-[11px] truncate max-w-[220px]" title={run.topic || run.trending_topic}>
+                                  {run.topic || run.trending_topic || "Trending Video"}
+                                </span>
+                                <Badge
+                                  variant={run.status === "completed" ? "success" : run.status === "failed" ? "error" : "warning"}
+                                  className="text-[9px]"
+                                >
+                                  {run.status}
+                                </Badge>
                               </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Card>
+
+                              <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                                <span>Sumber: {run.source || run.trending_source || "Multi-source"}</span>
+                                <span className="text-cyan-400 font-mono">Job #{run.video_job_id}</span>
+                              </div>
+
+                              {run.social_posts_scheduled > 0 && (
+                                <div className="text-[10px] text-emerald-400 flex items-center gap-1">
+                                  <Check className="h-3 w-3" />
+                                  <span>{run.social_posts_scheduled} postingan media sosial terjadwal</span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
+                  </div>
                 </div>
               </div>
             )}

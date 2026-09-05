@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Palette, Sparkles, Layers, Sliders, CheckCircle2, ChevronLeft, ChevronRight,
   Eye, Play, Pause, Copy, Check, Download, Bookmark, Send, ShieldCheck,
-  Film, User, Clapperboard, Split, Megaphone, Image as ImageIcon, Share2, X as XIcon
+  Film, User, Clapperboard, Split, Megaphone, Image as ImageIcon, Share2, X as XIcon,
+  MessageSquare, Type, LayoutTemplate, Info
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -21,11 +22,16 @@ import { useGoogleFont } from "../style-editor/utils";
 import { CanvasPreviewFrame } from "../style-editor/preview/CanvasPreviewFrame";
 import { HookPreviewRenderer } from "../style-editor/preview/HookPreviewRenderer";
 
+export type PresetPreviewLayerTab = "hook" | "subtitle" | "cta";
+
 export interface AutopilotPresetPreviewProps {
   selectedSlug: string;
   onSelectSlug: (slug: string) => void;
   presets?: Preset[];
   onOpenEditor?: (preset?: Preset) => void;
+  accentColor?: "violet" | "cyan";
+  title?: string;
+  subTitle?: string;
 }
 
 export function AutopilotPresetPreview({
@@ -33,8 +39,28 @@ export function AutopilotPresetPreview({
   onSelectSlug,
   presets = [],
   onOpenEditor,
+  accentColor = "violet",
+  title,
+  subTitle,
 }: AutopilotPresetPreviewProps) {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [previewTab, setPreviewTab] = useState<PresetPreviewLayerTab>("hook");
+
+  // Accent styling helpers
+  const isCyan = accentColor === "cyan";
+  const accentTheme = {
+    text: isCyan ? "text-cyan-400" : "text-violet-400",
+    textLight: isCyan ? "text-cyan-300" : "text-violet-300",
+    bgMuted: isCyan ? "bg-cyan-500/10" : "bg-violet-500/10",
+    bgActive: isCyan ? "bg-cyan-500/20" : "bg-violet-500/20",
+    border: isCyan ? "border-cyan-500/30" : "border-violet-500/30",
+    borderActive: isCyan ? "border-cyan-500/50" : "border-violet-500/50",
+    glow: isCyan ? "shadow-cyan-500/10" : "shadow-violet-500/10",
+    ring: isCyan ? "ring-cyan-500/30" : "ring-violet-500/30",
+    selectedCardBorder: isCyan ? "border-cyan-500 bg-cyan-500/10" : "border-emerald-500 bg-emerald-500/10",
+    selectedCardText: isCyan ? "text-cyan-300" : "text-emerald-300",
+    selectedCardBadge: isCyan ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40" : "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
+  };
 
   // Use only user-owned presets (or all user presets if superadmin) from presets prop
   const allPresets = useMemo(() => {
@@ -138,7 +164,6 @@ export function AutopilotPresetPreview({
 
   // Subtitle Container Box Style
   const presetKey = subStyle.stylePreset || "classic";
-  const isLightPanel = presetKey === "bubble_chat" || presetKey === "breaking_tape" || presetKey === "quote_box" || presetKey === "word_tiles";
   const previewBg = subStyle.bgEnabled === false
     ? "transparent"
     : subStyle.bgColor
@@ -181,9 +206,9 @@ export function AutopilotPresetPreview({
       {/* Top Section Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/80 pb-3">
         <div className="flex items-center gap-2">
-          <Palette className="h-4 w-4 text-violet-400" />
+          <Palette className={cn("h-4 w-4", accentTheme.text)} />
           <h3 className="text-xs font-semibold text-zinc-200">
-            2. Preset Style Visual Rendering (5 Layer)
+            {title || "Preset Style Visual & Live Preview 9:16"}
           </h3>
         </div>
         {onOpenEditor && (
@@ -192,7 +217,13 @@ export function AutopilotPresetPreview({
             variant="ghost"
             size="sm"
             onClick={() => onOpenEditor(activePreset || undefined)}
-            className="h-7 text-[11px] text-violet-300 hover:text-violet-200 hover:bg-violet-950/40 border border-violet-500/30"
+            className={cn(
+              "h-7 text-[11px] border transition-colors",
+              accentTheme.textLight,
+              accentTheme.border,
+              accentTheme.bgMuted,
+              "hover:bg-zinc-850"
+            )}
             icon={<Sliders className="h-3 w-3" />}
           >
             Buka Style Editor
@@ -201,20 +232,20 @@ export function AutopilotPresetPreview({
       </div>
 
       <p className="text-[11px] text-zinc-400">
-        Pilih preset visual di sebelah kiri untuk melihat live render preview 5-layer (Subtitle, Hook, Watermark, CTA, B-Roll) di sebelah kanan.
+        {subTitle || "Pilih preset visual di sebelah kiri. Pratinjau 9:16 di sebelah kanan menampilkan visual Hook, Subtitle, dan CTA secara interaktif sesuai hasil final video."}
       </p>
 
-      {/* Main 2-Column Side-by-Side Layout: Presets (Left) | Preview (Right) */}
+      {/* Main 2-Column Side-by-Side Layout: Presets List (Left) | 9:16 Preview + Tabs (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* LEFT COLUMN: Presets List with Pagination matching /jobs/new */}
+        {/* LEFT COLUMN: Presets List with Pagination */}
         <div className="lg:col-span-7 space-y-3">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-              <Bookmark className="h-3.5 w-3.5 text-emerald-400" />
+              <Bookmark className={cn("h-3.5 w-3.5", isCyan ? "text-cyan-400" : "text-emerald-400")} />
               Daftar Preset Tersimpan ({allPresets.length})
             </span>
             <span className="text-[10px] text-zinc-500 hidden sm:inline">
-              Klik slug untuk salin command Telegram / CLI
+              Klik kartu untuk langsung memuat ke preview
             </span>
           </div>
 
@@ -261,21 +292,22 @@ export function AutopilotPresetPreview({
                 return (
                   <div
                     key={p.id}
+                    onClick={() => onSelectSlug(slugStr)}
                     className={cn(
-                      "relative group rounded-xl border p-3.5 transition-all flex flex-col justify-between text-left",
+                      "relative group rounded-xl border p-3.5 transition-all flex flex-col justify-between text-left cursor-pointer select-none",
                       isSelected
-                        ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30 shadow-md shadow-emerald-500/5"
-                        : "border-zinc-800 bg-zinc-900/60 hover:border-emerald-500/40 hover:bg-zinc-900/80"
+                        ? cn(accentTheme.selectedCardBorder, "ring-1", accentTheme.ring, "shadow-md")
+                        : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-900/80"
                     )}
                   >
                     <div>
                       {/* Top Header: Title & Active Badge */}
                       <div className="flex items-start justify-between gap-2 mb-1.5">
-                        <h4 className={cn("text-xs font-bold truncate", isSelected ? "text-emerald-300" : "text-zinc-200")}>
+                        <h4 className={cn("text-xs font-bold truncate", isSelected ? accentTheme.selectedCardText : "text-zinc-200")}>
                           {p.name}
                         </h4>
                         {isSelected && (
-                          <span className="text-[8px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold uppercase px-1.5 py-0.5 rounded-full shrink-0">
+                          <span className={cn("text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full shrink-0 border", accentTheme.selectedCardBadge)}>
                             Aktif
                           </span>
                         )}
@@ -285,13 +317,16 @@ export function AutopilotPresetPreview({
                       <div className="mb-2.5 flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => copyPresetCommand(slugStr)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyPresetCommand(slugStr);
+                          }}
                           title="Klik untuk copy --preset command"
-                          className="inline-flex items-center gap-1 text-[10px] font-mono bg-zinc-800 hover:bg-zinc-700 text-emerald-400 hover:text-emerald-300 px-2 py-0.5 rounded border border-zinc-700 hover:border-emerald-500/40 transition-colors"
+                          className="inline-flex items-center gap-1 text-[10px] font-mono bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-2 py-0.5 rounded border border-zinc-700 transition-colors"
                         >
                           <code>--preset {slugStr}</code>
                           {copyFeedback === slugStr ? (
-                            <Check className="h-2.5 w-2.5 text-emerald-300 shrink-0" />
+                            <Check className="h-2.5 w-2.5 text-emerald-400 shrink-0" />
                           ) : (
                             <Copy className="h-2.5 w-2.5 opacity-60 shrink-0" />
                           )}
@@ -369,7 +404,7 @@ export function AutopilotPresetPreview({
                           )}
                         </div>
                         {(p.owner_name || p.owner_email) && (
-                          <div className="pt-1 border-t border-zinc-800/60 mt-1 flex items-center gap-1 text-[9px] text-blue-300 font-mono truncate">
+                          <div className="pt-1 border-t border-zinc-800/60 mt-1 flex items-center gap-1 text-[9px] text-zinc-400 font-mono truncate">
                             <ShieldCheck className="h-2.5 w-2.5 text-blue-400 shrink-0" />
                             <span className="truncate">By: {p.owner_name || p.owner_email}</span>
                           </div>
@@ -381,16 +416,19 @@ export function AutopilotPresetPreview({
                     <div>
                       <button
                         type="button"
-                        onClick={() => onSelectSlug(slugStr)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectSlug(slugStr);
+                        }}
                         className={cn(
                           "w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors",
                           isSelected
-                            ? "border-emerald-500 bg-emerald-500/20 text-emerald-300 shadow-sm"
-                            : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:border-emerald-500/60"
+                            ? cn(accentTheme.selectedCardBorder, accentTheme.selectedCardText, "shadow-sm")
+                            : "border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600"
                         )}
                       >
                         <Download className="h-3 w-3" />
-                        {isSelected ? "Preset Aktif" : "Load Preset"}
+                        {isSelected ? "Preset Aktif" : "Gunakan Preset Ini"}
                       </button>
                       {p.created_at && (
                         <p className="text-[8px] text-zinc-600 mt-1.5 text-center">
@@ -430,7 +468,7 @@ export function AutopilotPresetPreview({
                       className={cn(
                         "h-6 min-w-6 px-1.5 rounded text-[11px] font-medium transition-colors",
                         currentPage === pNum
-                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                          ? cn(accentTheme.bgActive, accentTheme.textLight, "border", accentTheme.borderActive)
                           : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
                       )}
                     >
@@ -455,35 +493,37 @@ export function AutopilotPresetPreview({
           )}
         </div>
 
-        {/* RIGHT COLUMN: Live 9:16 Preview Card with Exact Style Editor Parity */}
+        {/* RIGHT COLUMN: Live 9:16 Preview Card with Interactive Layer Tabs (Hook, Subtitle, CTA) */}
         <div className="lg:col-span-5 space-y-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/90 p-4 space-y-3 shadow-xl">
             {/* Preview Toolbar */}
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
-                <Eye className="h-3.5 w-3.5 text-violet-400 shrink-0" />
-                <span className="text-violet-300 truncate">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Eye className={cn("h-3.5 w-3.5 shrink-0", accentTheme.text)} />
+                <span className={cn("font-semibold truncate", accentTheme.textLight)}>
                   {activePreset ? activePreset.name : "Preview Visual 9:16"}
                 </span>
-              </span>
+              </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setIsPlayingPreview(!isPlayingPreview)}
-                  className="p-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors text-[10px] flex items-center gap-1 px-1.5"
-                  title={isPlayingPreview ? "Jeda animasi kata" : "Putar animasi kata"}
-                >
-                  {isPlayingPreview ? <Pause className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
-                  <span>{isPlayingPreview ? "Live" : "Pause"}</span>
-                </button>
+                {previewTab === "subtitle" && (
+                  <button
+                    type="button"
+                    onClick={() => setIsPlayingPreview(!isPlayingPreview)}
+                    className="p-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors text-[10px] flex items-center gap-1 px-1.5"
+                    title={isPlayingPreview ? "Jeda animasi kata" : "Putar animasi kata"}
+                  >
+                    {isPlayingPreview ? <Pause className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
+                    <span>{isPlayingPreview ? "Live" : "Pause"}</span>
+                  </button>
+                )}
                 <Badge variant="default" className="text-[9px] font-mono text-zinc-400 bg-zinc-900 border-zinc-800">
                   9:16
                 </Badge>
               </div>
             </div>
 
-            {/* Official CanvasPreviewFrame (Matching Hook & Subtitle Editors) */}
+            {/* Official CanvasPreviewFrame (Isolated Layer Preview Based on Active Tab) */}
             <div className="flex justify-center">
               <CanvasPreviewFrame
                 aspectRatio="9/16"
@@ -514,92 +554,96 @@ export function AutopilotPresetPreview({
                   )}
                 </div>
 
-                {/* 2. UPPER-MID: Hook Overlay (Rendered with HookPreviewRenderer for 100% parity) */}
-                <div className="absolute top-12 left-0 right-0 z-15 flex justify-center px-2 pointer-events-none">
-                  <HookPreviewRenderer style={hookStyle} scale={0.88} />
-                </div>
-
-                {/* 3. DYNAMIC POSITION: Subtitles Karaoke Box */}
-                <div
-                  className="absolute left-0 right-0 flex justify-center px-3 z-15 pointer-events-none"
-                  style={{ top: `${positionYPct}%`, transform: "translateY(-50%)" }}
-                >
-                  <div
-                    className="flex flex-wrap justify-center items-center text-center transition-all max-w-[92%]"
-                    style={{
-                      backgroundColor: previewBg,
-                      borderRadius: `${previewRadius}px`,
-                      padding: subStyle.bgEnabled ? `${Math.round((subStyle.bgPadding ?? 12) * 0.35)}px ${Math.round((subStyle.bgPadding ?? 12) * 0.65)}px` : "0px",
-                      gap: "4px",
-                      boxShadow: presetKey === "neon_pulse" ? `0 0 20px ${highlightColor}44` : undefined,
-                    }}
-                  >
-                    {sampleWords.map((word, idx) => {
-                      const isHighlighted = idx === activeWordIndex;
-                      const wordFont = isHighlighted && isDualFont ? dualFont : subFont;
-                      const fontSize = Math.min(Math.max((subStyle.fontSize || 38) * 0.24, 10), 16);
-                      const strokeWidth = subStyle.strokeEnabled ? Math.max((subStyle.strokeWidth || 3) * 0.25, 0.6) : 0;
-
-                      return (
-                        <span
-                          key={`${word}-${idx}`}
-                          style={{
-                            color: isHighlighted ? highlightColor : subColor,
-                            fontSize: fontSize,
-                            fontFamily: `'${wordFont}', sans-serif`,
-                            fontWeight: isHighlighted ? (subStyle.highlightBold ? 900 : 800) : subWeight,
-                            textTransform: (isUppercase || (isHighlighted && subStyle.highlightUppercase)) ? "uppercase" : "none",
-                            letterSpacing: `${subStyle.letterSpacing || 0}px`,
-                            paintOrder: strokeWidth > 0 ? "stroke fill" : undefined,
-                            WebkitTextStroke: strokeWidth > 0 ? `${strokeWidth}px ${subStyle.strokeColor || "#000000"}` : undefined,
-                            textShadow: subStyle.shadowEnabled
-                              ? `1px 1px ${(subStyle.shadowBlur || 4) * 0.5}px ${subStyle.shadowColor || "#000000"}`
-                              : (isHighlighted && subStyle.highlightGlow
-                                ? `0 0 10px ${subStyle.highlightGlowColor || highlightColor}`
-                                : "0 2px 4px rgba(0,0,0,0.8)"),
-                            backgroundColor: isHighlighted && !subStyle.bgEnabled ? `${highlightColor}25` : undefined,
-                            borderRadius: isHighlighted ? "3px" : undefined,
-                            padding: isHighlighted ? "0px 2px" : undefined,
-                            transform: isHighlighted ? "scale(1.08)" : "scale(1)",
-                            transition: "all 0.15s ease-out",
-                            display: "inline-block",
-                          }}
-                        >
-                          {word}
-                        </span>
-                      );
-                    })}
+                {/* 2. LAYER 1: HOOK OVERLAY PREVIEW (Only shown when previewTab === 'hook') */}
+                {previewTab === "hook" && (
+                  <div className="absolute inset-0 z-15 flex items-center justify-center px-2 pointer-events-none animate-in fade-in-50 duration-200">
+                    <HookPreviewRenderer style={hookStyle} scale={0.92} />
                   </div>
-                </div>
+                )}
 
-                {/* 4. BOTTOM: CTA End-Card Preview */}
-                {ctaStyle.enabled && (
-                  <div className="absolute bottom-2 left-2 right-2 z-20 pointer-events-none">
+                {/* 3. LAYER 2: SUBTITLES KARAOKE BOX PREVIEW (Only shown when previewTab === 'subtitle') */}
+                {previewTab === "subtitle" && (
+                  <div
+                    className="absolute left-0 right-0 flex justify-center px-3 z-15 pointer-events-none animate-in fade-in-50 duration-200"
+                    style={{ top: `${positionYPct}%`, transform: "translateY(-50%)" }}
+                  >
                     <div
-                      className="px-2.5 py-2 rounded-xl border flex items-center justify-between text-[8px] backdrop-blur-md shadow-xl"
+                      className="flex flex-wrap justify-center items-center text-center transition-all max-w-[92%]"
                       style={{
-                        backgroundColor: ctaStyle.backgroundColor || "rgba(10, 25, 47, 0.92)",
-                        borderColor: ctaStyle.primaryColor || "rgba(220, 38, 38, 0.6)",
+                        backgroundColor: previewBg,
+                        borderRadius: `${previewRadius}px`,
+                        padding: subStyle.bgEnabled ? `${Math.round((subStyle.bgPadding ?? 12) * 0.35)}px ${Math.round((subStyle.bgPadding ?? 12) * 0.65)}px` : "0px",
+                        gap: "4px",
+                        boxShadow: presetKey === "neon_pulse" ? `0 0 20px ${highlightColor}44` : undefined,
+                      }}
+                    >
+                      {sampleWords.map((word, idx) => {
+                        const isHighlighted = idx === activeWordIndex;
+                        const wordFont = isHighlighted && isDualFont ? dualFont : subFont;
+                        const fontSize = Math.min(Math.max((subStyle.fontSize || 38) * 0.24, 10), 16);
+                        const strokeWidth = subStyle.strokeEnabled ? Math.max((subStyle.strokeWidth || 3) * 0.25, 0.6) : 0;
+
+                        return (
+                          <span
+                            key={`${word}-${idx}`}
+                            style={{
+                              color: isHighlighted ? highlightColor : subColor,
+                              fontSize: fontSize,
+                              fontFamily: `'${wordFont}', sans-serif`,
+                              fontWeight: isHighlighted ? (subStyle.highlightBold ? 900 : 800) : subWeight,
+                              textTransform: (isUppercase || (isHighlighted && subStyle.highlightUppercase)) ? "uppercase" : "none",
+                              letterSpacing: `${subStyle.letterSpacing || 0}px`,
+                              paintOrder: strokeWidth > 0 ? "stroke fill" : undefined,
+                              WebkitTextStroke: strokeWidth > 0 ? `${strokeWidth}px ${subStyle.strokeColor || "#000000"}` : undefined,
+                              textShadow: subStyle.shadowEnabled
+                                ? `1px 1px ${(subStyle.shadowBlur || 4) * 0.5}px ${subStyle.shadowColor || "#000000"}`
+                                : (isHighlighted && subStyle.highlightGlow
+                                  ? `0 0 10px ${subStyle.highlightGlowColor || highlightColor}`
+                                  : "0 2px 4px rgba(0,0,0,0.8)"),
+                              backgroundColor: isHighlighted && !subStyle.bgEnabled ? `${highlightColor}25` : undefined,
+                              borderRadius: isHighlighted ? "3px" : undefined,
+                              padding: isHighlighted ? "0px 2px" : undefined,
+                              transform: isHighlighted ? "scale(1.08)" : "scale(1)",
+                              transition: "all 0.15s ease-out",
+                              display: "inline-block",
+                            }}
+                          >
+                            {word}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. LAYER 3: CTA END-CARD PREVIEW (Only shown when previewTab === 'cta') */}
+                {previewTab === "cta" && (
+                  <div className="absolute inset-x-2 bottom-6 z-20 pointer-events-none animate-in fade-in-50 duration-200">
+                    <div
+                      className="px-3 py-2.5 rounded-xl border flex items-center justify-between text-[9px] backdrop-blur-md shadow-2xl"
+                      style={{
+                        backgroundColor: ctaStyle.backgroundColor || "rgba(10, 25, 47, 0.94)",
+                        borderColor: ctaStyle.primaryColor || (isCyan ? "rgba(6, 182, 212, 0.6)" : "rgba(139, 92, 246, 0.6)"),
                         color: ctaStyle.textColor || "#ffffff",
                       }}
                     >
-                      <div className="flex items-center gap-1.5 truncate max-w-[70%]">
-                        <Send className="h-3 w-3 shrink-0" style={{ color: ctaStyle.primaryColor || "#dc2626" }} />
+                      <div className="flex items-center gap-2 truncate max-w-[70%]">
+                        <Send className="h-3.5 w-3.5 shrink-0" style={{ color: ctaStyle.primaryColor || (isCyan ? "#06b6d4" : "#8b5cf6") }} />
                         <div className="flex flex-col justify-center min-w-0">
-                          <span className="font-bold truncate text-[8.5px] leading-snug">
+                          <span className="font-bold truncate text-[9px] leading-tight">
                             {ctaStyle.headline || "Follow For More"}
                           </span>
                           {(ctaStyle.subhead || ctaStyle.socialHandle) && (
-                            <span className="text-[7px] text-zinc-300 truncate mt-0.5 opacity-80">
+                            <span className="text-[7.5px] text-zinc-300 truncate mt-0.5 opacity-80">
                               {ctaStyle.subhead || ctaStyle.socialHandle}
                             </span>
                           )}
                         </div>
                       </div>
                       <span
-                        className="px-2 py-0.5 rounded-lg font-extrabold uppercase text-[7px] shrink-0"
+                        className="px-2.5 py-1 rounded-lg font-extrabold uppercase text-[7.5px] shrink-0 shadow-sm"
                         style={{
-                          backgroundColor: ctaStyle.primaryColor || "#dc2626",
+                          backgroundColor: ctaStyle.primaryColor || (isCyan ? "#06b6d4" : "#8b5cf6"),
                           color: "#ffffff",
                         }}
                       >
@@ -611,128 +655,219 @@ export function AutopilotPresetPreview({
               </CanvasPreviewFrame>
             </div>
 
-            {/* Preset Specs Summary Matrix */}
-            <div className="space-y-2 pt-2 border-t border-zinc-800">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-                  <Sliders className="h-3 w-3 text-violet-400" />
-                  Konfigurasi Aktif Preset
-                </span>
-                <span className="text-[9px] font-mono text-zinc-500">
-                  Engine: {hookStyle.engine || "Remotion"} / {subStyle.engine || "Remotion"}
-                </span>
+            {/* ─── DEDICATED PREVIEW TABS (Hook, Subtitle, CTA) ─── */}
+            <div className="pt-1">
+              <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-zinc-900/90 border border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setPreviewTab("hook")}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all select-none",
+                    previewTab === "hook"
+                      ? cn(accentTheme.bgActive, accentTheme.textLight, "border", accentTheme.borderActive, "shadow-sm")
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                  )}
+                >
+                  <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                  <span>Hook</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPreviewTab("subtitle")}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all select-none",
+                    previewTab === "subtitle"
+                      ? cn(accentTheme.bgActive, accentTheme.textLight, "border", accentTheme.borderActive, "shadow-sm")
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                  )}
+                >
+                  <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+                  <span>Subtitle</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPreviewTab("cta")}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all select-none",
+                    previewTab === "cta"
+                      ? cn(accentTheme.bgActive, accentTheme.textLight, "border", accentTheme.borderActive, "shadow-sm")
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                  )}
+                >
+                  <Megaphone className="h-3.5 w-3.5 shrink-0" />
+                  <span>CTA</span>
+                </button>
               </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-2 text-[10px]">
-                {/* 1. Hook & Animasi */}
-                <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
-                  <span className="text-zinc-500 block text-[9px]">Hook & Animasi</span>
-                  <span className="font-semibold text-zinc-200 truncate block capitalize">
-                    {hookStyle.animation.replace(/_/g, " ")}
-                  </span>
-                  <span className="text-[8px] text-violet-300 block font-mono mt-0.5">
-                    Engine: {hookStyle.engine || "remotion"}
-                  </span>
-                </div>
-
-                {/* 2. Subtitle & Style */}
-                <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
-                  <span className="text-zinc-500 block text-[9px]">Subtitle & Transisi</span>
-                  <span className="font-semibold text-zinc-200 truncate block capitalize">
-                    {subStyle.stylePreset?.replace(/_/g, " ") || "classic"}
-                  </span>
-                  <span className="text-[8px] text-zinc-400 block font-mono mt-0.5 truncate">
-                    {subFont} • {subStyle.lineTransition || "word_pop"}
-                  </span>
-                </div>
-
-                {/* 3. AI Cinematic Text */}
-                <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
-                  <span className="text-zinc-500 block text-[9px]">AI Cinematic Text</span>
-                  <span className={cn("font-semibold truncate block", activeHasTextEmp ? "text-emerald-400" : "text-zinc-500")}>
-                    {activeHasTextEmp ? "Aktif" : "Nonaktif"}
-                  </span>
-                  <span className="text-[8px] text-zinc-400 block mt-0.5">
-                    {activeHasTextEmp ? (activeTextEmpMode.replace(/_/g, " ") || "Emphasis / Pop") : "Standar Subtitle"}
-                  </span>
-                </div>
-
-                {/* 4. Auto-Grid 2-Panel */}
-                <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
-                  <span className="text-zinc-500 block text-[9px]">Auto-Grid 2-Panel</span>
-                  <span className={cn("font-semibold truncate block", activeHasAutoGrid ? "text-cyan-400" : "text-zinc-500")}>
-                    {activeHasAutoGrid ? "Aktif (Auto Split)" : "Nonaktif"}
-                  </span>
-                  <span className="text-[8px] text-zinc-400 block mt-0.5 truncate">
-                    {activeHasAutoGrid ? "Speaker-Aware Dynamic" : "Single Shot Only"}
-                  </span>
-                </div>
-
-                {/* 5. B-Roll Architecture */}
-                <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60 col-span-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 block text-[9px]">B-Roll & Visual Placements</span>
-                    <span className={cn("text-[9px] font-semibold", activeHasBroll ? "text-amber-400" : "text-zinc-500")}>
-                      {activeHasBroll ? "B-Roll Aktif" : "Nonaktif"}
+            {/* ─── DEDICATED SPECIFICATION CARD FOR ACTIVE TAB ─── */}
+            <div className="space-y-2 pt-2 border-t border-zinc-800/80">
+              {/* TAB 1: HOOK SPECS */}
+              {previewTab === "hook" && (
+                <div className="space-y-2 animate-in fade-in-50 duration-150">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                      <Sparkles className={cn("h-3 w-3", accentTheme.text)} />
+                      Spesifikasi Hook Visual
+                    </span>
+                    <span className="text-[9px] font-mono text-zinc-500">
+                      Engine: {hookStyle.engine || "Remotion"}
                     </span>
                   </div>
-                  {activeHasBroll ? (
-                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium inline-flex items-center gap-1", activeHasBehindPerson ? "bg-blue-500/15 text-blue-300 border-blue-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
-                        {activeHasBehindPerson ? (
-                          <Check className="h-2.5 w-2.5 shrink-0 text-blue-400" />
-                        ) : (
-                          <XIcon className="h-2.5 w-2.5 shrink-0 text-zinc-500" />
-                        )}
-                        <span>Behind Person 16:9</span>
+
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
+                      <span className="text-zinc-500 block text-[9px]">Gaya Animasi</span>
+                      <span className="font-semibold text-zinc-200 truncate block capitalize">
+                        {hookStyle.animation.replace(/_/g, " ")}
                       </span>
-                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium inline-flex items-center gap-1", activeHasFloatingCard ? "bg-purple-500/15 text-purple-300 border-purple-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
-                        {activeHasFloatingCard ? (
-                          <Check className="h-2.5 w-2.5 shrink-0 text-purple-400" />
-                        ) : (
-                          <XIcon className="h-2.5 w-2.5 shrink-0 text-zinc-500" />
-                        )}
-                        <span>Floating Object Card</span>
-                      </span>
-                      <span className={cn("text-[8px] px-1.5 py-0.5 rounded border font-medium inline-flex items-center gap-1", activeHasCutaway ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" : "bg-zinc-800/40 text-zinc-500 border-zinc-800")}>
-                        {activeHasCutaway ? (
-                          <Check className="h-2.5 w-2.5 shrink-0 text-indigo-400" />
-                        ) : (
-                          <XIcon className="h-2.5 w-2.5 shrink-0 text-zinc-500" />
-                        )}
-                        <span>Full Frame Cutaway</span>
+                      <span className="text-[8px] text-zinc-400 block mt-0.5">
+                        Posisi Y: {hookStyle.positionY || 20}%
                       </span>
                     </div>
-                  ) : (
-                    <span className="text-[8px] text-zinc-500 block mt-0.5">
-                      Tanpa B-Roll stock visual overlay
+
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
+                      <span className="text-zinc-500 block text-[9px]">Font &amp; Tipografi</span>
+                      <span className="font-semibold text-zinc-200 truncate block">
+                        {hookStyle.fontFamily || "Inter"}
+                      </span>
+                      <span className="text-[8px] text-zinc-400 block mt-0.5">
+                        Ukuran: {hookStyle.fontSize || 42}px • {hookStyle.uppercase ? "UPPERCASE" : "Normal"}
+                      </span>
+                    </div>
+
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60 col-span-2">
+                      <span className="text-zinc-500 block text-[9px]">Warna &amp; Efek Background Box</span>
+                      <div className="flex items-center justify-between mt-1">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-3.5 w-3.5 rounded border border-zinc-700 shrink-0"
+                            style={{ backgroundColor: hookStyle.color || "#FFFFFF" }}
+                            title="Warna Teks"
+                          />
+                          <span className="text-zinc-300 text-[9px]">
+                            {hookStyle.color || "#FFFFFF"}
+                          </span>
+                        </div>
+                        <span className="text-[8px] text-zinc-400">
+                          Box: {hookStyle.boxEnabled ? "Aktif (Card)" : "Transparan"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: SUBTITLE SPECS */}
+              {previewTab === "subtitle" && (
+                <div className="space-y-2 animate-in fade-in-50 duration-150">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                      <MessageSquare className={cn("h-3 w-3", accentTheme.text)} />
+                      Spesifikasi Subtitle Karaoke
                     </span>
-                  )}
-                </div>
+                    <span className="text-[9px] font-mono text-zinc-500">
+                      Transisi: {subStyle.lineTransition || "word_pop"}
+                    </span>
+                  </div>
 
-                {/* 6. CTA End-Card */}
-                <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
-                  <span className="text-zinc-500 block text-[9px]">CTA End-Card</span>
-                  <span className={cn("font-semibold truncate block", ctaStyle.enabled ? "text-violet-300" : "text-zinc-500")}>
-                    {ctaStyle.enabled ? (ctaStyle.headline || "Follow For More") : "Nonaktif"}
-                  </span>
-                  <span className="text-[8px] text-zinc-400 block mt-0.5 truncate">
-                    {ctaStyle.enabled ? (ctaStyle.subhead || ctaStyle.socialHandle || "@handle") : "Tanpa CTA"}
-                  </span>
-                </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
+                      <span className="text-zinc-500 block text-[9px]">Preset Gaya</span>
+                      <span className="font-semibold text-zinc-200 truncate block capitalize">
+                        {subStyle.stylePreset?.replace(/_/g, " ") || "classic"}
+                      </span>
+                      <span className="text-[8px] text-zinc-400 block mt-0.5">
+                        Posisi Y: {positionYPct}%
+                      </span>
+                    </div>
 
-                {/* 7. Watermark & Auto-Post */}
-                <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
-                  <span className="text-zinc-500 block text-[9px]">Watermark & Auto-Post</span>
-                  <span className="font-semibold text-zinc-200 truncate block">
-                    {wmStyle.enabled ? (wmStyle.text || "@ClipHub") : "Tanpa Watermark"}
-                  </span>
-                  <span className={cn("text-[8px] mt-0.5 font-medium inline-flex items-center gap-1", autopostStyle?.enabled ? "text-rose-400" : "text-zinc-500")}>
-                    <Share2 className="h-2.5 w-2.5 shrink-0" />
-                    <span>{autopostStyle?.enabled ? "Auto-Post Aktif" : "Manual Publish"}</span>
-                  </span>
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
+                      <span className="text-zinc-500 block text-[9px]">Font Utama &amp; Dual Font</span>
+                      <span className="font-semibold text-zinc-200 truncate block">
+                        {subFont}
+                      </span>
+                      <span className="text-[8px] text-zinc-400 block mt-0.5 truncate">
+                        {isDualFont ? `Dual: ${dualFont}` : "Single Font"}
+                      </span>
+                    </div>
+
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60 col-span-2">
+                      <span className="text-zinc-500 block text-[9px]">Palet Warna &amp; Highlight Karaoke</span>
+                      <div className="flex items-center justify-between mt-1">
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className="h-3 w-3 rounded border border-zinc-700 shrink-0" style={{ backgroundColor: subColor }} />
+                            <span className="text-zinc-300 text-[9px]">Teks ({subColor})</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="h-3 w-3 rounded border border-zinc-700 shrink-0" style={{ backgroundColor: highlightColor }} />
+                            <span className="text-zinc-300 text-[9px]">Highlight ({highlightColor})</span>
+                          </div>
+                        </div>
+                        <span className="text-[8px] text-zinc-400">
+                          Stroke: {subStyle.strokeEnabled ? `${subStyle.strokeWidth || 3}px` : "Off"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* TAB 3: CTA SPECS */}
+              {previewTab === "cta" && (
+                <div className="space-y-2 animate-in fade-in-50 duration-150">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                      <Megaphone className={cn("h-3 w-3", accentTheme.text)} />
+                      Spesifikasi CTA Outro End-Card
+                    </span>
+                    <Badge variant={ctaStyle.enabled ? "success" : "default"} className="text-[8px] px-1.5 py-0">
+                      {ctaStyle.enabled ? "Aktif" : "Nonaktif"}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
+                      <span className="text-zinc-500 block text-[9px]">Headline Ajakan</span>
+                      <span className="font-semibold text-zinc-200 truncate block">
+                        {ctaStyle.headline || "Follow For More"}
+                      </span>
+                      <span className="text-[8px] text-zinc-400 block mt-0.5 truncate">
+                        {ctaStyle.subhead || ctaStyle.socialHandle || "@username"}
+                      </span>
+                    </div>
+
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60">
+                      <span className="text-zinc-500 block text-[9px]">Teks Tombol &amp; Warna</span>
+                      <span className="font-semibold text-zinc-200 truncate block">
+                        {ctaStyle.buttonText || "+ FOLLOW"}
+                      </span>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: ctaStyle.primaryColor || (isCyan ? "#06b6d4" : "#8b5cf6") }}
+                        />
+                        <span className="text-[8px] text-zinc-400">
+                          {ctaStyle.primaryColor || (isCyan ? "#06b6d4" : "#8b5cf6")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-2 rounded-lg bg-zinc-900/60 border border-zinc-800/60 col-span-2">
+                      <div className="flex items-center justify-between text-[9px] text-zinc-400">
+                        <span className="flex items-center gap-1">
+                          <Info className="h-3 w-3 text-zinc-500" />
+                          Outro Card muncul pada 3-5 detik terakhir video sebelum selesai
+                        </span>
+                        <span className="font-mono text-zinc-500">Duration: 4.5s</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
