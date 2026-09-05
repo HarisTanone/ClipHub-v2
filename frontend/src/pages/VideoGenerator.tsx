@@ -28,6 +28,7 @@ import {
   Trash2,
   Bookmark,
   MessageSquare,
+  Megaphone,
   Flame,
   Heart,
   Share2,
@@ -54,11 +55,15 @@ import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   DEFAULT_HOOK_STYLE,
   DEFAULT_SUBTITLE_STYLE,
+  DEFAULT_WATERMARK_STYLE,
+  DEFAULT_CTA_STYLE,
   StyleEditorModal,
   HookPreviewRenderer,
   useGoogleFont,
   type HookStyle,
   type SubtitleStyle,
+  type WatermarkStyle,
+  type CtaStyle,
 } from "@/components/StyleEditorModal";
 import { ScheduleModal } from "@/components/ScheduleModal";
 import {
@@ -347,6 +352,7 @@ function LiveVideoPreview({
   topic,
   onCustomizeHook,
   onCustomizeSubtitle,
+  onCustomizeCta,
   aspectRatio = "9:16",
   watermarkEnabled = false,
   watermarkText = "",
@@ -365,6 +371,7 @@ function LiveVideoPreview({
   topic: string;
   onCustomizeHook: () => void;
   onCustomizeSubtitle: () => void;
+  onCustomizeCta?: () => void;
   aspectRatio?: string;
   watermarkEnabled?: boolean;
   watermarkText?: string;
@@ -376,7 +383,7 @@ function LiveVideoPreview({
   aiTextEnabled?: boolean;
 }) {
   const [activeWordIdx, setActiveWordIdx] = useState(0);
-  const [previewMode, setPreviewMode] = useState<"full" | "hook" | "subtitles">("full");
+  const [previewMode, setPreviewMode] = useState<"hook" | "subtitles" | "cta">("hook");
   const [isPlaying, setIsPlaying] = useState(true);
 
   // Load Google Fonts for preview
@@ -466,46 +473,6 @@ function LiveVideoPreview({
 
   return (
     <div className="flex flex-col items-center gap-3">
-      {/* Mode Switcher Tabs */}
-      <div className="flex items-center gap-1 rounded-xl bg-zinc-950/80 p-1 border border-zinc-800/80 text-[11px]">
-        <button
-          type="button"
-          onClick={() => setPreviewMode("full")}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition",
-            previewMode === "full"
-              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
-              : "text-zinc-400 hover:text-zinc-200"
-          )}
-        >
-          <Film className="h-3 w-3" /> Full View
-        </button>
-        <button
-          type="button"
-          onClick={() => setPreviewMode("hook")}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition",
-            previewMode === "hook"
-              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
-              : "text-zinc-400 hover:text-zinc-200"
-          )}
-        >
-          <Sparkles className="h-3 w-3 text-violet-400" /> Hook (0-3s)
-        </button>
-        <button
-          type="button"
-          onClick={() => setPreviewMode("subtitles")}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition",
-            previewMode === "subtitles"
-              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
-              : "text-zinc-400 hover:text-zinc-200"
-          )}
-        >
-          <Type className="h-3 w-3 text-violet-400" /> Captions
-        </button>
-      </div>
-
       {/* Realistic Device Mockup Frame */}
       <div
         className={cn(
@@ -596,23 +563,23 @@ function LiveVideoPreview({
         </div>
 
         {/* Opening Hook Overlay (100% Visual match with StyleEditorModal) */}
-        {hookEnabled && (previewMode === "full" || previewMode === "hook") ? (
+        {hookEnabled && previewMode === "hook" ? (
           <div
             onClick={onCustomizeHook}
-            className="absolute inset-0 z-20 cursor-pointer transition-all hover:scale-[1.02]"
-            title="Click to customize opening hook in Style Editor"
+            className="absolute inset-0 z-20 cursor-pointer transition-all hover:scale-[1.02] animate-in fade-in-50 duration-200"
+            title="Klik untuk menyesuaikan Hook di Style Editor"
           >
             <HookPreviewRenderer style={hookStyle} customText={hookText} scale={0.88} />
           </div>
         ) : null}
 
         {/* Karaoke Subtitles Overlay (100% Visual match with StyleEditorModal) */}
-        {subtitlesEnabled && (previewMode === "full" || previewMode === "subtitles") ? (
+        {subtitlesEnabled && previewMode === "subtitles" ? (
           <div
             onClick={onCustomizeSubtitle}
-            className="absolute left-0 right-0 z-20 flex justify-center px-3 cursor-pointer transition-all hover:scale-[1.03]"
+            className="absolute left-0 right-0 z-20 flex justify-center px-3 cursor-pointer transition-all hover:scale-[1.03] animate-in fade-in-50 duration-200"
             style={{ top: subPosTop, transform: "translateY(-50%)" }}
-            title="Click to customize captions in Style Editor"
+            title="Klik untuk menyesuaikan Subtitle di Style Editor"
           >
             <div style={subContainerStyle}>
               {displayWords.map((w, idx) => {
@@ -683,12 +650,22 @@ function LiveVideoPreview({
         ) : null}
 
         {/* Call to Action (CTA) Outro Preview */}
-        {ctaEnabled ? (
-          <div className="absolute inset-x-3 bottom-12 z-25 flex flex-col items-center gap-1 rounded-xl bg-gradient-to-r from-violet-600/90 to-indigo-600/90 p-2 text-center text-white shadow-lg backdrop-blur-xs">
-            <span className="text-[10px] font-bold line-clamp-1">{ctaHeadline || "Follow & Subscribe!"}</span>
-            <span className="rounded-full bg-white px-2 py-0.5 text-[8px] font-bold text-zinc-900 shadow-xs">
-              {ctaButtonText || "Follow Sekarang"}
+        {previewMode === "cta" ? (
+          <div
+            onClick={onCustomizeCta || onCustomizeHook}
+            className="absolute inset-x-3 bottom-14 z-25 flex flex-col items-center justify-center p-3 rounded-2xl bg-zinc-950/90 border border-violet-500/40 text-center shadow-2xl backdrop-blur-md cursor-pointer transition-all hover:scale-[1.02] animate-in fade-in-50 duration-200"
+            title="Klik untuk menyesuaikan Call to Action"
+          >
+            <div className="flex items-center gap-1.5 mb-1">
+              <Megaphone className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+              <span className="text-[10px] font-bold text-white line-clamp-1">
+                {ctaHeadline || "Follow & Subscribe For More!"}
+              </span>
+            </div>
+            <span className="px-3 py-1 rounded-lg bg-violet-600 hover:bg-violet-500 text-[8.5px] font-extrabold text-white uppercase tracking-wider shadow-sm">
+              {ctaButtonText || "+ FOLLOW SEKARANG"}
             </span>
+            <span className="text-[7.5px] text-zinc-400 mt-1">Outro Call To Action (Detik Akhir)</span>
           </div>
         ) : null}
 
@@ -700,36 +677,139 @@ function LiveVideoPreview({
         ) : null}
       </div>
 
-      {/* Quick Action Trigger Buttons */}
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          size="xs"
-          variant="outline"
-          onClick={onCustomizeHook}
-          icon={<Sparkles className="h-3 w-3 text-violet-400" />}
-        >
-          Hook Style
-        </Button>
-        <Button
-          type="button"
-          size="xs"
-          variant="outline"
-          onClick={onCustomizeSubtitle}
-          icon={<Palette className="h-3 w-3 text-violet-400" />}
-        >
-          Subtitle Style
-        </Button>
+      {/* ─── DEDICATED PREVIEW TABS (Hook, Subtitle, CTA) BELOW PREVIEW ─── */}
+      <div className="w-full max-w-[280px] grid grid-cols-3 gap-1 p-1 rounded-xl bg-zinc-950/90 border border-zinc-800">
         <button
           type="button"
-          onClick={() => setIsPlaying((p) => !p)}
-          className="flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/80 px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition"
-          title="Play/Pause live karaoke preview"
+          onClick={() => setPreviewMode("hook")}
+          className={cn(
+            "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all select-none",
+            previewMode === "hook"
+              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          )}
         >
-          {isPlaying ? <Pause className="h-3 w-3 text-zinc-300" /> : <Play className="h-3 w-3 text-zinc-400" />}
-          {isPlaying ? "Playing" : "Paused"}
+          <Sparkles className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+          <span>Hook</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPreviewMode("subtitles")}
+          className={cn(
+            "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all select-none",
+            previewMode === "subtitles"
+              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          )}
+        >
+          <MessageSquare className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+          <span>Subtitle</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPreviewMode("cta")}
+          className={cn(
+            "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all select-none",
+            previewMode === "cta"
+              ? "bg-violet-500/20 text-violet-200 border border-violet-500/40 shadow-xs"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+          )}
+        >
+          <Megaphone className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+          <span>CTA</span>
         </button>
       </div>
+
+      {/* ─── TAB SPECIFICATION & ACTION CARD BELOW TABS ─── */}
+      {previewMode === "hook" && (
+        <div className="w-full max-w-[280px] flex items-center justify-between gap-2 p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800 text-[11px] animate-in fade-in-50 duration-150">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Sparkles className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="text-zinc-200 font-semibold truncate block capitalize">
+                {hookStyle.animation?.replace(/_/g, " ") || "Hook Opening"}
+              </span>
+              <span className="text-[9px] text-zinc-400 block truncate">
+                {hookStyle.fontFamily || "Montserrat"} · Posisi Y: {hookStyle.positionY ?? 20}%
+              </span>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={onCustomizeHook}
+            className="h-6 px-2 text-[10px] border-violet-500/30 text-violet-300 hover:bg-violet-500/10 shrink-0"
+            icon={<SlidersHorizontal className="h-2.5 w-2.5 text-violet-400" />}
+          >
+            Sesuaikan
+          </Button>
+        </div>
+      )}
+
+      {previewMode === "subtitles" && (
+        <div className="w-full max-w-[280px] flex items-center justify-between gap-2 p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800 text-[11px] animate-in fade-in-50 duration-150">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <MessageSquare className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="text-zinc-200 font-semibold truncate block capitalize">
+                {subtitleStyle.fontFamily || "Inter"} · {subtitleStyle.stylePreset || "Classic"}
+              </span>
+              <span className="text-[9px] text-zinc-400 block truncate">
+                {subtitleStyle.lineTransition || "word_by_word"} · Posisi Y: {subtitleStyle.positionY ?? 78}%
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsPlaying((p) => !p)}
+              className="p-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white text-[10px]"
+              title={isPlaying ? "Jeda simulasi" : "Putar simulasi"}
+            >
+              {isPlaying ? <Pause className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
+            </button>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              onClick={onCustomizeSubtitle}
+              className="h-6 px-2 text-[10px] border-violet-500/30 text-violet-300 hover:bg-violet-500/10"
+              icon={<Palette className="h-2.5 w-2.5 text-violet-400" />}
+            >
+              Sesuaikan
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {previewMode === "cta" && (
+        <div className="w-full max-w-[280px] flex items-center justify-between gap-2 p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800 text-[11px] animate-in fade-in-50 duration-150">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Megaphone className="h-3.5 w-3.5 text-violet-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="text-zinc-200 font-semibold truncate block">
+                {ctaButtonText || "Follow Sekarang"}
+              </span>
+              <span className="text-[9px] text-zinc-400 block truncate">
+                {ctaEnabled ? "CTA Aktif di Outro" : "CTA Nonaktif (klik untuk aktifkan)"}
+              </span>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={onCustomizeCta || onCustomizeHook}
+            className="h-6 px-2 text-[10px] border-violet-500/30 text-violet-300 hover:bg-violet-500/10 shrink-0"
+            icon={<SlidersHorizontal className="h-2.5 w-2.5 text-violet-400" />}
+          >
+            Sesuaikan
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1874,7 +1954,7 @@ export function VideoGeneratorPage() {
   const [userPresets, setUserPresets] = useState<Preset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [showStyleEditor, setShowStyleEditor] = useState(false);
-  const [activeStyleTab, setActiveStyleTab] = useState<"presets" | "hook" | "subtitle">("subtitle");
+  const [activeStyleTab, setActiveStyleTab] = useState<"presets" | "hook" | "subtitle" | "other">("hook");
 
   // Dynamic Trending Topics state (Multi-source Hermes engine)
   const [trendingTopics, setTrendingTopics] = useState<TrendingTopicItem[]>([]);
@@ -2153,15 +2233,31 @@ export function VideoGeneratorPage() {
     setSelectedPresetId(presetId);
     if (!presetId) return;
 
-    const matched = userPresets.find((p) => String(p.id) === presetId);
+    const matched = userPresets.find((p) => String(p.id) === presetId || p.slug === presetId);
     if (matched) {
       if (matched.hook_style && Object.keys(matched.hook_style).length > 0) {
         setHookStyle((prev) => ({ ...prev, ...matched.hook_style }));
+        setHookEnabled(true);
       }
       if (matched.subtitle_style && Object.keys(matched.subtitle_style).length > 0) {
-        setSubtitleStyle((prev) => ({ ...prev, ...matched.subtitle_style, engine: "ffmpeg" }));
+        setSubtitleStyle((prev) => ({ ...prev, ...matched.subtitle_style }));
+        setSubtitlesEnabled(true);
       }
-      toast.success(`Preset "${matched.name}" loaded for Hook & Subtitles`);
+      if (matched.watermark_style && Object.keys(matched.watermark_style).length > 0) {
+        setWatermarkEnabled(Boolean(matched.watermark_style.enabled));
+        if (matched.watermark_style.text) setWatermarkText(matched.watermark_style.text);
+        if (matched.watermark_style.position) setWatermarkPosition(matched.watermark_style.position);
+        if (matched.watermark_style.opacity !== undefined) setWatermarkOpacity(matched.watermark_style.opacity / 100);
+      }
+      if (matched.cta_style && Object.keys(matched.cta_style).length > 0) {
+        setCtaEnabled(Boolean(matched.cta_style.enabled));
+        if (matched.cta_style.headline) setCtaHeadline(matched.cta_style.headline);
+        if (matched.cta_style.buttonText) setCtaButtonText(matched.cta_style.buttonText);
+      }
+      if ((matched as any).target_aspect_ratio) {
+        setAspectRatio((matched as any).target_aspect_ratio as any);
+      }
+      toast.success(`Preset "${matched.name}" dimuat (Hook, Subtitle, CTA)`);
     }
   };
 
@@ -2174,10 +2270,12 @@ export function VideoGeneratorPage() {
     setIsSubmitting(true);
     try {
       const selectedVoice = customVoiceId.trim() || voice;
+      const matched = userPresets.find((p) => String(p.id) === selectedPresetId || p.slug === selectedPresetId);
       await fetchApi<VideoJob>("/api/video-generator/generate", {
         method: "POST",
         body: JSON.stringify({
           topic: effectiveTopic,
+          preset_slug: matched?.slug || (selectedPresetId ? String(selectedPresetId) : undefined),
           target_duration: targetDuration,
           tts_provider: ttsProvider,
           tts_model: ttsProvider === "gemini" ? ttsModel : undefined,
@@ -2235,10 +2333,12 @@ export function VideoGeneratorPage() {
     setIsPlanning(true);
     try {
       const selectedVoice = customVoiceId.trim() || voice;
+      const matched = userPresets.find((p) => String(p.id) === selectedPresetId || p.slug === selectedPresetId);
       const job = await fetchApi<VideoJob>("/api/video-generator/plan", {
         method: "POST",
         body: JSON.stringify({
           topic: effectiveTopic,
+          preset_slug: matched?.slug || (selectedPresetId ? String(selectedPresetId) : undefined),
           target_duration: targetDuration,
           tts_provider: ttsProvider,
           tts_model: ttsProvider === "gemini" ? ttsModel : undefined,
@@ -2289,10 +2389,12 @@ export function VideoGeneratorPage() {
 
   // Launch render from studio with selected footage
   const handleStartRenderWithSelected = async (jobId: string, updatedScenes: SceneItem[]) => {
+    const matched = userPresets.find((p) => String(p.id) === selectedPresetId || p.slug === selectedPresetId);
     await fetchApi<VideoJob>("/api/video-generator/render-selected", {
       method: "POST",
       body: JSON.stringify({
         job_id: jobId,
+        preset_slug: matched?.slug || (selectedPresetId ? String(selectedPresetId) : undefined),
         selected_scenes: updatedScenes,
         hook_enabled: hookEnabled,
         custom_hook: customHook.trim() || undefined,
@@ -2387,7 +2489,7 @@ export function VideoGeneratorPage() {
     }
   };
 
-  const openEditorFor = (tab: "presets" | "hook" | "subtitle") => {
+  const openEditorFor = (tab: "presets" | "hook" | "subtitle" | "other") => {
     setActiveStyleTab(tab);
     setShowStyleEditor(true);
   };
@@ -3559,6 +3661,7 @@ export function VideoGeneratorPage() {
                     topic={topic}
                     onCustomizeHook={() => openEditorFor("hook")}
                     onCustomizeSubtitle={() => openEditorFor("subtitle")}
+                    onCustomizeCta={() => openEditorFor("other")}
                     aspectRatio={aspectRatio}
                     watermarkEnabled={watermarkEnabled}
                     watermarkText={watermarkText}
@@ -3877,16 +3980,57 @@ export function VideoGeneratorPage() {
         />
       )}
 
-      {/* Style Editor Modal (Hook, Subtitle & Presets Tabs) */}
+      {/* Style Editor Modal (Hook, Subtitle, CTA, Watermark & Presets Tabs) */}
       <StyleEditorModal
         open={showStyleEditor}
         onClose={() => setShowStyleEditor(false)}
         hookStyle={hookStyle}
         subtitleStyle={subtitleStyle}
+        ctaStyle={{
+          ...DEFAULT_CTA_STYLE,
+          enabled: ctaEnabled,
+          headline: ctaHeadline,
+          buttonText: ctaButtonText,
+        }}
+        watermarkStyle={{
+          ...DEFAULT_WATERMARK_STYLE,
+          enabled: watermarkEnabled,
+          text: watermarkText,
+          position: watermarkPosition as any,
+          opacity: Math.round(watermarkOpacity * 100),
+        }}
         onHookChange={setHookStyle}
         onSubtitleChange={setSubtitleStyle}
+        onCtaChange={(cta) => {
+          if (cta.enabled !== undefined) setCtaEnabled(Boolean(cta.enabled));
+          if (cta.headline) setCtaHeadline(cta.headline);
+          if (cta.buttonText) setCtaButtonText(cta.buttonText);
+        }}
+        onWatermarkChange={(wm) => {
+          if (wm.enabled !== undefined) setWatermarkEnabled(Boolean(wm.enabled));
+          if (wm.text) setWatermarkText(wm.text);
+          if (wm.position) setWatermarkPosition(wm.position);
+          if (wm.opacity !== undefined) setWatermarkOpacity(wm.opacity / 100);
+        }}
+        onPresetLoad={(loaded) => {
+          if (loaded) {
+            if (loaded.id) setSelectedPresetId(String(loaded.id));
+            if (loaded.hook_style) setHookStyle((prev) => ({ ...prev, ...loaded.hook_style }));
+            if (loaded.subtitle_style) setSubtitleStyle((prev) => ({ ...prev, ...loaded.subtitle_style }));
+            if (loaded.cta_style) {
+              setCtaEnabled(Boolean(loaded.cta_style.enabled));
+              if (loaded.cta_style.headline) setCtaHeadline(loaded.cta_style.headline);
+              if (loaded.cta_style.buttonText) setCtaButtonText(loaded.cta_style.buttonText);
+            }
+            if (loaded.watermark_style) {
+              setWatermarkEnabled(Boolean(loaded.watermark_style.enabled));
+              if (loaded.watermark_style.text) setWatermarkText(loaded.watermark_style.text);
+            }
+            toast.success(`Preset "${loaded.name}" dimuat ke studio`);
+          }
+        }}
         activeTab={activeStyleTab}
-        aspectRatio="9:16"
+        aspectRatio={aspectRatio}
         isSuperadmin={user?.is_superadmin}
         isPremium={user?.is_premium}
         userFeatures={user?.features}

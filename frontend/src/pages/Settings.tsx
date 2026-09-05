@@ -5,7 +5,8 @@ import {
   Zap, Play, Terminal, RefreshCw, CheckCircle2, XCircle, BrainCircuit, Bot,
   Send, Key, Eye, EyeOff, Radio, Bell, Video, Copy, Check, MessageSquare, Palette,
   SlidersHorizontal, UserCheck, Layers, Lock, Activity, Globe, Info, HelpCircle, HardDrive, CheckSquare,
-  Upload, FileText, ExternalLink, ShieldCheck, Clock, Camera, Image as ImageIcon, Share2
+  Upload, FileText, ExternalLink, ShieldCheck, Clock, Camera, Image as ImageIcon, Share2,
+  Download, X
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -610,6 +611,7 @@ export function Settings() {
   const [hermesVideogenPresets, setHermesVideogenPresets] = useState<any[]>([]);
   const [hermesVideogenPlatforms, setHermesVideogenPlatforms] = useState<any>({});
   const [hermesVideogenHistory, setHermesVideogenHistory] = useState<HermesVideoGenRun[]>([]);
+  const [previewVideoJobId, setPreviewVideoJobId] = useState<string | null>(null);
   const [isLoadingHermesVideogen, setIsLoadingHermesVideogen] = useState<boolean>(false);
   const [isSavingHermesVideogen, setIsSavingHermesVideogen] = useState<boolean>(false);
   const [isRunningHermesVideogen, setIsRunningHermesVideogen] = useState<boolean>(false);
@@ -625,7 +627,9 @@ export function Settings() {
   const [editorActivePresetId, setEditorActivePresetId] = useState<number | undefined>(undefined);
 
   const handleOpenStyleEditor = (preset?: any) => {
-    const p = preset || autopilotPresets.find(pr => pr.slug === autopilotSettings?.preset_slug || pr.name === autopilotSettings?.preset_slug) || autopilotPresets[0];
+    const p = preset || (tab === "hermes_video_gen"
+      ? hermesVideogenPresets.find(pr => pr.slug === hermesVideogenSettings?.preset_slug || pr.name === hermesVideogenSettings?.preset_slug) || hermesVideogenPresets[0]
+      : autopilotPresets.find(pr => pr.slug === autopilotSettings?.preset_slug || pr.name === autopilotSettings?.preset_slug) || autopilotPresets[0]);
     if (p) {
       setEditorHook({ ...DEFAULT_HOOK_STYLE, ...(p.hook_style || {}) });
       setEditorSub({ ...DEFAULT_SUBTITLE_STYLE, ...(p.subtitle_style || {}) });
@@ -4602,6 +4606,28 @@ export function Settings() {
                                   <span>{run.social_posts_scheduled} postingan media sosial terjadwal</span>
                                 </div>
                               )}
+
+                              {run.video_job_id && (
+                                <div className="flex items-center gap-2 pt-1 border-t border-zinc-800/60">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewVideoJobId(String(run.video_job_id))}
+                                    className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20 text-[10px] font-medium transition"
+                                  >
+                                    <Eye className="h-3 w-3" />
+                                    <span>Pratinjau Video</span>
+                                  </button>
+                                  <a
+                                    href={`${API_BASE}/api/video-generator/jobs/${run.video_job_id}/download?token=${getToken() || ""}`}
+                                    download
+                                    className="flex items-center justify-center gap-1 py-1 px-2.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-zinc-100 text-[10px] font-medium transition"
+                                    title="Unduh file MP4"
+                                  >
+                                    <Download className="h-3 w-3" />
+                                    <span>Unduh</span>
+                                  </a>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -4822,7 +4848,11 @@ export function Settings() {
             open={showStyleModal}
             onClose={() => {
               setShowStyleModal(false);
-              loadAutopilotData();
+              if (tab === "hermes_video_gen") {
+                loadHermesVideoGenData();
+              } else {
+                loadAutopilotData();
+              }
             }}
             hookStyle={editorHook}
             subtitleStyle={editorSub}
@@ -4841,23 +4871,89 @@ export function Settings() {
             activePresetId={editorActivePresetId}
             onPresetSelect={(id) => setEditorActivePresetId(id)}
             onPresetLoad={async (preset) => {
-              if (preset.slug && autopilotSettings) {
-                const updated = { ...autopilotSettings, preset_slug: preset.slug };
-                setAutopilotSettings(updated);
-                try {
-                  const res = await autopilotApi.updateSettings(updated);
-                  if (res && res.data) {
-                    setAutopilotSettings(res.data);
-                    toast.success(`Preset '${preset.name || preset.slug}' aktif & tersimpan untuk Hermes Autopilot!`);
+              if (tab === "hermes_video_gen") {
+                if (preset.slug && hermesVideogenSettings) {
+                  const updated = { ...hermesVideogenSettings, preset_slug: preset.slug };
+                  setHermesVideogenSettings(updated);
+                  try {
+                    const res = await hermesVideoGenApi.updateSettings(updated);
+                    if (res && res.data) {
+                      setHermesVideogenSettings(res.data);
+                      toast.success(`Preset '${preset.name || preset.slug}' aktif & tersimpan untuk Hermes Video Generator!`);
+                    }
+                  } catch (e: any) {
+                    console.warn("Auto-save hermes videogen preset failed:", e);
                   }
-                } catch (e: any) {
-                  console.warn("Auto-save autopilot preset failed:", e);
                 }
+                loadHermesVideoGenData();
+              } else {
+                if (preset.slug && autopilotSettings) {
+                  const updated = { ...autopilotSettings, preset_slug: preset.slug };
+                  setAutopilotSettings(updated);
+                  try {
+                    const res = await autopilotApi.updateSettings(updated);
+                    if (res && res.data) {
+                      setAutopilotSettings(res.data);
+                      toast.success(`Preset '${preset.name || preset.slug}' aktif & tersimpan untuk Hermes Autopilot!`);
+                    }
+                  } catch (e: any) {
+                    console.warn("Auto-save autopilot preset failed:", e);
+                  }
+                }
+                loadAutopilotData();
               }
-              loadAutopilotData();
             }}
             isSuperadmin={isSuperadmin}
           />
+        )}
+
+        {/* Hermes Video Generator Video Preview Modal */}
+        {previewVideoJobId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-50">
+            <div className="relative w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-4 sm:p-5 shadow-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Film className="h-4 w-4 text-cyan-400" />
+                  <h3 className="text-xs sm:text-sm font-semibold text-zinc-100">Pratinjau Video Hermes</h3>
+                  <Badge variant="default" className="text-[9px] font-mono text-cyan-300 bg-cyan-500/10 border-cyan-500/30">
+                    Job #{previewVideoJobId}
+                  </Badge>
+                </div>
+                <button
+                  onClick={() => setPreviewVideoJobId(null)}
+                  className="p-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="aspect-[9/16] max-h-[60vh] mx-auto overflow-hidden rounded-xl bg-black border border-zinc-800 flex items-center justify-center">
+                <video
+                  src={`${API_BASE}/api/video-generator/jobs/${previewVideoJobId}/video`}
+                  controls
+                  autoPlay
+                  className="h-full w-full object-contain"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800/80">
+                <a
+                  href={`${API_BASE}/api/video-generator/jobs/${previewVideoJobId}/download?token=${getToken() || ""}`}
+                  download
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-zinc-950 transition shadow-sm"
+                >
+                  <Download className="h-3.5 w-3.5" /> Unduh Video
+                </a>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPreviewVideoJobId(null)}
+                >
+                  Tutup
+                </Button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
       </div>

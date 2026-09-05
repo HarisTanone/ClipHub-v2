@@ -393,15 +393,24 @@ class HermesVideoGenService:
 
             preset = None
             try:
-                from src.presentation.routes.presets import _get_preset_by_slug
-                preset = _get_preset_by_slug(user_id, preset_slug)
+                from src.presentation.routes.presets import get_preset_by_slug
+                preset = get_preset_by_slug(user_id, preset_slug)
                 if preset:
-                    if preset.get("hook_style"):
+                    if preset.get("hook_style") and isinstance(preset["hook_style"], dict):
                         hook_style = preset["hook_style"]
-                    if preset.get("subtitle_style"):
+                    if preset.get("subtitle_style") and isinstance(preset["subtitle_style"], dict):
                         subtitle_style = preset["subtitle_style"]
+                    logger.info(
+                        f"hermes_videogen: successfully resolved preset '{preset_slug}': "
+                        f"hook={hook_style.get('animation') or hook_style.get('hook_style')}, "
+                        f"subtitle={subtitle_style.get('stylePreset') or subtitle_style.get('preset')}"
+                    )
             except Exception as pe:
-                logger.debug(f"hermes_videogen: preset resolution skipped: {pe}")
+                logger.error(f"hermes_videogen: preset resolution error: {pe}", exc_info=True)
+
+            ai_text_config = {"enabled": bool(settings_dict.get("ai_text_enabled", True))}
+            if preset and preset.get("text_emphasis_style") and isinstance(preset["text_emphasis_style"], dict):
+                ai_text_config["style"] = preset["text_emphasis_style"]
 
             # Prepare Watermark Config (manual settings take precedence, otherwise fallback to existing preset)
             watermark_config = None
@@ -480,7 +489,7 @@ class HermesVideoGenService:
                     watermark_config=watermark_config,
                     transition=settings_dict.get("transition_style") or "dissolve",
                     cta_config=cta_config,
-                    ai_text_config={"enabled": bool(settings_dict.get("ai_text_enabled", True))},
+                    ai_text_config=ai_text_config,
                     aspect_ratio=settings_dict.get("aspect_ratio") or "9:16",
                     user_id=user_id,
                 )

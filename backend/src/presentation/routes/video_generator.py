@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from src.config import settings
 from src.application.video_generator import VideoGenStatus
-from src.presentation.auth_deps import CurrentUser, require_superadmin, get_current_user
+from src.presentation.auth_deps import CurrentUser, require_superadmin, get_current_user, get_optional_user
 
 
 router = APIRouter(prefix="/video-generator", tags=["video-generator"])
@@ -33,6 +33,7 @@ class GenerateVideoRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="TTS speed multiplier")
     instructions: str = Field(default="", max_length=1000, description="Additional instructions for AI")
     num_scenes: int = Field(default=0, ge=0, le=25, description="Number of scenes (0=auto)")
+    preset_slug: Optional[str] = Field(default=None, description="Preset slug or ID to load styles from")
     subtitles_enabled: bool = Field(default=True, description="Burn captions into the final video")
     subtitle_style_config: dict[str, Any] = Field(default_factory=dict)
     subtitle_style: Optional[dict[str, Any]] = Field(default=None, exclude=True)
@@ -102,6 +103,7 @@ class SearchSceneRequest(BaseModel):
 class RenderSelectedRequest(BaseModel):
     job_id: str
     selected_scenes: list[dict[str, Any]] = Field(default_factory=list)
+    preset_slug: Optional[str] = None
     hook_enabled: Optional[bool] = None
     custom_hook: Optional[str] = None
     hook_style_config: Optional[dict[str, Any]] = None
@@ -234,6 +236,8 @@ async def generate_video(
 
     vg = get_video_generator()
 
+    hook_style, subtitle_style, watermark_config, cta_config, ai_text_config = _resolve_job_styles(req, user.id)
+
     job = vg.create_job(
         topic=req.topic,
         target_duration=target_duration,
@@ -244,10 +248,10 @@ async def generate_video(
         instructions=req.instructions,
         num_scenes=req.num_scenes,
         subtitles_enabled=req.subtitles_enabled,
-        subtitle_style=req.subtitle_style_config or req.subtitle_style,
+        subtitle_style=subtitle_style,
         hook_enabled=req.hook_enabled,
         custom_hook=req.custom_hook,
-        hook_style=req.hook_style_config or req.hook_style,
+        hook_style=hook_style,
         include_bgm=req.include_bgm,
         bgm_volume=req.bgm_volume,
         source_video_url=req.source_video_url,
@@ -258,15 +262,53 @@ async def generate_video(
         fps=req.fps,
         start_offset=req.start_offset,
         end_offset=req.end_offset,
-        watermark_config=req.watermark_config,
+        watermark_config=watermark_config,
         transition=req.transition,
-        cta_config=req.cta_config,
-        ai_text_config=req.ai_text_config,
+        cta_config=cta_config,
+        ai_text_config=ai_text_config,
         user_id=user.id,
     )
 
     background_tasks.add_task(vg.run_pipeline, job.job_id)
     return _job_to_response(job)
+
+
+def _resolve_job_styles(
+    req: GenerateVideoRequest, user_id: int
+) -> tuple[dict, dict, Optional[dict], Optional[dict], Optional[dict]]:
+    """Resolve hook, subtitle, watermark, cta, and ai_text styles from preset and explicit overrides."""
+    import logging
+    _log = logging.getLogger(__name__)
+
+    hook_style = dict(req.hook_style_config or req.hook_style or {})
+    subtitle_style = dict(req.subtitle_style_config or req.subtitle_style or {})
+    watermark_config = req.watermark_config
+    cta_config = req.cta_config
+    ai_text_config = req.ai_text_config
+
+    preset = None
+    if req.preset_slug:
+        try:
+            from src.presentation.routes.presets import get_preset_by_slug
+            preset = get_preset_by_slug(user_id, req.preset_slug)
+            if preset:
+                _log.info(f"video_generator: loaded preset '{req.preset_slug}' for job topic '{req.topic[:30]}'")
+        except Exception as pe:
+            _log.warning(f"video_generator: failed to resolve preset '{req.preset_slug}': {pe}")
+
+    if preset:
+        if preset.get("hook_style") and isinstance(preset["hook_style"], dict):
+            hook_style = {**preset["hook_style"], **hook_style}
+        if preset.get("subtitle_style") and isinstance(preset["subtitle_style"], dict):
+            subtitle_style = {**preset["subtitle_style"], **subtitle_style}
+        if not watermark_config and preset.get("watermark_style") and preset["watermark_style"].get("enabled"):
+            watermark_config = preset["watermark_style"]
+        if not cta_config and preset.get("cta_style") and preset["cta_style"].get("enabled"):
+            cta_config = preset["cta_style"]
+        if not ai_text_config and preset.get("text_emphasis_style"):
+            ai_text_config = {"enabled": True, "style": preset["text_emphasis_style"]}
+
+    return hook_style, subtitle_style, watermark_config, cta_config, ai_text_config
 
 
 @router.post("/plan", response_model=JobStatusResponse)
@@ -290,6 +332,8 @@ async def plan_video(
 
     vg = get_video_generator()
 
+    hook_style, subtitle_style, watermark_config, cta_config, ai_text_config = _resolve_job_styles(req, user.id)
+
     job = vg.create_job(
         topic=req.topic,
         target_duration=target_duration,
@@ -300,10 +344,10 @@ async def plan_video(
         instructions=req.instructions,
         num_scenes=req.num_scenes,
         subtitles_enabled=req.subtitles_enabled,
-        subtitle_style=req.subtitle_style_config or req.subtitle_style,
+        subtitle_style=subtitle_style,
         hook_enabled=req.hook_enabled,
         custom_hook=req.custom_hook,
-        hook_style=req.hook_style_config or req.hook_style,
+        hook_style=hook_style,
         include_bgm=req.include_bgm,
         bgm_volume=req.bgm_volume,
         source_video_url=req.source_video_url,
@@ -314,10 +358,10 @@ async def plan_video(
         fps=req.fps,
         start_offset=req.start_offset,
         end_offset=req.end_offset,
-        watermark_config=req.watermark_config,
+        watermark_config=watermark_config,
         transition=req.transition,
-        cta_config=req.cta_config,
-        ai_text_config=req.ai_text_config,
+        cta_config=cta_config,
+        ai_text_config=ai_text_config,
         user_id=user.id,
     )
     job.status = VideoGenStatus.PLANNING
@@ -420,16 +464,32 @@ async def render_selected(
     if not user.is_superadmin and job.user_id and job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    if req.preset_slug:
+        try:
+            from src.presentation.routes.presets import get_preset_by_slug
+            preset = get_preset_by_slug(user.id, req.preset_slug)
+            if preset:
+                if preset.get("hook_style") and isinstance(preset["hook_style"], dict):
+                    job.hook_style = {**preset["hook_style"], **(job.hook_style or {})}
+                if preset.get("subtitle_style") and isinstance(preset["subtitle_style"], dict):
+                    job.subtitle_style = {**preset["subtitle_style"], **(job.subtitle_style or {})}
+                if not job.watermark_config and preset.get("watermark_style") and preset["watermark_style"].get("enabled"):
+                    job.watermark_config = preset["watermark_style"]
+                if not job.cta_config and preset.get("cta_style") and preset["cta_style"].get("enabled"):
+                    job.cta_config = preset["cta_style"]
+        except Exception as pe:
+            logger.warning(f"render_selected: failed to resolve preset '{req.preset_slug}': {pe}")
+
     if req.hook_enabled is not None:
         job.hook_enabled = req.hook_enabled
     if req.custom_hook is not None:
         job.custom_hook = req.custom_hook
     if req.hook_style_config is not None:
-        job.hook_style = req.hook_style_config
+        job.hook_style = {**(job.hook_style or {}), **req.hook_style_config}
     if req.subtitles_enabled is not None:
         job.subtitles_enabled = req.subtitles_enabled
     if req.subtitle_style_config is not None:
-        job.subtitle_style = req.subtitle_style_config
+        job.subtitle_style = {**(job.subtitle_style or {}), **req.subtitle_style_config}
     if req.include_bgm is not None:
         job.include_bgm = req.include_bgm
     if req.bgm_volume is not None:
@@ -514,31 +574,120 @@ async def get_job_status(
     return _job_to_response(job)
 
 
-@router.get("/jobs/{job_id}/download")
-async def download_video(
+def _find_job_video_path(job_id: str, job_output_path: Optional[str] = None) -> Optional[str]:
+    """Find video file on disk across known candidate locations."""
+    candidates = []
+    if job_output_path:
+        candidates.append(job_output_path)
+        if not os.path.isabs(job_output_path):
+            candidates.append(os.path.abspath(job_output_path))
+
+    out_dir = settings.VIDEO_GEN_OUTPUT_DIR
+    candidates.extend([
+        os.path.join(out_dir, job_id, f"final_{job_id}.mp4"),
+        os.path.join(out_dir, job_id, f"output_{job_id}.mp4"),
+        os.path.join(out_dir, job_id, "final.mp4"),
+        os.path.join(out_dir, job_id, "output.mp4"),
+        os.path.join(out_dir, f"final_{job_id}.mp4"),
+        os.path.join(out_dir, f"{job_id}.mp4"),
+        os.path.join("data", "video_generator_output", job_id, f"final_{job_id}.mp4"),
+        os.path.join("data", "video_generator_output", f"final_{job_id}.mp4"),
+        os.path.join("data", "video_generator_output", f"{job_id}.mp4"),
+        os.path.join("data", "output", job_id, "final.mp4"),
+        os.path.join("data", "output", job_id, "output.mp4"),
+    ])
+    for p in candidates:
+        if p and os.path.exists(p) and os.path.getsize(p) > 0:
+            return p
+    return None
+
+
+@router.get("/jobs/{job_id}/video")
+async def get_job_video(
     job_id: str,
-    user: CurrentUser = Depends(get_current_user),
+    token: Optional[str] = Query(None),
+    range: Optional[str] = Header(None, alias="range"),
 ):
-    """Download the final generated video."""
+    """Public media serving endpoint for social autopost (Repliz) and video playback.
+    Supports HTTP Range requests and streaming chunks.
+    """
     from src.application.video_generator import get_video_generator
+    from starlette.responses import StreamingResponse
 
     vg = get_video_generator()
     job = vg.get_job(job_id)
+    file_path = _find_job_video_path(job_id, job.output_path if job else None)
+    if not file_path:
+        raise HTTPException(status_code=404, detail=f"Video for job {job_id} not found")
 
+    file_size = os.path.getsize(file_path)
+    start, end = _parse_byte_range(range, file_size)
+    chunk_size = end - start + 1
+
+    def iter_file():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                read_size = min(remaining, 1024 * 1024)
+                data = f.read(read_size)
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(chunk_size),
+        "Content-Type": "video/mp4",
+    }
+    status_code = 206 if range else 200
+    if range:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+    return StreamingResponse(
+        iter_file(),
+        status_code=status_code,
+        headers=headers,
+        media_type="video/mp4",
+    )
+
+
+@router.get("/jobs/{job_id}/download")
+async def download_video(
+    job_id: str,
+    token: Optional[str] = Query(None),
+    user: Optional[CurrentUser] = Depends(get_optional_user),
+):
+    """Download the final generated video with optional token or bearer auth."""
+    from src.application.video_generator import get_video_generator
+    from src.infrastructure.auth import decode_access_token
+
+    eff_user = user
+    if not eff_user and token:
+        payload = decode_access_token(token)
+        if payload:
+            eff_user = CurrentUser(
+                user_id=int(payload.get("sub") or payload.get("user_id") or 1),
+                email=payload.get("email", ""),
+                role=payload.get("role", "user"),
+                permissions=payload.get("permissions", []),
+            )
+
+    vg = get_video_generator()
+    job = vg.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if not user.is_superadmin and job.user_id and job.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Job not found")
 
-    if job.status != VideoGenStatus.COMPLETED:
-        raise HTTPException(status_code=400, detail=f"Job not completed (status: {job.status})")
+    if eff_user and not eff_user.is_superadmin and job.user_id and job.user_id != eff_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to download this video")
 
-    if not job.output_path or not os.path.exists(job.output_path):
-        raise HTTPException(status_code=404, detail="Output file not found")
+    file_path = _find_job_video_path(job_id, job.output_path)
+    if not file_path:
+        raise HTTPException(status_code=404, detail=f"Output file for job {job_id} not found")
 
     filename = f"video_{job.job_id}.mp4"
     return FileResponse(
-        path=job.output_path,
+        path=file_path,
         media_type="video/mp4",
         filename=filename,
     )
@@ -1045,20 +1194,40 @@ async def get_job_thumbnail(
     job_id: str,
     token: Optional[str] = None,
 ):
-    """Get the keyframe thumbnail for a generated video."""
+    """Get the keyframe thumbnail for a generated video, with dynamic extraction fallback."""
     from starlette.responses import FileResponse
     from src.application.video_generator import get_video_generator
 
     vg = get_video_generator()
     job = vg.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
 
-    thumb_path = os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, f"thumbnail_{job_id}.jpg")
-    if os.path.exists(thumb_path):
-        return FileResponse(thumb_path, media_type="image/jpeg")
+    # 1. Check direct thumbnail candidate paths
+    thumb_candidates = [
+        os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, f"thumbnail_{job_id}.jpg"),
+        os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, "thumbnail.jpg"),
+        os.path.join(settings.VIDEO_GEN_OUTPUT_DIR, job_id, "thumb.jpg"),
+        job.thumbnail_url if (job and job.thumbnail_url) else None,
+    ]
+    for tp in thumb_candidates:
+        if tp and os.path.exists(tp) and os.path.getsize(tp) > 0:
+            return FileResponse(tp, media_type="image/jpeg")
 
-    if job.thumbnail_url and os.path.exists(job.thumbnail_url):
-        return FileResponse(job.thumbnail_url, media_type="image/jpeg")
+    # 2. Extract on-the-fly from video if thumbnail file is missing
+    video_path = _find_job_video_path(job_id, job.output_path if job else None)
+    if video_path and os.path.exists(video_path):
+        out_thumb = os.path.join(os.path.dirname(video_path), f"thumbnail_{job_id}.jpg")
+        try:
+            import subprocess
+            subprocess.run([
+                "ffmpeg", "-y", "-ss", "00:00:01",
+                "-i", video_path,
+                "-vframes", "1",
+                "-q:v", "2",
+                out_thumb
+            ], capture_output=True, timeout=10)
+            if os.path.exists(out_thumb) and os.path.getsize(out_thumb) > 0:
+                return FileResponse(out_thumb, media_type="image/jpeg")
+        except Exception:
+            pass
 
     raise HTTPException(status_code=404, detail="Thumbnail not found")

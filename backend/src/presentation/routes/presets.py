@@ -150,6 +150,64 @@ def _format_preset_dict(row, is_superadmin: bool = False) -> dict:
     return preset
 
 
+def get_preset_by_slug(user_id: Optional[int], slug_or_id: str) -> Optional[dict]:
+    """Retrieve preset dict by slug, ID, or name with fallback across users for system presets."""
+    if not slug_or_id:
+        return None
+    conn = get_dict_connection()
+    try:
+        cur = conn.cursor()
+        slug_clean = str(slug_or_id).strip()
+        is_id = slug_clean.isdigit()
+
+        # 1. Look up for current user
+        if user_id is not None:
+            if is_id:
+                cur.execute("SELECT * FROM user_presets WHERE id = ? AND user_id = ?", (int(slug_clean), user_id))
+            else:
+                cur.execute("SELECT * FROM user_presets WHERE slug = ? AND user_id = ?", (slug_clean, user_id))
+            row = cur.fetchone()
+            if not row and not is_id:
+                cur.execute("SELECT * FROM user_presets WHERE LOWER(name) = LOWER(?) AND user_id = ?", (slug_clean, user_id))
+                row = cur.fetchone()
+            if row:
+                return _format_preset_dict(row)
+
+        # 2. Global lookup across all users (system or superadmin presets)
+        if is_id:
+            cur.execute("SELECT * FROM user_presets WHERE id = ? ORDER BY id DESC LIMIT 1", (int(slug_clean),))
+        else:
+            cur.execute("SELECT * FROM user_presets WHERE slug = ? ORDER BY id DESC LIMIT 1", (slug_clean,))
+        row = cur.fetchone()
+        if not row and not is_id:
+            cur.execute("SELECT * FROM user_presets WHERE LOWER(name) = LOWER(?) ORDER BY id DESC LIMIT 1", (slug_clean,))
+            row = cur.fetchone()
+        if row:
+            return _format_preset_dict(row)
+
+        # 3. Special keywords: 'default', 'latest'
+        if slug_clean.lower() in ("default", "system", "latest"):
+            if user_id is not None:
+                cur.execute("SELECT * FROM user_presets WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,))
+                row = cur.fetchone()
+            if not row:
+                cur.execute("SELECT * FROM user_presets ORDER BY id DESC LIMIT 1")
+                row = cur.fetchone()
+            if row:
+                return _format_preset_dict(row)
+
+        return None
+    except Exception as e:
+        logger.warning(f"get_preset_by_slug error for '{slug_or_id}': {e}")
+        return None
+    finally:
+        conn.close()
+
+
+# Alias for backward compatibility
+_get_preset_by_slug = get_preset_by_slug
+
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("")

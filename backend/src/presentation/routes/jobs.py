@@ -605,6 +605,19 @@ async def get_clip_video(
     """Download trimmed clip video file."""
     job = await service.get_job(job_id)
     if not job:
+        # Check Video Generator job fallback
+        try:
+            from src.presentation.routes.video_generator import _find_job_video_path
+            from src.application.video_generator import get_video_generator
+
+            vg = get_video_generator()
+            vg_job = vg.get_job(job_id)
+            vg_path = _find_job_video_path(job_id, vg_job.output_path if vg_job else None)
+            if vg_path and os.path.exists(vg_path):
+                return _stream_video(vg_path, request, f"{job_id}_video.mp4")
+        except Exception:
+            pass
+
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
 
     clip_path = f"{settings.OUTPUT_DIR}/{job_id}/clip_{clip_rank:02d}.mp4"

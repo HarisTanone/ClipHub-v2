@@ -1096,9 +1096,21 @@ class SkiaHookRenderer:
         self, hook_text: str, hook_style: str = "skia_impact_badge", style_config: Optional[dict] = None
     ) -> Image.Image:
         """Generate a 1080x1920 RGBA transparent frame containing the complete Skia/FFmpeg hook."""
-        clean_key = str(hook_style or "skia_impact_badge").lower().replace(" ", "_").replace("-", "_").strip()
-        if clean_key not in SKIA_HOOK_PRESETS and f"skia_{clean_key}" in SKIA_HOOK_PRESETS:
-            clean_key = f"skia_{clean_key}"
+        effective_style = (
+            (style_config.get("animation") if style_config else None)
+            or (style_config.get("hook_style") if style_config else None)
+            or (style_config.get("name") if style_config else None)
+            or hook_style
+            or "skia_impact_badge"
+        )
+        clean_key = str(effective_style).lower().replace(" ", "_").replace("-", "_").strip()
+        if clean_key not in SKIA_HOOK_PRESETS:
+            if f"skia_{clean_key}" in SKIA_HOOK_PRESETS:
+                clean_key = f"skia_{clean_key}"
+            elif clean_key.startswith("skia_") and clean_key[5:] in SKIA_HOOK_PRESETS:
+                clean_key = clean_key[5:]
+            elif clean_key.startswith("hf_") and clean_key[3:] in SKIA_HOOK_PRESETS:
+                clean_key = clean_key[3:]
         cfg = dict(SKIA_HOOK_PRESETS.get(clean_key, SKIA_HOOK_PRESETS.get("news_viralin_badge", SKIA_HOOK_PRESETS["skia_impact_badge"])))
 
         # Normalize style_config overrides (support both camelCase and snake_case)
@@ -1107,9 +1119,13 @@ class SkiaHookRenderer:
                 cfg["font_size"] = int(style_config.get("fontSize") or style_config.get("font_size"))
             if style_config.get("fontFamily") or style_config.get("font_family"):
                 cfg["font_family"] = str(style_config.get("fontFamily") or style_config.get("font_family"))
+            if style_config.get("fontWeight") or style_config.get("font_weight"):
+                cfg["font_weight"] = str(style_config.get("fontWeight") or style_config.get("font_weight"))
+            if style_config.get("italic") is not None:
+                cfg["italic"] = bool(style_config.get("italic"))
             if style_config.get("color") or style_config.get("text_color"):
                 cfg["text_color"] = str(style_config.get("color") or style_config.get("text_color"))
-            
+
             # Custom box / background colors
             custom_box = style_config.get("boxColor") or style_config.get("bgColor") or style_config.get("bg_color")
             if custom_box:
@@ -1120,14 +1136,28 @@ class SkiaHookRenderer:
                     cfg.pop("bg_gradient_from", None)
                     cfg.pop("bg_gradient_to", None)
 
+            if style_config.get("boxEnabled") is False or style_config.get("bg_enabled") is False:
+                cfg["bg_opacity"] = 0
+            if style_config.get("boxRadius") is not None or style_config.get("bg_radius") is not None:
+                cfg["bg_radius"] = int(style_config.get("boxRadius") if style_config.get("boxRadius") is not None else style_config.get("bg_radius"))
+            if style_config.get("boxBorderColor") or style_config.get("bg_border_color"):
+                cfg["bg_border_color"] = str(style_config.get("boxBorderColor") or style_config.get("bg_border_color"))
+            if style_config.get("boxBorderWidth") is not None or style_config.get("bg_border_width") is not None:
+                cfg["bg_border_width"] = int(style_config.get("boxBorderWidth") if style_config.get("boxBorderWidth") is not None else style_config.get("bg_border_width"))
+
             if style_config.get("lineColor"):
                 cfg["line_color"] = style_config.get("lineColor")
-                cfg["badge_bg"] = style_config.get("lineColor")
+                if not style_config.get("badgeBg") and not style_config.get("badge_bg"):
+                    cfg["badge_bg"] = style_config.get("lineColor")
 
             if style_config.get("badgeEnabled") is not None:
                 cfg["badge_enabled"] = bool(style_config.get("badgeEnabled"))
             if style_config.get("badgeText"):
                 cfg["badge_text"] = str(style_config.get("badgeText"))
+            if style_config.get("badgeBg") or style_config.get("badge_bg"):
+                cfg["badge_bg"] = str(style_config.get("badgeBg") or style_config.get("badge_bg"))
+            if style_config.get("badgeColor") or style_config.get("badge_color"):
+                cfg["badge_color"] = str(style_config.get("badgeColor") or style_config.get("badge_color"))
 
             if style_config.get("gradientEnabled") is not None:
                 cfg["gradient_enabled"] = bool(style_config.get("gradientEnabled"))
@@ -1151,6 +1181,12 @@ class SkiaHookRenderer:
                 cfg["bg_opacity"] = float(style_config.get("bgOpacity"))
             if style_config.get("positionY") is not None:
                 cfg["position_y"] = float(style_config.get("positionY"))
+            elif style_config.get("position_y") is not None:
+                cfg["position_y"] = float(style_config.get("position_y"))
+            if style_config.get("tiltAngle") is not None:
+                cfg["tilt_angle"] = float(style_config.get("tiltAngle"))
+            elif style_config.get("tilt_angle") is not None:
+                cfg["tilt_angle"] = float(style_config.get("tilt_angle"))
             if style_config.get("uppercase") is not None:
                 cfg["uppercase"] = bool(style_config.get("uppercase"))
 
