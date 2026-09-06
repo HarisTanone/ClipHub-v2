@@ -308,21 +308,21 @@ function formatViews(views: number): string {
 
 function StatusBadge({ status }: { status: string }) {
   const statusMap: Record<string, { icon: typeof CheckCircle2; className: string; label: string }> = {
-    completed: { icon: CheckCircle2, className: "text-emerald-300 bg-emerald-500/10", label: "Completed" },
-    failed: { icon: AlertCircle, className: "text-red-300 bg-red-500/10", label: "Failed" },
-    queued: { icon: Clock, className: "text-zinc-300 bg-zinc-500/10", label: "Queued" },
-    awaiting_selection: { icon: Layers, className: "text-amber-300 bg-amber-500/15 border border-amber-500/30", label: "Footage Ready" },
+    completed: { icon: CheckCircle2, className: "text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 backdrop-blur-md", label: "Completed" },
+    failed: { icon: AlertCircle, className: "text-red-300 bg-red-500/20 border border-red-500/40 backdrop-blur-md", label: "Failed" },
+    queued: { icon: Clock, className: "text-zinc-300 bg-zinc-800/90 border border-zinc-700/60 backdrop-blur-md", label: "Queued" },
+    awaiting_selection: { icon: Layers, className: "text-amber-300 bg-amber-500/20 border border-amber-500/40 backdrop-blur-md", label: "Footage Ready" },
   };
   const entry = statusMap[status] || {
     icon: Loader2,
-    className: "text-violet-300 bg-violet-500/10",
+    className: "text-violet-300 bg-violet-500/20 border border-violet-500/40 backdrop-blur-md",
     label: "Processing",
   };
   const Icon = entry.icon;
 
   return (
-    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium", entry.className)}>
-      <Icon className={cn("h-3 w-3", isProcessing(status) && "animate-spin")} />
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium shadow-xs", entry.className)}>
+      <Icon className={cn("h-2.5 w-2.5", isProcessing(status) && "animate-spin")} />
       {entry.label}
     </span>
   );
@@ -1434,121 +1434,133 @@ function VideoCard({
   onOpenStudio: (job: VideoJob) => void;
   isRetrying?: boolean;
 }) {
+  const [imgError, setImgError] = useState(false);
   const completed = job.status === "completed";
   const isAwaitingSelection = job.status === "awaiting_selection";
   const processing = isProcessing(job.status);
 
+  // Fallback to backend job thumbnail endpoint if job.thumbnail_url isn't set
+  const thumbnailSrc = !imgError && (job.thumbnail_url || (completed ? `/api/video-generator/jobs/${job.job_id}/thumbnail` : null));
+
   return (
-    <Card className="group overflow-hidden p-0 flex flex-col justify-between border border-zinc-800/80 bg-zinc-900/60 hover:border-violet-500/40 transition-all duration-200 shadow-xs hover:shadow-md">
-      {/* Compact Preview Banner (Constrained height h-40 sm:h-44, not oversized aspect-[9/16]) */}
-      <div className="relative h-40 sm:h-44 w-full overflow-hidden bg-zinc-950 flex items-center justify-center">
-        {/* Ambient Blurred Background from Thumbnail */}
-        {job.thumbnail_url ? (
+    <Card
+      onClick={() => {
+        if (completed) onPlay(job);
+      }}
+      className={cn(
+        "group relative flex flex-col justify-between overflow-hidden p-0 border border-zinc-800/80 bg-zinc-900/70 transition-all duration-200 shadow-sm",
+        completed
+          ? "cursor-pointer hover:border-violet-500/50 hover:bg-zinc-900/90 hover:shadow-xl hover:shadow-violet-950/20"
+          : ""
+      )}
+    >
+      {/* Video Preview Banner */}
+      <div className="relative h-48 sm:h-52 w-full overflow-hidden bg-zinc-950 flex items-center justify-center">
+        {thumbnailSrc ? (
           <img
-            src={job.thumbnail_url}
+            src={thumbnailSrc}
             alt=""
-            aria-hidden="true"
-            className="absolute inset-0 h-full w-full object-cover blur-md opacity-25 scale-110"
+            onError={() => setImgError(true)}
+            className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-violet-950/20 via-zinc-900 to-black opacity-60" />
+          <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-950 to-violet-950/30 flex flex-col items-center justify-center p-4 text-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-500/10 border border-violet-500/20 text-violet-400 group-hover:scale-105 transition-transform">
+              <Film className="h-5 w-5 text-violet-400" />
+            </div>
+            <span className="mt-2 text-[10px] font-medium text-zinc-500 line-clamp-1 max-w-[140px]">
+              {job.title || job.topic || "AI Video"}
+            </span>
+          </div>
         )}
 
-        {/* Centered Crisp 9:16 Miniature Vertical Phone Frame */}
-        <button
-          type="button"
-          disabled={!completed}
-          onClick={() => completed && onPlay(job)}
-          className={cn(
-            "relative z-10 h-32 sm:h-36 w-[72px] sm:w-[81px] rounded-lg overflow-hidden border border-white/15 bg-black shadow-lg flex items-center justify-center transition-transform duration-200",
-            completed ? "cursor-pointer group-hover:scale-105 group-hover:border-violet-400/60" : ""
-          )}
-        >
-          {job.thumbnail_url ? (
-            <img
-              src={job.thumbnail_url}
-              alt={job.title || job.topic}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <Film className="h-6 w-6 text-zinc-600" />
-          )}
+        {/* Ambient Top & Bottom Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-transparent to-black/50 pointer-events-none" />
 
-          {completed && (
-            <span className="absolute inset-0 flex items-center justify-center bg-black/35 opacity-80 group-hover:opacity-100 transition-opacity">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25 text-white backdrop-blur-xs shadow-md pl-0.5 group-hover:scale-110 transition-transform">
-                <Play className="h-4 w-4 fill-white" />
-              </span>
+        {/* Hover Play Overlay for Completed Video */}
+        {completed && (
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-black/40 backdrop-blur-[2px]">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-violet-600 text-white shadow-xl shadow-violet-600/50 transform scale-90 group-hover:scale-100 transition-transform duration-200 pl-0.5">
+              <Play className="h-5 w-5 fill-white text-white" />
+            </div>
+          </div>
+        )}
+
+        {/* Processing State Overlay */}
+        {processing && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 backdrop-blur-xs p-3 text-center">
+            <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+            <span className="text-xs font-semibold text-violet-200 mt-2">{job.progress}%</span>
+            <span className="text-[10px] text-zinc-400 mt-0.5 line-clamp-1 max-w-[150px]">
+              {job.step_label || "Memproses..."}
             </span>
-          )}
+          </div>
+        )}
 
-          {isAwaitingSelection && (
-            <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 p-1 text-center">
-              <Layers className="h-5 w-5 text-amber-300 animate-pulse" />
-              <span className="text-[9px] font-semibold text-amber-200 mt-1 leading-tight">Ready</span>
-            </span>
-          )}
+        {/* Awaiting Footage Selection Overlay */}
+        {isAwaitingSelection && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 backdrop-blur-xs p-3 text-center">
+            <Layers className="h-6 w-6 text-amber-400 animate-pulse" />
+            <span className="text-xs font-semibold text-amber-200 mt-2">Klip Siap Dipilih</span>
+            <span className="text-[10px] text-zinc-400 mt-0.5">Buka Studio untuk review</span>
+          </div>
+        )}
 
-          {processing && (
-            <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 p-1 text-center">
-              <Loader2 className="h-5 w-5 animate-spin text-violet-300" />
-              <span className="text-[9px] text-violet-200 mt-1">{job.progress}%</span>
-            </span>
-          )}
+        {/* Failed State Overlay */}
+        {job.status === "failed" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 backdrop-blur-xs p-3 text-center">
+            <AlertCircle className="h-6 w-6 text-red-400" />
+            <span className="text-xs font-semibold text-red-200 mt-1">Gagal Diproses</span>
+          </div>
+        )}
 
-          {job.status === "failed" && (
-            <span className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 p-1 text-center">
-              <AlertCircle className="h-5 w-5 text-red-400" />
-            </span>
-          )}
-        </button>
-
-        {/* Top Badges */}
-        <div className="absolute top-2 left-2 z-20">
+        {/* Top Badges: Status & Aspect Ratio */}
+        <div className="absolute top-2 left-2 z-10">
           <StatusBadge status={job.status} />
         </div>
 
-        <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
           {job.source_video_url && (
             <span
-              className="rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-violet-300 border border-violet-500/30 backdrop-blur-xs flex items-center gap-1"
-              title={`Gemini Video Understanding (${job.video_processing_mode || "agentic"}, ${job.media_resolution || "low"} res)`}
+              className="rounded-md bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-violet-300 border border-violet-500/30 backdrop-blur-sm flex items-center gap-1"
+              title={`Gemini Video Understanding (${job.video_processing_mode || "agentic"})`}
             >
-              <Sparkles className="h-2.5 w-2.5" />
-              {job.video_processing_mode === "static" ? "Static Vision" : "Agentic Vision"}
+              <Sparkles className="h-2.5 w-2.5 text-violet-300" />
+              AI
             </span>
           )}
-          <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-zinc-300 border border-white/10 backdrop-blur-xs">
+          <span className="rounded-md bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-zinc-300 border border-white/10 backdrop-blur-sm">
             9:16
           </span>
         </div>
 
-        {/* Bottom Banner Pill */}
-        <div className="absolute bottom-1.5 left-2 right-2 z-20 flex items-center justify-between text-[10px] text-zinc-400 px-1">
-          <span className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-white/5 backdrop-blur-xs">
-            <Clock className="h-2.5 w-2.5 text-zinc-400" /> {job.target_duration}s
+        {/* Bottom Badges: Duration & Scene Count */}
+        <div className="absolute bottom-2 left-2 right-2 z-10 flex items-center justify-between text-[10px] text-zinc-300 px-0.5">
+          <span className="flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded-md border border-white/10 backdrop-blur-sm">
+            <Clock className="h-2.5 w-2.5 text-zinc-400" /> {job.target_duration || 65}s
           </span>
-          <span className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-white/5 backdrop-blur-xs">
-            <Layers className="h-2.5 w-2.5 text-zinc-400" /> {job.scenes_count || "—"} scenes
+          <span className="flex items-center gap-1 bg-black/60 px-2 py-0.5 rounded-md border border-white/10 backdrop-blur-sm">
+            <Layers className="h-2.5 w-2.5 text-zinc-400" /> {job.scenes_count || "—"} adegan
           </span>
         </div>
       </div>
 
-      {/* Card Content & Actions */}
-      <div className="p-2.5 space-y-2">
+      {/* Card Content & Action Bar */}
+      <div className="p-3 space-y-2.5 flex-1 flex flex-col justify-between">
         <div>
-          <p
-            className="truncate text-xs font-semibold text-zinc-200 hover:text-white transition-colors"
+          <h3
+            className="text-xs font-semibold text-zinc-100 group-hover:text-violet-200 transition-colors line-clamp-2 leading-snug"
             title={job.title || job.topic}
           >
-            {job.title || job.topic}
-          </p>
-          <div className="mt-0.5 flex items-center justify-between text-[10px] text-zinc-500">
-            <span className="truncate max-w-[120px]">
-              {job.voice ? `Voice: ${job.voice}` : "Default Voice"}
+            {job.title || job.topic || "Untitled Video"}
+          </h3>
+          <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-500">
+            <span className="truncate max-w-[130px] flex items-center gap-1">
+              <Mic className="h-3 w-3 text-zinc-500 shrink-0" />
+              <span className="truncate">{job.voice ? `Voice: ${job.voice}` : "Default Voice"}</span>
             </span>
-            <span>
-              {job.created_at ? new Date(job.created_at * 1000).toLocaleDateString() : ""}
+            <span className="shrink-0">
+              {job.created_at ? new Date(job.created_at * 1000).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }) : ""}
             </span>
           </div>
         </div>
@@ -1560,85 +1572,87 @@ function VideoCard({
         )}
 
         {job.error && (
-          <p className="line-clamp-2 text-[10px] leading-3.5 text-red-400" title={job.error}>
+          <p className="line-clamp-2 text-[10px] leading-tight text-red-400 bg-red-500/10 border border-red-500/20 rounded p-1.5" title={job.error}>
             {job.error}
           </p>
         )}
 
-        {/* Action Buttons */}
-        <div className="pt-1 flex items-center justify-between gap-1 border-t border-zinc-800/60">
-          <div className="flex flex-wrap items-center gap-1">
-            {isAwaitingSelection && (
-              <Button
-                type="button"
-                size="xs"
-                variant="primary"
-                onClick={() => onOpenStudio(job)}
-                className="h-6 px-2 text-[10px]"
-                icon={<Layers className="h-2.5 w-2.5" />}
-              >
-                Studio
-              </Button>
-            )}
-
+        {/* Action Buttons: Download, Post & Delete on a Single Clean Row */}
+        <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between gap-1.5 mt-auto">
+          <div className="flex items-center gap-1.5">
             {completed && (
               <>
-                <Button
+                {/* Download Button */}
+                <button
                   type="button"
-                  size="xs"
-                  variant="outline"
-                  onClick={() => onPlay(job)}
-                  className="h-6 px-2 text-[10px] text-zinc-200 hover:text-white"
-                  icon={<Play className="h-2.5 w-2.5 text-violet-400" />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDownload(job.job_id);
+                  }}
+                  className="flex items-center gap-1.5 rounded-lg border border-zinc-700/70 bg-zinc-800/80 hover:bg-zinc-700 hover:text-white px-2.5 py-1 text-xs font-medium text-zinc-200 transition shadow-xs"
+                  title="Unduh video MP4"
                 >
-                  Watch
-                </Button>
-                <Button
+                  <Download className="h-3.5 w-3.5 text-zinc-400" />
+                  <span>Download</span>
+                </button>
+
+                {/* Post Button */}
+                <button
                   type="button"
-                  size="xs"
-                  variant="outline"
-                  onClick={() => onDownload(job.job_id)}
-                  className="h-6 px-1.5 text-[10px] text-zinc-300"
-                  icon={<Download className="h-2.5 w-2.5" />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPublishSocial?.(job);
+                  }}
+                  className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:text-emerald-200 transition shadow-xs"
+                  title="Jadwalkan posting media sosial (TikTok, Instagram, YouTube Shorts)"
                 >
-                  Download
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  className="h-6 px-1.5 text-[10px] text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
-                  onClick={() => onPublishSocial?.(job)}
-                  icon={<Share2 className="h-2.5 w-2.5" />}
-                >
-                  Post
-                </Button>
+                  <Share2 className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Post</span>
+                </button>
               </>
             )}
 
-            {job.status === "failed" && (
-              <Button
+            {isAwaitingSelection && (
+              <button
                 type="button"
-                size="xs"
-                variant="outline"
-                loading={isRetrying}
-                disabled={isRetrying}
-                onClick={() => onRetry(job.job_id)}
-                className="h-6 px-2 text-[10px]"
-                icon={<RotateCcw className="h-2.5 w-2.5" />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenStudio(job);
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 hover:bg-amber-500/25 px-2.5 py-1 text-xs font-medium text-amber-300 transition shadow-xs"
               >
-                Retry
-              </Button>
+                <Layers className="h-3.5 w-3.5 text-amber-400" />
+                <span>Studio</span>
+              </button>
+            )}
+
+            {job.status === "failed" && (
+              <button
+                type="button"
+                disabled={isRetrying}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetry(job.job_id);
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-200 transition shadow-xs disabled:opacity-50"
+              >
+                <RotateCcw className={cn("h-3.5 w-3.5", isRetrying && "animate-spin text-amber-400")} />
+                <span>{isRetrying ? "Retrying..." : "Retry"}</span>
+              </button>
             )}
           </div>
 
+          {/* Delete Button */}
           <button
             type="button"
-            className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition ml-auto"
-            onClick={() => onDelete(job.job_id)}
-            title="Delete Job"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(job.job_id);
+            }}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition shrink-0 ml-auto"
+            title="Hapus video ini"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>

@@ -1156,7 +1156,7 @@ def _job_to_response(job) -> JobStatusResponse:
         completed_at=job.completed_at,
         scenes_count=scenes_count,
         estimated_duration=estimated_duration,
-        thumbnail_url=getattr(job, "thumbnail_url", None) or thumbnail_url,
+        thumbnail_url=getattr(job, "thumbnail_url", None) or thumbnail_url or (f"/api/video-generator/jobs/{job.job_id}/thumbnail" if status_val == "completed" else None),
         scenes=job.scenes_with_footage,
     )
 
