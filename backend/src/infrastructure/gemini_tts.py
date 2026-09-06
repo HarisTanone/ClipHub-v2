@@ -261,9 +261,11 @@ class GeminiTTS:
         os.makedirs(self.output_dir, exist_ok=True)
         self._key_index = 0
 
-    def _get_api_key(self) -> str:
+    def _get_api_key(self, preferred_key: Optional[str] = None) -> str:
         from src.infrastructure.auth import get_gemini_key_rotator
         rotator = get_gemini_key_rotator()
+        if preferred_key and not rotator.is_key_rate_limited(preferred_key):
+            return preferred_key
         key = rotator.get_current_key()
         if not key:
             keys = _get_gemini_api_keys()
@@ -324,6 +326,7 @@ class GeminiTTS:
         speed: float = 1.0,
         voice_style: Optional[str] = None,
         output_path: Optional[str] = None,
+        preferred_key: Optional[str] = None,
     ) -> Optional[str]:
         """Synthesize text to speech audio file using Gemini TTS API.
 
@@ -335,6 +338,7 @@ class GeminiTTS:
             speed: Playback speed multiplier (0.85 - 1.3).
             voice_style: Optional style/accent identifier (e.g. 'id_jakarta', 'id_formal').
             output_path: Destination path for output MP3/WAV file.
+            preferred_key: Optional specific Gemini API key (for round-robin distribution).
         """
         if not text or not text.strip():
             logger.warning("gemini_tts: Empty text, skipping synthesis")
@@ -398,13 +402,44 @@ class GeminiTTS:
             },
         }
 
-        # Multi-attempt with key rotation
+        # Multi-attempt with key rotation, backoff, and smart cooldown waiting
+        from src.infrastructure.auth import get_gemini_key_rotator, is_gemini_rate_limit_error
+        rotator = get_gemini_key_rotator()
+
         keys = _get_gemini_api_keys()
-        max_attempts = max(1, min(len(keys) if keys else 1, 3))
+        # Ensure we try across all available keys with retries (not capped at 3)
+        max_attempts = max(len(keys) * 2, 6) if keys else 3
         last_error = None
 
         for attempt in range(max_attempts):
-            api_key = self._get_api_key()
+            # 1. Smart cooldown wait if all keys are currently cooling down
+            min_cd = rotator.get_min_cooldown_remaining()
+            if min_cd > 0.0:
+                if min_cd <= 15.0:
+                    logger.info(f"gemini_tts: all keys on cooldown, waiting {min_cd:.1f}s for key recovery...")
+                    await asyncio.sleep(min_cd + 0.5)
+                else:
+                    # If cooldown is long, switch to 2.5-flash which may have separate quota
+                    if clean_model == "gemini-3.1-flash-tts-preview":
+                        clean_model = "gemini-2.5-flash-preview-tts"
+                        logger.info(f"gemini_tts: keys cooling down, trying model {clean_model}")
+
+            # 2. Key resolution
+            if attempt == 0 and preferred_key and not rotator.is_key_rate_limited(preferred_key):
+                api_key = preferred_key
+            else:
+                api_key = self._get_api_key()
+
+            # 3. Inter-attempt backoff with jitter if this is a retry
+            if attempt > 0:
+                backoff_sec = min(0.6 * (1.35 ** (attempt - 1)), 3.0) + ((abs(hash(text) + attempt) % 4) * 0.1)
+                await asyncio.sleep(backoff_sec)
+
+            # 4. If we reached halfway and still failing on 3.1-flash, try 2.5-flash
+            if attempt >= (len(keys) or 2) and clean_model == "gemini-3.1-flash-tts-preview":
+                clean_model = "gemini-2.5-flash-preview-tts"
+                logger.info(f"gemini_tts: fallback model -> {clean_model} (attempt {attempt + 1}/{max_attempts})")
+
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent?key={api_key}"
 
             try:
@@ -434,7 +469,6 @@ class GeminiTTS:
                         logger.warning(
                             f"gemini_tts: No audio parts in response (model={clean_model}): {data}"
                         )
-                        # Try fallback model if 3.1 preview had format issue
                         if clean_model != "gemini-2.5-flash-preview-tts":
                             clean_model = "gemini-2.5-flash-preview-tts"
                             continue
@@ -469,9 +503,12 @@ class GeminiTTS:
                         continue
                     last_error = f"HTTP {resp.status_code}: {err_msg[:100]}"
                 elif resp.status_code == 429:
-                    from src.infrastructure.auth import get_gemini_key_rotator
-                    get_gemini_key_rotator().mark_rate_limited(key=api_key, retry_after=60.0)
-                    logger.warning(f"gemini_tts: attempt {attempt + 1} HTTP 429 rate limited on key ...{api_key[-6:]}")
+                    is_rl, retry_after = is_gemini_rate_limit_error(Exception(resp.text))
+                    cd = max(15.0, min(float(retry_after or 45.0), 60.0))
+                    rotator.mark_rate_limited(key=api_key, retry_after=cd)
+                    logger.warning(
+                        f"gemini_tts: attempt {attempt + 1}/{max_attempts} HTTP 429 rate limited on key ...{api_key[-6:]} (cooldown: {cd:.1f}s)"
+                    )
                     last_error = "HTTP 429 Too Many Requests"
                     continue
                 else:
@@ -566,27 +603,41 @@ class GeminiTTS:
         speed: float = 1.0,
         voice_style: Optional[str] = None,
     ) -> list[dict[str, Any]]:
-        """Synthesize narration for all scenes in parallel with concurrency limit."""
-        sem = asyncio.Semaphore(4)
+        """Synthesize narration for all scenes with pacing, round-robin keys, and recovery pass."""
+        from src.infrastructure.auth import get_gemini_key_rotator
+        rotator = get_gemini_key_rotator()
 
-        async def _synth_scene(i: int, scene: dict[str, Any]):
+        # Paced execution with concurrency limit 1 to prevent triggering Google burst rate limits
+        sem = asyncio.Semaphore(1)
+
+        async def _synth_scene(i: int, scene: dict[str, Any], attempt_model: str) -> dict[str, Any]:
             narration = (scene.get("narration") or "").strip()
             if not narration:
                 return scene
 
             out_path = os.path.join(self.output_dir, f"scene_{i + 1:02d}_tts.mp3")
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 0 and scene.get("tts_path"):
+                return scene
+
+            # Select round-robin key for this scene to balance load across all keys
+            pref_key = rotator.get_round_robin_key(offset=i)
 
             async with sem:
+                # Polite stagger between scenes to avoid sudden burst detection
+                if i > 0:
+                    await asyncio.sleep(0.35)
+
                 audio_path = await self.synthesize(
                     text=narration,
                     voice_id=voice_id,
-                    model_id=model_id,
+                    model_id=attempt_model,
                     speed=speed,
                     voice_style=voice_style,
                     output_path=out_path,
+                    preferred_key=pref_key,
                 )
 
-            if audio_path and os.path.exists(audio_path):
+            if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
                 # Probe duration via ffprobe
                 dur = await self._probe_audio_duration(audio_path)
                 scene["tts_path"] = audio_path
@@ -595,8 +646,26 @@ class GeminiTTS:
                 scene["audio_duration"] = dur
             return scene
 
-        tasks = [_synth_scene(i, s) for i, s in enumerate(scenes)]
-        return await asyncio.gather(*tasks)
+        # Pass 1: Synthesize all scenes sequentially/paced
+        for i, s in enumerate(scenes):
+            await _synth_scene(i, s, attempt_model=model_id)
+
+        # Pass 2: Second-chance recovery specifically for any missing scenes
+        missing_indices = [
+            i for i, s in enumerate(scenes)
+            if not s.get("tts_path") and (s.get("narration") or "").strip()
+        ]
+        if missing_indices:
+            logger.info(
+                f"gemini_tts: {len(missing_indices)} scene(s) missing audio after Pass 1, executing Gemini recovery pass..."
+            )
+            await asyncio.sleep(1.5)
+            # Try with gemini-2.5-flash-preview-tts for broader quota pool if 3.1 had trouble
+            fallback_model = "gemini-2.5-flash-preview-tts"
+            for i in missing_indices:
+                await _synth_scene(i, scenes[i], attempt_model=fallback_model)
+
+        return scenes
 
     async def _probe_audio_duration(self, file_path: str, fallback: float = 5.0) -> float:
         """Probe audio duration in seconds via ffprobe."""

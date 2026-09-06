@@ -306,6 +306,71 @@ class GeminiKeyRotator:
             return None
         return avail[0]
 
+    def get_key_cooldown_remaining(self, key: str) -> float:
+        """Return remaining cooldown seconds for key (0.0 if not limited)."""
+        if not key or key not in GeminiKeyRotator._shared_rate_limited:
+            return 0.0
+        with self._lock:
+            if key not in GeminiKeyRotator._shared_rate_limited:
+                return 0.0
+            limited_at, cooldown = GeminiKeyRotator._shared_rate_limited[key]
+            now = datetime.now(timezone.utc)
+            elapsed = (now - limited_at).total_seconds()
+            remaining = cooldown - elapsed
+            if remaining <= 0:
+                GeminiKeyRotator._shared_rate_limited.pop(key, None)
+                return 0.0
+            return max(0.0, remaining)
+
+    def get_min_cooldown_remaining(self) -> float:
+        """Return minimum remaining cooldown among all keys (0.0 if any key is healthy)."""
+        all_keys = self.keys
+        if not all_keys:
+            return 0.0
+        with self._lock:
+            now = datetime.now(timezone.utc)
+            # Clean expired
+            for k in list(GeminiKeyRotator._shared_rate_limited.keys()):
+                lim_at, cd = GeminiKeyRotator._shared_rate_limited[k]
+                if (now - lim_at).total_seconds() > cd:
+                    GeminiKeyRotator._shared_rate_limited.pop(k, None)
+
+            # If any key is healthy, remaining cooldown is 0
+            healthy = [k for k in all_keys if k not in GeminiKeyRotator._shared_rate_limited]
+            if healthy:
+                return 0.0
+
+            # All keys are limited, find minimum remaining
+            min_rem = float("inf")
+            for k in all_keys:
+                if k in GeminiKeyRotator._shared_rate_limited:
+                    lim_at, cd = GeminiKeyRotator._shared_rate_limited[k]
+                    rem = cd - (now - lim_at).total_seconds()
+                    if rem < min_rem:
+                        min_rem = rem
+            return max(0.0, min_rem) if min_rem != float("inf") else 0.0
+
+    def get_round_robin_key(self, offset: int = 0) -> Optional[str]:
+        """Get a healthy key using round-robin offset for scene load-balancing."""
+        all_keys = self.keys
+        if not all_keys:
+            return None
+        with self._lock:
+            now = datetime.now(timezone.utc)
+            # Clean expired
+            for k in list(GeminiKeyRotator._shared_rate_limited.keys()):
+                lim_at, cd = GeminiKeyRotator._shared_rate_limited[k]
+                if (now - lim_at).total_seconds() > cd:
+                    GeminiKeyRotator._shared_rate_limited.pop(k, None)
+
+            n = len(all_keys)
+            healthy = [k for k in all_keys if k not in GeminiKeyRotator._shared_rate_limited]
+            if healthy:
+                return healthy[offset % len(healthy)]
+
+            # If none healthy, pick from all keys by offset
+            return all_keys[offset % n]
+
     def mark_rate_limited(self, key: Optional[str] = None, retry_after: float = 60.0) -> None:
         """Mark current key or specific key as rate limited and switch to next."""
         all_keys = self.keys

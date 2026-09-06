@@ -1277,24 +1277,37 @@ class VideoGenerator:
                 )
             except Exception as exc:
                 logger.warning(f"video_gen: GeminiTTS synthesize_scenes failed ({exc}), falling back to individual calls")
-                for i, scene in enumerate(scenes):
+
+            # Dedicated Gemini Recovery Pass before considering any secondary provider
+            missing_gemini = [
+                i for i, s in enumerate(scenes)
+                if not s.get("tts_path") and (s.get("narration") or "").strip()
+            ]
+            if missing_gemini:
+                logger.info(
+                    f"video_gen: {len(missing_gemini)} scene(s) missing audio after primary pass, "
+                    f"executing dedicated Gemini recovery pass with model fallback..."
+                )
+                await asyncio.sleep(1.0)
+                for i in missing_gemini:
+                    scene = scenes[i]
                     narration = (scene.get("narration") or "").strip()
-                    if not narration or scene.get("tts_path"):
-                        continue
                     try:
                         audio_path = await tts.synthesize(
                             text=narration,
                             voice_id=voice_id,
-                            model_id=model_id,
+                            model_id="gemini-2.5-flash-preview-tts",
                             speed=job.speed,
-                            output_path=os.path.join(tts_dir, f"tts_{i + 1}.mp3"),
+                            output_path=os.path.join(tts_dir, f"scene_{i + 1:02d}_tts.mp3"),
                         )
-                        if audio_path and os.path.exists(audio_path):
+                        if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
                             dur = await self._media_duration(audio_path, fallback=5.0)
                             scene["tts_path"] = audio_path
                             scene["tts_duration"] = dur
+                            scene["audio_path"] = audio_path
+                            scene["audio_duration"] = dur
                     except Exception as e:
-                        logger.warning(f"video_gen: Gemini TTS failed for scene {i + 1}: {e}")
+                        logger.warning(f"video_gen: Gemini TTS recovery failed for scene {i + 1}: {e}")
 
         else:
             from src.infrastructure.deepgram_tts import DeepgramTTS

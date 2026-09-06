@@ -172,13 +172,12 @@ class GeminiAgenticVideoService:
         import base64
         keys = self._key_rotator.get_available_keys()
         # Agentic video mode is officially supported on:
-        # Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash, 3.5 Flash Lite
+        # Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash, 2.5 Flash
         AGENTIC_SUPPORTED_MODELS = {
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.5-flash",
+            "gemini-2.5-flash",
         }
 
         if processing_mode == "agentic":
@@ -187,7 +186,7 @@ class GeminiAgenticVideoService:
                 "gemini-3.7-flash",
                 "gemini-3.8-flash",
                 "gemini-3.6-flash",
-                "gemini-3.5-flash-lite",
+                "gemini-2.5-flash",
                 self._fallback_model,
             ]
         else:
