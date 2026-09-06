@@ -1128,32 +1128,64 @@ class VideoGenerator:
         )
         return scenes
 
+    def _extract_media_keys(self, candidate: Optional[dict]) -> set[str]:
+        """Extract canonical identifiers for a media candidate to strictly prevent footage duplication."""
+        import urllib.parse
+        keys: set[str] = set()
+        if not candidate or not isinstance(candidate, dict):
+            return keys
+        vid_id = candidate.get("video_id") or candidate.get("id")
+        if vid_id:
+            keys.add(str(vid_id).strip().lower())
+        url = (candidate.get("url") or candidate.get("source_url") or "").strip().lower()
+        if url:
+            keys.add(url)
+            try:
+                parsed = urllib.parse.urlparse(url)
+                clean_host_path = f"{parsed.netloc}{parsed.path}".rstrip("/")
+                if clean_host_path:
+                    keys.add(clean_host_path)
+                if "youtube.com" in parsed.netloc or "youtu.be" in parsed.netloc:
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    if "v" in qs and qs["v"]:
+                        keys.add(qs["v"][0].lower())
+            except Exception:
+                pass
+        return keys
+
     async def _step_download_footage(
         self, scenes: list[dict], work_dir: str
     ) -> list[dict]:
-        """Step 3: Download top candidate for each scene via yt-dlp / direct stock downloader with multi-candidate fallback."""
+        """Step 3: Download top candidate for each scene with strict cross-scene deduplication and multi-tier fallback.
+        
+        STRICT DEDUPLICATION RULE: Once a footage item (video or photo) is assigned to a scene,
+        its keys are permanently locked so that NO subsequent scene in this job can reuse the same footage.
+        """
         from src.infrastructure.footage_downloader import FootageDownloader
 
         downloader = FootageDownloader(output_dir=os.path.join(work_dir, "footage"))
+        used_media_keys: set[str] = set()
 
         for i, scene in enumerate(scenes):
             selected = scene.get("selected_footage") or scene.get("footage_source")
             raw_cands = scene.get("footage_candidates", []) or []
 
-            # Prioritize candidates list: selected candidate first (if valid & relevant), then rest sorted by score (> 0)
+            # Prioritize candidates list: selected candidate first (if valid, relevant & not already used in previous scene)
             ordered_candidates: list[dict] = []
-            selected_score = self._score_candidate(selected, scene) if selected else -100.0
-            if selected and selected_score > 0:
-                ordered_candidates.append(selected)
+            if selected and not (self._extract_media_keys(selected) & used_media_keys):
+                selected_score = self._score_candidate(selected, scene)
+                if selected_score > 0:
+                    ordered_candidates.append(selected)
 
             scored = []
             for c in raw_cands:
                 if not isinstance(c, dict):
                     continue
-                if selected and (
-                    (c.get("video_id") and c.get("video_id") == selected.get("video_id"))
-                    or (c.get("url") and c.get("url") == selected.get("url"))
-                ):
+                c_keys = self._extract_media_keys(c)
+                if c_keys & used_media_keys:
+                    # STRICT DEDUPLICATION: Skip duplicate candidate already used in an earlier scene of this video
+                    continue
+                if selected and (self._extract_media_keys(selected) & c_keys):
                     continue
                 score = self._score_candidate(c, scene)
                 if score > 0:
@@ -1167,10 +1199,15 @@ class VideoGenerator:
 
             # Try candidate options in order until a valid footage file is successfully downloaded
             for cand_idx, cand in enumerate(ordered_candidates):
-                # If already downloaded local file exists, reuse
+                c_keys = self._extract_media_keys(cand)
+                if c_keys & used_media_keys:
+                    continue
+
+                # If already downloaded local file exists and not used
                 if cand.get("local_path") and os.path.exists(cand["local_path"]) and os.path.getsize(cand["local_path"]) > 0:
                     downloaded_path = cand["local_path"]
                     used_source = cand
+                    used_media_keys.update(c_keys)
                     break
 
                 video_url = cand.get("url", "")
@@ -1210,13 +1247,15 @@ class VideoGenerator:
 
                         downloaded_path = local_path
                         used_source = cand
+                        used_media_keys.update(c_keys)
+                        logger.info(f"video_gen: scene {i + 1} locked unique footage -> {cand.get('title', '')[:50]}")
                         break
                 except Exception as dl_err:
                     logger.warning(f"video_gen: candidate {cand_idx + 1} download failed for scene {i + 1}: {dl_err}")
 
-            # Clean stock b-roll fallback if all social candidates failed or had burned-in text
+            # Fallback 1: Clean stock video fallback (Pexels / Pixabay) with unique queries & deduplication
             if not downloaded_path:
-                logger.warning(f"video_gen: all {len(ordered_candidates)} candidates failed for scene {i + 1}, trying clean stock b-roll fallback...")
+                logger.warning(f"video_gen: all candidates failed or duplicate for scene {i + 1}, searching clean stock video fallback...")
                 try:
                     from src.infrastructure.youtube_search import YouTubeSearch, simplify_stock_query
                     yt = YouTubeSearch()
@@ -1226,16 +1265,19 @@ class VideoGenerator:
                     for sq in scene.get("search_queries", []):
                         if sq:
                             stock_queries.append(simplify_stock_query(sq))
-                    stock_queries.append("cinematic landscape")
+                    stock_queries.extend(["cinematic slow motion", "dramatic atmospheric lighting"])
 
                     for fq in stock_queries:
                         if not fq:
                             continue
-                        stock_cands = await yt.search_pexels(fq, max_results=3)
+                        stock_cands = await yt.search_pexels(fq, max_results=4)
                         if not stock_cands:
-                            stock_cands = await yt.search_pixabay(fq, max_results=3)
+                            stock_cands = await yt.search_pixabay(fq, max_results=4)
 
                         for sc in stock_cands:
+                            sc_keys = self._extract_media_keys(sc)
+                            if sc_keys & used_media_keys:
+                                continue
                             sc_url = sc.get("url")
                             if not sc_url:
                                 continue
@@ -1250,20 +1292,90 @@ class VideoGenerator:
                             if sc_path and os.path.exists(sc_path) and os.path.getsize(sc_path) > 0:
                                 downloaded_path = sc_path
                                 used_source = sc
+                                used_media_keys.update(sc_keys)
+                                logger.info(f"video_gen: scene {i + 1} locked clean stock video fallback -> {sc.get('title', '')[:50]}")
                                 break
                         if downloaded_path:
                             break
                 except Exception as stock_err:
-                    logger.warning(f"video_gen: stock fallback search failed for scene {i + 1}: {stock_err}")
+                    logger.warning(f"video_gen: stock video fallback failed for scene {i + 1}: {stock_err}")
 
-            # Adjacent scene borrowing fallback: NEVER leave scene with black screen if other scenes have footage
+            # Fallback 2: High-res vertical stock photo with Ken Burns 30 fps motion (guaranteed zero repetition)
             if not downloaded_path:
-                for other_scene in scenes:
-                    if other_scene.get("footage_path") and os.path.exists(other_scene["footage_path"]):
-                        downloaded_path = other_scene["footage_path"]
-                        used_source = other_scene.get("footage_source") or other_scene.get("selected_footage")
-                        logger.info(f"video_gen: scene {i + 1} borrowing footage from scene {other_scene.get('id', '?')} to prevent black frame")
-                        break
+                logger.info(f"video_gen: scene {i + 1} searching high-res vertical photo (Ken Burns) to prevent footage duplication...")
+                try:
+                    from src.infrastructure.youtube_search import YouTubeSearch, simplify_stock_query
+                    yt = YouTubeSearch()
+                    photo_queries = []
+                    if scene.get("visual"):
+                        photo_queries.append(simplify_stock_query(scene["visual"]))
+                    for sq in scene.get("search_queries", []):
+                        if sq:
+                            photo_queries.append(simplify_stock_query(sq))
+                    photo_queries.extend(["cinematic portrait atmosphere", "dramatic lighting cinematic"])
+
+                    for pq in photo_queries:
+                        if not pq:
+                            continue
+                        photo_cands = await yt.search_pexels_photos(pq, max_results=4)
+                        if not photo_cands:
+                            photo_cands = await yt.search_pixabay_photos(pq, max_results=4)
+
+                        for pc in photo_cands:
+                            pc_keys = self._extract_media_keys(pc)
+                            if pc_keys & used_media_keys:
+                                continue
+                            pc_url = pc.get("url")
+                            if not pc_url:
+                                continue
+                            pc_path = await downloader.download_segment(
+                                url=pc_url,
+                                start_time=0.0,
+                                duration=max(10.0, float(scene.get("duration_estimate", 7)) + 4.0),
+                                scene_id=scene.get("id", i + 1),
+                                platform=pc.get("platform", "pexels"),
+                                video_id=pc.get("video_id"),
+                            )
+                            if pc_path and os.path.exists(pc_path) and os.path.getsize(pc_path) > 0:
+                                pc["media_type"] = "image"
+                                downloaded_path = pc_path
+                                used_source = pc
+                                used_media_keys.update(pc_keys)
+                                logger.info(f"video_gen: scene {i + 1} locked unique photo for Ken Burns -> {pc.get('title', '')[:50]}")
+                                break
+                        if downloaded_path:
+                            break
+                except Exception as photo_err:
+                    logger.warning(f"video_gen: photo fallback error for scene {i + 1}: {photo_err}")
+
+            # Fallback 3: Procedural ambient studio motion backdrop (strict zero duplicate footage)
+            # Under NO circumstance borrow already-used footage from another scene!
+            if not downloaded_path:
+                logger.warning(f"video_gen: scene {i + 1} generating procedural ambient backdrop (strict zero duplicate footage)")
+                grad_path = os.path.join(work_dir, "footage", f"ambient_scene_{i + 1}.mp4")
+                dur = max(10.0, float(scene.get("duration_estimate", 7)) + 4.0)
+                import subprocess
+                proc_cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "lavfi",
+                    "-i", f"color=c=0x0d0d12:s=1080x1920:d={dur}",
+                    "-vf", "noise=c1s=8:c0f=u",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", str(dur),
+                    grad_path
+                ]
+                try:
+                    subprocess.run(proc_cmd, capture_output=True, timeout=20)
+                    if os.path.exists(grad_path) and os.path.getsize(grad_path) > 0:
+                        downloaded_path = grad_path
+                        used_source = {
+                            "video_id": f"ambient_procedural_{i + 1}",
+                            "title": f"Ambient Procedural Backdrop {i + 1}",
+                            "platform": "procedural",
+                            "media_type": "video",
+                        }
+                        used_media_keys.add(f"ambient_procedural_{i + 1}")
+                except Exception as grad_err:
+                    logger.error(f"video_gen: failed generating procedural backdrop: {grad_err}")
 
             scene["footage_path"] = downloaded_path
             scene["selected_footage"] = used_source

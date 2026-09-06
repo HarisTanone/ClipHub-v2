@@ -1117,6 +1117,12 @@ def _job_to_response(job) -> JobStatusResponse:
     }
     step_label = step_labels.get(status_val, status_val)
 
+    # For completed jobs, ALWAYS point to the official hook thumbnail endpoint
+    if status_val == "completed":
+        final_thumb = f"/api/video-generator/jobs/{job.job_id}/thumbnail"
+    else:
+        final_thumb = getattr(job, "thumbnail_url", None) or thumbnail_url
+
     return JobStatusResponse(
         job_id=job.job_id,
         user_id=getattr(job, "user_id", None),
@@ -1156,7 +1162,7 @@ def _job_to_response(job) -> JobStatusResponse:
         completed_at=job.completed_at,
         scenes_count=scenes_count,
         estimated_duration=estimated_duration,
-        thumbnail_url=getattr(job, "thumbnail_url", None) or thumbnail_url or (f"/api/video-generator/jobs/{job.job_id}/thumbnail" if status_val == "completed" else None),
+        thumbnail_url=final_thumb,
         scenes=job.scenes_with_footage,
     )
 
@@ -1272,7 +1278,7 @@ async def get_job_thumbnail(
                 out_thumb
             ], capture_output=True, timeout=15)
             if os.path.exists(out_thumb) and os.path.getsize(out_thumb) > 0:
-                return FileResponse(out_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+                return FileResponse(out_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"})
         except Exception:
             pass
 
@@ -1297,7 +1303,7 @@ async def get_job_thumbnail(
     ]
     for tp in thumb_candidates:
         if tp and os.path.exists(tp) and os.path.getsize(tp) > 0:
-            return FileResponse(tp, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+            return FileResponse(tp, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"})
 
     # 3. Extract on-the-fly from video at 2.0s if thumbnail file is missing
     if video_path and os.path.exists(video_path):
@@ -1312,7 +1318,7 @@ async def get_job_thumbnail(
                 out_thumb
             ], capture_output=True, timeout=15)
             if os.path.exists(out_thumb) and os.path.getsize(out_thumb) > 0:
-                return FileResponse(out_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+                return FileResponse(out_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"})
         except Exception:
             pass
 

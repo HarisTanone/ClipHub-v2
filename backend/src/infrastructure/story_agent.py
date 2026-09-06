@@ -723,7 +723,9 @@ class StoryAgent:
             "the visual goal, narrative context, and mood of that scene.\n"
             "HD Quality Rule: ALWAYS prioritize High Definition (HD, 720p minimum, 1080p Full HD, 4K) footage. Never choose blurry or low-resolution clips.\n"
             "Visual Pacing Rule: Curate an engaging hybrid mix between dynamic video clips and high-resolution still photos "
-            "across the timeline (keep Hook dynamic with video, and blend photos and videos across scenes for visual rhythm).\n\n"
+            "across the timeline (keep Hook dynamic with video, and blend photos and videos across scenes for visual rhythm).\n"
+            "STRICT NO-DUPLICATE RULE: Under NO circumstances select the same candidate option, video_id, url, or identical title for more than one scene! "
+            "Every scene MUST feature a completely unique footage clip to keep the viewer visually engaged.\n\n"
             f"Scenes and Candidates:\n{json.dumps(curation_payload, indent=2)}\n\n"
             "Output JSON mapping scene_id to the chosen option_index and reasoning:\n"
             '{\n  "curation": [\n    {"scene_id": 1, "chosen_option_index": 0, "reason": "Accurately depicts dark ocean submarine"}\n  ]\n}'
@@ -740,17 +742,47 @@ class StoryAgent:
                     except (ValueError, TypeError):
                         pass
 
+            assigned_keys: set[str] = set()
+
+            def _get_cand_id(c: dict) -> str:
+                return str(c.get("video_id") or c.get("url") or c.get("title") or "").strip().lower()
+
             for s in scenes:
                 s_id_str = str(s.get("id"))
                 cands = s.get("footage_candidates", [])
-                if s_id_str in choice_map and cands:
-                    chosen_idx = choice_map[s_id_str]
-                    if 0 <= chosen_idx < len(cands):
-                        s["selected_footage"] = cands[chosen_idx]
-                        s["footage_source"] = cands[chosen_idx]
-                        logger.info(
-                            f"story_agent (AI Director): Curated scene {s.get('id')} -> '{cands[chosen_idx].get('title', '')[:50]}'"
-                        )
+                if not cands:
+                    continue
+
+                preferred_idx = choice_map.get(s_id_str, 0)
+                chosen_candidate = None
+
+                # 1. Try AI Director preferred candidate if unused
+                if 0 <= preferred_idx < len(cands):
+                    cand = cands[preferred_idx]
+                    cid = _get_cand_id(cand)
+                    if cid and cid not in assigned_keys:
+                        chosen_candidate = cand
+                        assigned_keys.add(cid)
+
+                # 2. If AI preferred was duplicate or invalid, pick first unused candidate
+                if not chosen_candidate:
+                    for cand in cands:
+                        cid = _get_cand_id(cand)
+                        if cid and cid not in assigned_keys:
+                            chosen_candidate = cand
+                            assigned_keys.add(cid)
+                            break
+
+                # 3. Fallback to first candidate if all candidates were exhausted
+                if not chosen_candidate and cands:
+                    chosen_candidate = cands[0]
+
+                if chosen_candidate:
+                    s["selected_footage"] = chosen_candidate
+                    s["footage_source"] = chosen_candidate
+                    logger.info(
+                        f"story_agent (AI Director): Curated scene {s.get('id')} -> '{chosen_candidate.get('title', '')[:50]}'"
+                    )
 
         except Exception as cur_err:
             logger.warning(f"story_agent: AI Director curation pass fallback ({cur_err})")

@@ -928,6 +928,102 @@ def test_pixabay_valid_per_page_range():
     assert "max(3," in src_code
 
 
+@pytest.mark.asyncio
+async def test_cross_scene_footage_deduplication(tmp_path, monkeypatch):
+    """Verify that the same footage is NEVER reused across multiple scenes in a single job."""
+    import os
+    from src.application.video_generator import VideoGenerator
+
+    generator = VideoGenerator(output_dir=str(tmp_path))
+    work_dir = str(tmp_path / "dedup_job")
+    os.makedirs(work_dir, exist_ok=True)
+
+    # Candidate A is present in both Scene 1 and Scene 2
+    cand_a = {
+        "video_id": "pixabay_202749",
+        "title": "Soccer Field, Soccer, Kids, Playing",
+        "url": "https://cdn.pixabay.com/video/2024/03/03/202749.mp4",
+        "platform": "pixabay",
+    }
+    # Candidate B is only in Scene 2
+    cand_b = {
+        "video_id": "pexels_88888",
+        "title": "Soccer Stadium Bright Floodlights",
+        "url": "https://videos.pexels.com/video-files/88888.mp4",
+        "platform": "pexels",
+    }
+
+    scenes = [
+        {
+            "id": 1,
+            "visual": "Soccer field with bright floodlights",
+            "search_queries": ["soccer stadium", "soccer field"],
+            "footage_candidates": [cand_a],
+            "duration_estimate": 5.0,
+        },
+        {
+            "id": 2,
+            "visual": "Soccer stadium night floodlights",
+            "search_queries": ["soccer stadium", "soccer players"],
+            "footage_candidates": [cand_a, cand_b],
+            "duration_estimate": 5.0,
+        },
+    ]
+
+    # Create dummy local files for candidates
+    os.makedirs(os.path.join(work_dir, "footage"), exist_ok=True)
+    path_a = os.path.join(work_dir, "footage", "clip_a.mp4")
+    path_b = os.path.join(work_dir, "footage", "clip_b.mp4")
+    with open(path_a, "wb") as f:
+        f.write(b"dummy_a")
+    with open(path_b, "wb") as f:
+        f.write(b"dummy_b")
+
+    # Mock FootageDownloader.download_segment
+    async def mock_download_segment(self, url, start_time=0.0, duration=10.0, scene_id=1, platform=None, video_id=None):
+        if "202749" in str(url) or video_id == "pixabay_202749":
+            return path_a
+        return path_b
+
+    from src.infrastructure.footage_downloader import FootageDownloader
+    monkeypatch.setattr(FootageDownloader, "download_segment", mock_download_segment)
+    monkeypatch.setattr(generator, "check_video_has_burned_in_text", lambda p: (False, 0.0))
+
+    result_scenes = await generator._step_download_footage(scenes, work_dir)
+
+    assert len(result_scenes) == 2
+    # Scene 1 must use Candidate A
+    assert result_scenes[0]["selected_footage"]["video_id"] == "pixabay_202749"
+    assert result_scenes[0]["footage_path"] == path_a
+
+    # Scene 2 MUST NOT reuse Candidate A! It must use Candidate B!
+    assert result_scenes[1]["selected_footage"]["video_id"] == "pexels_88888"
+    assert result_scenes[1]["footage_path"] == path_b
+    assert result_scenes[0]["footage_path"] != result_scenes[1]["footage_path"]
+
+
+def test_completed_job_thumbnail_url_in_response(tmp_path):
+    """Verify that completed jobs always return the official Hook thumbnail endpoint."""
+    from src.application.video_generator import VideoGenerator, VideoGenJob, VideoGenStatus
+    from src.presentation.routes.video_generator import _job_to_response
+
+    job = VideoGenJob(
+        job_id="test_thumb_job",
+        topic="Arsenal vs Chelsea",
+        status=VideoGenStatus.COMPLETED,
+        progress=100,
+        thumbnail_url="http://cdn.pixabay.com/old_stock.jpg",
+        scenes_with_footage=[
+            {"footage_source": {"thumbnail_url": "http://cdn.pixabay.com/cand_thumb.jpg"}}
+        ]
+    )
+
+    resp = _job_to_response(job)
+    # Must be official hook thumbnail endpoint, not the raw stock thumbnail
+    assert resp.thumbnail_url == "/api/video-generator/jobs/test_thumb_job/thumbnail"
+
+
+
 
 
 

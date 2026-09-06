@@ -896,10 +896,25 @@ function SceneFootageStudioModal({
   const toast = useToast();
   const [currentJob, setCurrentJob] = useState<VideoJob>(job);
   const [scenes, setScenes] = useState<SceneItem[]>(() => {
-    return (job.scenes || []).map((s) => ({
-      ...s,
-      selected_footage: s.selected_footage || s.footage_source || (s.footage_candidates?.[0] || null),
-    }));
+    const usedKeys = new Set<string>();
+    return (job.scenes || []).map((s) => {
+      let chosen = s.selected_footage || s.footage_source;
+      if (!chosen && s.footage_candidates && s.footage_candidates.length > 0) {
+        chosen =
+          s.footage_candidates.find((c) => {
+            const k = (c.url || c.video_id || c.title || "").trim().toLowerCase();
+            return k && !usedKeys.has(k);
+          }) || s.footage_candidates[0] || null;
+      }
+      if (chosen) {
+        const k = (chosen.url || chosen.video_id || chosen.title || "").trim().toLowerCase();
+        if (k) usedKeys.add(k);
+      }
+      return {
+        ...s,
+        selected_footage: chosen,
+      };
+    });
   });
 
   // Keep currentJob in sync with prop
@@ -935,22 +950,49 @@ function SceneFootageStudioModal({
   useEffect(() => {
     if (currentJob.scenes && currentJob.scenes.length > 0) {
       setScenes((prev) => {
+        const usedKeys = new Set<string>();
         if (prev.length === 0) {
-          return currentJob.scenes!.map((s) => ({
-            ...s,
-            selected_footage: s.selected_footage || s.footage_source || (s.footage_candidates?.[0] || null),
-          }));
+          return currentJob.scenes!.map((s) => {
+            let chosen = s.selected_footage || s.footage_source;
+            if (!chosen && s.footage_candidates && s.footage_candidates.length > 0) {
+              chosen =
+                s.footage_candidates.find((c) => {
+                  const k = (c.url || c.video_id || c.title || "").trim().toLowerCase();
+                  return k && !usedKeys.has(k);
+                }) || s.footage_candidates[0] || null;
+            }
+            if (chosen) {
+              const k = (chosen.url || chosen.video_id || chosen.title || "").trim().toLowerCase();
+              if (k) usedKeys.add(k);
+            }
+            return {
+              ...s,
+              selected_footage: chosen,
+            };
+          });
         }
         // Preserve user selections for existing scenes while bringing in any new candidates
         return currentJob.scenes!.map((s) => {
           const existing = prev.find((p) => p.id === s.id);
+          let chosen =
+            existing?.selected_footage !== undefined
+              ? existing.selected_footage
+              : s.selected_footage || s.footage_source;
+          if (!chosen && s.footage_candidates && s.footage_candidates.length > 0) {
+            chosen =
+              s.footage_candidates.find((c) => {
+                const k = (c.url || c.video_id || c.title || "").trim().toLowerCase();
+                return k && !usedKeys.has(k);
+              }) || s.footage_candidates[0] || null;
+          }
+          if (chosen) {
+            const k = (chosen.url || chosen.video_id || chosen.title || "").trim().toLowerCase();
+            if (k) usedKeys.add(k);
+          }
           return {
             ...s,
             narration: existing?.narration ?? s.narration,
-            selected_footage:
-              existing?.selected_footage !== undefined
-                ? existing.selected_footage
-                : s.selected_footage || s.footage_source || (s.footage_candidates?.[0] || null),
+            selected_footage: chosen,
           };
         });
       });
@@ -1415,6 +1457,86 @@ function SceneFootageStudioModal({
   );
 }
 
+function VideoJobThumbnail({
+  job,
+  title,
+}: {
+  job: VideoJob;
+  title: string;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const completed = job.status === "completed";
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setSrc(null);
+    setFailed(false);
+
+    // 1. For completed videos: fetch crisp Hook keyframe thumbnail via authenticated blob request
+    if (completed) {
+      hermesVideoGenApi
+        .getThumbnailBlob(job.job_id)
+        .then((blob) => {
+          if (!active) return;
+          if (blob && blob.size > 0) {
+            objectUrl = URL.createObjectURL(blob);
+            setSrc(objectUrl);
+          } else {
+            setFailed(true);
+          }
+        })
+        .catch(() => {
+          if (active) {
+            // Fallback: check if job has direct external image URL
+            if (job.thumbnail_url && job.thumbnail_url.startsWith("http")) {
+              setSrc(job.thumbnail_url);
+            } else {
+              setFailed(true);
+            }
+          }
+        });
+    } else if (job.thumbnail_url) {
+      // In-progress or awaiting selection preview
+      const raw = job.thumbnail_url;
+      const u = raw.startsWith("http") ? raw : `${API_BASE}${raw.startsWith("/") ? "" : "/"}${raw}`;
+      setSrc(u);
+    } else {
+      setFailed(true);
+    }
+
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [job.job_id, job.status, job.thumbnail_url, completed]);
+
+  if (!src || failed) {
+    return (
+      <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-950 to-violet-950/30 flex flex-col items-center justify-center p-4 text-center">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-500/10 border border-violet-500/20 text-violet-400 group-hover:scale-105 transition-transform">
+          <Film className="h-5 w-5 text-violet-400" />
+        </div>
+        <span className="mt-2 text-[10px] font-medium text-zinc-500 line-clamp-1 max-w-[140px]">
+          {title}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={title}
+      onError={() => setFailed(true)}
+      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+    />
+  );
+}
+
 function VideoCard({
   job,
   onPlay,
@@ -1434,23 +1556,9 @@ function VideoCard({
   onOpenStudio: (job: VideoJob) => void;
   isRetrying?: boolean;
 }) {
-  const [imgError, setImgError] = useState(false);
   const completed = job.status === "completed";
   const isAwaitingSelection = job.status === "awaiting_selection";
   const processing = isProcessing(job.status);
-
-  // Resolve thumbnail URL with API_BASE and auth token for reliable remote loading
-  const token = getToken();
-  const rawThumb = job.thumbnail_url || (completed ? `/api/video-generator/jobs/${job.job_id}/thumbnail` : null);
-  const thumbnailSrc = !imgError && rawThumb
-    ? (() => {
-        let u = rawThumb.startsWith("http") ? rawThumb : `${API_BASE}${rawThumb.startsWith("/") ? "" : "/"}${rawThumb}`;
-        if (token && !u.includes("token=")) {
-          u = u.includes("?") ? `${u}&token=${encodeURIComponent(token)}` : `${u}?token=${encodeURIComponent(token)}`;
-        }
-        return u;
-      })()
-    : null;
 
   return (
     <Card
@@ -1466,23 +1574,7 @@ function VideoCard({
     >
       {/* Video Preview Banner */}
       <div className="relative h-48 sm:h-52 w-full overflow-hidden bg-zinc-950 flex items-center justify-center">
-        {thumbnailSrc ? (
-          <img
-            src={thumbnailSrc}
-            alt=""
-            onError={() => setImgError(true)}
-            className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-950 to-violet-950/30 flex flex-col items-center justify-center p-4 text-center">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-500/10 border border-violet-500/20 text-violet-400 group-hover:scale-105 transition-transform">
-              <Film className="h-5 w-5 text-violet-400" />
-            </div>
-            <span className="mt-2 text-[10px] font-medium text-zinc-500 line-clamp-1 max-w-[140px]">
-              {job.title || job.topic || "AI Video"}
-            </span>
-          </div>
-        )}
+        <VideoJobThumbnail job={job} title={job.title || job.topic || "AI Video"} />
 
         {/* Ambient Top & Bottom Gradient Overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-transparent to-black/50 pointer-events-none" />

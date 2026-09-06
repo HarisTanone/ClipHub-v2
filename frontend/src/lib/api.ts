@@ -1430,6 +1430,9 @@ export const hermesVideoGenApi = {
     if (keyword && keyword.trim()) q.set("keyword", keyword.trim());
     return request(`/api/video-generator/trending-topics?${q.toString()}`);
   },
+  async getThumbnailBlob(jobId: string): Promise<Blob> {
+    return requestBlob(`/api/video-generator/jobs/${jobId}/thumbnail`);
+  },
 };
 
 
