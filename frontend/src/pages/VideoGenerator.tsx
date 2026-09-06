@@ -1721,157 +1721,67 @@ function TrendingRadarModal({
           </button>
         </div>
 
-        {/* Keyword Search Input & Quick Niche Chips Bar */}
-        <div className="border-b border-zinc-800/80 px-5 py-3 bg-zinc-950/60 space-y-2.5">
-          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-              <input
-                type="text"
-                value={localKeyword}
-                onChange={(e) => setLocalKeyword(e.target.value)}
-                placeholder="Ketik keyword atau topik spesifik (contoh: AI, Kripto, Otomotif, Resep, Misteri)..."
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-900/90 pl-9 pr-8 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30 transition shadow-inner"
-              />
+        {/* Search & Actions Bar */}
+        <div className="border-b border-zinc-800 px-5 py-3 bg-zinc-950/40 flex items-center justify-between gap-3">
+          <form onSubmit={handleSearchSubmit} className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+            <input
+              type="text"
+              value={localKeyword}
+              onChange={(e) => setLocalKeyword(e.target.value)}
+              placeholder="Cari topik dengan kata kunci sendiri..."
+              className="w-full rounded-lg border border-zinc-800 bg-zinc-900/90 pl-9 pr-16 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30 transition"
+            />
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
               {localKeyword && (
                 <button
                   type="button"
                   onClick={handleClearKeyword}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-zinc-400 hover:text-zinc-200 transition"
-                  title="Hapus keyword"
+                  className="p-1 text-zinc-400 hover:text-zinc-200 transition"
+                  title="Hapus kata kunci"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-3 w-3" />
                 </button>
               )}
+              <Button
+                type="submit"
+                size="xs"
+                variant="primary"
+                disabled={isLoading}
+                className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium px-2.5 py-0.5 h-6 text-xs"
+              >
+                Cari
+              </Button>
             </div>
-
-            <Button
-              type="submit"
-              size="sm"
-              variant="primary"
-              disabled={isLoading}
-              className="shrink-0 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold"
-              icon={isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-            >
-              <span>{isLoading ? "Memindai..." : "Cari Radar"}</span>
-            </Button>
           </form>
 
-          {/* Quick Niche Suggestion Chips */}
-          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-            <span className="text-[10px] uppercase font-semibold tracking-wider text-zinc-500 mr-1 flex items-center gap-1">
-              <Sparkles className="h-3 w-3 text-amber-400" />
-              Niche Cepat:
-            </span>
-            {[
-              { label: "Semua", kw: "" },
-              { label: "AI & Teknologi", kw: "Kecerdasan Buatan AI" },
-              { label: "Bisnis & Finansial", kw: "Bisnis dan Investasi" },
-              { label: "Kesehatan", kw: "Kesehatan dan Diet" },
-              { label: "Otomotif", kw: "Otomotif Mobil Motor" },
-              { label: "Gaming", kw: "Gaming dan Esports" },
-              { label: "Misteri & Fakta", kw: "Misteri dan Fakta Menarik" },
-              { label: "Kuliner", kw: "Kuliner dan Resep Viral" },
-            ].map((chip) => {
-              const isActive = (chip.kw === "" && !keyword) || (chip.kw !== "" && keyword.toLowerCase() === chip.kw.toLowerCase());
-              return (
-                <button
-                  key={chip.label}
-                  type="button"
-                  onClick={() => {
-                    setLocalKeyword(chip.kw);
-                    onSearchKeyword?.(chip.kw);
-                  }}
-                  className={cn(
-                    "rounded-lg px-2 py-0.5 text-[11px] font-medium transition",
-                    isActive
-                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs"
-                      : "bg-zinc-900 border border-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
-                  )}
-                >
-                  {chip.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Region & Actions Filter Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 px-5 py-3 bg-zinc-950/40">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {[
-              { id: "ID", label: "Indonesia", isGlobal: false },
-              { id: "GLOBAL", label: "Worldwide", isGlobal: true },
-              { id: "US", label: "United States", isGlobal: false },
-              { id: "MY", label: "Malaysia", isGlobal: false },
-              { id: "SG", label: "Singapore", isGlobal: false },
-              { id: "GB", label: "UK", isGlobal: false },
-              { id: "JP", label: "Japan", isGlobal: false },
-            ].map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => onRegionChange(r.id)}
-                className={cn(
-                  "rounded-lg px-2.5 py-1 text-xs font-medium transition inline-flex items-center gap-1.5",
-                  region === r.id
-                    ? "bg-amber-500/20 text-amber-200 border border-amber-500/40 shadow-xs"
-                    : "border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
-                )}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Country Selector */}
+            <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-300">
+              <Globe className="h-3 w-3 text-zinc-400" />
+              <select
+                value={region}
+                onChange={(e) => onRegionChange(e.target.value)}
+                className="bg-transparent text-zinc-200 outline-none cursor-pointer text-xs"
               >
-                {r.isGlobal ? (
-                  <Globe className="h-3 w-3 text-amber-400" />
-                ) : (
-                  <MapPin className="h-3 w-3 text-zinc-400" />
-                )}
-                <span>{r.label}</span>
-              </button>
-            ))}
-          </div>
+                <option value="ID" className="bg-zinc-900">Indonesia</option>
+                <option value="GLOBAL" className="bg-zinc-900">Global</option>
+                <option value="US" className="bg-zinc-900">United States</option>
+                <option value="MY" className="bg-zinc-900">Malaysia</option>
+                <option value="SG" className="bg-zinc-900">Singapore</option>
+              </select>
+            </div>
 
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={isLoading}
-            className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-1 text-xs text-zinc-300 hover:border-zinc-700 hover:text-white transition"
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", isLoading && "animate-spin text-amber-400")} />
-            <span>{isLoading ? "Memindai..." : "Pindai Ulang"}</span>
-          </button>
-        </div>
-
-        {/* 4 Mandatory Active Filters Indicator Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/80 px-5 py-2.5 bg-zinc-950/80 text-xs">
-          <div className="flex items-center gap-1.5 text-zinc-400">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-amber-400/90 flex items-center gap-1">
-              <Sparkles className="h-3 w-3 text-amber-400" />
-              Filter Aktif:
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {/* 1. Country */}
-            <span className="inline-flex items-center gap-1 rounded-md bg-zinc-900 border border-zinc-700/80 px-2 py-0.5 text-[11px] text-zinc-200 font-medium shadow-xs">
-              <MapPin className="h-3 w-3 text-amber-400" />
-              Country: <strong className="text-zinc-100">{region === "ID" ? "Indonesia 🇮🇩" : region}</strong>
-            </span>
-
-            {/* 2. Time Frame */}
-            <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 text-[11px] text-blue-300 font-medium shadow-xs">
-              <Clock className="h-3 w-3 text-blue-400" />
-              Time Frame: <strong className="text-blue-100">24 Jam Terakhir</strong>
-            </span>
-
-            {/* 3. Status Tren */}
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 font-medium shadow-xs">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              Status Tren: <strong className="text-emerald-100">Aktif Saja (True)</strong>
-            </span>
-
-            {/* 4. Sort By */}
-            <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 border border-purple-500/30 px-2 py-0.5 text-[11px] text-purple-300 font-medium shadow-xs">
-              <TrendingUp className="h-3 w-3 text-purple-400" />
-              Urutkan: <strong className="text-purple-100">Menurut Keterkinian</strong>
-            </span>
+            {/* Refresh Button */}
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-1 text-xs text-zinc-300 hover:border-zinc-700 hover:text-white transition"
+            >
+              <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin text-amber-400")} />
+              <span>{isLoading ? "Memindai..." : "Pindai Ulang"}</span>
+            </button>
           </div>
         </div>
 
@@ -1879,19 +1789,19 @@ function TrendingRadarModal({
         <div className="flex-1 overflow-y-auto p-5 space-y-3.5">
           {/* Active Search Badge */}
           {keyword && (
-            <div className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-              <span className="flex items-center gap-2 font-medium">
-                <Sparkles className="h-4 w-4 text-amber-400 shrink-0" />
+            <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-1.5 text-xs text-zinc-300">
+              <span className="flex items-center gap-2">
+                <Search className="h-3.5 w-3.5 text-amber-400" />
                 <span>
-                  Radar tren aktif untuk keyword: <strong className="text-amber-100 font-semibold">"{keyword}"</strong>
+                  Hasil pencarian kata kunci: <strong className="text-zinc-100">"{keyword}"</strong>
                 </span>
               </span>
               <button
                 type="button"
                 onClick={handleClearKeyword}
-                className="flex items-center gap-1 text-[11px] text-amber-300 hover:text-amber-100 underline transition font-medium"
+                className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition"
               >
-                <span>Reset ke Tren Umum</span>
+                <span>Reset</span>
                 <X className="h-3 w-3" />
               </button>
             </div>
@@ -1902,11 +1812,11 @@ function TrendingRadarModal({
               <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
               <p className="text-sm font-medium text-zinc-200">
                 {keyword
-                  ? `Menganalisis YouTube, Google News & TikTok untuk keyword "${keyword}"...`
+                  ? `Menganalisis YouTube, Google News & TikTok untuk kata kunci "${keyword}"...`
                   : "Menghubungkan ke YouTube Data API, Google Trends & TikTok..."}
               </p>
               <p className="text-xs text-zinc-500 max-w-sm">
-                Gemini AI sedang memvalidasi topik paling ramai, menganalisis hook viral, dan menyusun poin pembahasan.
+                Gemini AI sedang menganalisis topik terhangat dalam 24 jam terakhir berdasarkan keterkinian.
               </p>
             </div>
           ) : topics.length === 0 ? (
@@ -1914,7 +1824,7 @@ function TrendingRadarModal({
               <AlertCircle className="h-8 w-8 text-zinc-500" />
               <p className="text-sm text-zinc-300">
                 {keyword
-                  ? `Belum ditemukan topik trending untuk keyword "${keyword}".`
+                  ? `Belum ditemukan topik trending untuk kata kunci "${keyword}".`
                   : "Belum ada topik trending untuk wilayah ini."}
               </p>
               <div className="flex items-center gap-2 pt-1">
@@ -1940,9 +1850,17 @@ function TrendingRadarModal({
                       #{idx + 1}
                     </span>
                     <div>
-                      <h4 className="text-sm font-bold text-zinc-100 group-hover:text-amber-200 transition-colors">
-                        {t.topic}
-                      </h4>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="text-sm font-bold text-zinc-100 group-hover:text-amber-200 transition-colors">
+                          {t.topic}
+                        </h4>
+                        {t.recency && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400 font-normal">
+                            <Clock className="h-2.5 w-2.5 text-zinc-500" />
+                            {t.recency}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-zinc-400 mt-0.5">{t.angle}</p>
                     </div>
                   </div>
@@ -1981,40 +1899,24 @@ function TrendingRadarModal({
                   </div>
                 )}
 
-                {/* Metadata Tags & Filter Badges */}
-                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-zinc-800/60 text-[10px]">
-                  {/* Status: Aktif */}
-                  <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 font-medium">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    {t.status || "Aktif"}
+                {/* Clean Metadata Tags */}
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-zinc-800/60 text-[10px] text-zinc-400">
+                  <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    Aktif
                   </span>
-
-                  {/* Timeframe: 24 Jam Terakhir */}
-                  <span className="inline-flex items-center gap-1 rounded bg-blue-500/10 text-blue-300 border border-blue-500/25 px-2 py-0.5 font-medium">
-                    <Clock className="h-2.5 w-2.5 text-blue-400" />
-                    {t.timeframe || "24 Jam Terakhir"}
-                  </span>
-
-                  {/* Keterkinian / Recency */}
-                  {t.recency && (
-                    <span className="inline-flex items-center gap-1 rounded bg-purple-500/10 text-purple-300 border border-purple-500/25 px-2 py-0.5 font-medium">
-                      <TrendingUp className="h-2.5 w-2.5 text-purple-400" />
-                      {t.recency}
-                    </span>
-                  )}
-
                   {t.source && (
-                    <span className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-300 font-medium">
+                    <span className="rounded bg-zinc-800/80 px-2 py-0.5 text-zinc-300">
                       Sumber: {t.source}
                     </span>
                   )}
                   {t.traffic_estimate && (
                     <span className="rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 px-2 py-0.5">
-                      Estimasi: {t.traffic_estimate}
+                      {t.traffic_estimate}
                     </span>
                   )}
                   {t.search_keywords && t.search_keywords.map((kw, kwIdx) => (
-                    <span key={kwIdx} className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-zinc-400">
+                    <span key={kwIdx} className="rounded bg-zinc-800/60 px-1.5 py-0.5 text-zinc-400">
                       #{kw}
                     </span>
                   ))}
@@ -3181,17 +3083,6 @@ export function VideoGeneratorPage() {
                         <span className="text-[10px] text-amber-400/80 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded font-mono">
                           {trendingTopics.length} Topik
                         </span>
-                        <div className="hidden sm:flex items-center gap-1 text-[10px] text-zinc-400">
-                          <span className="rounded bg-blue-500/10 border border-blue-500/25 px-1.5 py-0.2 text-blue-300">
-                            ⏱️ 24 Jam Terakhir
-                          </span>
-                          <span className="rounded bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.2 text-emerald-300">
-                            🟢 Aktif
-                          </span>
-                          <span className="rounded bg-purple-500/10 border border-purple-500/25 px-1.5 py-0.2 text-purple-300">
-                            ⚡ Keterkinian
-                          </span>
-                        </div>
                       </div>
 
                       <div className="flex items-center gap-1.5">
