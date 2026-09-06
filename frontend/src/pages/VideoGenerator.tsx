@@ -1657,6 +1657,8 @@ function TrendingRadarModal({
   onRegionChange,
   onRefresh,
   onSelectTopic,
+  keyword = "",
+  onSearchKeyword,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -1666,7 +1668,27 @@ function TrendingRadarModal({
   onRegionChange: (reg: string) => void;
   onRefresh: () => void;
   onSelectTopic: (t: TrendingTopicItem) => void;
+  keyword?: string;
+  onSearchKeyword?: (kw: string) => void;
 }) {
+  const [localKeyword, setLocalKeyword] = useState(keyword || "");
+
+  useEffect(() => {
+    if (isOpen) {
+      setLocalKeyword(keyword || "");
+    }
+  }, [keyword, isOpen]);
+
+  const handleSearchSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    onSearchKeyword?.(localKeyword.trim());
+  };
+
+  const handleClearKeyword = () => {
+    setLocalKeyword("");
+    onSearchKeyword?.("");
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -1697,6 +1719,81 @@ function TrendingRadarModal({
           >
             <X className="h-5 w-5" />
           </button>
+        </div>
+
+        {/* Keyword Search Input & Quick Niche Chips Bar */}
+        <div className="border-b border-zinc-800/80 px-5 py-3 bg-zinc-950/60 space-y-2.5">
+          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+              <input
+                type="text"
+                value={localKeyword}
+                onChange={(e) => setLocalKeyword(e.target.value)}
+                placeholder="Ketik keyword atau topik spesifik (contoh: AI, Kripto, Otomotif, Resep, Misteri)..."
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900/90 pl-9 pr-8 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30 transition shadow-inner"
+              />
+              {localKeyword && (
+                <button
+                  type="button"
+                  onClick={handleClearKeyword}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-zinc-400 hover:text-zinc-200 transition"
+                  title="Hapus keyword"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            <Button
+              type="submit"
+              size="sm"
+              variant="primary"
+              disabled={isLoading}
+              className="shrink-0 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold"
+              icon={isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+            >
+              <span>{isLoading ? "Memindai..." : "Cari Radar"}</span>
+            </Button>
+          </form>
+
+          {/* Quick Niche Suggestion Chips */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+            <span className="text-[10px] uppercase font-semibold tracking-wider text-zinc-500 mr-1 flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-amber-400" />
+              Niche Cepat:
+            </span>
+            {[
+              { label: "Semua", kw: "" },
+              { label: "AI & Teknologi", kw: "Kecerdasan Buatan AI" },
+              { label: "Bisnis & Finansial", kw: "Bisnis dan Investasi" },
+              { label: "Kesehatan", kw: "Kesehatan dan Diet" },
+              { label: "Otomotif", kw: "Otomotif Mobil Motor" },
+              { label: "Gaming", kw: "Gaming dan Esports" },
+              { label: "Misteri & Fakta", kw: "Misteri dan Fakta Menarik" },
+              { label: "Kuliner", kw: "Kuliner dan Resep Viral" },
+            ].map((chip) => {
+              const isActive = (chip.kw === "" && !keyword) || (chip.kw !== "" && keyword.toLowerCase() === chip.kw.toLowerCase());
+              return (
+                <button
+                  key={chip.label}
+                  type="button"
+                  onClick={() => {
+                    setLocalKeyword(chip.kw);
+                    onSearchKeyword?.(chip.kw);
+                  }}
+                  className={cn(
+                    "rounded-lg px-2 py-0.5 text-[11px] font-medium transition",
+                    isActive
+                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs"
+                      : "bg-zinc-900 border border-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                  )}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Region & Actions Filter Bar */}
@@ -1745,23 +1842,56 @@ function TrendingRadarModal({
 
         {/* Modal Body: Topic Cards List */}
         <div className="flex-1 overflow-y-auto p-5 space-y-3.5">
+          {/* Active Search Badge */}
+          {keyword && (
+            <div className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              <span className="flex items-center gap-2 font-medium">
+                <Sparkles className="h-4 w-4 text-amber-400 shrink-0" />
+                <span>
+                  Radar tren aktif untuk keyword: <strong className="text-amber-100 font-semibold">"{keyword}"</strong>
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={handleClearKeyword}
+                className="flex items-center gap-1 text-[11px] text-amber-300 hover:text-amber-100 underline transition font-medium"
+              >
+                <span>Reset ke Tren Umum</span>
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
               <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
               <p className="text-sm font-medium text-zinc-200">
-                Menghubungkan ke YouTube Data API, Google Trends & TikTok...
+                {keyword
+                  ? `Menganalisis YouTube, Google News & TikTok untuk keyword "${keyword}"...`
+                  : "Menghubungkan ke YouTube Data API, Google Trends & TikTok..."}
               </p>
               <p className="text-xs text-zinc-500 max-w-sm">
                 Gemini AI sedang memvalidasi topik paling ramai, menganalisis hook viral, dan menyusun poin pembahasan.
               </p>
             </div>
           ) : topics.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center space-y-2">
+            <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
               <AlertCircle className="h-8 w-8 text-zinc-500" />
-              <p className="text-sm text-zinc-300">Belum ada topik trending untuk wilayah ini.</p>
-              <Button size="sm" variant="outline" onClick={onRefresh}>
-                Coba Pindai Lagi
-              </Button>
+              <p className="text-sm text-zinc-300">
+                {keyword
+                  ? `Belum ditemukan topik trending untuk keyword "${keyword}".`
+                  : "Belum ada topik trending untuk wilayah ini."}
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                {keyword && (
+                  <Button size="sm" variant="outline" onClick={handleClearKeyword}>
+                    Lihat Tren Umum
+                  </Button>
+                )}
+                <Button size="sm" variant="primary" onClick={onRefresh}>
+                  Coba Pindai Lagi
+                </Button>
+              </div>
             </div>
           ) : (
             topics.map((t, idx) => (
@@ -1841,7 +1971,11 @@ function TrendingRadarModal({
 
         {/* Modal Footer */}
         <div className="flex items-center justify-between border-t border-zinc-800 px-5 py-3 bg-zinc-900/90 text-xs text-zinc-500">
-          <span>Menampilkan {topics.length} topik trending harian paling ramai.</span>
+          <span>
+            {keyword
+              ? `Menampilkan ${topics.length} konsep video viral untuk keyword "${keyword}".`
+              : `Menampilkan ${topics.length} topik trending harian paling ramai.`}
+          </span>
           <Button size="xs" variant="outline" onClick={onClose}>
             Tutup
           </Button>
@@ -1969,6 +2103,7 @@ export function VideoGeneratorPage() {
   const [trendingTopics, setTrendingTopics] = useState<TrendingTopicItem[]>([]);
   const [isLoadingTrending, setIsLoadingTrending] = useState(false);
   const [trendingRegion, setTrendingRegion] = useState("ID");
+  const [trendingKeyword, setTrendingKeyword] = useState("");
   const [showTrendingModal, setShowTrendingModal] = useState(false);
 
   // Aspect Ratio & Visual Elements state
@@ -2146,17 +2281,17 @@ export function VideoGeneratorPage() {
     }
   }, []);
 
-  const loadTrendingTopics = useCallback(async (region = trendingRegion, refresh = false) => {
+  const loadTrendingTopics = useCallback(async (region = trendingRegion, refresh = false, keyword = trendingKeyword) => {
     setIsLoadingTrending(true);
     try {
-      const data = await hermesVideoGenApi.getTrendingTopics(region, 5, refresh);
+      const data = await hermesVideoGenApi.getTrendingTopics(region, 5, refresh, keyword);
       setTrendingTopics(data.topics || []);
     } catch (err) {
       console.error("Failed to load trending topics:", err);
     } finally {
       setIsLoadingTrending(false);
     }
-  }, [trendingRegion]);
+  }, [trendingRegion, trendingKeyword]);
 
   const handleSelectTrendingTopic = (t: TrendingTopicItem) => {
     setTopic(t.topic);
@@ -2967,8 +3102,26 @@ export function VideoGeneratorPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
                         <Flame className="h-4 w-4 text-amber-400 fill-amber-400" />
-                        <span className="text-xs font-semibold text-amber-200">
-                          Topik Trending Hari Ini (Real-Time)
+                        <span className="text-xs font-semibold text-amber-200 flex items-center gap-1.5">
+                          {trendingKeyword ? (
+                            <>
+                              <span>Radar:</span>
+                              <span className="text-amber-100 italic font-bold">"{trendingKeyword}"</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTrendingKeyword("");
+                                  void loadTrendingTopics(trendingRegion, true, "");
+                                }}
+                                className="rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 p-0.5 transition"
+                                title="Hapus filter keyword"
+                              >
+                                <X className="h-2.5 w-2.5" />
+                              </button>
+                            </>
+                          ) : (
+                            "Topik Trending Hari Ini (Real-Time)"
+                          )}
                         </span>
                         <span className="text-[10px] text-amber-400/80 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded font-mono">
                           {trendingTopics.length} Topik
@@ -2984,7 +3137,7 @@ export function VideoGeneratorPage() {
                             onChange={(e) => {
                               const newReg = e.target.value;
                               setTrendingRegion(newReg);
-                              void loadTrendingTopics(newReg);
+                              void loadTrendingTopics(newReg, false, trendingKeyword);
                             }}
                             className="bg-transparent text-zinc-200 outline-none cursor-pointer text-xs"
                           >
@@ -3001,7 +3154,7 @@ export function VideoGeneratorPage() {
                         {/* Refresh Button */}
                         <button
                           type="button"
-                          onClick={() => loadTrendingTopics(trendingRegion, true)}
+                          onClick={() => loadTrendingTopics(trendingRegion, true, trendingKeyword)}
                           disabled={isLoadingTrending}
                           className="flex items-center justify-center h-6 w-6 rounded-md border border-zinc-800 bg-zinc-900/80 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition"
                           title="Refresh topik trending dari YouTube Data API, Google Trends & TikTok"
@@ -3970,10 +4123,15 @@ export function VideoGeneratorPage() {
         region={trendingRegion}
         onRegionChange={(reg) => {
           setTrendingRegion(reg);
-          void loadTrendingTopics(reg);
+          void loadTrendingTopics(reg, false, trendingKeyword);
         }}
-        onRefresh={() => loadTrendingTopics(trendingRegion, true)}
+        onRefresh={() => loadTrendingTopics(trendingRegion, true, trendingKeyword)}
         onSelectTopic={handleSelectTrendingTopic}
+        keyword={trendingKeyword}
+        onSearchKeyword={(kw) => {
+          setTrendingKeyword(kw);
+          void loadTrendingTopics(trendingRegion, true, kw);
+        }}
       />
 
       {/* Schedule / Post to Social Media Modal */}

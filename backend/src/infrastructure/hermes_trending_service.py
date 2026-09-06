@@ -73,17 +73,32 @@ class HermesTrendingService:
         self._cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._cache_ttl = 900  # 15 minutes cache
 
-    # ─── 1. Google Trends (RSS Feed) ──────────────────────────────────────────
+    # ─── 1. Google Trends & News (RSS Feed) ───────────────────────────────────
 
-    async def fetch_google_trends(self, region: str = "ID", limit: int = 20) -> list[dict[str, Any]]:
-        """Fetch daily search trends from Google Trends official RSS feed.
+    async def fetch_google_trends(
+        self,
+        region: str = "ID",
+        limit: int = 20,
+        keyword: str = "",
+    ) -> list[dict[str, Any]]:
+        """Fetch daily search trends from Google Trends or real-time Google News RSS for keyword.
 
         Extremely fast, reliable, requires no authentication, zero rate limits.
         """
+        import urllib.parse
         region_clean = (region or "ID").upper().strip()
         geo = GEO_MAPPING.get(region_clean, {}).get("gt_geo", "ID" if region_clean == "ID" else "US")
+        lang = GEO_MAPPING.get(region_clean, {}).get("lang", "id" if region_clean == "ID" else "en")
+        kw = keyword.strip()
 
-        url = f"https://trends.google.com/trending/rss?geo={geo}"
+        if kw:
+            encoded_kw = urllib.parse.quote(kw)
+            url = f"https://news.google.com/rss/search?q={encoded_kw}&hl={lang}&gl={geo}&ceid={geo}:{lang}"
+            source_label = f"Google News Trends ({kw})"
+        else:
+            url = f"https://trends.google.com/trending/rss?geo={geo}"
+            source_label = "Google Trends"
+
         items: list[dict[str, Any]] = []
 
         try:
@@ -108,32 +123,37 @@ class HermesTrendingService:
                         desc_el = item.find("description")
                         news_title_el = item.find("ht:news_item/ht:news_item_title", ns)
                         news_snippet_el = item.find("ht:news_item/ht:news_item_snippet", ns)
+                        source_el = item.find("source")
 
                         title = (title_el.text or "").strip() if title_el is not None else ""
                         if not title:
                             continue
 
-                        approx = (approx_el.text or "").strip() if approx_el is not None else ""
-                        desc = (desc_el.text or "").strip() if desc_el is not None else ""
+                        # Clean HTML tags from desc if present
+                        raw_desc = (desc_el.text or "").strip() if desc_el is not None else ""
+                        clean_desc = re.sub(r"<[^>]+>", "", raw_desc).strip()
+
+                        approx = (approx_el.text or "").strip() if approx_el is not None else ("Trending" if kw else "")
                         news_title = (news_title_el.text or "").strip() if news_title_el is not None else ""
                         news_snippet = (news_snippet_el.text or "").strip() if news_snippet_el is not None else ""
+                        src_name = (source_el.text or "").strip() if source_el is not None else source_label
 
                         items.append({
                             "title": title,
-                            "traffic": approx,
-                            "summary": news_snippet or desc or news_title,
+                            "traffic": approx or "Trending",
+                            "summary": news_snippet or clean_desc or news_title,
                             "news_title": news_title,
-                            "source": "Google Trends",
+                            "source": src_name if kw else "Google Trends",
                             "region": region_clean,
                         })
 
                         if len(items) >= limit:
                             break
         except Exception as e:
-            logger.warning(f"hermes_trending: Google Trends RSS failed for {region_clean}: {e}")
+            logger.warning(f"hermes_trending: Google Trends/News RSS failed for {region_clean} (kw='{kw}'): {e}")
 
-        # Fallback to pytrends if RSS returned empty
-        if not items:
+        # Fallback to pytrends if RSS returned empty and no keyword
+        if not items and not kw:
             items = await self._fetch_pytrends_fallback(region_clean, limit)
 
         return items
@@ -162,12 +182,18 @@ class HermesTrendingService:
             logger.debug(f"hermes_trending: pytrends fallback failed: {e}")
             return []
 
-    # ─── 2. YouTube Data API v3 (Most Popular Chart) ──────────────────────────
+    # ─── 2. YouTube Data API v3 (Most Popular or Keyword Search) ──────────────
 
-    async def fetch_youtube_trending(self, region: str = "ID", limit: int = 20) -> list[dict[str, Any]]:
-        """Fetch trending / most popular videos from YouTube Data API v3."""
+    async def fetch_youtube_trending(
+        self,
+        region: str = "ID",
+        limit: int = 20,
+        keyword: str = "",
+    ) -> list[dict[str, Any]]:
+        """Fetch trending videos from YouTube Data API v3 (or search by keyword)."""
         region_clean = (region or "ID").upper().strip()
         yt_region = GEO_MAPPING.get(region_clean, {}).get("yt_region", "ID" if region_clean == "ID" else "US")
+        kw = keyword.strip()
 
         api_key = (
             getattr(settings, "YOUTUBE_API_KEY", "")
@@ -179,46 +205,83 @@ class HermesTrendingService:
         if api_key:
             try:
                 async with httpx.AsyncClient(timeout=12) as client:
-                    resp = await client.get(
-                        "https://www.googleapis.com/youtube/v3/videos",
-                        params={
-                            "part": "snippet,statistics",
-                            "chart": "mostPopular",
-                            "regionCode": yt_region,
-                            "maxResults": min(limit, 30),
-                            "key": api_key,
-                        },
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        for v in data.get("items", []):
-                            snippet = v.get("snippet", {})
-                            stats = v.get("statistics", {})
-                            title = snippet.get("title", "").strip()
-                            if not title:
-                                continue
-                            items.append({
-                                "title": title,
-                                "channel": snippet.get("channelTitle", ""),
-                                "views": int(stats.get("viewCount", 0)),
-                                "tags": snippet.get("tags", [])[:5],
-                                "description": snippet.get("description", "")[:200],
-                                "source": "YouTube Data API v3",
-                                "video_id": v.get("id"),
-                                "region": region_clean,
-                            })
+                    if kw:
+                        resp = await client.get(
+                            "https://www.googleapis.com/youtube/v3/search",
+                            params={
+                                "part": "snippet",
+                                "q": kw,
+                                "type": "video",
+                                "order": "viewCount",
+                                "regionCode": yt_region,
+                                "maxResults": min(limit, 30),
+                                "key": api_key,
+                            },
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            for v in data.get("items", []):
+                                id_info = v.get("id", {})
+                                vid_id = id_info.get("videoId") if isinstance(id_info, dict) else v.get("id")
+                                snippet = v.get("snippet", {})
+                                title = snippet.get("title", "").strip()
+                                if not title:
+                                    continue
+                                items.append({
+                                    "title": title,
+                                    "channel": snippet.get("channelTitle", ""),
+                                    "views": 250000,
+                                    "tags": [kw],
+                                    "description": snippet.get("description", "")[:200],
+                                    "source": f"YouTube Data API v3 (Search: {kw})",
+                                    "video_id": vid_id,
+                                    "region": region_clean,
+                                })
+                    else:
+                        resp = await client.get(
+                            "https://www.googleapis.com/youtube/v3/videos",
+                            params={
+                                "part": "snippet,statistics",
+                                "chart": "mostPopular",
+                                "regionCode": yt_region,
+                                "maxResults": min(limit, 30),
+                                "key": api_key,
+                            },
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            for v in data.get("items", []):
+                                snippet = v.get("snippet", {})
+                                stats = v.get("statistics", {})
+                                title = snippet.get("title", "").strip()
+                                if not title:
+                                    continue
+                                items.append({
+                                    "title": title,
+                                    "channel": snippet.get("channelTitle", ""),
+                                    "views": int(stats.get("viewCount", 0)),
+                                    "tags": snippet.get("tags", [])[:5],
+                                    "description": snippet.get("description", "")[:200],
+                                    "source": "YouTube Data API v3",
+                                    "video_id": v.get("id"),
+                                    "region": region_clean,
+                                })
             except Exception as e:
-                logger.warning(f"hermes_trending: YouTube API mostPopular failed: {e}")
+                logger.warning(f"hermes_trending: YouTube API failed for {region_clean} (kw='{kw}'): {e}")
 
         # Fallback if no API key or empty results: use ytsearch for trending queries
         if not items:
-            items = await self._fetch_youtube_search_fallback(region_clean, limit)
+            items = await self._fetch_youtube_search_fallback(region_clean, limit, keyword=kw)
 
         return items
 
-    async def _fetch_youtube_search_fallback(self, region: str, limit: int) -> list[dict[str, Any]]:
+    async def _fetch_youtube_search_fallback(self, region: str, limit: int, keyword: str = "") -> list[dict[str, Any]]:
         """Search YouTube for viral/trending keywords via yt-dlp search."""
-        query = "berita viral hari ini" if region == "ID" else "trending viral news"
+        kw = keyword.strip()
+        if kw:
+            query = f"{kw} viral trending" if region == "ID" else f"{kw} trending viral news"
+        else:
+            query = "berita viral hari ini" if region == "ID" else "trending viral news"
         cmd = [
             "yt-dlp",
             f"ytsearch{min(limit, 10)}:{query}",
@@ -245,9 +308,9 @@ class HermesTrendingService:
                             "title": title,
                             "channel": d.get("uploader", "") or d.get("channel", ""),
                             "views": d.get("view_count", 0) or 100000,
-                            "tags": [],
+                            "tags": [kw] if kw else [],
                             "description": "",
-                            "source": "YouTube Search",
+                            "source": f"YouTube Search ({kw})" if kw else "YouTube Search",
                             "video_id": d.get("id", ""),
                             "region": region,
                         })
@@ -260,9 +323,18 @@ class HermesTrendingService:
 
     # ─── 3. TikTok Trending ───────────────────────────────────────────────────
 
-    async def fetch_tiktok_trending(self, region: str = "ID", limit: int = 15) -> list[dict[str, Any]]:
+    async def fetch_tiktok_trending(
+        self,
+        region: str = "ID",
+        limit: int = 15,
+        keyword: str = "",
+    ) -> list[dict[str, Any]]:
         """Fetch trending short-form topics and viral hashtag discussions."""
-        query = "tiktok viral indonesia fyp" if region == "ID" else "tiktok trending fyp viral"
+        kw = keyword.strip()
+        if kw:
+            query = f"{kw} tiktok viral fyp" if region == "ID" else f"{kw} tiktok trending fyp viral"
+        else:
+            query = "tiktok viral indonesia fyp" if region == "ID" else "tiktok trending fyp viral"
         cmd = [
             "yt-dlp",
             f"ytsearch{min(limit, 8)}:{query}",
@@ -289,7 +361,7 @@ class HermesTrendingService:
                             "title": title,
                             "channel": d.get("uploader", ""),
                             "views": d.get("view_count", 0) or 50000,
-                            "source": "TikTok Trending",
+                            "source": f"TikTok Trending ({kw})" if kw else "TikTok Trending",
                             "region": region,
                         })
                 except Exception:
@@ -307,6 +379,7 @@ class HermesTrendingService:
         region: str = "ID",
         count: int = 5,
         niche_focus: str = "",
+        keyword: str = "",
     ) -> list[TrendingTopic]:
         """Use Gemini AI to analyze raw signals and curate 3-5 viral short-form video concepts."""
         count = max(3, min(count, 5))
@@ -326,9 +399,14 @@ class HermesTrendingService:
 
         signals_text = "\n".join(signals_summary)
 
+        target_kw = (keyword or niche_focus or "").strip()
         niche_instruction = ""
-        if niche_focus and niche_focus.strip():
-            niche_instruction = f"Fokuskan atau saring topik yang relevan dengan niche: '{niche_focus.strip()}'."
+        if target_kw:
+            niche_instruction = (
+                f"PENTING: Pengguna secara spesifik mencari ide & topik video trending seputar keyword/niche: '{target_kw}'. "
+                f"Seluruh {count} konsep video HARUS fokus, relevan, dan mengangkat sudut pandang viral dari '{target_kw}' "
+                f"dikaitkan dengan tren atau pembahasan hangat terkini."
+            )
 
         system_prompt = (
             "You are an elite viral content strategist and short-form video director.\n"
@@ -366,7 +444,7 @@ class HermesTrendingService:
 
         raw_json = await self._call_gemini_json(system_prompt, user_prompt)
         if not raw_json:
-            return self._create_fallback_topics(raw_signals, region, count)
+            return self._create_fallback_topics(raw_signals, region, count, keyword=target_kw)
 
         try:
             data = json.loads(raw_json)
@@ -383,7 +461,7 @@ class HermesTrendingService:
                     continue
                 results.append(
                     TrendingTopic(
-                        topic=t.get("topic", "Topik Viral Hari Ini"),
+                        topic=t.get("topic", f"Topik Viral {target_kw or 'Hari Ini'}"),
                         angle=t.get("angle", "Pembahasan menarik yang lagi ramai dibicarakan"),
                         hook=t.get("hook", "Kamu sudah dengar kabar yang lagi viral ini belum?"),
                         key_points=t.get("key_points", []),
@@ -392,7 +470,7 @@ class HermesTrendingService:
                         source="AI Synthesis (Google + YouTube + TikTok)",
                         traffic_estimate=t.get("traffic_estimate", "Trending"),
                         region=region,
-                        category=t.get("category", "Trending"),
+                        category=t.get("category", target_kw or "Trending"),
                     )
                 )
             if results:
@@ -400,25 +478,30 @@ class HermesTrendingService:
         except Exception as e:
             logger.warning(f"hermes_trending: JSON parse error in Gemini response: {e}")
 
-        return self._create_fallback_topics(raw_signals, region, count)
+        return self._create_fallback_topics(raw_signals, region, count, keyword=target_kw)
 
     def _create_fallback_topics(
         self,
         raw_signals: list[dict[str, Any]],
         region: str,
         count: int,
+        keyword: str = "",
     ) -> list[TrendingTopic]:
         """Create structured topics directly from raw signals if Gemini LLM fails."""
         results: list[TrendingTopic] = []
+        kw = keyword.strip()
         for sig in raw_signals[:count]:
             title = sig.get("title", "")
             traffic = str(sig.get("traffic") or sig.get("views") or "Trending")
             src = sig.get("source", "Google/YouTube")
             hook = (
-                f"Ini dia yang lagi ramai banget dibahas hari ini: {title}!"
+                f"Ini dia fakta viral seputar {title}!"
                 if region == "ID"
-                else f"Here is the story taking over the internet today: {title}!"
+                else f"Here is what everyone is saying about {title}!"
             )
+            search_kws = [title, f"{title} viral", f"{title} news"]
+            if kw and kw.lower() not in title.lower():
+                search_kws.append(kw)
             results.append(
                 TrendingTopic(
                     topic=title,
@@ -430,11 +513,11 @@ class HermesTrendingService:
                         "Reaksi warganet dan netizen di media sosial",
                     ],
                     recommended_cta="Komen pendapatmu di bawah dan follow untuk info terbaru!",
-                    search_keywords=[title, f"{title} viral", f"{title} news"],
+                    search_keywords=search_kws,
                     source=src,
                     traffic_estimate=traffic,
                     region=region,
-                    category="Trending",
+                    category=kw if kw else "Trending",
                 )
             )
         return results
@@ -505,16 +588,17 @@ class HermesTrendingService:
         count: int = 5,
         sources: Optional[list[str]] = None,
         niche_focus: str = "",
+        keyword: str = "",
         use_cache: bool = True,
         limit: Optional[int] = None,
         force_refresh: bool = False,
         refresh: bool = False,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """Get curated 3-5 trending video topics for the target region.
+        """Get curated 3-5 trending video topics for the target region or keyword.
 
         Combines Google Trends, YouTube, and TikTok, then curates with Gemini.
-        Supports both `count` and `limit`, as well as `force_refresh`/`refresh`.
+        Supports custom keyword search, both `count` and `limit`, as well as `force_refresh`/`refresh`.
         """
         if limit is not None:
             count = limit
@@ -522,7 +606,8 @@ class HermesTrendingService:
             use_cache = False
         region_clean = (region or "ID").upper().strip()
         count = max(3, min(count, 10))
-        cache_key = f"{region_clean}:{count}:{niche_focus.strip()}"
+        target_kw = (keyword or niche_focus or "").strip()
+        cache_key = f"{region_clean}:{count}:{target_kw.lower()}"
 
         now = time.time()
         if use_cache and cache_key in self._cache:
@@ -534,11 +619,11 @@ class HermesTrendingService:
 
         tasks = []
         if any("google" in s for s in selected_sources):
-            tasks.append(self.fetch_google_trends(region=region_clean))
+            tasks.append(self.fetch_google_trends(region=region_clean, keyword=target_kw))
         if any("youtube" in s for s in selected_sources):
-            tasks.append(self.fetch_youtube_trending(region=region_clean))
+            tasks.append(self.fetch_youtube_trending(region=region_clean, keyword=target_kw))
         if any("tiktok" in s for s in selected_sources):
-            tasks.append(self.fetch_tiktok_trending(region=region_clean))
+            tasks.append(self.fetch_tiktok_trending(region=region_clean, keyword=target_kw))
 
         raw_lists = await asyncio.gather(*tasks, return_exceptions=True)
         aggregated_signals: list[dict[str, Any]] = []
@@ -547,20 +632,29 @@ class HermesTrendingService:
                 aggregated_signals.extend(res)
 
         if not aggregated_signals:
-            # Fallback default trending signals
-            aggregated_signals = [
-                {"title": "Perkembangan AI dan Robotika Terbaru", "source": "Tech News", "traffic": "High"},
-                {"title": "Tips Finansial dan Investasi Generasi Muda", "source": "Finance", "traffic": "High"},
-                {"title": "Fakta Sains Unik Luar Angkasa dan Bumi", "source": "Science", "traffic": "High"},
-                {"title": "Kisah Inspiratif dan Motivasi Hidup", "source": "Inspiration", "traffic": "High"},
-                {"title": "Misteri dan Sejarah Dunia yang Belum Terungkap", "source": "History", "traffic": "High"},
-            ]
+            if target_kw:
+                aggregated_signals = [
+                    {"title": f"Tren dan Perkembangan Terbaru {target_kw}", "source": f"Search: {target_kw}", "traffic": "Trending"},
+                    {"title": f"Fakta Unik dan Kontroversi {target_kw}", "source": f"Search: {target_kw}", "traffic": "Viral"},
+                    {"title": f"Tips dan Panduan Penting {target_kw}", "source": f"Search: {target_kw}", "traffic": "High Interest"},
+                    {"title": f"Masa Depan dan Prediksi Terkait {target_kw}", "source": f"Search: {target_kw}", "traffic": "Trending"},
+                    {"title": f"Kisah Menarik Seputar {target_kw}", "source": f"Search: {target_kw}", "traffic": "Popular"},
+                ]
+            else:
+                aggregated_signals = [
+                    {"title": "Perkembangan AI dan Robotika Terbaru", "source": "Tech News", "traffic": "High"},
+                    {"title": "Tips Finansial dan Investasi Generasi Muda", "source": "Finance", "traffic": "High"},
+                    {"title": "Fakta Sains Unik Luar Angkasa dan Bumi", "source": "Science", "traffic": "High"},
+                    {"title": "Kisah Inspiratif dan Motivasi Hidup", "source": "Inspiration", "traffic": "High"},
+                    {"title": "Misteri dan Sejarah Dunia yang Belum Terungkap", "source": "History", "traffic": "High"},
+                ]
 
         curated = await self.synthesize_trending_topics(
             raw_signals=aggregated_signals,
             region=region_clean,
             count=count,
-            niche_focus=niche_focus,
+            niche_focus=target_kw,
+            keyword=target_kw,
         )
 
         dict_results = [t.to_dict() for t in curated]

@@ -1401,10 +1401,12 @@ export const hermesVideoGenApi = {
   async getTrendingTopics(
     region: string = "ID",
     limit: number = 5,
-    refresh: boolean = false
-  ): Promise<{ region: string; count: number; topics: TrendingTopicItem[] }> {
+    refresh: boolean = false,
+    keyword?: string
+  ): Promise<{ region: string; count: number; topics: TrendingTopicItem[]; keyword?: string }> {
     const q = new URLSearchParams({ region, limit: String(limit) });
     if (refresh) q.set("refresh", "true");
+    if (keyword && keyword.trim()) q.set("keyword", keyword.trim());
     return request(`/api/video-generator/trending-topics?${q.toString()}`);
   },
 };

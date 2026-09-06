@@ -1205,18 +1205,22 @@ async def get_trending_topics_endpoint(
     region: str = Query("ID", description="Country code (e.g. ID, US, GLOBAL)"),
     limit: int = Query(5, ge=1, le=10, description="Number of topics to return (3-5)"),
     refresh: bool = Query(False, description="Bypass cache and fetch fresh trending topics"),
+    keyword: Optional[str] = Query(None, description="Custom keyword or niche to search trending topics"),
     user: CurrentUser = Depends(get_current_user),
 ):
     """Fetch multi-source trending topics synthesized by Gemini for viral short videos."""
     from src.infrastructure.hermes_trending_service import hermes_trending_service
 
+    kw = (keyword or "").strip()
     topics = await hermes_trending_service.get_trending_topics(
         region=region,
         count=limit,
         limit=limit,
         use_cache=not refresh,
+        niche_focus=kw,
+        keyword=kw,
     )
-    return {"region": region, "count": len(topics), "topics": topics}
+    return {"region": region, "count": len(topics), "topics": topics, "keyword": kw}
 
 
 @router.get("/jobs/{job_id}/thumbnail")
