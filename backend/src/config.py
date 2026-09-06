@@ -232,10 +232,14 @@ class Settings(BaseSettings):
     CDN_ACCESS_KEY: str = ""
     CDN_SECRET_KEY: str = ""
 
-    # ─── Asset Fetcher ────────────────────────────────────────────────────
+    # ─── Asset Fetcher & Video Search Engines ─────────────────────────────
     PEXELS_API_KEY: str = ""
     PIXABAY_API_KEY: str = ""
     GIPHY_API_KEY: str = ""
+    BRAVE_SEARCH_API_KEY: Optional[str] = None
+    BING_SEARCH_API_KEY: Optional[str] = None
+    GOOGLE_SEARCH_API_KEY: Optional[str] = None
+    GOOGLE_SEARCH_CX: Optional[str] = None
     ASSET_FETCH_ENABLED: bool = True
     ASSET_FETCH_TIMEOUT: int = 8          # seconds per API request
     ASSET_FETCH_MAX_CONCURRENT: int = 4

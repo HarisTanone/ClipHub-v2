@@ -1192,6 +1192,20 @@ class VideoGenerator:
                         video_id=cand.get("video_id"),
                     )
                     if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+                        # Check for burned-in subtitles / text overlays
+                        has_text, density = self.check_video_has_burned_in_text(local_path)
+                        if has_text and cand_idx < len(ordered_candidates) - 1:
+                            logger.warning(
+                                f"video_gen: candidate {cand_idx + 1} ({cand.get('title', '')[:40]}) has burned-in subtitles/text "
+                                f"(density={density:.4f}). Skipping to try cleaner candidate..."
+                            )
+                            try:
+                                if os.path.exists(local_path):
+                                    os.remove(local_path)
+                            except Exception:
+                                pass
+                            continue
+
                         downloaded_path = local_path
                         used_source = cand
                         break
@@ -1754,6 +1768,74 @@ class VideoGenerator:
 
     # ─── Helper Methods ────────────────────────────────────────────────────────
 
+    def check_video_has_burned_in_text(self, video_path: str, sample_frames: int = 6) -> tuple[bool, float]:
+        """Detect burned-in subtitles, captions, or text banners in video lower-third using OpenCV.
+
+        Samples frames across the video duration and analyzes edge density + horizontal
+        structuring element in the bottom 25% of the frame.
+        Returns:
+            (has_burned_in_text: bool, avg_edge_density: float)
+        """
+        if not video_path or not os.path.exists(video_path):
+            return False, 0.0
+
+        try:
+            import cv2
+            import numpy as np
+
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return False, 0.0
+
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total_frames <= 0:
+                cap.release()
+                return False, 0.0
+
+            step = max(1, total_frames // (sample_frames + 1))
+            text_frame_count = 0
+            densities = []
+
+            for i in range(1, sample_frames + 1):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, i * step)
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    continue
+
+                h, w = frame.shape[:2]
+                # Analyze lower-third (bottom 25% where subtitles / captions live)
+                lower = frame[int(h * 0.75):, :]
+                gray = cv2.cvtColor(lower, cv2.COLOR_BGR2GRAY)
+
+                edges = cv2.Canny(gray, 80, 180)
+                # Horizontal structuring element to group letter characters into text blocks
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 3))
+                dilated = cv2.dilate(edges, kernel, iterations=1)
+
+                contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                text_blobs = 0
+                for cnt in contours:
+                    x, y, cw, ch = cv2.boundingRect(cnt)
+                    aspect = cw / max(1, ch)
+                    # Text lines are wide and have significant horizontal extent
+                    if aspect > 2.5 and cw > w * 0.15 and ch > 10:
+                        text_blobs += 1
+
+                density = float(np.count_nonzero(edges) / edges.size)
+                densities.append(density)
+
+                if text_blobs >= 1:
+                    text_frame_count += 1
+
+            cap.release()
+            avg_density = float(np.mean(densities)) if densities else 0.0
+            # If at least half the sampled frames contain subtitle-like text contours
+            has_text = (text_frame_count >= max(2, sample_frames // 2))
+            return has_text, avg_density
+        except Exception as err:
+            logger.debug(f"video_gen: subtitle check error: {err}")
+            return False, 0.0
+
     def _score_candidate(self, candidate: dict, scene: dict) -> float:
         """Calculate deep semantic relevance score for a footage candidate."""
         if not candidate or not isinstance(candidate, dict):
@@ -1806,13 +1888,38 @@ class VideoGenerator:
         overlap = len(search_terms & (title_words | cand_query_words))
         score += overlap * 2.5
 
-        # 3. Platform preference
+        # 3. Platform preference (X & Citizen video #1, YouTube/TikTok #2, Stock clean B-roll #3)
         platform = candidate.get("platform", "").lower()
-        if platform in ["pexels", "pixabay"]:
-            score += 3.0
+        if platform in ["x", "twitter"]:
+            score += 7.0
         elif platform == "youtube" and entity_overlap > 0:
-            # High-value real local documentary/drone footage on YouTube
+            score += 4.5
+        elif platform in ["youtube", "tiktok"]:
             score += 4.0
+        elif platform in ["pexels", "pixabay"]:
+            score += 4.0
+
+        # 3.1 Raw & Authentic Footage Bonus (rekaman warga, amatir, cctv, detik detik)
+        raw_keywords = [
+            "rekaman", "amatir", "cctv", "warga", "detik detik", "detik-detik",
+            "kejadian", "suasana", "langsung", "kamera", "asli", "raw", "momen",
+            "terekam", "kondisi", "lapangan"
+        ]
+        for rk in raw_keywords:
+            if rk in title_lower:
+                score += 5.0
+                break
+
+        # 3.2 Heavy Penalty for Edited / Meme / Template / Burned-in Subtitle markers
+        dirty_edit_markers = [
+            "edit", "capcut", "alightmotion", "sub indo", "jedag jedug", "jedag-jedug",
+            "quotes", "reaction", "podcast", "pov", "slowed", "remix", "status wa",
+            "cinematic preset", "preset am", "lirik", "lyrics", "speed up", "speedup"
+        ]
+        for dm in dirty_edit_markers:
+            if dm in title_lower:
+                score -= 25.0
+                break
 
         # 4. View count bonus (log scale)
         views = candidate.get("view_count", 0)
@@ -1831,7 +1938,6 @@ class VideoGenerator:
             or any(candidate.get("url", "").lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"])
         )
         if is_image:
-            # Images provide crisp zero-render-fail b-roll matching scene duration
             score += 2.0
         else:
             dur = candidate.get("duration_seconds", 0)
@@ -1849,6 +1955,7 @@ class VideoGenerator:
         for kw in stock_keywords:
             if kw in title_lower:
                 score += 1.2
+
         # 7. HD Resolution priority (start from 720p minimum)
         is_hd = candidate.get("is_hd", True)
         cand_quality = str(candidate.get("quality", "")).lower()

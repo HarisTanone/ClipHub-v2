@@ -18,9 +18,11 @@ import asyncio
 import json
 import logging
 import re
+import urllib.parse
 from typing import Any, Optional
 
 import httpx
+import requests
 
 from src.config import settings
 from src.infrastructure.youtube_search import YouTubeSearch, simplify_stock_query
@@ -135,6 +137,266 @@ class SocialFootageSearcher:
 
         return results
 
+    async def _probe_post_with_ytdlp(
+        self,
+        post_url: str,
+        default_title: str,
+        clean_q: str,
+        platform_hint: str = "web",
+    ) -> Optional[dict]:
+        """Inspect and extract video stream format metadata via yt-dlp."""
+        cmd = ["yt-dlp", "--dump-json", "--no-warnings", "--geo-bypass", post_url]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=12)
+            if stdout:
+                first_line = stdout.decode(errors="replace").strip().splitlines()[0]
+                item = json.loads(first_line)
+                dur = float(item.get("duration") or 0.0)
+                if dur <= 0 or dur > 400:
+                    return None
+
+                h = int(item.get("height") or 0)
+                w = int(item.get("width") or 0)
+                is_hd = (h >= 720 or w >= 720)
+                q_label = f"{h}p" if h > 0 else ("HD" if is_hd else "SD")
+
+                # Detect platform
+                plat = platform_hint
+                low_url = post_url.lower()
+                if "x.com" in low_url or "twitter.com" in low_url:
+                    plat = "x"
+                elif "tiktok.com" in low_url:
+                    plat = "tiktok"
+                elif "youtube.com" in low_url or "youtu.be" in low_url:
+                    plat = "youtube"
+                elif "instagram.com" in low_url:
+                    plat = "instagram"
+
+                return {
+                    "video_id": f"{plat}_{item.get('id', '')}",
+                    "title": item.get("title") or default_title or f"Video: {clean_q}",
+                    "url": post_url,
+                    "thumbnail_url": item.get("thumbnail") or (item.get("thumbnails", [{}])[0].get("url") if item.get("thumbnails") else ""),
+                    "duration_seconds": int(dur),
+                    "view_count": int(item.get("view_count") or 50000),
+                    "channel": item.get("uploader") or item.get("channel") or f"Creator ({plat})",
+                    "query": clean_q,
+                    "platform": plat,
+                    "media_type": "video",
+                    "start_timestamp": 0.0,
+                    "is_hd": is_hd,
+                    "quality": q_label,
+                    "height": h,
+                    "width": w,
+                }
+        except Exception as e:
+            logger.debug(f"social_search: yt-dlp probe failed for {post_url}: {e}")
+            return None
+
+    def _fetch_web_video_urls_sync(self, search_q: str) -> list[str]:
+        """Synchronously query Yahoo Video and Web search index to discover active video URLs."""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+
+        urls_to_try = [
+            f"https://video.search.yahoo.com/search/video?p={urllib.parse.quote(search_q)}",
+            f"https://search.yahoo.com/search?p={urllib.parse.quote(search_q)}",
+        ]
+
+        found_urls: list[str] = []
+        seen: set[str] = set()
+
+        for u in urls_to_try:
+            try:
+                r = requests.get(u, headers=headers, timeout=8)
+                if r.status_code == 200:
+                    # 1. Yahoo video card direct reference URLs (most accurate)
+                    refs = re.findall(r'data-referenceurl=[\"\']([^\"\']+)[\"\']', r.text)
+                    for ref in refs:
+                        if ref not in seen and any(p in ref.lower() for p in ["youtube.com/watch", "youtu.be", "tiktok.com", "instagram.com", "x.com", "twitter.com"]):
+                            seen.add(ref)
+                            found_urls.append(ref)
+
+                    # 2. X status direct regex
+                    for match in re.finditer(r"https?://(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)/status/(\d+)", r.text):
+                        username, sid = match.groups()
+                        if username.lower() not in ("i", "search", "intent", "explore", "home"):
+                            status_url = f"https://x.com/{username}/status/{sid}"
+                            if status_url not in seen:
+                                seen.add(status_url)
+                                found_urls.append(status_url)
+
+                    # 3. Yahoo RU= redirect links
+                    for target in re.findall(r"/RU=([^/]+)/RK=", r.text):
+                        unq = urllib.parse.unquote(target)
+                        if any(p in unq.lower() for p in ["youtube.com/watch", "youtu.be", "tiktok.com", "instagram.com", "x.com", "twitter.com"]):
+                            if unq not in seen:
+                                seen.add(unq)
+                                found_urls.append(unq)
+            except Exception as e:
+                logger.debug(f"social_search: search error on {u[:40]}: {e}")
+                continue
+
+        return found_urls
+
+    async def _search_brave_video_api(self, query: str, max_results: int = 4) -> list[str]:
+        """Fetch video post URLs from Brave Search API if API key is provided."""
+        api_key = getattr(settings, "BRAVE_SEARCH_API_KEY", None)
+        if not api_key:
+            return []
+        try:
+            url = "https://api.search.brave.com/res/v1/videos/search"
+            headers = {"X-Subscription-Token": api_key, "Accept": "application/json"}
+            params = {"q": query, "count": max_results * 2, "freshness": "pd"}
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.get(url, headers=headers, params=params)
+                if res.status_code == 200:
+                    data = res.json()
+                    return [item.get("url") for item in data.get("results", []) if item.get("url")]
+        except Exception as e:
+            logger.warning(f"social_search: Brave Video API error: {e}")
+        return []
+
+    async def _search_bing_video_api(self, query: str, max_results: int = 4) -> list[str]:
+        """Fetch video post URLs from Bing Video Search API if API key is provided."""
+        api_key = getattr(settings, "BING_SEARCH_API_KEY", None)
+        if not api_key:
+            return []
+        try:
+            url = "https://api.bing.microsoft.com/v7.0/videos/search"
+            headers = {"Ocp-Apim-Subscription-Key": api_key}
+            params = {
+                "q": query,
+                "count": max_results * 2,
+                "freshness": "Day",
+                "videoLength": "Short",
+                "pricing": "free",
+            }
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.get(url, headers=headers, params=params)
+                if res.status_code == 200:
+                    data = res.json()
+                    return [item.get("contentUrl") for item in data.get("value", []) if item.get("contentUrl")]
+        except Exception as e:
+            logger.warning(f"social_search: Bing Video API error: {e}")
+        return []
+
+    async def _search_google_custom_search_api(self, query: str, max_results: int = 4) -> list[str]:
+        """Fetch video URLs from Google Custom Search JSON API if API key + CX are provided."""
+        api_key = getattr(settings, "GOOGLE_SEARCH_API_KEY", None)
+        cx = getattr(settings, "GOOGLE_SEARCH_CX", None)
+        if not api_key or not cx:
+            return []
+        try:
+            url = "https://www.googleapis.com/customsearch/v1"
+            params = {"key": api_key, "cx": cx, "q": f"{query} video", "num": max_results, "dateRestrict": "d1"}
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.get(url, params=params)
+                if res.status_code == 200:
+                    data = res.json()
+                    return [item.get("link") for item in data.get("items", []) if item.get("link")]
+        except Exception as e:
+            logger.warning(f"social_search: Google Custom Search API error: {e}")
+        return []
+
+    async def search_universal_video_candidates(
+        self,
+        query: str,
+        max_results: int = 4,
+        is_indonesian: bool = True,
+    ) -> list[dict]:
+        """Universal multi-platform video discovery (YouTube, TikTok, X, web).
+
+        Uses official search API if keys are provided (Brave/Bing/Google),
+        otherwise falls back seamlessly to the zero-cost web video index.
+        """
+        clean_q = query.strip()
+        if not clean_q:
+            return []
+
+        # 1. Try official search engine APIs if configured
+        urls: list[str] = []
+        if getattr(settings, "BRAVE_SEARCH_API_KEY", None):
+            urls = await self._search_brave_video_api(clean_q, max_results)
+        elif getattr(settings, "BING_SEARCH_API_KEY", None):
+            urls = await self._search_bing_video_api(clean_q, max_results)
+        elif getattr(settings, "GOOGLE_SEARCH_API_KEY", None) and getattr(settings, "GOOGLE_SEARCH_CX", None):
+            urls = await self._search_google_custom_search_api(clean_q, max_results)
+
+        # 2. Fallback to zero-cost web video search index if no API keys configured or no results
+        if not urls:
+            search_q = f"{clean_q} detik detik" if is_indonesian and "detik" not in clean_q.lower() else clean_q
+            urls = await asyncio.to_thread(self._fetch_web_video_urls_sync, search_q)
+
+        if not urls:
+            return []
+
+        # Probe video streams in parallel with yt-dlp
+        probe_tasks = [
+            self._probe_post_with_ytdlp(u, f"Video: {clean_q}", clean_q)
+            for u in urls[: max_results * 2]
+        ]
+        probed = await asyncio.gather(*probe_tasks, return_exceptions=True)
+
+        candidates: list[dict] = []
+        seen = set()
+        for cand in probed:
+            if isinstance(cand, dict) and cand.get("url") and cand["url"] not in seen:
+                seen.add(cand["url"])
+                candidates.append(cand)
+                if len(candidates) >= max_results:
+                    break
+
+        return candidates
+
+    async def search_x_video_posts(
+        self,
+        query: str,
+        max_results: int = 4,
+        is_indonesian: bool = True,
+    ) -> list[dict]:
+        """Search public X (Twitter) status posts containing video without requiring an X API key."""
+        clean_q = query.strip()
+        if not clean_q:
+            return []
+
+        search_q = f'site:x.com "{clean_q}" "detik detik"' if is_indonesian and "detik" not in clean_q.lower() else f'site:x.com "{clean_q}"'
+        found_urls = await asyncio.to_thread(self._fetch_web_video_urls_sync, search_q)
+        x_urls = [u for u in found_urls if "x.com" in u or "twitter.com" in u]
+
+        if not x_urls and "detik detik" in search_q:
+            search_q_simple = f"site:x.com {clean_q} video"
+            found_urls = await asyncio.to_thread(self._fetch_web_video_urls_sync, search_q_simple)
+            x_urls = [u for u in found_urls if "x.com" in u or "twitter.com" in u]
+
+        if not x_urls:
+            return []
+
+        probe_tasks = [
+            self._probe_post_with_ytdlp(u, f"X Video: {clean_q}", clean_q, platform_hint="x")
+            for u in x_urls[: max_results * 2]
+        ]
+        probed = await asyncio.gather(*probe_tasks, return_exceptions=True)
+
+        candidates: list[dict] = []
+        seen = set()
+        for cand in probed:
+            if isinstance(cand, dict) and cand.get("url") and cand["url"] not in seen:
+                seen.add(cand["url"])
+                candidates.append(cand)
+                if len(candidates) >= max_results:
+                    break
+
+        return candidates
+
     async def search_for_single_scene(
         self,
         scene: dict,
@@ -142,7 +404,7 @@ class SocialFootageSearcher:
         results_per_platform: int = 3,
         custom_query: Optional[str] = None,
     ) -> list[dict]:
-        """Search footage candidates across YouTube Shorts, TikTok, Instagram, X, and Stock for a single scene."""
+        """Search multi-source footage candidates across X, Universal Web Video, and Stock."""
         raw_queries = [custom_query] if custom_query else scene.get("search_queries", [])
         if not raw_queries and scene.get("visual"):
             raw_queries = [scene["visual"][:80]]
@@ -158,78 +420,76 @@ class SocialFootageSearcher:
         else:
             primary_query_id = primary_query
 
-        tasks = []
+        candidates: list[dict] = []
+        seen_urls: set[str] = set()
 
-        # 1. YouTube Shorts via YouTube Data API (HD only)
-        region = "ID" if is_indonesian else "US"
-        tasks.append(
-            self._yt_search.search(
-                query=primary_query_id,
-                max_results=results_per_platform,
-                shorts_only=True,
-                region_code=region,
-                video_definition="high",
-            )
-        )
-
-        # 2. YouTube Shorts via yt-dlp (reliable fallback)
-        tasks.append(
-            self.search_ytdlp_platform(
+        # ─── 1. Public Video Search (Universal & X Posts) ────────────────────────
+        tasks = [
+            self.search_universal_video_candidates(
                 query=primary_query,
-                platform="youtube",
                 max_results=results_per_platform,
                 is_indonesian=is_indonesian,
-            )
-        )
-
-        # 3. TikTok footage via social search
-        tasks.append(
-            self.search_ytdlp_platform(
+            ),
+            self.search_x_video_posts(
                 query=primary_query,
-                platform="tiktok",
                 max_results=results_per_platform,
                 is_indonesian=is_indonesian,
-            )
-        )
+            ),
+        ]
 
-        # 4. Instagram Reels footage
-        tasks.append(
-            self.search_ytdlp_platform(
-                query=primary_query,
-                platform="instagram",
-                max_results=results_per_platform,
-                is_indonesian=is_indonesian,
-            )
-        )
-
-        # 5. Pexels and Pixabay clean stock videos & photos + Wikimedia (universal secondary B-roll)
+        # ─── 2. Clean Stock Footage (Pexels & Pixabay) ───────────────────────────
         stock_q = clean_queries[1] if len(clean_queries) > 1 else primary_query
-        tasks.append(self._yt_search.search_pexels(stock_q, max_results=3))
-        tasks.append(self._yt_search.search_pixabay(stock_q, max_results=3))
-        tasks.append(self._yt_search.search_pexels_photos(stock_q, max_results=3))
-        tasks.append(self._yt_search.search_pixabay_photos(stock_q, max_results=3))
-        tasks.append(self._yt_search.search_wikimedia_photos(stock_q, max_results=3))
+        tasks.append(self._yt_search.search_pexels(stock_q, max_results=2))
+        tasks.append(self._yt_search.search_pixabay(stock_q, max_results=2))
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
-
-        candidates: list[dict] = []
-        seen_urls = set()
-
         for resp in responses:
             if isinstance(resp, Exception) or not resp:
                 continue
-
             if isinstance(resp, list):
                 for item in resp:
-                    if not isinstance(item, dict):
-                        continue
-                    url = item.get("url")
-                    if url and url not in seen_urls:
-                        seen_urls.add(url)
+                    if isinstance(item, dict) and item.get("url") and item["url"] not in seen_urls:
+                        seen_urls.add(item["url"])
                         candidates.append(item)
-            else:
-                # YouTubeSearchResult
-                if getattr(resp, "results", None):
+
+        # ─── 3. Fallback: If fewer than 2 candidates, query YouTube API & Social ──
+        if len(candidates) < 2:
+            logger.info(
+                f"social_search: scene {scene.get('id')} has few candidates ({len(candidates)}), "
+                f"triggering YouTube API & social fallbacks..."
+            )
+            fallback_tasks = [
+                self._yt_search.search(
+                    query=primary_query_id,
+                    max_results=results_per_platform,
+                    shorts_only=True,
+                    region_code="ID" if is_indonesian else "US",
+                    video_definition="high",
+                ),
+                self.search_ytdlp_platform(
+                    query=primary_query,
+                    platform="youtube",
+                    max_results=results_per_platform,
+                    is_indonesian=is_indonesian,
+                ),
+                self.search_ytdlp_platform(
+                    query=primary_query,
+                    platform="tiktok",
+                    max_results=results_per_platform,
+                    is_indonesian=is_indonesian,
+                ),
+                self._yt_search.search_wikimedia_photos(stock_q, max_results=2),
+            ]
+            fallback_resps = await asyncio.gather(*fallback_tasks, return_exceptions=True)
+            for resp in fallback_resps:
+                if isinstance(resp, Exception) or not resp:
+                    continue
+                if isinstance(resp, list):
+                    for item in resp:
+                        if isinstance(item, dict) and item.get("url") and item["url"] not in seen_urls:
+                            seen_urls.add(item["url"])
+                            candidates.append(item)
+                elif getattr(resp, "results", None):
                     for r in resp.results:
                         if r.url and r.url not in seen_urls:
                             seen_urls.add(r.url)
