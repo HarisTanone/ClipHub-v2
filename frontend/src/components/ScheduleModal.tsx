@@ -511,28 +511,38 @@ export function ScheduleModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800 bg-zinc-900/60 shrink-0">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800 bg-zinc-900/80 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="h-9 w-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
               <Share2 className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-sm font-bold text-zinc-100">Post to Social Media</h2>
-                <span className="text-xs font-medium text-zinc-400">
-                  {itemLabel || (clipRank ? `(Clip #${clipRank})` : `(AI Generated Video)`)}
-                </span>
+                <h2 className="text-sm font-bold text-zinc-100 shrink-0">Post to Social Media</h2>
+                {itemLabel ? (
+                  <span className="text-xs font-normal text-zinc-400 truncate max-w-[200px] sm:max-w-xs bg-zinc-800/80 px-2 py-0.5 rounded-md border border-zinc-700/50" title={itemLabel}>
+                    {itemLabel}
+                  </span>
+                ) : clipRank ? (
+                  <span className="text-xs font-normal text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded-md border border-zinc-700/50">
+                    Clip #{clipRank}
+                  </span>
+                ) : (
+                  <span className="text-xs font-normal text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded-md border border-zinc-700/50">
+                    AI Generated Video
+                  </span>
+                )}
                 {isSuperadmin ? (
-                  <Badge variant="info" size="sm" className="gap-1 border-cyan-500/30 bg-cyan-500/10 text-cyan-300 py-0 text-[10px]">
+                  <Badge variant="info" size="sm" className="gap-1 border-cyan-500/30 bg-cyan-500/10 text-cyan-300 py-0 text-[10px] shrink-0">
                     <ShieldCheck className="h-2.5 w-2.5" /> Superadmin
                   </Badge>
                 ) : user?.role === "editor" ? (
-                  <Badge variant="default" size="sm" className="gap-1 border-blue-500/30 bg-blue-500/10 text-blue-300 py-0 text-[10px]">
+                  <Badge variant="default" size="sm" className="gap-1 border-blue-500/30 bg-blue-500/10 text-blue-300 py-0 text-[10px] shrink-0">
                     <UserCheck className="h-2.5 w-2.5" /> Editor
                   </Badge>
                 ) : null}
               </div>
-              <p className="text-[11px] text-zinc-500 truncate">
+              <p className="text-[11px] text-zinc-400 truncate mt-0.5">
                 Pilih akun sosial media dan atur opsi publikasi konten
               </p>
             </div>
@@ -571,15 +581,19 @@ export function ScheduleModal({
             <div className="lg:col-span-5 space-y-4">
               {/* Account Selector */}
               <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-semibold text-zinc-200">
-                      Pilih Akun Platform
+                <div className="flex items-center justify-between gap-2 border-b border-zinc-800/60 pb-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <label className="text-xs font-semibold text-zinc-200 whitespace-nowrap">
+                      Pilih Akun
                     </label>
-                    {selectedAccountIds.length > 0 && (
-                      <Badge variant="success" size="sm" className="px-2 py-0 text-[10px] font-semibold">
-                        {selectedAccountIds.length} Terpilih
-                      </Badge>
+                    {selectedAccountIds.length > 0 ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                        {selectedAccountIds.length} dipilih
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-zinc-500 whitespace-nowrap">
+                        ({connectedAccounts.length} akun)
+                      </span>
                     )}
                   </div>
 
@@ -587,15 +601,17 @@ export function ScheduleModal({
                     <button
                       type="button"
                       onClick={handleSelectAll}
-                      className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
+                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-medium text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-500/20 hover:border-emerald-500/30 transition-all whitespace-nowrap shrink-0"
                     >
                       {isAllDisplayedSelected ? (
                         <>
-                          <Square className="h-3.5 w-3.5" /> Hapus Semua
+                          <Square className="h-3 w-3 text-emerald-400 shrink-0" />
+                          <span>Batalkan ({displayedAccounts.length})</span>
                         </>
                       ) : (
                         <>
-                          <CheckSquare className="h-3.5 w-3.5" /> Pilih Semua ({displayedAccounts.length})
+                          <CheckSquare className="h-3 w-3 text-emerald-400 shrink-0" />
+                          <span>Pilih Semua ({displayedAccounts.length})</span>
                         </>
                       )}
                     </button>
@@ -604,35 +620,48 @@ export function ScheduleModal({
 
                 {/* Filter Pills */}
                 {availablePlatforms.length > 1 && (
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar py-0.5">
                     <button
                       type="button"
                       onClick={() => setActiveFilter("all")}
                       className={cn(
-                        "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap",
+                        "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap flex items-center gap-1.5 border shrink-0",
                         activeFilter === "all"
-                          ? "bg-zinc-100 text-zinc-950 font-semibold"
-                          : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+                          ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-semibold shadow-sm"
+                          : "bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:border-zinc-700 hover:bg-zinc-800/80"
                       )}
                     >
-                      Semua ({connectedAccounts.length})
+                      <span>Semua</span>
+                      <span className={cn(
+                        "text-[10px] px-1.5 py-0.2 rounded font-mono",
+                        activeFilter === "all" ? "bg-emerald-500/30 text-emerald-200" : "bg-zinc-800 text-zinc-400"
+                      )}>
+                        {connectedAccounts.length}
+                      </span>
                     </button>
                     {availablePlatforms.map((plat) => {
                       const count = connectedAccounts.filter((a) => (a.type || "").toLowerCase().trim() === plat).length;
+                      const isActive = activeFilter === plat;
                       return (
                         <button
                           key={plat}
                           type="button"
                           onClick={() => setActiveFilter(plat)}
                           className={cn(
-                            "px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all whitespace-nowrap capitalize",
-                            activeFilter === plat
-                              ? "bg-zinc-100 text-zinc-950 font-semibold"
-                              : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+                            "px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all whitespace-nowrap capitalize border shrink-0",
+                            isActive
+                              ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-semibold shadow-sm"
+                              : "bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:border-zinc-700 hover:bg-zinc-800/80"
                           )}
                         >
-                          <PlatformIcon type={plat} className="h-3 w-3" />
-                          {plat} ({count})
+                          <PlatformIcon type={plat} className="h-3 w-3 shrink-0" />
+                          <span>{plat}</span>
+                          <span className={cn(
+                            "text-[10px] px-1.5 py-0.2 rounded font-mono",
+                            isActive ? "bg-emerald-500/30 text-emerald-200" : "bg-zinc-800 text-zinc-400"
+                          )}>
+                            {count}
+                          </span>
                         </button>
                       );
                     })}
