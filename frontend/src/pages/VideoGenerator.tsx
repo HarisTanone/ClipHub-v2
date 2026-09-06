@@ -1320,7 +1320,7 @@ function SceneFootageStudioModal({
                               <div className="relative aspect-[16/9] w-full bg-zinc-900 overflow-hidden">
                                 {cand.thumbnail_url ? (
                                   <img
-                                    src={cand.thumbnail_url}
+                                    src={cand.thumbnail_url.startsWith("http") ? cand.thumbnail_url : `${API_BASE}${cand.thumbnail_url.startsWith("/") ? "" : "/"}${cand.thumbnail_url}`}
                                     alt=""
                                     className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                                   />
@@ -1439,8 +1439,18 @@ function VideoCard({
   const isAwaitingSelection = job.status === "awaiting_selection";
   const processing = isProcessing(job.status);
 
-  // Fallback to backend job thumbnail endpoint if job.thumbnail_url isn't set
-  const thumbnailSrc = !imgError && (job.thumbnail_url || (completed ? `/api/video-generator/jobs/${job.job_id}/thumbnail` : null));
+  // Resolve thumbnail URL with API_BASE and auth token for reliable remote loading
+  const token = getToken();
+  const rawThumb = job.thumbnail_url || (completed ? `/api/video-generator/jobs/${job.job_id}/thumbnail` : null);
+  const thumbnailSrc = !imgError && rawThumb
+    ? (() => {
+        let u = rawThumb.startsWith("http") ? rawThumb : `${API_BASE}${rawThumb.startsWith("/") ? "" : "/"}${rawThumb}`;
+        if (token && !u.includes("token=")) {
+          u = u.includes("?") ? `${u}&token=${encodeURIComponent(token)}` : `${u}?token=${encodeURIComponent(token)}`;
+        }
+        return u;
+      })()
+    : null;
 
   return (
     <Card

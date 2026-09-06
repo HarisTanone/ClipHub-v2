@@ -862,6 +862,73 @@ async def test_image_footage_bypasses_agentic_video_alignment(tmp_path):
         assert scenes[0]["agentic_alignment"]["processing_mode"] == "static_image"
 
 
+def test_candidate_hard_relevance_gate_and_news_chyrons_penalty(tmp_path):
+    generator = VideoGenerator(output_dir=str(tmp_path))
+    scene = {
+        "visual": "Bandara ditutup akibat abu vulkanik letusan gunung krakatau",
+        "search_queries": ["krakatau erupsi abu bandara", "volcano ash airport closed"],
+        "narration": "Delapan bandara terpaksa ditutup sementara menyusul letusan dahsyat gunung anak krakatau.",
+        "duration_estimate": 6.5,
+    }
+
+    # Completely off-topic candidates must be disqualified (-100.0)
+    cand_irrelevant_1 = {
+        "title": "@is_pelssy - Mantap pak polisi ditembak biadapp ..",
+        "query": "",
+        "platform": "x",
+    }
+    cand_irrelevant_2 = {
+        "title": "b3'doel - Detik-detik Tendangan Mavt! Viral! Rus",
+        "query": "",
+        "platform": "x",
+    }
+
+    # News TV broadcast clip with chyrons
+    cand_news_watermark = {
+        "title": "detikcom - Detik-detik bandara ditutup erupsi krakatau",
+        "query": "krakatau erupsi abu bandara",
+        "platform": "youtube",
+    }
+
+    # Clean stock footage from Pexels
+    cand_clean_stock = {
+        "title": "Volcano eruption ash cloud rising in dark sky",
+        "query": "volcano ash airport closed",
+        "platform": "pexels",
+    }
+
+    cand_citizen_clean = {
+        "title": "Rekaman warga - Detik-detik bandara ditutup erupsi krakatau",
+        "query": "krakatau erupsi abu bandara",
+        "platform": "youtube",
+    }
+
+    score_irr1 = generator._score_candidate(cand_irrelevant_1, scene)
+    score_irr2 = generator._score_candidate(cand_irrelevant_2, scene)
+    score_news = generator._score_candidate(cand_news_watermark, scene)
+    score_citizen = generator._score_candidate(cand_citizen_clean, scene)
+    score_stock = generator._score_candidate(cand_clean_stock, scene)
+
+    # Disqualified candidates receive <= 0
+    assert score_irr1 <= 0.0
+    assert score_irr2 <= 0.0
+
+    # Clean stock receives positive score
+    assert score_stock > 0.0
+
+    # TV broadcaster watermark incurs heavy penalty compared to clean citizen footage
+    assert score_citizen > score_news
+    assert score_citizen - score_news >= 15.0
+
+
+def test_pixabay_valid_per_page_range():
+    import inspect
+    from src.infrastructure.youtube_search import YouTubeSearch
+    src_code = inspect.getsource(YouTubeSearch.search_pixabay)
+    assert "max(3," in src_code
+
+
+
 
 
 

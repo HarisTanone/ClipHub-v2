@@ -333,16 +333,19 @@ class SocialFootageSearcher:
 
         # 2. Fallback to zero-cost web video search index if no API keys configured or no results
         if not urls:
-            search_q = f"{clean_q} detik detik" if is_indonesian and "detik" not in clean_q.lower() else clean_q
+            search_q = f"{clean_q} video"
             urls = await asyncio.to_thread(self._fetch_web_video_urls_sync, search_q)
 
         if not urls:
             return []
 
+        # Extract meaningful query keywords for relevance filtering
+        q_tokens = set(re.findall(r"[a-zA-Z0-9]{3,}", clean_q.lower())) - {"video", "site", "com", "http", "https", "shorts", "clip"}
+
         # Probe video streams in parallel with yt-dlp
         probe_tasks = [
             self._probe_post_with_ytdlp(u, f"Video: {clean_q}", clean_q)
-            for u in urls[: max_results * 2]
+            for u in urls[: max_results * 3]
         ]
         probed = await asyncio.gather(*probe_tasks, return_exceptions=True)
 
@@ -350,6 +353,19 @@ class SocialFootageSearcher:
         seen = set()
         for cand in probed:
             if isinstance(cand, dict) and cand.get("url") and cand["url"] not in seen:
+                title_lower = (cand.get("title") or "").lower()
+                # Skip obvious spam or off-topic clickbait
+                junk_markers = ["judi", "slot", "gacor", "tawuran", "ditembak", "tendangan", "bokep", "porno", "sepakbola", "highlight bola", "gameplay", "mobile legends", "roblox", "free fire"]
+                if any(jm in title_lower for jm in junk_markers) and not any(jm in clean_q.lower() for jm in junk_markers):
+                    continue
+
+                # If we have distinct query tokens, require at least 1 keyword match in title
+                if q_tokens:
+                    title_tokens = set(re.findall(r"[a-zA-Z0-9]{3,}", title_lower))
+                    if not (q_tokens & title_tokens):
+                        # No keyword match with query - reject off-topic candidate
+                        continue
+
                 seen.add(cand["url"])
                 candidates.append(cand)
                 if len(candidates) >= max_results:
@@ -368,21 +384,23 @@ class SocialFootageSearcher:
         if not clean_q:
             return []
 
-        search_q = f'site:x.com "{clean_q}" "detik detik"' if is_indonesian and "detik" not in clean_q.lower() else f'site:x.com "{clean_q}"'
+        search_q = f"site:x.com {clean_q} video"
         found_urls = await asyncio.to_thread(self._fetch_web_video_urls_sync, search_q)
         x_urls = [u for u in found_urls if "x.com" in u or "twitter.com" in u]
 
-        if not x_urls and "detik detik" in search_q:
-            search_q_simple = f"site:x.com {clean_q} video"
+        if not x_urls:
+            search_q_simple = f"site:x.com {clean_q}"
             found_urls = await asyncio.to_thread(self._fetch_web_video_urls_sync, search_q_simple)
             x_urls = [u for u in found_urls if "x.com" in u or "twitter.com" in u]
 
         if not x_urls:
             return []
 
+        q_tokens = set(re.findall(r"[a-zA-Z0-9]{3,}", clean_q.lower())) - {"video", "site", "com", "http", "https", "shorts", "clip"}
+
         probe_tasks = [
             self._probe_post_with_ytdlp(u, f"X Video: {clean_q}", clean_q, platform_hint="x")
-            for u in x_urls[: max_results * 2]
+            for u in x_urls[: max_results * 3]
         ]
         probed = await asyncio.gather(*probe_tasks, return_exceptions=True)
 
@@ -390,6 +408,16 @@ class SocialFootageSearcher:
         seen = set()
         for cand in probed:
             if isinstance(cand, dict) and cand.get("url") and cand["url"] not in seen:
+                title_lower = (cand.get("title") or "").lower()
+                junk_markers = ["judi", "slot", "gacor", "tawuran", "ditembak", "tendangan", "bokep", "porno", "sepakbola", "highlight bola", "gameplay", "mobile legends", "roblox", "free fire"]
+                if any(jm in title_lower for jm in junk_markers) and not any(jm in clean_q.lower() for jm in junk_markers):
+                    continue
+
+                if q_tokens:
+                    title_tokens = set(re.findall(r"[a-zA-Z0-9]{3,}", title_lower))
+                    if not (q_tokens & title_tokens):
+                        continue
+
                 seen.add(cand["url"])
                 candidates.append(cand)
                 if len(candidates) >= max_results:

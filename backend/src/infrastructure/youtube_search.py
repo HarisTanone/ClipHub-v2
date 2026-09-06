@@ -115,7 +115,8 @@ def _get_pixabay_api_key() -> str:
             return str(val).strip()
     except Exception:
         pass
-    return (getattr(settings, "PIXABAY_API_KEY", "") or "").strip()
+    k = (getattr(settings, "PIXABAY_API_KEY", "") or "").strip()
+    return k or "55114413-ae6c8e21197725bbb3aa092e9"
 
 
 class YouTubeSearch:
@@ -382,7 +383,7 @@ class YouTubeSearch:
                         "video_type": "film",
                         "min_width": 720,
                         "min_height": 720,
-                        "per_page": min(max_results, 10),
+                        "per_page": max(3, min(max_results, 50)),
                     },
                 )
                 if resp.status_code != 200:
@@ -442,7 +443,7 @@ class YouTubeSearch:
                         "q": clean_q,
                         "image_type": "photo",
                         "orientation": "vertical",
-                        "per_page": min(max_results, 10),
+                        "per_page": max(3, min(max_results, 50)),
                     },
                 )
                 if resp.status_code != 200:

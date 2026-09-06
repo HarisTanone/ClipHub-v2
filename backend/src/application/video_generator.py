@@ -1140,9 +1140,10 @@ class VideoGenerator:
             selected = scene.get("selected_footage") or scene.get("footage_source")
             raw_cands = scene.get("footage_candidates", []) or []
 
-            # Prioritize candidates list: selected candidate first, then rest sorted by score
+            # Prioritize candidates list: selected candidate first (if valid & relevant), then rest sorted by score (> 0)
             ordered_candidates: list[dict] = []
-            if selected:
+            selected_score = self._score_candidate(selected, scene) if selected else -100.0
+            if selected and selected_score > 0:
                 ordered_candidates.append(selected)
 
             scored = []
@@ -1155,7 +1156,8 @@ class VideoGenerator:
                 ):
                     continue
                 score = self._score_candidate(c, scene)
-                scored.append((score, c))
+                if score > 0:
+                    scored.append((score, c))
 
             scored.sort(key=lambda x: x[0], reverse=True)
             ordered_candidates.extend([c for _, c in scored])
@@ -1212,40 +1214,47 @@ class VideoGenerator:
                 except Exception as dl_err:
                     logger.warning(f"video_gen: candidate {cand_idx + 1} download failed for scene {i + 1}: {dl_err}")
 
-            # Dynamic query fallback if all initial candidates failed
+            # Clean stock b-roll fallback if all social candidates failed or had burned-in text
             if not downloaded_path:
-                logger.warning(f"video_gen: all {len(ordered_candidates)} candidates failed for scene {i + 1}, trying dynamic query fallback...")
+                logger.warning(f"video_gen: all {len(ordered_candidates)} candidates failed for scene {i + 1}, trying clean stock b-roll fallback...")
                 try:
-                    from src.infrastructure.youtube_search import YouTubeSearch
+                    from src.infrastructure.youtube_search import YouTubeSearch, simplify_stock_query
                     yt = YouTubeSearch()
-                    fallback_queries = list(scene.get("search_queries", []))
+                    stock_queries = []
                     if scene.get("visual"):
-                        fallback_queries.append(scene["visual"][:80])
+                        stock_queries.append(simplify_stock_query(scene["visual"]))
+                    for sq in scene.get("search_queries", []):
+                        if sq:
+                            stock_queries.append(simplify_stock_query(sq))
+                    stock_queries.append("cinematic landscape")
 
-                    for fq in fallback_queries:
+                    for fq in stock_queries:
                         if not fq:
                             continue
-                        fb_cands = await yt.search_for_single_scene(scene, custom_query=fq, results_per_query=3)
-                        for fb_c in fb_cands:
-                            fb_url = fb_c.get("url") or (f"https://www.youtube.com/watch?v={fb_c['video_id']}" if fb_c.get("video_id") else None)
-                            if not fb_url:
+                        stock_cands = await yt.search_pexels(fq, max_results=3)
+                        if not stock_cands:
+                            stock_cands = await yt.search_pixabay(fq, max_results=3)
+
+                        for sc in stock_cands:
+                            sc_url = sc.get("url")
+                            if not sc_url:
                                 continue
-                            fb_path = await downloader.download_segment(
-                                url=fb_url,
-                                start_time=float(fb_c.get("start_timestamp") or 0.0),
+                            sc_path = await downloader.download_segment(
+                                url=sc_url,
+                                start_time=0.0,
                                 duration=max(10.0, float(scene.get("duration_estimate", 7)) + 4.0),
                                 scene_id=scene.get("id", i + 1),
-                                platform=fb_c.get("platform"),
-                                video_id=fb_c.get("video_id"),
+                                platform=sc.get("platform", "pexels"),
+                                video_id=sc.get("video_id"),
                             )
-                            if fb_path and os.path.exists(fb_path) and os.path.getsize(fb_path) > 0:
-                                downloaded_path = fb_path
-                                used_source = fb_c
+                            if sc_path and os.path.exists(sc_path) and os.path.getsize(sc_path) > 0:
+                                downloaded_path = sc_path
+                                used_source = sc
                                 break
                         if downloaded_path:
                             break
-                except Exception as fb_err:
-                    logger.warning(f"video_gen: dynamic fallback search failed for scene {i + 1}: {fb_err}")
+                except Exception as stock_err:
+                    logger.warning(f"video_gen: stock fallback search failed for scene {i + 1}: {stock_err}")
 
             # Adjacent scene borrowing fallback: NEVER leave scene with black screen if other scenes have footage
             if not downloaded_path:
@@ -1732,14 +1741,8 @@ class VideoGenerator:
             thumb_filename = f"thumbnail_{job.job_id}.jpg"
             thumb_path = os.path.join(work_dir, thumb_filename)
 
-            # Determine best timestamp where Hook is fully visible and animated
-            # Hook starts at 0.0s and lasts for hook_duration (typically 2.5 - 3.0s).
-            # At 00:00:01.000, any entrance animation has fully settled and the selected
-            # hook title/styling is 100% visible, crisp, and clear.
-            hook_duration = 3.0
-            if isinstance(job.hook_style, dict):
-                hook_duration = float(job.hook_style.get("duration", 3.0) or 3.0)
-            hook_ss = "00:00:01.000" if (job.hook_enabled and hook_duration >= 1.0) else "00:00:00.500"
+            # Extract frame at 2.0s (00:00:02.000) where the 3-second hook overlay is fully settled and visible
+            hook_ss = "00:00:02.000"
 
             thumb_cmd = [
                 "ffmpeg", "-y",
@@ -1769,10 +1772,10 @@ class VideoGenerator:
     # ─── Helper Methods ────────────────────────────────────────────────────────
 
     def check_video_has_burned_in_text(self, video_path: str, sample_frames: int = 6) -> tuple[bool, float]:
-        """Detect burned-in subtitles, captions, or text banners in video lower-third using OpenCV.
+        """Detect burned-in subtitles, captions, news chyrons, or TV watermarks using OpenCV.
 
         Samples frames across the video duration and analyzes edge density + horizontal
-        structuring element in the bottom 25% of the frame.
+        structuring elements in both the bottom 28% (subtitles/chyrons) and top 22% (news banners/watermarks).
         Returns:
             (has_burned_in_text: bool, avg_edge_density: float)
         """
@@ -1803,34 +1806,45 @@ class VideoGenerator:
                     continue
 
                 h, w = frame.shape[:2]
-                # Analyze lower-third (bottom 25% where subtitles / captions live)
-                lower = frame[int(h * 0.75):, :]
-                gray = cv2.cvtColor(lower, cv2.COLOR_BGR2GRAY)
+                # Analyze lower region (bottom 28% where subtitles / captions / chyrons live)
+                # and upper region (top 22% where news banners / TV station watermarks live)
+                regions = [
+                    frame[int(h * 0.72):, :],
+                    frame[:int(h * 0.22), :],
+                ]
 
-                edges = cv2.Canny(gray, 80, 180)
-                # Horizontal structuring element to group letter characters into text blocks
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 3))
-                dilated = cv2.dilate(edges, kernel, iterations=1)
+                has_frame_text = False
+                frame_densities = []
+                for reg in regions:
+                    if reg.size == 0:
+                        continue
+                    gray = cv2.cvtColor(reg, cv2.COLOR_BGR2GRAY)
+                    edges = cv2.Canny(gray, 75, 175)
+                    # Horizontal structuring element to group letter characters into text lines
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 3))
+                    dilated = cv2.dilate(edges, kernel, iterations=1)
 
-                contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                text_blobs = 0
-                for cnt in contours:
-                    x, y, cw, ch = cv2.boundingRect(cnt)
-                    aspect = cw / max(1, ch)
-                    # Text lines are wide and have significant horizontal extent
-                    if aspect > 2.5 and cw > w * 0.15 and ch > 10:
-                        text_blobs += 1
+                    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    for cnt in contours:
+                        x, y, cw, ch = cv2.boundingRect(cnt)
+                        aspect = cw / max(1, ch)
+                        # Text lines have wide aspect ratio and noticeable width
+                        if aspect > 2.2 and cw > w * 0.12 and ch >= 8:
+                            has_frame_text = True
+                            break
 
-                density = float(np.count_nonzero(edges) / edges.size)
-                densities.append(density)
+                    density = float(np.count_nonzero(edges) / edges.size)
+                    frame_densities.append(density)
 
-                if text_blobs >= 1:
+                if frame_densities:
+                    densities.append(float(np.mean(frame_densities)))
+                if has_frame_text:
                     text_frame_count += 1
 
             cap.release()
             avg_density = float(np.mean(densities)) if densities else 0.0
-            # If at least half the sampled frames contain subtitle-like text contours
-            has_text = (text_frame_count >= max(2, sample_frames // 2))
+            # Flag if 2 or more sampled frames contain text lines or high structured edge density
+            has_text = (text_frame_count >= 2) or (avg_density > 0.042)
             return has_text, avg_density
         except Exception as err:
             logger.debug(f"video_gen: subtitle check error: {err}")
@@ -1839,7 +1853,7 @@ class VideoGenerator:
     def _score_candidate(self, candidate: dict, scene: dict) -> float:
         """Calculate deep semantic relevance score for a footage candidate."""
         if not candidate or not isinstance(candidate, dict):
-            return 0.0
+            return -100.0
 
         target_duration = scene.get("duration_estimate", 7)
         search_terms = set()
@@ -1877,27 +1891,34 @@ class VideoGenerator:
         if avoid_keywords:
             cand_blob = f"{title_lower} {candidate.get('query', '')}".lower()
             if any(k.lower() in cand_blob for k in avoid_keywords if k.strip()):
-                return -50.0
+                return -100.0
 
-        # 1. Named Entity Exact Match Bonus (e.g. "Salatiga" or "Jawa Tengah" in YouTube title)
+        # 1. Named Entity Exact Match
         entity_overlap = len(entity_terms & title_words)
         if entity_overlap > 0:
             score += entity_overlap * 5.0
 
         # 2. General Keyword Overlap
         overlap = len(search_terms & (title_words | cand_query_words))
-        score += overlap * 2.5
+        score += overlap * 3.0
 
-        # 3. Platform preference (X & Citizen video #1, YouTube/TikTok #2, Stock clean B-roll #3)
+        # ─── HARD RELEVANCE GATE ─────────────────────────────────────────────
+        # If the candidate has ZERO entity overlap AND ZERO keyword overlap with the scene,
+        # it is completely off-topic (e.g. random viral shooting or soccer fights) and must be discarded!
+        if entity_overlap == 0 and overlap == 0:
+            return -100.0
+
+        # 3. Platform & Stock preference
         platform = candidate.get("platform", "").lower()
-        if platform in ["x", "twitter"]:
-            score += 7.0
+        if platform in ["pexels", "pixabay"]:
+            # Clean stock footage is guaranteed 100% free of burned-in subtitles, TV chyrons, and watermarks
+            score += 6.0
+        elif platform in ["x", "twitter"] and overlap > 0:
+            score += 5.0
         elif platform == "youtube" and entity_overlap > 0:
             score += 4.5
         elif platform in ["youtube", "tiktok"]:
-            score += 4.0
-        elif platform in ["pexels", "pixabay"]:
-            score += 4.0
+            score += 3.0
 
         # 3.1 Raw & Authentic Footage Bonus (rekaman warga, amatir, cctv, detik detik)
         raw_keywords = [
@@ -1907,10 +1928,19 @@ class VideoGenerator:
         ]
         for rk in raw_keywords:
             if rk in title_lower:
-                score += 5.0
+                score += 4.0
                 break
 
-        # 3.2 Heavy Penalty for Edited / Meme / Template / Burned-in Subtitle markers
+        # 3.2 News broadcast chyrons & lower-third banners penalty
+        # Broadcasters almost always have burned-in station logos and tickers
+        news_chyrons_markers = [
+            "detikcom", "tvone", "kompas", "metrotv", "inews", "cnn", "tribun",
+            "liputan6", "beritasatu", "sindo", "kumparan", "merdeka.com"
+        ]
+        if any(nm in title_lower for nm in news_chyrons_markers):
+            score -= 15.0
+
+        # 3.3 Heavy Penalty for Edited / Meme / Template / Burned-in Subtitle markers
         dirty_edit_markers = [
             "edit", "capcut", "alightmotion", "sub indo", "jedag jedug", "jedag-jedug",
             "quotes", "reaction", "podcast", "pov", "slowed", "remix", "status wa",

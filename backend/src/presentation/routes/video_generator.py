@@ -1259,29 +1259,33 @@ async def get_job_thumbnail(
 
     video_path = _find_job_video_path(job_id, job.output_path if job else None)
 
-    # 1. If refresh requested and video exists, re-extract clean Hook frame immediately
+    # 1. If refresh requested and video exists, re-extract clean Hook frame at 2.0s immediately
     if refresh and video_path and os.path.exists(video_path):
         out_thumb = os.path.join(os.path.dirname(video_path), f"thumbnail_{job_id}.jpg")
         try:
             import subprocess
             subprocess.run([
-                "ffmpeg", "-y", "-ss", "00:00:01.000",
+                "ffmpeg", "-y", "-ss", "00:00:02.000",
                 "-i", video_path,
                 "-vframes", "1",
                 "-q:v", "2",
                 out_thumb
-            ], capture_output=True, timeout=10)
+            ], capture_output=True, timeout=15)
             if os.path.exists(out_thumb) and os.path.getsize(out_thumb) > 0:
-                return FileResponse(out_thumb, media_type="image/jpeg")
+                return FileResponse(out_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
         except Exception:
             pass
 
     # 2. Check direct thumbnail candidate paths
     out_dir = settings.VIDEO_GEN_OUTPUT_DIR
     thumb_candidates = [
+        os.path.join(os.path.dirname(video_path), f"thumbnail_{job_id}.jpg") if video_path else None,
+        os.path.join(os.path.dirname(video_path), "thumbnail.jpg") if video_path else None,
         os.path.join(out_dir, job_id, f"thumbnail_{job_id}.jpg"),
         os.path.join(out_dir, job_id, "thumbnail.jpg"),
         os.path.join(out_dir, job_id, "thumb.jpg"),
+        os.path.join("tmp", "video_gen", job_id, f"thumbnail_{job_id}.jpg"),
+        os.path.join("tmp", "video_gen", job_id, "thumbnail.jpg"),
         os.path.join("data", "video_generator_output", job_id, f"thumbnail_{job_id}.jpg"),
         os.path.join("data", "video_generator_output", job_id, "thumbnail.jpg"),
         os.path.join("data", "video_generator_output", job_id, "thumb.jpg"),
@@ -1289,26 +1293,26 @@ async def get_job_thumbnail(
         os.path.join("backend", "data", "video_generator_output", job_id, "thumb.jpg"),
         os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "thumbnail", "clip_01.jpg"),
         os.path.join(getattr(settings, "OUTPUT_DIR", "data/output"), job_id, "clip_01_thumb.jpg"),
-        job.thumbnail_url if (job and job.thumbnail_url) else None,
+        job.thumbnail_url if (job and job.thumbnail_url and not job.thumbnail_url.startswith("/") and not job.thumbnail_url.startswith("http")) else None,
     ]
     for tp in thumb_candidates:
         if tp and os.path.exists(tp) and os.path.getsize(tp) > 0:
-            return FileResponse(tp, media_type="image/jpeg")
+            return FileResponse(tp, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 
-    # 3. Extract on-the-fly from video if thumbnail file is missing
+    # 3. Extract on-the-fly from video at 2.0s if thumbnail file is missing
     if video_path and os.path.exists(video_path):
         out_thumb = os.path.join(os.path.dirname(video_path), f"thumbnail_{job_id}.jpg")
         try:
             import subprocess
             subprocess.run([
-                "ffmpeg", "-y", "-ss", "00:00:01.000",
+                "ffmpeg", "-y", "-ss", "00:00:02.000",
                 "-i", video_path,
                 "-vframes", "1",
                 "-q:v", "2",
                 out_thumb
-            ], capture_output=True, timeout=10)
+            ], capture_output=True, timeout=15)
             if os.path.exists(out_thumb) and os.path.getsize(out_thumb) > 0:
-                return FileResponse(out_thumb, media_type="image/jpeg")
+                return FileResponse(out_thumb, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
         except Exception:
             pass
 
