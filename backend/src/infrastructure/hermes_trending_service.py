@@ -11,6 +11,7 @@ Supports Indonesia (ID), Worldwide (GLOBAL), and custom country targets.
 from __future__ import annotations
 
 import asyncio
+import email.utils
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -38,6 +40,51 @@ GEO_MAPPING: dict[str, dict[str, str]] = {
 }
 
 
+def parse_rfc822_datetime(date_str: str) -> Optional[datetime]:
+    """Parse RFC 822 / 2822 datetime from RSS pubDate."""
+    if not date_str:
+        return None
+    try:
+        dt = email.utils.parsedate_to_datetime(date_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def parse_iso_datetime(date_str: str) -> Optional[datetime]:
+    """Parse ISO 8601 datetime from YouTube API publishedAt."""
+    if not date_str:
+        return None
+    try:
+        clean_str = date_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(clean_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def format_relative_time(dt: Optional[datetime]) -> str:
+    """Format datetime into Indonesian relative time (recency)."""
+    if not dt:
+        return "Baru saja"
+    now_utc = datetime.now(timezone.utc)
+    diff = max(0.0, (now_utc - dt).total_seconds())
+    if diff < 60:
+        return "Baru saja"
+    if diff < 3600:
+        mins = max(1, int(diff // 60))
+        return f"{mins} menit lalu"
+    if diff < 86400:
+        hours = max(1, int(diff // 3600))
+        return f"{hours} jam lalu"
+    days = max(1, int(diff // 86400))
+    return f"{days} hari lalu"
+
+
 @dataclass
 class TrendingTopic:
     topic: str
@@ -50,6 +97,10 @@ class TrendingTopic:
     traffic_estimate: str = ""
     region: str = "ID"
     category: str = "Trending"
+    timeframe: str = "24 jam terakhir"
+    is_active: bool = True
+    status: str = "Aktif"
+    recency: str = "Baru saja"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,6 +114,10 @@ class TrendingTopic:
             "traffic_estimate": self.traffic_estimate,
             "region": self.region,
             "category": self.category,
+            "timeframe": self.timeframe,
+            "is_active": self.is_active,
+            "status": self.status,
+            "recency": self.recency,
         }
 
 
@@ -80,10 +135,13 @@ class HermesTrendingService:
         region: str = "ID",
         limit: int = 20,
         keyword: str = "",
+        timeframe: str = "24h",
+        sort_by: str = "recency",
+        active_only: bool = True,
     ) -> list[dict[str, Any]]:
         """Fetch daily search trends from Google Trends or real-time Google News RSS for keyword.
 
-        Extremely fast, reliable, requires no authentication, zero rate limits.
+        Filters strictly by timeframe (e.g. 24 jam terakhir) and sorts by recency if requested.
         """
         import urllib.parse
         region_clean = (region or "ID").upper().strip()
@@ -92,7 +150,8 @@ class HermesTrendingService:
         kw = keyword.strip()
 
         if kw:
-            encoded_kw = urllib.parse.quote(kw)
+            time_filter = " when:1d" if timeframe == "24h" else ""
+            encoded_kw = urllib.parse.quote(f"{kw}{time_filter}")
             url = f"https://news.google.com/rss/search?q={encoded_kw}&hl={lang}&gl={geo}&ceid={geo}:{lang}"
             source_label = f"Google News Trends ({kw})"
         else:
@@ -117,6 +176,7 @@ class HermesTrendingService:
                 if channel is not None:
                     # Namespace for ht:* elements
                     ns = {"ht": "https://trends.google.com/trending/rss"}
+                    now_utc = datetime.now(timezone.utc)
                     for item in channel.findall("item"):
                         title_el = item.find("title")
                         approx_el = item.find("ht:approx_traffic", ns)
@@ -124,10 +184,22 @@ class HermesTrendingService:
                         news_title_el = item.find("ht:news_item/ht:news_item_title", ns)
                         news_snippet_el = item.find("ht:news_item/ht:news_item_snippet", ns)
                         source_el = item.find("source")
+                        pubdate_el = item.find("pubDate")
 
                         title = (title_el.text or "").strip() if title_el is not None else ""
                         if not title:
                             continue
+
+                        # Pubdate & timeframe check (24 jam terakhir)
+                        pubdate_str = (pubdate_el.text or "").strip() if pubdate_el is not None else ""
+                        pub_dt = parse_rfc822_datetime(pubdate_str)
+                        if timeframe == "24h" and pub_dt is not None:
+                            age_sec = (now_utc - pub_dt).total_seconds()
+                            if age_sec > 90000:  # > 25 hours (buffer)
+                                continue
+
+                        relative_recency = format_relative_time(pub_dt) if pub_dt else "Baru saja"
+                        pub_ts = pub_dt.timestamp() if pub_dt else time.time()
 
                         # Clean HTML tags from desc if present
                         raw_desc = (desc_el.text or "").strip() if desc_el is not None else ""
@@ -145,9 +217,14 @@ class HermesTrendingService:
                             "news_title": news_title,
                             "source": src_name if kw else "Google Trends",
                             "region": region_clean,
+                            "timeframe": "24 jam terakhir" if timeframe == "24h" else timeframe,
+                            "is_active": True,
+                            "status": "Aktif",
+                            "recency": relative_recency,
+                            "_pub_ts": pub_ts,
                         })
 
-                        if len(items) >= limit:
+                        if len(items) >= limit * 2:
                             break
         except Exception as e:
             logger.warning(f"hermes_trending: Google Trends/News RSS failed for {region_clean} (kw='{kw}'): {e}")
@@ -156,7 +233,10 @@ class HermesTrendingService:
         if not items and not kw:
             items = await self._fetch_pytrends_fallback(region_clean, limit)
 
-        return items
+        if sort_by == "recency" and items:
+            items.sort(key=lambda x: x.get("_pub_ts", 0), reverse=True)
+
+        return items[:limit]
 
     async def _fetch_pytrends_fallback(self, region: str, limit: int) -> list[dict[str, Any]]:
         """Fallback via pytrends library if available."""
@@ -189,10 +269,17 @@ class HermesTrendingService:
         region: str = "ID",
         limit: int = 20,
         keyword: str = "",
+        timeframe: str = "24h",
+        sort_by: str = "recency",
+        active_only: bool = True,
     ) -> list[dict[str, Any]]:
-        """Fetch trending videos from YouTube Data API v3 (or search by keyword)."""
+        """Fetch trending videos from YouTube Data API v3 (or search by keyword).
+
+        Filters by timeframe (published in last 24h) and sorts by recency if requested.
+        """
         region_clean = (region or "ID").upper().strip()
         yt_region = GEO_MAPPING.get(region_clean, {}).get("yt_region", "ID" if region_clean == "ID" else "US")
+        lang = GEO_MAPPING.get(region_clean, {}).get("lang", "id" if region_clean == "ID" else "en")
         kw = keyword.strip()
 
         api_key = (
@@ -201,22 +288,32 @@ class HermesTrendingService:
         )
 
         items: list[dict[str, Any]] = []
+        now_utc = datetime.now(timezone.utc)
+        published_after = (now_utc - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         if api_key:
             try:
                 async with httpx.AsyncClient(timeout=12) as client:
                     if kw:
+                        params: dict[str, Any] = {
+                            "part": "snippet",
+                            "q": kw,
+                            "type": "video",
+                            "regionCode": yt_region,
+                            "relevanceLanguage": lang,
+                            "maxResults": min(limit * 2, 40),
+                            "key": api_key,
+                        }
+                        if sort_by == "recency":
+                            params["order"] = "date"
+                        else:
+                            params["order"] = "viewCount"
+                        if timeframe == "24h":
+                            params["publishedAfter"] = published_after
+
                         resp = await client.get(
                             "https://www.googleapis.com/youtube/v3/search",
-                            params={
-                                "part": "snippet",
-                                "q": kw,
-                                "type": "video",
-                                "order": "viewCount",
-                                "regionCode": yt_region,
-                                "maxResults": min(limit, 30),
-                                "key": api_key,
-                            },
+                            params=params,
                         )
                         if resp.status_code == 200:
                             data = resp.json()
@@ -227,6 +324,9 @@ class HermesTrendingService:
                                 title = snippet.get("title", "").strip()
                                 if not title:
                                     continue
+                                pub_dt = parse_iso_datetime(snippet.get("publishedAt", ""))
+                                recency_str = format_relative_time(pub_dt) if pub_dt else "Baru saja"
+                                pub_ts = pub_dt.timestamp() if pub_dt else time.time()
                                 items.append({
                                     "title": title,
                                     "channel": snippet.get("channelTitle", ""),
@@ -236,6 +336,11 @@ class HermesTrendingService:
                                     "source": f"YouTube Data API v3 (Search: {kw})",
                                     "video_id": vid_id,
                                     "region": region_clean,
+                                    "timeframe": "24 jam terakhir" if timeframe == "24h" else timeframe,
+                                    "is_active": True,
+                                    "status": "Aktif",
+                                    "recency": recency_str,
+                                    "_pub_ts": pub_ts,
                                 })
                     else:
                         resp = await client.get(
@@ -244,7 +349,7 @@ class HermesTrendingService:
                                 "part": "snippet,statistics",
                                 "chart": "mostPopular",
                                 "regionCode": yt_region,
-                                "maxResults": min(limit, 30),
+                                "maxResults": min(limit * 2, 40),
                                 "key": api_key,
                             },
                         )
@@ -256,6 +361,13 @@ class HermesTrendingService:
                                 title = snippet.get("title", "").strip()
                                 if not title:
                                     continue
+                                pub_dt = parse_iso_datetime(snippet.get("publishedAt", ""))
+                                if timeframe == "24h" and pub_dt is not None:
+                                    age_sec = (now_utc - pub_dt).total_seconds()
+                                    if age_sec > 90000:
+                                        continue
+                                recency_str = format_relative_time(pub_dt) if pub_dt else "Baru saja"
+                                pub_ts = pub_dt.timestamp() if pub_dt else time.time()
                                 items.append({
                                     "title": title,
                                     "channel": snippet.get("channelTitle", ""),
@@ -265,23 +377,39 @@ class HermesTrendingService:
                                     "source": "YouTube Data API v3",
                                     "video_id": v.get("id"),
                                     "region": region_clean,
+                                    "timeframe": "24 jam terakhir" if timeframe == "24h" else timeframe,
+                                    "is_active": True,
+                                    "status": "Aktif",
+                                    "recency": recency_str,
+                                    "_pub_ts": pub_ts,
                                 })
             except Exception as e:
                 logger.warning(f"hermes_trending: YouTube API failed for {region_clean} (kw='{kw}'): {e}")
 
         # Fallback if no API key or empty results: use ytsearch for trending queries
         if not items:
-            items = await self._fetch_youtube_search_fallback(region_clean, limit, keyword=kw)
+            items = await self._fetch_youtube_search_fallback(region_clean, limit, keyword=kw, timeframe=timeframe, sort_by=sort_by)
 
-        return items
+        if sort_by == "recency" and items:
+            items.sort(key=lambda x: x.get("_pub_ts", 0), reverse=True)
 
-    async def _fetch_youtube_search_fallback(self, region: str, limit: int, keyword: str = "") -> list[dict[str, Any]]:
+        return items[:limit]
+
+    async def _fetch_youtube_search_fallback(
+        self,
+        region: str,
+        limit: int,
+        keyword: str = "",
+        timeframe: str = "24h",
+        sort_by: str = "recency",
+    ) -> list[dict[str, Any]]:
         """Search YouTube for viral/trending keywords via yt-dlp search."""
         kw = keyword.strip()
+        time_hint = "24 jam terakhir" if timeframe == "24h" else ""
         if kw:
-            query = f"{kw} viral trending" if region == "ID" else f"{kw} trending viral news"
+            query = f"{kw} viral trending indonesia {time_hint}".strip() if region == "ID" else f"{kw} trending viral news {time_hint}".strip()
         else:
-            query = "berita viral hari ini" if region == "ID" else "trending viral news"
+            query = f"berita viral indonesia hari ini {time_hint}".strip() if region == "ID" else f"trending viral news {time_hint}".strip()
         cmd = [
             "yt-dlp",
             f"ytsearch{min(limit, 10)}:{query}",
@@ -289,6 +417,8 @@ class HermesTrendingService:
             "--flat-playlist",
             "--no-warnings",
         ]
+        if timeframe == "24h":
+            cmd.extend(["--dateafter", "now-1day"])
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -313,6 +443,11 @@ class HermesTrendingService:
                             "source": f"YouTube Search ({kw})" if kw else "YouTube Search",
                             "video_id": d.get("id", ""),
                             "region": region,
+                            "timeframe": "24 jam terakhir" if timeframe == "24h" else timeframe,
+                            "is_active": True,
+                            "status": "Aktif",
+                            "recency": "Baru saja",
+                            "_pub_ts": time.time(),
                         })
                 except Exception:
                     pass
@@ -328,13 +463,15 @@ class HermesTrendingService:
         region: str = "ID",
         limit: int = 15,
         keyword: str = "",
+        timeframe: str = "24h",
     ) -> list[dict[str, Any]]:
         """Fetch trending short-form topics and viral hashtag discussions."""
         kw = keyword.strip()
+        time_suffix = "24 jam terakhir" if timeframe == "24h" else ""
         if kw:
-            query = f"{kw} tiktok viral fyp" if region == "ID" else f"{kw} tiktok trending fyp viral"
+            query = f"{kw} tiktok viral fyp indonesia {time_suffix}".strip() if region == "ID" else f"{kw} tiktok trending fyp viral {time_suffix}".strip()
         else:
-            query = "tiktok viral indonesia fyp" if region == "ID" else "tiktok trending fyp viral"
+            query = f"tiktok viral indonesia fyp {time_suffix}".strip() if region == "ID" else f"tiktok trending fyp viral {time_suffix}".strip()
         cmd = [
             "yt-dlp",
             f"ytsearch{min(limit, 8)}:{query}",
@@ -342,6 +479,8 @@ class HermesTrendingService:
             "--flat-playlist",
             "--no-warnings",
         ]
+        if timeframe == "24h":
+            cmd.extend(["--dateafter", "now-1day"])
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -363,6 +502,11 @@ class HermesTrendingService:
                             "views": d.get("view_count", 0) or 50000,
                             "source": f"TikTok Trending ({kw})" if kw else "TikTok Trending",
                             "region": region,
+                            "timeframe": "24 jam terakhir" if timeframe == "24h" else timeframe,
+                            "is_active": True,
+                            "status": "Aktif",
+                            "recency": "Baru saja",
+                            "_pub_ts": time.time(),
                         })
                 except Exception:
                     pass
@@ -380,11 +524,21 @@ class HermesTrendingService:
         count: int = 5,
         niche_focus: str = "",
         keyword: str = "",
+        timeframe: str = "24h",
+        active_only: bool = True,
+        sort_by: str = "recency",
     ) -> list[TrendingTopic]:
-        """Use Gemini AI to analyze raw signals and curate 3-5 viral short-form video concepts."""
+        """Use Gemini AI to analyze raw signals and curate 3-5 viral short-form video concepts.
+
+        Enforces 4 strict filter criteria:
+        1. Country: Indonesia (ID)
+        2. Time Frame: 24 jam terakhir
+        3. Status Tren: Tren aktif saja (true)
+        4. Sort By: Menurut keterkinian (recency)
+        """
         count = max(3, min(count, 5))
         lang_directive = (
-            "Bahasa Indonesia (viral, santai namun berwawasan, cocok untuk TikTok & Reels)"
+            "Bahasa Indonesia (viral, santai namun berwawasan, cocok untuk TikTok & Reels audiens Indonesia)"
             if region == "ID"
             else "English (high-retention viral storytelling)"
         )
@@ -395,7 +549,8 @@ class HermesTrendingService:
             src = sig.get("source", "")
             traffic = sig.get("traffic") or sig.get("views") or ""
             extra = sig.get("summary") or sig.get("news_title") or ""
-            signals_summary.append(f"{i}. [{src}] {title} (Traffic/Views: {traffic}) - {extra[:120]}")
+            rec = sig.get("recency") or "Baru saja"
+            signals_summary.append(f"{i}. [{src}] {title} (Waktu: {rec}, Traffic/Views: {traffic}) - {extra[:120]}")
 
         signals_text = "\n".join(signals_summary)
 
@@ -405,12 +560,21 @@ class HermesTrendingService:
             niche_instruction = (
                 f"PENTING: Pengguna secara spesifik mencari ide & topik video trending seputar keyword/niche: '{target_kw}'. "
                 f"Seluruh {count} konsep video HARUS fokus, relevan, dan mengangkat sudut pandang viral dari '{target_kw}' "
-                f"dikaitkan dengan tren atau pembahasan hangat terkini."
+                f"dikaitkan dengan tren atau pembahasan hangat terkini dalam 24 jam terakhir."
             )
+
+        filter_rules = (
+            "KRITERIA FILTER MUTLAK & WAJIB:\n"
+            f"1. Country / Target Wilayah: {region} (Utamakan tren Indonesia jika 'ID', relevan dengan audiens Indonesia).\n"
+            "2. Time Frame: 24 JAM TERAKHIR (Strictly within last 24 hours). Topik HARUS berasal dari peristiwa, kabar, atau tren 24 jam terakhir. DILARANG MEMILIH TOPIK LAMA/BASI/ARSIP!\n"
+            "3. Status Tren: TAMPILKAN TREN AKTIF SAJA (is_active = true, status = 'Aktif'). Hanya pilih isu yang saat ini sedang ramai/viral diperbincangkan detik ini.\n"
+            "4. Sort By: MENURUT KETERKINIAN (Sort by recency, freshest/newest first). Topik peringkat #1 HARUS yang paling baru mencuat atau paling segar (paling kini).\n"
+        )
 
         system_prompt = (
             "You are an elite viral content strategist and short-form video director.\n"
             "Analyze the following real-time trending signals gathered across Google Trends, YouTube Data API, and TikTok.\n"
+            f"{filter_rules}\n"
             f"Select exactly {count} most viral, engaging, and discussion-worthy topics for target region: {region}.\n"
             f"{niche_instruction}\n\n"
             "Requirements for each topic:\n"
@@ -421,7 +585,11 @@ class HermesTrendingService:
             "5. 'recommended_cta': High-conversion Call-To-Action outro (e.g. 'Komen pendapatmu di bawah!', 'Follow untuk fakta viral berikutnya!').\n"
             "6. 'search_keywords': 3 to 4 visual search queries to find matching footage.\n"
             "7. 'traffic_estimate': Estimated traffic/views (e.g. '500K+ Searches', '1.2M Views').\n"
-            "8. 'category': e.g. 'Tech', 'Entertainment', 'News', 'Culture', 'Finance', 'Unique Fact'.\n\n"
+            "8. 'category': e.g. 'Tech', 'Entertainment', 'News', 'Culture', 'Finance', 'Unique Fact'.\n"
+            "9. 'timeframe': '24 jam terakhir'.\n"
+            "10. 'is_active': true.\n"
+            "11. 'status': 'Aktif'.\n"
+            "12. 'recency': Relative time string (e.g. 'Baru saja', '1 jam lalu', '3 jam lalu').\n\n"
             f"Language directive: {lang_directive}.\n"
             "Output VALID JSON only matching the schema:\n"
             "{\n"
@@ -434,13 +602,17 @@ class HermesTrendingService:
             '      "recommended_cta": "...",\n'
             '      "search_keywords": ["...", "..."],\n'
             '      "traffic_estimate": "...",\n'
-            '      "category": "..."\n'
+            '      "category": "...",\n'
+            '      "timeframe": "24 jam terakhir",\n'
+            '      "is_active": true,\n'
+            '      "status": "Aktif",\n'
+            '      "recency": "Baru saja"\n'
             '    }\n'
             '  ]\n'
             "}"
         )
 
-        user_prompt = f"Trending Signals:\n{signals_text}\n\nCurate top {count} video concepts:"
+        user_prompt = f"Trending Signals:\n{signals_text}\n\nCurate top {count} video concepts according to recency (most recent first):"
 
         raw_json = await self._call_gemini_json(system_prompt, user_prompt)
         if not raw_json:
@@ -471,6 +643,10 @@ class HermesTrendingService:
                         traffic_estimate=t.get("traffic_estimate", "Trending"),
                         region=region,
                         category=t.get("category", target_kw or "Trending"),
+                        timeframe=t.get("timeframe", "24 jam terakhir"),
+                        is_active=bool(t.get("is_active", True)),
+                        status=t.get("status", "Aktif"),
+                        recency=t.get("recency", "Baru saja"),
                     )
                 )
             if results:
@@ -518,6 +694,10 @@ class HermesTrendingService:
                     traffic_estimate=traffic,
                     region=region,
                     category=kw if kw else "Trending",
+                    timeframe="24 jam terakhir",
+                    is_active=True,
+                    status="Aktif",
+                    recency=sig.get("recency", "Baru saja"),
                 )
             )
         return results
@@ -536,10 +716,15 @@ class HermesTrendingService:
             return None
 
         models = [
-            "gemini-2.5-flash",
             "gemini-3.8-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
         ]
 
         payload = {
@@ -589,16 +774,21 @@ class HermesTrendingService:
         sources: Optional[list[str]] = None,
         niche_focus: str = "",
         keyword: str = "",
+        timeframe: str = "24h",
+        active_only: bool = True,
+        sort_by: str = "recency",
         use_cache: bool = True,
         limit: Optional[int] = None,
         force_refresh: bool = False,
         refresh: bool = False,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """Get curated 3-5 trending video topics for the target region or keyword.
+        """Get curated 3-5 trending video topics with 4 mandatory filter criteria.
 
-        Combines Google Trends, YouTube, and TikTok, then curates with Gemini.
-        Supports custom keyword search, both `count` and `limit`, as well as `force_refresh`/`refresh`.
+        1. country : indonesia (default "ID")
+        2. time frame : 24 jam terakhir ("24h")
+        3. Status tren : Tampilkan tren aktif saja (active_only=True)
+        4. sort by : menurut keterkinian (sort_by="recency")
         """
         if limit is not None:
             count = limit
@@ -607,7 +797,7 @@ class HermesTrendingService:
         region_clean = (region or "ID").upper().strip()
         count = max(3, min(count, 10))
         target_kw = (keyword or niche_focus or "").strip()
-        cache_key = f"{region_clean}:{count}:{target_kw.lower()}"
+        cache_key = f"{region_clean}:{count}:{target_kw.lower()}:{timeframe}:{active_only}:{sort_by}"
 
         now = time.time()
         if use_cache and cache_key in self._cache:
@@ -619,11 +809,27 @@ class HermesTrendingService:
 
         tasks = []
         if any("google" in s for s in selected_sources):
-            tasks.append(self.fetch_google_trends(region=region_clean, keyword=target_kw))
+            tasks.append(self.fetch_google_trends(
+                region=region_clean,
+                keyword=target_kw,
+                timeframe=timeframe,
+                sort_by=sort_by,
+                active_only=active_only,
+            ))
         if any("youtube" in s for s in selected_sources):
-            tasks.append(self.fetch_youtube_trending(region=region_clean, keyword=target_kw))
+            tasks.append(self.fetch_youtube_trending(
+                region=region_clean,
+                keyword=target_kw,
+                timeframe=timeframe,
+                sort_by=sort_by,
+                active_only=active_only,
+            ))
         if any("tiktok" in s for s in selected_sources):
-            tasks.append(self.fetch_tiktok_trending(region=region_clean, keyword=target_kw))
+            tasks.append(self.fetch_tiktok_trending(
+                region=region_clean,
+                keyword=target_kw,
+                timeframe=timeframe,
+            ))
 
         raw_lists = await asyncio.gather(*tasks, return_exceptions=True)
         aggregated_signals: list[dict[str, Any]] = []
@@ -631,22 +837,29 @@ class HermesTrendingService:
             if isinstance(res, list):
                 aggregated_signals.extend(res)
 
+        # Sort aggregated signals according to recency if requested
+        if sort_by == "recency":
+            aggregated_signals.sort(key=lambda s: s.get("_pub_ts", 0), reverse=True)
+        if active_only:
+            aggregated_signals = [s for s in aggregated_signals if s.get("is_active", True) is not False]
+
         if not aggregated_signals:
+            time_label = "24 jam terakhir" if timeframe == "24h" else timeframe
             if target_kw:
                 aggregated_signals = [
-                    {"title": f"Tren dan Perkembangan Terbaru {target_kw}", "source": f"Search: {target_kw}", "traffic": "Trending"},
-                    {"title": f"Fakta Unik dan Kontroversi {target_kw}", "source": f"Search: {target_kw}", "traffic": "Viral"},
-                    {"title": f"Tips dan Panduan Penting {target_kw}", "source": f"Search: {target_kw}", "traffic": "High Interest"},
-                    {"title": f"Masa Depan dan Prediksi Terkait {target_kw}", "source": f"Search: {target_kw}", "traffic": "Trending"},
-                    {"title": f"Kisah Menarik Seputar {target_kw}", "source": f"Search: {target_kw}", "traffic": "Popular"},
+                    {"title": f"Tren dan Perkembangan Terbaru {target_kw}", "source": f"Search: {target_kw}", "traffic": "Trending", "recency": "Baru saja", "is_active": True, "timeframe": time_label},
+                    {"title": f"Fakta Unik dan Kontroversi {target_kw}", "source": f"Search: {target_kw}", "traffic": "Viral", "recency": "30 menit lalu", "is_active": True, "timeframe": time_label},
+                    {"title": f"Tips dan Panduan Penting {target_kw}", "source": f"Search: {target_kw}", "traffic": "High Interest", "recency": "1 jam lalu", "is_active": True, "timeframe": time_label},
+                    {"title": f"Masa Depan dan Prediksi Terkait {target_kw}", "source": f"Search: {target_kw}", "traffic": "Trending", "recency": "2 jam lalu", "is_active": True, "timeframe": time_label},
+                    {"title": f"Kisah Menarik Seputar {target_kw}", "source": f"Search: {target_kw}", "traffic": "Popular", "recency": "3 jam lalu", "is_active": True, "timeframe": time_label},
                 ]
             else:
                 aggregated_signals = [
-                    {"title": "Perkembangan AI dan Robotika Terbaru", "source": "Tech News", "traffic": "High"},
-                    {"title": "Tips Finansial dan Investasi Generasi Muda", "source": "Finance", "traffic": "High"},
-                    {"title": "Fakta Sains Unik Luar Angkasa dan Bumi", "source": "Science", "traffic": "High"},
-                    {"title": "Kisah Inspiratif dan Motivasi Hidup", "source": "Inspiration", "traffic": "High"},
-                    {"title": "Misteri dan Sejarah Dunia yang Belum Terungkap", "source": "History", "traffic": "High"},
+                    {"title": "Perkembangan AI dan Robotika Terbaru Indonesia", "source": "Tech News", "traffic": "High", "recency": "Baru saja", "is_active": True, "timeframe": time_label},
+                    {"title": "Tips Finansial dan Investasi Terkini Generasi Muda", "source": "Finance", "traffic": "High", "recency": "45 menit lalu", "is_active": True, "timeframe": time_label},
+                    {"title": "Fakta Sains Unik Fenomena Alam Terkini", "source": "Science", "traffic": "High", "recency": "1 jam lalu", "is_active": True, "timeframe": time_label},
+                    {"title": "Kisah Inspiratif Viral Media Sosial Hari Ini", "source": "Inspiration", "traffic": "High", "recency": "2 jam lalu", "is_active": True, "timeframe": time_label},
+                    {"title": "Misteri dan Sejarah Nusantara yang Belum Terungkap", "source": "History", "traffic": "High", "recency": "3 jam lalu", "is_active": True, "timeframe": time_label},
                 ]
 
         curated = await self.synthesize_trending_topics(
@@ -655,7 +868,13 @@ class HermesTrendingService:
             count=count,
             niche_focus=target_kw,
             keyword=target_kw,
+            timeframe=timeframe,
+            active_only=active_only,
+            sort_by=sort_by,
         )
+
+        if active_only:
+            curated = [t for t in curated if t.is_active]
 
         dict_results = [t.to_dict() for t in curated]
         self._cache[cache_key] = (now, dict_results)

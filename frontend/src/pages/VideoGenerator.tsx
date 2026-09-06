@@ -1840,6 +1840,41 @@ function TrendingRadarModal({
           </button>
         </div>
 
+        {/* 4 Mandatory Active Filters Indicator Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/80 px-5 py-2.5 bg-zinc-950/80 text-xs">
+          <div className="flex items-center gap-1.5 text-zinc-400">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-amber-400/90 flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-amber-400" />
+              Filter Aktif:
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/* 1. Country */}
+            <span className="inline-flex items-center gap-1 rounded-md bg-zinc-900 border border-zinc-700/80 px-2 py-0.5 text-[11px] text-zinc-200 font-medium shadow-xs">
+              <MapPin className="h-3 w-3 text-amber-400" />
+              Country: <strong className="text-zinc-100">{region === "ID" ? "Indonesia 🇮🇩" : region}</strong>
+            </span>
+
+            {/* 2. Time Frame */}
+            <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 text-[11px] text-blue-300 font-medium shadow-xs">
+              <Clock className="h-3 w-3 text-blue-400" />
+              Time Frame: <strong className="text-blue-100">24 Jam Terakhir</strong>
+            </span>
+
+            {/* 3. Status Tren */}
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 font-medium shadow-xs">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              Status Tren: <strong className="text-emerald-100">Aktif Saja (True)</strong>
+            </span>
+
+            {/* 4. Sort By */}
+            <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 border border-purple-500/30 px-2 py-0.5 text-[11px] text-purple-300 font-medium shadow-xs">
+              <TrendingUp className="h-3 w-3 text-purple-400" />
+              Urutkan: <strong className="text-purple-100">Menurut Keterkinian</strong>
+            </span>
+          </div>
+        </div>
+
         {/* Modal Body: Topic Cards List */}
         <div className="flex-1 overflow-y-auto p-5 space-y-3.5">
           {/* Active Search Badge */}
@@ -1946,8 +1981,28 @@ function TrendingRadarModal({
                   </div>
                 )}
 
-                {/* Metadata Tags */}
+                {/* Metadata Tags & Filter Badges */}
                 <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-zinc-800/60 text-[10px]">
+                  {/* Status: Aktif */}
+                  <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 font-medium">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {t.status || "Aktif"}
+                  </span>
+
+                  {/* Timeframe: 24 Jam Terakhir */}
+                  <span className="inline-flex items-center gap-1 rounded bg-blue-500/10 text-blue-300 border border-blue-500/25 px-2 py-0.5 font-medium">
+                    <Clock className="h-2.5 w-2.5 text-blue-400" />
+                    {t.timeframe || "24 Jam Terakhir"}
+                  </span>
+
+                  {/* Keterkinian / Recency */}
+                  {t.recency && (
+                    <span className="inline-flex items-center gap-1 rounded bg-purple-500/10 text-purple-300 border border-purple-500/25 px-2 py-0.5 font-medium">
+                      <TrendingUp className="h-2.5 w-2.5 text-purple-400" />
+                      {t.recency}
+                    </span>
+                  )}
+
                   {t.source && (
                     <span className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-300 font-medium">
                       Sumber: {t.source}
@@ -2284,7 +2339,7 @@ export function VideoGeneratorPage() {
   const loadTrendingTopics = useCallback(async (region = trendingRegion, refresh = false, keyword = trendingKeyword) => {
     setIsLoadingTrending(true);
     try {
-      const data = await hermesVideoGenApi.getTrendingTopics(region, 5, refresh, keyword);
+      const data = await hermesVideoGenApi.getTrendingTopics(region, 5, refresh, keyword, "24h", true, "recency");
       setTrendingTopics(data.topics || []);
     } catch (err) {
       console.error("Failed to load trending topics:", err);
@@ -3126,6 +3181,17 @@ export function VideoGeneratorPage() {
                         <span className="text-[10px] text-amber-400/80 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded font-mono">
                           {trendingTopics.length} Topik
                         </span>
+                        <div className="hidden sm:flex items-center gap-1 text-[10px] text-zinc-400">
+                          <span className="rounded bg-blue-500/10 border border-blue-500/25 px-1.5 py-0.2 text-blue-300">
+                            ⏱️ 24 Jam Terakhir
+                          </span>
+                          <span className="rounded bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.2 text-emerald-300">
+                            🟢 Aktif
+                          </span>
+                          <span className="rounded bg-purple-500/10 border border-purple-500/25 px-1.5 py-0.2 text-purple-300">
+                            ⚡ Keterkinian
+                          </span>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-1.5">

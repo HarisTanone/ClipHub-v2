@@ -1301,6 +1301,10 @@ export interface TrendingTopicItem {
   traffic_estimate?: string;
   region?: string;
   category?: string;
+  timeframe?: string;
+  is_active?: boolean;
+  status?: string;
+  recency?: string;
 }
 
 export interface HermesVideoGenSettings {
@@ -1402,9 +1406,26 @@ export const hermesVideoGenApi = {
     region: string = "ID",
     limit: number = 5,
     refresh: boolean = false,
-    keyword?: string
-  ): Promise<{ region: string; count: number; topics: TrendingTopicItem[]; keyword?: string }> {
-    const q = new URLSearchParams({ region, limit: String(limit) });
+    keyword?: string,
+    timeframe: string = "24h",
+    activeOnly: boolean = true,
+    sortBy: string = "recency"
+  ): Promise<{
+    region: string;
+    count: number;
+    topics: TrendingTopicItem[];
+    keyword?: string;
+    timeframe?: string;
+    active_only?: boolean;
+    sort_by?: string;
+  }> {
+    const q = new URLSearchParams({
+      region,
+      limit: String(limit),
+      timeframe,
+      active_only: String(activeOnly),
+      sort_by: sortBy,
+    });
     if (refresh) q.set("refresh", "true");
     if (keyword && keyword.trim()) q.set("keyword", keyword.trim());
     return request(`/api/video-generator/trending-topics?${q.toString()}`);

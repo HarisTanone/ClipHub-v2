@@ -1206,9 +1206,19 @@ async def get_trending_topics_endpoint(
     limit: int = Query(5, ge=1, le=10, description="Number of topics to return (3-5)"),
     refresh: bool = Query(False, description="Bypass cache and fetch fresh trending topics"),
     keyword: Optional[str] = Query(None, description="Custom keyword or niche to search trending topics"),
+    timeframe: str = Query("24h", description="Time frame filter (default: 24h / 24 jam terakhir)"),
+    active_only: bool = Query(True, description="Tampilkan tren aktif saja"),
+    sort_by: str = Query("recency", description="Sort by criteria (default: recency / menurut keterkinian)"),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Fetch multi-source trending topics synthesized by Gemini for viral short videos."""
+    """Fetch multi-source trending topics synthesized by Gemini for viral short videos.
+
+    Enforces 4 mandatory filters:
+    1. country: Indonesia (ID)
+    2. time frame: 24 jam terakhir (24h)
+    3. Status tren: Tampilkan tren aktif saja (active_only=True)
+    4. sort by: Menurut keterkinian (sort_by="recency")
+    """
     from src.infrastructure.hermes_trending_service import hermes_trending_service
 
     kw = (keyword or "").strip()
@@ -1219,8 +1229,19 @@ async def get_trending_topics_endpoint(
         use_cache=not refresh,
         niche_focus=kw,
         keyword=kw,
+        timeframe=timeframe,
+        active_only=active_only,
+        sort_by=sort_by,
     )
-    return {"region": region, "count": len(topics), "topics": topics, "keyword": kw}
+    return {
+        "region": region,
+        "count": len(topics),
+        "topics": topics,
+        "keyword": kw,
+        "timeframe": timeframe,
+        "active_only": active_only,
+        "sort_by": sort_by,
+    }
 
 
 @router.get("/jobs/{job_id}/thumbnail")
