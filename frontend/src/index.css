@@ -146,3 +146,118 @@ input[type="checkbox"] {
 .animate-pulse-dot {
   animation: pulse-dot 2s ease-in-out infinite;
 }
+
+/* ─── Style-editor preview keyframes ──────────────────────────────────────── */
+
+/* Subtitle animation classes */
+@keyframes popIn {
+  0%   { opacity: 0; transform: scale(0.7); }
+  60%  { opacity: 1; transform: scale(1.08); }
+  80%  { transform: scale(0.97); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes fadeIn {
+  0%,100% { opacity: 0.3; }
+  50%      { opacity: 1; }
+}
+@keyframes slideInUp {
+  0%   { opacity: 0; transform: translateY(10px); }
+  60%  { opacity: 1; transform: translateY(-2px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Hook animation preview classes */
+@keyframes fadeScalePreview {
+  0%,100% { opacity: 0; transform: scale(0.88); }
+  20%,80% { opacity: 1; transform: scale(1); }
+}
+@keyframes slideUpPreview {
+  0%,100% { opacity: 0; transform: translateY(18px); }
+  20%,80% { opacity: 1; transform: translateY(0); }
+}
+@keyframes slidePunchPreview {
+  0%     { opacity: 0; transform: translateX(-24px) scale(0.92); }
+  18%    { opacity: 1; transform: translateX(4px) scale(1.04); }
+  30%    { transform: translateX(0) scale(1); }
+  80%    { opacity: 1; transform: translateX(0) scale(1); }
+  100%   { opacity: 0; transform: translateX(0) scale(1); }
+}
+@keyframes glitchJitter {
+  0%,100% { transform: translate(0); }
+  20%     { transform: translate(-3px, 1px) skewX(-2deg); }
+  40%     { transform: translate(3px, -1px) skewX(2deg); }
+  60%     { transform: translate(-2px, 2px); }
+  80%     { transform: translate(2px, -2px); }
+}
+@keyframes typewriterReveal {
+  0%  { clip-path: inset(0 100% 0 0); opacity: 1; }
+  70% { clip-path: inset(0 0% 0 0);   opacity: 1; }
+  90%,100% { clip-path: inset(0 0% 0 0); opacity: 0.8; }
+}
+@keyframes cinematicRevealText {
+  0%,100% { opacity: 0; letter-spacing: 0.3em; }
+  25%,75% { opacity: 1; letter-spacing: 0.05em; }
+}
+@keyframes dangerPulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%     { opacity: 0.75; transform: scale(1.04); filter: brightness(1.3); }
+}
+@keyframes boldSlamPreview {
+  0%     { opacity: 0; transform: scale(1.6) rotate(-3deg); }
+  18%    { opacity: 1; transform: scale(0.96) rotate(0deg); }
+  28%    { transform: scale(1.02); }
+  38%    { transform: scale(1); }
+  80%    { opacity: 1; }
+  100%   { opacity: 0; }
+}
+@keyframes podcastLowerPreview {
+  0%,100% { opacity: 0; transform: translateY(14px); }
+  15%,80% { opacity: 1; transform: translateY(0); }
+}
+@keyframes quoteCardPreview {
+  0%,100% { opacity: 0; transform: translateY(-10px) scale(0.95); }
+  20%,80% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes waveformTextPreview {
+  0%,100% { transform: scaleY(0.8); opacity: 0.6; }
+  50%     { transform: scaleY(1.1); opacity: 1; }
+}
+@keyframes breakingTapePreview {
+  0%   { opacity: 0; transform: translateX(-40px); }
+  20%  { opacity: 1; transform: translateX(0); }
+  80%  { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(40px); }
+}
+@keyframes micDropPreview {
+  0%   { opacity: 0; transform: translateY(-30px) scale(0.8); }
+  25%  { opacity: 1; transform: translateY(4px) scale(1.05); }
+  40%  { transform: translateY(0) scale(1); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes splitPanelPreview {
+  0%,100% { opacity: 0; transform: scaleX(0.5); }
+  20%,80% { opacity: 1; transform: scaleX(1); }
+}
+@keyframes kineticStackPreview {
+  0%    { opacity: 0; transform: translateY(20px) rotate(-4deg); }
+  20%   { opacity: 1; transform: translateY(0) rotate(0deg); }
+  80%   { opacity: 1; }
+  100%  { opacity: 0; }
+}
+@keyframes glassFlashPreview {
+  0%,100% { opacity: 0; backdrop-filter: blur(0px); }
+  15%,85% { opacity: 1; backdrop-filter: blur(12px); }
+}
+@keyframes markerSwipePreview {
+  0%   { opacity: 0; transform: translateX(-20px); }
+  20%  { opacity: 1; transform: translateX(0); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes signalScanPreview {
+  0%   { opacity: 0; transform: translateY(-16px) scaleX(0.9); }
+  18%  { opacity: 1; transform: translateY(0) scaleX(1); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
