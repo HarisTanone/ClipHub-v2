@@ -1,4 +1,6 @@
 import os
+import json
+import subprocess
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -49,3 +51,14 @@ async def test_unavailable_selected_engine_fails_without_dispatching_another(tmp
 async def test_empty_hook_text_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="empty"):
         await NativeHookPreviewService(str(tmp_path)).render(manifest(), "  ", 30)
+
+
+def test_synthetic_preview_video_contains_audio_for_hyperframes(tmp_path):
+    path = str(tmp_path / "synthetic.mp4")
+    NativeHookPreviewService._synthetic_video(path, 1.0)
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_streams", "-of", "json", path],
+        check=True, capture_output=True, text=True,
+    )
+    codec_types = {stream["codec_type"] for stream in json.loads(probe.stdout)["streams"]}
+    assert codec_types == {"video", "audio"}

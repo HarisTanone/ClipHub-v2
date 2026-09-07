@@ -46,7 +46,10 @@ class NativeHookPreviewService:
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi", "-i",
             f"color=c=#111827:s=1080x1920:r=30:d={max(1.0, duration)}",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", path,
+            "-f", "lavfi", "-i",
+            f"anullsrc=channel_layout=stereo:sample_rate=48000:d={max(1.0, duration)}",
+            "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k", path,
         ], check=True, capture_output=True, timeout=60)
 
     @staticmethod

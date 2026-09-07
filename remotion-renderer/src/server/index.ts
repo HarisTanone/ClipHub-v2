@@ -351,6 +351,18 @@ app.get("/status/:renderId", (req, res) => {
 // Renders a single frame PNG so the frontend can preview style changes
 // without committing to a full video render.
 
+export const STILL_HOOK_ANIMATIONS = [
+  "fade_scale", "slide_up", "glitch", "typewriter", "glitch_rgb",
+  "shake_neon", "cinematic_reveal", "danger_bold", "slide_punch_framer",
+  "bold_slam", "podcast_lower_third", "quote_card", "waveform_pulse",
+  "breaking_tape", "mic_drop", "split_panel", "kinetic_stack",
+  "glass_flash", "marker_swipe", "signal_scan", "comment_reply",
+  "search_prompt", "countdown_list", "pov_stamp", "news_viralin_badge",
+  "news_portal_pantau", "news_offset_box", "brutalist_bracket",
+  "quote_strip_tape", "paper_clip_scrap", "trending_radar",
+  "news_breaking_live",
+] as const;
+
 const StillRequestSchema = z.object({
   compositionId: z.string().default("ClipComposition"),
   outputPath: z.string(),
@@ -360,28 +372,7 @@ const StillRequestSchema = z.object({
     videoPath: z.string(),
     words: z.array(z.any()).default([]),
     hookText: z.string().default(""),
-    hookAnimation: z.enum([
-      "fade_scale",
-      "slide_up",
-      "glitch",
-      "typewriter",
-      "glitch_rgb",
-      "shake_neon",
-      "cinematic_reveal",
-      "danger_bold",
-      "slide_punch_framer",
-      "bold_slam",
-      "podcast_lower_third",
-      "quote_card",
-      "waveform_pulse",
-      "breaking_tape",
-      "mic_drop",
-      "split_panel",
-      "kinetic_stack",
-      "glass_flash",
-      "marker_swipe",
-      "signal_scan",
-    ]).default("podcast_lower_third"),
+    hookAnimation: z.enum(STILL_HOOK_ANIMATIONS).default("podcast_lower_third"),
     textEmphasisEvents: z.array(z.any()).max(2).default([]),
     brollEvents: z.array(z.any()).max(3).default([]),
     enableThreeJS: z.boolean().default(false),
@@ -476,8 +467,10 @@ app.post("/render-still", async (req, res) => {
 
 // ─── Start server ────────────────────────────────────────────────────────────
 
-app.listen(PORT, async () => {
-  console.log(`[remotion-server] Listening on http://localhost:${PORT}`);
-  console.log(`[remotion-server] Media files served at http://localhost:${PORT}/media/...`);
-  await initBundle();
-});
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, async () => {
+    console.log(`[remotion-server] Listening on http://localhost:${PORT}`);
+    console.log(`[remotion-server] Media files served at http://localhost:${PORT}/media/...`);
+    await initBundle();
+  });
+}
