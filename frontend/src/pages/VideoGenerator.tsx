@@ -65,6 +65,11 @@ import {
   type WatermarkStyle,
   type CtaStyle,
 } from "@/components/StyleEditorModal";
+import {
+  DEFAULT_TEXT_EMPHASIS_STYLE,
+  normaliseTextEmphasisStyle,
+  type TextEmphasisStyle,
+} from "@/components/style-editor/types";
 import { ScheduleModal } from "@/components/ScheduleModal";
 import {
   API_BASE,
@@ -2190,6 +2195,7 @@ export function VideoGeneratorPage() {
   const [ctaHeadline, setCtaHeadline] = useState<string>("Follow & Subscribe untuk Konten Menarik Lainnya!");
   const [ctaButtonText, setCtaButtonText] = useState<string>("Follow Sekarang");
   const [aiTextEnabled, setAiTextEnabled] = useState<boolean>(true);
+  const [textEmphasisStyle, setTextEmphasisStyle] = useState<TextEmphasisStyle>(DEFAULT_TEXT_EMPHASIS_STYLE);
 
   // Job and list state
   const [voices, setVoices] = useState<VoiceOption[]>([]);
@@ -2520,7 +2526,9 @@ export function VideoGeneratorPage() {
           } : undefined,
           ai_text_config: {
             enabled: aiTextEnabled,
+            ...(aiTextEnabled ? textEmphasisStyle : {}),
           },
+          text_emphasis_style_config: aiTextEnabled ? textEmphasisStyle : undefined,
           source_video_url: isAgenticVideoMode && sourceVideoUrl.trim() ? sourceVideoUrl.trim() : undefined,
           agentic_understanding: agenticUnderstanding,
           video_processing_mode: isAgenticVideoMode ? videoProcessingMode : "agentic",
@@ -2583,7 +2591,9 @@ export function VideoGeneratorPage() {
           } : undefined,
           ai_text_config: {
             enabled: aiTextEnabled,
+            ...(aiTextEnabled ? textEmphasisStyle : {}),
           },
+          text_emphasis_style_config: aiTextEnabled ? textEmphasisStyle : undefined,
           source_video_url: isAgenticVideoMode && sourceVideoUrl.trim() ? sourceVideoUrl.trim() : undefined,
           agentic_understanding: agenticUnderstanding,
           video_processing_mode: isAgenticVideoMode ? videoProcessingMode : "agentic",
@@ -2633,7 +2643,9 @@ export function VideoGeneratorPage() {
         } : undefined,
         ai_text_config: {
           enabled: aiTextEnabled,
+          ...(aiTextEnabled ? textEmphasisStyle : {}),
         },
+        text_emphasis_style_config: aiTextEnabled ? textEmphasisStyle : undefined,
       }),
     });
     setPage(1);
@@ -4226,6 +4238,7 @@ export function VideoGeneratorPage() {
         onClose={() => setShowStyleEditor(false)}
         hookStyle={hookStyle}
         subtitleStyle={subtitleStyle}
+        textEmphasisStyle={textEmphasisStyle}
         ctaStyle={{
           ...DEFAULT_CTA_STYLE,
           enabled: ctaEnabled,
@@ -4241,6 +4254,7 @@ export function VideoGeneratorPage() {
         }}
         onHookChange={setHookStyle}
         onSubtitleChange={setSubtitleStyle}
+        onTextEmphasisChange={setTextEmphasisStyle}
         onCtaChange={(cta) => {
           if (cta.enabled !== undefined) setCtaEnabled(Boolean(cta.enabled));
           if (cta.headline) setCtaHeadline(cta.headline);
@@ -4257,6 +4271,7 @@ export function VideoGeneratorPage() {
             if (loaded.id) setSelectedPresetId(String(loaded.id));
             if (loaded.hook_style) setHookStyle((prev) => ({ ...prev, ...loaded.hook_style }));
             if (loaded.subtitle_style) setSubtitleStyle((prev) => ({ ...prev, ...loaded.subtitle_style }));
+            if (loaded.text_emphasis_style) setTextEmphasisStyle(normaliseTextEmphasisStyle(loaded.text_emphasis_style));
             if (loaded.cta_style) {
               setCtaEnabled(Boolean(loaded.cta_style.enabled));
               if (loaded.cta_style.headline) setCtaHeadline(loaded.cta_style.headline);
