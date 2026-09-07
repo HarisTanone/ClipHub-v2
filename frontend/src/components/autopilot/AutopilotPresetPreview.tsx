@@ -557,7 +557,7 @@ export function AutopilotPresetPreview({
                 {/* 2. LAYER 1: HOOK OVERLAY PREVIEW (Only shown when previewTab === 'hook') */}
                 {previewTab === "hook" && (
                   <div className="absolute inset-0 z-15 flex items-center justify-center px-2 pointer-events-none animate-in fade-in-50 duration-200">
-                    <HookPreviewRenderer style={hookStyle} scale={0.92} />
+                    <HookPreviewRenderer style={hookStyle} containerWidth={240} />
                   </div>
                 )}
 

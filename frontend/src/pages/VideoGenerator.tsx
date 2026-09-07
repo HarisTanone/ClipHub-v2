@@ -571,7 +571,7 @@ function LiveVideoPreview({
             className="absolute inset-0 z-20 cursor-pointer transition-all hover:scale-[1.02] animate-in fade-in-50 duration-200"
             title="Klik untuk menyesuaikan Hook di Style Editor"
           >
-            <HookPreviewRenderer style={hookStyle} customText={hookText} scale={0.88} />
+            <HookPreviewRenderer style={hookStyle} customText={hookText} containerWidth={230} />
           </div>
         ) : null}
 

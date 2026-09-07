@@ -135,7 +135,7 @@ export function VideoPreviewOverlay({
         className="absolute inset-0 pointer-events-none transition-opacity duration-150"
         style={{ opacity: hookAlpha }}
       >
-        <HookPreviewRenderer style={mergedStyle} customText={displayHookText} scale={1.0} />
+        <HookPreviewRenderer style={mergedStyle} customText={displayHookText} containerWidth={270} />
       </div>
     );
   }, [hookVisible, hookStyle, hookAlpha, displayHookText, hookStyleConfig]);

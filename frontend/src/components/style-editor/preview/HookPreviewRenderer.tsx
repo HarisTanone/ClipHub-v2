@@ -8,13 +8,21 @@ export function HookPreviewRenderer({
   style,
   customText,
   scale = 1.0,
+  containerWidth = 240,
 }: {
   style: HookStyle;
   customText?: string;
+  /** @deprecated use containerWidth instead */
   scale?: number;
+  /** Actual rendered container width in px (default 240). Used to scale
+   *  font sizes proportionally relative to the 1080px Remotion canvas. */
+  containerWidth?: number;
 }) {
   const text = customText || style.text || getHookPreviewSample(style.animation);
-  const fontSize = Math.max(style.fontSize * 0.32 * scale, 10);
+  // Scale factor: container / remotion canvas width (1080px)
+  // Apply the legacy `scale` prop on top for callers that still pass it
+  const sf = (containerWidth / 1080) * scale;
+  const fontSize = Math.max(style.fontSize * sf, 9);
   const fontFamily = style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`;
   const fontWeight = Number(style.fontWeight);
   const fontStyle = style.italic ? ("italic" as const) : ("normal" as const);
@@ -32,7 +40,7 @@ export function HookPreviewRenderer({
     whiteSpace: "pre-line",
     wordBreak: "break-word",
     paintOrder: style.strokeEnabled ? "stroke" : undefined,
-    WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.32, 0.7)}px ${style.strokeColor}` : undefined,
+    WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * sf, 0.5)}px ${style.strokeColor}` : undefined,
   };
 
   const textShadow = [
