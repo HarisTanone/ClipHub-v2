@@ -280,7 +280,12 @@ def _resolve_job_styles(
     import logging
     _log = logging.getLogger(__name__)
 
-    hook_style = dict(req.hook_style_config or req.hook_style or {})
+    from src.infrastructure.hook_manifest import resolve_hook_preset
+    hook_manifest = resolve_hook_preset(
+        user_id, req.preset_slug, req.hook_style_config or req.hook_style or None
+    )
+    hook_style = dict(hook_manifest["config"])
+    hook_style["resolved_hook_manifest"] = hook_manifest
     subtitle_style = dict(req.subtitle_style_config or req.subtitle_style or {})
     watermark_config = req.watermark_config
     cta_config = req.cta_config
@@ -297,8 +302,7 @@ def _resolve_job_styles(
             _log.warning(f"video_generator: failed to resolve preset '{req.preset_slug}': {pe}")
 
     if preset:
-        if preset.get("hook_style") and isinstance(preset["hook_style"], dict):
-            hook_style = {**preset["hook_style"], **hook_style}
+        # Hook is already canonical; only non-Hook layers use this legacy row.
         if preset.get("subtitle_style") and isinstance(preset["subtitle_style"], dict):
             subtitle_style = {**preset["subtitle_style"], **subtitle_style}
         if not watermark_config and preset.get("watermark_style") and preset["watermark_style"].get("enabled"):
@@ -307,6 +311,11 @@ def _resolve_job_styles(
             cta_config = preset["cta_style"]
         if not ai_text_config and preset.get("text_emphasis_style"):
             ai_text_config = {"enabled": True, "style": preset["text_emphasis_style"]}
+
+    from src.infrastructure.subtitle_manifest import resolve_subtitle_manifest
+    subtitle_manifest = resolve_subtitle_manifest(subtitle_style)
+    subtitle_style = dict(subtitle_manifest["config"])
+    subtitle_style["resolved_subtitle_manifest"] = subtitle_manifest
 
     return hook_style, subtitle_style, watermark_config, cta_config, ai_text_config
 

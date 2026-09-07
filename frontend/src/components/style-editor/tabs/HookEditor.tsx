@@ -21,18 +21,14 @@ import {
   FONT_OPTIONS,
   HOOK_FONT_SUGGESTIONS,
 } from "../types";
-import { useGoogleFont, getPageItems, getPageForIndex, getHookPreviewSample } from "../utils";
+import { useGoogleFont, getPageItems, getPageForIndex } from "../utils";
 import { Section, UnavailableHint, ColorPicker, RangeInput, Checkbox, SelectSmall } from "../ui/CommonControls";
 import { TimingOptionCard, FontChips } from "../ui/MetaTile";
 import { PaginationControls } from "../ui/PaginationControls";
 import { EnginePicker } from "../ui/EnginePicker";
-import { AccentLinePreview } from "../ui/AccentLinePreview";
 import { HookPresetCard } from "../cards/HookPresetCard";
-import { CanvasPreviewFrame } from "../preview/CanvasPreviewFrame";
-import { HookPreviewRenderer } from "../preview/HookPreviewRenderer";
 import { HfStyleGrid } from "../preview/HfStyleGrid";
-import { HfLivePreview } from "../preview/HfLivePreview";
-import { SkiaHookLivePreview } from "../preview/SkiaHookLivePreview";
+import { NativeHookPreview } from "../preview/NativeHookPreview";
 
 export function HookEditor({
   style,
@@ -710,53 +706,7 @@ export function HookEditor({
       </div>
 
       <div className="lg:col-span-4 flex min-h-0 flex-col items-center justify-center overflow-hidden bg-zinc-950 p-4">
-        {engine === "hyperframes" ? (
-          <HfLivePreview
-            preset={hfPreset}
-            sample={style.text || hfPreset?.preview || "HOOK TEXT"}
-            kind="hook"
-            aspectRatio={aspectRatio}
-            thumbnailUrl={thumbnailUrl}
-            canvas={canvas}
-          />
-        ) : engine === "ffmpeg" ? (
-          <>
-            <div className="mb-3 flex w-full items-center justify-between gap-2">
-              <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
-              <span className="rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[9px] text-purple-300">FFmpeg Drawtext</span>
-            </div>
-            <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
-              <div className="absolute left-0 right-0 flex items-center justify-center px-3 pointer-events-none" style={{ top: `${style.positionY}%`, transform: "translateY(-50%)" }}>
-                <p style={{ fontSize: Math.min(Math.max(style.fontSize * 0.22, 11), 16), fontWeight: Number(style.fontWeight), fontFamily: style.fontFamily === "monospace" ? "monospace" : `'${style.fontFamily}', sans-serif`, color: style.color, textTransform: style.uppercase ? ("uppercase" as const) : ("none" as const), textAlign: "center" as const, maxWidth: "92%", whiteSpace: "pre-line" as const, wordBreak: "break-word" as const, padding: "4px 8px", backgroundColor: style.bgOpacity > 0 ? `${style.bgColor || "black"}${Math.round(style.bgOpacity * 255).toString(16).padStart(2, "0")}` : "transparent", paintOrder: style.strokeEnabled ? ("stroke" as const) : undefined, WebkitTextStroke: style.strokeEnabled ? `${Math.max(style.strokeWidth * 0.25, 0.6)}px ${style.strokeColor}` : undefined, textShadow: style.shadowEnabled ? `2px 2px 0px ${style.shadowColor}` : undefined }}>
-                  {style.text || getHookPreviewSample(style.animation || "zoom_punch")}
-                </p>
-              </div>
-              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">ffmpeg {style.animation || "zoom_punch"} | {style.duration}s</p>
-            </CanvasPreviewFrame>
-            <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Color</span><p className="truncate" style={{ color: style.color }}>{style.color}</p></div>
-            </div>
-          </>
-        ) : engine === "skia" ? (
-          <SkiaHookLivePreview style={style} thumbnailUrl={thumbnailUrl} aspectRatio={aspectRatio} canvas={canvas} />
-        ) : (
-          <>
-            <div className="mb-3 flex w-full items-center justify-between gap-2">
-              <p className="text-[9px] text-zinc-600 uppercase tracking-widest shrink-0">Live Preview</p>
-              <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[9px] text-zinc-400">{activeAnimation.label}</span>
-            </div>
-            <CanvasPreviewFrame canvas={canvas} thumbnailUrl={thumbnailUrl}>
-              <HookPreviewRenderer style={style} />
-              {style.lineEnabled && <AccentLinePreview style={style} />}
-              <p className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-zinc-600 z-10">{style.animation.replace(/_/g, " ")} | {style.duration}s</p>
-            </CanvasPreviewFrame>
-            <div className="mt-3 grid w-full grid-cols-2 gap-2 text-[10px]">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Font</span><p className="truncate text-zinc-300">{style.fontFamily}</p></div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2"><span className="text-zinc-600">Style</span><p className="truncate text-zinc-300">{activeAnimation.label}</p></div>
-            </div>
-          </>
-        )}
+        <NativeHookPreview style={{ ...style, engine }} frame={30} />
       </div>
     </div>
   );

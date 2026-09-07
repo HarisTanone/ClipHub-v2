@@ -356,7 +356,7 @@ export function NewJob() {
       remotion_quality: "medium",
       hook_style_config: {
         ...hookStyleConfig,
-        engine: hookStyleConfig.engine || (hookStyleConfig.animation?.startsWith("skia_") ? "skia" : (hookStyleConfig.animation?.startsWith("hook_") ? "hyperframes" : "remotion")),
+        engine: hookStyleConfig.engine,
         hf_template: hookStyleConfig.hf_template,
         template_mode: templateMode,
       },

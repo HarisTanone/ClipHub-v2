@@ -544,15 +544,11 @@ class AutopilotService:
 
                 # 4. Resolve preset style layers
                 from src.infrastructure.preset_resolver import resolve_preset
+                from src.infrastructure.hook_manifest import resolve_hook_preset
                 preset_slug = str(preset_override or settings.get("preset_slug", "default")).strip() or "default"
                 resolved_preset = resolve_preset(preset_slug, user_id=user_id)
-                if not resolved_preset or resolved_preset.get("source") == "builtin_default":
-                    fallback_p = resolve_preset("active", user_id=user_id)
-                    if fallback_p and fallback_p.get("source") != "builtin_default":
-                        resolved_preset = fallback_p
-                        preset_slug = resolved_preset.get("slug") or preset_slug
-                        logger.info(f"autopilot: Automatically resolved active user preset '{resolved_preset.get('name')}' ({preset_slug})")
-                elif resolved_preset:
+                hook_manifest = resolve_hook_preset(user_id, preset_slug, None)
+                if resolved_preset:
                     preset_slug = resolved_preset.get("slug") or preset_slug
 
                 # 5. Prepare AutoCliper job options
@@ -584,7 +580,7 @@ class AutopilotService:
                     "autogrid_enabled": resolved_preset.get("autogrid_enabled", False) if resolved_preset else False,
                     # Text & Hook & Subtitle layers from resolved preset
                     "text_emphasis_enabled": resolved_preset.get("text_emphasis_enabled", True) if resolved_preset else True,
-                    "hook_style_config": resolved_preset.get("hook_style_config", {}) if resolved_preset else {},
+                    "hook_style_config": hook_manifest["config"],
                     "subtitle_style_config": resolved_preset.get("subtitle_style_config", {}) if resolved_preset else {},
                     "text_emphasis_style_config": resolved_preset.get("text_emphasis_style_config", {}) if resolved_preset else {},
                     "watermark_config": resolved_preset.get("watermark_config", {}) if resolved_preset else {},

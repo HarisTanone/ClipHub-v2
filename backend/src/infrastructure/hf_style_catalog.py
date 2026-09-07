@@ -5,7 +5,6 @@ Supports auto mode (AI contextual selection) or specific user selection.
 """
 from __future__ import annotations
 
-import random
 from typing import Any
 
 HOOK_STYLES = (
@@ -222,13 +221,11 @@ def resolve_hf_template(cfg: dict | None, *, kind: str, clip_index: int = 0) -> 
     }.get(kind, ())
 
     if mode == "auto" or raw in ("auto", "random", "ai"):
-        # Select from top 12 primary templates based on clip_index
-        candidates = HF_HOOK_TEMPLATES if kind in ("hook", "polish") else HF_SUBTITLE_TEMPLATES
-        return candidates[clip_index % len(candidates)]
+        raise ValueError(f"Explicit HyperFrames {kind} template is required")
 
     if raw in allowed:
         return raw
-    return allowed[0] if allowed else "hook_cyber_hud"
+    raise ValueError(f"Unknown HyperFrames {kind} template: {raw or '<empty>'}")
 
 
 def hook_events_from_text(text: str, duration: float = 3.0) -> list[dict]:

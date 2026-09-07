@@ -22,6 +22,20 @@ export function detectApiBase(): string {
 }
 export const API_BASE = detectApiBase();
 
+export interface HookPreviewRequest {
+  manifest?: Record<string, unknown> | null;
+  preset?: string | null;
+  config: Record<string, unknown>;
+  text: string;
+  frame: number;
+}
+
+export interface HookPreviewResponse {
+  image_url: string;
+  hash: string;
+  manifest?: Record<string, unknown>;
+}
+
 export function getToken(): string | null {
   return localStorage.getItem("access_token");
 }
@@ -96,6 +110,28 @@ async function request<T>(
 
   return res.json();
 }
+
+/** Native Hook frame rendered by the backend's canonical render specification. */
+export const hookPreviewApi = {
+  async render(payload: HookPreviewRequest, signal?: AbortSignal): Promise<HookPreviewResponse> {
+    const raw = await request<Record<string, unknown>>("/api/hook-preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
+    const body = ((raw.data && typeof raw.data === "object") ? raw.data : raw) as Record<string, unknown>;
+    const imageUrl = body.image_url ?? body.imageUrl ?? body.url;
+    const hash = body.hash ?? body.image_hash ?? body.spec_hash;
+    if (typeof imageUrl !== "string" || !imageUrl.trim() || typeof hash !== "string" || !hash.trim()) {
+      throw new Error("Respons preview Hook tidak memiliki image URL/hash yang valid");
+    }
+    return {
+      image_url: imageUrl.startsWith("/") ? `${API_BASE}${imageUrl}` : imageUrl,
+      hash,
+      manifest: body.manifest as Record<string, unknown> | undefined,
+    };
+  },
+};
 
 async function requestForm<T>(
   path: string,

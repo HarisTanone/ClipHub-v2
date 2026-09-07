@@ -2249,16 +2249,22 @@ class V2PipelineService:
                     hook_style_config, subtitle_style_config,
                 )
                 return
-            logger.warning(
-                f"[{job_id}] Remotion is unavailable (hook_engine={hook_engine}, sub_engine={sub_engine}). "
-                "Gracefully falling back to direct FFmpeg/Skia rendering so hook & subtitles always render."
-            )
+            # Do not silently change the selected hook/subtitle owner.  A
+            # Remotion preset rendered by FFmpeg/Skia is a different preset,
+            # which is exactly the preview/final drift this pipeline must
+            # prevent.  Direct rendering remains valid only when explicitly
+            # selected by the user.
+            if hook_engine == "remotion" or sub_engine == "remotion":
+                raise RuntimeError(
+                    f"Selected Remotion engine unavailable (hook={hook_engine}, subtitle={sub_engine}); "
+                    "refusing to publish a different engine's visual output"
+                )
             await self._render_via_direct_engines(
                 job, job_id, clips, clips_with_words,
                 output_dir, trim_results,
                 hook_style_config, subtitle_style_config,
-                hook_engine="ffmpeg" if hook_engine == "remotion" else hook_engine,
-                sub_engine="ffmpeg" if sub_engine == "remotion" else sub_engine,
+                hook_engine=hook_engine,
+                sub_engine=sub_engine,
             )
             return
 
@@ -3055,30 +3061,12 @@ class V2PipelineService:
                         ):
                             current = tmp_hook
                         else:
-                            logger.warning(
-                                f"[{job_id}] HyperFrames hook failed on clip {clip.rank} ({r}), falling back to Skia/FFmpeg hook"
-                            )
-                            # Fallback to Skia / FFmpeg hook
-                            fb_ok = False
-                            try:
-                                from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
-                                skia_hook = SkiaHookRenderer(font_dir=getattr(self, "_fonts_dir", "assets/fonts"))
-                                hook_style = hook_style_config.get("animation", "skia_impact_badge") if hook_style_config else "skia_impact_badge"
-                                await skia_hook.render_hook(
-                                    current, clip.hook or "", tmp_hook,
-                                    hook_style=hook_style,
-                                    style_config=hook_style_config,
-                                )
-                                if os.path.exists(tmp_hook) and os.path.getsize(tmp_hook) > 1000:
-                                    current = tmp_hook
-                                    fb_ok = True
-                                    logger.info(f"[{job_id}] Skia hook fallback successful for clip {clip.rank}")
-                            except Exception as fb_exc:
-                                logger.warning(f"[{job_id}] Skia hook fallback failed: {fb_exc}")
-
-                            if not fb_ok:
-                                errors.append(f"clip {clip.rank} hook: {r}")
-                                continue
+                            # Never substitute Skia/FFmpeg for an explicitly
+                            # selected HyperFrames preset.  That makes a job
+                            # appear successful while producing a different
+                            # visual than the editor preview.
+                            errors.append(f"clip {clip.rank} hook: {r}")
+                            continue
 
                 sub_enabled = (subtitle_style_config or {}).get("enabled", True) is not False
                 if sub_engine == "hyperframes" and sub_enabled:

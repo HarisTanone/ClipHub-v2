@@ -150,19 +150,21 @@ async def test_render_clips_fallback_when_remotion_offline(tmp_path):
     from src.domain.entities import CreativeDirection
     cd = CreativeDirection()
 
-    # Should not raise RuntimeError, but gracefully call _render_via_direct_engines
-    await service._render_clips(
-        job=job,
-        job_id="job_test2",
-        clips=clips,
-        clips_with_words=clips_with_words,
-        creative_direction=cd,
-        output_dir=output_dir,
-        trim_results=trim_results,
-        reframe_data={},
-    )
+    # Fail closed: never publish a different engine's visual output when
+    # the selected Remotion owner is unavailable.
+    with pytest.raises(RuntimeError, match="Selected Remotion engine unavailable"):
+        await service._render_clips(
+            job=job,
+            job_id="job_test2",
+            clips=clips,
+            clips_with_words=clips_with_words,
+            creative_direction=cd,
+            output_dir=output_dir,
+            trim_results=trim_results,
+            reframe_data={},
+        )
 
-    assert service._render_via_direct_engines.called
+    assert not service._render_via_direct_engines.called
 
 
 def test_skia_subtitle_renderer_glow_and_gradient_frame(tmp_path):

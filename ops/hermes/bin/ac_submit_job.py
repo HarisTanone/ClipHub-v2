@@ -145,19 +145,16 @@ def main():
     if args.post_qty and args.post_qty > 0:
         payload["auto_post_clips_count"] = int(args.post_qty)
 
-    # Embed full resolved style configurations if available
+    # Embed full resolved style configurations if available.
+    # Engine normalization is done exclusively by the backend resolver —
+    # do NOT add engine defaults here; pass raw config as-is.
     if preset_obj:
         hook_style = preset_obj.get("hook_style") or preset_obj.get("hook_style_config")
         if hook_style and isinstance(hook_style, dict):
-            hook_style_dict = dict(hook_style)
-            if not hook_style_dict.get("engine"):
-                hook_style_dict["engine"] = "remotion"
-            payload["hook_style_config"] = hook_style_dict
-            if hook_style_dict.get("animation"):
-                payload["hook_style"] = hook_style_dict["animation"]
+            payload["hook_style_config"] = dict(hook_style)
         sub_style = preset_obj.get("subtitle_style") or preset_obj.get("subtitle_style_config")
         if sub_style and isinstance(sub_style, dict):
-            payload["subtitle_style_config"] = sub_style
+            payload["subtitle_style_config"] = dict(sub_style)
         wm_style = preset_obj.get("watermark_style") or preset_obj.get("watermark_config")
         if wm_style and isinstance(wm_style, dict):
             payload["watermark_config"] = wm_style

@@ -1795,15 +1795,46 @@ async def restyle_clip(
         or {}
     )
     from src.infrastructure.hf_style_catalog import resolve_engine
-    hook_render_engine = resolve_engine(hook_config)
-    subtitle_render_engine = resolve_engine(subtitle_config)
+    from src.infrastructure.hook_manifest import resolve_hook_preset
+    stored_hook_manifest = root_style_data.get("resolved_hook_manifest")
+    has_hook_override = bool(
+        body and (body.hook_style_config is not None or body.hook_style is not None)
+    )
+    if has_hook_override:
+        override = dict(body.hook_style_config or {})
+        if body.hook_style:
+            override["animation"] = body.hook_style
+        hook_manifest = resolve_hook_preset(
+            getattr(job, "user_id", None), job.style_preset, override
+        )
+    elif isinstance(stored_hook_manifest, dict):
+        hook_manifest = stored_hook_manifest
+    else:
+        # Compatibility-only for jobs created before manifests were persisted.
+        hook_manifest = resolve_hook_preset(
+            getattr(job, "user_id", None), job.style_preset, hook_config
+        )
+    hook_config = dict(hook_manifest["config"])
+    hook_render_engine = hook_manifest["engine"]
+    from src.infrastructure.subtitle_manifest import resolve_subtitle_manifest
+    stored_subtitle_manifest = root_style_data.get("resolved_subtitle_manifest")
+    has_subtitle_override = bool(body and body.subtitle_style_config is not None)
+    if has_subtitle_override:
+        subtitle_manifest = resolve_subtitle_manifest(subtitle_config)
+    elif isinstance(stored_subtitle_manifest, dict):
+        subtitle_manifest = stored_subtitle_manifest
+    else:
+        # Compatibility-only for jobs created before Subtitle manifests.
+        subtitle_manifest = resolve_subtitle_manifest(subtitle_config)
+    subtitle_config = dict(subtitle_manifest["config"])
+    subtitle_render_engine = subtitle_manifest["engine"]
     hook_text = (body.hook_text if body and body.hook_text else clip_data.get("hook", "")).strip()
     hook_style = (
         body.hook_style if body and body.hook_style
         else clip_data.get("hook_style_override")
         or hook_config.get("animation")
         or job.hook_style
-        or settings.HOOK_DEFAULT_STYLE
+        or hook_manifest["hook_id"]
     )
     do_subtitle = body.subtitle_enabled if body else True
     do_broll = body.broll_enabled if body else True
@@ -2157,7 +2188,10 @@ async def restyle_clip(
                         current_path = staged_final_path
                         logger.info(f"[restyle] {hook_render_engine} hook applied clip {clip_rank}")
                 except Exception as e:
-                    logger.warning(f"[restyle] {hook_render_engine} hook failed clip {clip_rank}: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"{hook_render_engine} hook failed; refusing to publish a mismatched restyle: {e}",
+                    ) from e
 
             # Direct Subtitle Pass
             if subtitle_render_engine in ("ffmpeg", "skia") and render_words:
@@ -2191,7 +2225,10 @@ async def restyle_clip(
                         os.replace(tmp_sub_path, staged_final_path)
                         current_path = staged_final_path
                 except Exception as e:
-                    logger.warning(f"[restyle] {subtitle_render_engine} subtitle failed clip {clip_rank}: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"{subtitle_render_engine} subtitle failed; refusing to publish a mismatched restyle: {e}",
+                    ) from e
 
             # CTA (FFmpeg drawtext)
             try:

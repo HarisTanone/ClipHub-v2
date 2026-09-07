@@ -388,8 +388,11 @@ class HermesVideoGenService:
 
             # Resolve preset styles if configured
             preset_slug = settings_dict.get("preset_slug") or "default"
-            hook_style = {"animation": "skia_impact_badge", "fontSize": 54, "bgColor": "#FACC15", "color": "#000000"}
-            subtitle_style = {"fontFamily": "Montserrat", "fontSize": 52, "fontWeight": "800", "positionY": 84}
+            # Do not inject a hidden Skia hook default. The selected preset
+            # must be the single source of truth; an empty config resolves to
+            # the canonical Remotion default and fails closed if unavailable.
+            hook_style = {}
+            subtitle_style = {}
 
             preset = None
             try:

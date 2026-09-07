@@ -308,7 +308,13 @@ class JobService:
 
         job_id = self._generate_job_id()
 
-        # Resolve preset styles if style_preset is provided (by slug, ID, or name) or fallback to default
+        # Resolve Hook exactly once and persist the immutable render intent.
+        from src.infrastructure.hook_manifest import HOOK_RENDERER_VERSION, resolve_hook_preset
+        resolved_hook_manifest = resolve_hook_preset(user_id, style_preset, hook_style_config)
+        hook_style_config = dict(resolved_hook_manifest["config"])
+        hook_style = resolved_hook_manifest["hook_id"]
+
+        # Non-Hook layers remain compatibility-resolved below.
         resolved_preset = None
         try:
             from src.infrastructure.preset_resolver import resolve_preset
@@ -358,10 +364,26 @@ class JobService:
                     if not auto_post_clips_count and resolved_preset.get("auto_post_clips_count"):
                         auto_post_clips_count = resolved_preset.get("auto_post_clips_count")
         except Exception as e:
-            logger.warning(f"Preset resolution failed for '{style_preset}': {e}")
+            logger.warning(f"Non-Hook preset resolution failed for '{style_preset}': {e}")
+
+        # Resolve Subtitle exactly once after preset compatibility fields have
+        # been merged. Final renderers consume this manifest; resolve_engine()
+        # remains compatibility-only for pre-manifest jobs.
+        from src.infrastructure.subtitle_manifest import (
+            SUBTITLE_RENDERER_VERSION,
+            resolve_subtitle_manifest,
+        )
+        resolved_subtitle_manifest = resolve_subtitle_manifest(subtitle_style_config)
+        subtitle_style_config = dict(resolved_subtitle_manifest["config"])
 
         # Store style configs in clips_data for later use during render
-        initial_clips_data = {}
+        initial_clips_data = {
+            "resolved_hook_manifest": resolved_hook_manifest,
+            "resolved_subtitle_manifest": resolved_subtitle_manifest,
+            "renderer_version": HOOK_RENDERER_VERSION,
+            "subtitle_renderer_version": SUBTITLE_RENDERER_VERSION,
+            "preset_version": resolved_hook_manifest["version"],
+        }
         if force_reprocess:
             initial_clips_data["force_reprocess"] = True
         if resolved_preset:
@@ -1772,17 +1794,6 @@ class JobService:
             shutil.copy2(video_path, output_path)
             return
 
-        # If Skia engine or preset is requested, delegate to SkiaHookRenderer
-        if str(hook_style).startswith("skia_") or (style_config and style_config.get("engine") == "skia"):
-            try:
-                from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
-                fonts_dir = getattr(self, "_fonts_dir", "assets/fonts")
-                renderer = SkiaHookRenderer(font_dir=fonts_dir)
-                await renderer.render_hook(video_path, hook_text, output_path, hook_style=hook_style, style_config=style_config)
-                if os.path.exists(output_path):
-                    return
-            except Exception as e:
-                logger.warning(f"SkiaHookRenderer failed ({e}), falling back to FFmpeg drawtext")
 
         # ─── Style-specific parameters ─────────────────────────────────────
         HOOK_STYLES = {
@@ -1843,23 +1854,6 @@ class JobService:
 
         style = HOOK_STYLES.get(hook_style, HOOK_STYLES["zoom_punch"])
 
-        # Route through high-fidelity PIL frame renderer for exact 1:1 visual match to preview
-        try:
-            from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
-            fonts_dir = getattr(self, "_fonts_dir", "assets/fonts")
-            skia_hook = SkiaHookRenderer(font_dir=fonts_dir)
-            await skia_hook.render_hook(
-                video_path=video_path,
-                hook_text=hook_text,
-                output_path=output_path,
-                hook_style=hook_style,
-                style_config=style_config,
-            )
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                logger.info(f"Hook high-fidelity rendered: {os.path.basename(output_path)}")
-                return
-        except Exception as e:
-            logger.warning(f"Hook high-fidelity render failed ({e}), falling back to drawtext")
 
         # Try DB-driven style first (overrides hardcoded)
         try:

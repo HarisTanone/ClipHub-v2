@@ -1740,14 +1740,16 @@ class VideoGenerator:
             )
             if hook_text and hook_text.strip():
                 hook_style_dict = job.hook_style if isinstance(job.hook_style, dict) else {"animation": job.hook_style}
-                hook_engine = (
-                    hook_style_dict.get("engine")
-                    or resolve_engine(hook_style_dict)
-                )
+                manifest = hook_style_dict.get("resolved_hook_manifest")
+                if not isinstance(manifest, dict):
+                    from src.infrastructure.hook_manifest import resolve_hook_preset
+                    manifest = resolve_hook_preset(job.user_id, "", hook_style_dict)
+                hook_style_dict = dict(manifest["config"])
+                hook_engine = manifest["engine"]
                 hook_style_name = (
                     hook_style_dict.get("animation")
                     or hook_style_dict.get("hook_style")
-                    or "skia_impact_badge"
+                    or manifest["hook_id"]
                 )
                 hook_duration = float(hook_style_dict.get("duration", 3.0) or 3.0)
 
@@ -1783,20 +1785,34 @@ class VideoGenerator:
                             hook_applied = True
                             logger.info(f"video_gen [{job.job_id}]: successfully applied HyperFrames hook overlay ({hf_tpl})")
                     except Exception as hf_err:
-                        logger.warning(f"video_gen [{job.job_id}]: HyperFrames hook failed, falling back to Skia: {hf_err}")
+                        logger.warning(f"video_gen [{job.job_id}]: HyperFrames hook failed: {hf_err}")
 
                 # 2. Remotion Hook Engine
                 if not hook_applied and hook_engine == "remotion":
                     try:
                         from src.infrastructure.remotion_adapter import RemotionAdapter
+                        from src.domain.interfaces_remotion import RemotionRenderConfig
                         remotion = RemotionAdapter()
-                        # If Remotion server is active, try remotion render; otherwise fallback
-                        pass
+                        if not await remotion.health_check():
+                            raise RuntimeError("Remotion server unavailable")
+                        hooked_path = os.path.join(work_dir, f"hooked_{job.job_id}.mp4")
+                        result = await remotion.render_clip(
+                            scene_graph={"clip_rank": 1, "duration": float(job.target_duration), "layers": []},
+                            creative_direction={"hook_style_config": hook_style_dict, "subtitle_style_config": {"enabled": False}},
+                            video_path=output_path, output_path=hooked_path, clip_rank=1,
+                            config=RemotionRenderConfig(), words=[], hook_text=hook_text.strip(),
+                            hook_style=manifest["animation"],
+                        )
+                        if result.success and os.path.exists(hooked_path) and os.path.getsize(hooked_path) > 0:
+                            import shutil
+                            shutil.move(hooked_path, output_path)
+                            hook_applied = True
                     except Exception as rem_err:
-                        logger.warning(f"video_gen [{job.job_id}]: Remotion hook unavailable, falling back to Skia: {rem_err}")
+                        logger.warning(f"video_gen [{job.job_id}]: Remotion hook unavailable; selected engine will fail closed: {rem_err}")
 
-                # 3. Skia / FFmpeg Hook Engine (or Fallback)
-                if not hook_applied:
+                # 3. Direct Skia hook engine. Never silently replace a
+                # selected engine with Skia: preview and final would drift.
+                if not hook_applied and hook_engine == "skia":
                     try:
                         from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
                         renderer = SkiaHookRenderer(font_dir=fonts_dir)
@@ -1814,7 +1830,28 @@ class VideoGenerator:
                             hook_applied = True
                             logger.info(f"video_gen [{job.job_id}]: successfully applied Skia hook overlay ({hook_style_name})")
                     except Exception as hook_err:
-                        logger.warning(f"video_gen [{job.job_id}]: failed to burn hook overlay: {hook_err}")
+                        logger.warning(f"video_gen [{job.job_id}]: failed to burn Skia hook overlay: {hook_err}")
+                if not hook_applied and hook_engine == "ffmpeg":
+                    try:
+                        from src.application.services import AutoClipService
+                        renderer = AutoClipService.__new__(AutoClipService)
+                        renderer._fonts_dir = fonts_dir
+                        hooked_path = os.path.join(work_dir, f"hooked_{job.job_id}.mp4")
+                        await renderer._render_hook_ffmpeg(
+                            output_path, hook_text.strip(), hooked_path,
+                            hook_style=hook_style_name,
+                            style_config=hook_style_dict,
+                        )
+                        if os.path.exists(hooked_path) and os.path.getsize(hooked_path) > 0:
+                            import shutil
+                            shutil.move(hooked_path, output_path)
+                            hook_applied = True
+                    except Exception as hook_err:
+                        logger.warning(f"video_gen [{job.job_id}]: failed to burn FFmpeg hook overlay: {hook_err}")
+                if not hook_applied:
+                    raise RuntimeError(
+                        f"Hook engine '{hook_engine}' did not render; refusing silent fallback"
+                    )
 
         # Step 6g: Watermark overlay
         if job.watermark_config and os.path.exists(output_path):
