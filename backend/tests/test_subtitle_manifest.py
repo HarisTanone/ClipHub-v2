@@ -11,8 +11,8 @@ from src.infrastructure.subtitle_manifest import (
 def test_empty_config_returns_complete_canonical_remotion_manifest():
     manifest = resolve_subtitle_manifest(None)
     assert manifest["preset_id"] == CANONICAL_SUBTITLE_DEFAULT_ID
-    assert manifest["engine"] == "remotion"
-    assert manifest["subtitle_id"] == "classic"
+    assert manifest["engine"] == "ffmpeg"
+    assert manifest["subtitle_id"] == "classic_karaoke"
     assert set(manifest) >= {
         "preset_id", "subtitle_id", "engine", "enabled", "position_y",
         "font_family", "font_size", "font_weight", "color", "highlight_color",

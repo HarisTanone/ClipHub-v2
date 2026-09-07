@@ -90,9 +90,8 @@ def resolve_subtitle_manifest(
     if raw.get("version") == SUBTITLE_MANIFEST_VERSION and "subtitle_id" in raw:
         return raw
 
-    # Default engine to remotion if absent
     if not raw.get("engine"):
-        raw["engine"] = "remotion"
+        raw["engine"] = "ffmpeg"
 
     cfg = _canonical_config(raw)
     engine = cfg["engine"]
@@ -101,7 +100,7 @@ def resolve_subtitle_manifest(
     style_preset = str(
         cfg.get("stylePreset") or cfg.get("style_preset") or cfg.get("id") or ""
     ).strip()
-    subtitle_id = template if engine == "hyperframes" else (style_preset or "classic")
+    subtitle_id = template if engine == "hyperframes" else (style_preset or "classic_karaoke")
 
     manifest = SubtitleManifest(
         preset_id=CANONICAL_SUBTITLE_DEFAULT_ID,

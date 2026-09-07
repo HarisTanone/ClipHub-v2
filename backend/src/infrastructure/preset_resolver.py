@@ -69,8 +69,8 @@ DEFAULT_HOOK_STYLE: Dict[str, Any] = {
 
 DEFAULT_SUBTITLE_STYLE: Dict[str, Any] = {
     "enabled": True,
-    "stylePreset": "classic",
-    "engine": "remotion",
+    "stylePreset": "classic_karaoke",
+    "engine": "ffmpeg",
     "fontFamily": "Poppins",
     "fontSize": 34,
     "fontWeight": "700",
@@ -357,7 +357,7 @@ def _get_builtin_default_preset() -> Dict[str, Any]:
         "transition_style": "cut",
         "transition_duration": 0.35,
         "hook_engine": "remotion",
-        "subtitle_engine": "remotion",
+        "subtitle_engine": "ffmpeg",
         "autopost_config": {},
         "auto_post_social": False,
         "auto_post_platforms": "tiktok,instagram,youtube",
