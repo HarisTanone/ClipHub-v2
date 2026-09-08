@@ -465,3 +465,104 @@ def test_mass_delete_with_query_params_compatibility(client):
         assert "2 schedules" in data2["message"]
 
 
+def test_batch_tiktok_music_recommendations_distinct_tracks(client):
+    """Verify POST /api/social/tiktok/music/batch-recommendations returns unique tracks per clip."""
+    fake_user = CurrentUser(1, "admin@test.com", "superadmin", ["*"])
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+
+    mock_docs = [
+        {"id": "track_101", "name": "Song 1", "artist": "Artist 1", "duration": 60, "url": "https://cdn.com/1.mp3"},
+        {"id": "track_102", "name": "Song 2", "artist": "Artist 2", "duration": 60, "url": "https://cdn.com/2.mp3"},
+        {"id": "track_103", "name": "Song 3", "artist": "Artist 3", "duration": 60, "url": "https://cdn.com/3.mp3"},
+    ]
+
+    with patch("src.presentation.routes.social.tiktok.repliz_get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {"docs": mock_docs}
+        from src.presentation.routes.social import tiktok
+        tiktok._music_cache.clear()
+
+        resp = client.post(
+            "/api/social/tiktok/music/batch-recommendations",
+            json={
+                "job_id": "job_123",
+                "country_code": "ID",
+                "items": [
+                    {"clip_rank": 1, "title": "Kisah Podcast Santai", "hook": "Bicara santai"},
+                    {"clip_rank": 2, "title": "Tips Sukses Finansial", "hook": "Cara kaya"},
+                    {"clip_rank": 3, "title": "Lucu Banget Ngakak", "hook": "Prank komedi"},
+                ],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert len(data["recommendations"]) == 3
+
+        recs = data["recommendations"]
+        assert recs[0]["clip_rank"] == 1
+        assert recs[1]["clip_rank"] == 2
+        assert recs[2]["clip_rank"] == 3
+
+        track_ids = [r["track"]["id"] for r in recs if r["track"]]
+        # Ensure all assigned tracks are distinct
+        assert len(track_ids) == len(set(track_ids))
+
+
+def test_batch_publish_with_clip_music_configs(client):
+    """Verify POST /api/social/publish/batch uses per-clip music and volume configurations."""
+    fake_user = CurrentUser(1, "admin@test.com", "superadmin", ["*"])
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+
+    published_requests = []
+
+    async def fake_publish_clip(req, _user):
+        published_requests.append(req)
+        return {"success": True, "count": 1, "schedules": []}
+
+    with patch("src.presentation.routes.social.publish.publish_clip", side_effect=fake_publish_clip):
+        resp = client.post(
+            "/api/social/publish/batch",
+            json={
+                "jobId": "job_abc",
+                "clipRanks": [1, 2],
+                "scheduleMode": "same",
+                "scheduleAt": "2026-09-08T15:00:00.000Z",
+                "accountIds": ["acc_tiktok_1"],
+                "caption": "Batch clips test",
+                "title": "Clip Video",
+                "originalVolume": 1.0,
+                "musicVolume": 0.25,
+                "clipMusicConfigs": {
+                    "1": {
+                        "music": {"id": "song_1", "name": "Lagu Satu", "artist": "Artis A"},
+                        "musicVolume": 0.35,
+                        "originalVolume": 0.8,
+                    },
+                    "2": {
+                        "music": {"id": "song_2", "name": "Lagu Dua", "artist": "Artis B"},
+                        "musicVolume": 0.15,
+                        "originalVolume": 1.0,
+                    },
+                },
+            },
+        )
+        assert resp.status_code == 200
+        assert len(published_requests) == 2
+
+        # Verify Clip 1 got song_1 and volume 0.35 / 0.8
+        req1 = published_requests[0]
+        assert req1.clipRank == 1
+        assert req1.music["id"] == "song_1"
+        assert req1.musicVolume == 0.35
+        assert req1.originalVolume == 0.8
+        assert req1.isAutoAddMusic is True
+
+        # Verify Clip 2 got song_2 and volume 0.15 / 1.0
+        req2 = published_requests[1]
+        assert req2.clipRank == 2
+        assert req2.music["id"] == "song_2"
+        assert req2.musicVolume == 0.15
+        assert req2.originalVolume == 1.0
+        assert req2.isAutoAddMusic is True
+
+

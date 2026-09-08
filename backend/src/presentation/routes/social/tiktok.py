@@ -125,6 +125,73 @@ def infer_music_recommendation(
     }
 
 
+async def _fetch_repliz_music_docs(
+    genre: str,
+    country_code: str,
+    date_range: str,
+) -> List[Dict[str, Any]]:
+    """Fetch and cache raw music documents from Repliz."""
+    eff_genre = (genre or "ALL").upper().strip()
+    eff_range = (date_range or "7DAY").upper().strip()
+    if eff_genre == "EDM":
+        eff_genre = "ELECTRONIC"
+    valid_repliz_genres = {"ALL", "POP", "ROCK", "ELECTRONIC", "LATIN", "COUNTRY", "JAZZ", "CLASSICAL", "FOLK"}
+    if eff_genre not in valid_repliz_genres:
+        eff_genre = "ALL"
+
+    cache_key = f"{eff_genre}_{country_code}_{eff_range}"
+    now = time.time()
+    cached = _music_cache.get(cache_key)
+
+    if cached and (now - cached["timestamp"] < _cache_ttl):
+        return cached["docs"]
+
+    try:
+        res = await repliz_get(
+            "/public/tiktok/music",
+            params={
+                "genre": eff_genre,
+                "countryCode": country_code,
+                "dateRange": eff_range,
+            },
+        )
+        raw_docs = res.get("docs", []) if isinstance(res, dict) else []
+        _music_cache[cache_key] = {"docs": raw_docs, "timestamp": now}
+        return raw_docs
+    except Exception as e:
+        logger.warning(f"Failed to fetch TikTok music from Repliz (genre={eff_genre}): {e}")
+        return []
+
+
+def _format_track_doc(doc: Dict[str, Any], rank: int = 1, match_reason: str = "") -> Dict[str, Any]:
+    """Format Repliz raw music doc into a clean UI track model."""
+    if rank == 1:
+        usage_label = "1.8M+ Video Digunakan"
+    elif rank <= 3:
+        usage_label = "1.2M+ Video Digunakan"
+    elif rank <= 10:
+        usage_label = "750K+ Video Digunakan"
+    elif rank <= 25:
+        usage_label = "420K+ Video Digunakan"
+    else:
+        usage_label = "200K+ Video Digunakan"
+
+    track_reason = match_reason if rank == 1 and match_reason else ("Trending Pilihan" if rank <= 3 else "")
+
+    return {
+        "id": str(doc.get("id") or ""),
+        "name": doc.get("name") or "Unknown Title",
+        "artist": doc.get("artist") or "Unknown Artist",
+        "thumbnail": doc.get("thumbnail") or "",
+        "duration": int(doc.get("duration") or 0),
+        "url": doc.get("url") or "",  # Direct audio stream URL for in-browser playback
+        "rank": rank,
+        "usage_label": usage_label,
+        "is_recommended": rank <= 3,
+        "match_reason": track_reason,
+    }
+
+
 @tiktok_router.get("/music")
 async def get_tiktok_trending_music(
     genre: str = Query(default="RECOMMENDED", description="Music genre: RECOMMENDED, ALL, VIRAL_TODAY, POP, EDM, ROCK, FOLK, JAZZ"),
@@ -175,27 +242,7 @@ async def get_tiktok_trending_music(
     if effective_genre not in valid_repliz_genres:
         effective_genre = "ALL"
 
-    cache_key = f"{effective_genre}_{country_code}_{effective_date_range}"
-    now = time.time()
-    cached = _music_cache.get(cache_key)
-
-    if cached and (now - cached["timestamp"] < _cache_ttl):
-        raw_docs = cached["docs"]
-    else:
-        try:
-            res = await repliz_get(
-                "/public/tiktok/music",
-                params={
-                    "genre": effective_genre,
-                    "countryCode": country_code,
-                    "dateRange": effective_date_range,
-                },
-            )
-            raw_docs = res.get("docs", []) if isinstance(res, dict) else []
-            _music_cache[cache_key] = {"docs": raw_docs, "timestamp": now}
-        except Exception as e:
-            logger.warning(f"Failed to fetch TikTok music from Repliz (genre={effective_genre}): {e}")
-            raw_docs = []
+    raw_docs = await _fetch_repliz_music_docs(effective_genre, country_code, effective_date_range)
 
     # Filter / Search if requested
     filtered_docs = list(raw_docs)
@@ -211,34 +258,10 @@ async def get_tiktok_trending_music(
         rot = seed_offset % min(len(filtered_docs), 12)
         filtered_docs = filtered_docs[rot:] + filtered_docs[:rot]
 
-    # Format tracks
-    tracks = []
-    for idx, doc in enumerate(filtered_docs[:limit], 1):
-        if idx == 1:
-            usage_label = "1.8M+ Video Digunakan"
-        elif idx <= 3:
-            usage_label = "1.2M+ Video Digunakan"
-        elif idx <= 10:
-            usage_label = "750K+ Video Digunakan"
-        elif idx <= 25:
-            usage_label = "420K+ Video Digunakan"
-        else:
-            usage_label = "200K+ Video Digunakan"
-
-        track_reason = match_reason if idx == 1 and match_reason else ("Trending Pilihan" if idx <= 3 else "")
-
-        tracks.append({
-            "id": str(doc.get("id") or ""),
-            "name": doc.get("name") or "Unknown Title",
-            "artist": doc.get("artist") or "Unknown Artist",
-            "thumbnail": doc.get("thumbnail") or "",
-            "duration": int(doc.get("duration") or 0),
-            "url": doc.get("url") or "",  # Direct audio stream URL for in-browser playback
-            "rank": idx,
-            "usage_label": usage_label,
-            "is_recommended": idx <= 3,
-            "match_reason": track_reason,
-        })
+    tracks = [
+        _format_track_doc(doc, rank=idx, match_reason=match_reason)
+        for idx, doc in enumerate(filtered_docs[:limit], 1)
+    ]
 
     return {
         "success": True,
@@ -249,4 +272,94 @@ async def get_tiktok_trending_music(
         "match_reason": match_reason,
         "total": len(tracks),
         "tracks": tracks,
+    }
+
+
+class BatchMusicItemRequest(BaseModel):
+    clip_rank: int
+    title: Optional[str] = None
+    hook: Optional[str] = None
+    topic: Optional[str] = None
+
+
+class BatchMusicRecommendationsRequest(BaseModel):
+    job_id: Optional[str] = None
+    country_code: str = "ID"
+    items: List[BatchMusicItemRequest]
+
+
+@tiktok_router.post("/music/batch-recommendations")
+async def get_batch_tiktok_music_recommendations(
+    body: BatchMusicRecommendationsRequest,
+    _user=Depends(get_current_user),
+):
+    """Generate distinct, non-duplicating TikTok music recommendations for multiple batch clips."""
+    used_track_ids: set[str] = set()
+    recommendations = []
+
+    # Pre-fetch fallback ALL trending tracks
+    all_fallback_docs = await _fetch_repliz_music_docs("ALL", body.country_code, "7DAY")
+
+    for item in body.items:
+        rec = infer_music_recommendation(
+            title=item.title or "",
+            hook=item.hook or "",
+            topic=item.topic or "",
+            job_id=body.job_id or "",
+            clip_rank=item.clip_rank,
+        )
+        genre = rec["genre"]
+        date_range = rec["date_range"]
+        match_reason = rec["match_reason"]
+        seed_offset = rec["seed_offset"]
+
+        genre_docs = await _fetch_repliz_music_docs(genre, body.country_code, date_range)
+        if seed_offset > 0 and len(genre_docs) > 1:
+            rot = seed_offset % min(len(genre_docs), 12)
+            candidates = genre_docs[rot:] + genre_docs[:rot]
+        else:
+            candidates = list(genre_docs)
+
+        chosen_doc = None
+        for doc in candidates:
+            doc_id = str(doc.get("id") or "")
+            if doc_id and doc_id not in used_track_ids:
+                chosen_doc = doc
+                used_track_ids.add(doc_id)
+                break
+
+        if not chosen_doc:
+            for doc in all_fallback_docs:
+                doc_id = str(doc.get("id") or "")
+                if doc_id and doc_id not in used_track_ids:
+                    chosen_doc = doc
+                    used_track_ids.add(doc_id)
+                    break
+
+        if not chosen_doc and candidates:
+            chosen_doc = candidates[0]
+        elif not chosen_doc and all_fallback_docs:
+            chosen_doc = all_fallback_docs[0]
+
+        if chosen_doc:
+            track = _format_track_doc(chosen_doc, rank=1, match_reason=match_reason)
+            recommendations.append({
+                "clip_rank": item.clip_rank,
+                "genre": genre,
+                "match_reason": match_reason,
+                "track": track,
+            })
+        else:
+            recommendations.append({
+                "clip_rank": item.clip_rank,
+                "genre": genre,
+                "match_reason": match_reason,
+                "track": None,
+            })
+
+    return {
+        "success": True,
+        "country_code": body.country_code,
+        "total": len(recommendations),
+        "recommendations": recommendations,
     }

@@ -1060,7 +1060,39 @@ export const socialApi = {
     const qs = q.toString() ? `?${q.toString()}` : "";
     return request<TikTokMusicResponse>(`/api/social/tiktok/music${qs}`);
   },
+  async getBatchTikTokMusicRecommendations(params: {
+    job_id?: string;
+    country_code?: string;
+    items: Array<{
+      clip_rank: number;
+      title?: string;
+      hook?: string;
+      topic?: string;
+    }>;
+  }): Promise<BatchMusicRecommendationsResponse> {
+    return request<BatchMusicRecommendationsResponse>(
+      "/api/social/tiktok/music/batch-recommendations",
+      {
+        method: "POST",
+        body: JSON.stringify(params),
+      }
+    );
+  },
 };
+
+export interface BatchMusicRecommendation {
+  clip_rank: number;
+  genre: string;
+  match_reason: string;
+  track: TikTokMusicTrack | null;
+}
+
+export interface BatchMusicRecommendationsResponse {
+  success: boolean;
+  country_code: string;
+  total: number;
+  recommendations: BatchMusicRecommendation[];
+}
 
 // ─── Storage/Cleanup API ─────────────────────────────────────────────────────
 

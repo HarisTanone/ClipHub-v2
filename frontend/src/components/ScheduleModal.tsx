@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Calendar,
   Clock,
@@ -32,6 +32,7 @@ import {
   Radio,
   Coffee,
   Disc,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Textarea, Input } from "@/components/ui/Input";
@@ -49,7 +50,9 @@ const MUSIC_GENRE_FILTERS = [
   { id: "ROCK", label: "Rock", Icon: Radio },
   { id: "FOLK", label: "Santai / Folk", Icon: Coffee },
   { id: "JAZZ", label: "Jazz", Icon: Disc },
-];
+ ];
+
+const ALL_SOCIAL_PLATFORMS = ["tiktok", "instagram", "youtube", "facebook", "threads", "linkedin"];
 
 // ─── Custom Platform Icons (Pure SVG) ─────────────────────────────────────────
 
@@ -141,9 +144,9 @@ async function fetchSocialAccounts(): Promise<any[]> {
   return data.docs || [];
 }
 
-async function publishClip(payload: any): Promise<any> {
+async function publishClip(payload: any, batch = false): Promise<any> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/api/social/publish`, {
+  const res = await fetch(`${API_BASE}/api/social/publish${batch ? "/batch" : ""}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -164,6 +167,24 @@ async function checkPublishStatus(): Promise<{ gdrive_configured: boolean; repli
   return res.json();
 }
 
+interface AiScheduleTimeItem {
+  index: number;
+  utc: string;
+  wib: string;
+  time_label: string;
+  date_label: string;
+}
+
+async function fetchAiScheduleTimes(count: number): Promise<AiScheduleTimeItem[]> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/social/publish/batch/ai-times?count=${count}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.times || [];
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ScheduleModalProps {
@@ -171,6 +192,8 @@ interface ScheduleModalProps {
   onClose: () => void;
   jobId: string;
   clipRank?: number;
+  clipRanks?: number[];
+  clips?: any[];
   videoSource?: "clip" | "video_generator";
   defaultCaption?: string;
   hookText?: string;
@@ -184,6 +207,8 @@ export function ScheduleModal({
   onClose,
   jobId,
   clipRank,
+  clipRanks,
+  clips,
   videoSource,
   defaultCaption,
   hookText,
@@ -204,6 +229,8 @@ export function ScheduleModal({
   const [postType, setPostType] = useState<"video" | "reel" | "story">("video");
   const [isAiGenerated, setIsAiGenerated] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<"now" | "later">("now");
+  const [batchScheduleMode, setBatchScheduleMode] = useState<"same" | "ai" | "custom">("same");
+  const [customScheduleTimes, setCustomScheduleTimes] = useState<string[]>([]);
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
   const [posting, setPosting] = useState(false);
@@ -225,6 +252,16 @@ export function ScheduleModal({
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
+  // ── Option C: Hybrid Batch Music & Volume States ──
+  const [batchMusicMode, setBatchMusicMode] = useState<"ai_distinct" | "single">("ai_distinct");
+  const [clipMusicMap, setClipMusicMap] = useState<Record<number, TikTokMusicTrack | null>>({});
+  const [clipMusicReasonMap, setClipMusicReasonMap] = useState<Record<number, string>>({});
+  const [clipVolumeMap, setClipVolumeMap] = useState<Record<number, { musicVolume: number; originalVolume: number }>>({});
+  const [activeClipPickerRank, setActiveClipPickerRank] = useState<number | null>(null);
+  const [clipSearchQuery, setClipSearchQuery] = useState<string>("");
+  const [loadingBatchMusic, setLoadingBatchMusic] = useState<boolean>(false);
+  const [editingClipVolumeRank, setEditingClipVolumeRank] = useState<number | null>(null);
+
   useEffect(() => {
     if (open) {
       setTitle(hookText || (clipRank ? `Clip #${clipRank}` : "AI Generated Video"));
@@ -233,6 +270,13 @@ export function ScheduleModal({
       setMusicSearchQuery("");
       setShuffleSeed(0);
       setMatchReason("");
+      setBatchMusicMode("ai_distinct");
+      setClipMusicMap({});
+      setClipMusicReasonMap({});
+      setClipVolumeMap({});
+      setActiveClipPickerRank(null);
+      setClipSearchQuery("");
+      setEditingClipVolumeRank(null);
       setLoadingAccounts(true);
       Promise.all([fetchSocialAccounts(), checkPublishStatus()])
         .then(([accs, st]) => {
@@ -282,6 +326,71 @@ export function ScheduleModal({
       (a) => (a.type || "").toLowerCase().trim() === "tiktok" && selectedAccountIds.includes(a._id || a.id)
     );
   }, [connectedAccounts, selectedAccountIds]);
+
+  const isBatch = Boolean(clipRanks && clipRanks.length > 1);
+
+  const [aiTimes, setAiTimes] = useState<AiScheduleTimeItem[]>([]);
+  const [loadingAiTimes, setLoadingAiTimes] = useState(false);
+
+  const loadAiTimes = useCallback(async () => {
+    if (!clipRanks || clipRanks.length === 0) return;
+    setLoadingAiTimes(true);
+    try {
+      const times = await fetchAiScheduleTimes(clipRanks.length);
+      setAiTimes(times);
+    } catch {
+      setAiTimes([]);
+    } finally {
+      setLoadingAiTimes(false);
+    }
+  }, [clipRanks?.join(",")]);
+
+  useEffect(() => {
+    if (open && isBatch && batchScheduleMode === "ai") {
+      loadAiTimes();
+    }
+  }, [open, isBatch, batchScheduleMode, loadAiTimes]);
+
+  const handleFillSequentialCustomTimes = useCallback((intervalHours: number) => {
+    const now = new Date();
+    const base = new Date(now.getTime() + 60 * 60 * 1000);
+    base.setMinutes(0, 0, 0);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const newTimes = (clipRanks || []).map((_, idx) => {
+      const d = new Date(base.getTime() + idx * intervalHours * 60 * 60 * 1000);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    });
+    setCustomScheduleTimes(newTimes);
+  }, [clipRanks?.join(",")]);
+
+  const handleFillDailyCustomTimes = useCallback(() => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const newTimes = (clipRanks || []).map((_, idx) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() + (now.getHours() >= 19 ? idx + 1 : idx));
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T19:00`;
+    });
+    setCustomScheduleTimes(newTimes);
+  }, [clipRanks?.join(",")]);
+
+  useEffect(() => {
+    if (isBatch && batchScheduleMode === "custom") {
+      setCustomScheduleTimes((current) => {
+        if (current.length === (clipRanks?.length || 0) && current.some(Boolean)) {
+          return current;
+        }
+        const now = new Date();
+        const base = new Date(now.getTime() + 60 * 60 * 1000);
+        base.setMinutes(0, 0, 0);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        return (clipRanks || []).map((_, idx) => {
+          const d = new Date(base.getTime() + idx * 2 * 60 * 60 * 1000);
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        });
+      });
+    }
+  }, [isBatch, batchScheduleMode, clipRanks?.join(",")]);
 
   // Load TikTok trending/recommended music when TikTok is selected and music feature is active
   useEffect(() => {
@@ -366,6 +475,58 @@ export function ScheduleModal({
     }
   }
 
+  const fetchBatchRecommendations = useCallback(async () => {
+    if (!jobId || !clipRanks || clipRanks.length === 0) return;
+    setLoadingBatchMusic(true);
+    try {
+      const items = clipRanks.map((rank) => {
+        const c = clips?.find((item: any) => item.rank === rank);
+        return {
+          clip_rank: rank,
+          title: c?.title || hookText || `Clip #${rank}`,
+          hook: c?.hook || hookText || "",
+          topic: topic || "",
+        };
+      });
+
+      const res = await socialApi.getBatchTikTokMusicRecommendations({
+        job_id: jobId,
+        country_code: "ID",
+        items,
+      });
+
+      if (res && res.recommendations) {
+        const musicMap: Record<number, TikTokMusicTrack | null> = {};
+        const reasonMap: Record<number, string> = {};
+        const volMap: Record<number, { musicVolume: number; originalVolume: number }> = {};
+        for (const rec of res.recommendations) {
+          musicMap[rec.clip_rank] = rec.track;
+          reasonMap[rec.clip_rank] = rec.match_reason;
+          volMap[rec.clip_rank] = { musicVolume, originalVolume };
+        }
+        setClipMusicMap(musicMap);
+        setClipMusicReasonMap(reasonMap);
+        setClipVolumeMap(volMap);
+
+        const firstTrack = res.recommendations.find((r) => r.track)?.track;
+        if (firstTrack && !selectedTrack) {
+          setSelectedTrack(firstTrack);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load batch TikTok music recommendations:", err);
+    } finally {
+      setLoadingBatchMusic(false);
+    }
+  }, [jobId, clipRanks, clips, hookText, topic, selectedTrack, musicVolume, originalVolume]);
+
+  useEffect(() => {
+    if (!open || !hasTikTokSelected || !autoPickMusic || !isBatch) return;
+    if (batchMusicMode === "ai_distinct" && Object.keys(clipMusicMap).length === 0) {
+      fetchBatchRecommendations();
+    }
+  }, [open, hasTikTokSelected, autoPickMusic, isBatch, batchMusicMode, clipMusicMap, fetchBatchRecommendations]);
+
   function handleToggleAutoPickMusic(checked: boolean) {
     setAutoPickMusic(checked);
     if (checked) {
@@ -374,6 +535,9 @@ export function ScheduleModal({
       if (musicVolume === 0) setMusicVolume(25);
       if (musicTracks.length > 0 && !selectedTrack) {
         setSelectedTrack(musicTracks[0]);
+      }
+      if (isBatch && batchMusicMode === "ai_distinct" && Object.keys(clipMusicMap).length === 0) {
+        fetchBatchRecommendations();
       }
     } else {
       if (audioPlayerRef.current) {
@@ -389,11 +553,54 @@ export function ScheduleModal({
     if (audioPlayerRef.current) {
       audioPlayerRef.current.volume = clamped / 100;
     }
+    if (isBatch) {
+      setClipVolumeMap((prev) => {
+        const next = { ...prev };
+        for (const r of clipRanks || []) {
+          next[r] = {
+            musicVolume: clamped,
+            originalVolume: next[r]?.originalVolume ?? originalVolume,
+          };
+        }
+        return next;
+      });
+    }
   }
 
   function handleOriginalVolumeChange(newVol: number) {
     const clamped = Math.max(0, Math.min(100, newVol));
     setOriginalVolume(clamped);
+    if (isBatch) {
+      setClipVolumeMap((prev) => {
+        const next = { ...prev };
+        for (const r of clipRanks || []) {
+          next[r] = {
+            musicVolume: next[r]?.musicVolume ?? musicVolume,
+            originalVolume: clamped,
+          };
+        }
+        return next;
+      });
+    }
+  }
+
+  function handleClipSpecificVolume(rank: number, type: "original" | "music", val: number) {
+    const clamped = Math.max(0, Math.min(100, val));
+    setClipVolumeMap((prev) => ({
+      ...prev,
+      [rank]: {
+        originalVolume: type === "original" ? clamped : (prev[rank]?.originalVolume ?? originalVolume),
+        musicVolume: type === "music" ? clamped : (prev[rank]?.musicVolume ?? musicVolume),
+      },
+    }));
+  }
+
+  function handleSelectTrackForClip(rank: number, track: TikTokMusicTrack) {
+    setClipMusicMap((prev) => ({ ...prev, [rank]: track }));
+    setClipMusicReasonMap((prev) => ({ ...prev, [rank]: "Pilihan Manual" }));
+    setActiveClipPickerRank(null);
+    setClipSearchQuery("");
+    toast.success(`Lagu "${track.name}" dipilih untuk Clip #${rank}`);
   }
 
   function togglePlayDemo(track: TikTokMusicTrack, e?: React.MouseEvent) {
@@ -430,11 +637,11 @@ export function ScheduleModal({
       return;
     }
 
-    let scheduleAt: string;
+    let scheduleAt = "";
     if (scheduleMode === "now") {
       const future = new Date(Date.now() + 2 * 60 * 1000);
       scheduleAt = future.toISOString();
-    } else {
+    } else if (!isBatch || batchScheduleMode === "same") {
       if (!scheduleDate || !scheduleTime) {
         toast.error("Pilih tanggal dan jam untuk menjadwalkan postingan.");
         return;
@@ -444,20 +651,54 @@ export function ScheduleModal({
         toast.error("Format tanggal atau jam tidak valid.");
         return;
       }
+      if (scheduled <= new Date()) {
+        toast.error("Waktu jadwal harus lebih dari waktu sekarang.");
+        return;
+      }
       scheduleAt = scheduled.toISOString();
+    }
+
+    let resolvedCustomTimes: string[] = [];
+    if (isBatch && batchScheduleMode === "custom") {
+      if (customScheduleTimes.length !== clipRanks!.length || customScheduleTimes.some((value) => !value)) {
+        toast.error("Isi waktu jadwal untuk semua clip yang dipilih.");
+        return;
+      }
+      const nowMs = Date.now();
+      for (let i = 0; i < customScheduleTimes.length; i++) {
+        const timeVal = new Date(customScheduleTimes[i]);
+        if (isNaN(timeVal.getTime()) || timeVal.getTime() <= nowMs) {
+          toast.error(`Waktu jadwal Clip #${clipRanks![i]} harus di masa depan.`);
+          return;
+        }
+      }
+      resolvedCustomTimes = customScheduleTimes.map((value) => new Date(value).toISOString());
+      if (new Set(resolvedCustomTimes).size !== resolvedCustomTimes.length) {
+        toast.error("Setiap clip harus memiliki waktu custom yang berbeda (tidak boleh sama).");
+        return;
+      }
     }
 
     const tags = tagsStr
       ? tagsStr.split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean)
       : [];
 
-    if (hasTikTokSelected && autoPickMusic && !selectedTrack) {
-      toast.error("Pilih lagu TikTok terlebih dahulu.");
-      return;
+    if (hasTikTokSelected && autoPickMusic) {
+      if (isBatch && batchMusicMode === "ai_distinct") {
+        const missingRank = (clipRanks || []).find((r) => !clipMusicMap[r] && !selectedTrack);
+        if (missingRank) {
+          toast.error(`Pilih lagu TikTok untuk Clip #${missingRank} terlebih dahulu.`);
+          return;
+        }
+      } else if (!selectedTrack) {
+        toast.error("Pilih lagu TikTok terlebih dahulu.");
+        return;
+      }
     }
     setPosting(true);
     try {
-      const hasSelectedMusic = hasTikTokSelected && autoPickMusic && Boolean(selectedTrack);
+      const hasSelectedMusic = hasTikTokSelected && autoPickMusic && (Boolean(selectedTrack) || Object.keys(clipMusicMap).length > 0);
+      const fallbackTrack = selectedTrack || Object.values(clipMusicMap).find(Boolean) || null;
       const payload: any = {
         jobId,
         clipRank: clipRank || 1,
@@ -473,25 +714,66 @@ export function ScheduleModal({
         type: postType,
         isAutoAddMusic: hasSelectedMusic,
         music:
-          hasSelectedMusic && selectedTrack
+          hasSelectedMusic && fallbackTrack
             ? {
-                id: selectedTrack.id,
-                name: selectedTrack.name,
-                artist: selectedTrack.artist,
-                thumbnail: selectedTrack.thumbnail,
-                url: selectedTrack.url,
+                id: fallbackTrack.id,
+                name: fallbackTrack.name,
+                artist: fallbackTrack.artist,
+                thumbnail: fallbackTrack.thumbnail,
+                url: fallbackTrack.url,
               }
             : undefined,
         originalVolume: originalVolume / 100,
         musicVolume: hasSelectedMusic ? musicVolume / 100 : 0,
       };
+      if (isBatch) {
+        payload.clipRanks = clipRanks;
+        payload.scheduleMode = batchScheduleMode;
+        payload.customScheduleTimes = resolvedCustomTimes;
 
-      const result = await publishClip(payload);
-      const successCount = result.count || selectedAccountIds.length;
-      if (scheduleMode === "now") {
-        toast.success(`Video berhasil di-upload dan dijadwalkan untuk segera tayang di ${successCount} akun!`);
+        if (hasTikTokSelected && autoPickMusic && batchMusicMode === "ai_distinct") {
+          const configs: Record<string, any> = {};
+          for (const rank of clipRanks || []) {
+            const track = clipMusicMap[rank] || fallbackTrack;
+            const vol = clipVolumeMap[rank] || { musicVolume, originalVolume };
+            if (track) {
+              configs[String(rank)] = {
+                music: {
+                  id: track.id,
+                  name: track.name,
+                  artist: track.artist,
+                  thumbnail: track.thumbnail,
+                  url: track.url,
+                },
+                musicVolume: (vol.musicVolume ?? musicVolume) / 100,
+                originalVolume: (vol.originalVolume ?? originalVolume) / 100,
+              };
+            }
+          }
+          payload.clipMusicConfigs = configs;
+        }
+      }
+
+      const result = await publishClip(payload, isBatch);
+      const successCount = isBatch ? (result.scheduleCount || 0) : (result.count || selectedAccountIds.length);
+      if (isBatch) {
+        if (batchScheduleMode === "ai") {
+          toast.success(`${clipRanks?.length || 0} video berhasil dijadwalkan dengan AI Pick Time ke ${selectedAccountIds.length} akun!`);
+        } else if (batchScheduleMode === "custom") {
+          toast.success(`${clipRanks?.length || 0} video berhasil dijadwalkan dengan waktu custom berbeda ke ${selectedAccountIds.length} akun!`);
+        } else {
+          toast.success(
+            scheduleMode === "now"
+              ? `${clipRanks?.length || 0} video berhasil dijadwalkan untuk segera tayang ke ${selectedAccountIds.length} akun!`
+              : `${clipRanks?.length || 0} video berhasil dijadwalkan untuk ${scheduleDate} ${scheduleTime} WIB ke ${selectedAccountIds.length} akun!`
+          );
+        }
       } else {
-        toast.success(`Berhasil dijadwalkan untuk ${scheduleDate} ${scheduleTime} ke ${successCount} akun!`);
+        if (scheduleMode === "now") {
+          toast.success(`Video berhasil di-upload dan dijadwalkan untuk segera tayang di ${successCount} akun!`);
+        } else {
+          toast.success(`Berhasil dijadwalkan untuk ${scheduleDate} ${scheduleTime} ke ${successCount} akun!`);
+        }
       }
       onClose();
     } catch (e: any) {
@@ -625,7 +907,7 @@ export function ScheduleModal({
                 </div>
 
                 {/* Filter Pills */}
-                {availablePlatforms.length > 1 && (
+                {(availablePlatforms.length > 0 || isBatch) && (
                   <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar py-0.5">
                     <button
                       type="button"
@@ -671,6 +953,21 @@ export function ScheduleModal({
                         </button>
                       );
                     })}
+                    {ALL_SOCIAL_PLATFORMS.filter((plat) => !availablePlatforms.includes(plat)).map((plat) => (
+                      <button
+                        key={plat}
+                        type="button"
+                        disabled
+                        title={`Belum ada akun ${plat} terhubung untuk akun ini (Read-Only)`}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1.5 whitespace-nowrap capitalize border shrink-0 border-zinc-800 bg-zinc-950/40 text-zinc-500 cursor-not-allowed opacity-60 select-none"
+                      >
+                        <PlatformIcon type={plat} className="h-3 w-3 grayscale opacity-60" />
+                        <span>{plat}</span>
+                        <span className="flex items-center gap-0.5 text-[9px] text-zinc-500 bg-zinc-900 px-1 py-0.2 rounded border border-zinc-800 font-normal">
+                          <Lock className="h-2 w-2" /> Read-Only
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 )}
 
@@ -681,10 +978,12 @@ export function ScheduleModal({
                     <span>Memuat daftar akun...</span>
                   </div>
                 ) : connectedAccounts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4 text-center">
-                    <Share2 className="h-5 w-5 text-zinc-600 mx-auto mb-1.5" />
-                    <p className="text-xs text-zinc-400 font-medium">Belum ada akun sosial media yang terhubung.</p>
-                    <p className="text-[10px] text-zinc-600 mt-1">Koneksikan di menu Social Accounts.</p>
+                  <div className="rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 p-4 text-center">
+                    <Share2 className="h-5 w-5 text-amber-500/80 mx-auto mb-1.5" />
+                    <p className="text-xs text-zinc-200 font-medium">Belum ada akun sosial media yang terhubung.</p>
+                    <p className="text-[11px] text-zinc-400 mt-1">
+                      Semua platform berstatus <span className="text-amber-400 font-semibold">Read-Only</span>. Silakan hubungkan akun di menu Social Accounts terlebih dahulu untuk dapat membagikan video.
+                    </p>
                   </div>
                 ) : displayedAccounts.length === 0 ? (
                   <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 text-center text-xs text-zinc-500">
@@ -761,53 +1060,191 @@ export function ScheduleModal({
               {/* Timing */}
               <div className="space-y-2 pt-1 border-t border-zinc-800/80">
                 <label className="text-xs font-semibold text-zinc-200">Waktu Publikasi</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setScheduleMode("now")}
-                    className={cn(
-                      "flex items-center justify-center gap-2 rounded-xl border p-2 text-xs font-medium transition-all",
-                      scheduleMode === "now"
-                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400 font-semibold shadow-sm"
-                        : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                    )}
-                  >
-                    <Send className="h-3.5 w-3.5" /> Post Sekarang
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScheduleMode("later")}
-                    className={cn(
-                      "flex items-center justify-center gap-2 rounded-xl border p-2 text-xs font-medium transition-all",
-                      scheduleMode === "later"
-                        ? "border-blue-500/60 bg-blue-500/10 text-blue-400 font-semibold shadow-sm"
-                        : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                    )}
-                  >
-                    <Clock className="h-3.5 w-3.5" /> Jadwalkan
-                  </button>
-                </div>
-
-                {scheduleMode === "later" && (
-                  <div className="grid grid-cols-2 gap-2 pt-1 animate-in fade-in duration-150">
-                    <div>
-                      <label className="text-[10px] font-medium text-zinc-400 mb-1 block">Tanggal</label>
-                      <input
-                        type="date"
-                        min={new Date().toISOString().split("T")[0]}
-                        value={scheduleDate}
-                        onChange={(e) => setScheduleDate(e.target.value)}
-                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
-                      />
+                {isBatch && (
+                  <div className="space-y-1">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: "same", label: "Waktu Sama" },
+                        { id: "ai", label: "AI Pick Time ✨" },
+                        { id: "custom", label: "Custom per Clip" },
+                      ].map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setBatchScheduleMode(option.id as "same" | "ai" | "custom")}
+                          className={cn(
+                            "rounded-xl border px-2 py-2 text-[11px] font-medium transition-all text-center",
+                            batchScheduleMode === option.id
+                              ? "border-emerald-500 bg-emerald-500/15 text-emerald-300 font-semibold shadow-sm ring-1 ring-emerald-500/30"
+                              : "border-zinc-800 bg-zinc-950/50 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
                     </div>
-                    <div>
-                      <label className="text-[10px] font-medium text-zinc-400 mb-1 block">Jam (WIB)</label>
-                      <input
-                        type="time"
-                        value={scheduleTime}
-                        onChange={(e) => setScheduleTime(e.target.value)}
-                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
-                      />
+                  </div>
+                )}
+
+                {/* Mode 1: Waktu Sama (All at the same time) */}
+                {(!isBatch || batchScheduleMode === "same") && (
+                  <div className="space-y-2 animate-in fade-in duration-150">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setScheduleMode("now")}
+                        className={cn(
+                          "flex items-center justify-center gap-2 rounded-xl border p-2 text-xs font-medium transition-all",
+                          scheduleMode === "now"
+                            ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400 font-semibold shadow-sm"
+                            : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                        )}
+                      >
+                        <Send className="h-3.5 w-3.5" /> Post Sekarang
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setScheduleMode("later")}
+                        className={cn(
+                          "flex items-center justify-center gap-2 rounded-xl border p-2 text-xs font-medium transition-all",
+                          scheduleMode === "later"
+                            ? "border-blue-500/60 bg-blue-500/10 text-blue-400 font-semibold shadow-sm"
+                            : "border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                        )}
+                      >
+                        <Clock className="h-3.5 w-3.5" /> Jadwalkan
+                      </button>
+                    </div>
+
+                    {scheduleMode === "now" && isBatch && (
+                      <p className="text-[11px] text-zinc-400 bg-zinc-950/60 border border-zinc-800/80 rounded-lg p-2 leading-relaxed">
+                        ⚡ Semua <strong className="text-zinc-200">{clipRanks?.length || 0} klip terpilih</strong> akan diposting serentak sesegera mungkin.
+                      </p>
+                    )}
+
+                    {scheduleMode === "later" && (
+                      <div className="grid grid-cols-2 gap-2 pt-1 animate-in fade-in duration-150">
+                        <div>
+                          <label className="text-[10px] font-medium text-zinc-400 mb-1 block">Tanggal</label>
+                          <input
+                            type="date"
+                            min={new Date().toISOString().split("T")[0]}
+                            value={scheduleDate}
+                            onChange={(e) => setScheduleDate(e.target.value)}
+                            className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-medium text-zinc-400 mb-1 block">Jam (WIB)</label>
+                          <input
+                            type="time"
+                            value={scheduleTime}
+                            onChange={(e) => setScheduleTime(e.target.value)}
+                            className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-blue-500/50"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Mode 2: AI Pick Time */}
+                {isBatch && batchScheduleMode === "ai" && (
+                  <div className="space-y-2.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-3 animate-in fade-in duration-150">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5 text-emerald-400">
+                        <Sparkles className="h-4 w-4 shrink-0" />
+                        <span className="text-xs font-semibold">AI Optimal Prime-Time Scheduling</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={loadAiTimes}
+                        disabled={loadingAiTimes}
+                        title="Hitung ulang estimasi waktu AI"
+                        className="text-[10px] text-zinc-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
+                      >
+                        <RefreshCw className={cn("h-3 w-3", loadingAiTimes ? "animate-spin text-emerald-400" : "")} />
+                        <span>Refresh</span>
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-zinc-300 leading-relaxed">
+                      AI secara cerdas memilih jam-jam prime time (<strong className="text-zinc-100">07:00 - 22:00 WIB</strong>) dengan jeda waktu optimal antar video agar views dan engagement maksimal.
+                    </p>
+
+                    {loadingAiTimes ? (
+                      <div className="flex items-center justify-center gap-2 py-3 text-xs text-zinc-400">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                        <span>Menghitung jadwal AI terbaik...</span>
+                      </div>
+                    ) : aiTimes.length > 0 ? (
+                      <div className="space-y-1.5 pt-1.5 border-t border-emerald-500/20">
+                        <p className="text-[10px] font-medium text-emerald-400/90 uppercase tracking-wider">
+                          Estimasi Waktu Tayang ({aiTimes.length} Klip):
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-0.5">
+                          {aiTimes.map((item, idx) => (
+                            <div key={item.index} className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-zinc-950/80 px-2.5 py-1.5 text-[11px]">
+                              <span className="font-semibold text-zinc-200">Clip #{clipRanks?.[idx] ?? item.index}</span>
+                              <span className="font-mono text-emerald-300 font-medium">{item.date_label}, {item.time_label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* Mode 3: Custom per Clip */}
+                {isBatch && batchScheduleMode === "custom" && (
+                  <div className="space-y-2.5 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-zinc-200">Custom Waktu per Klip</span>
+                      <span className="text-[10px] text-zinc-400">{clipRanks?.length || 0} waktu berbeda</span>
+                    </div>
+                    <p className="text-[10px] text-zinc-400">
+                      Tentukan tanggal dan jam publikasi spesifik yang berbeda untuk masing-masing klip terpilih.
+                    </p>
+                    {/* Quick Shortcuts */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-zinc-500">Shortcut Jeda:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleFillSequentialCustomTimes(1)}
+                        className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-300 transition-colors"
+                      >
+                        +1 Jam
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFillSequentialCustomTimes(2)}
+                        className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-300 transition-colors"
+                      >
+                        +2 Jam
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleFillDailyCustomTimes}
+                        className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-300 transition-colors"
+                      >
+                        1 Klip/Hari (19:00 WIB)
+                      </button>
+                    </div>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                      {clipRanks!.map((rank, index) => (
+                        <label key={rank} className="grid grid-cols-[68px_1fr] items-center gap-2 text-[11px] text-zinc-300 bg-zinc-900/60 border border-zinc-800/80 rounded-lg p-1.5">
+                          <span className="font-semibold text-zinc-200">Clip #{rank}</span>
+                          <input
+                            type="datetime-local"
+                            value={customScheduleTimes[index] || ""}
+                            onChange={(event) =>
+                              setCustomScheduleTimes((current) =>
+                                current.map((value, itemIndex) => (itemIndex === index ? event.target.value : value))
+                              )
+                            }
+                            className="rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 focus:border-emerald-500/60 outline-none"
+                          />
+                        </label>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -954,214 +1391,553 @@ export function ScheduleModal({
                   {/* Body when Auto Pick is active */}
                   {autoPickMusic && (
                     <div className="space-y-3 pt-1 animate-in fade-in duration-200">
-                      {/* Track Selection Cards */}
-                      <div className="space-y-2">
-                        {/* Section Header */}
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <label className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+                      {/* Option C: Batch Mode Switcher */}
+                      {isBatch && (
+                        <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-zinc-900/90 border border-zinc-800 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBatchMusicMode("ai_distinct");
+                              if (Object.keys(clipMusicMap).length === 0) {
+                                fetchBatchRecommendations();
+                              }
+                            }}
+                            className={cn(
+                              "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg font-medium transition-all cursor-pointer",
+                              batchMusicMode === "ai_distinct"
+                                ? "bg-pink-500/20 text-pink-300 border border-pink-500/40 font-semibold shadow-xs"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            )}
+                          >
+                            <Sparkles className="h-3.5 w-3.5 text-pink-400" />
+                            <span>Lagu Berbeda Tiap Klip (AI)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBatchMusicMode("single")}
+                            className={cn(
+                              "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg font-medium transition-all cursor-pointer",
+                              batchMusicMode === "single"
+                                ? "bg-pink-500/20 text-pink-300 border border-pink-500/40 font-semibold shadow-xs"
+                                : "text-zinc-400 hover:text-zinc-200"
+                            )}
+                          >
                             <Music className="h-3.5 w-3.5 text-pink-400" />
-                            <span>Rekomendasi Lagu TikTok</span>
-                            {selectedGenre === "RECOMMENDED" && (
-                              <span className="text-[9px] bg-pink-500/10 text-pink-400 border border-pink-500/20 px-1.5 py-0.5 rounded-full">
-                                Sesuai Video
+                            <span>1 Lagu Sama untuk Semua</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* MODE 1: Distinct Music per Clip (Option C Hybrid) */}
+                      {isBatch && batchMusicMode === "ai_distinct" ? (
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="text-[11px] text-zinc-300 flex items-center gap-1.5">
+                              <Sparkles className="h-3.5 w-3.5 text-pink-400" />
+                              <span className="font-semibold">Lagu Rekomendasi per Video Klip</span>
+                              <span className="text-[9px] bg-pink-500/10 text-pink-300 border border-pink-500/20 px-1.5 py-0.5 rounded-full">
+                                AI Smart Rotation
                               </span>
-                            )}
-                          </label>
-                          <div className="flex items-center gap-2">
+                            </div>
                             <button
                               type="button"
-                              onClick={() => setShuffleSeed((s) => s + 1)}
-                              disabled={loadingMusic}
+                              onClick={() => fetchBatchRecommendations()}
+                              disabled={loadingBatchMusic}
                               className="flex items-center gap-1 text-[10px] font-medium text-pink-400 hover:text-pink-300 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-all disabled:opacity-50 cursor-pointer"
-                              title="Pilihkan saran lagu TikTok lainnya yang sesuai"
+                              title="Acak ulang lagu rekomendasi untuk semua video klip"
                             >
-                              <Shuffle className={cn("h-3 w-3", loadingMusic && "animate-spin")} />
-                              <span>Ganti Saran</span>
+                              <Shuffle className={cn("h-3 w-3", loadingBatchMusic && "animate-spin")} />
+                              <span>Acak Ulang Semua</span>
                             </button>
-                            {musicTracks.length > 4 && !musicSearchQuery && (
-                              <button
-                                type="button"
-                                onClick={() => setShowAllMusic(!showAllMusic)}
-                                className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-0.5 cursor-pointer"
-                              >
-                                {showAllMusic ? (
-                                  <>
-                                    Tutup <ChevronUp className="h-3 w-3" />
-                                  </>
-                                ) : (
-                                  <>
-                                    Semua ({musicTracks.length}) <ChevronDown className="h-3 w-3" />
-                                  </>
-                                )}
-                              </button>
-                            )}
                           </div>
-                        </div>
 
-                        {/* Genre / Mood Pills */}
-                        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-                          {MUSIC_GENRE_FILTERS.map((filter) => {
-                            const isActive = selectedGenre === filter.id;
-                            return (
-                              <button
-                                key={filter.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedGenre(filter.id);
-                                  setShuffleSeed(0);
-                                }}
-                                className={cn(
-                                  "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all border shrink-0 cursor-pointer",
-                                  isActive
-                                    ? "bg-pink-500/20 border-pink-500/60 text-pink-300 font-semibold shadow-xs"
-                                    : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
-                                )}
-                              >
-                                <filter.Icon className="h-3 w-3 shrink-0" />
-                                <span>{filter.label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
+                          {loadingBatchMusic ? (
+                            <div className="flex items-center justify-center gap-2 py-6 text-xs text-zinc-400 bg-zinc-900/40 rounded-xl border border-zinc-800">
+                              <RefreshCw className="h-4 w-4 animate-spin text-pink-400" />
+                              <span>Mencocokkan lagu TikTok viral berbeda untuk setiap klip...</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+                              {clipRanks?.map((rank) => {
+                                const clipInfo = clips?.find((c) => c.rank === rank);
+                                const track = clipMusicMap[rank];
+                                const reason = clipMusicReasonMap[rank];
+                                const isPlaying = playingTrackId === track?.id;
+                                const clipVol = clipVolumeMap[rank] || { musicVolume, originalVolume };
+                                const isEditingSong = activeClipPickerRank === rank;
+                                const isEditingVol = editingClipVolumeRank === rank;
 
-                        {/* Search Input */}
-                        <div className="relative">
-                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
-                          <input
-                            type="text"
-                            value={musicSearchQuery}
-                            onChange={(e) => setMusicSearchQuery(e.target.value)}
-                            placeholder="Cari lagu atau artis viral TikTok..."
-                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 pl-8 pr-7 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:border-pink-500/50 focus:outline-none focus:ring-1 focus:ring-pink-500/50 transition-all"
-                          />
-                          {musicSearchQuery && (
-                            <button
-                              type="button"
-                              onClick={() => setMusicSearchQuery("")}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          )}
-                        </div>
+                                return (
+                                  <div
+                                    key={rank}
+                                    className="rounded-xl border border-zinc-800/90 bg-zinc-900/60 p-2.5 space-y-2 transition-all hover:border-zinc-700"
+                                  >
+                                    {/* Top Row: Clip Header */}
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="shrink-0 text-[10px] font-bold font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
+                                          #{rank}
+                                        </span>
+                                        <span className="text-xs font-semibold text-zinc-200 truncate">
+                                          {clipInfo?.hook || clipInfo?.reason || `Video Klip #${rank}`}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingClipVolumeRank(isEditingVol ? null : rank);
+                                            if (isEditingSong) setActiveClipPickerRank(null);
+                                          }}
+                                          className={cn(
+                                            "text-[10px] px-2 py-0.5 rounded-md border transition-all cursor-pointer flex items-center gap-1",
+                                            isEditingVol
+                                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                              : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 border-zinc-700"
+                                          )}
+                                          title="Sesuaikan volume khusus untuk klip ini"
+                                        >
+                                          <Volume2 className="h-3 w-3 text-emerald-400" />
+                                          <span>Vol</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setActiveClipPickerRank(isEditingSong ? null : rank);
+                                            if (isEditingVol) setEditingClipVolumeRank(null);
+                                          }}
+                                          className={cn(
+                                            "text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all cursor-pointer",
+                                            isEditingSong
+                                              ? "bg-pink-500 text-zinc-950 border-pink-400 font-semibold"
+                                              : "bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 hover:text-pink-300 border-pink-500/30"
+                                          )}
+                                        >
+                                          {isEditingSong ? "Tutup" : "Ganti Lagu"}
+                                        </button>
+                                      </div>
+                                    </div>
 
-                        {/* Recommendation Context Banner */}
-                        {matchReason && selectedGenre === "RECOMMENDED" && !musicSearchQuery && (
-                          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/20 text-[10px] text-pink-300">
-                            <Sparkles className="h-3.5 w-3.5 text-pink-400 shrink-0" />
-                            <span className="truncate">
-                              <strong className="font-semibold text-pink-200">Saran Khusus Video:</strong> {matchReason}
-                            </span>
-                          </div>
-                        )}
-
-                        {loadingMusic ? (
-                          <div className="flex items-center justify-center gap-2 py-4 text-xs text-zinc-500">
-                            <RefreshCw className="h-3.5 w-3.5 animate-spin text-pink-400" />
-                            <span>Mencari rekomendasi lagu TikTok yang cocok...</span>
-                          </div>
-                        ) : musicTracks.length === 0 ? (
-                          <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-900/60 text-center text-xs text-zinc-400">
-                            {musicSearchQuery
-                              ? `Tidak ditemukan lagu dengan kata kunci "${musicSearchQuery}"`
-                              : "Sedang memuat data lagu trending..."}
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
-                            {visibleMusicTracks.map((track) => {
-                              const isSelected = selectedTrack?.id === track.id;
-                              const isPlaying = playingTrackId === track.id;
-
-                              return (
-                                <div
-                                  key={track.id}
-                                  onClick={() => setSelectedTrack(track)}
-                                  className={cn(
-                                    "flex items-center justify-between p-2 rounded-lg border text-left cursor-pointer transition-all duration-150",
-                                    isSelected
-                                      ? "border-pink-500/60 bg-pink-500/10 ring-1 ring-pink-500/30"
-                                      : "border-zinc-800/80 bg-zinc-900/50 hover:border-zinc-700"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    {/* Thumbnail & Rank Badge */}
-                                    <div className="relative shrink-0">
-                                      {track.thumbnail ? (
-                                        <img
-                                          src={track.thumbnail}
-                                          alt=""
-                                          className="h-8 w-8 rounded-md object-cover border border-zinc-700 bg-zinc-800"
-                                        />
-                                      ) : (
-                                        <div className="h-8 w-8 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center text-pink-400">
-                                          <Music className="h-4 w-4" />
+                                    {/* Middle Row: Assigned Song Card */}
+                                    {track ? (
+                                      <div className="flex items-center justify-between gap-2 p-2 rounded-lg border border-pink-500/20 bg-pink-950/20">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          {track.thumbnail ? (
+                                            <img
+                                              src={track.thumbnail}
+                                              alt=""
+                                              className="h-8 w-8 rounded object-cover border border-zinc-700 shrink-0 bg-zinc-800"
+                                            />
+                                          ) : (
+                                            <div className="h-8 w-8 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-pink-400 shrink-0">
+                                              <Music className="h-4 w-4" />
+                                            </div>
+                                          )}
+                                          <div className="min-w-0">
+                                            <p className="text-xs font-semibold text-zinc-100 truncate">{track.name}</p>
+                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                              <span className="text-[10px] text-zinc-400 truncate max-w-[120px]">
+                                                {track.artist}
+                                              </span>
+                                              {reason && (
+                                                <span className="text-[9px] text-pink-300 bg-pink-500/20 px-1.5 py-0.2 rounded border border-pink-500/30 inline-flex items-center gap-0.5 truncate">
+                                                  <Sparkles className="h-2.5 w-2.5 text-pink-400 shrink-0" />
+                                                  {reason}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
                                         </div>
-                                      )}
-                                      <span className="absolute -top-1 -left-1 text-[8px] font-bold bg-pink-600 text-white rounded px-1">
-                                        #{track.rank}
+
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => togglePlayDemo(track, e)}
+                                            className={cn(
+                                              "h-7 w-7 rounded-full flex items-center justify-center transition-colors border cursor-pointer",
+                                              isPlaying
+                                                ? "bg-pink-500 text-zinc-950 border-pink-400 shadow-sm"
+                                                : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-700"
+                                            )}
+                                            title={isPlaying ? "Jeda demo lagu" : "Dengarkan demo lagu"}
+                                          >
+                                            {isPlaying ? (
+                                              <Pause className="h-3 w-3 fill-current" />
+                                            ) : (
+                                              <Play className="h-3 w-3 fill-current ml-0.5" />
+                                            )}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="p-2 rounded-lg border border-dashed border-zinc-800 text-xs text-zinc-500 text-center">
+                                        Belum ada lagu dipilih untuk klip ini
+                                      </div>
+                                    )}
+
+                                    {/* Volume Status Pill for this clip */}
+                                    <div className="flex items-center justify-between text-[10px] text-zinc-400 px-1 pt-0.5">
+                                      <span className="flex items-center gap-1 text-zinc-400">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                                        Suara Asli: <strong className="font-mono text-zinc-200">{clipVol.originalVolume}%</strong>
+                                      </span>
+                                      <span className="flex items-center gap-1 text-zinc-400">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-pink-400" />
+                                        Musik: <strong className="font-mono text-pink-300">{clipVol.musicVolume}%</strong>
                                       </span>
                                     </div>
 
-                                    {/* Track Info */}
-                                    <div className="min-w-0">
-                                      <p className="text-xs font-semibold text-zinc-100 truncate">
-                                        {track.name}
-                                      </p>
-                                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                        <span className="text-[10px] text-zinc-400 truncate max-w-[110px]">
-                                          {track.artist}
-                                        </span>
-                                        {track.match_reason ? (
-                                          <span className="text-[9px] text-pink-300 bg-pink-500/20 px-1.5 py-0.5 rounded border border-pink-500/30 flex items-center gap-0.5 truncate">
-                                            <Sparkles className="h-2.5 w-2.5 text-pink-400 shrink-0" />
-                                            {track.match_reason}
-                                          </span>
-                                        ) : (
-                                          <span className="text-[9px] text-zinc-400 bg-zinc-800/80 px-1 py-0.2 rounded border border-zinc-700/50 truncate">
-                                            {track.usage_label}
-                                          </span>
-                                        )}
+                                    {/* Inline Volume Adjuster if expanded */}
+                                    {isEditingVol && (
+                                      <div className="pt-2 border-t border-zinc-800/80 p-2.5 rounded-lg bg-zinc-950/70 space-y-2 animate-in fade-in duration-150">
+                                        <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-300">
+                                          <span>Atur Volume Khusus Clip #{rank}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditingClipVolumeRank(null)}
+                                            className="text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                                          >
+                                            Selesai
+                                          </button>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                          <div>
+                                            <div className="flex justify-between text-[10px] mb-1 text-zinc-400">
+                                              <span>Suara Asli Video</span>
+                                              <span className="font-mono font-bold text-emerald-400">{clipVol.originalVolume}%</span>
+                                            </div>
+                                            <input
+                                              type="range"
+                                              min="0"
+                                              max="100"
+                                              value={clipVol.originalVolume}
+                                              onChange={(e) => handleClipSpecificVolume(rank, "original", Number(e.target.value))}
+                                              className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                                              style={{
+                                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${clipVol.originalVolume}%, #27272a ${clipVol.originalVolume}%, #27272a 100%)`,
+                                              }}
+                                            />
+                                          </div>
+                                          <div>
+                                            <div className="flex justify-between text-[10px] mb-1 text-zinc-400">
+                                              <span>Musik TikTok</span>
+                                              <span className="font-mono font-bold text-pink-400">{clipVol.musicVolume}%</span>
+                                            </div>
+                                            <input
+                                              type="range"
+                                              min="0"
+                                              max="100"
+                                              value={clipVol.musicVolume}
+                                              onChange={(e) => handleClipSpecificVolume(rank, "music", Number(e.target.value))}
+                                              className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                                              style={{
+                                                background: `linear-gradient(to right, #ec4899 0%, #ec4899 ${clipVol.musicVolume}%, #27272a ${clipVol.musicVolume}%, #27272a 100%)`,
+                                              }}
+                                            />
+                                          </div>
+                                        </div>
                                       </div>
-                                    </div>
-                                  </div>
+                                    )}
 
-                                  {/* Play/Pause Demo & Selection */}
-                                  <div className="flex items-center gap-2 shrink-0 ml-2">
-                                    <button
-                                      type="button"
-                                      onClick={(e) => togglePlayDemo(track, e)}
-                                      className={cn(
-                                        "h-7 w-7 rounded-full flex items-center justify-center transition-colors border",
-                                        isPlaying
-                                          ? "bg-pink-500 text-zinc-950 border-pink-400 shadow-sm"
-                                          : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-700"
-                                      )}
-                                      title={isPlaying ? "Jeda demo lagu" : "Dengarkan demo lagu"}
-                                    >
-                                      {isPlaying ? (
-                                        <Pause className="h-3 w-3 fill-current" />
-                                      ) : (
-                                        <Play className="h-3 w-3 fill-current ml-0.5" />
-                                      )}
-                                    </button>
+                                    {/* Inline Song Selector if expanded */}
+                                    {isEditingSong && (
+                                      <div className="pt-2 border-t border-zinc-800/80 p-2.5 rounded-lg bg-zinc-950/80 space-y-2 animate-in fade-in duration-150">
+                                        <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-300">
+                                          <span>Ganti Lagu untuk Clip #{rank}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setActiveClipPickerRank(null)}
+                                            className="text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                                          >
+                                            Batal
+                                          </button>
+                                        </div>
+                                        <div className="relative">
+                                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+                                          <input
+                                            type="text"
+                                            value={clipSearchQuery}
+                                            onChange={(e) => setClipSearchQuery(e.target.value)}
+                                            placeholder="Cari lagu viral atau nama artis..."
+                                            className="w-full rounded-md border border-zinc-800 bg-zinc-900/90 pl-8 pr-3 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-pink-500/50"
+                                          />
+                                        </div>
+                                        <div className="max-h-40 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                                          {(clipSearchQuery.trim()
+                                            ? musicTracks.filter(
+                                                (t) =>
+                                                  t.name.toLowerCase().includes(clipSearchQuery.toLowerCase()) ||
+                                                  t.artist.toLowerCase().includes(clipSearchQuery.toLowerCase())
+                                              )
+                                            : musicTracks
+                                          ).map((t) => {
+                                            const isCurrent = track?.id === t.id;
+                                            const isPlayingThis = playingTrackId === t.id;
 
-                                    <div
-                                      className={cn(
-                                        "h-4 w-4 rounded-full border flex items-center justify-center",
-                                        isSelected
-                                          ? "border-pink-500 bg-pink-500 text-zinc-950"
-                                          : "border-zinc-700"
-                                      )}
-                                    >
-                                      {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-zinc-950" />}
-                                    </div>
+                                            return (
+                                              <div
+                                                key={t.id}
+                                                onClick={() => handleSelectTrackForClip(rank, t)}
+                                                className={cn(
+                                                  "flex items-center justify-between p-1.5 rounded-md border text-left cursor-pointer transition-all",
+                                                  isCurrent
+                                                    ? "border-pink-500/60 bg-pink-500/15"
+                                                    : "border-zinc-800/80 bg-zinc-900/40 hover:border-zinc-700"
+                                                )}
+                                              >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                  {t.thumbnail ? (
+                                                    <img src={t.thumbnail} alt="" className="h-6 w-6 rounded object-cover shrink-0" />
+                                                  ) : (
+                                                    <div className="h-6 w-6 rounded bg-zinc-800 flex items-center justify-center text-pink-400 shrink-0">
+                                                      <Music className="h-3 w-3" />
+                                                    </div>
+                                                  )}
+                                                  <div className="min-w-0">
+                                                    <p className="text-[11px] font-semibold text-zinc-200 truncate">{t.name}</p>
+                                                    <p className="text-[9px] text-zinc-400 truncate">{t.artist}</p>
+                                                  </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => togglePlayDemo(t, e)}
+                                                    className="h-6 w-6 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-zinc-300 shrink-0 cursor-pointer"
+                                                    title="Dengarkan preview lagu"
+                                                  >
+                                                    {isPlayingThis ? (
+                                                      <Pause className="h-2.5 w-2.5 fill-current" />
+                                                    ) : (
+                                                      <Play className="h-2.5 w-2.5 fill-current ml-0.5" />
+                                                    )}
+                                                  </button>
+                                                  <span className="text-[10px] font-medium text-pink-400 hover:underline">
+                                                    Pilih
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
-                                </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* MODE 2: Single Song for All Clips (or Single Clip) */
+                        <div className="space-y-2">
+                          {/* Section Header */}
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <label className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
+                              <Music className="h-3.5 w-3.5 text-pink-400" />
+                              <span>{isBatch ? "Lagu untuk Seluruh Klip" : "Rekomendasi Lagu TikTok"}</span>
+                              {selectedGenre === "RECOMMENDED" && (
+                                <span className="text-[9px] bg-pink-500/10 text-pink-400 border border-pink-500/20 px-1.5 py-0.5 rounded-full">
+                                  Sesuai Video
+                                </span>
+                              )}
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setShuffleSeed((s) => s + 1)}
+                                disabled={loadingMusic}
+                                className="flex items-center gap-1 text-[10px] font-medium text-pink-400 hover:text-pink-300 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-all disabled:opacity-50 cursor-pointer"
+                                title="Pilihkan saran lagu TikTok lainnya yang sesuai"
+                              >
+                                <Shuffle className={cn("h-3 w-3", loadingMusic && "animate-spin")} />
+                                <span>Ganti Saran</span>
+                              </button>
+                              {musicTracks.length > 4 && !musicSearchQuery && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAllMusic(!showAllMusic)}
+                                  className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-0.5 cursor-pointer"
+                                >
+                                  {showAllMusic ? (
+                                    <>
+                                      Tutup <ChevronUp className="h-3 w-3" />
+                                    </>
+                                  ) : (
+                                    <>
+                                      Semua ({musicTracks.length}) <ChevronDown className="h-3 w-3" />
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Genre / Mood Pills */}
+                          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+                            {MUSIC_GENRE_FILTERS.map((filter) => {
+                              const isActive = selectedGenre === filter.id;
+                              return (
+                                <button
+                                  key={filter.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedGenre(filter.id);
+                                    setShuffleSeed(0);
+                                  }}
+                                  className={cn(
+                                    "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all border shrink-0 cursor-pointer",
+                                    isActive
+                                      ? "bg-pink-500/20 border-pink-500/60 text-pink-300 font-semibold shadow-xs"
+                                      : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                                  )}
+                                >
+                                  <filter.Icon className="h-3 w-3 shrink-0" />
+                                  <span>{filter.label}</span>
+                                </button>
                               );
                             })}
                           </div>
-                        )}
-                      </div>
+
+                          {/* Search Input */}
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+                            <input
+                              type="text"
+                              value={musicSearchQuery}
+                              onChange={(e) => setMusicSearchQuery(e.target.value)}
+                              placeholder="Cari lagu atau artis viral TikTok..."
+                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 pl-8 pr-7 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:border-pink-500/50 focus:outline-none focus:ring-1 focus:ring-pink-500/50 transition-all"
+                            />
+                            {musicSearchQuery && (
+                              <button
+                                type="button"
+                                onClick={() => setMusicSearchQuery("")}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Recommendation Context Banner */}
+                          {matchReason && selectedGenre === "RECOMMENDED" && !musicSearchQuery && (
+                            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/20 text-[10px] text-pink-300">
+                              <Sparkles className="h-3.5 w-3.5 text-pink-400 shrink-0" />
+                              <span className="truncate">
+                                <strong className="font-semibold text-pink-200">Saran Khusus Video:</strong> {matchReason}
+                              </span>
+                            </div>
+                          )}
+
+                          {loadingMusic ? (
+                            <div className="flex items-center justify-center gap-2 py-4 text-xs text-zinc-500">
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-pink-400" />
+                              <span>Mencari rekomendasi lagu TikTok yang cocok...</span>
+                            </div>
+                          ) : musicTracks.length === 0 ? (
+                            <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-900/60 text-center text-xs text-zinc-400">
+                              {musicSearchQuery
+                                ? `Tidak ditemukan lagu dengan kata kunci "${musicSearchQuery}"`
+                                : "Sedang memuat data lagu trending..."}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                              {visibleMusicTracks.map((track) => {
+                                const isSelected = selectedTrack?.id === track.id;
+                                const isPlaying = playingTrackId === track.id;
+
+                                return (
+                                  <div
+                                    key={track.id}
+                                    onClick={() => setSelectedTrack(track)}
+                                    className={cn(
+                                      "flex items-center justify-between p-2 rounded-lg border text-left cursor-pointer transition-all duration-150",
+                                      isSelected
+                                        ? "border-pink-500/60 bg-pink-500/10 ring-1 ring-pink-500/30"
+                                        : "border-zinc-800/80 bg-zinc-900/50 hover:border-zinc-700"
+                                    )}
+                                  >
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      {/* Thumbnail & Rank Badge */}
+                                      <div className="relative shrink-0">
+                                        {track.thumbnail ? (
+                                          <img
+                                            src={track.thumbnail}
+                                            alt=""
+                                            className="h-8 w-8 rounded-md object-cover border border-zinc-700 bg-zinc-800"
+                                          />
+                                        ) : (
+                                          <div className="h-8 w-8 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center text-pink-400">
+                                            <Music className="h-4 w-4" />
+                                          </div>
+                                        )}
+                                        <span className="absolute -top-1 -left-1 text-[8px] font-bold bg-pink-600 text-white rounded px-1">
+                                          #{track.rank}
+                                        </span>
+                                      </div>
+
+                                      {/* Track Info */}
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-semibold text-zinc-100 truncate">
+                                          {track.name}
+                                        </p>
+                                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                          <span className="text-[10px] text-zinc-400 truncate max-w-[110px]">
+                                            {track.artist}
+                                          </span>
+                                          {track.match_reason ? (
+                                            <span className="text-[9px] text-pink-300 bg-pink-500/20 px-1.5 py-0.5 rounded border border-pink-500/30 flex items-center gap-0.5 truncate">
+                                              <Sparkles className="h-2.5 w-2.5 text-pink-400 shrink-0" />
+                                              {track.match_reason}
+                                            </span>
+                                          ) : (
+                                            <span className="text-[9px] text-zinc-400 bg-zinc-800/80 px-1 py-0.2 rounded border border-zinc-700/50 truncate">
+                                              {track.usage_label}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Play/Pause Demo & Selection */}
+                                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => togglePlayDemo(track, e)}
+                                        className={cn(
+                                          "h-7 w-7 rounded-full flex items-center justify-center transition-colors border cursor-pointer",
+                                          isPlaying
+                                            ? "bg-pink-500 text-zinc-950 border-pink-400 shadow-sm"
+                                            : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-700"
+                                        )}
+                                        title={isPlaying ? "Jeda demo lagu" : "Dengarkan demo lagu"}
+                                      >
+                                        {isPlaying ? (
+                                          <Pause className="h-3 w-3 fill-current" />
+                                        ) : (
+                                          <Play className="h-3 w-3 fill-current ml-0.5" />
+                                        )}
+                                      </button>
+
+                                      <div
+                                        className={cn(
+                                          "h-4 w-4 rounded-full border flex items-center justify-center",
+                                          isSelected
+                                            ? "border-pink-500 bg-pink-500 text-zinc-950"
+                                            : "border-zinc-700"
+                                        )}
+                                      >
+                                        {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-zinc-950" />}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Dual Volume Controls with Matching Selector Style */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80">
@@ -1311,7 +2087,7 @@ export function ScheduleModal({
                             />
                             <p className="text-[10px] text-zinc-500">
                               {musicVolume === 0
-                                ? "Volume 0% (Mute) — Musik dimatikan, video diposting tanpa lagu TikTok."
+                                ? "Volume 0% (Mute) — Lagu tetap disematkan untuk discovery, tetapi audionya tidak terdengar."
                                 : `Musik akan dimixing di latar belakang dengan volume ${musicVolume}%.`}
                             </p>
                           </div>
@@ -1348,13 +2124,19 @@ export function ScheduleModal({
             {selectedAccountIds.length > 0 ? (
               <span>
                 <strong className="text-zinc-100">{selectedAccountIds.length}</strong> akun dipilih
-                {autoPickMusic && selectedTrack && (
+                {autoPickMusic && (
                   <span className="ml-2 font-medium text-[11px]">
-                    {musicVolume === 0 ? (
-                      <span className="text-zinc-500">Lagu: {selectedTrack.name} (Muted/Nonaktif)</span>
-                    ) : (
-                      <span className="text-pink-400">Lagu: {selectedTrack.name} ({musicVolume}%)</span>
-                    )}
+                    {isBatch && batchMusicMode === "ai_distinct" ? (
+                      <span className="text-pink-400">
+                        Lagu: AI Berbeda Tiap Klip ({Object.keys(clipMusicMap).length}/{clipRanks?.length || 0}) • Vol {musicVolume}%
+                      </span>
+                    ) : selectedTrack ? (
+                      musicVolume === 0 ? (
+                        <span className="text-zinc-500">Lagu: {selectedTrack.name} (Disematkan, audio mute)</span>
+                      ) : (
+                        <span className="text-pink-400">Lagu: {selectedTrack.name} ({musicVolume}%)</span>
+                      )
+                    ) : null}
                   </span>
                 )}
               </span>
@@ -1380,14 +2162,33 @@ export function ScheduleModal({
               disabled={
                 !canPublish ||
                 selectedAccountIds.length === 0 ||
-                (scheduleMode === "later" && (!scheduleDate || !scheduleTime)) ||
+                ((!isBatch || batchScheduleMode === "same") && scheduleMode === "later" && (!scheduleDate || !scheduleTime)) ||
+                (isBatch && batchScheduleMode === "custom" && (customScheduleTimes.length !== (clipRanks?.length || 0) || customScheduleTimes.some((t) => !t))) ||
                 (status !== null && !status.repliz_configured)
               }
               className="bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-semibold px-4"
-              icon={scheduleMode === "now" ? <Send className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
+              icon={
+                isBatch
+                  ? batchScheduleMode === "ai"
+                    ? <Sparkles className="h-3.5 w-3.5" />
+                    : batchScheduleMode === "custom" || scheduleMode === "later"
+                    ? <Clock className="h-3.5 w-3.5" />
+                    : <Send className="h-3.5 w-3.5" />
+                  : scheduleMode === "now"
+                  ? <Send className="h-3.5 w-3.5" />
+                  : <Clock className="h-3.5 w-3.5" />
+              }
             >
               {posting
-                ? `Memproses (${selectedAccountIds.length} akun)...`
+                ? `Memproses ${isBatch ? `${clipRanks?.length || 0} klip` : "video"} (${selectedAccountIds.length} akun)...`
+                : isBatch
+                ? batchScheduleMode === "ai"
+                  ? `Jadwalkan ${clipRanks?.length || 0} Klip via AI (${selectedAccountIds.length} Akun)`
+                  : batchScheduleMode === "custom"
+                  ? `Jadwalkan ${clipRanks?.length || 0} Klip Custom (${selectedAccountIds.length} Akun)`
+                  : scheduleMode === "now"
+                  ? `Post ${clipRanks?.length || 0} Klip Sekarang (${selectedAccountIds.length} Akun)`
+                  : `Jadwalkan ${clipRanks?.length || 0} Klip (${selectedAccountIds.length} Akun)`
                 : scheduleMode === "now"
                 ? selectedAccountIds.length > 1
                   ? `Post ke ${selectedAccountIds.length} Akun`

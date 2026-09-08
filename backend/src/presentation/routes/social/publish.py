@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -54,6 +54,37 @@ class PublishRequest(BaseModel):
     mentions: List[str] = Field(default_factory=list)
     targetCountries: List[str] = Field(default_factory=list)
     scheduleAt: str  # ISO 8601 UTC string
+
+
+class BatchPublishRequest(PublishRequest):
+    clipRanks: List[int] = Field(min_length=1, max_length=50)
+    scheduleMode: str = "same"  # same, ai, custom
+    customScheduleTimes: List[str] = Field(default_factory=list)
+    scheduleAt: str = ""
+    clipMusicConfigs: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def calculate_batch_schedule_times(
+    clip_count: int,
+    mode: str,
+    schedule_at: str = "",
+    custom_schedule_times: Optional[List[str]] = None,
+) -> List[str]:
+    """Resolve one Repliz ISO timestamp per selected clip."""
+    mode = (mode or "same").lower().strip()
+    if mode == "custom":
+        values = custom_schedule_times or []
+        if len(values) != clip_count:
+            raise HTTPException(status_code=400, detail="Custom schedule harus berisi satu waktu untuk setiap clip.")
+        return values
+    if mode == "ai":
+        from src.infrastructure.social_auto_post_service import SocialAutoPostService
+        return [value.strftime("%Y-%m-%dT%H:%M:%S.000Z") for value in SocialAutoPostService().calculate_ai_schedule_times(clip_count)]
+    if not schedule_at or not schedule_at.strip():
+        import datetime as dt
+        min_future = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=2)
+        schedule_at = min_future.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return [schedule_at] * clip_count
 
 
 async def mix_video_with_music(
@@ -224,6 +255,29 @@ def get_supported_post_type(requested_type: Optional[str], platform: str = "") -
     return req or "video"
 
 
+def _is_user_superadmin(user: Any) -> bool:
+    if not user:
+        return False
+    if getattr(user, "is_superadmin", False):
+        return True
+    if isinstance(user, dict):
+        return bool(user.get("is_superadmin") or user.get("id") in ("admin", 1) or user.get("role") == "admin")
+    return False
+
+
+def _get_user_id(user: Any) -> Optional[int]:
+    if not user:
+        return None
+    uid = getattr(user, "id", None)
+    if uid is None and isinstance(user, dict):
+        uid = user.get("id")
+    if isinstance(uid, int):
+        return uid
+    if isinstance(uid, str) and uid.isdigit():
+        return int(uid)
+    return None
+
+
 @publish_router.post("")
 async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     """Upload clip or AI generated video to Google Drive once and schedule posts across all selected accounts via Repliz."""
@@ -241,6 +295,24 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             status_code=400,
             detail="Pilih minimal satu akun media sosial untuk posting.",
         )
+
+    if not _is_user_superadmin(_user):
+        uid = _get_user_id(_user)
+        if uid is not None:
+            from sqlalchemy import select
+            from src.infrastructure.database import SocialAccountModel, async_session
+
+            requested_ids = set(target_account_ids)
+            async with async_session() as session:
+                result = await session.execute(
+                    select(SocialAccountModel.account_id).where(
+                        SocialAccountModel.user_id == uid,
+                        SocialAccountModel.account_id.in_(requested_ids),
+                    )
+                )
+                owned_ids = {row[0] for row in result.fetchall()}
+            if requested_ids != owned_ids:
+                raise HTTPException(status_code=403, detail="Ada akun sosial yang bukan milik user ini.")
 
     # 2. Check credentials
     from src.infrastructure.social_compliance import resolve_public_media_base_url
@@ -598,6 +670,90 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         "errors": failed_schedules,
         "count": len(successful_schedules),
         "total": len(target_account_ids),
+    }
+
+
+@publish_router.post("/batch")
+async def publish_clip_batch(body: BatchPublishRequest, user=Depends(get_current_user)):
+    """Publish selected clips to selected user-owned accounts with per-clip timing."""
+    ranks = list(dict.fromkeys(body.clipRanks))
+    times = calculate_batch_schedule_times(
+        len(ranks), body.scheduleMode, body.scheduleAt, body.customScheduleTimes
+    )
+
+    if not _is_user_superadmin(user):
+        uid = _get_user_id(user)
+        if uid is not None:
+            from sqlalchemy import select
+            from src.infrastructure.database import SocialAccountModel, async_session
+
+            requested_ids = set(body.accountIds or ([body.accountId] if body.accountId else []))
+            async with async_session() as session:
+                result = await session.execute(
+                    select(SocialAccountModel.account_id).where(
+                        SocialAccountModel.user_id == uid,
+                        SocialAccountModel.account_id.in_(requested_ids),
+                    )
+                )
+                owned_ids = {row[0] for row in result.fetchall()}
+            if requested_ids != owned_ids:
+                raise HTTPException(status_code=403, detail="Ada akun sosial yang bukan milik user ini.")
+
+    results = []
+    for rank, schedule_at in zip(ranks, times):
+        item_data = body.model_dump(exclude={"clipRanks", "scheduleMode", "customScheduleTimes", "clipMusicConfigs"})
+        item_data.update({"clipRank": rank, "scheduleAt": schedule_at})
+
+        # Apply per-clip music and volume override if provided
+        rank_key = str(rank)
+        if body.clipMusicConfigs and rank_key in body.clipMusicConfigs:
+            conf = body.clipMusicConfigs[rank_key]
+            if "music" in conf:
+                item_data["music"] = conf["music"]
+                item_data["isAutoAddMusic"] = bool(conf["music"])
+            if "musicVolume" in conf and conf["musicVolume"] is not None:
+                item_data["musicVolume"] = float(conf["musicVolume"])
+            if "originalVolume" in conf and conf["originalVolume"] is not None:
+                item_data["originalVolume"] = float(conf["originalVolume"])
+
+        try:
+            result = await publish_clip(PublishRequest(**item_data), _user=user)
+            results.append({"clipRank": rank, "success": True, "result": result})
+        except HTTPException as exc:
+            results.append({"clipRank": rank, "success": False, "error": str(exc.detail)})
+
+    success_count = sum(1 for item in results if item["success"])
+    if success_count == 0:
+        raise HTTPException(status_code=502, detail="Semua clip gagal dijadwalkan.")
+    return {
+        "success": True,
+        "clips": results,
+        "clipCount": success_count,
+        "scheduleCount": sum(item.get("result", {}).get("count", 0) for item in results if item["success"]),
+    }
+
+
+@publish_router.get("/batch/ai-times")
+async def get_ai_schedule_times(
+    count: int = Query(..., ge=1, le=50, description="Jumlah clip yang akan dijadwalkan"),
+    _user=Depends(get_current_user),
+):
+    """Preview smart AI scheduled posting timestamps for batch clips."""
+    from src.infrastructure.social_auto_post_service import SocialAutoPostService
+    service = SocialAutoPostService()
+    times = service.calculate_ai_schedule_times(count)
+    return {
+        "count": len(times),
+        "times": [
+            {
+                "index": i + 1,
+                "utc": t.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                "wib": t.astimezone(service.WIB).strftime("%Y-%m-%d %H:%M:%S WIB"),
+                "time_label": t.astimezone(service.WIB).strftime("%H:%M WIB"),
+                "date_label": t.astimezone(service.WIB).strftime("%d %b %Y"),
+            }
+            for i, t in enumerate(times)
+        ],
     }
 
 

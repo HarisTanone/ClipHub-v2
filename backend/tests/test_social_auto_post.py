@@ -15,6 +15,69 @@ from src.infrastructure.telegram_service import TelegramService
 
 class TestSocialAutoPost(unittest.TestCase):
 
+    def test_batch_same_time_repeats_one_timestamp(self):
+        from src.presentation.routes.social.publish import calculate_batch_schedule_times
+
+        times = calculate_batch_schedule_times(
+            clip_count=5,
+            mode="same",
+            schedule_at="2026-09-10T12:00:00.000Z",
+        )
+        self.assertEqual(times, ["2026-09-10T12:00:00.000Z"] * 5)
+
+    def test_batch_same_time_defaults_to_immediate_future(self):
+        from src.presentation.routes.social.publish import calculate_batch_schedule_times
+
+        times = calculate_batch_schedule_times(
+            clip_count=4,
+            mode="same",
+            schedule_at="",
+        )
+        self.assertEqual(len(times), 4)
+        self.assertTrue(all(t.endswith(".000Z") for t in times))
+        self.assertEqual(len(set(times)), 1)
+
+    def test_batch_ai_mode_returns_n_timestamps(self):
+        from src.presentation.routes.social.publish import calculate_batch_schedule_times
+
+        times = calculate_batch_schedule_times(clip_count=5, mode="ai")
+        self.assertEqual(len(times), 5)
+        self.assertTrue(all(t.endswith(".000Z") for t in times))
+
+    def test_batch_custom_requires_one_time_per_clip(self):
+        from fastapi import HTTPException
+        from src.presentation.routes.social.publish import calculate_batch_schedule_times
+
+        with self.assertRaises(HTTPException):
+            calculate_batch_schedule_times(
+                clip_count=3,
+                mode="custom",
+                custom_schedule_times=["2026-09-10T12:00:00.000Z"],
+            )
+
+        valid_custom = [
+            "2026-09-10T12:00:00.000Z",
+            "2026-09-10T14:00:00.000Z",
+            "2026-09-10T16:00:00.000Z",
+        ]
+        times = calculate_batch_schedule_times(
+            clip_count=3,
+            mode="custom",
+            custom_schedule_times=valid_custom,
+        )
+        self.assertEqual(times, valid_custom)
+
+    def test_get_ai_schedule_times_endpoint(self):
+        from src.presentation.routes.social.publish import get_ai_schedule_times
+        import asyncio
+
+        data = asyncio.run(get_ai_schedule_times(count=3, _user={"id": 1, "is_superadmin": True}))
+        self.assertEqual(data["count"], 3)
+        self.assertEqual(len(data["times"]), 3)
+        self.assertEqual(data["times"][0]["index"], 1)
+        self.assertTrue(data["times"][0]["time_label"].endswith("WIB"))
+
+
     def setUp(self):
         self.service = SocialAutoPostService()
         self.tg_service = TelegramService()

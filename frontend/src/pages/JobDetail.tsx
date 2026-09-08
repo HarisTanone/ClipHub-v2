@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo, Lock, LoaderCircle, Download, Copy, Check, Zap } from "lucide-react";
+import { ArrowLeft, Play, XCircle, ExternalLink, Clock, User, Eye, Sparkles, Layers, Film, Scissors, Radio, CheckCircle, AlertTriangle, Activity, RefreshCw, FileVideo, Lock, LoaderCircle, Download, Copy, Check, Zap, Send, CheckSquare, Square } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/Toast";
 import { jobs, preview, type JobDetailResponse, type VideoPreview, type ClipInfo } from "@/lib/api";
 import { useProgress } from "@/hooks/useProgress";
 import { formatDuration, formatDate, cn } from "@/lib/utils";
+import { ScheduleModal } from "@/components/ScheduleModal";
 
 const PIPELINE_STEPS = [
   { name: "validate", label: "Validating URL" },
@@ -40,6 +41,8 @@ export function JobDetail() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [videoMeta, setVideoMeta] = useState<VideoPreview | null>(null);
+  const [selectedClipRanks, setSelectedClipRanks] = useState<number[]>([]);
+  const [batchPublishOpen, setBatchPublishOpen] = useState(false);
 
   const isTerminal = data ? ["completed", "failed", "timeout"].includes(data.status) : false;
   const { progress } = useProgress(jobId, !isTerminal);
@@ -142,6 +145,7 @@ export function JobDetail() {
   const createdDate = data.created_at ? formatDate(data.created_at).split(",")[0] : "-";
   const isUploadSource = data.source_type === "upload";
   const sourceLabel = data.source_label || data.youtube_url;
+  const readyClipRanks = (data.clips || []).filter((clip) => clip.has_final).map((clip) => clip.rank);
 
   return (
     <div className="h-full min-h-0 overflow-y-auto space-y-3">
@@ -356,7 +360,35 @@ export function JobDetail() {
                 )}
               </p>
             </div>
-            <Badge variant="default" size="sm">{data.target_aspect_ratio || "9:16"}</Badge>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedClipRanks(selectedClipRanks.length === readyClipRanks.length && readyClipRanks.length > 0 ? [] : readyClipRanks)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900/80 px-2.5 py-1 text-[11px] font-medium text-zinc-300 hover:border-zinc-600 hover:text-zinc-100 transition-colors"
+              >
+                {selectedClipRanks.length === readyClipRanks.length && readyClipRanks.length > 0 ? (
+                  <>
+                    <Square className="h-3 w-3 text-emerald-400" />
+                    <span>Batalkan Semua</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckSquare className="h-3 w-3 text-emerald-400" />
+                    <span>Pilih Semua ({readyClipRanks.length})</span>
+                  </>
+                )}
+              </button>
+              <Button
+                size="xs"
+                variant="primary"
+                disabled={selectedClipRanks.length === 0}
+                onClick={() => setBatchPublishOpen(true)}
+                icon={<Send className="h-3 w-3" />}
+              >
+                Bagikan ({selectedClipRanks.length})
+              </Button>
+              <Badge variant="default" size="sm">{data.target_aspect_ratio || "9:16"}</Badge>
+            </div>
           </div>
           {/* Final output always 9:16 — medium phone cards, horizontal scroll */}
           <div className="flex gap-2 overflow-x-auto p-2.5 snap-x mobile-h-scroll">
@@ -369,11 +401,58 @@ export function JobDetail() {
                   activeClip={progress?.activeClip}
                   clipProgress={progress?.clipsProgress?.[String(clip.rank)]}
                   isJobTerminal={isTerminal}
+                  selected={selectedClipRanks.includes(clip.rank)}
+                  isSelectionMode={selectedClipRanks.length > 0}
+                  onToggleSelect={() => setSelectedClipRanks((current) => current.includes(clip.rank) ? current.filter((rank) => rank !== clip.rank) : [...current, clip.rank].sort((a, b) => a - b))}
                 />
               </div>
             ))}
           </div>
         </Card>
+      )}
+
+      {/* Floating selection bar when clips are selected */}
+      {selectedClipRanks.length > 0 && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-2xl border border-emerald-500/40 bg-zinc-950/95 px-4 py-2.5 shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <div className="flex items-center gap-2 pr-2 border-r border-zinc-800">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold">
+              {selectedClipRanks.length}
+            </span>
+            <span className="text-xs font-medium text-zinc-200">
+              video dipilih dari {readyClipRanks.length}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedClipRanks([])}
+              className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Batalkan
+            </button>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => setBatchPublishOpen(true)}
+              icon={<Send className="h-3.5 w-3.5" />}
+            >
+              Bagikan {selectedClipRanks.length} Video
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {batchPublishOpen && selectedClipRanks.length > 0 && (
+        <ScheduleModal
+          open
+          onClose={() => setBatchPublishOpen(false)}
+          jobId={data.job_id}
+          clipRank={selectedClipRanks[0]}
+          clipRanks={selectedClipRanks}
+          clips={data.clips}
+          defaultCaption={`${selectedClipRanks.length} video klip terpilih siap diposting`}
+          itemLabel={`${selectedClipRanks.length} clips`}
+        />
       )}
 
       {isTerminal && data.clips_total === 0 && data.status === "completed" && (
@@ -427,6 +506,9 @@ function ClipCard({
   activeClip,
   clipProgress,
   isJobTerminal,
+  selected,
+  isSelectionMode,
+  onToggleSelect,
 }: {
   jobId: string;
   clip: ClipInfo;
@@ -434,6 +516,9 @@ function ClipCard({
   activeClip?: { rank: number; total: number; stage: string; eta_seconds: number | null } | null;
   clipProgress?: { status: string; stage: string; eta_seconds: number | null };
   isJobTerminal?: boolean;
+  selected?: boolean;
+  isSelectionMode?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const toast = useToast();
   const [copied, setCopied] = useState(false);
@@ -470,14 +555,35 @@ function ClipCard({
 
   const card = (
     <Card className={cn(
-        "p-0 overflow-hidden h-full flex flex-col rounded-md transition-colors",
-        clip.has_final
-          ? "hover:border-emerald-500/30 hover:bg-zinc-900/80 cursor-pointer"
+        "p-0 overflow-hidden h-full flex flex-col rounded-lg transition-all duration-200",
+        selected
+          ? "border-emerald-500 bg-emerald-950/25 ring-2 ring-emerald-500/60 shadow-[0_0_16px_rgba(16,185,129,0.16)]"
+          : clip.has_final
+          ? "border-zinc-800/80 hover:border-emerald-500/40 hover:bg-zinc-900/80 cursor-pointer"
           : isClipProcessing
           ? "border-amber-500/40 bg-zinc-950/60 shadow-[0_0_12px_rgba(245,158,11,0.08)]"
           : "border-zinc-800/70 bg-zinc-950/45 cursor-not-allowed"
       )}>
         <div className="bg-zinc-950 relative overflow-hidden aspect-[9/16]">
+          {clip.has_final && onToggleSelect && (
+            <button
+              type="button"
+              aria-label={`Pilih clip #${clip.rank}`}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onToggleSelect();
+              }}
+              className={cn(
+                "absolute left-1.5 top-7 z-20 flex h-5 w-5 items-center justify-center rounded-md border transition-all duration-150 shadow-md",
+                selected
+                  ? "border-emerald-400 bg-emerald-500 text-zinc-950 ring-1 ring-emerald-300 scale-105"
+                  : "border-zinc-500/80 bg-black/75 text-transparent hover:border-emerald-400 hover:text-emerald-400/50 hover:bg-black/90"
+              )}
+            >
+              <Check className="h-3.5 w-3.5 stroke-[3]" />
+            </button>
+          )}
           {finalUrl ? (
             <video
               src={finalUrl}
@@ -573,9 +679,20 @@ function ClipCard({
   );
 
   return clip.has_final ? (
-    <Link to={`/jobs/${jobId}/clips/${clip.rank}`} className="group block h-full">
-      {card}
-    </Link>
+    isSelectionMode ? (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onToggleSelect}
+        className="group block h-full select-none cursor-pointer"
+      >
+        {card}
+      </div>
+    ) : (
+      <Link to={`/jobs/${jobId}/clips/${clip.rank}`} className="group block h-full">
+        {card}
+      </Link>
+    )
   ) : (
     <div className="block h-full" aria-disabled="true">
       {card}
