@@ -2163,7 +2163,8 @@ async def restyle_clip(
             if hook_render_engine in ("ffmpeg", "skia") and hook_text:
                 tmp_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-hook.mp4"
                 try:
-                    if hook_render_engine == "skia" or str(hook_style).startswith("skia_"):
+                    from src.infrastructure.unified_ffmpeg_compositor import GRAPHICAL_CARD_HOOKS
+                    if hook_render_engine == "skia" or str(hook_style).startswith("skia_") or hook_style in GRAPHICAL_CARD_HOOKS:
                         from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
                         fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
                         skia_hook = SkiaHookRenderer(font_dir=fonts_dir)

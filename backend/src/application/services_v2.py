@@ -2501,23 +2501,28 @@ class V2PipelineService:
                         )
                     else:
                         message = f"clip {clip.rank}: {result.error_message or 'unknown Remotion error'}"
-                        logger.warning(f"[{job_id}] Remotion failed {message}; falling back to direct FFmpeg rendering for clip {clip.rank}")
+                        from src.infrastructure.unified_ffmpeg_compositor import GRAPHICAL_CARD_HOOKS
+                        is_card = (hook_style in GRAPHICAL_CARD_HOOKS) or str(hook_style).startswith("skia_")
+                        fallback_hook_eng = "skia" if is_card else ("ffmpeg" if hook_eng == "remotion" else hook_eng)
                         await self._render_via_direct_engines(
                             job, job_id, [clip], clips_with_words,
                             output_dir, trim_results,
                             hook_style_config, subtitle_style_config,
-                            hook_engine="ffmpeg" if hook_eng == "remotion" else hook_eng,
+                            hook_engine=fallback_hook_eng,
                             sub_engine="ffmpeg" if sub_eng == "remotion" else sub_eng,
                         )
                 except Exception as e:
                     message = f"clip {clip.rank}: {e}"
                     logger.warning(f"[{job_id}] Remotion error {message}; falling back to direct FFmpeg rendering for clip {clip.rank}")
                     try:
+                        from src.infrastructure.unified_ffmpeg_compositor import GRAPHICAL_CARD_HOOKS
+                        is_card = (hook_style in GRAPHICAL_CARD_HOOKS) or str(hook_style).startswith("skia_")
+                        fallback_hook_eng = "skia" if is_card else ("ffmpeg" if hook_eng == "remotion" else hook_eng)
                         await self._render_via_direct_engines(
                             job, job_id, [clip], clips_with_words,
                             output_dir, trim_results,
                             hook_style_config, subtitle_style_config,
-                            hook_engine="ffmpeg" if hook_eng == "remotion" else hook_eng,
+                            hook_engine=fallback_hook_eng,
                             sub_engine="ffmpeg" if sub_eng == "remotion" else sub_eng,
                         )
                     except Exception as direct_err:
@@ -2687,7 +2692,8 @@ class V2PipelineService:
             hooked_path = f"{output_dir}/clip_{clip.rank:02d}_hooked.mp4"
             if clip.hook:
                 try:
-                    if hook_engine == "skia" or str(hook_style).startswith("skia_"):
+                    from src.infrastructure.unified_ffmpeg_compositor import GRAPHICAL_CARD_HOOKS
+                    if hook_engine == "skia" or str(hook_style).startswith("skia_") or hook_style in GRAPHICAL_CARD_HOOKS:
                         from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
                         skia_hook = SkiaHookRenderer(font_dir=fonts_dir)
                         await skia_hook.render_hook(

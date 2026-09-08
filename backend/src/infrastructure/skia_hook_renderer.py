@@ -356,9 +356,12 @@ SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
         "bg_padding_x": 36,
         "bg_padding_y": 22,
         "badge_enabled": True,
-        "badge_text": "NEWS",
+        "badge_text": "INTERNASIONAL",
         "badge_bg": "#DC2626",
         "badge_color": "#FFFFFF",
+        "line_color": "#DC2626",
+        "footer_enabled": True,
+        "footer_text": "READ MORE AT chatgpt.com",
         "position_y": 46,
         "uppercase": True,
         "duration": 3.0,
@@ -1190,8 +1193,23 @@ class SkiaHookRenderer:
             if style_config.get("uppercase") is not None:
                 cfg["uppercase"] = bool(style_config.get("uppercase"))
 
+            if style_config.get("footerEnabled") is not None:
+                cfg["footer_enabled"] = bool(style_config.get("footerEnabled"))
+            elif style_config.get("footer_enabled") is not None:
+                cfg["footer_enabled"] = bool(style_config.get("footer_enabled"))
+            if style_config.get("footerText"):
+                cfg["footer_text"] = str(style_config.get("footerText"))
+            elif style_config.get("footer_text"):
+                cfg["footer_text"] = str(style_config.get("footer_text"))
+            elif style_config.get("badgeSubText"):
+                cfg["footer_text"] = str(style_config.get("badgeSubText"))
+            elif style_config.get("badge_sub_text"):
+                cfg["footer_text"] = str(style_config.get("badge_sub_text"))
+
         # Format text
         display_text = hook_text.strip()
+        if clean_key == "news_portal_pantau":
+            cfg["uppercase"] = True
         if cfg.get("uppercase", False):
             display_text = display_text.upper()
 
@@ -1473,43 +1491,103 @@ class SkiaHookRenderer:
         # 3. SPECIAL CASE: News Portal Notch (`news_portal_pantau`)
         # ─────────────────────────────────────────────────────────────────────
         if clean_key == "news_portal_pantau":
-            pad_x = 36
-            pad_y = 24
-            card_w = min(int(self._width * 0.90), max(total_text_width + pad_x * 2, 500))
-            card_h = total_text_height + pad_y * 2 + 20
+            # Match Remotion News Portal Notch: 88% width, 40px top pad, 44px side pad, 34px bottom pad
+            card_w = int(self._width * 0.88)
             card_x = (self._width - card_w) // 2
-            card_y = center_y - card_h // 2
+            pad_x = 44
+            pad_top = 40
+            pad_bottom = 34
             accent_col = self._hex_to_rgba(cfg.get("line_color", "#DC2626"), 1.0)
+            card_bg = self._hex_to_rgba(cfg.get("box_color", cfg.get("bg_color", "#FFFFFF")), 1.0)
 
-            # White Card with Red Bottom Border
-            draw.rounded_rectangle([card_x, card_y + 8, card_x + card_w, card_y + card_h + 8], radius=14, fill=(0, 0, 0, 160))
-            draw.rounded_rectangle([card_x, card_y, card_x + card_w, card_y + card_h], radius=14, fill=(255, 255, 255, 255))
-            draw.rectangle([card_x, card_y + card_h - 6, card_x + card_w, card_y + card_h], fill=accent_col)
-
-            # Red Category Tag at top-left
-            if cfg.get("badge_enabled", True):
-                cat_text = str(cfg.get("badge_text", "NEWS"))
+            # Category badge pill
+            badge_enabled = cfg.get("badge_enabled", True)
+            if badge_enabled:
+                cat_text = str(cfg.get("badge_text", "INTERNASIONAL")).upper()
                 cat_font = self._resolve_font("Inter", "900", 22)
                 cat_bbox = cat_font.getbbox(cat_text)
-                cat_w = (cat_bbox[2] - cat_bbox[0]) + 24
-                cat_h = 32
-                draw.rounded_rectangle([card_x + 20, card_y + 16, card_x + 20 + cat_w, card_y + 16 + cat_h], radius=4, fill=accent_col)
-                draw.text((card_x + 32, card_y + 20), cat_text, font=cat_font, fill=(255, 255, 255, 255))
+                cat_w = (cat_bbox[2] - cat_bbox[0]) + 32
+                cat_h = 36
+                badge_total_h = cat_h + 18
+            else:
+                badge_total_h = 0
 
-            # Speech bubble triangular notch at bottom-right
-            notch_w = 26
-            notch_h = 16
-            notch_x = card_x + card_w - 64
-            draw.polygon([(notch_x, card_y + card_h), (notch_x + notch_w, card_y + card_h), (notch_x + notch_w // 2, card_y + card_h + notch_h)], fill=accent_col)
+            # Headline typography and text wrapping to card content width
+            headline_size = int(cfg.get("font_size", 54))
+            headline_font = self._resolve_font(cfg.get("font_family", "Montserrat"), cfg.get("font_weight", "900"), headline_size)
+            max_headline_w = card_w - pad_x * 2
+            card_lines = self._wrap_text(display_text.upper(), headline_font, max_headline_w)
+            if not card_lines:
+                card_lines = [display_text.upper()]
+            headline_lh = int(headline_size * 1.20)
+            headline_total_h = headline_lh * len(card_lines)
 
-            # Text
+            # Footer label
+            footer_enabled = cfg.get("footer_enabled", True)
+            footer_text = str(cfg.get("footer_text") or cfg.get("badge_sub_text") or "READ MORE AT chatgpt.com").upper()
+            footer_font = self._resolve_font("Inter", "800", 16)
+            if footer_enabled:
+                footer_total_h = 22 + 14 + 24
+            else:
+                footer_total_h = 0
+
+            card_h = pad_top + badge_total_h + headline_total_h + footer_total_h + pad_bottom
+            card_y = center_y - card_h // 2
+
+            # Multi-layer smooth drop shadow
+            for off, op in [(18, 30), (12, 50), (8, 80), (4, 120)]:
+                draw.rounded_rectangle(
+                    [card_x, card_y + off, card_x + card_w, card_y + card_h + off],
+                    radius=16,
+                    fill=(0, 0, 0, op)
+                )
+
+            # Main white card with rounded top corners
+            draw.rounded_rectangle([card_x, card_y, card_x + card_w, card_y + card_h], radius=16, fill=card_bg)
+
+            # Red accent bottom border
+            draw.rectangle([card_x, card_y + card_h - 6, card_x + card_w, card_y + card_h], fill=accent_col)
+
+            # Speech bubble triangular notch at bottom-right pointing down
+            notch_w = 32
+            notch_h = 22
+            notch_x = card_x + card_w - 48 - notch_w
+            # Notch shadow
+            draw.polygon([
+                (notch_x, card_y + card_h + 4),
+                (notch_x + notch_w, card_y + card_h + 4),
+                (notch_x + notch_w // 2, card_y + card_h + notch_h + 4)
+            ], fill=(0, 0, 0, 70))
+            # Notch triangle
+            draw.polygon([
+                (notch_x, card_y + card_h),
+                (notch_x + notch_w, card_y + card_h),
+                (notch_x + notch_w // 2, card_y + card_h + notch_h)
+            ], fill=accent_col)
+
+            cur_y = card_y + pad_top
+
+            # Draw Category Pill Tag
+            if badge_enabled:
+                badge_bg = self._hex_to_rgba(cfg.get("badge_bg", cfg.get("line_color", "#DC2626")), 1.0)
+                badge_fg = self._hex_to_rgba(cfg.get("badge_color", "#FFFFFF"), 1.0)
+                draw.rounded_rectangle([card_x + pad_x, cur_y, card_x + pad_x + cat_w, cur_y + cat_h], radius=4, fill=badge_bg)
+                text_y_offset = (cat_h - (cat_bbox[3] - cat_bbox[1])) // 2 - 2
+                draw.text((card_x + pad_x + 16, cur_y + text_y_offset), cat_text, font=cat_font, fill=badge_fg)
+                cur_y += badge_total_h
+
+            # Draw Main News Headline (Left Aligned)
             txt_color = self._hex_to_rgba(cfg.get("text_color", "#09090B"), 1.0)
-            text_origin_y = card_y + pad_y + (30 if cfg.get("badge_enabled", True) else 0)
-            for i, line in enumerate(lines):
-                lw = line_widths[i]
-                lx = card_x + 24
-                ly = text_origin_y + i * line_height
-                draw.text((lx, ly), line, font=font, fill=txt_color)
+            for i, line in enumerate(card_lines):
+                draw.text((card_x + pad_x, cur_y + i * headline_lh), line, font=headline_font, fill=txt_color)
+            cur_y += headline_total_h
+
+            # Draw Brand Footer Bar
+            if footer_enabled:
+                divider_y = cur_y + 22
+                draw.line([card_x + pad_x, divider_y, card_x + card_w - pad_x, divider_y], fill=(0, 0, 0, 24), width=1)
+                footer_col = (82, 82, 91, 255)  # #52525B
+                draw.text((card_x + pad_x, divider_y + 14), footer_text, font=footer_font, fill=footer_col)
 
             return frame
 

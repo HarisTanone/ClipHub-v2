@@ -31,6 +31,18 @@ from src.infrastructure.cta_renderer import (
 
 logger = logging.getLogger(__name__)
 
+# Graphical card-style hooks that require high-fidelity rendering (cards, badges, notches)
+GRAPHICAL_CARD_HOOKS = {
+    "news_portal_pantau",
+    "news_viralin_badge",
+    "news_offset_box",
+    "brutalist_bracket",
+    "quote_strip_tape",
+    "paper_clip_scrap",
+    "trending_radar",
+    "news_breaking_live",
+}
+
 # Fallback hook preset styles
 HOOK_STYLES = {
     "paper_clip_scrap": {
@@ -74,7 +86,7 @@ HOOK_STYLES = {
         "font_pref": ["Montserrat-Black", "Montserrat-Bold"],
     },
     "news_portal_pantau": {
-        "fontsize": 62,
+        "fontsize": 54,
         "fontcolor": "#09090B",
         "borderw": 0,
         "bordercolor": "black",
@@ -82,6 +94,9 @@ HOOK_STYLES = {
         "duration": 3.0,
         "y_expr": "h*0.46-text_h/2",
         "font_pref": ["Inter-Black", "Montserrat-Black"],
+        "box": 1,
+        "boxcolor": "white@1",
+        "boxborderw": 24,
     },
     "news_offset_box": {
         "fontsize": 64,
@@ -336,6 +351,28 @@ class UnifiedFFmpegCompositor:
             pass
 
         duration = float(cfg.get("duration") or style.get("duration", 3.0))
+
+        # High-Fidelity Graphical Card Hooks (Skia / Card Presets)
+        if anim in GRAPHICAL_CARD_HOOKS or str(anim).startswith("skia_"):
+            try:
+                from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+                skia_renderer = SkiaHookRenderer(font_dir=self._font_dir)
+                overlay_img = skia_renderer.generate_hook_frame(hook_text, hook_style=anim, style_config=cfg)
+                png_path = os.path.join(tmp_dir, f"hook_{os.getpid()}_{abs(hash(hook_text)) % 10000}.png")
+                overlay_img.save(png_path, format="PNG")
+
+                fade_out_st = max(0.0, duration - 0.35)
+                fade_out_dur = min(0.35, duration / 2)
+                movie_filter = (
+                    f"movie='{png_path}':loop=0,setpts=N/FRAME_RATE/TB,format=rgba,"
+                    f"fade=t=in:st=0:d=0.35:alpha=1,"
+                    f"fade=t=out:st={fade_out_st:.3f}:d={fade_out_dur:.3f}:alpha=1[hook_ov];"
+                    f"[in][hook_ov]overlay=0:0:enable='between(t,0,{duration})':shortest=1"
+                )
+                return [movie_filter], [png_path]
+            except Exception as e:
+                logger.warning(f"unified_compositor: failed to render skia card hook for {anim}: {e}")
+
         fontsize = int(cfg.get("fontSize") or style.get("fontsize", 68))
         fontcolor = str(cfg.get("color") or style.get("fontcolor", "white"))
         borderw = int(cfg.get("strokeWidth") or style.get("borderw", 4))
@@ -403,8 +440,9 @@ class UnifiedFFmpegCompositor:
                 f"drawtext=textfile='{text_file}':fontsize={fontsize}{font_opt}:fontcolor={fontcolor}:borderw={borderw}:bordercolor=black:x=(w-text_w)/2:y={y_expr}:alpha='{alpha_expr}':enable='between(t,0,{duration})'",
             ])
         else:
+            box_opt = f":box=1:boxcolor={style['boxcolor']}:boxborderw={style.get('boxborderw', 20)}" if style.get("box") else ""
             filters.append(
-                f"drawtext=textfile='{text_file}':fontsize={fontsize}{font_opt}:fontcolor={fontcolor}:borderw={borderw}:bordercolor={bordercolor}:x=(w-text_w)/2:y={y_expr}:alpha='{alpha_expr}':enable='between(t,0,{duration})'"
+                f"drawtext=textfile='{text_file}':fontsize={fontsize}{font_opt}:fontcolor={fontcolor}:borderw={borderw}:bordercolor={bordercolor}{box_opt}:x=(w-text_w)/2:y={y_expr}:alpha='{alpha_expr}':enable='between(t,0,{duration})'"
             )
 
         return filters, [text_file]
@@ -687,8 +725,10 @@ class UnifiedFFmpegCompositor:
                 clip_duration=clip_dur,
             )
 
-            # Assemble video filter chain (hook + watermark + CTA in FFmpeg)
+            # Assemble video filter chain (hook + subtitle + watermark + CTA in FFmpeg)
             v_chain_elements = [*hook_filters]
+            if sub_filters:
+                v_chain_elements.extend(sub_filters)
             if cta_filters:
                 v_chain_elements.extend(cta_filters)
 
@@ -700,7 +740,11 @@ class UnifiedFFmpegCompositor:
                 # Complex filter graph required for image watermark scale2ref
                 if v_chain_elements:
                     pre_chain = ",".join(v_chain_elements)
-                    filter_complex = f"[0:v]{pre_chain}[v_pre];[1:v][v_pre]{wm_filter}[v_out]"
+                    if "[in]" in pre_chain:
+                        pre_chain = pre_chain.replace("[in]", "[0:v]")
+                        filter_complex = f"{pre_chain}[v_pre];[1:v][v_pre]{wm_filter}[v_out]"
+                    else:
+                        filter_complex = f"[0:v]{pre_chain}[v_pre];[1:v][v_pre]{wm_filter}[v_out]"
                 else:
                     filter_complex = f"[1:v][0:v]{wm_filter}[v_out]"
                 cmd.extend(["-filter_complex", filter_complex, "-map", "[v_out]"])

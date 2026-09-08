@@ -155,3 +155,27 @@ async def test_render_single_pass_execution(compositor, tmp_path):
         assert "-y" in call_args
         assert str(input_file) in call_args
         assert str(output_file) in call_args
+
+
+def test_build_hook_filter_chain_graphical_card_news_portal(compositor, tmp_path):
+    hook_text = "PLOT TWIST HIDUP YANG GILA"
+    style_config = {
+        "animation": "news_portal_pantau",
+        "duration": 3.0,
+        "badgeText": "INTERNASIONAL",
+        "footerText": "READ MORE AT chatgpt.com",
+    }
+
+    filters, files = compositor.build_hook_filter_chain(
+        hook_text=hook_text,
+        style_config=style_config,
+        tmp_dir=str(tmp_path),
+    )
+
+    assert len(filters) == 1
+    assert "movie=" in filters[0]
+    assert "overlay=" in filters[0]
+    assert len(files) == 1
+    assert files[0].endswith(".png")
+    assert os.path.exists(files[0])
+
