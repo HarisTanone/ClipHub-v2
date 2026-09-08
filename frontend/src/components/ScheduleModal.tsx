@@ -33,6 +33,7 @@ import {
   Coffee,
   Disc,
   Lock,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Textarea, Input } from "@/components/ui/Input";
@@ -121,12 +122,36 @@ function PlatformIcon({ type, className = "h-4 w-4" }: { type: string; className
   return <Share2 className={cn("text-zinc-400", className)} />;
 }
 
+function cleanEmoji(text?: string): string {
+  if (!text) return "";
+  return text.replace(/[\p{Extended_Pictographic}\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, "").trim();
+}
+
+function extractClipDefaultTitle(clip?: any, fallbackRank?: number): string {
+  if (!clip) return fallbackRank ? `Clip #${fallbackRank}` : "Video";
+  const rawTitle = clip.hook || `Clip #${clip.rank || fallbackRank || 1}`;
+  return cleanEmoji(rawTitle);
+}
+
+function extractClipDefaultCaption(clip?: any, fallbackRank?: number): string {
+  if (!clip) return "";
+  const captions = clip.captions || {};
+  if (captions.tiktok) return cleanEmoji(captions.tiktok);
+  if (captions.instagram) return cleanEmoji(captions.instagram);
+  if (captions.youtube) return cleanEmoji(captions.youtube);
+
+  const hook = clip.hook || `Clip #${clip.rank || fallbackRank || 1}`;
+  const reason = clip.reason ? `\n\n${clip.reason}` : "";
+  const tags = "\n\n#fyp #viral #trending #reels #shorts #autocliper";
+  return cleanEmoji(`${hook}${reason}${tags}`.trim());
+}
+
 function getPlatformColorClass(type: string) {
   const norm = (type || "").toLowerCase().trim();
   if (norm === "youtube") return "bg-red-500/10 text-red-400 border-red-500/20";
-  if (norm === "tiktok") return "bg-pink-500/10 text-pink-400 border-pink-500/20";
+  if (norm === "tiktok") return "bg-zinc-800 text-zinc-300 border-zinc-700";
   if (norm === "facebook") return "bg-blue-500/10 text-blue-400 border-blue-500/20";
-  if (norm === "instagram") return "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20";
+  if (norm === "instagram") return "bg-purple-500/10 text-purple-300 border-purple-500/20";
   if (norm === "threads") return "bg-zinc-700/20 text-zinc-300 border-zinc-600/30";
   if (norm === "linkedin") return "bg-sky-500/10 text-sky-400 border-sky-500/20";
   return "bg-zinc-800 text-zinc-400 border-zinc-700";
@@ -261,11 +286,39 @@ export function ScheduleModal({
   const [clipSearchQuery, setClipSearchQuery] = useState<string>("");
   const [loadingBatchMusic, setLoadingBatchMusic] = useState<boolean>(false);
   const [editingClipVolumeRank, setEditingClipVolumeRank] = useState<number | null>(null);
+  // ── Per-Clip Caption & Title States ──
+  const [batchCaptionMode, setBatchCaptionMode] = useState<"ai_distinct" | "single">("ai_distinct");
+  const [clipCaptionMap, setClipCaptionMap] = useState<Record<number, { title: string; caption: string }>>({});
+  const [editingClipCaptionRank, setEditingClipCaptionRank] = useState<number | null>(null);
 
   useEffect(() => {
     if (open) {
-      setTitle(hookText || (clipRank ? `Clip #${clipRank}` : "AI Generated Video"));
-      setCaption(defaultCaption || "");
+      const initialClipMap: Record<number, { title: string; caption: string }> = {};
+      if (clipRanks && clipRanks.length > 0) {
+        for (const r of clipRanks) {
+          const c = clips?.find((item: any) => item.rank === r);
+          initialClipMap[r] = {
+            title: extractClipDefaultTitle(c, r),
+            caption: extractClipDefaultCaption(c, r),
+          };
+        }
+      } else if (clipRank) {
+        const c = clips?.find((item: any) => item.rank === clipRank);
+        initialClipMap[clipRank] = {
+          title: hookText || extractClipDefaultTitle(c, clipRank),
+          caption: defaultCaption || extractClipDefaultCaption(c, clipRank),
+        };
+      }
+      setClipCaptionMap(initialClipMap);
+
+      const targetSingleClip = clipRank ? clips?.find((item: any) => item.rank === clipRank) : undefined;
+      const initialTitle = hookText || extractClipDefaultTitle(targetSingleClip, clipRank);
+      const initialCaption = defaultCaption || extractClipDefaultCaption(targetSingleClip, clipRank);
+
+      setTitle(initialTitle);
+      setCaption(initialCaption);
+      setBatchCaptionMode("ai_distinct");
+      setEditingClipCaptionRank(null);
       setSelectedGenre("RECOMMENDED");
       setMusicSearchQuery("");
       setShuffleSeed(0);
@@ -290,7 +343,7 @@ export function ScheduleModal({
         })
         .finally(() => setLoadingAccounts(false));
     }
-  }, [open, defaultCaption, hookText]);
+  }, [open, defaultCaption, hookText, clipRank, clipRanks, clips]);
 
   const connectedAccounts = useMemo(() => {
     return accounts.filter((a) => a.isConnected);
@@ -730,6 +783,23 @@ export function ScheduleModal({
         payload.clipRanks = clipRanks;
         payload.scheduleMode = batchScheduleMode;
         payload.customScheduleTimes = resolvedCustomTimes;
+        payload.batchCaptionMode = batchCaptionMode;
+
+        if (batchCaptionMode === "ai_distinct") {
+          const capConfigs: Record<string, { title: string; caption: string }> = {};
+          for (const rank of clipRanks || []) {
+            const clipInfo = clips?.find((c) => c.rank === rank);
+            const cCap = clipCaptionMap[rank] || {
+              title: extractClipDefaultTitle(clipInfo, rank),
+              caption: extractClipDefaultCaption(clipInfo, rank),
+            };
+            capConfigs[String(rank)] = {
+              title: cCap.title,
+              caption: cCap.caption,
+            };
+          }
+          payload.clipCaptionConfigs = capConfigs;
+        }
 
         if (hasTikTokSelected && autoPickMusic && batchMusicMode === "ai_distinct") {
           const configs: Record<string, any> = {};
@@ -795,11 +865,11 @@ export function ScheduleModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-3xl bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
+        className="w-full max-w-5xl xl:max-w-6xl bg-zinc-900 border border-zinc-800/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[90vh] max-h-[880px]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800 bg-zinc-900/80 shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/90 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="h-9 w-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
               <Share2 className="h-4 w-4" />
@@ -844,11 +914,11 @@ export function ScheduleModal({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
+        {/* Body with Independent Scroll Columns */}
+        <div className="flex-1 overflow-hidden p-5 sm:p-6 min-h-0">
           {/* Status Warnings */}
           {status && !status.repliz_configured && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300">
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <p className="text-xs leading-relaxed">
                 Repliz API belum dikonfigurasi. Pastikan <code className="bg-amber-950/60 px-1 py-0.5 rounded text-[11px]">REPLIZ_ACCESS_KEY</code> dan <code className="bg-amber-950/60 px-1 py-0.5 rounded text-[11px]">REPLIZ_SECRET_KEY</code> sudah terisi di backend.
@@ -857,16 +927,16 @@ export function ScheduleModal({
           )}
 
           {!canPublish && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-zinc-700 bg-zinc-950/60 p-3 text-zinc-400 text-xs">
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-zinc-700 bg-zinc-950/60 p-3 text-zinc-400 text-xs">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-zinc-400" />
               <p>Peran akun Anda saat ini adalah Viewer (Read-only). Publikasi video hanya dapat dilakukan oleh Editor atau Superadmin.</p>
             </div>
           )}
 
           {/* 2-Column Responsive Layout */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full min-h-0">
             {/* ── LEFT COLUMN: Accounts & Timing (5 cols) ── */}
-            <div className="lg:col-span-5 space-y-4">
+            <div className="lg:col-span-5 flex flex-col h-full min-h-0 overflow-y-auto pr-2 custom-scrollbar space-y-4">
               {/* Account Selector */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between gap-2 border-b border-zinc-800/60 pb-2">
@@ -1040,14 +1110,14 @@ export function ScheduleModal({
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
                               <p className="text-xs font-semibold text-zinc-100 truncate">
-                                {acc.name || "Akun Sosial"}
+                                {cleanEmoji(acc.name) || acc.username || "Akun Sosial"}
                               </p>
                               <span className={cn("text-[9px] font-medium px-1.5 py-0.2 rounded border capitalize", platBadgeColor)}>
                                 {acc.type}
                               </span>
                             </div>
                             <p className="text-[10px] text-zinc-500 truncate">
-                              {acc.username ? `@${acc.username}` : `ID: ${accId.slice(-6)}`}
+                              {acc.username ? `@${cleanEmoji(acc.username)}` : `ID: ${accId.slice(-6)}`}
                             </p>
                           </div>
                         </div>
@@ -1065,7 +1135,7 @@ export function ScheduleModal({
                     <div className="grid grid-cols-3 gap-1.5">
                       {[
                         { id: "same", label: "Waktu Sama" },
-                        { id: "ai", label: "AI Pick Time ✨" },
+                        { id: "ai", label: "AI Pick Time" },
                         { id: "custom", label: "Custom per Clip" },
                       ].map((option) => (
                         <button
@@ -1118,7 +1188,7 @@ export function ScheduleModal({
 
                     {scheduleMode === "now" && isBatch && (
                       <p className="text-[11px] text-zinc-400 bg-zinc-950/60 border border-zinc-800/80 rounded-lg p-2 leading-relaxed">
-                        ⚡ Semua <strong className="text-zinc-200">{clipRanks?.length || 0} klip terpilih</strong> akan diposting serentak sesegera mungkin.
+                        Semua <strong className="text-zinc-200">{clipRanks?.length || 0} klip terpilih</strong> akan diposting serentak sesegera mungkin.
                       </p>
                     )}
 
@@ -1281,39 +1351,131 @@ export function ScheduleModal({
             </div>
 
             {/* ── RIGHT COLUMN: Content & TikTok Viral Music (7 cols) ── */}
-            <div className="lg:col-span-7 space-y-3.5">
-              {/* Title & Caption */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-zinc-200">Judul Konten</label>
-                <Input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Judul video / YouTube Title..."
-                  className="text-xs bg-zinc-950/60 border-zinc-800 rounded-xl h-8"
-                />
-              </div>
+            <div className="lg:col-span-7 flex flex-col h-full min-h-0 overflow-y-auto pr-2 custom-scrollbar space-y-4">
+              {/* Title & Caption Strategy */}
+              {isBatch ? (
+                <div className="space-y-3 p-3.5 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5 text-emerald-400" />
+                      <span>Judul dan Caption Konten</span>
+                    </label>
+                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-400">
+                      {batchCaptionMode === "ai_distinct" ? "Otomatis Tiap Video" : "Seragam"}
+                    </span>
+                  </div>
 
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-zinc-200">Caption Post</label>
-                  {hookText && (
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setCaption((prev) => (prev ? `${hookText}\n\n${prev}` : hookText))}
-                      className="text-[10px] font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                      onClick={() => setBatchCaptionMode("ai_distinct")}
+                      className={cn(
+                        "p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between",
+                        batchCaptionMode === "ai_distinct"
+                          ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300 font-semibold shadow-xs"
+                          : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                      )}
                     >
-                      <Sparkles className="h-3 w-3" /> Masukkan Hook
+                      <div className="flex items-center gap-1.5 text-xs font-semibold">
+                        <Sparkles className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                        <span>Caption Tiap Klip (AI)</span>
+                      </div>
+                      <p className="text-[10px] text-zinc-400 mt-1 font-normal leading-relaxed">
+                        Judul & caption diambil otomatis dari hook dan konten masing-masing video.
+                      </p>
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setBatchCaptionMode("single")}
+                      className={cn(
+                        "p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between",
+                        batchCaptionMode === "single"
+                          ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300 font-semibold shadow-xs"
+                          : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                      )}
+                    >
+                      <div className="flex items-center gap-1.5 text-xs font-semibold">
+                        <FileText className="h-3.5 w-3.5 shrink-0" />
+                        <span>1 Caption untuk Semua</span>
+                      </div>
+                      <p className="text-[10px] text-zinc-400 mt-1 font-normal leading-relaxed">
+                        Gunakan satu teks caption dan judul seragam untuk seluruh video klip.
+                      </p>
+                    </button>
+                  </div>
+
+                  {batchCaptionMode === "single" ? (
+                    <div className="space-y-2 pt-1 border-t border-zinc-800/60">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-zinc-300">Judul Konten Bersama</label>
+                        <Input
+                          value={title}
+                          onChange={(e) => setTitle(e.target.value)}
+                          placeholder="Judul video untuk semua klip..."
+                          className="text-xs bg-zinc-900 border-zinc-800 focus:border-emerald-500/50 rounded-xl h-8"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-zinc-300">Caption Post Bersama</label>
+                        <Textarea
+                          value={caption}
+                          onChange={(e) => setCaption(e.target.value)}
+                          rows={3}
+                          placeholder="Tulis caption umum untuk seluruh video terpilih..."
+                          className="text-xs bg-zinc-900 border-zinc-800 focus:border-emerald-500/50 rounded-xl"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg bg-zinc-900/60 border border-zinc-800/80 p-2.5 flex items-start gap-2 text-zinc-400 text-[11px] leading-relaxed">
+                      <Sparkles className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold text-zinc-200">
+                          {clipRanks?.length || 0} klip akan menggunakan judul & caption unik dari videonya masing-masing.
+                        </span>
+                        <p className="text-zinc-400 mt-0.5">
+                          Hook video, ringkasan AI, dan hashtag otomatis disertakan. Anda dapat melihat atau menyesuaikan caption tiap video melalui tombol <strong>Caption</strong> pada kartu klip di bawah.
+                        </p>
+                      </div>
+                    </div>
                   )}
                 </div>
-                <Textarea
-                  value={caption}
-                  onChange={(e) => setCaption(e.target.value)}
-                  rows={3}
-                  placeholder="Tulis caption atau deskripsi untuk video ini..."
-                  className="text-xs bg-zinc-950/60 border-zinc-800 focus:border-emerald-500/50 rounded-xl"
-                />
-              </div>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-zinc-200">Judul Konten</label>
+                    <Input
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Judul video / YouTube Title..."
+                      className="text-xs bg-zinc-950/60 border-zinc-800 focus:border-emerald-500/50 rounded-xl h-8"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-zinc-200">Caption Post</label>
+                      {hookText && (
+                        <button
+                          type="button"
+                          onClick={() => setCaption((prev) => (prev ? `${hookText}\n\n${prev}` : hookText))}
+                          className="text-[10px] font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="h-3 w-3" /> Masukkan Hook
+                        </button>
+                      )}
+                    </div>
+                    <Textarea
+                      value={caption}
+                      onChange={(e) => setCaption(e.target.value)}
+                      rows={3}
+                      placeholder="Tulis caption atau deskripsi untuk video ini..."
+                      className="text-xs bg-zinc-950/60 border-zinc-800 focus:border-emerald-500/50 rounded-xl"
+                    />
+                  </div>
+                </>
+              )}
 
               {/* Platform Addons */}
               {(hasThreadsSelected || hasYouTubeSelected) && (
@@ -1347,23 +1509,23 @@ export function ScheduleModal({
                 </div>
               )}
 
-              {/* ── TIKTOK VIRAL MUSIC SUITE ── */}
+              {/* ── TIKTOK VIRAL MUSIC SUITE (Unified Emerald & Zinc Dark Theme) ── */}
               {hasTikTokSelected && (
-                <div className="rounded-xl border border-pink-500/30 bg-gradient-to-b from-pink-950/20 via-zinc-950/60 to-zinc-950/60 p-3.5 space-y-3 shadow-sm">
+                <div className="rounded-2xl border border-zinc-800/90 bg-zinc-950/60 p-3.5 space-y-3 shadow-sm">
                   {/* Header & Toggle */}
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <div className="h-7 w-7 rounded-lg bg-pink-500/15 border border-pink-500/30 flex items-center justify-center text-pink-400 shrink-0">
-                        <Flame className="h-4 w-4" />
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="h-8 w-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                        <Music className="h-4 w-4" />
                       </div>
-                      <div>
-                        <h3 className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
-                          <span>Auto Pick Lagu Viral TikTok</span>
-                          <span className="text-[10px] font-semibold text-pink-400 bg-pink-500/10 px-1.5 py-0.2 rounded border border-pink-500/20">
-                            Viral Addon
+                      <div className="min-w-0">
+                        <h3 className="text-xs font-bold text-zinc-100 flex items-center gap-2">
+                          <span>Musik Viral TikTok</span>
+                          <span className="text-[9px] font-medium text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700/60 shrink-0">
+                            Trending Addon
                           </span>
                         </h3>
-                        <p className="text-[10px] text-zinc-400">
+                        <p className="text-[10px] text-zinc-400 truncate">
                           Sematkan lagu trending TikTok untuk mendongkrak algoritma FYP
                         </p>
                       </div>
@@ -1376,13 +1538,13 @@ export function ScheduleModal({
                       onClick={() => handleToggleAutoPickMusic(!autoPickMusic)}
                       className={cn(
                         "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                        autoPickMusic ? "bg-pink-500" : "bg-zinc-800"
+                        autoPickMusic ? "bg-emerald-500" : "bg-zinc-800"
                       )}
                     >
                       <span
                         className={cn(
-                          "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out",
-                          autoPickMusic ? "translate-x-4" : "translate-x-0"
+                          "pointer-events-none inline-block h-4 w-4 transform rounded-full shadow-md transition duration-200 ease-in-out",
+                          autoPickMusic ? "translate-x-4 bg-zinc-950" : "translate-x-0 bg-zinc-400"
                         )}
                       />
                     </button>
@@ -1393,7 +1555,7 @@ export function ScheduleModal({
                     <div className="space-y-3 pt-1 animate-in fade-in duration-200">
                       {/* Option C: Batch Mode Switcher */}
                       {isBatch && (
-                        <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-zinc-900/90 border border-zinc-800 text-xs">
+                        <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-zinc-900 border border-zinc-800 text-xs">
                           <button
                             type="button"
                             onClick={() => {
@@ -1405,11 +1567,11 @@ export function ScheduleModal({
                             className={cn(
                               "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg font-medium transition-all cursor-pointer",
                               batchMusicMode === "ai_distinct"
-                                ? "bg-pink-500/20 text-pink-300 border border-pink-500/40 font-semibold shadow-xs"
+                                ? "bg-zinc-800 text-emerald-300 border border-zinc-700 font-semibold shadow-xs"
                                 : "text-zinc-400 hover:text-zinc-200"
                             )}
                           >
-                            <Sparkles className="h-3.5 w-3.5 text-pink-400" />
+                            <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
                             <span>Lagu Berbeda Tiap Klip (AI)</span>
                           </button>
                           <button
@@ -1418,24 +1580,167 @@ export function ScheduleModal({
                             className={cn(
                               "flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg font-medium transition-all cursor-pointer",
                               batchMusicMode === "single"
-                                ? "bg-pink-500/20 text-pink-300 border border-pink-500/40 font-semibold shadow-xs"
+                                ? "bg-zinc-800 text-emerald-300 border border-zinc-700 font-semibold shadow-xs"
                                 : "text-zinc-400 hover:text-zinc-200"
                             )}
                           >
-                            <Music className="h-3.5 w-3.5 text-pink-400" />
+                            <Music className="h-3.5 w-3.5 text-zinc-400" />
                             <span>1 Lagu Sama untuk Semua</span>
                           </button>
                         </div>
                       )}
 
+                      {/* Unified Audio Master Volume Controls Strip (Compact & Prominent) */}
+                      <div className="p-3 rounded-xl bg-zinc-900/70 border border-zinc-800/90 space-y-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* 1. Suara Asli Video */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <button
+                                type="button"
+                                onClick={() => handleOriginalVolumeChange(originalVolume === 0 ? 100 : 0)}
+                                className="font-medium text-[11px] text-zinc-300 flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
+                              >
+                                {originalVolume === 0 ? (
+                                  <VolumeX className="h-3.5 w-3.5 text-zinc-500" />
+                                ) : (
+                                  <Volume2 className="h-3.5 w-3.5 text-emerald-400" />
+                                )}
+                                <span>Suara Asli Video</span>
+                              </button>
+                              <span
+                                className={cn(
+                                  "font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                  originalVolume === 0
+                                    ? "text-zinc-500 bg-zinc-900 border-zinc-800"
+                                    : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                                )}
+                              >
+                                {originalVolume}%
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-4 gap-1">
+                              {[
+                                { label: "Mute", val: 0 },
+                                { label: "50%", val: 50 },
+                                { label: "80%", val: 80 },
+                                { label: "100%", val: 100 },
+                              ].map((preset) => {
+                                const isActive = originalVolume === preset.val;
+                                return (
+                                  <button
+                                    key={preset.val}
+                                    type="button"
+                                    onClick={() => handleOriginalVolumeChange(preset.val)}
+                                    className={cn(
+                                      "py-0.5 rounded text-[9px] font-medium transition-all border text-center cursor-pointer",
+                                      isActive
+                                        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300 font-semibold shadow-xs"
+                                        : "border-zinc-800/80 bg-zinc-950/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                                    )}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={originalVolume}
+                              onChange={(e) => handleOriginalVolumeChange(Number(e.target.value))}
+                              className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                              style={{
+                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${originalVolume}%, #27272a ${originalVolume}%, #27272a 100%)`,
+                              }}
+                            />
+                          </div>
+
+                          {/* 2. TikTok Music Volume */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <button
+                                type="button"
+                                onClick={() => handleMusicVolumeChange(musicVolume === 0 ? 25 : 0)}
+                                className="font-medium text-[11px] text-zinc-300 flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
+                              >
+                                {musicVolume === 0 ? (
+                                  <VolumeX className="h-3.5 w-3.5 text-zinc-500" />
+                                ) : (
+                                  <Music className="h-3.5 w-3.5 text-emerald-400" />
+                                )}
+                                <span>Volume Musik TikTok</span>
+                              </button>
+                              <span
+                                className={cn(
+                                  "font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                  musicVolume === 0
+                                    ? "text-zinc-500 bg-zinc-900 border-zinc-800"
+                                    : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                                )}
+                              >
+                                {musicVolume}%
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-4 gap-1">
+                              {[
+                                { label: "Mute", val: 0 },
+                                { label: "10% Soft", val: 10 },
+                                { label: "25% Norm", val: 25 },
+                                { label: "50% Loud", val: 50 },
+                              ].map((preset) => {
+                                const isActive = musicVolume === preset.val;
+                                return (
+                                  <button
+                                    key={preset.val}
+                                    type="button"
+                                    onClick={() => handleMusicVolumeChange(preset.val)}
+                                    className={cn(
+                                      "py-0.5 rounded text-[9px] font-medium transition-all border text-center cursor-pointer",
+                                      isActive
+                                        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300 font-semibold shadow-xs"
+                                        : "border-zinc-800/80 bg-zinc-950/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                                    )}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={musicVolume}
+                              onChange={(e) => handleMusicVolumeChange(Number(e.target.value))}
+                              className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                              style={{
+                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${musicVolume}%, #27272a ${musicVolume}%, #27272a 100%)`,
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        <p className="text-[10px] text-zinc-500">
+                          {musicVolume === 0
+                            ? "Volume 0% (Mute): Lagu disematkan di TikTok untuk jangkauan algoritma, suara musik dimatikan."
+                            : `Musik TikTok akan dimixing di latar belakang dengan volume ${musicVolume}%.`}
+                        </p>
+                      </div>
+
                       {/* MODE 1: Distinct Music per Clip (Option C Hybrid) */}
                       {isBatch && batchMusicMode === "ai_distinct" ? (
-                        <div className="space-y-2.5">
+                        <div className="space-y-2">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="text-[11px] text-zinc-300 flex items-center gap-1.5">
-                              <Sparkles className="h-3.5 w-3.5 text-pink-400" />
-                              <span className="font-semibold">Lagu Rekomendasi per Video Klip</span>
-                              <span className="text-[9px] bg-pink-500/10 text-pink-300 border border-pink-500/20 px-1.5 py-0.5 rounded-full">
+                              <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+                              <span className="font-semibold">Rekomendasi Lagu per Video Klip</span>
+                              <span className="text-[9px] bg-zinc-800 text-zinc-300 border border-zinc-700 px-1.5 py-0.2 rounded font-normal">
                                 AI Smart Rotation
                               </span>
                             </div>
@@ -1443,7 +1748,7 @@ export function ScheduleModal({
                               type="button"
                               onClick={() => fetchBatchRecommendations()}
                               disabled={loadingBatchMusic}
-                              className="flex items-center gap-1 text-[10px] font-medium text-pink-400 hover:text-pink-300 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-all disabled:opacity-50 cursor-pointer"
+                              className="flex items-center gap-1 text-[10px] font-medium text-zinc-300 hover:text-white bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700/60 rounded-lg px-2 py-0.5 transition-all disabled:opacity-50 cursor-pointer"
                               title="Acak ulang lagu rekomendasi untuk semua video klip"
                             >
                               <Shuffle className={cn("h-3 w-3", loadingBatchMusic && "animate-spin")} />
@@ -1453,11 +1758,11 @@ export function ScheduleModal({
 
                           {loadingBatchMusic ? (
                             <div className="flex items-center justify-center gap-2 py-6 text-xs text-zinc-400 bg-zinc-900/40 rounded-xl border border-zinc-800">
-                              <RefreshCw className="h-4 w-4 animate-spin text-pink-400" />
+                              <RefreshCw className="h-4 w-4 animate-spin text-emerald-400" />
                               <span>Mencocokkan lagu TikTok viral berbeda untuk setiap klip...</span>
                             </div>
                           ) : (
-                            <div className="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+                            <div className="space-y-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
                               {clipRanks?.map((rank) => {
                                 const clipInfo = clips?.find((c) => c.rank === rank);
                                 const track = clipMusicMap[rank];
@@ -1466,11 +1771,16 @@ export function ScheduleModal({
                                 const clipVol = clipVolumeMap[rank] || { musicVolume, originalVolume };
                                 const isEditingSong = activeClipPickerRank === rank;
                                 const isEditingVol = editingClipVolumeRank === rank;
+                                const isEditingCaption = editingClipCaptionRank === rank;
+                                const clipCaption = clipCaptionMap[rank] || {
+                                  title: extractClipDefaultTitle(clipInfo, rank),
+                                  caption: extractClipDefaultCaption(clipInfo, rank),
+                                };
 
                                 return (
                                   <div
                                     key={rank}
-                                    className="rounded-xl border border-zinc-800/90 bg-zinc-900/60 p-2.5 space-y-2 transition-all hover:border-zinc-700"
+                                    className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-2.5 space-y-2 transition-all hover:border-zinc-700"
                                   >
                                     {/* Top Row: Clip Header */}
                                     <div className="flex items-center justify-between gap-2">
@@ -1478,16 +1788,35 @@ export function ScheduleModal({
                                         <span className="shrink-0 text-[10px] font-bold font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
                                           #{rank}
                                         </span>
-                                        <span className="text-xs font-semibold text-zinc-200 truncate">
-                                          {clipInfo?.hook || clipInfo?.reason || `Video Klip #${rank}`}
+                                        <span className="text-xs font-semibold text-zinc-200 truncate" title={clipInfo?.hook || clipInfo?.reason || `Clip #${rank}`}>
+                                          {clipInfo?.hook || clipInfo?.reason || `Clip #${rank}`}
                                         </span>
                                       </div>
                                       <div className="flex items-center gap-1.5 shrink-0">
                                         <button
                                           type="button"
                                           onClick={() => {
+                                            setEditingClipCaptionRank(isEditingCaption ? null : rank);
+                                            if (isEditingVol) setEditingClipVolumeRank(null);
+                                            if (isEditingSong) setActiveClipPickerRank(null);
+                                          }}
+                                          className={cn(
+                                            "text-[10px] px-2 py-0.5 rounded-md border transition-all cursor-pointer flex items-center gap-1",
+                                            isEditingCaption
+                                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-semibold"
+                                              : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 border-zinc-700"
+                                          )}
+                                          title="Lihat atau edit judul & caption untuk klip ini"
+                                        >
+                                          <FileText className="h-3 w-3 text-emerald-400" />
+                                          <span>Caption</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
                                             setEditingClipVolumeRank(isEditingVol ? null : rank);
                                             if (isEditingSong) setActiveClipPickerRank(null);
+                                            if (isEditingCaption) setEditingClipCaptionRank(null);
                                           }}
                                           className={cn(
                                             "text-[10px] px-2 py-0.5 rounded-md border transition-all cursor-pointer flex items-center gap-1",
@@ -1498,19 +1827,20 @@ export function ScheduleModal({
                                           title="Sesuaikan volume khusus untuk klip ini"
                                         >
                                           <Volume2 className="h-3 w-3 text-emerald-400" />
-                                          <span>Vol</span>
+                                          <span>Vol ({clipVol.originalVolume}%/{clipVol.musicVolume}%)</span>
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() => {
                                             setActiveClipPickerRank(isEditingSong ? null : rank);
                                             if (isEditingVol) setEditingClipVolumeRank(null);
+                                            if (isEditingCaption) setEditingClipCaptionRank(null);
                                           }}
                                           className={cn(
                                             "text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all cursor-pointer",
                                             isEditingSong
-                                              ? "bg-pink-500 text-zinc-950 border-pink-400 font-semibold"
-                                              : "bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 hover:text-pink-300 border-pink-500/30"
+                                              ? "bg-zinc-700 text-white border-zinc-600 font-semibold"
+                                              : "bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border-zinc-700"
                                           )}
                                         >
                                           {isEditingSong ? "Tutup" : "Ganti Lagu"}
@@ -1518,9 +1848,83 @@ export function ScheduleModal({
                                       </div>
                                     </div>
 
+                                    {/* Inline Caption Editor */}
+                                    {isEditingCaption && (
+                                      <div className="p-3 rounded-xl border border-emerald-500/30 bg-zinc-950/70 space-y-2.5 animate-in fade-in duration-150">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[11px] font-semibold text-emerald-300 flex items-center gap-1.5">
+                                            <FileText className="h-3.5 w-3.5 text-emerald-400" />
+                                            <span>Judul & Caption Klip #{rank}</span>
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setClipCaptionMap((prev) => ({
+                                                ...prev,
+                                                [rank]: {
+                                                  title: extractClipDefaultTitle(clipInfo, rank),
+                                                  caption: extractClipDefaultCaption(clipInfo, rank),
+                                                },
+                                              }));
+                                            }}
+                                            className="text-[10px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+                                          >
+                                            Reset ke AI Caption
+                                          </button>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] text-zinc-400">Judul Klip</label>
+                                          <Input
+                                            value={clipCaption.title}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              setClipCaptionMap((prev) => ({
+                                                ...prev,
+                                                [rank]: {
+                                                  title: val,
+                                                  caption: prev[rank]?.caption ?? clipCaption.caption,
+                                                },
+                                              }));
+                                            }}
+                                            placeholder="Judul klip..."
+                                            className="text-xs bg-zinc-900 border-zinc-800 focus:border-emerald-500/50 rounded-lg h-7 text-zinc-200"
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] text-zinc-400">Caption Post Klip</label>
+                                          <Textarea
+                                            value={clipCaption.caption}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              setClipCaptionMap((prev) => ({
+                                                ...prev,
+                                                [rank]: {
+                                                  title: prev[rank]?.title ?? clipCaption.title,
+                                                  caption: val,
+                                                },
+                                              }));
+                                            }}
+                                            rows={3}
+                                            placeholder="Tulis caption khusus klip ini..."
+                                            className="text-xs bg-zinc-900 border-zinc-800 focus:border-emerald-500/50 rounded-lg text-zinc-200"
+                                          />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Preview 1-Line Caption when not editing */}
+                                    {!isEditingCaption && (
+                                      <div className="text-[10px] text-zinc-400 bg-zinc-950/40 px-2 py-1 rounded-md border border-zinc-800/60 truncate flex items-center gap-1.5">
+                                        <span className="text-zinc-500 shrink-0 font-medium">Caption:</span>
+                                        <span className="truncate text-zinc-300">
+                                          {clipCaption.caption ? clipCaption.caption.replace(/\n+/g, " ") : (clipCaption.title || `Clip #${rank}`)}
+                                        </span>
+                                      </div>
+                                    )}
+
                                     {/* Middle Row: Assigned Song Card */}
                                     {track ? (
-                                      <div className="flex items-center justify-between gap-2 p-2 rounded-lg border border-pink-500/20 bg-pink-950/20">
+                                      <div className="flex items-center justify-between gap-2 p-2 rounded-lg border border-zinc-800 bg-zinc-950/50">
                                         <div className="flex items-center gap-2 min-w-0">
                                           {track.thumbnail ? (
                                             <img
@@ -1529,7 +1933,7 @@ export function ScheduleModal({
                                               className="h-8 w-8 rounded object-cover border border-zinc-700 shrink-0 bg-zinc-800"
                                             />
                                           ) : (
-                                            <div className="h-8 w-8 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-pink-400 shrink-0">
+                                            <div className="h-8 w-8 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 shrink-0">
                                               <Music className="h-4 w-4" />
                                             </div>
                                           )}
@@ -1540,8 +1944,8 @@ export function ScheduleModal({
                                                 {track.artist}
                                               </span>
                                               {reason && (
-                                                <span className="text-[9px] text-pink-300 bg-pink-500/20 px-1.5 py-0.2 rounded border border-pink-500/30 inline-flex items-center gap-0.5 truncate">
-                                                  <Sparkles className="h-2.5 w-2.5 text-pink-400 shrink-0" />
+                                                <span className="text-[9px] text-zinc-300 bg-zinc-800/80 px-1.5 py-0.2 rounded border border-zinc-700/50 inline-flex items-center gap-0.5 truncate">
+                                                  <Sparkles className="h-2.5 w-2.5 text-emerald-400 shrink-0" />
                                                   {reason}
                                                 </span>
                                               )}
@@ -1556,7 +1960,7 @@ export function ScheduleModal({
                                             className={cn(
                                               "h-7 w-7 rounded-full flex items-center justify-center transition-colors border cursor-pointer",
                                               isPlaying
-                                                ? "bg-pink-500 text-zinc-950 border-pink-400 shadow-sm"
+                                                ? "bg-emerald-500 text-zinc-950 border-emerald-400 shadow-sm"
                                                 : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-700"
                                             )}
                                             title={isPlaying ? "Jeda demo lagu" : "Dengarkan demo lagu"}
@@ -1575,21 +1979,9 @@ export function ScheduleModal({
                                       </div>
                                     )}
 
-                                    {/* Volume Status Pill for this clip */}
-                                    <div className="flex items-center justify-between text-[10px] text-zinc-400 px-1 pt-0.5">
-                                      <span className="flex items-center gap-1 text-zinc-400">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                                        Suara Asli: <strong className="font-mono text-zinc-200">{clipVol.originalVolume}%</strong>
-                                      </span>
-                                      <span className="flex items-center gap-1 text-zinc-400">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-pink-400" />
-                                        Musik: <strong className="font-mono text-pink-300">{clipVol.musicVolume}%</strong>
-                                      </span>
-                                    </div>
-
                                     {/* Inline Volume Adjuster if expanded */}
                                     {isEditingVol && (
-                                      <div className="pt-2 border-t border-zinc-800/80 p-2.5 rounded-lg bg-zinc-950/70 space-y-2 animate-in fade-in duration-150">
+                                      <div className="pt-2 border-t border-zinc-800/80 p-2.5 rounded-lg bg-zinc-950/80 space-y-2 animate-in fade-in duration-150">
                                         <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-300">
                                           <span>Atur Volume Khusus Clip #{rank}</span>
                                           <button
@@ -1621,7 +2013,7 @@ export function ScheduleModal({
                                           <div>
                                             <div className="flex justify-between text-[10px] mb-1 text-zinc-400">
                                               <span>Musik TikTok</span>
-                                              <span className="font-mono font-bold text-pink-400">{clipVol.musicVolume}%</span>
+                                              <span className="font-mono font-bold text-emerald-400">{clipVol.musicVolume}%</span>
                                             </div>
                                             <input
                                               type="range"
@@ -1631,7 +2023,7 @@ export function ScheduleModal({
                                               onChange={(e) => handleClipSpecificVolume(rank, "music", Number(e.target.value))}
                                               className="w-full h-1 rounded-full appearance-none cursor-pointer"
                                               style={{
-                                                background: `linear-gradient(to right, #ec4899 0%, #ec4899 ${clipVol.musicVolume}%, #27272a ${clipVol.musicVolume}%, #27272a 100%)`,
+                                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${clipVol.musicVolume}%, #27272a ${clipVol.musicVolume}%, #27272a 100%)`,
                                               }}
                                             />
                                           </div>
@@ -1659,7 +2051,7 @@ export function ScheduleModal({
                                             value={clipSearchQuery}
                                             onChange={(e) => setClipSearchQuery(e.target.value)}
                                             placeholder="Cari lagu viral atau nama artis..."
-                                            className="w-full rounded-md border border-zinc-800 bg-zinc-900/90 pl-8 pr-3 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-pink-500/50"
+                                            className="w-full rounded-md border border-zinc-800 bg-zinc-900/90 pl-8 pr-3 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500/50"
                                           />
                                         </div>
                                         <div className="max-h-40 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
@@ -1681,7 +2073,7 @@ export function ScheduleModal({
                                                 className={cn(
                                                   "flex items-center justify-between p-1.5 rounded-md border text-left cursor-pointer transition-all",
                                                   isCurrent
-                                                    ? "border-pink-500/60 bg-pink-500/15"
+                                                    ? "border-emerald-500/60 bg-emerald-500/15"
                                                     : "border-zinc-800/80 bg-zinc-900/40 hover:border-zinc-700"
                                                 )}
                                               >
@@ -1689,7 +2081,7 @@ export function ScheduleModal({
                                                   {t.thumbnail ? (
                                                     <img src={t.thumbnail} alt="" className="h-6 w-6 rounded object-cover shrink-0" />
                                                   ) : (
-                                                    <div className="h-6 w-6 rounded bg-zinc-800 flex items-center justify-center text-pink-400 shrink-0">
+                                                    <div className="h-6 w-6 rounded bg-zinc-800 flex items-center justify-center text-zinc-400 shrink-0">
                                                       <Music className="h-3 w-3" />
                                                     </div>
                                                   )}
@@ -1712,7 +2104,7 @@ export function ScheduleModal({
                                                       <Play className="h-2.5 w-2.5 fill-current ml-0.5" />
                                                     )}
                                                   </button>
-                                                  <span className="text-[10px] font-medium text-pink-400 hover:underline">
+                                                  <span className="text-[10px] font-medium text-emerald-400 hover:underline">
                                                     Pilih
                                                   </span>
                                                 </div>
@@ -1734,10 +2126,10 @@ export function ScheduleModal({
                           {/* Section Header */}
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <label className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5">
-                              <Music className="h-3.5 w-3.5 text-pink-400" />
+                              <Music className="h-3.5 w-3.5 text-emerald-400" />
                               <span>{isBatch ? "Lagu untuk Seluruh Klip" : "Rekomendasi Lagu TikTok"}</span>
                               {selectedGenre === "RECOMMENDED" && (
-                                <span className="text-[9px] bg-pink-500/10 text-pink-400 border border-pink-500/20 px-1.5 py-0.5 rounded-full">
+                                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">
                                   Sesuai Video
                                 </span>
                               )}
@@ -1747,7 +2139,7 @@ export function ScheduleModal({
                                 type="button"
                                 onClick={() => setShuffleSeed((s) => s + 1)}
                                 disabled={loadingMusic}
-                                className="flex items-center gap-1 text-[10px] font-medium text-pink-400 hover:text-pink-300 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-all disabled:opacity-50 cursor-pointer"
+                                className="flex items-center gap-1 text-[10px] font-medium text-zinc-300 hover:text-white bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700/60 rounded-lg px-2 py-0.5 transition-all disabled:opacity-50 cursor-pointer"
                                 title="Pilihkan saran lagu TikTok lainnya yang sesuai"
                               >
                                 <Shuffle className={cn("h-3 w-3", loadingMusic && "animate-spin")} />
@@ -1788,7 +2180,7 @@ export function ScheduleModal({
                                   className={cn(
                                     "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all border shrink-0 cursor-pointer",
                                     isActive
-                                      ? "bg-pink-500/20 border-pink-500/60 text-pink-300 font-semibold shadow-xs"
+                                      ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-semibold shadow-xs"
                                       : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
                                   )}
                                 >
@@ -1807,7 +2199,7 @@ export function ScheduleModal({
                               value={musicSearchQuery}
                               onChange={(e) => setMusicSearchQuery(e.target.value)}
                               placeholder="Cari lagu atau artis viral TikTok..."
-                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 pl-8 pr-7 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:border-pink-500/50 focus:outline-none focus:ring-1 focus:ring-pink-500/50 transition-all"
+                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/70 pl-8 pr-7 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-all"
                             />
                             {musicSearchQuery && (
                               <button
@@ -1822,17 +2214,17 @@ export function ScheduleModal({
 
                           {/* Recommendation Context Banner */}
                           {matchReason && selectedGenre === "RECOMMENDED" && !musicSearchQuery && (
-                            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/20 text-[10px] text-pink-300">
-                              <Sparkles className="h-3.5 w-3.5 text-pink-400 shrink-0" />
+                            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700/60 text-[10px] text-zinc-300">
+                              <Sparkles className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                               <span className="truncate">
-                                <strong className="font-semibold text-pink-200">Saran Khusus Video:</strong> {matchReason}
+                                <strong className="font-semibold text-zinc-200">Saran Khusus Video:</strong> {matchReason}
                               </span>
                             </div>
                           )}
 
                           {loadingMusic ? (
                             <div className="flex items-center justify-center gap-2 py-4 text-xs text-zinc-500">
-                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-pink-400" />
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-emerald-400" />
                               <span>Mencari rekomendasi lagu TikTok yang cocok...</span>
                             </div>
                           ) : musicTracks.length === 0 ? (
@@ -1854,7 +2246,7 @@ export function ScheduleModal({
                                     className={cn(
                                       "flex items-center justify-between p-2 rounded-lg border text-left cursor-pointer transition-all duration-150",
                                       isSelected
-                                        ? "border-pink-500/60 bg-pink-500/10 ring-1 ring-pink-500/30"
+                                        ? "border-emerald-500/60 bg-emerald-500/10 ring-1 ring-emerald-500/30"
                                         : "border-zinc-800/80 bg-zinc-900/50 hover:border-zinc-700"
                                     )}
                                   >
@@ -1868,11 +2260,11 @@ export function ScheduleModal({
                                             className="h-8 w-8 rounded-md object-cover border border-zinc-700 bg-zinc-800"
                                           />
                                         ) : (
-                                          <div className="h-8 w-8 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center text-pink-400">
+                                          <div className="h-8 w-8 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400">
                                             <Music className="h-4 w-4" />
                                           </div>
                                         )}
-                                        <span className="absolute -top-1 -left-1 text-[8px] font-bold bg-pink-600 text-white rounded px-1">
+                                        <span className="absolute -top-1 -left-1 text-[8px] font-bold bg-zinc-800 text-zinc-300 border border-zinc-700 rounded px-1">
                                           #{track.rank}
                                         </span>
                                       </div>
@@ -1887,8 +2279,8 @@ export function ScheduleModal({
                                             {track.artist}
                                           </span>
                                           {track.match_reason ? (
-                                            <span className="text-[9px] text-pink-300 bg-pink-500/20 px-1.5 py-0.5 rounded border border-pink-500/30 flex items-center gap-0.5 truncate">
-                                              <Sparkles className="h-2.5 w-2.5 text-pink-400 shrink-0" />
+                                            <span className="text-[9px] text-zinc-300 bg-zinc-800/80 px-1.5 py-0.5 rounded border border-zinc-700/50 flex items-center gap-0.5 truncate">
+                                              <Sparkles className="h-2.5 w-2.5 text-emerald-400 shrink-0" />
                                               {track.match_reason}
                                             </span>
                                           ) : (
@@ -1908,7 +2300,7 @@ export function ScheduleModal({
                                         className={cn(
                                           "h-7 w-7 rounded-full flex items-center justify-center transition-colors border cursor-pointer",
                                           isPlaying
-                                            ? "bg-pink-500 text-zinc-950 border-pink-400 shadow-sm"
+                                            ? "bg-emerald-500 text-zinc-950 border-emerald-400 shadow-sm"
                                             : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-700"
                                         )}
                                         title={isPlaying ? "Jeda demo lagu" : "Dengarkan demo lagu"}
@@ -1924,7 +2316,7 @@ export function ScheduleModal({
                                         className={cn(
                                           "h-4 w-4 rounded-full border flex items-center justify-center",
                                           isSelected
-                                            ? "border-pink-500 bg-pink-500 text-zinc-950"
+                                            ? "border-emerald-500 bg-emerald-500 text-zinc-950"
                                             : "border-zinc-700"
                                         )}
                                       >
@@ -1938,161 +2330,6 @@ export function ScheduleModal({
                           )}
                         </div>
                       )}
-
-                      {/* Dual Volume Controls with Matching Selector Style */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/80">
-                        {/* 1. Original Video Volume Card */}
-                        <div className="space-y-2.5 p-3 rounded-xl bg-zinc-950/50 border border-zinc-800/80">
-                          <div className="flex items-center justify-between">
-                            <button
-                              type="button"
-                              onClick={() => handleOriginalVolumeChange(originalVolume === 0 ? 100 : 0)}
-                              className="font-semibold text-xs text-zinc-300 flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
-                              title={originalVolume === 0 ? "Unmute suara asli" : "Mute suara asli"}
-                            >
-                              {originalVolume === 0 ? (
-                                <VolumeX className="h-4 w-4 text-zinc-500" />
-                              ) : (
-                                <Volume2 className="h-4 w-4 text-emerald-400" />
-                              )}
-                              <span>Suara Asli Video</span>
-                            </button>
-                            <span
-                              className={cn(
-                                "font-mono text-[11px] font-bold px-2 py-0.5 rounded-md border",
-                                originalVolume === 0
-                                  ? "text-zinc-500 bg-zinc-900 border-zinc-800"
-                                  : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                              )}
-                            >
-                              {originalVolume}%
-                            </span>
-                          </div>
-
-                          {/* Quick Preset Selector Pills */}
-                          <div className="grid grid-cols-4 gap-1">
-                            {[
-                              { label: "Mute", val: 0 },
-                              { label: "50%", val: 50 },
-                              { label: "80%", val: 80 },
-                              { label: "100%", val: 100 },
-                            ].map((preset) => {
-                              const isActive = originalVolume === preset.val;
-                              return (
-                                <button
-                                  key={preset.val}
-                                  type="button"
-                                  onClick={() => handleOriginalVolumeChange(preset.val)}
-                                  className={cn(
-                                    "py-1 rounded-lg text-[10px] font-medium transition-all border text-center cursor-pointer",
-                                    isActive
-                                      ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-300 font-semibold shadow-xs"
-                                      : "border-zinc-800/80 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
-                                  )}
-                                >
-                                  {preset.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          <div className="space-y-1">
-                            <input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={originalVolume}
-                              onChange={(e) => handleOriginalVolumeChange(Number(e.target.value))}
-                              className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                              style={{
-                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${originalVolume}%, #27272a ${originalVolume}%, #27272a 100%)`,
-                                '--slider-thumb-color': '#10b981',
-                              } as React.CSSProperties}
-                            />
-                            <p className="text-[10px] text-zinc-500">
-                              {originalVolume === 0
-                                ? "Suara dialog pembicara asli dibisukan (0%)."
-                                : "Volume dialog pembicara asli video."}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* 2. TikTok Music Overlay Volume Card */}
-                        <div className="space-y-2.5 p-3 rounded-xl bg-zinc-950/50 border border-zinc-800/80">
-                          <div className="flex items-center justify-between">
-                            <button
-                              type="button"
-                              onClick={() => handleMusicVolumeChange(musicVolume === 0 ? 25 : 0)}
-                              className="font-semibold text-xs text-zinc-300 flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
-                              title={musicVolume === 0 ? "Unmute musik TikTok" : "Mute musik TikTok"}
-                            >
-                              {musicVolume === 0 ? (
-                                <VolumeX className="h-4 w-4 text-zinc-500" />
-                              ) : (
-                                <Music className="h-4 w-4 text-pink-400" />
-                              )}
-                              <span>Volume Musik TikTok</span>
-                            </button>
-                            <span
-                              className={cn(
-                                "font-mono text-[11px] font-bold px-2 py-0.5 rounded-md border",
-                                musicVolume === 0
-                                  ? "text-zinc-500 bg-zinc-900 border-zinc-800"
-                                  : "text-pink-400 bg-pink-500/10 border-pink-500/20"
-                              )}
-                            >
-                              {musicVolume}%
-                            </span>
-                          </div>
-
-                          {/* Quick Preset Selector Pills */}
-                          <div className="grid grid-cols-4 gap-1">
-                            {[
-                              { label: "Mute", val: 0 },
-                              { label: "10% Soft", val: 10 },
-                              { label: "25% Normal", val: 25 },
-                              { label: "50% Loud", val: 50 },
-                            ].map((preset) => {
-                              const isActive = musicVolume === preset.val;
-                              return (
-                                <button
-                                  key={preset.val}
-                                  type="button"
-                                  onClick={() => handleMusicVolumeChange(preset.val)}
-                                  className={cn(
-                                    "py-1 rounded-lg text-[10px] font-medium transition-all border text-center cursor-pointer",
-                                    isActive
-                                      ? "border-pink-500/60 bg-pink-500/15 text-pink-300 font-semibold shadow-xs"
-                                      : "border-zinc-800/80 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
-                                  )}
-                                >
-                                  {preset.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          <div className="space-y-1">
-                            <input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={musicVolume}
-                              onChange={(e) => handleMusicVolumeChange(Number(e.target.value))}
-                              className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                              style={{
-                                background: `linear-gradient(to right, #ec4899 0%, #ec4899 ${musicVolume}%, #27272a ${musicVolume}%, #27272a 100%)`,
-                                '--slider-thumb-color': '#ec4899',
-                              } as React.CSSProperties}
-                            />
-                            <p className="text-[10px] text-zinc-500">
-                              {musicVolume === 0
-                                ? "Volume 0% (Mute) — Lagu tetap disematkan untuk discovery, tetapi audionya tidak terdengar."
-                                : `Musik akan dimixing di latar belakang dengan volume ${musicVolume}%.`}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
                     </div>
                   )}
                 </div>
@@ -2127,16 +2364,21 @@ export function ScheduleModal({
                 {autoPickMusic && (
                   <span className="ml-2 font-medium text-[11px]">
                     {isBatch && batchMusicMode === "ai_distinct" ? (
-                      <span className="text-pink-400">
+                      <span className="text-emerald-400">
                         Lagu: AI Berbeda Tiap Klip ({Object.keys(clipMusicMap).length}/{clipRanks?.length || 0}) • Vol {musicVolume}%
                       </span>
                     ) : selectedTrack ? (
                       musicVolume === 0 ? (
                         <span className="text-zinc-500">Lagu: {selectedTrack.name} (Disematkan, audio mute)</span>
                       ) : (
-                        <span className="text-pink-400">Lagu: {selectedTrack.name} ({musicVolume}%)</span>
+                        <span className="text-emerald-400">Lagu: {selectedTrack.name} ({musicVolume}%)</span>
                       )
                     ) : null}
+                  </span>
+                )}
+                {isBatch && (
+                  <span className="ml-2 font-medium text-[11px] text-zinc-400">
+                    • Caption: {batchCaptionMode === "ai_distinct" ? "Otomatis Tiap Video" : "Seragam"}
                   </span>
                 )}
               </span>

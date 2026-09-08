@@ -62,6 +62,8 @@ class BatchPublishRequest(PublishRequest):
     customScheduleTimes: List[str] = Field(default_factory=list)
     scheduleAt: str = ""
     clipMusicConfigs: Optional[Dict[str, Dict[str, Any]]] = None
+    batchCaptionMode: str = "ai_distinct"  # ai_distinct, single
+    clipCaptionConfigs: Optional[Dict[str, Dict[str, str]]] = None
 
 
 def calculate_batch_schedule_times(
@@ -699,10 +701,45 @@ async def publish_clip_batch(body: BatchPublishRequest, user=Depends(get_current
             if requested_ids != owned_ids:
                 raise HTTPException(status_code=403, detail="Ada akun sosial yang bukan milik user ini.")
 
+    # Pre-fetch job clips if distinct AI captions are needed and configs not provided
+    job_clips_by_rank: Dict[int, Dict[str, Any]] = {}
+    if body.batchCaptionMode == "ai_distinct" and body.jobId:
+        try:
+            from src.presentation.dependencies import get_job_service
+            job_svc = get_job_service()
+            job = await job_svc.get_job(body.jobId)
+            if job and isinstance(job.clips_data, dict):
+                for c in job.clips_data.get("clips", []):
+                    r = int(c.get("rank", 0))
+                    if r:
+                        job_clips_by_rank[r] = c
+        except Exception as e:
+            logger.warning(f"Could not load job clips for batch caption extraction: {e}")
+
     results = []
     for rank, schedule_at in zip(ranks, times):
-        item_data = body.model_dump(exclude={"clipRanks", "scheduleMode", "customScheduleTimes", "clipMusicConfigs"})
+        item_data = body.model_dump(
+            exclude={"clipRanks", "scheduleMode", "customScheduleTimes", "clipMusicConfigs", "batchCaptionMode", "clipCaptionConfigs"}
+        )
         item_data.update({"clipRank": rank, "scheduleAt": schedule_at})
+
+        # Apply per-clip caption & title override or AI extraction
+        rank_key = str(rank)
+        if body.clipCaptionConfigs and rank_key in body.clipCaptionConfigs:
+            c_conf = body.clipCaptionConfigs[rank_key]
+            if c_conf.get("title"):
+                item_data["title"] = c_conf["title"]
+            if c_conf.get("caption"):
+                item_data["caption"] = c_conf["caption"]
+        elif body.batchCaptionMode == "ai_distinct" and rank in job_clips_by_rank:
+            from src.infrastructure.social_auto_post_service import SocialAutoPostService
+            matched_clip = job_clips_by_rank[rank]
+            auto_caption = SocialAutoPostService().extract_clip_caption(matched_clip)
+            auto_title = matched_clip.get("hook") or f"Clip #{rank}"
+            if auto_caption:
+                item_data["caption"] = auto_caption
+            if auto_title:
+                item_data["title"] = auto_title[:100]
 
         # Apply per-clip music and volume override if provided
         rank_key = str(rank)

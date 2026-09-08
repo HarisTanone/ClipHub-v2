@@ -546,6 +546,8 @@ export interface ClipInfo {
   duration: number;
   hook: string | null;
   reason: string | null;
+  captions?: Record<string, string>;
+  hashtags?: string[];
   has_words: boolean;
   word_count: number;
   has_final: boolean;

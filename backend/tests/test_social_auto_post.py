@@ -504,6 +504,82 @@ class TestSocialAutoPost(unittest.TestCase):
                     self.assertNotIn(excluded_rank, scheduled_ranks)
 
 
+    def test_batch_publish_with_clip_caption_configs(self):
+        """Verify publish_clip_batch applies custom per-clip titles and captions."""
+        from src.presentation.routes.social.publish import BatchPublishRequest, publish_clip_batch
+
+        captured_requests = []
+
+        async def fake_publish_clip(req, _user=None):
+            captured_requests.append(req)
+            return {"success": True, "count": 1}
+
+        with patch("src.presentation.routes.social.publish.publish_clip", side_effect=fake_publish_clip), \
+             patch("src.presentation.routes.social.publish._is_user_superadmin", return_value=True):
+            body = BatchPublishRequest(
+                jobId="job_batch_caps",
+                accountId="acc_1",
+                clipRanks=[1, 2],
+                scheduleMode="same",
+                scheduleAt="2026-09-10T12:00:00.000Z",
+                title="Generic Title",
+                caption="Generic Caption",
+                batchCaptionMode="single",
+                clipCaptionConfigs={
+                    "1": {"title": "Title #1", "caption": "Caption for clip 1"},
+                    "2": {"title": "Title #2", "caption": "Caption for clip 2"},
+                }
+            )
+            result = asyncio.run(publish_clip_batch(body, user={"is_superadmin": True}))
+            self.assertTrue(result["success"])
+            self.assertEqual(len(captured_requests), 2)
+            self.assertEqual(captured_requests[0].title, "Title #1")
+            self.assertEqual(captured_requests[0].caption, "Caption for clip 1")
+            self.assertEqual(captured_requests[1].title, "Title #2")
+            self.assertEqual(captured_requests[1].caption, "Caption for clip 2")
+
+    def test_batch_publish_ai_distinct_mode(self):
+        """Verify publish_clip_batch automatically extracts distinct AI titles and captions from job clips."""
+        from src.presentation.routes.social.publish import BatchPublishRequest, publish_clip_batch
+
+        captured_requests = []
+
+        async def fake_publish_clip(req, _user=None):
+            captured_requests.append(req)
+            return {"success": True, "count": 1}
+
+        fake_job = MagicMock()
+        fake_job.clips_data = {
+            "clips": [
+                {"rank": 1, "hook": "Hook Clip 1", "reason": "Reason 1", "captions": {"tiktok": "TikTok Caption 1"}},
+                {"rank": 2, "hook": "Hook Clip 2", "reason": "Reason 2", "captions": {"tiktok": "TikTok Caption 2"}},
+            ]
+        }
+        fake_job_svc = MagicMock()
+        fake_job_svc.get_job = AsyncMock(return_value=fake_job)
+
+        with patch("src.presentation.routes.social.publish.publish_clip", side_effect=fake_publish_clip), \
+             patch("src.presentation.routes.social.publish._is_user_superadmin", return_value=True), \
+             patch("src.presentation.dependencies.get_job_service", return_value=fake_job_svc):
+            body = BatchPublishRequest(
+                jobId="job_batch_distinct",
+                accountId="acc_1",
+                clipRanks=[1, 2],
+                scheduleMode="same",
+                scheduleAt="2026-09-10T12:00:00.000Z",
+                title="Generic Title",
+                caption="Generic Caption",
+                batchCaptionMode="ai_distinct",
+            )
+            result = asyncio.run(publish_clip_batch(body, user={"is_superadmin": True}))
+            self.assertTrue(result["success"])
+            self.assertEqual(len(captured_requests), 2)
+            self.assertEqual(captured_requests[0].title, "Hook Clip 1")
+            self.assertIn("TikTok Caption 1", captured_requests[0].caption)
+            self.assertEqual(captured_requests[1].title, "Hook Clip 2")
+            self.assertIn("TikTok Caption 2", captured_requests[1].caption)
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -450,7 +450,6 @@ export function JobDetail() {
           clipRank={selectedClipRanks[0]}
           clipRanks={selectedClipRanks}
           clips={data.clips}
-          defaultCaption={`${selectedClipRanks.length} video klip terpilih siap diposting`}
           itemLabel={`${selectedClipRanks.length} clips`}
         />
       )}

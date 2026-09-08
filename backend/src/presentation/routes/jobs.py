@@ -1184,6 +1184,8 @@ async def get_job_detail(
             "duration": round(max(0, end - start), 1),
             "hook": clip.get("hook"),
             "reason": clip.get("reason"),
+            "captions": clip.get("captions") or {},
+            "hashtags": clip.get("hashtags") or [],
             "has_words": bool(clip.get("words")),
             "word_count": len(clip.get("words", [])),
             "has_final": has_final,
