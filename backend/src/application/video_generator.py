@@ -29,8 +29,65 @@ from src.application.video_gen_captions import (
     write_ass_subtitles,
 )
 from src.config import settings
+from src.infrastructure.text_emphasis import normalise_ai_text_config
 
 logger = logging.getLogger(__name__)
+
+
+def build_video_gen_ai_text_events(
+    timeline: list[dict],
+    config: object,
+    *,
+    hook_duration: float = 3.0,
+    cta_duration: float = 0.0,
+    max_events: int = 2,
+) -> list[dict]:
+    """Build sparse AI Text events from the AI-authored VideoGen timeline.
+
+    No domain vocabulary is used. Candidates come only from narration already
+    authored by the Story Agent. Hook and CTA windows are excluded so overlays
+    cannot collide with those owner layers.
+    """
+    safe = normalise_ai_text_config(config)
+    if not safe["enabled"] or max_events <= 0:
+        return []
+
+    style = safe["style"]
+    total_duration = max(
+        (float(item.get("start_time", 0) or 0) + float(item.get("duration", 0) or 0) for item in timeline),
+        default=0.0,
+    )
+    earliest = max(0.0, float(hook_duration)) + 0.2
+    latest = max(earliest, total_duration - max(0.0, float(cta_duration)))
+    auto_effects = ("hero_punch", "word_cascade", "split_impact", "type_pulse")
+    candidates: list[dict] = []
+
+    for index, item in enumerate(timeline):
+        narration = str(item.get("narration") or "").strip()
+        words = narration.split()
+        start = float(item.get("start_time", 0) or 0)
+        duration = max(0.0, float(item.get("duration", 0) or 0))
+        event_start = max(earliest, start + min(0.8, duration * 0.18))
+        event_end = min(latest, start + duration - min(0.3, duration * 0.08), event_start + 2.4)
+        if not words or event_end - event_start < 0.6:
+            continue
+
+        phrase = " ".join(words[: min(6, len(words))])
+        requested = str(style.get("effectMode") or "auto")
+        effect = auto_effects[index % len(auto_effects)] if requested == "auto" else requested
+        candidates.append({
+            "id": f"videogen_emphasis_{index + 1}",
+            "start": round(event_start, 3),
+            "end": round(event_end, 3),
+            "text": phrase,
+            "effect": effect,
+            "position": "center",
+            "reason": "story_timeline",
+        })
+
+    # Prefer substantial phrases, then restore chronological render order.
+    selected = sorted(candidates, key=lambda event: (-len(event["text"]), event["start"]))[: min(2, max_events)]
+    return sorted(selected, key=lambda event: event["start"])
 
 
 class VideoGenStatus(str, Enum):
@@ -477,12 +534,79 @@ class VideoGenerator:
             watermark_config=watermark_config,
             transition=transition or "dissolve",
             cta_config=cta_config,
-            ai_text_config=ai_text_config,
+            ai_text_config=normalise_ai_text_config(ai_text_config),
             user_id=user_id,
         )
         self._jobs[job_id] = job
         self._persist_job(job)
         return job
+
+    async def _apply_ai_text_pass(
+        self,
+        timeline: list[dict],
+        job: VideoGenJob,
+        work_dir: str,
+        final_path: str,
+    ) -> list[dict]:
+        """Bake canonical AI Text through the same Remotion layer as final clips."""
+        config = normalise_ai_text_config(job.ai_text_config)
+        if not config["enabled"]:
+            return []
+
+        hook_duration = 0.0
+        if job.hook_enabled:
+            hook_duration = float((job.hook_style or {}).get("duration", 3.0) or 3.0)
+        cta_duration = 0.0
+        if isinstance(job.cta_config, dict) and job.cta_config.get("enabled", True):
+            cta_duration = float(job.cta_config.get("duration", 3.0) or 3.0)
+        events = build_video_gen_ai_text_events(
+            timeline, config, hook_duration=hook_duration, cta_duration=cta_duration,
+        )
+        if not events:
+            raise RuntimeError("AI Text enabled but no safe timeline event could be created")
+
+        from src.infrastructure.text_emphasis import TRACKING_EFFECTS
+        if any(event.get("effect") in TRACKING_EFFECTS for event in events):
+            from src.infrastructure.person_foreground_generator import PersonForegroundGenerator
+            foreground = PersonForegroundGenerator()
+            try:
+                events = await foreground.generate_for_events(
+                    final_path, events, os.path.join(work_dir, "ai_text_foreground"),
+                    fps=30, feather=int(config["style"].get("maskFeather", 9)),
+                )
+            except Exception as exc:
+                events = foreground._downgrade_behind_events(events, f"tracking_error:{exc}")
+
+        from src.domain.interfaces_remotion import RemotionRenderConfig
+        from src.infrastructure.remotion_adapter import RemotionAdapter
+        remotion = RemotionAdapter()
+        if not await remotion.health_check():
+            raise RuntimeError("AI Text requires Remotion, but the renderer is unavailable")
+
+        duration = max(
+            (float(item.get("start_time", 0) or 0) + float(item.get("duration", 0) or 0) for item in timeline),
+            default=float(job.target_duration or 1),
+        )
+        output_path = os.path.join(work_dir, f"ai_text_{job.job_id}.mp4")
+        result = await remotion.render_clip(
+            scene_graph={"clip_rank": 1, "duration": duration, "layers": []},
+            creative_direction={
+                "hook_style_config": {"enabled": False},
+                "subtitle_style_config": {"enabled": False},
+                "text_emphasis_style_config": config["style"],
+            },
+            video_path=final_path, output_path=output_path, clip_rank=1,
+            config=RemotionRenderConfig(enable_threejs=False, enable_ai_layer=True),
+            words=[], hook_text="", hook_style="podcast_lower_third",
+            text_emphasis_events=events,
+        )
+        if not result.success or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError(
+                f"AI Text Remotion pass failed: {getattr(result, 'error_message', None) or 'no artifact'}"
+            )
+        shutil.move(output_path, final_path)
+        job.ai_text_config = {**config, "events": events}
+        return events
 
     def get_job(self, job_id: str) -> Optional[VideoGenJob]:
         # Always check database first to maintain consistency across multi-worker processes

@@ -9,6 +9,7 @@ from src.presentation.auth_deps import CurrentUser
 from src.presentation.routes.auth import get_current_user
 from src.presentation.routes.social.publish import (
     PublishRequest,
+    _publish_artifact_path,
     mix_video_with_music,
     scale_video_audio_volume,
 )
@@ -250,6 +251,27 @@ def test_publish_request_accepts_all_music_parameters():
     assert req.musicVolume == 0.15
 
 
+def test_publish_request_rejects_percentage_instead_of_ratio():
+    """Backend contract is strictly 0..1; UI converts percent exactly once."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        PublishRequest(
+            jobId="job_bad_volume",
+            accountId="acc_tiktok",
+            scheduleAt="2026-09-01T14:00:00.000Z",
+            musicVolume=25,
+        )
+
+
+def test_publish_artifact_path_is_stable_and_sanitized(tmp_path):
+    with patch("src.presentation.routes.social.publish.settings.OUTPUT_DIR", str(tmp_path)):
+        first = _publish_artifact_path("vg/job unsafe", 2)
+        second = _publish_artifact_path("vg/job unsafe", 2)
+    assert first == second
+    assert first.endswith("vg_job_unsafe_2_music.mp4")
+
+
 @pytest.mark.asyncio
 async def test_scale_video_audio_volume():
     """Verify that scale_video_audio_volume invokes ffmpeg with volume filter when volume != 1.0."""
@@ -269,8 +291,8 @@ async def test_scale_video_audio_volume():
         assert "volume=0.50" in cmd_str
 
 
-def test_zero_music_volume_disables_repliz_music():
-    """Verify additional_info sets isAutoAddMusic=False and music.id='' when musicVolume is 0."""
+def test_zero_music_volume_keeps_repliz_music_attachment():
+    """Muted TikTok music remains attached for discovery/search metadata."""
     from src.presentation.routes.social.publish import PublishRequest
 
     body = PublishRequest(
@@ -283,16 +305,31 @@ def test_zero_music_volume_disables_repliz_music():
         originalVolume=1.0,
     )
 
-    has_active_music = bool(body.isAutoAddMusic) and body.musicVolume > 0.0 and bool(body.music)
-    assert has_active_music is False
+    has_selected_music = bool(body.isAutoAddMusic) and bool(body.music)
+    should_bake_music = has_selected_music and body.musicVolume > 0.0
+    assert has_selected_music is True
+    assert should_bake_music is False
     additional_info = {
-        "isAutoAddMusic": has_active_music,
+        "isAutoAddMusic": False,
         "music": {
             "id": str((body.music or {}).get("id") or ""),
-        } if has_active_music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
+        } if has_selected_music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
     }
     assert additional_info["isAutoAddMusic"] is False
-    assert additional_info["music"]["id"] == ""
+    assert additional_info["music"]["id"] == "track_123"
+
+
+def test_explicit_music_uses_attachment_not_auto_pick():
+    """Repliz's documented Music example uses an ID with isAutoAddMusic=false."""
+    music = {
+        "id": "7602104441417107457",
+        "artist": "CHAYRA",
+        "name": "Mudik Raya",
+        "thumbnail": "https://p16-sg.tiktokcdn.com/cover.jpeg",
+    }
+    additional_info = {"isAutoAddMusic": False, "music": music}
+    assert additional_info["isAutoAddMusic"] is False
+    assert additional_info["music"]["id"] == "7602104441417107457"
 
 
 def test_infer_music_recommendation_vibe_and_diversity():
@@ -350,6 +387,22 @@ def test_tiktok_music_recommendation_endpoint(client):
         assert "edukasi" in data["match_reason"].lower()
         assert len(data["tracks"]) == 2
         assert data["tracks"][0]["match_reason"] != ""
+
+
+def test_edm_ui_filter_uses_documented_repliz_electronic_genre(client):
+    fake_user = CurrentUser(1, "admin@test.com", "superadmin", ["*"])
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    try:
+        with patch("src.presentation.routes.social.tiktok.repliz_get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = {"docs": []}
+            from src.presentation.routes.social import tiktok
+            tiktok._music_cache.clear()
+            response = client.get("/api/social/tiktok/music?genre=EDM")
+            assert response.status_code == 200
+            assert response.json()["genre"] == "ELECTRONIC"
+            assert mock_get.call_args.kwargs["params"]["genre"] == "ELECTRONIC"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_schedule_stats_endpoint(client):

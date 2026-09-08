@@ -168,6 +168,25 @@ def normalise_text_emphasis_style(style: object) -> dict:
     return result
 
 
+def normalise_ai_text_config(config: object) -> dict:
+    """Canonicalize AI Text settings from panel, preset, or automation.
+
+    Accepts the historical nested ``{enabled, style}`` shape and the current
+    flat ``{enabled, effectMode, ...}`` shape. Always returns one stable
+    ``{enabled, style}`` contract for persistence and rendering.
+    """
+    raw = dict(config) if isinstance(config, dict) else {}
+    nested_style = raw.get("style")
+    if isinstance(nested_style, dict):
+        style_input = nested_style
+    else:
+        style_input = {key: value for key, value in raw.items() if key != "enabled"}
+    return {
+        "enabled": bool(raw.get("enabled", False)),
+        "style": normalise_text_emphasis_style(style_input),
+    }
+
+
 def build_text_emphasis_context(
     clips_words: dict[int, list[dict]],
     max_total_words: int = 900,

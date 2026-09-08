@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from src.config import settings
@@ -47,8 +48,8 @@ class PublishRequest(BaseModel):
     isDraft: bool = False
     isAutoAddMusic: bool = False
     music: Optional[Dict[str, Any]] = None
-    originalVolume: float = 1.0
-    musicVolume: float = 0.0
+    originalVolume: float = Field(default=1.0, ge=0.0, le=1.0)
+    musicVolume: float = Field(default=0.0, ge=0.0, le=1.0)
     collaborators: List[str] = Field(default_factory=list)
     mentions: List[str] = Field(default_factory=list)
     targetCountries: List[str] = Field(default_factory=list)
@@ -119,6 +120,28 @@ async def mix_video_with_music(
                 os.remove(temp_music_path)
             except Exception:
                 pass
+
+
+def _publish_artifact_path(job_id: str, clip_rank: int) -> str:
+    """Return a stable sidecar path for locally baked publish media."""
+    safe_job_id = re.sub(r"[^A-Za-z0-9_.-]", "_", job_id)
+    artifact_dir = os.path.join(settings.OUTPUT_DIR, ".social_publish")
+    os.makedirs(artifact_dir, exist_ok=True)
+    return os.path.join(artifact_dir, f"{safe_job_id}_{clip_rank}_music.mp4")
+
+
+@publish_router.get("/media/{job_id}/{clip_rank}", include_in_schema=False)
+async def get_publish_media(job_id: str, clip_rank: int):
+    """Serve the exact audio-baked artifact to the delayed Repliz worker."""
+    artifact = _publish_artifact_path(job_id, clip_rank)
+    if not os.path.isfile(artifact) or os.path.getsize(artifact) == 0:
+        raise HTTPException(status_code=404, detail="Publish media not found")
+    return FileResponse(
+        artifact,
+        media_type="video/mp4",
+        filename=f"{job_id}_{clip_rank}.mp4",
+        headers={"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=86400"},
+    )
 
 
 async def scale_video_audio_volume(video_path: str, volume: float = 1.0) -> str:
@@ -292,17 +315,32 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         logger.warning(f"Video compliance transcode fallback: {e}")
         compliant_video = video_file
 
-    # 4-music. Optionally mix TikTok background music if musicVolume > 0 and music url provided
-    if body.musicVolume > 0.0 and body.music and body.music.get("url"):
+    # Repliz supports TikTok music metadata, but the documented schedule schema
+    # has no volume fields. Bake the stream locally so both slider values are
+    # guaranteed to affect the audible result.
+    selected_music = bool(body.isAutoAddMusic and body.music)
+    should_bake_music = selected_music and body.musicVolume > 0.0
+    mixed_artifact = None
+    if should_bake_music and not (body.music or {}).get("url"):
+        raise HTTPException(status_code=400, detail="Lagu TikTok terpilih tidak memiliki URL audio.")
+    if should_bake_music:
         try:
-            compliant_video = await mix_video_with_music(
+            assert body.music is not None
+            mixed_video = await mix_video_with_music(
                 video_path=compliant_video,
                 music_url=body.music["url"],
                 original_vol=body.originalVolume,
                 music_vol=body.musicVolume,
             )
+            if mixed_video == compliant_video:
+                raise RuntimeError("audio lagu gagal diunduh atau FFmpeg gagal melakukan mixing")
+            mixed_artifact = _publish_artifact_path(body.jobId, body.clipRank or 1)
+            import shutil
+            shutil.copy2(mixed_video, mixed_artifact)
+            compliant_video = mixed_artifact
         except Exception as mix_err:
-            logger.warning(f"Failed to mix TikTok music into video: {mix_err}")
+            logger.exception("Failed to mix selected TikTok music")
+            raise HTTPException(status_code=502, detail=f"Gagal memasukkan lagu TikTok ke video: {mix_err}")
     elif abs(body.originalVolume - 1.0) >= 0.01:
         # Scale original dialogue volume when music is muted/absent
         try:
@@ -366,7 +404,9 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     drive_result = None
     video_url = ""
 
-    if public_base:
+    if public_base and mixed_artifact:
+        video_url = f"{public_base}/api/social/publish/media/{body.jobId}/{body.clipRank or 1}"
+    elif public_base:
         if is_video_gen:
             video_url = f"{public_base}/api/jobs/{body.jobId}/clips/1/final"
             thumb_url = f"{public_base}/api/jobs/{body.jobId}/clips/1/thumb"
@@ -473,30 +513,32 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             "medias": [],
         })
 
-    has_active_music = bool(body.isAutoAddMusic) and body.musicVolume > 0.0 and bool(body.music)
-    additional_info = {
-        "isAiGenerated": bool(body.isAiGenerated),
-        "isDraft": bool(body.isDraft),
-        "isAutoAddMusic": has_active_music,
-        "coverTimestampMs": int(max(0.5, float(hook_seek)) * 1000),
-        "coverTimestamp": round(hook_seek, 2),
-        "collaborators": body.collaborators or [],
-        "mentions": body.mentions or [],
-        "music": {
-            "id": str((body.music or {}).get("id") or ""),
-            "artist": str((body.music or {}).get("artist") or ""),
-            "name": str((body.music or {}).get("name") or ""),
-            "thumbnail": str((body.music or {}).get("thumbnail") or ""),
-        } if has_active_music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
-        "products": [],
-        "tags": tags or [],
-        "targetCountries": body.targetCountries or [],
-    }
-
     for acc_id in target_account_ids:
         try:
             platform = account_platform_map.get(acc_id, "")
             post_type = get_supported_post_type(body.type, platform)
+            has_selected_music = selected_music and platform.lower().strip() == "tiktok"
+            additional_info = {
+                "isAiGenerated": bool(body.isAiGenerated),
+                "isDraft": bool(body.isDraft),
+                # Official Repliz "Music" example keeps this false when an
+                # explicit additionalInfo.music object is supplied. True asks
+                # TikTok/Repliz to auto-select music and can override our ID.
+                "isAutoAddMusic": False,
+                "coverTimestampMs": int(max(0.5, float(hook_seek)) * 1000),
+                "coverTimestamp": round(hook_seek, 2),
+                "collaborators": body.collaborators or [],
+                "mentions": body.mentions or [],
+                "music": {
+                    "id": str((body.music or {}).get("id") or ""),
+                    "artist": str((body.music or {}).get("artist") or ""),
+                    "name": str((body.music or {}).get("name") or ""),
+                    "thumbnail": str((body.music or {}).get("thumbnail") or ""),
+                } if has_selected_music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
+                "products": [],
+                "tags": tags or [],
+                "targetCountries": body.targetCountries or [],
+            }
 
             payload = {
                 "title": post_title,

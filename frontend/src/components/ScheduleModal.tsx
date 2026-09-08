@@ -221,7 +221,7 @@ export function ScheduleModal({
   const [shuffleSeed, setShuffleSeed] = useState<number>(0);
   const [matchReason, setMatchReason] = useState<string>("");
   const [originalVolume, setOriginalVolume] = useState<number>(100);
-  const [musicVolume, setMusicVolume] = useState<number>(0);
+  const [musicVolume, setMusicVolume] = useState<number>(25);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
@@ -369,7 +369,9 @@ export function ScheduleModal({
   function handleToggleAutoPickMusic(checked: boolean) {
     setAutoPickMusic(checked);
     if (checked) {
-      setMusicVolume(0); // Default 0% music volume
+      // A selected track must be audible by default. Percent is converted once
+      // to the backend's 0..1 ratio when the schedule payload is built.
+      if (musicVolume === 0) setMusicVolume(25);
       if (musicTracks.length > 0 && !selectedTrack) {
         setSelectedTrack(musicTracks[0]);
       }
@@ -449,9 +451,13 @@ export function ScheduleModal({
       ? tagsStr.split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean)
       : [];
 
+    if (hasTikTokSelected && autoPickMusic && !selectedTrack) {
+      toast.error("Pilih lagu TikTok terlebih dahulu.");
+      return;
+    }
     setPosting(true);
     try {
-      const hasActiveMusic = hasTikTokSelected && autoPickMusic && musicVolume > 0;
+      const hasSelectedMusic = hasTikTokSelected && autoPickMusic && Boolean(selectedTrack);
       const payload: any = {
         jobId,
         clipRank: clipRank || 1,
@@ -465,9 +471,9 @@ export function ScheduleModal({
         isAiGenerated,
         scheduleAt,
         type: postType,
-        isAutoAddMusic: hasActiveMusic,
+        isAutoAddMusic: hasSelectedMusic,
         music:
-          hasActiveMusic && selectedTrack
+          hasSelectedMusic && selectedTrack
             ? {
                 id: selectedTrack.id,
                 name: selectedTrack.name,
@@ -477,7 +483,7 @@ export function ScheduleModal({
               }
             : undefined,
         originalVolume: originalVolume / 100,
-        musicVolume: hasActiveMusic ? musicVolume / 100 : 0,
+        musicVolume: hasSelectedMusic ? musicVolume / 100 : 0,
       };
 
       const result = await publishClip(payload);

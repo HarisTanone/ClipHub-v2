@@ -168,8 +168,10 @@ async def get_tiktok_trending_music(
     else:
         seed_offset = shuffle_seed
 
-    # Map invalid genres to valid Repliz genres
-    valid_repliz_genres = {"ALL", "POP", "ROCK", "EDM", "ELECTRONIC", "LATIN", "COUNTRY", "JAZZ", "CLASSICAL", "FOLK"}
+    # Repliz documents ELECTRONIC (not the UI-friendly EDM label).
+    if effective_genre == "EDM":
+        effective_genre = "ELECTRONIC"
+    valid_repliz_genres = {"ALL", "POP", "ROCK", "ELECTRONIC", "LATIN", "COUNTRY", "JAZZ", "CLASSICAL", "FOLK"}
     if effective_genre not in valid_repliz_genres:
         effective_genre = "ALL"
 
