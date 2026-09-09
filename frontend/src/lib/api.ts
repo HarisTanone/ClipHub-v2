@@ -1121,6 +1121,7 @@ export interface AnalyzeClipCandidate {
 export interface AnalyzeResponse {
   success: boolean;
   job_id: string;
+  youtube_url?: string;
   video_duration: number;
   video_title: string;
   thumbnail: string;
@@ -1134,6 +1135,23 @@ export const analyze = {
       method: "POST",
       body: JSON.stringify({ youtube_url: youtubeUrl }),
     });
+  },
+
+  async getAnalyzeSession(jobId: string): Promise<AnalyzeResponse> {
+    return request<AnalyzeResponse>(`/api/jobs/${encodeURIComponent(jobId)}/analyze-session`);
+  },
+
+  async updateAnalyzeSession(
+    jobId: string,
+    clips: AnalyzeClipCandidate[]
+  ): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>(
+      `/api/jobs/${encodeURIComponent(jobId)}/analyze-session`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ clips }),
+      }
+    );
   },
 
   getSourceVideoUrl(jobId: string): string {

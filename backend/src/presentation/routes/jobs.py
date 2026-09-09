@@ -1501,6 +1501,12 @@ async def get_clip_detail(
                 or (job.clips_data or {}).get("text_emphasis_style_config")
                 or {}
             ),
+            "cta_config": (
+                clip_data.get("cta_config")
+                or (job.clips_data or {}).get("cta_config")
+                or {}
+            ),
+            "watermark_config": (job.clips_data or {}).get("watermark_config") or {},
             "text_emphasis_events": clip_data.get("text_emphasis_events", [])[:2],
             "reframe_layout": clip_data.get("reframe_layout") or clip_data.get("layout") or "single",
             "virality": _normalize_virality(clip_data.get("virality")),
@@ -1841,6 +1847,20 @@ async def restyle_clip(
     do_subtitle = body.subtitle_enabled if body else True
     do_broll = body.broll_enabled if body else True
 
+    # CTA / watermark config: body > per-clip > job-level. Resolved once,
+    # before any render pass, so the Remotion branch and direct FFmpeg pass
+    # always agree.
+    cta_config = (
+        body.cta_config if body and body.cta_config is not None
+        else (clip_data.get("cta_config") or root_style_data.get("cta_config"))
+        or {}
+    )
+    watermark_config = (
+        body.watermark_config if body and body.watermark_config is not None
+        else root_style_data.get("watermark_config")
+        or {}
+    )
+
     # Prepare paths
     os.makedirs(f"{output_dir}/final", exist_ok=True)
     brolled_path = f"{output_dir}/clip_{clip_rank:02d}_brolled.mp4"
@@ -1850,6 +1870,18 @@ async def restyle_clip(
     staged_final_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.mp4"
     hf_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.hf-hook.mp4"
     hf_subtitle_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.hf-subtitle.mp4"
+    tmp_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-hook.mp4"
+    tmp_sub_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-sub.mp4"
+    tmp_1pass_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.1pass.mp4"
+    restyle_tmp_paths = [
+        restyle_reframed_path,
+        staged_final_path,
+        hf_hook_path,
+        hf_subtitle_path,
+        tmp_hook_path,
+        tmp_sub_path,
+        tmp_1pass_path,
+    ]
 
     try:
         await _set_clip_operation(job_id, clip_rank, operation_id, stage="reframe", percentage=20)
@@ -1982,10 +2014,7 @@ async def restyle_clip(
                                   or {})
                         ),
                     }
-                    cta_cfg = (
-                        body.cta_config if body and body.cta_config is not None
-                        else (clip_data.get("cta_config") or root_style_data.get("cta_config"))
-                    )
+                    cta_cfg = cta_config
                     result = await remotion_adapter.render_clip(
                         scene_graph={
                             "clip_rank": clip_rank,
@@ -2098,20 +2127,6 @@ async def restyle_clip(
                 "mode": "hyperframes",
             }
 
-        # Watermark config
-        watermark_config = (
-            body.watermark_config if body and body.watermark_config is not None
-            else root_style_data.get("watermark_config")
-            or {}
-        )
-
-        # CTA config
-        cta_config = (
-            body.cta_config if body and body.cta_config is not None
-            else root_style_data.get("cta_config")
-            or {}
-        )
-
         # Enrich subtitle_config with Auto-Grid layout events & autogrid status
         clip_reframe = (getattr(job, "clips_data", {}) or {}).get("reframe_data", {}).get(clip_rank) or {}
         clip_layout_events = clip_reframe.get("layout_events") or []
@@ -2133,11 +2148,9 @@ async def restyle_clip(
             from src.infrastructure.unified_ffmpeg_compositor import UnifiedFFmpegCompositor
             fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
             compositor = UnifiedFFmpegCompositor(font_dir=fonts_dir)
-            tmp_1pass = f"{output_dir}/final/clip_{clip_rank}_final.restyle.1pass.mp4"
-
             success = await compositor.render_single_pass(
                 input_video=staged_final_path,
-                output_video=tmp_1pass,
+                output_video=tmp_1pass_path,
                 hook_text=hook_text or "",
                 hook_style_config=hook_config,
                 words=[],
@@ -2145,15 +2158,15 @@ async def restyle_clip(
                 watermark_config=watermark_config,
                 cta_config=cta_config,
             )
-            if success and os.path.exists(tmp_1pass):
-                os.replace(tmp_1pass, staged_final_path)
+            if success and os.path.exists(tmp_1pass_path):
+                os.replace(tmp_1pass_path, staged_final_path)
                 current_path = staged_final_path
                 logger.info(f"[restyle] 1-pass FFmpeg composite applied clip {clip_rank}")
             else:
                 logger.warning(f"[restyle] 1-pass FFmpeg composite failed clip {clip_rank}; falling back to multi-step")
-                if os.path.exists(tmp_1pass):
+                if os.path.exists(tmp_1pass_path):
                     try:
-                        os.remove(tmp_1pass)
+                        os.remove(tmp_1pass_path)
                     except OSError:
                         pass
 
@@ -2161,7 +2174,6 @@ async def restyle_clip(
         if not (hook_render_engine == "ffmpeg" and subtitle_render_engine == "ffmpeg" and not render_words and os.path.exists(staged_final_path)):
             # Direct Hook Pass
             if hook_render_engine in ("ffmpeg", "skia") and hook_text:
-                tmp_hook_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-hook.mp4"
                 try:
                     from src.infrastructure.unified_ffmpeg_compositor import GRAPHICAL_CARD_HOOKS
                     if hook_render_engine == "skia" or str(hook_style).startswith("skia_") or hook_style in GRAPHICAL_CARD_HOOKS:
@@ -2198,7 +2210,6 @@ async def restyle_clip(
 
             # Direct Subtitle Pass
             if subtitle_render_engine in ("ffmpeg", "skia") and render_words:
-                tmp_sub_path = f"{output_dir}/final/clip_{clip_rank}_final.restyle.direct-sub.mp4"
                 fonts_dir = getattr(service, "_fonts_dir", "assets/fonts")
                 try:
                     if subtitle_render_engine == "skia":
@@ -2321,7 +2332,7 @@ async def restyle_clip(
             await session.commit()
 
         # Cleanup temp files
-        for tmp in [restyle_reframed_path, staged_final_path, hf_hook_path, hf_subtitle_path]:
+        for tmp in restyle_tmp_paths:
             if tmp != final_path and os.path.exists(tmp):
                 os.remove(tmp)
 
@@ -2345,13 +2356,13 @@ async def restyle_clip(
 
     except HTTPException as e:
         await _set_clip_operation(job_id, clip_rank, operation_id, status="failed", stage="failed", error=str(e.detail), completed_at=datetime.now(timezone.utc).isoformat())
-        for tmp in [restyle_reframed_path, staged_final_path, hf_hook_path, hf_subtitle_path]:
+        for tmp in restyle_tmp_paths:
             if os.path.exists(tmp):
                 os.remove(tmp)
         raise
     except Exception as e:
         await _set_clip_operation(job_id, clip_rank, operation_id, status="failed", stage="failed", error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
-        for tmp in [restyle_reframed_path, staged_final_path, hf_hook_path, hf_subtitle_path]:
+        for tmp in restyle_tmp_paths:
             if os.path.exists(tmp):
                 os.remove(tmp)
         logger.error(f"restyle_error: job={job_id}, clip={clip_rank}, error={e}", exc_info=True)

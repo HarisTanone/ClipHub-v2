@@ -823,8 +823,14 @@ class PersonFirstReframeEngine(IReframeEngine):
         if not per_frame_faces or len(per_frame_faces) < 3:
             return None
 
-        crop_w = min(int(height * 9 / 16), width)
-        max_crop_x = width - crop_w
+        if int(height * 9 / 16) > width:
+            crop_w = (width // 2) * 2
+            crop_h = (int(width * 16 / 9) // 2) * 2
+        else:
+            crop_w = (int(height * 9 / 16) // 2) * 2
+            crop_h = (height // 2) * 2
+        max_crop_x = max(0, width - crop_w)
+        max_crop_y = max(0, height - crop_h)
 
         position_targets = {
             int(k): float(v)
@@ -837,6 +843,19 @@ class PersonFirstReframeEngine(IReframeEngine):
         sample_timestamps = tracked_data.get("sample_timestamps") or []
         sample_frame_indices = tracked_data.get("sample_frame_indices") or []
         per_frame_tracked = tracked_data.get("per_frame_tracked") or []
+
+        crop_y = 0
+        if max_crop_y > 0 and per_frame_tracked:
+            all_dets = [d for frame_dets in per_frame_tracked for d in frame_dets]
+            if all_dets:
+                head_ys = [
+                    float(d.face_bbox.y1 if getattr(d, 'face_bbox', None) is not None else (d.bbox.y1 + 0.15 * d.bbox.height))
+                    for d in all_dets
+                ]
+                med_head_y = float(np.median(head_ys))
+                desired_y = int(med_head_y - crop_h * 0.18)
+                crop_y = max(0, min(desired_y, max_crop_y))
+                crop_y = (crop_y // 2) * 2
 
         # Build keyframes: (time, crop_x, speaker_id)
         keyframes: List[Tuple[float, int, Optional[int]]] = []
@@ -890,10 +909,12 @@ class PersonFirstReframeEngine(IReframeEngine):
                 transition_style,
             )
 
+        safe_x_expr = f"min(max({crop_x_expr}\\,0)\\,{max_crop_x})"
+
         # Render
         fps_value = max(1.0, float(fps))
         vf = (
-            f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x_expr}:0,"
+            f"setpts=PTS-STARTPTS,crop={crop_w}:{crop_h}:{safe_x_expr}:{crop_y},"
             f"scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
             f"unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
             f"format=yuv420p,setsar=1,"
@@ -966,11 +987,20 @@ class PersonFirstReframeEngine(IReframeEngine):
         elif position_targets:
             crop_center_x = int(np.median(list(position_targets.values())))
 
-        crop_w = min(int(height * 9 / 16), width)
-        crop_x = max(0, min(crop_center_x - crop_w // 2, width - crop_w))
+        if int(height * 9 / 16) > width:
+            crop_w = (width // 2) * 2
+            crop_h = (int(width * 16 / 9) // 2) * 2
+        else:
+            crop_w = (int(height * 9 / 16) // 2) * 2
+            crop_h = (height // 2) * 2
+        max_crop_x = max(0, width - crop_w)
+        max_crop_y = max(0, height - crop_h)
+        crop_x = max(0, min(crop_center_x - crop_w // 2, max_crop_x))
+        crop_y = (max_crop_y // 2 // 2) * 2
+        crop_x = (crop_x // 2) * 2
 
         vf = (
-            f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x}:0,"
+            f"setpts=PTS-STARTPTS,crop={crop_w}:{crop_h}:{crop_x}:{crop_y},"
             "scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
             "unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
             "format=yuv420p,setsar=1"

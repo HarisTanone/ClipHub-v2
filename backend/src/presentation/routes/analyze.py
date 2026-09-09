@@ -52,6 +52,7 @@ class ClipCandidate(BaseModel):
 class AnalyzeResponse(BaseModel):
     success: bool = True
     job_id: str
+    youtube_url: str = ""
     video_duration: float
     video_title: str = ""
     thumbnail: str = ""
@@ -245,12 +246,108 @@ async def analyze_only(
     return AnalyzeResponse(
         success=True,
         job_id=job_id,
+        youtube_url=url,
         video_duration=duration,
         video_title=video_title,
         thumbnail=thumbnail,
         clips=clips_out,
         creative_direction=gemini_result.get("creative_direction"),
     )
+
+
+# ─── Analyze Session Persistence ──────────────────────────────────────────────
+
+class UpdateAnalyzeSessionRequest(BaseModel):
+    clips: list[ClipCandidate]
+
+
+@router.get("/{job_id}/analyze-session", response_model=AnalyzeResponse)
+async def get_analyze_session(
+    job_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Retrieve metadata and clips for an existing analyze session."""
+    meta_path = os.path.join(settings.DOWNLOAD_DIR, f"{job_id}.meta.json")
+    if not os.path.exists(meta_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Sesi analisis tidak ditemukan atau sudah kedaluwarsa",
+        )
+
+    try:
+        with open(meta_path, "r") as f:
+            data = json.load(f)
+    except Exception as err:
+        logger.error(f"Failed to read analyze session {job_id}: {err}")
+        raise HTTPException(status_code=500, detail="Gagal membaca data sesi analisis")
+
+    video_path = data.get("video_path") or os.path.join(settings.DOWNLOAD_DIR, f"{job_id}.mp4")
+    if not os.path.exists(video_path):
+        raise HTTPException(
+            status_code=404,
+            detail="File video sesi analisis sudah tidak tersedia di server",
+        )
+
+    raw_clips = data.get("clips", [])
+    clips_out = [
+        ClipCandidate(
+            rank=c.get("rank", i + 1),
+            start=float(c.get("start", 0)),
+            end=float(c.get("end", 0)),
+            duration=float(c.get("duration", 0)) if c.get("duration") else round(float(c.get("end", 0)) - float(c.get("start", 0)), 2),
+            score=c.get("score"),
+            hook=c.get("hook"),
+            reason=c.get("reason"),
+            content_type=c.get("content_type"),
+            speaker_energy=c.get("speaker_energy"),
+        )
+        for i, c in enumerate(raw_clips)
+    ]
+
+    thumbnail = data.get("thumbnail") or ""
+    video_id = data.get("video_id")
+    if not thumbnail and video_id:
+        thumbnail = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+
+    return AnalyzeResponse(
+        success=True,
+        job_id=job_id,
+        youtube_url=data.get("youtube_url", ""),
+        video_duration=float(data.get("video_duration", 0)),
+        video_title=data.get("video_title", ""),
+        thumbnail=thumbnail,
+        clips=clips_out,
+        creative_direction=data.get("creative_direction"),
+    )
+
+
+@router.put("/{job_id}/analyze-session")
+async def update_analyze_session(
+    job_id: str,
+    body: UpdateAnalyzeSessionRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Update saved clip candidate adjustments in an existing analyze session."""
+    meta_path = os.path.join(settings.DOWNLOAD_DIR, f"{job_id}.meta.json")
+    if not os.path.exists(meta_path):
+        raise HTTPException(status_code=404, detail="Sesi analisis tidak ditemukan")
+
+    try:
+        with open(meta_path, "r") as f:
+            data = json.load(f)
+    except Exception as err:
+        raise HTTPException(status_code=500, detail="Gagal membaca metadata sesi")
+
+    data["clips"] = [c.model_dump() for c in body.clips]
+    data["updated_at"] = time.time()
+
+    tmp_path = meta_path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp_path, meta_path)
+
+    return {"success": True, "message": "Sesi analisis berhasil diperbarui"}
+
 
 
 # ─── Source Video Streaming ────────────────────────────────────────────────────

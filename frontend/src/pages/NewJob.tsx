@@ -13,7 +13,6 @@ import { StyleEditorModal, DEFAULT_HOOK_STYLE, DEFAULT_SUBTITLE_STYLE, DEFAULT_T
 import { jobs, preview, presets as presetsApi, analyze, socialApi, type VideoPreview, type Preset, type AnalyzeResponse, type PlatformsStatusResponse, API_BASE } from "@/lib/api";
 import { cn, formatDuration, extractCleanYouTubeUrl, extractVideoId } from "@/lib/utils";
 import { BackgroundTemplateSection, type BackgroundMode } from "@/components/BackgroundTemplateSection";
-import { ClipTimelineEditor, type EditableClip } from "@/components/ClipTimelineEditor";
 
 export function NewJob() {
   const navigate = useNavigate();
@@ -51,10 +50,7 @@ export function NewJob() {
   const [loadingPlatforms, setLoadingPlatforms] = useState(false);
 
   // ─── Analyze-only flow state ─────────────────────────────────────
-  const [analyzeStep, setAnalyzeStep] = useState<"input" | "analyzing" | "review">("input");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analyzeResult, setAnalyzeResult] = useState<AnalyzeResponse | null>(null);
-  const [editableClips, setEditableClips] = useState<EditableClip[]>([]);
 
   // Style editor inline (not modal)
   const [styleTab, setStyleTab] = useState<"presets" | "hook" | "subtitle" | "transition" | "ai_text" | "other">("hook");
@@ -300,35 +296,50 @@ export function NewJob() {
   async function handleAnalyze() {
     if (!validateUrl(url)) return;
     setIsAnalyzing(true);
-    setAnalyzeStep("analyzing");
     try {
       const submitUrl = extractCleanYouTubeUrl(url);
+      const activePreset = userPresets.find((p) => p.id === activePresetId);
+      const activePresetSlug = activePreset ? (activePreset.slug || `preset-${activePreset.id}`) : undefined;
+
+      const draftConfig = {
+        aspectRatio,
+        stylePreset: activePresetSlug,
+        activePresetId,
+        brollEnabled,
+        brollImageOverlay,
+        brollBehindPerson,
+        brollVideoFootage,
+        autogridEnabled,
+        textEmphasisEnabled,
+        autoPostSocial,
+        autoPostPlatforms,
+        autoPostAccountIds,
+        autoPostScheduleMode,
+        autoPostCustomTime,
+        hookStyleConfig,
+        subtitleStyleConfig,
+        textEmphasisStyleConfig,
+        watermarkStyleConfig,
+        ctaStyleConfig,
+      };
+      try {
+        sessionStorage.setItem("autocliper_job_draft_config", JSON.stringify(draftConfig));
+      } catch {}
+
       const result = await analyze.analyzeOnly(submitUrl);
-      setAnalyzeResult(result);
-      const sortedClips = [...(result.clips || [])].sort((a, b) => a.start - b.start);
-      setEditableClips(
-        sortedClips.map((c, i) => ({
-          ...c,
-          rank: i + 1,
-          ai_start: c.start,
-          ai_end: c.end,
-          modified: false,
-        }))
-      );
-      setAnalyzeStep("review");
+      toast.success("Analisis selesai! Membuka halaman Review Clips...");
+      navigate(`/jobs/review/${result.job_id}`, {
+        state: {
+          analyzeResult: result,
+          draftConfig,
+        },
+      });
     } catch (e: any) {
-      const msg = e.message || "Analysis failed";
+      const msg = e.message || "Analisis video gagal";
       toast.error(msg);
-      setAnalyzeStep("input");
     } finally {
       setIsAnalyzing(false);
     }
-  }
-
-  function handleBackToInput() {
-    setAnalyzeStep("input");
-    setAnalyzeResult(null);
-    setEditableClips([]);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -340,7 +351,6 @@ export function NewJob() {
     setIsSubmitting(true);
     setUploadProgress(sourceMode === "upload" ? 0 : null);
 
-    const isFromReview = analyzeStep === "review" && editableClips.length > 0;
     const activePreset = userPresets.find((p) => p.id === activePresetId);
     const activePresetSlug = activePreset ? (activePreset.slug || `preset-${activePreset.id}`) : undefined;
 
@@ -348,8 +358,7 @@ export function NewJob() {
       style_preset: activePresetSlug,
       target_aspect_ratio: aspectRatio,
       hook_style: hookStyleConfig.animation || undefined,
-      force_reprocess: isFromReview ? false : (sourceMode === "youtube" ? forceReprocess : true),
-      source_job_id: isFromReview ? analyzeResult?.job_id : undefined,
+      force_reprocess: sourceMode === "youtube" ? forceReprocess : true,
       use_remotion: true,
       ai_layer_enabled: true,
       threejs_enabled: false,
@@ -388,16 +397,6 @@ export function NewJob() {
       custom_hook: sourceMode === "upload" && uploadProcessingMode === "direct"
         ? directHook.trim() || undefined
         : undefined,
-      // Custom clips from analyze-review step (user-adjusted timestamps & hooks)
-      ...(editableClips.length > 0 ? {
-        custom_clips: editableClips.map((c) => ({
-          rank: c.rank,
-          start: c.start,
-          end: c.end,
-          hook: c.hook,
-          score: c.score,
-        })),
-      } : {}),
       ...(aspectRatio === "16:9" || aspectRatio === "1:1"
         ? {
           background_mode: backgroundMode,
@@ -440,64 +439,26 @@ export function NewJob() {
       {/* Header */}
       <div className="flex items-center justify-between shrink-0 mb-3">
         <div className="flex items-center gap-3">
-          {analyzeStep === "review" ? (
-            <button type="button" onClick={handleBackToInput} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">
-              <ArrowLeft className="h-4 w-4" />
-            </button>
-          ) : (
-            <Link to="/" className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          )}
+          <Link to="/" className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
           <h1 className="text-base font-semibold text-zinc-100">
-            {analyzeStep === "review" ? "Review Clips" : "New Job"}
+            New Job
           </h1>
-          {analyzeStep === "review" && analyzeResult && (
-            <span className="text-[10px] text-zinc-500 font-medium">
-              {analyzeResult.video_title}
-            </span>
-          )}
         </div>
-        {analyzeStep === "review" ? (
-          <Button
-            type="button"
-            size="sm"
-            loading={isSubmitting}
-            disabled={isSubmitting || isAnalyzing}
-            onClick={handleSubmit}
-            icon={<Send className="h-3.5 w-3.5" />}
-          >
-            {submitButtonLabel}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            loading={isSubmitting}
-            disabled={isSubmitting || isAnalyzing}
-            onClick={handleSubmit}
-            icon={<Send className="h-3.5 w-3.5" />}
-          >
-            {submitButtonLabel}
-          </Button>
-        )}
+        <Button
+          type="button"
+          size="sm"
+          loading={isSubmitting}
+          disabled={isSubmitting || isAnalyzing}
+          onClick={handleSubmit}
+          icon={<Send className="h-3.5 w-3.5" />}
+        >
+          {submitButtonLabel}
+        </Button>
       </div>
 
-      {/* ─── REVIEW STATE (split-view: clips + video) ─────────────────── */}
-      {analyzeStep === "review" && analyzeResult && (
-        <div className="flex-1 min-h-0 overflow-y-auto pb-4">
-          <ClipTimelineEditor
-            clips={editableClips}
-            videoDuration={analyzeResult.video_duration}
-            videoSrc={analyze.getSourceVideoUrl(analyzeResult.job_id)}
-            onClipsChange={setEditableClips}
-          />
-        </div>
-      )}
-
-      {/* ─── INPUT STATE (normal form — also shows during analyzing) ──── */}
-      {(analyzeStep === "input" || analyzeStep === "analyzing") && (
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Left: URL + Config (col-4) */}
         <div className="lg:col-span-4 min-h-0 space-y-3 overflow-y-auto pb-4 lg:pb-0">
           {/* Source */}
@@ -1158,7 +1119,6 @@ export function NewJob() {
           </Card>
         </div>
       </div>
-      )}
     </div>
   );
 }

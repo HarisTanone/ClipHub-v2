@@ -2953,7 +2953,17 @@ class PodcastReframeEngine(IReframeEngine):
         def get_det_cx(d: TrackedDetection) -> float:
             if getattr(d, 'anatomical_center_x', None) is not None:
                 return float(d.anatomical_center_x)
-            return d.face_bbox.center_x if getattr(d, 'face_bbox', None) is not None else d.bbox.center_x
+            face_cx = float(d.face_bbox.center_x) if getattr(d, 'face_bbox', None) is not None else None
+            body_cx = float(d.bbox.center_x) if getattr(d, 'bbox', None) is not None else None
+            if face_cx is not None and body_cx is not None:
+                # 70% face center + 30% upper body torso centroid:
+                # avoids abrupt camera swing when speaker turns their head while body sits steady
+                return float(0.70 * face_cx + 0.30 * body_cx)
+            if face_cx is not None:
+                return face_cx
+            if body_cx is not None:
+                return body_cx
+            return 0.0
 
 
         def get_det_profile_distance(d: TrackedDetection, prof: dict) -> float:
@@ -3057,16 +3067,37 @@ class PodcastReframeEngine(IReframeEngine):
         if not per_frame_faces or len(per_frame_faces) < 3:
             return None
 
-        crop_w = min(int(height * 9 / 16), width)
-        max_crop_x = width - crop_w
+        # Ensure proper 9:16 aspect ratio without stretching, blank bars, or odd pixel misalignment
+        if int(height * 9 / 16) > width:
+            crop_w = (width // 2) * 2
+            crop_h = (int(width * 16 / 9) // 2) * 2
+        else:
+            crop_w = (int(height * 9 / 16) // 2) * 2
+            crop_h = (height // 2) * 2
+        max_crop_x = max(0, width - crop_w)
+        max_crop_y = max(0, height - crop_h)
+
+        per_frame_tracked = tracked_data.get("per_frame_tracked", [])
+        sample_frame_indices = tracked_data.get("sample_frame_indices", [])
+        sample_timestamps = tracked_data.get("sample_timestamps", [])
+
+        crop_y = 0
+        if max_crop_y > 0 and per_frame_tracked:
+            all_dets = [d for frame_dets in per_frame_tracked for d in frame_dets]
+            if all_dets:
+                head_ys = [
+                    float(d.face_bbox.y1 if getattr(d, 'face_bbox', None) is not None else (d.bbox.y1 + 0.15 * d.bbox.height))
+                    for d in all_dets
+                ]
+                med_head_y = float(np.median(head_ys))
+                desired_y = int(med_head_y - crop_h * 0.18)
+                crop_y = max(0, min(desired_y, max_crop_y))
+                crop_y = (crop_y // 2) * 2
 
         # 1. Build target crop X per second
         # For each sample, determine where crop should be centered
         keyframes: List[Tuple[float, int, Optional[int], str]] = []
         # (time_sec, target_crop_x, active_position_id, target_source)
-        per_frame_tracked = tracked_data.get("per_frame_tracked", [])
-        sample_frame_indices = tracked_data.get("sample_frame_indices", [])
-        sample_timestamps = tracked_data.get("sample_timestamps", [])
         position_targets = {
             int(k): float(v)
             for k, v in (tracked_data.get("position_targets") or {}).items()
@@ -3311,6 +3342,8 @@ class PodcastReframeEngine(IReframeEngine):
 
         return {
             "crop_w": crop_w,
+            "crop_h": crop_h,
+            "crop_y": crop_y,
             "crop_x_expr": crop_x_expr,
             "keyframes": stabilized,
             "framing_events": self._speaker_change_events(stabilized),
@@ -3342,13 +3375,17 @@ class PodcastReframeEngine(IReframeEngine):
             return None
 
         crop_w = plan["crop_w"]
+        crop_h = plan.get("crop_h", height)
+        crop_y = plan.get("crop_y", 0)
         crop_x_expr = plan["crop_x_expr"]
         stabilized = plan["keyframes"]
+        max_crop_x = max(0, width - crop_w)
+        safe_x_expr = f"min(max({crop_x_expr}\\,0)\\,{max_crop_x})"
 
         # 3. Render with single FFmpeg command
         fps_value = max(1.0, float(fps))
         vf = (
-            f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x_expr}:0,"
+            f"setpts=PTS-STARTPTS,crop={crop_w}:{crop_h}:{safe_x_expr}:{crop_y},"
             f"scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
             f"unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
             f"format=yuv420p,setsar=1,"
@@ -3451,7 +3488,11 @@ class PodcastReframeEngine(IReframeEngine):
             return None
 
         single_crop_w = int(plan["crop_w"])
+        single_crop_h = int(plan.get("crop_h", height))
+        single_crop_y = int(plan.get("crop_y", 0))
         single_x_expr = plan["crop_x_expr"]
+        single_max_x = max(0, width - single_crop_w)
+        safe_single_x = f"min(max({single_x_expr}\\,0)\\,{single_max_x})"
 
         transition_graph, output_label = self._build_layout_transition_graph(
             layout_events=layout_events,
@@ -3466,7 +3507,7 @@ class PodcastReframeEngine(IReframeEngine):
         filters = [
             "[0:v]setpts=PTS-STARTPTS,split=3[single_src][top_src][bottom_src]",
             (
-                f"[single_src]crop={single_crop_w}:{height}:{single_x_expr}:0,"
+                f"[single_src]crop={single_crop_w}:{single_crop_h}:{safe_single_x}:{single_crop_y},"
                 f"scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
                 f"unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
                 f"format=yuv420p,setsar=1,"
@@ -3773,11 +3814,21 @@ class PodcastReframeEngine(IReframeEngine):
         self, video_path: str, output_path: str, width: int, height: int, decision: dict
     ) -> Optional[dict]:
         """Simple 9:16 crop centered on detected face with a clean A/V clock."""
-        crop_w = min(int(height * 9 / 16), width)
-        crop_x = self._clamp_x(decision["crop_x"], crop_w, width)
+        if int(height * 9 / 16) > width:
+            crop_w = (width // 2) * 2
+            crop_h = (int(width * 16 / 9) // 2) * 2
+        else:
+            crop_w = (int(height * 9 / 16) // 2) * 2
+            crop_h = (height // 2) * 2
+        max_crop_x = max(0, width - crop_w)
+        max_crop_y = max(0, height - crop_h)
+        crop_x = max(0, min(self._clamp_x(decision["crop_x"], crop_w, width), max_crop_x))
+        crop_y = max(0, min(int(decision.get("crop_y", 0)), max_crop_y))
+        crop_x = (crop_x // 2) * 2
+        crop_y = (crop_y // 2) * 2
 
         vf = (
-            f"setpts=PTS-STARTPTS,crop={crop_w}:{height}:{crop_x}:0,"
+            f"setpts=PTS-STARTPTS,crop={crop_w}:{crop_h}:{crop_x}:{crop_y},"
             "scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,"
             "unsharp=lx=3:ly=3:la=0.5:cx=3:cy=3:ca=0.25,"
             "format=yuv420p,setsar=1"

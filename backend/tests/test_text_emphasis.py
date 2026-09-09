@@ -271,3 +271,44 @@ def test_prepare_text_emphasis_blocks_and_truncates_before_cta():
     assert clip.text_emphasis_events[0]["start"] == 10.0
     assert clip.text_emphasis_events[0]["end"] == 12.0
 
+
+def test_fast_guided_filter_snaps_edges_properly():
+    """Verify fast guided filter preserves boundary resolution without shape or range distortion."""
+    import numpy as np
+    from src.infrastructure.top_behind_subject_renderer import fast_guided_filter
+
+    h, w = 120, 120
+    # Guide image with a sharp vertical edge at x=60
+    guide = np.zeros((h, w), dtype=np.float32)
+    guide[:, 60:] = 1.0
+
+    # Rough segmentation mask with noisy edge around x=60
+    p = np.zeros((h, w), dtype=np.float32)
+    p[:, 58:] = 1.0
+
+    refined = fast_guided_filter(guide, p, r=4, eps=1e-3, subsample=2)
+    assert refined.shape == (h, w)
+    assert refined.min() >= 0.0 and refined.max() <= 1.0
+    # At x < 55, should be close to 0
+    assert np.all(refined[:, :55] < 0.1)
+    # At x > 65, should be close to 1
+    assert np.all(refined[:, 65:] > 0.9)
+
+
+def test_person_foreground_generator_downgrades_on_unreadable_video():
+    """Verify graceful fallback to hero_punch when input video cannot be read."""
+    generator = PersonForegroundGenerator()
+    events = [{"id": "ev1", "effect": "behind_person", "start": 1.0, "end": 2.0}]
+    # Run with nonexistent path
+    result = generator._generate_sync(
+        video_path="/nonexistent/video.mp4",
+        events=events,
+        output_dir="/tmp/fg_test",
+        fps=30,
+        feather=5,
+    )
+    assert len(result) == 1
+    assert result[0]["effect"] == "hero_punch"
+    assert result[0]["fallback_reason"] == "video_unreadable"
+
+

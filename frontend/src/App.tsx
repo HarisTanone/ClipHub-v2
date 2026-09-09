@@ -5,6 +5,7 @@ import { Dashboard } from "@/pages/Dashboard";
 import { NewJob } from "@/pages/NewJob";
 import { JobDetail } from "@/pages/JobDetail";
 import { ClipViewer } from "@/pages/ClipViewer";
+import { ReviewClips } from "@/pages/ReviewClips";
 import { Settings } from "@/pages/Settings";
 import { SocialAccounts } from "@/pages/SocialAccounts";
 import { VideoGeneratorPage } from "@/pages/VideoGenerator";
@@ -56,6 +57,8 @@ export default function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="jobs/new" element={<NewJob />} />
+          <Route path="jobs/review/:sessionId" element={<ReviewClips />} />
+          <Route path="jobs/review" element={<ReviewClips />} />
           <Route path="jobs/:jobId" element={<JobDetail />} />
           <Route path="jobs/:jobId/clips/:rank" element={<ClipViewer />} />
           <Route path="social" element={<SocialAccounts />} />

@@ -70,6 +70,13 @@ export function ClipViewer() {
   const [ctaStyleConfig, setCtaStyleConfig] = useState<CtaStyle>(() => {
     try { const s = localStorage.getItem("autocliper_cta_style"); return s ? normaliseCtaStyle(JSON.parse(s)) : DEFAULT_CTA_STYLE; } catch { return DEFAULT_CTA_STYLE; }
   });
+  // Snapshot of the job's persisted watermark/CTA configs. Restyle only sends
+  // these when the user actually edits them — otherwise the job-level config
+  // stored on the backend stays authoritative.
+  const savedWatermarkRef = useRef<string | null>(null);
+  const savedCtaRef = useRef<string | null>(null);
+  const watermarkDirty = () => JSON.stringify(watermarkStyleConfig) !== savedWatermarkRef.current;
+  const ctaDirty = () => JSON.stringify(ctaStyleConfig) !== savedCtaRef.current;
 
   useEffect(() => { localStorage.setItem("autocliper_cta_style", JSON.stringify(ctaStyleConfig)); }, [ctaStyleConfig]);
   const [isRestyling, setIsRestyling] = useState(false);
@@ -142,6 +149,20 @@ export function ClipViewer() {
       if (clipRes.data.cta_config && Object.keys(clipRes.data.cta_config).length > 0) {
         setCtaStyleConfig(normaliseCtaStyle(clipRes.data.cta_config));
       }
+      if (clipRes.data.watermark_config && Object.keys(clipRes.data.watermark_config).length > 0) {
+        setWatermarkStyleConfig({ ...DEFAULT_WATERMARK_STYLE, ...clipRes.data.watermark_config } as WatermarkStyle);
+      }
+      // Track what the job currently has persisted so restyle only sends
+      // watermark/CTA overrides when they were actually edited. Snapshot the
+      // normalised form so it matches how the state was set above.
+      const savedWatermark = clipRes.data.watermark_config && Object.keys(clipRes.data.watermark_config).length > 0
+        ? { ...DEFAULT_WATERMARK_STYLE, ...clipRes.data.watermark_config } as WatermarkStyle
+        : null;
+      const savedCta = clipRes.data.cta_config && Object.keys(clipRes.data.cta_config).length > 0
+        ? normaliseCtaStyle(clipRes.data.cta_config)
+        : null;
+      savedWatermarkRef.current = savedWatermark ? JSON.stringify(savedWatermark) : null;
+      savedCtaRef.current = savedCta ? JSON.stringify(savedCta) : null;
       // Set other clips (exclude current)
       const allClips = detailRes.data.clips || [];
       setOtherClips(allClips.filter((c: any) => c.rank !== clipRank));
@@ -252,8 +273,10 @@ export function ClipViewer() {
         hook_style_config: hookStyleConfig,
         subtitle_style_config: subtitleStyleConfig,
         text_emphasis_style_config: textEmphasisStyleConfig,
-        watermark_config: watermarkStyleConfig,
-        cta_config: ctaStyleConfig,
+        // Only send watermark/CTA when edited in this session — otherwise let
+        // the job-level config on the backend stay authoritative.
+        ...(watermarkDirty() ? { watermark_config: watermarkStyleConfig } : {}),
+        ...(ctaDirty() ? { cta_config: ctaStyleConfig } : {}),
         subtitle_enabled: true,
       });
       setShowRaw(false);

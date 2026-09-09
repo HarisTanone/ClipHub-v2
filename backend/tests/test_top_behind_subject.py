@@ -816,5 +816,115 @@ def test_snap_overlay_to_phrase_pauses_and_shot_cuts():
     assert (at2 + dur2) <= 6.5, f"Must end before shot cut at 6.5s, got {at2 + dur2}"
 
 
+def test_cover_resize_zero_blank_spots():
+    """Verify cover_resize eliminates black voids/blank spots in vertical framing."""
+    r = TopBehindSubjectRenderer()
+    # Landscape B-roll input (1920x1080)
+    broll = np.ones((1080, 1920, 3), dtype=np.uint8) * 180
+    # Target vertical 1080x1920
+    target_w, target_h = 1080, 1920
+    out = r.cover_resize(broll, target_w, target_h)
+
+    assert out.shape == (target_h, target_w, 3)
+    # The bottom region (y >= 1080) must NOT be black zeros
+    bottom_slice = out[1080:, :]
+    assert not np.all(bottom_slice == 0), "Bottom region should have ambient reflection continuation, not black void"
+    assert np.mean(bottom_slice) > 50.0
+
+
+def test_microphone_protection_in_speech_zone():
+    """Verify dark microphone capsules in speech zone are absorbed into foreground mask."""
+    r = TopBehindSubjectRenderer()
+    h, w = 200, 200
+    frame = np.full((h, w, 3), 128, dtype=np.uint8)
+    
+    # Draw head (y: 20..60, x: 80..120) and chest (y: 60..150, x: 60..140)
+    frame[20:60, 80:120] = [180, 150, 130]
+    frame[60:150, 60:140] = [100, 100, 160]
+    
+    # Dark microphone foam in front of chest (y: 80..105, x: 90..110)
+    frame[80:105, 90:110] = [20, 20, 20]
+
+    # Raw mask has a hole at the microphone
+    raw_mask = np.zeros((h, w), dtype=np.uint8)
+    raw_mask[20:60, 80:120] = 255
+    raw_mask[60:150, 60:140] = 255
+    raw_mask[80:105, 90:110] = 0  # Cutout hole where mic is!
+
+    protected = r._protect_speech_zone_objects(raw_mask, frame)
+    # Microphone pixels should now be protected in the mask (> 128)
+    mic_region = protected[85:100, 95:105]
+    assert np.mean(mic_region) > 200, f"Microphone should be sealed into foreground mask, got mean {np.mean(mic_region)}"
+
+
+def test_hand_protection_in_speech_zone():
+    """Verify gesturing hands with skin tones in speech zone are protected."""
+    r = TopBehindSubjectRenderer()
+    h, w = 200, 200
+    frame = np.full((h, w, 3), 128, dtype=np.uint8)
+    # Head and torso
+    frame[20:60, 80:120] = [180, 150, 130]
+    frame[60:150, 60:140] = [100, 100, 160]
+
+    # Skin tone hand in front of chest (BGR: [120, 140, 200] -> skin locus in YCrCb)
+    frame[85:110, 92:108] = [120, 140, 200]
+
+    raw_mask = np.zeros((h, w), dtype=np.uint8)
+    raw_mask[20:60, 80:120] = 255
+    raw_mask[60:150, 60:140] = 255
+    raw_mask[85:110, 92:108] = 0  # Hand missed by segmenter
+
+    protected = r._protect_speech_zone_objects(raw_mask, frame)
+    hand_region = protected[88:105, 95:105]
+    assert np.mean(hand_region) > 200, f"Hand should be retained in foreground mask, got mean {np.mean(hand_region)}"
+
+
+def test_temporal_smoothing_multi_frame_dropout_recovery():
+    """Verify temporal smoothing preserves mask continuity during single-frame YOLO dropouts."""
+    r = TopBehindSubjectRenderer()
+    h, w = 100, 100
+    
+    # Stable person mask
+    stable_mask = np.zeros((h, w), dtype=np.float32)
+    stable_mask[20:80, 30:70] = 1.0
+
+    r.reset_temporal_state()
+    # Feed 20 frames of stable person
+    for _ in range(20):
+        smoothed = r._apply_temporal_smoothing(stable_mask.copy())
+        assert np.mean(smoothed[30:70, 40:60]) > 0.9
+
+    # Frame 21 has a single-frame detector dropout (empty mask)
+    dropout_mask = np.zeros((h, w), dtype=np.float32)
+    smoothed_dropout = r._apply_temporal_smoothing(dropout_mask)
+
+    # Thanks to temporal persistence buffer, the mask does not instantly collapse to 0
+    assert np.mean(smoothed_dropout[30:70, 40:60]) > 0.4, "Single-frame dropout must be protected by temporal persistence"
+
+
+def test_bounded_scanline_bridging_no_runaway_arms():
+    """Verify internal holes are bridged but wide gaps between body and outstretched arms are preserved."""
+    r = TopBehindSubjectRenderer()
+    h, w = 200, 300
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    # Torso in center: x=120..180
+    mask[50:150, 120:180] = 255
+    # Small internal hole (mic or tie gap): x=145..155 (width 10)
+    mask[70:90, 145:155] = 0
+
+    # Outstretched arm far on the left: x=20..40 (gap of 80px to body at x=120)
+    mask[50:120, 20:40] = 255
+
+    solidified = r._solidify_body_and_attached_objects(mask)
+
+    # Small internal hole MUST be closed
+    assert np.all(solidified[75:85, 148:152] == 255)
+
+    # Wide gap between outstretched arm and body (e.g. x=60..100) MUST NOT be bridged
+    assert np.mean(solidified[70:90, 60:100]) == 0.0, "Wide gap between arm and body must remain background"
+
+
+
 
 

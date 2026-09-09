@@ -8,6 +8,8 @@ from pathlib import Path
 
 from src.config import settings
 
+from src.infrastructure.top_behind_subject_renderer import fast_guided_filter
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,11 +46,21 @@ class PersonForegroundGenerator:
         if self._model is not None:
             return self._model
 
-        # RF-DETR releases used by the reframe engine are detection-only and do
-        # not expose RFDETRSegLarge.  Use the segmentation model that is already
-        # configured for this feature instead of guaranteeing a runtime fallback.
+        model_p = self.model_path
+        if not os.path.exists(model_p) and not os.path.isabs(model_p):
+            candidates = [
+                os.path.join(os.path.dirname(__file__), "..", "..", "yolo11n-seg.pt"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "yolo11n-seg.pt"),
+                "backend/yolo11n-seg.pt",
+                "yolo11n-seg.pt",
+            ]
+            for cand in candidates:
+                if os.path.exists(cand):
+                    model_p = os.path.abspath(cand)
+                    break
+
         from ultralytics import YOLO
-        self._model = YOLO(self.model_path)
+        self._model = YOLO(model_p)
         return self._model
 
     def _generate_sync(
@@ -107,6 +119,9 @@ class PersonForegroundGenerator:
                 # PNG effects need every frame for smooth mask animation.
                 frame_step = 1 if needs_png else 3
 
+                prev_png_alpha: np.ndarray | None = None
+                classes_to_detect = [0, 24, 26, 27, 28, 39, 41, 63, 64, 65, 66, 67, 73, 76] if needs_png else [0]
+
                 for composition_frame in range(start_frame, end_frame + 1, frame_step):
                     cap.set(cv2.CAP_PROP_POS_MSEC, composition_frame * 1000.0 / fps)
                     ok, frame = cap.read()
@@ -115,12 +130,13 @@ class PersonForegroundGenerator:
                     try:
                         results = model.predict(
                             source=frame,
-                            classes=[0],
+                            classes=classes_to_detect,
                             conf=float(settings.TEXT_EMPHASIS_SEG_CONFIDENCE),
                             verbose=False,
                         )
                         person_masks = []
                         person_bboxes = []
+                        object_masks = []
                         result = results[0] if results else None
                         if result is not None and result.masks is not None:
                             masks = result.masks.data.detach().cpu().numpy()
@@ -129,8 +145,19 @@ class PersonForegroundGenerator:
                                 if result.boxes is not None
                                 else []
                             )
-                            person_masks.extend(masks)
-                            person_bboxes.extend(boxes)
+                            classes_arr = (
+                                result.boxes.cls.detach().cpu().numpy().astype(int)
+                                if result.boxes is not None
+                                else []
+                            )
+                            for i, m in enumerate(masks):
+                                cls_id = int(classes_arr[i]) if i < len(classes_arr) else 0
+                                if cls_id == 0:
+                                    person_masks.append(m)
+                                    if i < len(boxes):
+                                        person_bboxes.append(boxes[i])
+                                else:
+                                    object_masks.append(m)
                     except Exception as exc:
                         logger.warning("text_emphasis: YOLO inference failed at frame %s: %s", composition_frame, exc)
                         continue
@@ -142,6 +169,16 @@ class PersonForegroundGenerator:
                     union = np.max(masks, axis=0)
                     if union.shape[:2] != (height, width):
                         union = cv2.resize(union, (width, height), interpolation=cv2.INTER_LINEAR)
+
+                    # Merge overlapping held objects (laptop, cup, phone, etc.)
+                    if object_masks and needs_png:
+                        for obj_m in object_masks:
+                            if obj_m.shape[:2] != (height, width):
+                                obj_m = cv2.resize(obj_m, (width, height), interpolation=cv2.INTER_LINEAR)
+                            overlap = float(np.sum((union > 0.3) & (obj_m > 0.3)))
+                            obj_sum = float(np.sum(obj_m > 0.3))
+                            if obj_sum > 0 and (overlap / obj_sum) >= 0.12:
+                                union = np.maximum(union, obj_m)
 
                     # Compute person bbox from mask union (always, for tracking effects)
                     ys, xs = np.where(union > 0.5)
@@ -167,8 +204,47 @@ class PersonForegroundGenerator:
                     depth_z = round(min(1.0, person_area / (frame_area * 0.35)), 3)
 
                     if needs_png:
-                        alpha = np.clip(union * 255, 0, 255).astype(np.uint8)
-                        alpha = cv2.GaussianBlur(alpha, (kernel, kernel), 0)
+                        # 1. Binarize & solidify body, microphones, ties, and hands
+                        binary = (union >= 0.38).astype(np.uint8) * 255
+                        pad_f = np.zeros((height + 4, width + 4), dtype=np.uint8)
+                        pad_f[2 : height + 2, 2 : width + 2] = binary
+                        pad_f[height + 2, :] = 255
+                        flood = pad_f.copy()
+                        ff_mask = np.zeros((height + 6, width + 6), dtype=np.uint8)
+                        cv2.floodFill(flood, ff_mask, (0, 0), 128)
+                        holes = (flood != 128) & (pad_f == 0)
+                        pad_f[holes] = 255
+                        sealed = pad_f[2 : height + 2, 2 : width + 2]
+
+                        # Bounded scanline bridge for internal gaps (mics, hands on chest)
+                        max_gap = max(35, int(round(person_w * 0.40)))
+                        for y_row in range(y1, y2):
+                            row_pts = np.where(sealed[y_row, :] > 0)[0]
+                            if len(row_pts) >= 2:
+                                diffs = np.diff(row_pts)
+                                g_idxs = np.where(diffs > 1)[0]
+                                for gi in g_idxs:
+                                    xl = int(row_pts[gi])
+                                    xr = int(row_pts[gi + 1])
+                                    if (xr - xl) <= max_gap:
+                                        sealed[y_row, xl : xr + 1] = 255
+
+                        k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 17))
+                        sealed = cv2.morphologyEx(sealed, cv2.MORPH_CLOSE, k_close, iterations=1)
+                        raw_alpha = (sealed >= 128).astype(np.float32)
+
+                        # 2. Multi-frame temporal smoothing across sequence
+                        if prev_png_alpha is not None and prev_png_alpha.shape == raw_alpha.shape:
+                            diff = np.abs(raw_alpha - prev_png_alpha)
+                            alpha_weight = np.where(diff < 0.12, 0.60, 0.15).astype(np.float32)
+                            raw_alpha = alpha_weight * prev_png_alpha + (1.0 - alpha_weight) * raw_alpha
+                        prev_png_alpha = raw_alpha.copy()
+
+                        # 3. High-precision guided filter for razor-sharp edge snapping
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+                        refined_alpha = fast_guided_filter(gray, raw_alpha, r=6, eps=1e-3, subsample=2)
+                        alpha = np.clip(refined_alpha * 255, 0, 255).astype(np.uint8)
+
                         crop = frame[y1:y2, x1:x2]
                         crop_alpha = alpha[y1:y2, x1:x2]
                         bgra = cv2.cvtColor(crop, cv2.COLOR_BGR2BGRA)

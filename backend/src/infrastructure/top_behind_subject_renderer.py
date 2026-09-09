@@ -254,6 +254,7 @@ class TopBehindSubjectRenderer:
         self._prev_gray_frame: np.ndarray | None = None
         self._active_track_box: tuple[float, float, float, float] | None = None
         self._secondary_persistence: int = 0
+        self._temporal_mask_buffer: list[np.ndarray] = []
 
     def reset_temporal_state(self) -> None:
         """Reset all temporal smoothing & tracking states (used on shot cuts / segment gaps)."""
@@ -262,6 +263,7 @@ class TopBehindSubjectRenderer:
         self._prev_gray_frame = None
         self._active_track_box = None
         self._secondary_persistence = 0
+        self._temporal_mask_buffer.clear()
 
     # ─── Public Frame Compositor ────────────────────────────────────────────
 
@@ -281,22 +283,8 @@ class TopBehindSubjectRenderer:
         p = self._normalize_person_mask(person_mask, h, w)
         p = self._clean_person_mask(p, guide_frame=frame)
 
-        # 2. Adaptive Motion-Aware Temporal EMA Smoothing with Cut-Aware Snap
-        if (
-            self._prev_clean_mask is not None
-            and self._prev_clean_mask.shape == p.shape
-        ):
-            diff = np.abs(p - self._prev_clean_mask)
-            mean_diff = float(np.mean(diff))
-            # If the mask changed drastically across the frame (e.g. shot cut or sudden person switch),
-            # snap instantly without dragging a ghost/shadow of the old person!
-            if mean_diff > 0.28:
-                p = p
-            else:
-                alpha_weight = np.where(diff < 0.12, 0.65, 0.15).astype(np.float32)
-                p = alpha_weight * self._prev_clean_mask + (1.0 - alpha_weight) * p
-                p = np.clip(p, 0.0, 1.0)
-        self._prev_clean_mask = p.copy()
+        # 2. Multi-frame temporal anti-flicker smoothing across sequences (50-90 frames)
+        p = self._apply_temporal_smoothing(p, guide_frame=frame)
 
         # 3. Layout person (natural 1:1 original crispness)
         frame_f, p, layout = self._layout_person_supporting(frame, p)
@@ -394,6 +382,19 @@ class TopBehindSubjectRenderer:
             out_frame = np.zeros((target_h, target_w, 3), dtype=np.uint8)
             copy_h = min(nh, target_h)
             out_frame[:copy_h, :target_w] = resized[:copy_h, x0 : x0 + target_w]
+
+            # Zero-Blank-Spot Guarantee:
+            # If resized height is less than target_h, seamlessly extend the bottom region
+            # using a blurred ambient continuation of the bottom edge of the B-roll footage.
+            # Never leave pure black zeros in the background plate!
+            if copy_h < target_h:
+                band_h = min(copy_h, max(8, int(round(target_h * 0.06))))
+                edge_band = resized[copy_h - band_h : copy_h, x0 : x0 + target_w]
+                rem_h = target_h - copy_h
+                fill_bottom = cv2.resize(edge_band, (target_w, rem_h), interpolation=cv2.INTER_LINEAR)
+                fill_bottom = cv2.GaussianBlur(fill_bottom, (0, 0), sigmaX=15.0, sigmaY=15.0)
+                out_frame[copy_h:, :target_w] = fill_bottom
+
             return out_frame
 
         scale = max(target_w / iw, target_h / ih) * 1.12
@@ -451,7 +452,10 @@ class TopBehindSubjectRenderer:
                     y0 = min(y0, int(max_y * 0.35))
                 y0 = int(np.clip(y0, 0, max_y))
 
-        return resized[y0 : y0 + target_h, x0 : x0 + target_w]
+        cropped = resized[y0 : y0 + target_h, x0 : x0 + target_w]
+        if cropped.shape[:2] != (target_h, target_w):
+            cropped = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+        return cropped
 
     # ─── Clip-Level Pipeline ────────────────────────────────────────────────
 
@@ -695,17 +699,91 @@ class TopBehindSubjectRenderer:
             p = cv2.resize(p, (w, h), interpolation=cv2.INTER_LINEAR)
         return np.clip(p, 0.0, 1.0)
 
+    def _protect_speech_zone_objects(
+        self,
+        binary: np.ndarray,
+        guide_frame: np.ndarray,
+        h: Optional[int] = None,
+        w: Optional[int] = None,
+    ) -> np.ndarray:
+        """Detect and protect microphones, pop filters, lapels, and hands in front of speaker.
+
+        Analyzes the speech/gesture interaction zone (mouth to chest). Microphones (dark foam
+        capsules, metallic grilles) or hands (skin-tone locus) connected or directly adjacent
+        to the speaker are merged into the foreground matte so B-roll never leaks onto them.
+        """
+        if h is None or w is None:
+            h, w = binary.shape[:2]
+        if binary.max() == 0 or guide_frame is None or guide_frame.shape[:2] != (h, w):
+            return binary
+
+        ys, xs = np.where(binary > 0)
+        if len(ys) == 0:
+            return binary
+        py0, py1 = int(ys.min()), int(ys.max())
+        px0, px1 = int(xs.min()), int(xs.max())
+        ph = py1 - py0 + 1
+        pw = px1 - px0 + 1
+
+        # Speech & gesture interaction zone: from mouth level to mid-chest
+        zone_y0 = max(0, py0 + int(round(ph * 0.12)))
+        zone_y1 = min(h, py0 + int(round(ph * 0.72)))
+        zone_w_pad = int(round(pw * 0.22))
+        zone_x0 = max(0, px0 - zone_w_pad)
+        zone_x1 = min(w, px1 + zone_w_pad + 1)
+
+        if zone_y1 <= zone_y0 or zone_x1 <= zone_x0:
+            return binary
+
+        roi_bgr = guide_frame[zone_y0:zone_y1, zone_x0:zone_x1]
+        roi_bin = binary[zone_y0:zone_y1, zone_x0:zone_x1]
+
+        k_attach = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        attached_band = cv2.dilate(roi_bin, k_attach, iterations=2)
+
+        # 1. Dark microphone capsules & pop filters (Shure SM7B, PodMic, etc.)
+        roi_gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+        dark_mic = (roi_gray < 75) & (attached_band > 0)
+
+        # 2. Skin-tone locus in YCrCb space for hands & fingers in front of chest/mouth
+        roi_ycrcb = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2YCrCb)
+        cr = roi_ycrcb[:, :, 1]
+        cb = roi_ycrcb[:, :, 2]
+        skin = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127) & (attached_band > 0)
+
+        candidate_obj = (dark_mic | skin).astype(np.uint8) * 255
+
+        n_cand, cand_labels, cand_stats, _ = cv2.connectedComponentsWithStats(candidate_obj, connectivity=8)
+        protected_add = np.zeros_like(roi_bin)
+        min_obj_area = max(20, int(round(min(h, w) * 0.0004 * min(h, w) * 0.0004)))
+
+        for i in range(1, n_cand):
+            area = cand_stats[i, cv2.CC_STAT_AREA]
+            if area < min_obj_area:
+                continue
+            comp = (cand_labels == i).astype(np.uint8)
+            # Must intersect or directly contact the person's upper body mask
+            if np.sum((comp > 0) & (roi_bin > 0)) > 0 or np.sum(cv2.dilate(comp, k_attach) & (roi_bin > 0)) > 0:
+                comp_closed = cv2.morphologyEx(comp * 255, cv2.MORPH_CLOSE, k_attach)
+                protected_add = cv2.bitwise_or(protected_add, comp_closed)
+
+        merged = binary.copy()
+        merged[zone_y0:zone_y1, zone_x0:zone_x1] = cv2.bitwise_or(roi_bin, protected_add)
+        return merged
+
     def _solidify_body_and_attached_objects(
         self,
         binary: np.ndarray,
-        h: int,
-        w: int,
+        h: Optional[int] = None,
+        w: Optional[int] = None,
     ) -> np.ndarray:
         """Protect microphones, handheld items, lapels, and chest objects from being cut out.
 
         Any object attached to, overlapping, or resting on the person's torso/body is
         retained as solid foreground so background B-roll never leaks into microphones or body gaps.
         """
+        if h is None or w is None:
+            h, w = binary.shape[:2]
         if binary.max() == 0:
             return binary
 
@@ -734,20 +812,32 @@ class TopBehindSubjectRenderer:
             comp_mask = (labels == lbl).astype(np.uint8)
             cy0 = stats[lbl, cv2.CC_STAT_TOP]
             ch_h = stats[lbl, cv2.CC_STAT_HEIGHT]
+            ch_w = stats[lbl, cv2.CC_STAT_WIDTH]
             cy1 = min(h, cy0 + ch_h)
 
             filled_comp = comp_mask.copy()
 
-            # Torso scanline bridge:
-            # A person's upper body / chest / torso is physically solid.
-            # Any 0 gap between the leftmost and rightmost non-zero pixels on row y
-            # represents a microphone (Shure SM7B, mic arm, lavalier), handheld item,
-            # clothing emblem, or necktie. Fill the gap completely!
+            # Bounded scanline bridge:
+            # Seal internal gaps (microphones, lapels, ties, arms crossed over chest)
+            # without bridging wide open space between outstretched gesturing arms and torso.
+            max_allowed_gap = max(40, int(round(ch_w * 0.40)))
             for y in range(cy0, cy1):
                 row_pts = np.where(comp_mask[y, :] > 0)[0]
                 if len(row_pts) >= 2:
-                    x_min, x_max = int(row_pts[0]), int(row_pts[-1])
-                    filled_comp[y, x_min : x_max + 1] = 1
+                    diffs = np.diff(row_pts)
+                    gap_indices = np.where(diffs > 1)[0]
+                    if len(gap_indices) == 0:
+                        continue
+                    # Extra bridge allowance in the upper chest & chin zone where mics sit
+                    rel_y = (y - cy0) / max(1, ch_h)
+                    row_max_gap = max_allowed_gap
+                    if 0.12 <= rel_y <= 0.65:
+                        row_max_gap = max(row_max_gap, int(round(ch_w * 0.52)))
+                    for g_idx in gap_indices:
+                        x_left = int(row_pts[g_idx])
+                        x_right = int(row_pts[g_idx + 1])
+                        if (x_right - x_left) <= row_max_gap:
+                            filled_comp[y, x_left : x_right + 1] = 1
 
             solid_binary = cv2.bitwise_or(solid_binary, (filled_comp * 255).astype(np.uint8))
 
@@ -764,9 +854,10 @@ class TopBehindSubjectRenderer:
         pad[holes] = 255
         sealed_binary = pad[2 : h + 2, 2 : w + 2]
 
-        # 3. Adaptive morphological close: bridge concavities/notches around chin, neck, and mic capsules
-        k_size = max(11, int(round(min(h, w) * 0.016))) | 1
-        k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+        # 3. Directional morphological close with vertical bias (bridges chin to mic, mic stand coming from below)
+        k_w = max(9, int(round(min(h, w) * 0.012))) | 1
+        k_h = max(15, int(round(min(h, w) * 0.022))) | 1
+        k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_w, k_h))
         closed = cv2.morphologyEx(sealed_binary, cv2.MORPH_CLOSE, k_close, iterations=1)
 
         return closed
@@ -779,12 +870,16 @@ class TopBehindSubjectRenderer:
         h, w = p.shape[:2]
         binary = (p >= 0.40).astype(np.uint8) * 255
 
-        # Solidify body and attached objects (mic, stand, lapel, handheld items)
+        # 1. Protect microphones, boom arms, lapels, and gesturing hands in speech zone
+        if guide_frame is not None and guide_frame.shape[:2] == (h, w):
+            binary = self._protect_speech_zone_objects(binary, guide_frame, h, w)
+
+        # 2. Solidify body and attached objects (mic, stand, lapel, handheld items)
         binary = self._solidify_body_and_attached_objects(binary, h, w)
 
         float_mask = (binary >= 128).astype(np.float32)
 
-        # Fast Guided Filter: snaps low-res YOLO mask to high-res image luminance edges
+        # 3. Fast Guided Filter: snaps low-res YOLO mask to high-res image luminance edges
         if guide_frame is not None and guide_frame.shape[:2] == (h, w):
             gray = cv2.cvtColor(guide_frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
             float_mask = fast_guided_filter(gray, float_mask, r=6, eps=1e-3, subsample=2)
@@ -792,6 +887,60 @@ class TopBehindSubjectRenderer:
             float_mask = cv2.GaussianBlur(float_mask, (5, 5), 0)
 
         return np.clip(float_mask, 0.0, 1.0)
+
+    def _apply_temporal_smoothing(
+        self,
+        current_mask: np.ndarray,
+        guide_frame: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Temporal consistency across multi-frame sequences (e.g. 50-90 frames over 3s).
+
+        Eliminates single-frame dropouts, boundary buzz, and mask crawl while respecting
+        camera cuts and fast body motion.
+        """
+        if current_mask.max() < 0.01:
+            if self._temporal_mask_buffer:
+                # If person was prominent just 1 frame ago, don't instantly drop to 0
+                if len(self._temporal_mask_buffer) >= 1 and self._temporal_mask_buffer[-1].max() > 0.40:
+                    fallback = self._temporal_mask_buffer[-1] * 0.70
+                    self._prev_clean_mask = fallback.copy()
+                    return fallback
+            self.reset_temporal_state()
+            return current_mask
+
+        # Motion & cut detection relative to previous clean mask
+        if self._prev_clean_mask is not None and self._prev_clean_mask.shape == current_mask.shape:
+            diff = np.abs(current_mask - self._prev_clean_mask)
+            mean_diff = float(np.mean(diff))
+            if mean_diff > 0.28:
+                # Shot cut or sudden large shift: reset history to avoid ghost dragging
+                self._temporal_mask_buffer.clear()
+            else:
+                # Adaptive blend: smooth slight jitter (diff < 0.12) while tracking real moves
+                alpha_weight = np.where(diff < 0.12, 0.60, 0.15).astype(np.float32)
+                current_mask = alpha_weight * self._prev_clean_mask + (1.0 - alpha_weight) * current_mask
+                current_mask = np.clip(current_mask, 0.0, 1.0)
+
+        # Rolling buffer for multi-frame consensus
+        self._temporal_mask_buffer.append(current_mask.copy())
+        if len(self._temporal_mask_buffer) > 4:
+            self._temporal_mask_buffer.pop(0)
+
+        if len(self._temporal_mask_buffer) >= 3:
+            buf = self._temporal_mask_buffer
+            smoothed = buf[-1] * 0.55 + buf[-2] * 0.30 + buf[-3] * 0.15
+            # Temporal persistence: if previous 2 frames had confident foreground (>0.5),
+            # prevent single-frame dip from flickering
+            prev_consensus = np.minimum(buf[-2], buf[-3])
+            smoothed = np.maximum(smoothed, prev_consensus * 0.75)
+        elif len(self._temporal_mask_buffer) == 2:
+            smoothed = self._temporal_mask_buffer[-1] * 0.65 + self._temporal_mask_buffer[-2] * 0.35
+        else:
+            smoothed = current_mask
+
+        smoothed = np.clip(smoothed, 0.0, 1.0)
+        self._prev_clean_mask = smoothed.copy()
+        return smoothed
 
     def _draw_person_outline(
         self,
@@ -1034,7 +1183,20 @@ class TopBehindSubjectRenderer:
             return self._model
         from ultralytics import YOLO
 
-        self._model = YOLO(self.model_path)
+        model_p = self.model_path
+        if not os.path.exists(model_p):
+            candidates = [
+                os.path.join(os.path.dirname(__file__), "..", "..", "yolo11n-seg.pt"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "yolo11n-seg.pt"),
+                "backend/yolo11n-seg.pt",
+                "yolo11n-seg.pt",
+            ]
+            for cand in candidates:
+                if os.path.exists(cand):
+                    model_p = os.path.abspath(cand)
+                    break
+
+        self._model = YOLO(model_p)
         return self._model
 
     def _load_det_model(self):
@@ -1042,7 +1204,21 @@ class TopBehindSubjectRenderer:
             return self._det_model
         from ultralytics import YOLO
 
-        self._det_model = YOLO(self.det_model_path)
+        model_p = self.det_model_path
+        if not os.path.exists(model_p):
+            candidates = [
+                os.path.join(os.path.dirname(__file__), "..", "..", "yolo11n.pt"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "yolo11n.pt"),
+                "backend/yolo11n.pt",
+                "yolo11n.pt",
+                "yolov8n.pt",
+            ]
+            for cand in candidates:
+                if os.path.exists(cand):
+                    model_p = os.path.abspath(cand)
+                    break
+
+        self._det_model = YOLO(model_p)
         return self._det_model
 
     def _detect_subject_xy(self, image: np.ndarray) -> tuple[float, float] | None:
