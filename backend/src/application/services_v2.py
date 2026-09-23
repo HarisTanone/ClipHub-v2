@@ -620,9 +620,9 @@ class V2PipelineService:
                 transcript_source=transcript_result.source,
             )
             pending_clips_data["broll_enabled"] = job.broll_enabled
-            pending_clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", True))
-            pending_clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", True))
-            pending_clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", True))
+            pending_clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", False))
+            pending_clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", False))
+            pending_clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", False))
             merged_clips_data = dict(job.clips_data or {})
             merged_clips_data.update(pending_clips_data)
             job.clips_data = merged_clips_data
@@ -662,9 +662,9 @@ class V2PipelineService:
                         transcript_source=transcript_result.source,
                     )
                     pending_clips_data["broll_enabled"] = job.broll_enabled
-                    pending_clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", True))
-                    pending_clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", True))
-                    pending_clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", True))
+                    pending_clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", False))
+                    pending_clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", False))
+                    pending_clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", False))
                     merged_clips_data = dict(job.clips_data or {})
                     merged_clips_data.update(pending_clips_data)
                     job.clips_data = merged_clips_data
@@ -1114,9 +1114,9 @@ class V2PipelineService:
             )
             clips_data["reframe_data"] = reframe_data
             clips_data["broll_enabled"] = job.broll_enabled
-            clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", True))
-            clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", True))
-            clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", True))
+            clips_data["broll_image_overlay"] = bool(getattr(job, "broll_image_overlay", False))
+            clips_data["broll_behind_person"] = bool(getattr(job, "broll_behind_person", False))
+            clips_data["broll_video_footage"] = bool(getattr(job, "broll_video_footage", False))
             for clip_output in clips_data.get("clips", []):
                 layout = reframe_data.get(clip_output.get("rank"), {})
                 if isinstance(layout, dict):
@@ -1406,9 +1406,9 @@ class V2PipelineService:
         from src.infrastructure.canvas_templates import resolution_for_aspect as _res_for_aspect
         _out_w, _out_h = _res_for_aspect(job.target_aspect_ratio or "9:16")
 
-        allow_video = bool(getattr(job, "broll_video_footage", True))
-        allow_behind = bool(getattr(job, "broll_behind_person", True))
-        allow_image = bool(getattr(job, "broll_image_overlay", True))
+        allow_video = bool(getattr(job, "broll_video_footage", False))
+        allow_behind = bool(getattr(job, "broll_behind_person", False))
+        allow_image = bool(getattr(job, "broll_image_overlay", False))
         # clips_data is source of truth when job reloaded mid-pipeline
         cd = job.clips_data or {}
         if "broll_video_footage" in cd:
@@ -2015,15 +2015,20 @@ class V2PipelineService:
         job_data = job.clips_data or {}
         raw_style_cfg = job_data.get("text_emphasis_style_config") or {}
         style = normalise_text_emphasis_style(raw_style_cfg)
-        te_enabled = bool(
-            job_data.get("text_emphasis_enabled")
-            or getattr(job, "text_emphasis_enabled", False)
-            or (
+        # ─── Strict precedence (fix 2026-09-23) ───
+        # Explicit persisted flag wins; style-config heuristic only applies
+        # when the flag is absent entirely. Previously an explicit False in
+        # clips_data was bypassed by the OR heuristic whenever a style config
+        # existed, silently re-enabling AI text the user had turned off.
+        persisted_flag = job_data.get("text_emphasis_enabled")
+        if persisted_flag is not None:
+            te_enabled = bool(persisted_flag)
+        else:
+            te_enabled = bool(
                 raw_style_cfg
                 and raw_style_cfg.get("enabled", True) is not False
                 and (not style.get("effectMode") or style.get("effectMode") != "off")
             )
-        )
         if not te_enabled:
             logger.info(f"[{job_id}] AI cinematic text disabled by user")
             return
@@ -2451,11 +2456,15 @@ class V2PipelineService:
                 if job_cta:
                     clip_cta = job_cta
                 else:
-                    try:
-                        from src.infrastructure.clip_quality_helpers import suggest_cta
-                        clip_cta = suggest_cta(clip_hook or "", getattr(clip, "reason", "") or "", clip.rank)
-                    except Exception:
-                        clip_cta = None
+                    # Fix 2026-09-23: NO fallback CTA. Previously suggest_cta()
+                    # produced a dict without an `enabled` key, and
+                    # CTALayer.tsx only rejects cta when enabled === false —
+                    # so the Remotion path baked a CTA end-card into every
+                    # clip even when the user never configured a CTA. The
+                    # FFmpeg pass already skipped it (normalise_cta_config
+                    # defaults enabled=False); now the Remotion path is
+                    # consistent: no user config → no CTA.
+                    clip_cta = None
 
                 job_wm = (job.clips_data or {}).get("watermark_config") or getattr(job, "watermark_config", None)
                 from src.infrastructure.watermark_renderer import normalise_watermark_config, _is_enabled as _wm_is_enabled

@@ -13,7 +13,9 @@ class JobOptionsBase(BaseModel):
     hook_style: str = ""  # e.g. "slide_punch_framer"
     broll_enabled: bool = False  # B-Roll disabled by default
     autogrid_enabled: bool = False  # Enable multi-speaker grid (9:16 only)
-    # Sub-types when broll_enabled (default on). Off = skip that path.
+    # Sub-types when broll_enabled. Default True for API convenience, but
+    # services.create_job gates them by the master broll_enabled flag —
+    # master off forces all subtypes off (fail-closed).
     broll_image_overlay: bool = True   # object image+text cards
     broll_behind_person: bool = True   # top stock behind person
     broll_video_footage: bool = True   # full-frame video splice

@@ -231,13 +231,13 @@ class JobService:
         target_aspect_ratio: str = "9:16",
         hook_engine: str = "v3",
         hook_style: str = "",
-        broll_enabled: bool = False,
-        autogrid_enabled: bool = False,
-        broll_image_overlay: bool = True,
-        broll_behind_person: bool = True,
-        broll_video_footage: bool = True,
+        broll_enabled: Optional[bool] = None,
+        autogrid_enabled: Optional[bool] = None,
+        broll_image_overlay: Optional[bool] = None,
+        broll_behind_person: Optional[bool] = None,
+        broll_video_footage: Optional[bool] = None,
         broll_motion_style: Optional[str] = None,
-        text_emphasis_enabled: bool = False,
+        text_emphasis_enabled: Optional[bool] = None,
         # v3.0 Remotion fields
         use_remotion: Optional[bool] = None,
         ai_layer_enabled: Optional[bool] = None,
@@ -330,31 +330,58 @@ class JobService:
                     cta_config = resolved_preset["cta_config"]
                 if not text_emphasis_style_config and resolved_preset.get("text_emphasis_style_config"):
                     text_emphasis_style_config = resolved_preset["text_emphasis_style_config"]
-                    text_emphasis_enabled = text_emphasis_enabled or resolved_preset.get("text_emphasis_enabled", False)
+                    # Inherit text_emphasis_enabled from preset only when user
+                    # did not send an explicit value (None).
+                    if text_emphasis_enabled is None:
+                        text_emphasis_enabled = resolved_preset.get("text_emphasis_enabled", False)
                 broll_cfg = resolved_preset.get("broll_config") or resolved_preset.get("broll_style_config") or {}
                 if isinstance(broll_cfg, dict):
-                    if not broll_motion_style and broll_cfg.get("motion_style"):
-                        broll_motion_style = broll_cfg.get("motion_style")
-                    if "enabled" in broll_cfg:
-                        broll_enabled = bool(broll_cfg["enabled"])
-                    elif "broll_enabled" in resolved_preset:
-                        broll_enabled = bool(resolved_preset["broll_enabled"])
-                    if "image_overlay" in broll_cfg:
-                        broll_image_overlay = bool(broll_cfg["image_overlay"])
-                    elif "broll_image_overlay" in resolved_preset:
-                        broll_image_overlay = bool(resolved_preset["broll_image_overlay"])
-                    if "behind_person" in broll_cfg:
-                        broll_behind_person = bool(broll_cfg["behind_person"])
-                    elif "broll_behind_person" in resolved_preset:
-                        broll_behind_person = bool(resolved_preset["broll_behind_person"])
-                    if "video_footage" in broll_cfg:
-                        broll_video_footage = bool(broll_cfg["video_footage"])
-                    elif "broll_video_footage" in resolved_preset:
-                        broll_video_footage = bool(resolved_preset["broll_video_footage"])
-                    if "autogrid_enabled" in broll_cfg:
-                        autogrid_enabled = bool(broll_cfg["autogrid_enabled"])
-                    elif "autogrid_enabled" in resolved_preset:
-                        autogrid_enabled = bool(resolved_preset["autogrid_enabled"])
+                    # ─── USER-FIRST PRECEDENCE (fix 2026-09-23) ───
+                    # Only inherit from the preset when the request did not
+                    # carry an explicit value. Previously the preset value
+                    # unconditionally clobbered the user's broll_enabled=False,
+                    # producing b-roll in final clips even when turned off.
+                    # NOTE: Pydantic bool fields always carry a value, so we
+                    # cannot distinguish "explicit false" from "unset" here.
+                    # The FE always sends explicit values, so treat the
+                    # request as authoritative UNLESS it equals the schema
+                    # default while the FE actually sent something else —
+                    # which is impossible to detect server-side. Therefore:
+                    # preset only fills values for fields the schema does NOT
+                    # default-match... Simpler invariant: preset NEVER raises
+                    # a flag the user turned off. Preset may only turn a
+                    # feature ON if it was left at schema default AND the
+                    # preset explicitly enables it. Since we cannot detect
+                    # "unset", the safest contract is: user request wins, and
+                    # preset values are only merged when the request field is
+                    # None (impossible for bool) — i.e. preset broll_config
+                    # style fields merge ONLY when explicitly missing from
+                    # the request path. For bool flags, request always wins.
+                    if broll_enabled is None:
+                        if "enabled" in broll_cfg:
+                            broll_enabled = bool(broll_cfg["enabled"])
+                        elif "broll_enabled" in resolved_preset:
+                            broll_enabled = bool(resolved_preset["broll_enabled"])
+                    if broll_image_overlay is None:
+                        if "image_overlay" in broll_cfg:
+                            broll_image_overlay = bool(broll_cfg["image_overlay"])
+                        elif "broll_image_overlay" in resolved_preset:
+                            broll_image_overlay = bool(resolved_preset["broll_image_overlay"])
+                    if broll_behind_person is None:
+                        if "behind_person" in broll_cfg:
+                            broll_behind_person = bool(broll_cfg["behind_person"])
+                        elif "broll_behind_person" in resolved_preset:
+                            broll_behind_person = bool(resolved_preset["broll_behind_person"])
+                    if broll_video_footage is None:
+                        if "video_footage" in broll_cfg:
+                            broll_video_footage = bool(broll_cfg["video_footage"])
+                        elif "broll_video_footage" in resolved_preset:
+                            broll_video_footage = bool(resolved_preset["broll_video_footage"])
+                    if autogrid_enabled is None:
+                        if "autogrid_enabled" in broll_cfg:
+                            autogrid_enabled = bool(broll_cfg["autogrid_enabled"])
+                        elif "autogrid_enabled" in resolved_preset:
+                            autogrid_enabled = bool(resolved_preset["autogrid_enabled"])
                 if not auto_post_social and resolved_preset.get("auto_post_social"):
                     auto_post_social = True
                     auto_post_platforms = auto_post_platforms or resolved_preset.get("auto_post_platforms", "")
@@ -365,6 +392,16 @@ class JobService:
                         auto_post_clips_count = resolved_preset.get("auto_post_clips_count")
         except Exception as e:
             logger.warning(f"Non-Hook preset resolution failed for '{style_preset}': {e}")
+
+        # ─── Final bool normalization (fix 2026-09-23) ───
+        # Any optional feature still None means neither user request nor
+        # preset supplied a value. Fall back to fail-closed defaults so the
+        # pipeline never activates optional overlays without explicit consent.
+        broll_enabled_final = bool(broll_enabled) if broll_enabled is not None else False
+        autogrid_enabled_final = bool(autogrid_enabled) if autogrid_enabled is not None else False
+        broll_image_overlay_final = bool(broll_image_overlay) if broll_image_overlay is not None else False
+        broll_behind_person_final = bool(broll_behind_person) if broll_behind_person is not None else False
+        broll_video_footage_final = bool(broll_video_footage) if broll_video_footage is not None else False
 
         # Resolve Subtitle exactly once after preset compatibility fields have
         # been merged. Final renderers consume this manifest; resolve_engine()
@@ -415,25 +452,34 @@ class JobService:
             initial_clips_data["watermark_config"] = watermark_config
         if cta_config:
             initial_clips_data["cta_config"] = cta_config
-        # Persist explicit false as well, but activate if style config has active effect
-        te_is_active = bool(
-            text_emphasis_enabled
-            or (
+        # ─── text_emphasis activation (fix 2026-09-23) ───
+        # Precedence: explicit user flag > preset > style config heuristic.
+        # The previous heuristic `text_emphasis_style_config and effectMode != "off"`
+        # silently activated AI text even when the user request explicitly set
+        # text_emphasis_enabled=False (Pydantic bool=False was still truthy via
+        # OR-clause). New rule: if user explicitly set the flag, that wins. If
+        # user did not set it (None) AND preset did not set it, fall back to
+        # the style_config heuristic for backward compat.
+        if text_emphasis_enabled is not None:
+            te_is_active = bool(text_emphasis_enabled)
+        elif resolved_preset and resolved_preset.get("text_emphasis_enabled") is not None:
+            te_is_active = bool(resolved_preset["text_emphasis_enabled"])
+        else:
+            te_is_active = bool(
                 text_emphasis_style_config
                 and isinstance(text_emphasis_style_config, dict)
                 and text_emphasis_style_config.get("enabled", True) is not False
                 and (not text_emphasis_style_config.get("effectMode") or text_emphasis_style_config.get("effectMode") != "off")
             )
-        )
         initial_clips_data["text_emphasis_enabled"] = te_is_active
         if text_emphasis_style_config:
             initial_clips_data["text_emphasis_style_config"] = text_emphasis_style_config
-        # B-roll sub-types (explicit false must persist)
-        initial_clips_data["broll_enabled"] = bool(broll_enabled)
-        initial_clips_data["broll_image_overlay"] = bool(broll_image_overlay) if broll_enabled else False
-        initial_clips_data["broll_behind_person"] = bool(broll_behind_person) if broll_enabled else False
-        initial_clips_data["broll_video_footage"] = bool(broll_video_footage) if broll_enabled else False
-        initial_clips_data["autogrid_enabled"] = bool(autogrid_enabled)
+        # B-roll sub-types (persist explicit false; gate subtypes by master)
+        initial_clips_data["broll_enabled"] = broll_enabled_final
+        initial_clips_data["broll_image_overlay"] = broll_image_overlay_final if broll_enabled_final else False
+        initial_clips_data["broll_behind_person"] = broll_behind_person_final if broll_enabled_final else False
+        initial_clips_data["broll_video_footage"] = broll_video_footage_final if broll_enabled_final else False
+        initial_clips_data["autogrid_enabled"] = autogrid_enabled_final
         # Background/template only for landscape/square; clear on 9:16
         if target_aspect_ratio in ("16:9", "1:1"):
             mode = background_mode or "template"
@@ -496,13 +542,15 @@ class JobService:
             target_aspect_ratio=target_aspect_ratio,
             hook_engine=hook_engine,
             hook_style=hook_style or (hook_style_config.get("animation", "") if hook_style_config else ""),
-            broll_enabled=broll_enabled,
+            broll_enabled=broll_enabled_final,
             # Computer-vision framing features are portrait-only. Enforce this
             # server-side as API clients must not be able to bypass the UI lock.
-            autogrid_enabled=autogrid_enabled and target_aspect_ratio == "9:16",
-            broll_image_overlay=bool(broll_image_overlay) if broll_enabled else False,
-            broll_behind_person=bool(broll_behind_person) if broll_enabled else False,
-            broll_video_footage=bool(broll_video_footage) if broll_enabled else False,
+            autogrid_enabled=autogrid_enabled_final and target_aspect_ratio == "9:16",
+            # Subtypes only valid when master toggle is on. If user turned b-roll
+            # off entirely, subtypes must also be off — fail closed.
+            broll_image_overlay=broll_image_overlay_final if broll_enabled_final else False,
+            broll_behind_person=broll_behind_person_final if broll_enabled_final else False,
+            broll_video_footage=broll_video_footage_final if broll_enabled_final else False,
             broll_motion_style=broll_motion_style or None,
             # v3.0 Remotion fields - use settings default if not specified
             use_remotion=use_remotion if use_remotion is not None else settings.USE_REMOTION,

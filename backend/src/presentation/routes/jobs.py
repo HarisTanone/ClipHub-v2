@@ -1729,8 +1729,9 @@ class RestyleRequest(BaseModel):
     text_emphasis_style_config: Opt[dict] = None
     watermark_config: Opt[dict] = None  # optional per-restyle watermark override
     cta_config: Opt[dict] = None  # optional per-restyle CTA override
-    subtitle_enabled: bool = True
-    broll_enabled: bool = True
+    subtitle_enabled: Opt[bool] = None  # None = inherit from job
+    broll_enabled: Opt[bool] = None  # None = inherit from job (fix 2026-09-23;
+    # previous default True re-applied b-roll even when the job had it off)
 
 
 @router.post("/{job_id}/clips/{clip_rank}/restyle")
@@ -1844,8 +1845,15 @@ async def restyle_clip(
         or job.hook_style
         or hook_manifest["hook_id"]
     )
-    do_subtitle = body.subtitle_enabled if body else True
-    do_broll = body.broll_enabled if body else True
+    do_subtitle = body.subtitle_enabled if (body and body.subtitle_enabled is not None) else bool(
+        (job.clips_data or {}).get("subtitle_enabled", True)
+    )
+    # Inherit b-roll from the job's persisted choice — NOT a hardcoded True.
+    # A job created with broll_enabled=false must never gain b-roll on restyle.
+    do_broll = body.broll_enabled if (body and body.broll_enabled is not None) else bool(
+        job.broll_enabled
+        and (job.clips_data or {}).get("broll_enabled", job.broll_enabled)
+    )
 
     # CTA / watermark config: body > per-clip > job-level. Resolved once,
     # before any render pass, so the Remotion branch and direct FFmpeg pass

@@ -335,7 +335,14 @@ def resolve_preset(
 
 
 def _get_builtin_default_preset() -> Dict[str, Any]:
-    """Fallback preset definition when no database preset is configured."""
+    """Fallback preset definition when no database preset is configured.
+
+    All optional features default to OFF (fail-closed). User must explicitly
+    opt in via UI toggle or by selecting a preset that explicitly sets these
+    flags. This prevents the silent-override bug where users who did not
+    request b-roll/AI text/autogrid would still get them applied because the
+    built-in default had them on.
+    """
     return {
         "source": "builtin_default",
         "id": "default",
@@ -347,12 +354,12 @@ def _get_builtin_default_preset() -> Dict[str, Any]:
         "text_emphasis_enabled": False,
         "watermark_config": dict(DEFAULT_WATERMARK_STYLE),
         "cta_config": dict(DEFAULT_CTA_STYLE),
-        "broll_config": {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True},
-        "broll_style_config": {"enabled": True, "image_overlay": True, "behind_person": True, "video_footage": True},
-        "broll_enabled": True,
-        "broll_image_overlay": True,
-        "broll_behind_person": True,
-        "broll_video_footage": True,
+        "broll_config": {"enabled": False, "image_overlay": False, "behind_person": False, "video_footage": False},
+        "broll_style_config": {"enabled": False, "image_overlay": False, "behind_person": False, "video_footage": False},
+        "broll_enabled": False,
+        "broll_image_overlay": False,
+        "broll_behind_person": False,
+        "broll_video_footage": False,
         "autogrid_enabled": False,
         "transition_style": "cut",
         "transition_duration": 0.35,
@@ -412,12 +419,14 @@ def _format_user_preset_row(row) -> Dict[str, Any]:
     else:
         plat_str = str(raw_plats or "")
 
-    # B-Roll enabled logic:
-    # If broll_style explicitly defines 'enabled', respect it.
-    # If broll_style contains options (image_overlay, etc.) but no explicit 'enabled', treat as True.
-    # If broll_style is empty or None, treat as False.
+    # B-Roll enabled logic (fail-closed):
+    # - Explicit `enabled` key in broll_style → respect it (True OR False).
+    # - broll_style contains subtype options but NO `enabled` key → OFF
+    #   (user opt-in; old format presets with subtypes-only must not silently
+    #   re-enable b-roll).
+    # - broll_style empty/None → OFF.
     if isinstance(broll_style, dict) and broll_style:
-        broll_enabled = bool(broll_style.get("enabled", True))
+        broll_enabled = bool(broll_style.get("enabled", False))
     else:
         broll_enabled = False
 

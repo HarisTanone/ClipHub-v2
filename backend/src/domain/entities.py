@@ -292,12 +292,15 @@ class Job:
     hook_engine: str = "v3"  # "v2" (legacy) or "v3" (Browser Render Engine)
     hook_style: str = ""
     custom_style: Optional[dict] = None
-    broll_enabled: bool = True
-    autogrid_enabled: bool = True
-    # Sub-types (default True for back-compat). Only applied when broll_enabled.
-    broll_image_overlay: bool = True
-    broll_behind_person: bool = True
-    broll_video_footage: bool = True
+    broll_enabled: bool = False
+    autogrid_enabled: bool = False
+    # Sub-types. Default OFF so that pipeline does not silently apply
+    # b-roll overlays when user did not request them. The actual request
+    # schema (backend/src/presentation/schemas/jobs.py) defaults subtypes to
+    # True, but the entity default must be fail-closed for reloaded jobs.
+    broll_image_overlay: bool = False
+    broll_behind_person: bool = False
+    broll_video_footage: bool = False
     # Deprecated motion style (Remotion B-roll FX); unused when subtypes used.
     broll_motion_style: Optional[str] = None
     # ─── v3.0 Remotion fields ─────────────────────────────────────────────
