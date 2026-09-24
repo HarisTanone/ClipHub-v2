@@ -740,18 +740,33 @@ class TopBehindSubjectRenderer:
 
         k_attach = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
         attached_band = cv2.dilate(roi_bin, k_attach, iterations=2)
+        # Focus explicitly on areas protruding outside the current mask but touching it
+        band_only = cv2.bitwise_and(attached_band, cv2.bitwise_not(roi_bin))
 
-        # 1. Dark microphone capsules & pop filters (Shure SM7B, PodMic, etc.)
         roi_gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
-        dark_mic = (roi_gray < 75) & (attached_band > 0)
 
-        # 2. Skin-tone locus in YCrCb space for hands & fingers in front of chest/mouth
+        # 1. Dynamic dark threshold for microphones & pop filters
+        # Base it on the person's average brightness so it adapts to bright/dark scenes
+        mean_gray = cv2.mean(roi_gray, mask=roi_bin)[0] if cv2.countNonZero(roi_bin) > 0 else 128
+        mic_thresh = min(90.0, max(35.0, mean_gray * 0.65))
+        dark_mic = (roi_gray < mic_thresh) & (band_only > 0)
+
+        # 2. Broader skin-tone locus for hands under various studio lighting (RGB/warm/cool)
         roi_ycrcb = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2YCrCb)
         cr = roi_ycrcb[:, :, 1]
         cb = roi_ycrcb[:, :, 2]
-        skin = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127) & (attached_band > 0)
+        # Relaxed bounds compared to strictly daylight skin
+        skin = (cr >= 130) & (cr <= 180) & (cb >= 70) & (cb <= 135) & (band_only > 0)
 
-        candidate_obj = (dark_mic | skin).astype(np.uint8) * 255
+        # 3. High-contrast / metallic objects (e.g., silver mics, bright rings/watches)
+        # Use Canny edges inside the protrusion band to capture detailed metallic shapes
+        edges = cv2.Canny(roi_gray, 40, 120)
+        edge_mask = (edges > 0) & (band_only > 0)
+        # Dilate the edges slightly to form a solid mass that CC can pick up
+        k_edge = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        edge_mass = cv2.dilate(edge_mask.astype(np.uint8), k_edge, iterations=1)
+
+        candidate_obj = (dark_mic | skin | (edge_mass > 0)).astype(np.uint8) * 255
 
         n_cand, cand_labels, cand_stats, _ = cv2.connectedComponentsWithStats(candidate_obj, connectivity=8)
         protected_add = np.zeros_like(roi_bin)
