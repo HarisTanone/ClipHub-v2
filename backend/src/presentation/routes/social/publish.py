@@ -389,41 +389,14 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
         logger.warning(f"Video compliance transcode fallback: {e}")
         compliant_video = video_file
 
-    # Repliz supports TikTok music metadata, but the documented schedule schema
-    # has no volume fields. Bake the stream locally so both slider values are
-    # guaranteed to affect the audible result.
+    # Repliz schedule API accepts explicit music volume settings (0..100).
+    # Keep video audio unmodified here: applying it locally and in Repliz would
+    # double-scale it. Repliz also owns the selected music playback, so do not
+    # download/mix the track into the media artifact.
     selected_music = bool(body.isAutoAddMusic and body.music)
-    should_bake_music = selected_music and body.musicVolume > 0.0
+    if selected_music and not (body.music or {}).get("id"):
+        raise HTTPException(status_code=400, detail="Lagu TikTok terpilih tidak memiliki ID track.")
     mixed_artifact = None
-    if should_bake_music and not (body.music or {}).get("url"):
-        raise HTTPException(status_code=400, detail="Lagu TikTok terpilih tidak memiliki URL audio.")
-    if should_bake_music:
-        try:
-            assert body.music is not None
-            mixed_video = await mix_video_with_music(
-                video_path=compliant_video,
-                music_url=body.music["url"],
-                original_vol=body.originalVolume,
-                music_vol=body.musicVolume,
-            )
-            if mixed_video == compliant_video:
-                raise RuntimeError("audio lagu gagal diunduh atau FFmpeg gagal melakukan mixing")
-            mixed_artifact = _publish_artifact_path(body.jobId, body.clipRank or 1)
-            import shutil
-            shutil.copy2(mixed_video, mixed_artifact)
-            compliant_video = mixed_artifact
-        except Exception as mix_err:
-            logger.exception("Failed to mix selected TikTok music")
-            raise HTTPException(status_code=502, detail=f"Gagal memasukkan lagu TikTok ke video: {mix_err}")
-    elif abs(body.originalVolume - 1.0) >= 0.01:
-        # Scale original dialogue volume when music is muted/absent
-        try:
-            compliant_video = await scale_video_audio_volume(
-                video_path=compliant_video,
-                volume=body.originalVolume,
-            )
-        except Exception as vol_err:
-            logger.warning(f"Failed to scale original video audio volume: {vol_err}")
 
     # 4a. Programmatic duration and format validation check (Mandatory TikTok/Meta API requirement)
     if os.path.exists(compliant_video):
@@ -592,6 +565,18 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             platform = account_platform_map.get(acc_id, "")
             post_type = get_supported_post_type(body.type, platform)
             has_selected_music = selected_music and platform.lower().strip() == "tiktok"
+            requested_volume = {
+                "video": round(body.originalVolume * 100, 2),
+                "music": round(body.musicVolume * 100, 2),
+            } if has_selected_music else None
+            music_payload: Dict[str, Any] = {
+                "id": str((body.music or {}).get("id") or ""),
+                "artist": str((body.music or {}).get("artist") or ""),
+                "name": str((body.music or {}).get("name") or ""),
+                "thumbnail": str((body.music or {}).get("thumbnail") or ""),
+            } if has_selected_music else {"id": "", "artist": "", "name": "", "thumbnail": ""}
+            if has_selected_music:
+                music_payload["volume"] = requested_volume
             additional_info = {
                 "isAiGenerated": bool(body.isAiGenerated),
                 "isDraft": bool(body.isDraft),
@@ -603,12 +588,7 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
                 "coverTimestamp": round(hook_seek, 2),
                 "collaborators": body.collaborators or [],
                 "mentions": body.mentions or [],
-                "music": {
-                    "id": str((body.music or {}).get("id") or ""),
-                    "artist": str((body.music or {}).get("artist") or ""),
-                    "name": str((body.music or {}).get("name") or ""),
-                    "thumbnail": str((body.music or {}).get("thumbnail") or ""),
-                } if has_selected_music else {"id": "", "artist": "", "name": "", "thumbnail": ""},
+                "music": music_payload,
                 "products": [],
                 "tags": tags or [],
                 "targetCountries": body.targetCountries or [],

@@ -150,6 +150,24 @@ class MassDeleteScheduleRequest(BaseModel):
     scheduleIds: List[str]
 
 
+def _normalize_music_object(additional_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Preserve documented TikTok music volume settings in schedule payloads."""
+    music_obj = additional_info.get("music") or {}
+    music: Dict[str, Any] = {
+        "id": str(music_obj.get("id") or ""),
+        "artist": str(music_obj.get("artist") or ""),
+        "name": str(music_obj.get("name") or ""),
+        "thumbnail": str(music_obj.get("thumbnail") or ""),
+    }
+    if "volume" in music_obj:
+        volume = music_obj.get("volume") or {}
+        music["volume"] = {
+            "video": volume.get("video", 50),
+            "music": volume.get("music", 100),
+        }
+    return music
+
+
 @schedule_router.post("")
 async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current_user)):
     """Create a scheduled post in Repliz."""
@@ -204,6 +222,7 @@ async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current
     else:
         normalized_schedule_at = min_future.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
+    music = _normalize_music_object(body.additionalInfo)
     payload = {
         "title": (body.title or "Video")[:100],
         "description": (body.description or "")[:2000],
@@ -217,9 +236,7 @@ async def create_schedule(body: ScheduleCreateRequest, _user=Depends(get_current
             "isAutoAddMusic": body.additionalInfo.get("isAutoAddMusic", False),
             "collaborators": body.additionalInfo.get("collaborators", []),
             "mentions": body.additionalInfo.get("mentions", []),
-            "music": body.additionalInfo.get(
-                "music", {"id": "", "artist": "", "name": "", "thumbnail": ""}
-            ),
+            "music": music,
             "products": body.additionalInfo.get("products", []),
             "tags": body.additionalInfo.get("tags", []),
             "targetCountries": body.additionalInfo.get("targetCountries", []),
@@ -469,6 +486,7 @@ async def update_schedule(
             else:
                 sanitized_replies.append(r)
 
+    music = _normalize_music_object(body.additionalInfo)
     payload = {
         "title": (body.title or "Video")[:100],
         "description": (body.description or "")[:2000],
@@ -482,9 +500,7 @@ async def update_schedule(
             "isAutoAddMusic": body.additionalInfo.get("isAutoAddMusic", False),
             "collaborators": body.additionalInfo.get("collaborators", []),
             "mentions": body.additionalInfo.get("mentions", []),
-            "music": body.additionalInfo.get(
-                "music", {"id": "", "artist": "", "name": "", "thumbnail": ""}
-            ),
+            "music": music,
             "products": body.additionalInfo.get("products", []),
             "tags": body.additionalInfo.get("tags", []),
             "targetCountries": body.additionalInfo.get("targetCountries", []),

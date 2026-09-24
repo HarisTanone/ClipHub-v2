@@ -1729,7 +1729,7 @@ export function ScheduleModal({
                         <p className="text-[10px] text-zinc-500">
                           {musicVolume === 0
                             ? "Volume 0% (Mute): Lagu disematkan di TikTok untuk jangkauan algoritma, suara musik dimatikan."
-                            : `Musik TikTok akan dimixing di latar belakang dengan volume ${musicVolume}%.`}
+                            : `TikTok akan mengatur volume musik ke ${musicVolume}% saat mempublikasikan.`}
                         </p>
                       </div>
 

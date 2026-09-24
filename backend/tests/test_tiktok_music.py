@@ -244,11 +244,10 @@ def test_publish_request_accepts_all_music_parameters():
         originalVolume=0.90,
         musicVolume=0.15,
     )
-
-    assert req.isAutoAddMusic is True
-    assert req.music["id"] == "7604121927885342721"
     assert req.originalVolume == 0.90
     assert req.musicVolume == 0.15
+    assert req.isAutoAddMusic is True
+    assert req.music and req.music["id"] == "7604121927885342721"
 
 
 def test_publish_request_rejects_percentage_instead_of_ratio():
@@ -330,6 +329,26 @@ def test_explicit_music_uses_attachment_not_auto_pick():
     additional_info = {"isAutoAddMusic": False, "music": music}
     assert additional_info["isAutoAddMusic"] is False
     assert additional_info["music"]["id"] == "7602104441417107457"
+
+
+def test_schedule_music_volume_normalization_preserves_documented_shape():
+    from src.presentation.routes.social.schedule import _normalize_music_object
+    result = _normalize_music_object({"music": {
+        "id": "track", "artist": "artist", "name": "song", "thumbnail": "thumb",
+        "volume": {"video": 40, "music": 75},
+    }})
+    assert result == {
+        "id": "track", "artist": "artist", "name": "song", "thumbnail": "thumb",
+        "volume": {"video": 40, "music": 75},
+    }
+
+
+def test_schedule_music_volume_normalization_defaults_when_music_has_no_volume():
+    from src.presentation.routes.social.schedule import _normalize_music_object
+    result = _normalize_music_object({"music": {
+        "id": "track", "artist": "artist", "name": "song", "thumbnail": "thumb",
+    }})
+    assert "volume" not in result
 
 
 def test_infer_music_recommendation_vibe_and_diversity():
