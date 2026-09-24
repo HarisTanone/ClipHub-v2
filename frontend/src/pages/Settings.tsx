@@ -4832,8 +4832,14 @@ export function Settings() {
                               step={item.data_type === "float" ? "0.05" : "1"}
                               value={currentVal ?? ""}
                               onChange={(e) => {
-                                const v = item.data_type === "float" ? parseFloat(e.target.value) : parseInt(e.target.value, 10);
-                                setSysConfigEdits(prev => ({ ...prev, [item.key]: isNaN(v) ? e.target.value : v }));
+                                const raw = e.target.value;
+                                const parsed = item.data_type === "float" ? parseFloat(raw) : parseInt(raw, 10);
+                                const min = typeof item.min_value === "number" ? item.min_value : undefined;
+                                const max = typeof item.max_value === "number" ? item.max_value : undefined;
+                                const v = Number.isNaN(parsed)
+                                  ? raw
+                                  : Math.min(max ?? parsed, Math.max(min ?? parsed, parsed));
+                                setSysConfigEdits(prev => ({ ...prev, [item.key]: v }));
                               }}
                               className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-violet-500"
                             />

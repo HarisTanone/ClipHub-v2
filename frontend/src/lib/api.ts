@@ -1221,13 +1221,16 @@ export interface SystemConfigItem {
   key: string;
   value: any;
   raw_value?: string;
-  category: "ai_llm" | "api_keys" | "render_limits" | "vision_reframe" | "broll_effects" | "storage_cdn" | string;
+  category: "ai_llm" | "api_keys" | "render_limits" | "vision_reframe" | "broll_effects" | "storage_cdn" | "social_publish" | string;
   data_type: "string" | "int" | "float" | "bool" | "json";
   min_role: "superadmin" | "editor" | "viewer";
   is_secret: boolean;
   description: string;
   updated_at: string | null;
   updated_by: number | null;
+  min_value?: number;
+  max_value?: number;
+  default?: any;
 }
 
 export const systemConfig = {

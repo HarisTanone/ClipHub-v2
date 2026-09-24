@@ -48,16 +48,42 @@ class PublishRequest(BaseModel):
     isDraft: bool = False
     isAutoAddMusic: bool = False
     music: Optional[Dict[str, Any]] = None
-    originalVolume: float = Field(default=1.0, ge=0.0, le=1.0)
-    musicVolume: float = Field(default=0.0, ge=0.0, le=1.0)
+    originalVolume: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    musicVolume: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     collaborators: List[str] = Field(default_factory=list)
     mentions: List[str] = Field(default_factory=list)
     targetCountries: List[str] = Field(default_factory=list)
     scheduleAt: str  # ISO 8601 UTC string
 
 
+def _publish_setting(key: str, default: Any) -> Any:
+    """Read a validated admin publish policy with a safe fallback."""
+    try:
+        from src.infrastructure.system_config_store import get_system_setting
+        return get_system_setting(key, default)
+    except Exception as exc:
+        logger.warning("Could not read publish setting %s: %s", key, exc)
+        return default
+
+
+def _publish_int_setting(key: str, default: int, minimum: int, maximum: int) -> int:
+    value = _publish_setting(key, default)
+    try:
+        return max(minimum, min(maximum, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _publish_float_setting(key: str, default: float, minimum: float, maximum: float) -> float:
+    value = _publish_setting(key, default)
+    try:
+        return max(minimum, min(maximum, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 class BatchPublishRequest(PublishRequest):
-    clipRanks: List[int] = Field(min_length=1, max_length=50)
+    clipRanks: List[int] = Field(min_length=1, max_length=200)
     scheduleMode: str = "same"  # same, ai, custom
     customScheduleTimes: List[str] = Field(default_factory=list)
     scheduleAt: str = ""
@@ -84,7 +110,9 @@ def calculate_batch_schedule_times(
         return [value.strftime("%Y-%m-%dT%H:%M:%S.000Z") for value in SocialAutoPostService().calculate_ai_schedule_times(clip_count)]
     if not schedule_at or not schedule_at.strip():
         import datetime as dt
-        min_future = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=2)
+        min_future = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
+            minutes=_publish_int_setting("PUBLISH_MIN_FUTURE_BUFFER_MINUTES", 2, 0, 1440)
+        )
         schedule_at = min_future.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     return [schedule_at] * clip_count
 
@@ -517,7 +545,9 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
 
     raw_schedule_at = body.scheduleAt
     now_utc = dt.datetime.now(dt.timezone.utc)
-    min_future = now_utc + dt.timedelta(minutes=2)
+    min_future = now_utc + dt.timedelta(
+        minutes=_publish_int_setting("PUBLISH_MIN_FUTURE_BUFFER_MINUTES", 2, 0, 1440)
+    )
     if raw_schedule_at:
         try:
             parsed_dt = dt.datetime.fromisoformat(raw_schedule_at.replace("Z", "+00:00"))
@@ -536,9 +566,11 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     failed_schedules = []
 
     post_title = (body.title or "Video")[:100]
-    post_desc = (body.caption or "")
-    if len(post_desc) > 2000:
-        post_desc = post_desc[:1990].rstrip() + "..."
+    post_desc = body.caption or ""
+    caption_limit = _publish_int_setting("PUBLISH_CAPTION_MAX_CHARS", 2000, 100, 10000)
+    if len(post_desc) > caption_limit:
+        suffix = "..."
+        post_desc = post_desc[: max(0, caption_limit - len(suffix))].rstrip() + suffix
 
     media_obj: Dict[str, Any] = {
         "alt": post_title,
@@ -566,8 +598,18 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             post_type = get_supported_post_type(body.type, platform)
             has_selected_music = selected_music and platform.lower().strip() == "tiktok"
             requested_volume = {
-                "video": round(body.originalVolume * 100, 2),
-                "music": round(body.musicVolume * 100, 2),
+                "video": round(
+                    body.originalVolume * 100
+                    if body.originalVolume is not None
+                    else _publish_float_setting("PUBLISH_DEFAULT_ORIGINAL_VOLUME", 1.0, 0.0, 1.0) * 100,
+                    2,
+                ),
+                "music": round(
+                    body.musicVolume * 100
+                    if body.musicVolume is not None
+                    else _publish_float_setting("PUBLISH_DEFAULT_MUSIC_VOLUME", 0.25, 0.0, 1.0) * 100,
+                    2,
+                ),
             } if has_selected_music else None
             music_payload: Dict[str, Any] = {
                 "id": str((body.music or {}).get("id") or ""),
@@ -658,6 +700,12 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
 @publish_router.post("/batch")
 async def publish_clip_batch(body: BatchPublishRequest, user=Depends(get_current_user)):
     """Publish selected clips to selected user-owned accounts with per-clip timing."""
+    max_clips = _publish_int_setting("PUBLISH_BATCH_MAX_CLIPS", 50, 1, 200)
+    if len(body.clipRanks) > max_clips:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Batch publish melebihi batas {max_clips} clip (saat ini {len(body.clipRanks)}).",
+        )
     ranks = list(dict.fromkeys(body.clipRanks))
     times = calculate_batch_schedule_times(
         len(ranks), body.scheduleMode, body.scheduleAt, body.customScheduleTimes

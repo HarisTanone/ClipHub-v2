@@ -1127,7 +1127,7 @@ async def update_system_config_endpoint(
 
     for k, v in req.settings.items():
         if k not in SYSTEM_SETTINGS_METADATA:
-            continue
+            raise HTTPException(status_code=400, detail=f"Unknown system setting key: {k}")
         req_role = SYSTEM_SETTINGS_METADATA[k]["min_role"]
         req_level = ROLE_LEVELS.get(req_role, 3)
 
@@ -1137,6 +1137,18 @@ async def update_system_config_endpoint(
             # Don't update if secret is passed as masked placeholder
             if SYSTEM_SETTINGS_METADATA[k]["is_secret"] and isinstance(v, str) and ("..." in v or "******" in v):
                 continue
+            meta = SYSTEM_SETTINGS_METADATA[k]
+            if meta.get("data_type") in ("int", "float"):
+                try:
+                    numeric = float(v)
+                    if meta["data_type"] == "int" and numeric != int(numeric):
+                        raise ValueError("must be an integer")
+                    if "min_value" in meta and numeric < meta["min_value"]:
+                        raise ValueError(f"must be >= {meta['min_value']}")
+                    if "max_value" in meta and numeric > meta["max_value"]:
+                        raise ValueError(f"must be <= {meta['max_value']}")
+                except (TypeError, ValueError) as exc:
+                    raise HTTPException(status_code=422, detail=f"Invalid value for {k}: {exc}") from exc
             allowed_updates[k] = v
 
     if denied_keys:

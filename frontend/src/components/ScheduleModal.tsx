@@ -40,6 +40,13 @@ import { Textarea, Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
 import { API_BASE, getToken, socialApi, type TikTokMusicTrack } from "@/lib/api";
+import {
+  DEFAULT_SCHEDULE_PREFERENCES,
+  loadSchedulePreferences,
+  resetSchedulePreferences,
+  saveSchedulePreferences,
+  type SchedulePreferences,
+} from "@/lib/schedulePreferences";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
@@ -242,6 +249,7 @@ export function ScheduleModal({
   const toast = useToast();
   const { user, isSuperadmin } = useAuth();
   const canPublish = isSuperadmin || user?.role !== "viewer";
+  const initialPrefs = useMemo(() => loadSchedulePreferences(user), [user?.id]);
 
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
@@ -251,10 +259,10 @@ export function ScheduleModal({
   const [firstReply, setFirstReply] = useState("");
   const [topic, setTopic] = useState("");
   const [tagsStr, setTagsStr] = useState("");
-  const [postType, setPostType] = useState<"video" | "reel" | "story">("video");
+  const [postType, setPostType] = useState<"video" | "reel" | "story">(initialPrefs.postType);
   const [isAiGenerated, setIsAiGenerated] = useState(false);
-  const [scheduleMode, setScheduleMode] = useState<"now" | "later">("now");
-  const [batchScheduleMode, setBatchScheduleMode] = useState<"same" | "ai" | "custom">("same");
+  const [scheduleMode, setScheduleMode] = useState<"now" | "later">(initialPrefs.scheduleMode);
+  const [batchScheduleMode, setBatchScheduleMode] = useState<"same" | "ai" | "custom">(initialPrefs.batchScheduleMode);
   const [customScheduleTimes, setCustomScheduleTimes] = useState<string[]>([]);
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
@@ -268,17 +276,17 @@ export function ScheduleModal({
   const [selectedTrack, setSelectedTrack] = useState<TikTokMusicTrack | null>(null);
   const [loadingMusic, setLoadingMusic] = useState(false);
   const [showAllMusic, setShowAllMusic] = useState(false);
-  const [selectedGenre, setSelectedGenre] = useState<string>("RECOMMENDED");
+  const [selectedGenre, setSelectedGenre] = useState<string>(initialPrefs.selectedGenre);
   const [musicSearchQuery, setMusicSearchQuery] = useState<string>("");
   const [shuffleSeed, setShuffleSeed] = useState<number>(0);
   const [matchReason, setMatchReason] = useState<string>("");
-  const [originalVolume, setOriginalVolume] = useState<number>(100);
-  const [musicVolume, setMusicVolume] = useState<number>(25);
+  const [originalVolume, setOriginalVolume] = useState<number>(initialPrefs.originalVolume);
+  const [musicVolume, setMusicVolume] = useState<number>(initialPrefs.musicVolume);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // ── Option C: Hybrid Batch Music & Volume States ──
-  const [batchMusicMode, setBatchMusicMode] = useState<"ai_distinct" | "single">("ai_distinct");
+  const [batchMusicMode, setBatchMusicMode] = useState<"ai_distinct" | "single">(initialPrefs.batchMusicMode);
   const [clipMusicMap, setClipMusicMap] = useState<Record<number, TikTokMusicTrack | null>>({});
   const [clipMusicReasonMap, setClipMusicReasonMap] = useState<Record<number, string>>({});
   const [clipVolumeMap, setClipVolumeMap] = useState<Record<number, { musicVolume: number; originalVolume: number }>>({});
@@ -317,13 +325,14 @@ export function ScheduleModal({
 
       setTitle(initialTitle);
       setCaption(initialCaption);
+      setTagsStr(initialPrefs.captionHashtags.join(", "));
       setBatchCaptionMode("ai_distinct");
       setEditingClipCaptionRank(null);
-      setSelectedGenre("RECOMMENDED");
+      setSelectedGenre(initialPrefs.selectedGenre);
       setMusicSearchQuery("");
       setShuffleSeed(0);
       setMatchReason("");
-      setBatchMusicMode("ai_distinct");
+      setBatchMusicMode(initialPrefs.batchMusicMode);
       setClipMusicMap({});
       setClipMusicReasonMap({});
       setClipVolumeMap({});
@@ -343,7 +352,7 @@ export function ScheduleModal({
         })
         .finally(() => setLoadingAccounts(false));
     }
-  }, [open, defaultCaption, hookText, clipRank, clipRanks, clips]);
+  }, [open, defaultCaption, hookText, clipRank, clipRanks, clips, initialPrefs]);
 
   const connectedAccounts = useMemo(() => {
     return accounts.filter((a) => a.isConnected);
@@ -421,11 +430,11 @@ export function ScheduleModal({
     const pad = (n: number) => String(n).padStart(2, "0");
     const newTimes = (clipRanks || []).map((_, idx) => {
       const d = new Date(now);
-      d.setDate(d.getDate() + (now.getHours() >= 19 ? idx + 1 : idx));
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T19:00`;
+      d.setDate(d.getDate() + (now.getHours() >= initialPrefs.dailyScheduleHour ? idx + 1 : idx));
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(initialPrefs.dailyScheduleHour)}:00`;
     });
     setCustomScheduleTimes(newTimes);
-  }, [clipRanks?.join(",")]);
+  }, [clipRanks?.join(","), initialPrefs.dailyScheduleHour]);
 
   useEffect(() => {
     if (isBatch && batchScheduleMode === "custom") {
@@ -438,12 +447,12 @@ export function ScheduleModal({
         base.setMinutes(0, 0, 0);
         const pad = (n: number) => String(n).padStart(2, "0");
         return (clipRanks || []).map((_, idx) => {
-          const d = new Date(base.getTime() + idx * 2 * 60 * 60 * 1000);
+          const d = new Date(base.getTime() + idx * initialPrefs.batchIntervalHours * 60 * 60 * 1000);
           return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
         });
       });
     }
-  }, [isBatch, batchScheduleMode, clipRanks?.join(",")]);
+  }, [isBatch, batchScheduleMode, clipRanks?.join(","), initialPrefs.batchIntervalHours]);
 
   // Load TikTok trending/recommended music when TikTok is selected and music feature is active
   useEffect(() => {
@@ -644,6 +653,44 @@ export function ScheduleModal({
         musicVolume: type === "music" ? clamped : (prev[rank]?.musicVolume ?? musicVolume),
       },
     }));
+  }
+
+  // Persist current modal state as the user's defaults so the next opening
+  // honors them. Hashtag list is captured as-is; numbers are clamped and
+  // validated by the storage helper to refuse unsafe storage shapes.
+  function captureCurrentPreferences(): SchedulePreferences {
+    const tags = tagsStr
+      ? tagsStr.split(",").map((t) => t.trim()).filter(Boolean)
+      : [...initialPrefs.captionHashtags];
+    return {
+      ...initialPrefs,
+      musicVolume,
+      originalVolume,
+      selectedGenre,
+      scheduleMode,
+      batchScheduleMode,
+      batchMusicMode,
+      postType,
+      captionHashtags: tags,
+    };
+  }
+
+  function handleSavePreferences() {
+    saveSchedulePreferences(user, captureCurrentPreferences());
+    toast.success("Default Schedule tersimpan untuk akun ini");
+  }
+
+  function handleResetPreferences() {
+    resetSchedulePreferences(user);
+    setMusicVolume(DEFAULT_SCHEDULE_PREFERENCES.musicVolume);
+    setOriginalVolume(DEFAULT_SCHEDULE_PREFERENCES.originalVolume);
+    setSelectedGenre(DEFAULT_SCHEDULE_PREFERENCES.selectedGenre);
+    setScheduleMode(DEFAULT_SCHEDULE_PREFERENCES.scheduleMode);
+    setBatchScheduleMode(DEFAULT_SCHEDULE_PREFERENCES.batchScheduleMode);
+    setBatchMusicMode(DEFAULT_SCHEDULE_PREFERENCES.batchMusicMode);
+    setPostType(DEFAULT_SCHEDULE_PREFERENCES.postType);
+    setTagsStr("");
+    toast.success("Default Schedule dikembalikan ke bawaan");
   }
 
   function handleSelectTrackForClip(rank: number, track: TikTokMusicTrack) {
@@ -1296,7 +1343,7 @@ export function ScheduleModal({
                         onClick={handleFillDailyCustomTimes}
                         className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-300 transition-colors"
                       >
-                        1 Klip/Hari (19:00 WIB)
+                        1 Klip/Hari ({String(initialPrefs.dailyScheduleHour).padStart(2, "0")}:00 WIB)
                       </button>
                     </div>
                     <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
@@ -2388,6 +2435,24 @@ export function ScheduleModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleResetPreferences}
+              className="border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+              title="Kembalikan default Schedule untuk akun ini"
+            >
+              Reset Default
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSavePreferences}
+              className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
+              title="Simpan pilihan saat ini sebagai default akun ini"
+            >
+              Simpan Default
+            </Button>
             <Button
               variant="outline"
               size="sm"
