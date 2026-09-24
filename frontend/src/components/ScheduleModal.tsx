@@ -506,8 +506,6 @@ export function ScheduleModal({
     };
   }, [open]);
 
-  if (!open) return null;
-
   function toggleAccount(accId: string) {
     setSelectedAccountIds((prev) => {
       if (prev.includes(accId)) {
@@ -858,6 +856,8 @@ export function ScheduleModal({
     displayedAccounts.every((a) => selectedAccountIds.includes(a._id || a.id));
 
   const visibleMusicTracks = showAllMusic ? musicTracks : musicTracks.slice(0, 4);
+
+  if (!open) return null;
 
   return (
     <div
