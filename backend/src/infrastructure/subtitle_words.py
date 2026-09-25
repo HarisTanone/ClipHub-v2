@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import re
 
+# ponytail: function-word filter only (len/pos), not domain lexicon. Upgrade: DB abstract_stop_words when ceiling hit.
 _STOP_WORDS = {"yang", "dan", "di", "ke", "dari", "ini", "itu", "dengan", "untuk", "pada", "adalah", "juga", "akan", "sudah", "tidak", "bukan", "ada", "bisa", "jadi", "saya", "aku", "kamu", "dia", "kita", "mereka", "the", "is", "a", "to", "of", "in", "it", "and", "for", "but", "we", "they"}
 
 

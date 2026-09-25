@@ -378,7 +378,7 @@ export const DEFAULT_HOOK_STYLE: HookStyle = {
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   enabled: true,
-  stylePreset: "classic",
+  stylePreset: "classic_karaoke",
   engine: "ffmpeg",
   hf_template: defaultHfSubtitleId(),
   fontFamily: "Poppins",

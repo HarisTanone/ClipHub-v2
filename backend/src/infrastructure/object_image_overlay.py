@@ -88,8 +88,10 @@ def load_object_overlay_style(user_id: int | None = None) -> dict[str, Any]:
     return base
 
 
-# Indonesian entity normalization map for common reduplicated & everyday terms
-INDONESIAN_ENTITY_MAP: dict[str, tuple[str, str, str]] = {
+# Indonesian entity normalization map — DB-backed with hardcoded fallback.
+# Primary source: indonesian_entity_map table (seeded via v9 migration).
+# Hardcoded dict kept as offline fallback only (DB unreachable / fresh install).
+_HARDCODED_INDONESIAN_ENTITY_MAP: dict[str, tuple[str, str, str]] = {
     # Indonesian root / stem -> (Base Indonesian word, High precision English query, English search tags)
     "tepung": ("tepung", "wheat flour baking powder", "flour baking dough powder"),
     "tepung-tepungan": ("tepung", "wheat flour baking powder", "flour baking dough powder"),
@@ -151,37 +153,65 @@ INDONESIAN_ENTITY_MAP: dict[str, tuple[str, str, str]] = {
 }
 
 
+_entity_map_cache: dict[str, tuple[str, str, str]] | None = None
+
+def _load_entity_map() -> dict[str, tuple[str, str, str]]:
+    global _entity_map_cache
+    if _entity_map_cache is not None:
+        return _entity_map_cache
+    try:
+        import sqlite3
+        from src.config import settings
+        conn = sqlite3.connect(settings.db_path)
+        rows = conn.execute("SELECT norm_key, base_word, query_en, query_tags FROM indonesian_entity_map").fetchall()
+        conn.close()
+        if rows:
+            _entity_map_cache = {r[0]: (r[1], r[2], r[3]) for r in rows}
+            return _entity_map_cache
+    except Exception:
+        pass
+    _entity_map_cache = _HARDCODED_INDONESIAN_ENTITY_MAP
+    return _entity_map_cache
+
+# ponytail: DB is truth, hardcode fallback only when DB unreachable. Upgrade: admin CRUD via API.
+INDONESIAN_ENTITY_MAP: dict[str, tuple[str, str, str]] = _HARDCODED_INDONESIAN_ENTITY_MAP
+
+def _get_entity_map() -> dict[str, tuple[str, str, str]]:
+    return _load_entity_map()
+
 def normalize_indonesian_entity(raw_text: str | None) -> tuple[str, str, str]:
     """Extract clean base root word and accurate English stock query for Indonesian terms (e.g. reduplications)."""
     if not raw_text:
         return "", "", ""
+    _map = _get_entity_map()
+    INDONESIAN_ENTITY_MAP.update(_map)
     clean = re.sub(r"[^\w\-]+", " ", str(raw_text).lower()).strip()
-    if clean in INDONESIAN_ENTITY_MAP:
-        return INDONESIAN_ENTITY_MAP[clean]
+    if clean in _map:
+        return _map[clean]
 
     # Handle reduplications like kata-kataan or kata-kata (e.g., tepung-tepung, tepung-tepungan)
     match_redup = re.match(r"^([a-z]+)-\1(an)?$", clean)
     if match_redup:
         stem = match_redup.group(1)
-        if stem in INDONESIAN_ENTITY_MAP:
-            return INDONESIAN_ENTITY_MAP[stem]
+        if stem in _map:
+            return _map[stem]
         return stem, f"{stem} product close up", stem
 
     # Handle prefix me-/ber-
     if clean.startswith("me") and len(clean) > 4:
         stem = clean[2:]
-        if stem in INDONESIAN_ENTITY_MAP:
-            return INDONESIAN_ENTITY_MAP[stem]
+        if stem in _map:
+            return _map[stem]
     if clean.startswith("ber") and len(clean) > 5:
         stem = clean[3:]
-        if stem in INDONESIAN_ENTITY_MAP:
-            return INDONESIAN_ENTITY_MAP[stem]
+        if stem in _map:
+            return _map[stem]
 
     # Handle suffix -an (e.g. gorengan -> goreng, makanan -> makan)
     if clean.endswith("an") and len(clean) > 4:
         stem = clean[:-2]
-        if stem in INDONESIAN_ENTITY_MAP:
-            return INDONESIAN_ENTITY_MAP[stem]
+        if stem in _map:
+            return _map[stem]
 
     return clean, "", ""
 

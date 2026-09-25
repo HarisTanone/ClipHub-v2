@@ -593,7 +593,11 @@ class HermesVideoGenService:
 
         # Also extract keywords from topic title
         topic_words = re.findall(r"\b[A-Za-z0-9]{3,}\b", topic)
-        stopwords = {"yang", "pada", "dalam", "untuk", "dari", "ini", "itu", "dan", "dengan", "akan", "the", "and", "for", "with"}
+        try:
+            from src.infrastructure.stop_words_store import get_abstract_stop_words
+            stopwords = get_abstract_stop_words() | {"the", "and", "for", "with"}
+        except Exception:
+            stopwords = {"yang", "pada", "dalam", "untuk", "dari", "ini", "itu", "dan", "dengan", "akan", "the", "and", "for", "with"}  # ponytail: fallback minimal, DB is source of truth
         for w in topic_words:
             if w.lower() not in stopwords:
                 keywords.append(w.capitalize())

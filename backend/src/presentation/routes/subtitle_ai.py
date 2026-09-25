@@ -50,7 +50,7 @@ def _parse_with_local_rules(prompt: str, current_style: Optional[dict[str, Any]]
         "highlightStyle": "scale",
         "highlightGlow": False,
         "highlightGlowColor": "#00F0FF",
-        "highlightWords": ["viral", "penting", "rahasia", "sukses", "cuan"],
+        "highlightWords": [],  # ponytail: dynamic from AI analyze_visual_entities_for_clips; empty = no hardcode domain
         "dualStyleEnabled": False,
         "highlightFontFamily": "Montserrat",
         "highlightFontSize": 36,
@@ -228,7 +228,7 @@ async def generate_subtitle_with_ai(req: SubtitleAIGenerateRequest):
             ok=True,
             subtitle_style=fallback_style,
             explanation=f"Gaya subtitle AI berhasil dibuat berdasarkan instruksi: '{prompt}'",
-            highlight_keywords=fallback_style.get("highlightWords", ["viral", "penting", "rahasia"]),
+            highlight_keywords=fallback_style.get("highlightWords", [])  # ponytail: no hardcode fallback,
         )
 
     system_instruction = """You are an expert typography and video motion designer specializing in viral short-form video subtitles (TikTok, Reels, YouTube Shorts).
@@ -299,7 +299,7 @@ Output ONLY valid JSON."""
         # Merge with fallback to guarantee all keys exist
         merged_style = {**fallback_style, **parsed}
         explanation = parsed.get("explanation") or f"Gaya subtitle AI berhasil dibuat berdasarkan: '{prompt}'"
-        highlight_keywords = parsed.get("highlightWords") or merged_style.get("highlightWords") or ["viral", "penting", "rahasia"]
+        highlight_keywords = parsed.get("highlightWords") or merged_style.get("highlightWords") or []  # ponytail: dynamic from AI
 
         return SubtitleAIGenerateResponse(
             ok=True,
@@ -314,5 +314,5 @@ Output ONLY valid JSON."""
             ok=True,
             subtitle_style=fallback_style,
             explanation=f"Gaya subtitle AI (mode cerdas) berhasil diterapkan berdasarkan: '{prompt}'",
-            highlight_keywords=fallback_style.get("highlightWords", ["viral", "penting", "rahasia"]),
+            highlight_keywords=fallback_style.get("highlightWords", [])  # ponytail: no hardcode fallback,
         )

@@ -445,6 +445,7 @@ class SubtitleRenderer(ISubtitleRenderer):
 
     # ─── Emphasis Style Renderer ──────────────────────────────────────────────
 
+    # ponytail: function-word filter only (len/pos), not domain lexicon. Upgrade: DB abstract_stop_words when ceiling hit.
     STOP_WORDS = {
         "yang", "dan", "di", "ke", "dari", "ini", "itu", "dengan", "untuk",
         "pada", "adalah", "juga", "akan", "sudah", "udah", "gak", "nggak",

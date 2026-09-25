@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     target_aspect_ratio TEXT NOT NULL DEFAULT '9:16',
     hook_engine TEXT NOT NULL DEFAULT 'v3',
     hook_style TEXT NOT NULL DEFAULT '',
-    broll_enabled INTEGER NOT NULL DEFAULT 1,
+    broll_enabled INTEGER NOT NULL DEFAULT 0,
     autogrid_enabled INTEGER NOT NULL DEFAULT 0,
     -- v3.0 Remotion Integration Fields
     use_remotion INTEGER NOT NULL DEFAULT 0,
@@ -449,4 +449,13 @@ CREATE TABLE IF NOT EXISTS object_overlay_configs (
     show_label INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ─── Indonesian Entity Map (v8 — replaces hardcoded INDONESIAN_ENTITY_MAP) ───
+CREATE TABLE IF NOT EXISTS indonesian_entity_map (
+    norm_key TEXT PRIMARY KEY,             -- normalized key (lowercase, no punct): e.g. 'tepung', 'nasi'
+    base_word TEXT NOT NULL,               -- base Indonesian word (display)
+    query_en TEXT NOT NULL,                -- English search query (Pexels/stock)
+    query_tags TEXT NOT NULL DEFAULT '',   -- English tag string for search expansion
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

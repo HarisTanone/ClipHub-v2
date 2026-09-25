@@ -2645,7 +2645,7 @@ class V2PipelineService:
 
             clip_sub_config = dict(subtitle_style_config or {})
             clip_sub_config["layout_events"] = clip_layout_events
-            clip_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", True))
+            clip_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", False))
             clip_sub_config["grid_position_y"] = float((subtitle_style_config or {}).get("grid_position_y") or (subtitle_style_config or {}).get("gridPositionY") or 50.0)
             if clip_reframe.get("layout"):
                 clip_sub_config["reframe_layout"] = clip_reframe.get("layout")
@@ -2929,7 +2929,7 @@ class V2PipelineService:
 
                         clip_sub_config = dict(subtitle_style_config or {})
                         clip_sub_config["layout_events"] = clip_layout_events
-                        clip_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", True))
+                        clip_sub_config["autogrid_enabled"] = bool(getattr(job, "autogrid_enabled", False))
                         clip_sub_config["grid_position_y"] = float((subtitle_style_config or {}).get("grid_position_y") or (subtitle_style_config or {}).get("gridPositionY") or 50.0)
                         if clip_reframe.get("layout"):
                             clip_sub_config["reframe_layout"] = clip_reframe.get("layout")
