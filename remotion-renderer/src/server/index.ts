@@ -216,10 +216,10 @@ app.post("/render", async (req, res) => {
     try {
       // Memory-optimized Quality presets: 1 concurrent frame worker, pristine visual crf
       const qualityConfig = {
-        low: { crf: 18, concurrency: 1, x264Preset: "fast" },
-        medium: { crf: 14, concurrency: 1, x264Preset: "medium" },
-        high: { crf: 10, concurrency: 1, x264Preset: "slow" },
-      }[request.quality] || { crf: 14, concurrency: 1, x264Preset: "medium" };
+        low: { crf: 28, concurrency: 1, x264Preset: "fast" },
+        medium: { crf: 24, concurrency: 1, x264Preset: "medium" },
+        high: { crf: 19, concurrency: 1, x264Preset: "fast" },
+      }[request.quality] || { crf: 24, concurrency: 1, x264Preset: "medium" };
 
       // Convert local video path to HTTP URL served by this server
       const propsWithUrl = { ...request.props };

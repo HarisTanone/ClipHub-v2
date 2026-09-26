@@ -598,34 +598,36 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
             post_type = get_supported_post_type(body.type, platform)
             has_selected_music = selected_music and platform.lower().strip() == "tiktok"
             requested_volume = {
-                "video": round(
+                "video": int(round(
                     body.originalVolume * 100
                     if body.originalVolume is not None
-                    else _publish_float_setting("PUBLISH_DEFAULT_ORIGINAL_VOLUME", 1.0, 0.0, 1.0) * 100,
-                    2,
-                ),
-                "music": round(
+                    else _publish_float_setting("PUBLISH_DEFAULT_ORIGINAL_VOLUME", 1.0, 0.0, 1.0) * 100
+                )),
+                "music": int(round(
                     body.musicVolume * 100
                     if body.musicVolume is not None
-                    else _publish_float_setting("PUBLISH_DEFAULT_MUSIC_VOLUME", 0.25, 0.0, 1.0) * 100,
-                    2,
-                ),
+                    else _publish_float_setting("PUBLISH_DEFAULT_MUSIC_VOLUME", 0.25, 0.0, 1.0) * 100
+                )),
             } if has_selected_music else None
+            
             music_payload: Dict[str, Any] = {
                 "id": str((body.music or {}).get("id") or ""),
                 "artist": str((body.music or {}).get("artist") or ""),
                 "name": str((body.music or {}).get("name") or ""),
                 "thumbnail": str((body.music or {}).get("thumbnail") or ""),
             } if has_selected_music else {"id": "", "artist": "", "name": "", "thumbnail": ""}
+            
             if has_selected_music:
                 music_payload["volume"] = requested_volume
+            
+            # If user explicitly wants to adjust volume but hasn't selected a specific track,
+            # we can still pass the volume config with an empty music ID if Repliz supports it,
+            # but for now we follow the existing has_selected_music check.
+            # Ensure isAutoAddMusic respects the client's request.
             additional_info = {
                 "isAiGenerated": bool(body.isAiGenerated),
                 "isDraft": bool(body.isDraft),
-                # Official Repliz "Music" example keeps this false when an
-                # explicit additionalInfo.music object is supplied. True asks
-                # TikTok/Repliz to auto-select music and can override our ID.
-                "isAutoAddMusic": False,
+                "isAutoAddMusic": bool(body.isAutoAddMusic),
                 "coverTimestampMs": int(max(0.5, float(hook_seek)) * 1000),
                 "coverTimestamp": round(hook_seek, 2),
                 "collaborators": body.collaborators or [],

@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from src.application.services import JobService
 from src.config import settings
 from src.infrastructure.clip_outputs import discover_ready_clip_ranks, find_final_clip
+from src.infrastructure.social_compliance import ensure_social_compliant_video
 from src.presentation.auth_deps import CurrentUser, get_current_user, get_optional_user, require_permission
 from src.presentation.dependencies import get_job_service
 from src.presentation.schemas.jobs import (
@@ -2282,6 +2283,14 @@ async def restyle_clip(
 
         if not os.path.exists(staged_final_path):
             raise HTTPException(status_code=503, detail="Restyle did not produce a final video")
+
+        # Apply social compliance to ensure +faststart and safe web stream bitrates
+        try:
+            compliant_path = ensure_social_compliant_video(staged_final_path)
+            if compliant_path and compliant_path != staged_final_path and os.path.exists(compliant_path):
+                os.replace(compliant_path, staged_final_path)
+        except Exception as e:
+            logger.warning(f"[restyle] social compliance check failed: {e}")
 
         # Keep the old final playable until the replacement is complete.
         os.replace(staged_final_path, final_path)
