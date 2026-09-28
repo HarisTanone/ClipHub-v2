@@ -544,10 +544,11 @@ class ActiveSpeakerDetector:
         chin_x, chin_y = get_pt(self.CHIN)
         forehead_x, forehead_y = get_pt(self.FOREHEAD)
 
-        # 5. Multi-modal anatomical center
-        # Retina/Eyes (20%), Nose tip (20%), Lips & Speech Articulation (40%), Chin Balance (20%)
-        anatomical_cx = 0.20 * eyes_center_x + 0.20 * nose_x + 0.40 * mouth_x + 0.20 * chin_x
-        anatomical_cy = 0.20 * eyes_center_y + 0.20 * nose_y + 0.40 * mouth_y + 0.20 * chin_y
+        # 5. Voice-precise anatomical center — ponytail: mouth reduced from 40%→20% to cut phoneme jitter;
+        #    nose (35% X / 25% Y) is stable sagittal anchor, eyes give horizontal stability.
+        #    Upgrade: per-phoneme adaptive weighting if viseme classification added.
+        anatomical_cx = 0.30 * eyes_center_x + 0.35 * nose_x + 0.20 * mouth_x + 0.15 * chin_x
+        anatomical_cy = 0.30 * eyes_center_y + 0.25 * nose_y + 0.20 * mouth_y + 0.25 * chin_y
 
         face_w = abs(mr_x - ml_x) * 2.5
         face_h = abs(chin_y - forehead_y)

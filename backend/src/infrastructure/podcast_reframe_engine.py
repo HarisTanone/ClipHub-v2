@@ -4661,8 +4661,9 @@ class PodcastReframeEngine(IReframeEngine):
                             det.mouth_y = (mly + mry) / 2.0
                             ecx = (lex + rex) / 2.0
                             mcx = (mlx + mrx) / 2.0
-                            det.anatomical_center_x = 0.20 * ecx + 0.20 * nx + 0.40 * mcx + 0.20 * face_found.center_x
-                            det.anatomical_center_y = 0.20 * det.eyes_y + 0.20 * ny + 0.40 * det.mouth_y + 0.20 * face_found.center_y
+                            # ponytail: voice-precise weighting — nose stable anchor 35%, eyes 30%, mouth 20% (cut phoneme jitter)
+                            det.anatomical_center_x = 0.30 * ecx + 0.35 * nx + 0.20 * mcx + 0.15 * face_found.center_x
+                            det.anatomical_center_y = 0.30 * det.eyes_y + 0.25 * ny + 0.20 * det.mouth_y + 0.25 * face_found.center_y
                     elif self._crop_face_detector_type == "mediapipe":
                         if self._use_legacy_api:
                             keypoints = getattr(best_det.location_data, "relative_keypoints", None)
@@ -4676,8 +4677,9 @@ class PodcastReframeEngine(IReframeEngine):
                                 det.eyes_y = (ley + rey) / 2.0
                                 det.mouth_y = my
                                 ecx = (lex + rex) / 2.0
-                                det.anatomical_center_x = 0.20 * ecx + 0.20 * nx + 0.40 * mx + 0.20 * face_found.center_x
-                                det.anatomical_center_y = 0.20 * det.eyes_y + 0.20 * ny + 0.40 * my + 0.20 * face_found.center_y
+                                # ponytail: voice-precise weighting — nose 35%, mouth 20%
+                                det.anatomical_center_x = 0.30 * ecx + 0.35 * nx + 0.20 * mx + 0.15 * face_found.center_x
+                                det.anatomical_center_y = 0.30 * det.eyes_y + 0.25 * ny + 0.20 * my + 0.25 * face_found.center_y
 
                     if getattr(det, "anatomical_center_x", None) is None:
                         det.anatomical_center_x = face_found.center_x

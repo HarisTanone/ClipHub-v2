@@ -880,7 +880,14 @@ class PersonFirstReframeEngine(IReframeEngine):
                 )
                 if closest_frame is not None:
                     active_speaker = speaker_result.per_frame_speaker[closest_frame]
-                    target_x = position_targets.get(active_speaker)
+                    # ponytail: voice-precise — prioritize anatomical face center over body bbox center
+                    lm = (getattr(speaker_result, "speaker_landmarks", {}) or {}).get(active_speaker)
+                    if lm and getattr(lm, "anatomical_center_x", 0) > 0:
+                        target_x = float(lm.anatomical_center_x)
+                    else:
+                        ptp = tracked_data.get("position_target_profiles") or {}
+                        prof = ptp.get(active_speaker) or {}
+                        target_x = prof.get("anatomical_x") or prof.get("face_x") or position_targets.get(active_speaker)
 
             if target_x is None and frame_faces:
                 target_x = float(np.median(frame_faces))
@@ -978,12 +985,18 @@ class PersonFirstReframeEngine(IReframeEngine):
             for k, v in (tracked_data.get("position_targets") or {}).items()
         }
 
-        # Determine crop center
+        # Determine crop center — ponytail: voice-precise anatomical over body bbox
         crop_center_x = width // 2
         if speaker_result and speaker_result.dominant_speaker_id is not None:
-            target_x = position_targets.get(speaker_result.dominant_speaker_id)
-            if target_x is not None:
-                crop_center_x = int(target_x)
+            dom = speaker_result.dominant_speaker_id
+            lm = (getattr(speaker_result, "speaker_landmarks", {}) or {}).get(dom)
+            if lm and getattr(lm, "anatomical_center_x", 0) > 0:
+                crop_center_x = int(float(lm.anatomical_center_x))
+            else:
+                ptp = tracked_data.get("position_target_profiles") or {}
+                prof = ptp.get(dom) or {}
+                ax = prof.get("anatomical_x") or prof.get("face_x")
+                crop_center_x = int(ax) if ax is not None else int(position_targets.get(dom, crop_center_x))
         elif position_targets:
             crop_center_x = int(np.median(list(position_targets.values())))
 

@@ -151,3 +151,6 @@ tmp/
 *.pt
 *.onnx
 
+# ─── Hermes local session artifacts ───────────────────────────────────────────
+.hermes/
+
