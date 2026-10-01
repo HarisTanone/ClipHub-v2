@@ -37,10 +37,22 @@ async def test_vidkraken_client_initialization(monkeypatch):
     from src.infrastructure.vidkraken_client import VidKrakenClient
     from src.config import settings
     monkeypatch.setattr(settings, "VIDKRAKEN_ENABLED", True)
+    monkeypatch.setattr(settings, "VIDKRAKEN_API_KEY", "test-key-123")
     client = VidKrakenClient()
     assert client.is_enabled is True
-    assert client.api_key == "ce1bcba1-b808-470f-987c-072ca2d35488"
+    assert client.api_key == "test-key-123"
     assert "vidkraken.com" in client.base_url
+
+
+@pytest.mark.asyncio
+async def test_vidkraken_missing_key_disables_client(monkeypatch):
+    from src.infrastructure.vidkraken_client import VidKrakenClient
+    from src.config import settings
+    monkeypatch.setattr(settings, "VIDKRAKEN_API_KEY", "")
+    monkeypatch.setattr(settings, "VIDKRAKEN_ENABLED", True)
+    client = VidKrakenClient()
+    assert client.is_enabled is False
+    assert client.api_key == ""
 
 
 @pytest.mark.asyncio

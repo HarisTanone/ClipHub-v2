@@ -32,8 +32,20 @@ from src.infrastructure.cta_renderer import (
 
 logger = logging.getLogger(__name__)
 
-# Graphical card-style hooks that require high-fidelity rendering (cards, badges, notches)
-GRAPHICAL_CARD_HOOKS = {
+def _graphical_card_hooks_from_db() -> set[str]:
+    """Read graphical-card hook IDs from the DB catalog."""
+    try:
+        from src.infrastructure.render_style_presets_store import list_style_presets
+        return {
+            p["id"] for p in list_style_presets(kind="hook", engine="remotion")
+            if p["config"].get("graphical_card")
+        }
+    except Exception:
+        return set()
+
+
+# DB is canonical; fallback exists only during migration/bootstrap.
+GRAPHICAL_CARD_HOOKS = _graphical_card_hooks_from_db() or {
     "news_portal_pantau",
     "news_viralin_badge",
     "news_offset_box",
@@ -42,7 +54,7 @@ GRAPHICAL_CARD_HOOKS = {
     "paper_clip_scrap",
     "trending_radar",
     "news_breaking_live",
-}
+} # ponytail: remove fallback after production migration soak.
 
 # Legacy fallback hook styles — DB table `ffmpeg_hook_styles` is the canonical source.
 # Do NOT add new styles here — add via DB migration. Contains presets not yet in DB

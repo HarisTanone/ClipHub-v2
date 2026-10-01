@@ -691,17 +691,34 @@ SKIA_STYLES = {
 
 
 def get_ffmpeg_style(style_id: str) -> dict:
-    """Get FFmpeg style preset by ID. Returns classic_karaoke as default."""
+    """Get FFmpeg style preset by ID. DB-first, code fallback, classic_karaoke as default."""
+    from src.infrastructure.render_style_presets_store import get_style_config
+    cfg = get_style_config(style_id, "subtitle", "ffmpeg", fallback=None)
+    if cfg:
+        cfg.setdefault("id", style_id)
+        return cfg
     return FFMPEG_STYLES.get(style_id, FFMPEG_STYLES["classic_karaoke"])
 
 
 def get_skia_style(style_id: str) -> dict:
-    """Get Skia style preset by ID. Returns gradient_fill as default."""
+    """Get Skia style preset by ID. DB-first, code fallback, gradient_fill as default."""
+    from src.infrastructure.render_style_presets_store import get_style_config
+    cfg = get_style_config(style_id, "subtitle", "skia", fallback=None)
+    if cfg:
+        cfg.setdefault("id", style_id)
+        return cfg
     return SKIA_STYLES.get(style_id, SKIA_STYLES["gradient_fill"])
 
 
 def list_ffmpeg_styles() -> list[dict]:
-    """List all FFmpeg style presets (id, name, description, category)."""
+    """List all FFmpeg style presets (id, name, description, category). DB-first."""
+    from src.infrastructure.render_style_presets_store import list_style_presets
+    db = [
+        {"id": p["id"], "name": p["name"], "description": p["description"], "category": p["category"]}
+        for p in list_style_presets(kind="subtitle", engine="ffmpeg")
+    ]
+    if db:
+        return db
     return [
         {"id": s["id"], "name": s["name"], "description": s["description"], "category": s["category"]}
         for s in FFMPEG_STYLES.values()
@@ -709,7 +726,14 @@ def list_ffmpeg_styles() -> list[dict]:
 
 
 def list_skia_styles() -> list[dict]:
-    """List all Skia style presets (id, name, description, category)."""
+    """List all Skia style presets (id, name, description, category). DB-first."""
+    from src.infrastructure.render_style_presets_store import list_style_presets
+    db = [
+        {"id": p["id"], "name": p["name"], "description": p["description"], "category": p["category"]}
+        for p in list_style_presets(kind="subtitle", engine="skia")
+    ]
+    if db:
+        return db
     return [
         {"id": s["id"], "name": s["name"], "description": s["description"], "category": s["category"]}
         for s in SKIA_STYLES.values()

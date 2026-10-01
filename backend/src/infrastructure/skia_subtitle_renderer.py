@@ -76,14 +76,22 @@ class SkiaSubtitleRenderer:
         preset_id = raw_preset_id.replace(" ", "_").replace("-", "_")
 
         base = {}
-        if preset_id in SKIA_STYLES:
-            base = dict(SKIA_STYLES[preset_id])
-        elif raw_preset_id in SKIA_STYLES:
-            base = dict(SKIA_STYLES[raw_preset_id])
-        elif preset_id in FFMPEG_STYLES:
-            base = dict(FFMPEG_STYLES[preset_id])
-        elif raw_preset_id in FFMPEG_STYLES:
-            base = dict(FFMPEG_STYLES[raw_preset_id])
+        from src.infrastructure.render_style_presets_store import get_style_config
+        for _pid in (preset_id, raw_preset_id):
+            if base:
+                break
+            cfg = get_style_config(_pid, "subtitle", "skia", fallback=None) or get_style_config(_pid, "subtitle", "ffmpeg", fallback=None)
+            if cfg:
+                base = dict(cfg)
+        if not base:
+            if preset_id in SKIA_STYLES:
+                base = dict(SKIA_STYLES[preset_id])
+            elif raw_preset_id in SKIA_STYLES:
+                base = dict(SKIA_STYLES[raw_preset_id])
+            elif preset_id in FFMPEG_STYLES:
+                base = dict(FFMPEG_STYLES[preset_id])
+            elif raw_preset_id in FFMPEG_STYLES:
+                base = dict(FFMPEG_STYLES[raw_preset_id])
 
         # Default font based on preset
         preset_default_fonts = {

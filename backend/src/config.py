@@ -56,8 +56,8 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY: str = ""
     YOUTUBE_COOKIES_PATH: str = ""
 
-    # VidKraken Video Downloader API (Backup)
-    VIDKRAKEN_API_KEY: str = "ce1bcba1-b808-470f-987c-072ca2d35488"
+    # VidKraken Video Downloader API (Backup) — MUST be set via env var / shared.env
+    VIDKRAKEN_API_KEY: str = ""
     VIDKRAKEN_BASE_URL: str = "https://vidkraken.com/api/v2"
     VIDKRAKEN_ENABLED: bool = True
     VIDKRAKEN_TIMEOUT: int = 180

@@ -24,7 +24,7 @@ class VidKrakenClient:
         base_url: Optional[str] = None,
         timeout: Optional[int] = None,
     ):
-        self.api_key = api_key or getattr(settings, "VIDKRAKEN_API_KEY", "ce1bcba1-b808-470f-987c-072ca2d35488")
+        self.api_key = api_key or getattr(settings, "VIDKRAKEN_API_KEY", "")
         self.base_url = (base_url or getattr(settings, "VIDKRAKEN_BASE_URL", "https://vidkraken.com/api/v2")).rstrip("/")
         self.timeout = timeout or getattr(settings, "VIDKRAKEN_TIMEOUT", 180)
 

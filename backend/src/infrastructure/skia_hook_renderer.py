@@ -26,6 +26,23 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 logger = logging.getLogger(__name__)
 
 
+def _resolve_skia_hook_preset(clean_key: str) -> Dict[str, Any]:
+    """DB-first Skia hook preset resolver. Code dict is transitional fallback."""
+    try:
+        from src.infrastructure.render_style_presets_store import get_style_config
+        cfg = get_style_config(clean_key, "hook", "skia", fallback=None)
+        if cfg:
+            return dict(cfg)
+    except Exception as e:
+        logger.warning(f"[skia_hook] DB resolver failed for {clean_key}: {e}")
+    # ponytail: SKIA_HOOK_PRESETS kept until prod soak shows zero fallback hits.
+    return dict(
+        SKIA_HOOK_PRESETS.get(clean_key)
+        or SKIA_HOOK_PRESETS.get("news_viralin_badge")
+        or SKIA_HOOK_PRESETS["skia_impact_badge"]
+    )
+
+
 # ─── Comprehensive Hook Presets Specifications ────────────────────────────────
 
 SKIA_HOOK_PRESETS: Dict[str, Dict[str, Any]] = {
@@ -1114,7 +1131,9 @@ class SkiaHookRenderer:
                 clean_key = clean_key[5:]
             elif clean_key.startswith("hf_") and clean_key[3:] in SKIA_HOOK_PRESETS:
                 clean_key = clean_key[3:]
-        cfg = dict(SKIA_HOOK_PRESETS.get(clean_key, SKIA_HOOK_PRESETS.get("news_viralin_badge", SKIA_HOOK_PRESETS["skia_impact_badge"])))
+        # DB-first resolver; code dict only as transitional fallback.
+        # ponytail: keep SKIA_HOOK_PRESETS until prod soak shows zero fallback hits.
+        cfg = _resolve_skia_hook_preset(clean_key)
 
         # Normalize style_config overrides (support both camelCase and snake_case)
         if style_config:

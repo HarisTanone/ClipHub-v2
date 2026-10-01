@@ -85,6 +85,23 @@ ENGINE_NOTES = {
 
 
 def catalogue() -> dict[str, Any]:
+    """Return catalog metadata, DB-first for migrated HyperFrames rows."""
+    try:
+        from src.infrastructure.render_style_presets_store import list_style_presets
+        db_hooks = list_style_presets(kind="hook", engine="hyperframes")
+        db_subs = list_style_presets(kind="subtitle", engine="hyperframes")
+        if db_hooks and db_subs:
+            return {
+                "engines": ENGINE_NOTES,
+                "hook": [{"id": p["id"], "name": p["name"], "description": p["description"], **p["config"], "kind": "hook"} for p in db_hooks],
+                "subtitle": [{"id": p["id"], "name": p["name"], "description": p["description"], **p["config"], "kind": "subtitle"} for p in db_subs],
+                "polish": [{"id": t, "kind": "polish"} for t in HF_POLISH_TEMPLATES],
+                "default_hook": next((p["id"] for p in db_hooks if p["is_default"]), db_hooks[0]["id"]),
+                "default_subtitle": next((p["id"] for p in db_subs if p["is_default"]), db_subs[0]["id"]),
+                "default_polish": HF_POLISH_TEMPLATES[0],
+            }
+    except Exception:
+        pass
     return {
         "engines": ENGINE_NOTES,
         "hook": [{**style, "kind": "hook"} for style in HOOK_STYLES],

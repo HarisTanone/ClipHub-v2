@@ -251,8 +251,8 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "string",
         "min_role": "superadmin",
         "is_secret": True,
-        "default": "ce1bcba1-b808-470f-987c-072ca2d35488",
-        "description": "VidKraken API Key untuk download video YouTube (Primary)",
+        "default": "",
+        "description": "VidKraken video downloader API key (sensitive). Set via env or shared.env.",
     },
     "VIDKRAKEN_BASE_URL": {
         "category": "api_keys",
