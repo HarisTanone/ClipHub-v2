@@ -58,7 +58,7 @@ def normalize_subtitle_style(raw_style: Mapping[str, Any] | None = None) -> dict
     line_transition = _choice(
         raw_transition,
         "word_pop",
-        {"word_pop", "emphasis", "line_reveal"},
+        {"word_pop", "emphasis", "line_reveal", "typing"},
     )
     animation = _choice(raw.get("animationStyle"), "pop", {"pop", "fade", "slide", "none"})
 

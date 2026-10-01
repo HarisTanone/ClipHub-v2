@@ -17,6 +17,8 @@ line_transition modes (FFmpeg):
 import logging
 import os
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any, Optional
 
 from src.domain.entities import SubtitleStyleConfig
@@ -290,72 +292,89 @@ class SubtitleRenderer(ISubtitleRenderer):
         offset: float,
         timing_adj: float,
     ) -> str:
-        """Typewriter: words reveal progressively, active word in highlight color."""
+        """Progressively reveal words as timed ASS karaoke, avoiding overlapping drawtext layers."""
         lines = self._group_words_into_lines(words, config.max_words_per_line)
         if not lines:
             return video_path
 
         font_path = self._resolve_font(config.font_family, config.font_weight)
-        font_file_opt = f":fontfile={font_path}" if font_path else ""
-        y_pos = self._calculate_y_position(config)
-        stroke_color = config.stroke_color or "black"
-        stroke_opt = (
-            f":borderw={config.stroke_width}:bordercolor={stroke_color}"
-            if (config.stroke_width and config.stroke_width > 0) else ""
-        )
-        shadow_color = config.shadow_color or "black@0.5"
-        shadow_opt = (
-            f":shadowx={config.shadow_x}:shadowy={config.shadow_y}:shadowcolor={shadow_color}"
-            if (config.shadow_x or config.shadow_y) else ""
-        )
+        style = {
+            "fontFamily": config.font_family,
+            "fontSize": config.font_size,
+            "fontWeight": config.font_weight,
+            "color": config.color or "#FFFFFF",
+            "highlightColor": config.highlight_color or "#FFCC00",
+            "position": config.position,
+            "positionY": config.position_y,
+            "uppercase": config.uppercase,
+            "capitalize": getattr(config, "capitalize", False),
+            "strokeEnabled": bool(config.stroke_width),
+            "strokeColor": config.stroke_color or "#000000",
+            "strokeWidth": config.stroke_width or 0,
+            "shadowEnabled": bool(config.shadow_x or config.shadow_y),
+            "shadowColor": config.shadow_color or "#000000",
+            "shadowBlur": max(config.shadow_x, config.shadow_y, 0),
+            "bgEnabled": bool(config.background_opacity),
+            "bgColor": config.background_color or "#000000",
+            "bgOpacity": config.background_opacity or 0,
+            "maxWordsPerLine": config.max_words_per_line,
+            "maxWidthPct": 90,
+            "lineTransition": "typing",
+            "animationStyle": "none",
+        }
 
-        filter_parts = []
-        for line in lines:
-            line_end = line[-1]["end"] + offset + timing_adj
-            for i, w in enumerate(line):
-                w_start = w["start"] + offset + timing_adj
-                next_start = (
-                    line[i + 1]["start"] + offset + timing_adj
-                    if i + 1 < len(line) else line_end
-                )
-                # Revealed text up to this word (normal color)
-                revealed = " ".join(
-                    self._apply_text_case(lw["word"], config) for lw in line[:i]
-                )
-                active_word = self._apply_text_case(w["word"], config)
+        from src.application.video_gen_captions import ffmpeg_subtitle_filter
 
-                # Show already-revealed words in dim color
-                if revealed:
-                    escaped_rev = self._escape_drawtext(revealed)
-                    filter_parts.append(
-                        f"drawtext=text='{escaped_rev}'"
-                        f":fontsize={config.font_size}"
-                        f"{font_file_opt}"
-                        f":fontcolor={config.color or '#FFFFFF'}@0.6"
-                        f"{stroke_opt}{shadow_opt}"
-                        f":x=(w-text_w)/2:y={y_pos}"
-                        f":enable='between(t,{w_start:.3f},{next_start:.3f})'"
-                    )
+        fd, ass_path = tempfile.mkstemp(suffix=".ass", prefix="autocliper_typing_")
+        os.close(fd)
+        try:
+            ass_lines = self._typing_ass_header(style)
+            for line in lines:
+                for index, word in enumerate(line):
+                    start = word["start"] + offset + timing_adj
+                    end = (line[index + 1]["start"] if index + 1 < len(line) else line[-1]["end"]) + offset + timing_adj
+                    if end <= start:
+                        continue
+                    visible = line[:index + 1]
+                    text = " ".join(self._apply_text_case(item["word"], config) for item in visible)
+                    escaped = text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
+                    tag = rf"{{\\1c{self._ass_bgr(config.color or '#FFFFFF')}\\k{max(1, round((end-start)*100))}}}"
+                    ass_lines.append(f"Dialogue: 0,{self._typing_ass_time(start)},{self._typing_ass_time(end)},Caption,,0,0,0,,{tag}{escaped}")
 
-                # Active word in highlight color
-                escaped_active = self._escape_drawtext(active_word)
-                filter_parts.append(
-                    f"drawtext=text='{escaped_active}'"
-                    f":fontsize={int(config.font_size * 1.05)}"
-                    f"{font_file_opt}"
-                    f":fontcolor={config.highlight_color or '#FFCC00'}"
-                    f"{stroke_opt}{shadow_opt}"
-                    f":x=(w-text_w)/2:y={y_pos}"
-                    f":enable='between(t,{w_start:.3f},{next_start:.3f})'"
-                )
+            Path(ass_path).write_text("\n".join(ass_lines) + "\n", encoding="utf-8")
+            filter_parts = [ffmpeg_subtitle_filter(ass_path)]
+            return self._run_ffmpeg(video_path, output_path, filter_parts, words, "typing")
+        finally:
+            try:
+                os.unlink(ass_path)
+            except OSError:
+                pass
 
-        if not filter_parts:
-            return video_path
+    @staticmethod
+    def _typing_ass_time(seconds: float) -> str:
+        seconds = max(0, round(seconds * 100)) / 100
+        hours, remainder = divmod(seconds, 3600)
+        minutes, remainder = divmod(remainder, 60)
+        return f"{int(hours)}:{int(minutes):02d}:{remainder:05.2f}"
 
-        if len(filter_parts) > 300:
-            return self._render_line_only(video_path, words, config, output_path, offset, timing_adj)
+    @staticmethod
+    def _typing_ass_header(style: dict) -> list[str]:
+        from src.application.video_gen_captions import _ass_color, _ass_alignment
+        alignment, margin_v = _ass_alignment(style["position"], style["positionY"])
+        return [
+            "[Script Info]", "ScriptType: v4.00+", "PlayResX: 1080", "PlayResY: 1920",
+            "ScaledBorderAndShadow: yes", "WrapStyle: 2", "", "[V4+ Styles]",
+            "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
+            f"Style: Caption,{style['fontFamily']},{style['fontSize']},{_ass_color(style['color'])},{_ass_color(style['highlightColor'])},{_ass_color(style['strokeColor'])},{_ass_color(style['bgColor'], style['bgOpacity'])},-1,0,0,0,100,100,0,0,1,{style['strokeWidth']},0,{alignment},54,54,{margin_v},1",
+            "", "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
+        ]
 
-        return self._run_ffmpeg(video_path, output_path, filter_parts, words, "typing")
+    @staticmethod
+    def _ass_bgr(color: str) -> str:
+        value = color.lstrip("#")
+        if len(value) != 6:
+            return "&H00FFFFFF&"
+        return f"&H00{value[4:6]}{value[2:4]}{value[0:2]}&"
 
     # ─── Line Only (fallback) ─────────────────────────────────────────────────
 

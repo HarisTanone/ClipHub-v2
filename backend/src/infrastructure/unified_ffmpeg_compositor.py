@@ -548,6 +548,8 @@ class UnifiedFFmpegCompositor:
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                     )
             elif config.line_transition == "typing":
+                # One progressive line per cue. Never render revealed text and active word
+                # as separate centered drawtext layers; that causes glyph overlap.
                 for w_idx, w in enumerate(line):
                     w_start = float(w.get("start", 0)) + offset + timing_adj
                     next_w_start = (float(line[w_idx + 1].get("start", 0)) + offset + timing_adj) if (w_idx + 1 < len(line)) else line_end

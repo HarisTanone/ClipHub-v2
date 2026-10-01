@@ -46,6 +46,11 @@ def test_caption_writer_outputs_timed_karaoke_ass(tmp_path):
     assert "Dialogue: 0,0:00:00.00" in content
 
 
+def test_typing_transition_is_preserved():
+    style = normalize_subtitle_style({"lineTransition": "typing"})
+    assert style["lineTransition"] == "typing"
+
+
 def test_caption_style_is_bounded_and_sanitized():
     style = normalize_subtitle_style(
         {

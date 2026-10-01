@@ -83,6 +83,21 @@ def test_build_subtitle_filter_chain(compositor):
     assert any("Ini adalah contoh" in f for f in filters_line)
     assert any("subtitle karaoke" in f for f in filters_line)
 
+    # Typing mode: one progressive drawtext per word, no overlapping layers
+    typing_config = {**style_config, "line_transition": "typing"}
+    filters_typing = compositor.build_subtitle_filter_chain(
+        words=words,
+        style=typing_config,
+        start_offset=0.0,
+    )
+    assert len(filters_typing) == 5
+    assert all("drawtext" in f for f in filters_typing)
+    assert any("Ini" in f for f in filters_typing)
+    assert any("Ini adalah contoh" in f for f in filters_typing)
+    # Each filter must be a single centered drawtext, not stacked layers
+    for f in filters_typing:
+        assert f.count("drawtext=text=") == 1
+
 
 def test_build_watermark_filter_chain_text(compositor, tmp_path):
     watermark_config = {
