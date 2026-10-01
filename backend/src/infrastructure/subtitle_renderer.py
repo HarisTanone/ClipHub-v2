@@ -338,17 +338,23 @@ class SubtitleRenderer(ISubtitleRenderer):
                     visible = line[:index + 1]
                     text = " ".join(self._apply_text_case(item["word"], config) for item in visible)
                     escaped = text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
-                    tag = rf"{{\\1c{self._ass_bgr(config.color or '#FFFFFF')}\\k{max(1, round((end-start)*100))}}}"
+                    tag = "{" + r"\1c" + self._ass_bgr(config.color or "#FFFFFF") + r"\k" + str(max(1, round((end - start) * 100))) + "}"
                     ass_lines.append(f"Dialogue: 0,{self._typing_ass_time(start)},{self._typing_ass_time(end)},Caption,,0,0,0,,{tag}{escaped}")
 
             Path(ass_path).write_text("\n".join(ass_lines) + "\n", encoding="utf-8")
             filter_parts = [ffmpeg_subtitle_filter(ass_path)]
-            return self._run_ffmpeg(video_path, output_path, filter_parts, words, "typing")
-        finally:
+            result = self._run_ffmpeg(video_path, output_path, filter_parts, words, "typing")
             try:
                 os.unlink(ass_path)
             except OSError:
                 pass
+            return result
+        except Exception:
+            try:
+                os.unlink(ass_path)
+            except OSError:
+                pass
+            raise
 
     @staticmethod
     def _typing_ass_time(seconds: float) -> str:
