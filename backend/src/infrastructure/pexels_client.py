@@ -98,6 +98,64 @@ class PexelsClient(IAssetClient):
         self._max_size = settings.ASSET_FETCH_MAX_VIDEO_SIZE_MB * 1024 * 1024  # bytes
         self._timeout = settings.ASSET_FETCH_TIMEOUT
 
+    async def search_candidates(
+        self, keyword: str, exclude_ids: Optional[set] = None, limit: int = 5
+    ) -> list:
+        """Search Pexels, return candidate metadata list WITHOUT download."""
+        if not self._api_key:
+            return []
+        from src.domain.entities import VideoCandidate
+        queries = expand_visual_queries(keyword)
+        out: list = []
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                for q in queries:
+                    response = await client.get(
+                        self.BASE_URL,
+                        headers={"Authorization": self._api_key},
+                        params={"query": q, "orientation": "portrait", "per_page": limit},
+                    )
+                    if response.status_code != 200:
+                        continue
+                    for video in response.json().get("videos", []):
+                        vid = str(video.get("id", ""))
+                        if exclude_ids and vid in exclude_ids:
+                            continue
+                        duration = int(video.get("duration", 0))
+                        if duration > 12:
+                            continue
+                        best_file = self._best_file_url(video.get("video_files", []))
+                        if not best_file:
+                            continue
+                        out.append(VideoCandidate(
+                            id=vid,
+                            title=str(video.get("url", ""))[:200],
+                            source_url=best_file,
+                            platform="pexels",
+                            license="royalty-free",
+                            duration_seconds=duration,
+                            relevance_score=1.0,
+                            channel_or_author=str(video.get("user", {}).get("name", "")),
+                        ))
+                    if out:
+                        break
+        except Exception as exc:
+            logger.debug(f"[PexelsClient] search_candidates fail '{keyword}': {exc}")
+        return out
+
+    def _best_file_url(self, video_files: list[dict]) -> str:
+        """Pick best portrait file URL, closest to 1080x1920, height <= 1920."""
+        best_url, best_score = "", float("inf")
+        for vf in video_files:
+            w, h = vf.get("width", 0), vf.get("height", 0)
+            link = vf.get("link", "")
+            if not link or h > 1920:
+                continue
+            score = abs(w - 1080) + abs(h - 1920)
+            if score < best_score:
+                best_score, best_url = score, link
+        return best_url
+
     async def search(self, keyword: str, **kwargs) -> Optional[AssetResult]:
         """Search Pexels for portrait video matching keyword with AI query expansion."""
         if not self._api_key:

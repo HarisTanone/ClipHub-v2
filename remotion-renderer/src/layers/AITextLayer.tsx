@@ -8,6 +8,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import type { TextEmphasisEvent, TextEmphasisStyleConfig } from "../types";
+import { SafeImg } from "../components/SafeImg";
 import { hexToRgba } from "../utils/hexToRgba";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -408,7 +409,7 @@ export const AITextLayer: React.FC<{
       </AbsoluteFill>
 
       {foreground && foreground.path && effect === "depth_cutout" && (
-        <Img
+        <SafeImg
           src={foreground.path}
           style={{
             position: "absolute",

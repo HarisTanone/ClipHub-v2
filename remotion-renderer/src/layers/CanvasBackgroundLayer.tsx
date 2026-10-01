@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, Img, OffthreadVideo, interpolate, useCurrentFrame } from "remotion";
+import { AbsoluteFill, OffthreadVideo, interpolate, useCurrentFrame } from "remotion";
+import { SafeImg } from "../components/SafeImg";
 
 export type CanvasAccent =
   | { type: "soft-glow"; x: number; y: number; r: number; color: string }
@@ -105,7 +106,7 @@ export const CanvasBackgroundLayer: React.FC<{ config: CanvasConfig; videoPath?:
 
       {/* ── Background Image ── */}
       {imageUrl && !isVideoMirror ? (
-        <Img
+        <SafeImg
           src={imageUrl}
           style={{
             position: "absolute",

@@ -2081,6 +2081,17 @@ OUTPUT RAW JSON (tanpa markdown):
         json_str = re.sub(r'//[^\n]*', '', json_str)
         return json_str
 
+    @staticmethod
+    def _looks_like_upstream_error(text: str) -> bool:
+        """Detect provider error pages (quota, auth, paywall) masquerading as LLM output."""
+        t = text.lower()
+        markers = (
+            "free quota has been exhausted", "quota exceeded", "payment information",
+            "401 unauthorized", "403 forbidden", "429 too many requests",
+            "rate limit", "billing", "insufficient_quota", "invalid api key",
+        )
+        return any(m in t for m in markers)
+
     def _extract_json_candidate(self, text: str) -> Optional[str]:
         """Pull JSON object from text. Does NOT require a closing brace.
 
@@ -2122,6 +2133,12 @@ OUTPUT RAW JSON (tanpa markdown):
 
         candidate = self._extract_json_candidate(text)
         if not candidate:
+            # Detect upstream quota / paywall / auth error pages returned as HTML/text.
+            if self._looks_like_upstream_error(text):
+                logger.error(
+                    f"v2_analyzer: upstream provider error (quota/auth/paywall): {text[:200]}"
+                )
+                return {}  # caller falls back to offline length-filter per AGENTS.md rule 3
             logger.warning(
                 f"v2_analyzer: failed to parse JSON (no JSON object found): {text[:200]}"
             )

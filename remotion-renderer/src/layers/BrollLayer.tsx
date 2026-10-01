@@ -8,6 +8,7 @@ import {
   useVideoConfig,
   Easing,
 } from "remotion";
+import { SafeImg } from "../components/SafeImg";
 import type { BrollEvent, BrollMotionStyle, BrollStyleConfig } from "../types";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -424,7 +425,7 @@ const BrollEventView: React.FC<{
       <AbsoluteFill style={{ zIndex: 2, pointerEvents: "none" }}>
         <AbsoluteFill style={{ background: `rgba(0,0,0,${backdropDim})`, backdropFilter: `blur(${backdropBlur}px)` }} />
         <AbsoluteFill style={{ overflow: "hidden" }}>
-          <Img
+          <SafeImg
             src={event.imagePath}
             style={{ width: "100%", height: "100%", objectFit: "cover", transform: imageTransform, opacity: imgOpacity }}
           />

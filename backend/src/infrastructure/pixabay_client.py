@@ -31,6 +31,67 @@ class PixabayClient(IAssetClient):
         self._max_size = settings.ASSET_FETCH_MAX_VIDEO_SIZE_MB * 1024 * 1024  # bytes
         self._timeout = settings.ASSET_FETCH_TIMEOUT
 
+    async def search_candidates(
+        self, keyword: str, exclude_ids: Optional[set] = None, limit: int = 5
+    ) -> list:
+        """Search Pixabay, return candidate metadata list WITHOUT download."""
+        if not self._api_key:
+            return []
+        from src.domain.entities import VideoCandidate
+        from src.infrastructure.pexels_client import expand_visual_queries
+        queries = expand_visual_queries(keyword)
+        out: list = []
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                for q in queries:
+                    response = await client.get(
+                        self.BASE_URL,
+                        params={"key": self._api_key, "q": q, "video_type": "film", "min_width": 720, "per_page": limit},
+                    )
+                    if response.status_code != 200:
+                        continue
+                    hits = self.filter_banned_hits(response.json().get("hits", []))
+                    for hit in hits:
+                        vid = str(hit.get("id", ""))
+                        if exclude_ids and vid in exclude_ids:
+                            continue
+                        duration = int(hit.get("duration", 0))
+                        if duration > 12:
+                            continue
+                        best_url = self._best_hit_url(hit.get("videos", {}))
+                        if not best_url:
+                            continue
+                        out.append(VideoCandidate(
+                            id=vid,
+                            title=str(hit.get("tags", ""))[:200],
+                            source_url=best_url,
+                            platform="pixabay",
+                            license="royalty-free",
+                            duration_seconds=duration,
+                            relevance_score=1.0,
+                            channel_or_author=str(hit.get("user", "")),
+                        ))
+                    if out:
+                        break
+        except Exception as exc:
+            logger.debug(f"[PixabayClient] search_candidates fail '{keyword}': {exc}")
+        return out
+
+    def _best_hit_url(self, videos: dict) -> str:
+        """Pick highest-resolution tier URL under 1920px height."""
+        best_url, best_score = "", -1
+        for tier in ("large", "medium", "small"):
+            t = videos.get(tier, {})
+            url = t.get("url", "")
+            h = t.get("height", 0)
+            w = t.get("width", 0)
+            if not url or h > 1920:
+                continue
+            score = w * h
+            if score > best_score:
+                best_score, best_url = score, url
+        return best_url
+
     async def search(self, keyword: str, **kwargs) -> Optional[AssetResult]:
         """Search Pixabay for video matching keyword.
 

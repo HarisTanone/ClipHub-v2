@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, Img, useVideoConfig } from "remotion";
+import { AbsoluteFill, useVideoConfig } from "remotion";
+import { SafeImg } from "../components/SafeImg";
 
 export interface WatermarkConfig {
   enabled?: boolean;
@@ -100,7 +101,7 @@ export const WatermarkLayer: React.FC<{ watermark?: WatermarkConfig | null }> = 
     return (
       <AbsoluteFill style={{ pointerEvents: "none" }}>
         <div style={containerStyle}>
-          <Img
+          <SafeImg
             src={imgUrl}
             style={{
               width: `${imgWidth}px`,
