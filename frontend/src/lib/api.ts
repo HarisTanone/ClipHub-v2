@@ -457,8 +457,16 @@ export interface CreateJobPayload {
   subtitle_style_config?: Record<string, any>;
   text_emphasis_style_config?: Record<string, any>;
   watermark_config?: Record<string, any>;
+  cta_config?: Record<string, any>;
   processing_mode?: "analyze" | "direct";
   custom_hook?: string;
+  // AI Auto-Post to Social Media
+  auto_post_social?: boolean;
+  auto_post_platforms?: string;
+  auto_post_account_ids?: string[];
+  auto_post_schedule_mode?: "ai" | "custom" | "instant";
+  auto_post_custom_time?: string;
+  auto_post_clips_count?: number;
   // Canvas background (16:9 / 1:1 only)
   background_mode?: "template" | "upload" | null;
   background_template_id?: string | null;

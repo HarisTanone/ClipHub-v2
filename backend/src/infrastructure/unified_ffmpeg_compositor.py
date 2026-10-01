@@ -17,6 +17,7 @@ import tempfile
 from typing import Any, Optional
 
 from src.domain.entities import SubtitleStyleConfig
+from src.config import settings
 from src.infrastructure.gpu_encoder import get_video_encoder_args, get_encoder_name
 from src.infrastructure.watermark_renderer import (
     normalise_watermark_config,
@@ -43,8 +44,10 @@ GRAPHICAL_CARD_HOOKS = {
     "news_breaking_live",
 }
 
-# Fallback hook preset styles
-HOOK_STYLES = {
+# Legacy fallback hook styles — DB table `ffmpeg_hook_styles` is the canonical source.
+# Do NOT add new styles here — add via DB migration. Contains presets not yet in DB
+# (news_* / card hooks) plus safe defaults. ponytail: remove once all prod rows migrated.
+_LEGACY_HOOK_STYLES = {
     "paper_clip_scrap": {
         "fontsize": 64,
         "fontcolor": "#1C1917",
@@ -339,7 +342,7 @@ class UnifiedFFmpegCompositor:
 
         cfg = style_config or {}
         anim = cfg.get("animation", "zoom_punch")
-        style = HOOK_STYLES.get(anim, HOOK_STYLES["zoom_punch"]).copy()
+        style = _LEGACY_HOOK_STYLES.get(anim, _LEGACY_HOOK_STYLES["zoom_punch"]).copy()
 
         # Database override if present
         try:
@@ -350,7 +353,7 @@ class UnifiedFFmpegCompositor:
         except Exception:
             pass
 
-        duration = float(cfg.get("duration") or style.get("duration", 3.0))
+        duration = float(cfg.get("duration") or style.get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
 
         # High-Fidelity Graphical Card Hooks (Skia / Card Presets)
         if anim in GRAPHICAL_CARD_HOOKS or str(anim).startswith("skia_"):
@@ -707,7 +710,7 @@ class UnifiedFFmpegCompositor:
             cleanup_files.extend(hook_files)
 
             # Subtitle timing start offset if hook is present
-            hook_dur = float((hook_style_config or {}).get("duration", 3.0) or 3.0) if hook_text else 0.0
+            hook_dur = float((hook_style_config or {}).get("duration") or settings.HOOK_DEFAULT_DURATION_SEC) if hook_text else 0.0
             sub_filters = self.build_subtitle_filter_chain(
                 words=words or [],
                 style=subtitle_style_config,

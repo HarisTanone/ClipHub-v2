@@ -161,14 +161,11 @@ class JobService:
         return f"job_{secrets.token_hex(6)}"
 
     def _calc_max_clips(self, duration: float) -> int:
-        if duration < 180:
-            n = 2
-        elif duration < 600:
-            n = 5
-        elif duration < 1800:
-            n = 8
-        else:
-            n = 10
+        n = 15
+        for limit, count in settings.MAX_CLIPS_TIERS:
+            if duration < limit:
+                n = count
+                break
         limit = settings.VIDEO_FINAL_RESULT
         if limit and limit > 0:
             n = min(n, limit)
@@ -1498,9 +1495,10 @@ class JobService:
                     )
                     logger.info(f"[{job_id}] Subtitle rendered clip {clip.rank}")
                 except Exception as e:
-                    logger.warning(f"[{job_id}] Subtitle render failed clip {clip.rank}: {e}")
-                    if os.path.exists(in_path) and not os.path.exists(out_path):
-                        shutil.copy2(in_path, out_path)
+                    logger.exception(f"[{job_id}] Subtitle render failed clip {clip.rank}: {e}")
+                    raise RuntimeError(
+                        f"Subtitle rendering failed for clip #{clip.rank}; refusing raw fallback"
+                    ) from e
             else:
                 # No words / no renderer — copy best available as final
                 if os.path.exists(in_path) and not os.path.exists(out_path):
@@ -1601,7 +1599,7 @@ class JobService:
                             cd_dict["zoom_events"] = [
                                 {"time": peak.time, "intensity": peak.intensity, "duration": 0.5}
                                 for peak in prosody.energy_peaks[:8]
-                                if peak.time > (cd_dict.get("hook_style_config", {}).get("duration", 3.0))
+                                if peak.time > (cd_dict.get("hook_style_config", {}).get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
                             ]
                         self._apply_reframe_metadata(
                             cd_dict, job, reframe_data.get(clip.rank)
@@ -1843,67 +1841,19 @@ class JobService:
             return
 
 
-        # ─── Style-specific parameters ─────────────────────────────────────
-        HOOK_STYLES = {
-            "zoom_punch": {
-                "fontsize": 56, "fontcolor": "white", "borderw": 4,
+        # DB is canonical source; hardcoded dict is fallback only when DB unavailable.
+        # Do NOT add new styles here — add to `ffmpeg_hook_styles` table via migration.
+        # ponytail: remove HOOK_STYLES dict once all prod instances have migrated rows.
+        _LEGACY_HOOK_STYLES = {
+            "zoom_punch": {"fontsize": 56, "fontcolor": "white", "borderw": 4,
                 "bordercolor": "black", "duration": 3.0,
                 "font_pref": ["Anton-Regular.ttf", "BebasNeue-Regular.ttf", "Poppins-Bold.ttf"],
-                "bg_opacity": 0.6, "y_expr": "h*0.4-text_h/2",
-            },
-            "fade_scale": {
-                "fontsize": 48, "fontcolor": "white", "borderw": 3,
-                "bordercolor": "black@0.8", "duration": 3.5,
-                "font_pref": ["Inter-Bold.ttf", "Poppins-Bold.ttf", "Montserrat-Bold.ttf"],
-                "bg_opacity": 0.5, "y_expr": "h*0.42-text_h/2",
-            },
-            "slide_punch_framer": {
-                "fontsize": 52, "fontcolor": "white", "borderw": 5,
-                "bordercolor": "black", "duration": 3.0,
-                "font_pref": ["Poppins-Bold.ttf", "Montserrat-Bold.ttf", "Inter-Bold.ttf"],
-                "bg_opacity": 0.65, "y_expr": "h*0.38-text_h/2",
-            },
-            "typewriter": {
-                "fontsize": 44, "fontcolor": "#00FF88", "borderw": 2,
-                "bordercolor": "black", "duration": 3.5,
-                "font_pref": ["Inter-Bold.ttf", "Poppins-Bold.ttf"],
-                "bg_opacity": 0.7, "y_expr": "h*0.45-text_h/2",
-            },
-            # ─── NEW: Kinetic Typography Styles ───────────────────────────
-            "glitch_rgb": {
-                "fontsize": 58, "fontcolor": "white", "borderw": 0,
-                "bordercolor": "black", "duration": 3.0,
-                "font_pref": ["Anton-Regular.ttf", "BlackOpsOne-Regular.ttf", "BebasNeue-Regular.ttf"],
-                "bg_opacity": 0.7, "y_expr": "h*0.4-text_h/2",
-                "effect": "glitch_rgb",
-            },
-            "shake_neon": {
-                "fontsize": 54, "fontcolor": "#00FFCC", "borderw": 0,
-                "bordercolor": "black", "duration": 3.0,
-                "font_pref": ["Bungee-Regular.ttf", "Anton-Regular.ttf", "BlackOpsOne-Regular.ttf"],
-                "bg_opacity": 0.65, "y_expr": "h*0.4-text_h/2",
-                "effect": "shake_neon",
-            },
-            "cinematic_reveal": {
-                "fontsize": 62, "fontcolor": "#FFD700", "borderw": 0,
-                "bordercolor": "black", "duration": 3.5,
-                "font_pref": ["PlayfairDisplay-Variable.ttf", "Lora-Variable.ttf", "Merriweather-Bold.ttf"],
-                "bg_opacity": 0.8, "y_expr": "h*0.42-text_h/2",
-                "effect": "cinematic_reveal",
-            },
-            "danger_bold": {
-                "fontsize": 70, "fontcolor": "#FF2D2D", "borderw": 6,
-                "bordercolor": "black", "duration": 3.0,
-                "font_pref": ["BlackOpsOne-Regular.ttf", "Anton-Regular.ttf", "ArchivoBlack-Regular.ttf"],
-                "bg_opacity": 0.75, "y_expr": "h*0.38-text_h/2",
-                "effect": "danger_bold",
-            },
+                "bg_opacity": 0.6, "y_expr": "h*0.4-text_h/2"},
         }
 
-        style = HOOK_STYLES.get(hook_style, HOOK_STYLES["zoom_punch"])
+        style = _LEGACY_HOOK_STYLES.get(hook_style, _LEGACY_HOOK_STYLES["zoom_punch"])
 
-
-        # Try DB-driven style first (overrides hardcoded)
+        # DB-driven style (canonical) overrides legacy hardcoded fallback
         try:
             from src.infrastructure.ffmpeg_styles_store import get_ffmpeg_hook_style
             db_style = get_ffmpeg_hook_style(hook_style)
@@ -1939,8 +1889,15 @@ class JobService:
                 pos_y = int(style_config["positionY"])
                 y_expr = f"h*{pos_y / 100:.2f}-text_h/2"
             if style_config.get("animation"):
-                # Map animation name to effect if it exists in HOOK_STYLES
-                anim_style = HOOK_STYLES.get(style_config["animation"])
+                # Map animation name to effect via DB (canonical) then legacy fallback
+                anim_style = None
+                try:
+                    from src.infrastructure.ffmpeg_styles_store import get_ffmpeg_hook_style
+                    anim_style = get_ffmpeg_hook_style(style_config["animation"])
+                except Exception:
+                    anim_style = None
+                if not anim_style:
+                    anim_style = _LEGACY_HOOK_STYLES.get(style_config["animation"])
                 if anim_style and anim_style.get("effect"):
                     style = {**style, "effect": anim_style["effect"]}
             # Override font_pref with custom fontFamily

@@ -236,9 +236,9 @@ const REFRAME_TUNING_DEFAULTS: ReframeTuning = {
   sample_interval_sec: 0.333, max_samples: 720, face_confidence: 0.55,
   min_face_size_ratio: 0.10, max_face_size_ratio: 0.50,
   min_separation_ratio: 0.05, min_coexist_ratio: 0.40,
-  dominance_single_crop: 0.75, grid_base_zoom: 1.08, grid_max_zoom: 3.50,
-  grid_face_margin: 0.35, grid_enter_samples: 4, grid_exit_samples: 2,
-  min_grid_segment_seconds: 1.20,
+    dominance_single_crop: 0.75, grid_base_zoom: 1.08, grid_max_zoom: 2.20,
+  grid_face_margin: 0.35, grid_enter_samples: 9, grid_exit_samples: 6,
+  min_grid_segment_seconds: 3.0,
   min_face_area_px: 4000, min_area_ratio_to_max: 0.25, min_frame_ratio: 0.15,
   ghost_iou_threshold: 0.25, ghost_center_dist_ratio: 0.08,
   ghost_center_dist_broad: 0.20, min_pair_size_ratio: 0.18,
@@ -319,7 +319,7 @@ interface ObjectOverlayConfig {
 
 const OBJECT_OVERLAY_DEFAULTS: ObjectOverlayConfig = {
   enabled: true,
-  max_per_clip: 3,
+  max_per_clip: 6,
   box_size_ratio: 0.28,
   corner_radius: 18,
   position: "auto",

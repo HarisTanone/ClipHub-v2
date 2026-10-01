@@ -2326,19 +2326,9 @@ export function VideoGeneratorPage() {
       const response = await fetchApi<TTSModelOption[]>("/api/video-generator/models");
       if (response && response.length > 0) {
         setTtsModels(response);
-      } else {
-        setTtsModels([
-          { model_id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", description: "Model terbaru, sangat ekspresif, respons cepat & intonasi natural (Free Tier)", free_tier: true },
-          { model_id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS", description: "Cepat, efisien, optimal untuk batch & volume tinggi (Free Tier)", free_tier: true },
-          { model_id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS", description: "Kualitas studio audio tinggi, podcast & narasi mendalam", free_tier: false },
-        ]);
       }
     } catch {
-      setTtsModels([
-        { model_id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", description: "Model terbaru, sangat ekspresif, respons cepat & intonasi natural (Free Tier)", free_tier: true },
-        { model_id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS", description: "Cepat, efisien, optimal untuk batch & volume tinggi (Free Tier)", free_tier: true },
-        { model_id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS", description: "Kualitas studio audio tinggi, podcast & narasi mendalam", free_tier: false },
-      ]);
+      // no fallback — user sees empty state if BE is unreachable
     }
   }, []);
 
@@ -2646,6 +2636,13 @@ export function VideoGeneratorPage() {
           ...(aiTextEnabled ? textEmphasisStyle : {}),
         },
         text_emphasis_style_config: aiTextEnabled ? textEmphasisStyle : undefined,
+        source_video_url: isAgenticVideoMode && sourceVideoUrl.trim() ? sourceVideoUrl.trim() : undefined,
+        agentic_understanding: agenticUnderstanding,
+        video_processing_mode: isAgenticVideoMode ? videoProcessingMode : "agentic",
+        media_resolution: isAgenticVideoMode ? mediaResolution : "low",
+        fps: isAgenticVideoMode && videoProcessingMode === "static" ? staticFps : undefined,
+        start_offset: isAgenticVideoMode && videoProcessingMode === "static" ? parseMmSsToSeconds(startOffsetStr) : undefined,
+        end_offset: isAgenticVideoMode && videoProcessingMode === "static" ? parseMmSsToSeconds(endOffsetStr) : undefined,
       }),
     });
     setPage(1);

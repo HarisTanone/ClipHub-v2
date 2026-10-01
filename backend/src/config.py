@@ -221,6 +221,19 @@ class Settings(BaseSettings):
 
     # === Hook Rendering ===
     HOOK_DEFAULT_STYLE: str = "zoom_punch"  # animation preset name
+    HOOK_DEFAULT_DURATION_SEC: float = 3.0
+    CTA_DEFAULT_DURATION_SEC: float = 3.0
+    CTA_ANIMATION_DURATION_SEC: float = 0.35
+    TOP_OVERLAY_FADE_DURATION_SEC: float = 0.35
+
+    # === Timeout Budgets (shared named timeouts) ===
+    TIMEOUT_HTTP_DEFAULT: float = 30.0     # httpx AsyncClient for external social/API calls
+    TIMEOUT_HTTP_HEALTH: float = 10.0      # liveness/readiness probes, quick status checks
+    TIMEOUT_FFMPEG_PROBE: float = 15.0     # ffprobe for metadata extraction
+    TIMEOUT_FFMPEG_THUMB: float = 30.0     # thumbnail frame extraction
+
+    # Unified highlight clip tiers: shared by V1/V2 analyzers.
+    MAX_CLIPS_TIERS: tuple = ((180, 2), (600, 5), (1800, 8), (3600, 12), (float("inf"), 15))
 
     # === Subtitle Style Override (from assets/subtitle/*.json) ===
     SUBTITLE_STYLE_ID: str = ""  # empty = use DB preset, set to JSON style id to override

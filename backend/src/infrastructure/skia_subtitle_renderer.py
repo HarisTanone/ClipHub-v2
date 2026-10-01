@@ -36,17 +36,20 @@ from src.infrastructure.subtitle_styles import SKIA_STYLES, FFMPEG_STYLES, get_s
 logger = logging.getLogger(__name__)
 
 
-# Indonesian / English stop words for emphasis word detection
-# ponytail: function-word filter only (len/pos), not domain lexicon. Upgrade: DB abstract_stop_words when ceiling hit.
-STOP_WORDS = {
-    "yang", "dan", "di", "ke", "dari", "ini", "itu", "dengan", "untuk",
-    "pada", "adalah", "juga", "akan", "sudah", "udah", "gak", "nggak",
-    "tidak", "bukan", "ada", "bisa", "lagi", "kalau", "aja", "sih",
-    "ya", "dong", "deh", "nih", "tuh", "loh", "kan", "pun", "atau",
-    "tapi", "jadi", "saya", "aku", "kamu", "dia", "kita", "mereka",
-    "the", "is", "a", "to", "of", "in", "it", "and", "for", "but",
-    "so", "he", "she", "we", "they", "an", "at", "by", "from",
-}
+# Indonesian / English stop words for emphasis word detection — single source of truth.
+# All other modules import this. Backed by stop_words_store (self-learning JSON + DB upgrade path).
+from src.infrastructure.stop_words_store import get_abstract_stop_words  # noqa: E402
+
+
+def _load_stop_words() -> set[str]:
+    try:
+        return set(get_abstract_stop_words())
+    except Exception:
+        # ponytail: minimal fallback if store unavailable; store is source of truth
+        return {"yang", "dan", "di", "ke", "dari", "ini", "itu", "dengan", "untuk"}
+
+
+STOP_WORDS = _load_stop_words()
 
 
 class SkiaSubtitleRenderer:
@@ -163,7 +166,7 @@ class SkiaSubtitleRenderer:
             "position_y": pos_y_pct,
             "grid_position_y": float(style.get("gridPositionY") or style.get("grid_position_y") or 50.0),
             "layout_events": list(style.get("layout_events") or style.get("layoutEvents") or []),
-            "autogrid_enabled": bool(style.get("autogrid_enabled", True) if style.get("autogrid_enabled") is not None else style.get("autogridEnabled", True)),
+            "autogrid_enabled": bool(style.get("autogrid_enabled") if style.get("autogrid_enabled") is not None else style.get("autogridEnabled", False)),
             "reframe_layout": str(style.get("reframe_layout") or style.get("reframeLayout") or "single"),
             "max_words_per_line": max_words_per_line,
             "line_transition": style.get("lineTransition") or style.get("line_transition") or base.get("line_transition", "karaoke"),

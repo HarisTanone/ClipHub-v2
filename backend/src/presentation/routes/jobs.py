@@ -1309,9 +1309,9 @@ async def reprocess_job(
         text_emphasis_style_config=(old.clips_data or {}).get("text_emphasis_style_config"),
         watermark_config=(old.clips_data or {}).get("watermark_config"),
         cta_config=(old.clips_data or {}).get("cta_config"),
-        broll_image_overlay=bool((old.clips_data or {}).get("broll_image_overlay", True)),
-        broll_behind_person=bool((old.clips_data or {}).get("broll_behind_person", True)),
-        broll_video_footage=bool((old.clips_data or {}).get("broll_video_footage", True)),
+        broll_image_overlay=bool((old.clips_data or {}).get("broll_image_overlay", False)),
+        broll_behind_person=bool((old.clips_data or {}).get("broll_behind_person", False)),
+        broll_video_footage=bool((old.clips_data or {}).get("broll_video_footage", False)),
         broll_motion_style=(old.clips_data or {}).get("broll_motion_style") or getattr(old, "broll_motion_style", "zoom_in"),
         background_mode=(old.clips_data or {}).get("background_mode"),
         background_template_id=(old.clips_data or {}).get("background_template_id"),
@@ -1945,7 +1945,7 @@ async def restyle_clip(
             or max(0.0, float(clip_data.get("end", 0)) - float(clip_data.get("start", 0)))
             or 30.0
         )
-        hook_duration = float(hook_config.get("duration", 3.0) or 3.0)
+        hook_duration = float(hook_config.get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
         render_words = clip_data.get("words") or []
         if do_subtitle and not render_words and raw_path and os.path.exists(raw_path):
             try:

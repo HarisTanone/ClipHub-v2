@@ -470,17 +470,8 @@ class SubtitleRenderer(ISubtitleRenderer):
 
     # ─── Emphasis Style Renderer ──────────────────────────────────────────────
 
-    # ponytail: function-word filter only (len/pos), not domain lexicon. Upgrade: DB abstract_stop_words when ceiling hit.
-    STOP_WORDS = {
-        "yang", "dan", "di", "ke", "dari", "ini", "itu", "dengan", "untuk",
-        "pada", "adalah", "juga", "akan", "sudah", "udah", "gak", "nggak",
-        "tidak", "bukan", "ada", "bisa", "lagi", "kalau", "aja", "sih",
-        "ya", "dong", "deh", "nih", "tuh", "loh", "kan", "pun", "atau",
-        "tapi", "jadi", "saya", "aku", "kamu", "dia", "kita", "mereka",
-        "apa", "siapa", "mana", "kapan", "gimana", "kenapa", "karena",
-        "kayak", "banget", "sama", "terus", "the", "is", "a", "to", "of",
-        "in", "it", "and", "for", "but", "so", "he", "she", "we", "they",
-    }
+    # ponytail: single source = skia_subtitle_renderer.STOP_WORDS backed by stop_words_store.
+    from src.infrastructure.skia_subtitle_renderer import STOP_WORDS
 
     def render_emphasis_style(
         self,

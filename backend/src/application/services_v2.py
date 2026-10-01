@@ -190,16 +190,11 @@ class V2PipelineService:
             pass
 
     def _calc_max_clips(self, duration: float) -> int:
-        if duration < 180:
-            n = 2
-        elif duration < 600:
-            n = 5
-        elif duration < 1800:
-            n = 8
-        elif duration < 3600:
-            n = 12
-        else:
-            n = 15
+        n = 15
+        for limit, count in settings.MAX_CLIPS_TIERS:
+            if duration < limit:
+                n = count
+                break
         limit = settings.VIDEO_FINAL_RESULT
         if limit and limit > 0:
             n = min(n, limit)
@@ -964,7 +959,7 @@ class V2PipelineService:
             # ═══ Step 10: Build Subtitle Data (words already 0-based) ═══
             # Hook owns 0–N seconds (default 3s). Subtitles must not appear there.
             hook_duration = float(
-                ((job.clips_data or {}).get("hook_style_config") or {}).get("duration", 3.0) or 3.0
+                ((job.clips_data or {}).get("hook_style_config") or {}).get("duration") or settings.HOOK_DEFAULT_DURATION_SEC
             )
             self._emit(job_id, 10, "highlights", "start")
             await self._repo.update_status(job_id, JobStatus.HIGHLIGHTING)
@@ -2037,7 +2032,7 @@ class V2PipelineService:
         min_starts = {}
         blocked_ranges = {}
         # Adaptive min_start for short clips (hook may consume most of a short clip).
-        hook_duration = float((job_data.get("hook_style_config") or {}).get("duration", 3.0) or 3.0)
+        hook_duration = float((job_data.get("hook_style_config") or {}).get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
 
         # Check CTA configuration to prevent AI Text colliding with CTA end-card
         cta_cfg = (
@@ -2051,7 +2046,7 @@ class V2PipelineService:
         from src.infrastructure.cta_renderer import normalise_cta_config
         norm_cta = normalise_cta_config(cta_cfg)
         cta_enabled = bool(norm_cta.get("enabled", False))
-        cta_duration = float(norm_cta.get("duration", 3.0) or 3.0) if cta_enabled else 0.0
+        cta_duration = float(norm_cta.get("duration") or settings.HOOK_DEFAULT_DURATION_SEC) if cta_enabled else 0.0
 
         for clip in clips:
             clip_dur = max(0.0, clip.end - clip.start)
@@ -2365,7 +2360,7 @@ class V2PipelineService:
                 clip_words_raw = clips_with_words.get(clip.rank, [])
                 clip_hook = clip.hook or ""
                 hook_enabled = (hook_style_config or {}).get("enabled", True) is not False
-                hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0)
+                hook_dur = float(hook_style_config.get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
                 sub_min = hook_dur if (clip_hook and hook_enabled) else 0.0
                 te_ranges = [
                     (float(e.get("start", 0)), float(e.get("end", 0)))
@@ -2617,7 +2612,7 @@ class V2PipelineService:
 
         errors: list[str] = []
         hook_style = hook_style_config.get("animation", "zoom_punch") if hook_style_config else "zoom_punch"
-        hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0) if hook_style_config else 3.0
+        hook_dur = float(hook_style_config.get("duration") or settings.HOOK_DEFAULT_DURATION_SEC) if hook_style_config else settings.HOOK_DEFAULT_DURATION_SEC
         fonts_dir = getattr(self, "_fonts_dir", "assets/fonts")
 
         for clip in clips:
@@ -2829,7 +2824,7 @@ class V2PipelineService:
         errors: list[str] = []
         fonts_dir = getattr(self, "_fonts_dir", "assets/fonts")
         hook_style = hook_style_config.get("animation", "zoom_punch") if hook_style_config else "zoom_punch"
-        hook_dur = float(hook_style_config.get("duration", 3.0) or 3.0) if hook_style_config else 3.0
+        hook_dur = float(hook_style_config.get("duration") or settings.HOOK_DEFAULT_DURATION_SEC) if hook_style_config else settings.HOOK_DEFAULT_DURATION_SEC
 
         for clip in clips:
             if not trim_results.get(clip.rank):
@@ -3021,7 +3016,7 @@ class V2PipelineService:
 
         hook_tpl = resolve_hf_template(hook_style_config, kind="hook")
         sub_tpl = resolve_hf_template(subtitle_style_config, kind="subtitle")
-        hook_dur = float((hook_style_config or {}).get("duration", 3.0) or 3.0)
+        hook_dur = float((hook_style_config or {}).get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
         errors: list[str] = []
         applied = 0
 

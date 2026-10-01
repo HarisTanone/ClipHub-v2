@@ -381,8 +381,16 @@ class SocialAutoPostService:
             try:
                 compliant_clip_file = ensure_social_compliant_video(clip_file)
             except Exception as e:
-                logger.warning(f"auto_post: Video compliance check fallback on clip #{rank}: {e}")
-                compliant_clip_file = clip_file
+                error = f"Clip #{rank}: video compliance failed; skipped auto-post ({e})"
+                logger.exception("auto_post: %s", error)
+                errors.append(error)
+                continue
+
+            if not compliant_clip_file or not os.path.exists(compliant_clip_file):
+                error = f"Clip #{rank}: compliance did not produce a valid video; skipped auto-post"
+                logger.error("auto_post: %s", error)
+                errors.append(error)
+                continue
 
             # Resolve public direct URL for Repliz (prefer direct tunnel/public URL)
             from src.infrastructure.social_compliance import resolve_public_media_base_url

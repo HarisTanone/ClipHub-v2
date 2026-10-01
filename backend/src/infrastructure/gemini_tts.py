@@ -279,8 +279,28 @@ class GeminiTTS:
 
     @classmethod
     async def fetch_models(cls) -> list[dict[str, Any]]:
-        """Return supported Gemini TTS models."""
-        return GEMINI_TTS_MODELS
+        """Return supported Gemini TTS models.
+
+        DB-driven default (GEMINI_TTS_MODEL setting) takes precedence over hardcoded
+        list when an admin has configured a custom default. Hardcoded list is the
+        baseline so the UI always has a model to display.
+        """
+        try:
+            from src.infrastructure.system_config_store import get_system_setting
+            db_default = get_system_setting("GEMINI_TTS_MODEL")
+        except Exception:
+            db_default = None
+        models = list(GEMINI_TTS_MODELS)
+        if db_default and not any(m["model_id"] == db_default for m in models):
+            # Admin-configured default not in the hardcoded catalog — surface it
+            models.insert(0, {
+                "model_id": db_default,
+                "name": db_default,
+                "description": "Custom default configured in Settings",
+                "free_tier": True,
+                "languages": ["id", "en", "multi"],
+            })
+        return models
 
     @classmethod
     async def fetch_voices(

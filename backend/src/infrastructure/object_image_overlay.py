@@ -25,7 +25,7 @@ def default_object_overlay_style() -> dict[str, Any]:
     """Defaults — mirrored in DB object_overlay_configs + env OBJECT_OVERLAY_*."""
     return {
         "enabled": bool(getattr(settings, "OBJECT_OVERLAY_ENABLED", True)),
-        "max_per_clip": int(getattr(settings, "OBJECT_OVERLAY_MAX_PER_CLIP", 3)),
+        "max_per_clip": int(getattr(settings, "OBJECT_OVERLAY_MAX_PER_CLIP", 6)),
         "box_size_ratio": float(getattr(settings, "OBJECT_OVERLAY_BOX_SIZE", 0.28)),
         "corner_radius": int(getattr(settings, "OBJECT_OVERLAY_CORNER_RADIUS", 18)),
         "position": str(getattr(settings, "OBJECT_OVERLAY_POSITION", "auto")),

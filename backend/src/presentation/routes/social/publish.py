@@ -414,8 +414,17 @@ async def publish_clip(body: PublishRequest, _user=Depends(get_current_user)):
     try:
         compliant_video = ensure_social_compliant_video(video_file)
     except Exception as e:
-        logger.warning(f"Video compliance transcode fallback: {e}")
-        compliant_video = video_file
+        logger.exception("Video compliance transcode failed: %s", e)
+        raise HTTPException(
+            status_code=422,
+            detail="Video compliance validation failed; publish aborted",
+        ) from e
+
+    if not compliant_video or not os.path.exists(compliant_video):
+        raise HTTPException(
+            status_code=422,
+            detail="Video compliance did not produce a valid video; publish aborted",
+        )
 
     # Repliz schedule API accepts explicit music volume settings (0..100).
     # Keep video audio unmodified here: applying it locally and in Repliz would

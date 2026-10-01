@@ -555,10 +555,10 @@ class VideoGenerator:
 
         hook_duration = 0.0
         if job.hook_enabled:
-            hook_duration = float((job.hook_style or {}).get("duration", 3.0) or 3.0)
+            hook_duration = float((job.hook_style or {}).get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
         cta_duration = 0.0
         if isinstance(job.cta_config, dict) and job.cta_config.get("enabled", True):
-            cta_duration = float(job.cta_config.get("duration", 3.0) or 3.0)
+            cta_duration = float(job.cta_config.get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
         events = build_video_gen_ai_text_events(
             timeline, config, hook_duration=hook_duration, cta_duration=cta_duration,
         )
@@ -1875,7 +1875,7 @@ class VideoGenerator:
                     or hook_style_dict.get("hook_style")
                     or manifest["hook_id"]
                 )
-                hook_duration = float(hook_style_dict.get("duration", 3.0) or 3.0)
+                hook_duration = float(hook_style_dict.get("duration") or settings.HOOK_DEFAULT_DURATION_SEC)
 
                 hook_applied = False
 

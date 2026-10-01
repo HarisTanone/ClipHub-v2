@@ -456,7 +456,7 @@ class HermesVideoGenService:
                     "headline": cs.get("headline") or "Follow for more",
                     "buttonText": cs.get("buttonText") or "FOLLOW",
                     "ctaType": cs.get("ctaType", "card"),
-                    "duration": float(cs.get("duration", 3.0)),
+                    "duration": float(cs.get("duration") or settings.CTA_DEFAULT_DURATION_SEC),
                 }
 
             created_jobs = []
