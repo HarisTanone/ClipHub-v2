@@ -157,6 +157,11 @@ async def test_run_autopilot_step_success():
              "watermark_config": {"text": "@cliphub"},
              "cta_config": {"template": "subscribe_cta"},
          }), \
+         patch("src.infrastructure.hook_manifest.resolve_preset", return_value={
+             "slug": "podcast-epic-v1",
+             "source": "user_preset",
+             "hook_style_config": {"font": "Impact", "color": "#FF0000", "engine": "remotion"},
+         }), \
          patch("src.presentation.dependencies.get_job_service", return_value=mock_job_service), \
          patch("src.infrastructure.telegram_service.TelegramService.send_message", new=AsyncMock()):
 

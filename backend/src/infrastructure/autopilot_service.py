@@ -412,42 +412,56 @@ class AutopilotService:
             conn.close()
 
     def pick_best_candidate(self, user_id: int = 1) -> Optional[dict]:
-        """Search and pick the #1 best viral candidate matching niche & duration that hasn't been clipped."""
+        """Search and pick the #1 best viral candidate matching niche & duration that hasn't been clipped.
+
+        Progressive query variants: when a batch is exhausted (all processed/out of
+        duration range), widen the pool with recency/length modifiers before giving up.
+        """
         settings = self.get_settings(user_id)
         niche = settings.get("niche_query", "podcast bisnis")
         min_dur = settings.get("min_duration_sec", 480)
         max_dur = settings.get("max_duration_sec", 3600)
 
-        videos = self.search_viral_videos(niche, limit=10)
-        if not videos:
-            # Fallback search with broader terms
-            videos = self.search_viral_videos(f"{niche} viral shorts", limit=10)
-
-        if not videos:
-            return None
-
         processed_urls = self.get_processed_urls()
 
-        for v in videos:
-            vid_url = v["url"]
-            vid_id = v["id"]
-            dur = v["duration_sec"]
+        attempts = [
+            (niche, 10),
+            (f"{niche} viral shorts", 10),
+            (f"{niche} full", 15),
+            (f"{niche} terbaru", 15),
+        ]
 
-            # Check if processed
-            if vid_url in processed_urls or vid_id in processed_urls:
+        total_searched = 0
+        unprocessed: list[dict] = []
+        for query, limit in attempts:
+            videos = self.search_viral_videos(query, limit=limit)
+            if not videos:
                 continue
-
-            # Check duration range (if duration metadata is available)
-            if dur > 0 and (dur < min_dur or dur > max_dur):
-                continue
-
-            return v
-
-        # If all candidates filtered by duration, return highest score candidate that hasn't been processed
-        for v in videos:
-            if v["url"] not in processed_urls and v["id"] not in processed_urls:
+            total_searched += len(videos)
+            for v in videos:
+                if v["url"] in processed_urls or v["id"] in processed_urls:
+                    continue
+                dur = v["duration_sec"]
+                if dur > 0 and (dur < min_dur or dur > max_dur):
+                    unprocessed.append(v)
+                    continue
                 return v
 
+        if unprocessed:
+            # Legacy leniency: better a slightly-off-length video than a failed run.
+            v = unprocessed[0]
+            logger.warning(
+                f"autopilot: no in-range candidate; falling back to '{v['title'][:60]}' "
+                f"({v['duration_sec']}s, wanted {min_dur}s..{max_dur}s)"
+            )
+            return v
+
+        if total_searched:
+            logger.info(
+                f"autopilot: {total_searched} candidates searched across "
+                f"{len(attempts)} query variants — all already processed for niche "
+                f"'{niche}' ({len(processed_urls)} processed URLs total)"
+            )
         return None
 
     async def run_autopilot_step(

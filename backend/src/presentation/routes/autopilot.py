@@ -80,9 +80,15 @@ async def trigger_autopilot_now(
         notify_telegram=True,
     )
     if not res.get("success"):
+        status_code = {
+            "quota_exceeded": 409,
+            "pipeline_busy": 423,
+            "disabled": 409,
+            "no_candidate_found": 404,
+        }.get(str(res.get("status") or ""), 400)
         raise HTTPException(
-            status_code=400 if res.get("status") == "quota_exceeded" else 500,
-            detail=res.get("message", "Gagal menjalankan autopilot"),
+            status_code=status_code,
+            detail=str(res.get("message") or "Gagal menjalankan autopilot"),
         )
     return res
 
