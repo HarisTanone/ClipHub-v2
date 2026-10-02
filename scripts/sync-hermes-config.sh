@@ -55,18 +55,48 @@ else
 import os
 hermes_env = '$HERMES_HOME/.env'
 be_env = '$PROJECT_DIR/backend/.env'
+Q = chr(34) + chr(39) + ' '
 defaults = {
-    'OPENAI_BASE_URL': 'http://127.0.0.1:20128/v1',
+    'GEMINI_API_KEY': '',
+    'GEMINI_MODEL': '',
+    'GEMINI_FALLBACK_MODEL': '',
     'AUTOCLIPER_API_URL': 'http://127.0.0.1:8000/api',
 }
 if os.path.exists(be_env):
     with open(be_env, 'r') as f:
         for line in f:
             line = line.strip()
-            if line.startswith('SUPERADMIN_EMAIL='):
-                defaults['AUTOCLIPER_EMAIL'] = line.split('=', 1)[1].strip('\"\' ')
-            elif line.startswith('SUPERADMIN_PASSWORD='):
-                defaults['AUTOCLIPER_PASSWORD'] = line.split('=', 1)[1].strip('\"\' ')
+            key, sep, val = line.partition('=')
+            val = val.strip().strip(Q)
+            if key in defaults and val:
+                defaults[key] = val
+            elif key == 'SUPERADMIN_EMAIL' and val:
+                defaults['AUTOCLIPER_EMAIL'] = val
+            elif key == 'SUPERADMIN_PASSWORD' and val:
+                defaults['AUTOCLIPER_PASSWORD'] = val
+
+# DB fallback: panel-managed GEMINI_* live in system_settings when .env has none.
+for _db in ('$PROJECT_DIR/backend/data/autoclip.db', '$PROJECT_DIR/backend/data/autocliper.db', '$PROJECT_DIR/backend/autocliper.db'):
+    if not os.path.exists(_db):
+        continue
+    try:
+        import sqlite3 as _sq
+        _conn = _sq.connect(_db)
+        for _k in ('GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_FALLBACK_MODEL'):
+            if defaults.get(_k):
+                continue
+            try:
+                _row = _conn.execute('SELECT value FROM system_settings WHERE key=?', (_k,)).fetchone()
+            except Exception:
+                _row = None
+            if _row and _row[0]:
+                _v = str(_row[0]).strip().strip(Q)
+                if _k == 'GEMINI_API_KEY':
+                    _v = _v.split(',')[0].strip()
+                defaults[_k] = _v
+        _conn.close()
+    except Exception:
+        pass
 
 if os.path.exists(hermes_env):
     with open(hermes_env, 'r') as f:
@@ -77,10 +107,10 @@ if os.path.exists(hermes_env):
         stripped = line.strip()
         matched = False
         for k, v in defaults.items():
-            if stripped.startswith(f'{k}='):
-                val = stripped.split('=', 1)[1].strip('\"\' ')
+            if stripped.startswith(k + '='):
+                val = stripped.split('=', 1)[1].strip(Q)
                 if not val and v:
-                    new_lines.append(f'{k}={v}\n')
+                    new_lines.append(k + '=' + v + os.linesep)
                 else:
                     new_lines.append(line)
                 keys_found.add(k)
@@ -90,7 +120,7 @@ if os.path.exists(hermes_env):
             new_lines.append(line)
     for k, v in defaults.items():
         if k not in keys_found and v:
-            new_lines.append(f'{k}={v}\n')
+            new_lines.append(k + '=' + v + os.linesep)
     with open(hermes_env, 'w') as f:
         f.writelines(new_lines)
 " 2>/dev/null || true
@@ -119,7 +149,8 @@ cat > "$HERMES_HOME/AUTOCLIPER.md" <<EOF
 # AutoCliper Hermes profile
 
 - config.yaml synced from repo ops/hermes/config.yaml
-- LLM: custom provider → http://127.0.0.1:20128/v1 (9router)
+- LLM: native Gemini (GEMINI_API_KEY/GEMINI_MODEL/GEMINI_FALLBACK_MODEL di \$HERMES_HOME/.env)
+- Rotate mode (DeepSeek/GLM/custom): UI Settings → LLM Providers (DB llm_providers, LLM_ROTATE_ALL)
 - Hook + subtitle remain Remotion; Hermes used for creative/template/HF authoring
 - AutoCliper tools: skills/bin/ac_*.py (viral_search, submit_job, job_status, dll)
 - Telegram bot: ops/telegram/telegram_bot.py

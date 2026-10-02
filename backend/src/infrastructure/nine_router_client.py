@@ -26,11 +26,16 @@ class NineRouterClient:
         api_key: Optional[str] = None,
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
+        bypass_router: bool = False,
     ):
         self.base_url = (base_url or settings.get_nine_router("NINE_ROUTER_BASE_URL") or settings.NINE_ROUTER_BASE_URL).rstrip("/")
         self.api_key = api_key if api_key is not None else (settings.get_nine_router("NINE_ROUTER_API_KEY") or settings.NINE_ROUTER_API_KEY)
         self.timeout = int(timeout or settings.get_nine_router("NINE_ROUTER_TIMEOUT") or settings.NINE_ROUTER_TIMEOUT)
         self.max_retries = int(max_retries or settings.get_nine_router("NINE_ROUTER_MAX_RETRIES") or settings.NINE_ROUTER_MAX_RETRIES)
+        # When False, chat() first tries the system LLM router chain
+        # (Gemini + custom providers); this client stays the last-resort
+        # fallback inside llm_router (constructed there with bypass_router=True).
+        self._bypass_router = bypass_router
 
     @property
     def is_configured(self) -> bool:
@@ -45,6 +50,18 @@ class NineRouterClient:
         response_format: Optional[dict[str, Any]] = None,
     ) -> str:
         """Call 9router and return the first message content as text."""
+        if not self._bypass_router:
+            try:
+                from src.infrastructure.llm_router import route_chat
+                return route_chat(
+                    messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    require_json=response_format is not None,
+                )
+            except Exception as exc:
+                # Router chain down → fall through to legacy direct 9router.
+                logger.warning(f"nine_router: llm_router chain failed ({str(exc)[:200]}), falling back to direct 9router")
         if not self.base_url:
             raise NineRouterError("NINE_ROUTER_BASE_URL belum dikonfigurasi")
 

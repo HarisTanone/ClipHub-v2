@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 # (category, data_type, min_role, is_secret, default_value, description)
 SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     # ─── Group 1: AI & LLM Routing ──────────────────────────────────────────
+    "LLM_ROTATE_ALL": {
+        "category": "ai_llm",
+        "data_type": "bool",
+        "min_role": "superadmin",
+        "is_secret": False,
+        "default": False,
+        "description": (
+            "Rotasi LLM semua provider: off = hanya Gemini, on = Gemini + semua "
+            "provider custom aktif (failover berantai)"
+        ),
+    },
     "LLM_PROVIDER": {
         "category": "ai_llm",
         "data_type": "string",

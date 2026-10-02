@@ -2,15 +2,14 @@
 # Synced by: scripts/sync-hermes-config.sh
 # Secrets live in $HERMES_HOME/.env (never commit).
 #
-# LLM path: Hermes → 9router (:20128) → model combo (CliperHub / gcli/…)
-# Same host/port on Mac and Ubuntu server (loopback).
+# LLM path: Hermes → native Gemini (GEMINI_API_KEY di $HERMES_HOME/.env).
+# Rotate mode (custom providers) diatur via UI Settings → LLM Providers
+# (backend DB llm_providers) — endpoint ini generate snippet fallback_providers.
 
 model:
-  default: gcli/grok-4.5-high
-  provider: custom
-  base_url: http://127.0.0.1:20128/v1
-  api_mode: chat_completions
-  # api_key loaded from HERMES/.env → NINE_ROUTER_API_KEY or OPENAI_API_KEY
+  default: gemini-3.7-flash
+  provider: gemini
+  # api_key loaded from $HERMES_HOME/.env → GEMINI_API_KEY (alias GOOGLE_API_KEY)
 
 providers: {}
 fallback_providers: []

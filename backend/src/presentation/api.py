@@ -302,6 +302,8 @@ app.include_router(telegram_router, prefix="/api")
 app.include_router(autopilot_router, prefix="/api")
 app.include_router(hermes_videogen_router, prefix="/api")
 app.include_router(hook_preview_router, prefix="/api")
+from src.presentation.routes.llm_providers import router as llm_providers_router
+app.include_router(llm_providers_router, prefix="/api")
 
 
 
