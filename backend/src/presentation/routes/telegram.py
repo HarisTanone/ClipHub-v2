@@ -218,6 +218,7 @@ async def trigger_job_auto_post(
             job_id=job_id,
             clips=clips,
             output_dir=output_dir,
+            user_id=job.user_id,
             target_platforms=platforms or None,
             schedule_mode=cfg.get("auto_post_schedule_mode", "ai"),
             notify_telegram=True,

@@ -1290,6 +1290,7 @@ class JobService:
                     clips_count=len(clips_list),
                     clips=clips_list,
                     output_dir=output_dir,
+                    user_id=job.user_id,
                 ))
             except Exception:
                 pass

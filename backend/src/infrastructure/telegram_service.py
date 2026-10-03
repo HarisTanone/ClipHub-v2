@@ -461,7 +461,8 @@ class TelegramService:
         title: str,
         clips_count: int,
         clips: List[Dict[str, Any]],
-        output_dir: Optional[str] = None
+        output_dir: Optional[str] = None,
+        user_id: Optional[int] = None
     ) -> bool:
         """Send notification when job completes, and send video clips if enabled."""
         cfg = self.get_settings()
@@ -507,22 +508,6 @@ class TelegramService:
                     await self.send_video(video_file, caption=caption)
                     # small delay between sending multiple videos
                     await asyncio.sleep(1.0)
-
-        # Trigger AI Auto-Post to Social Media if enabled
-        if cfg.get("auto_post_social") and output_dir and os.path.exists(output_dir):
-            try:
-                from src.infrastructure.social_auto_post_service import social_auto_post_service
-                platforms = [p.strip() for p in cfg.get("auto_post_platforms", "").split(",") if p.strip()]
-                asyncio.create_task(social_auto_post_service.auto_schedule_job_clips(
-                    job_id=job_id,
-                    clips=clips,
-                    output_dir=output_dir,
-                    target_platforms=platforms or None,
-                    schedule_mode=cfg.get("auto_post_schedule_mode", "ai"),
-                    notify_telegram=True,
-                ))
-            except Exception as e:
-                logger.warning(f"telegram: failed to trigger auto-post: {e}")
 
         return True
 

@@ -211,6 +211,7 @@ class TestTelegramService(unittest.TestCase):
                 title="Amazing Podcast Episode",
                 clips_count=2,
                 clips=clips,
+                user_id=1,
             )
 
         res = asyncio.run(_run())
