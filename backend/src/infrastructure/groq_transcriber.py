@@ -417,6 +417,8 @@ class GroqTranscriber(IGroqTranscriber):
         elif os.path.exists("cookies.txt"):
             cookie_args = ["--cookies", "cookies.txt"]
 
+        output_template = os.path.join(output_dir, "%(id)s.%(ext)s")
+
         cmd = [
             "yt-dlp",
             "--geo-bypass",
