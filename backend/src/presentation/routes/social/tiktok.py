@@ -148,7 +148,7 @@ async def _fetch_repliz_music_docs(
 
     try:
         res = await repliz_get(
-            "/public/tiktok/music",
+            "/public/addon/tiktok/music",
             params={
                 "genre": eff_genre,
                 "countryCode": country_code,
