@@ -339,7 +339,7 @@ class RemotionAdapter(IRemotionRenderer):
             async with session.post(
                 f"{self.base_url}/render-still",
                 json=payload,
-                timeout=ClientTimeout(total=60),
+                timeout=ClientTimeout(total=180),
             ) as resp:
                 result = await resp.json()
                 if resp.status == 200 and result.get("success"):

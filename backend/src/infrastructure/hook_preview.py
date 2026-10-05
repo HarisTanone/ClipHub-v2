@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
@@ -10,6 +11,8 @@ from typing import Any, Awaitable, Callable, Mapping
 
 from src.infrastructure.hook_manifest import HOOK_RENDERER_VERSION, hook_render_spec_hash
 from src.infrastructure.skia_hook_renderer import SkiaHookRenderer
+
+logger = logging.getLogger(__name__)
 
 
 class NativeHookPreviewService:
@@ -54,10 +57,18 @@ class NativeHookPreviewService:
 
     @staticmethod
     def _extract_frame(video: str, path: str, frame: int) -> None:
-        subprocess.run([
-            "ffmpeg", "-y", "-ss", str(max(0, frame) / 30), "-i", video,
-            "-frames:v", "1", path,
-        ], check=True, capture_output=True, timeout=60)
+        try:
+            subprocess.run([
+                "ffmpeg", "-y", "-ss", str(max(0, frame) / 30), "-i", video,
+                "-frames:v", "1", path,
+            ], check=True, capture_output=True, timeout=60)
+        except subprocess.CalledProcessError as exc:
+            logger.warning("[hook_preview] _extract_frame failed: ffmpeg %s exit %s. "
+                           "Input exists=%s size=%s",
+                           video, exc.returncode,
+                           os.path.exists(video),
+                           os.path.getsize(video) if os.path.exists(video) else -1)
+            raise RuntimeError(f"Frame extraction failed: ffmpeg exit {exc.returncode}") from exc
 
     async def _render_skia(self, manifest: Mapping[str, Any], text: str, frame: int, path: str) -> None:
         renderer = SkiaHookRenderer(font_dir=self.font_dir)
