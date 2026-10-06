@@ -62,10 +62,13 @@ def test_unified_compositor_subtitle_y_dynamic_grid_vs_single():
     assert any("h*0.80" in f for f in filters_single)
 
     # 3. Dynamic timeline via layout_events:
+    # All 3 words are in ONE line (max_words_per_line default = 3), so they
+    # all share the SAME Y — computed from line_start=1.0 which is in single
+    # layout → h*0.80. Words in the same line never drift to different Y.
     words_timeline = [
-        {"word": "FIRST", "start": 1.0, "end": 2.0},   # at t=1.5 -> single (0.80)
-        {"word": "SECOND", "start": 6.0, "end": 7.0},  # at t=6.5 -> double (0.50)
-        {"word": "THIRD", "start": 11.0, "end": 12.0}, # at t=11.5 -> single (0.80)
+        {"word": "FIRST", "start": 1.0, "end": 2.0},
+        {"word": "SECOND", "start": 6.0, "end": 7.0},
+        {"word": "THIRD", "start": 11.0, "end": 12.0},
     ]
     layout_events = [
         {"time": 0.0, "layout": "single"},
@@ -78,11 +81,29 @@ def test_unified_compositor_subtitle_y_dynamic_grid_vs_single():
             "layout_events": layout_events,
             "grid_position_y": 50.0,
             "position_y": 80.0,
+            "max_words_per_line": 3,
         },
     )
     joined = " ".join(filters_dyn)
+    # All words share line's Y (line_start=1.0 → single → 80%)
     assert "h*0.80" in joined
-    assert "h*0.50" in joined
+    assert "h*0.50" not in joined  # line never spans double layout
+    assert joined.count("h*0.80") >= 3  # every word has same Y
+
+    # 4. Force each word into its OWN line so Y can shift per line
+    filters_multiline = compositor.build_subtitle_filter_chain(
+        words=words_timeline,
+        style={
+            "layout_events": layout_events,
+            "grid_position_y": 50.0,
+            "position_y": 80.0,
+            "max_words_per_line": 1,
+        },
+    )
+    joined_ml = " ".join(filters_multiline)
+    # FIRST line starts t=1.0 (single) → 80%; SECOND t=6.0 (double) → 50%; THIRD t=11.0 (single) → 80%
+    assert "h*0.80" in joined_ml
+    assert "h*0.50" in joined_ml
 
 
 def test_skia_subtitle_renderer_dynamic_grid_position():

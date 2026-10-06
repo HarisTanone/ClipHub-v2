@@ -48,7 +48,7 @@ from src.domain.interfaces import (
     IYoloReframeEngine,
 )
 from src.infrastructure.content_intelligence import ContentIntelligence
-from src.infrastructure.clip_outputs import initialize_clip_readiness, mark_clip_ready
+from src.infrastructure.clip_outputs import discover_ready_clip_ranks, initialize_clip_readiness, mark_clip_ready
 from src.infrastructure.subtitle_words import sanitize_subtitle_words
 from src.infrastructure.text_emphasis import normalise_text_emphasis_style
 from src.infrastructure.video_splicer import VideoSplicer
@@ -2289,16 +2289,24 @@ class V2PipelineService:
                     "HyperFrames hook/subtitle render failed: "
                     + "; ".join(errors[:5])
                 )
-        # Post-Remotion FFmpeg / Skia overlays when user explicitly picked FFmpeg or Skia for hook and/or subtitle
+        # Post-Remotion FFmpeg / Skia overlays when user explicitly picked FFmpeg or Skia for hook and/or subtitle.
+        # SKIP clips that _render_via_remotion already finalized (either natively OR via
+        # the Remotion-failure fallback which calls _render_via_direct_engines). Re-running
+        # the direct pass here would render subtitles twice per clip.
         if hook_engine in ("ffmpeg", "skia") or sub_engine in ("ffmpeg", "skia"):
-            direct_errors = await self._apply_direct_hook_subtitle_pass(
-                job, job_id, clips, clips_with_words,
-                output_dir, trim_results,
-                hook_style_config, subtitle_style_config,
-                hook_engine=hook_engine, sub_engine=sub_engine,
-            )
-            if direct_errors:
-                logger.warning(f"[{job_id}] Post-Remotion direct pass warnings: {direct_errors}")
+            already_finalized = set(discover_ready_clip_ranks(output_dir))
+            pending_clips = [c for c in clips if c.rank not in already_finalized]
+            if pending_clips:
+                direct_errors = await self._apply_direct_hook_subtitle_pass(
+                    job, job_id, pending_clips, clips_with_words,
+                    output_dir, trim_results,
+                    hook_style_config, subtitle_style_config,
+                    hook_engine=hook_engine, sub_engine=sub_engine,
+                )
+                if direct_errors:
+                    logger.warning(f"[{job_id}] Post-Remotion direct pass warnings: {direct_errors}")
+            else:
+                logger.info(f"[{job_id}] All clips finalized by Remotion/fallback; skipping post-Remotion direct pass")
 
     async def _render_via_remotion(
         self, job, job_id, clips, clips_with_words, creative_direction,

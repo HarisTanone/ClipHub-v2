@@ -99,6 +99,70 @@ def test_build_subtitle_filter_chain(compositor):
         assert f.count("drawtext=text=") == 1
 
 
+def test_word_pop_words_in_same_line_share_y(compositor):
+    """Words in the same line share one Y — regardless of each word's w_start.
+
+    Regression guard: if _get_y_for_time were called per-word, words in a single
+    line whose timeline crosses a layout transition would drift to different Y
+    positions on the same frame.
+    """
+    words = [
+        {"word": "A", "start": 1.0, "end": 2.0},   # single layout
+        {"word": "B", "start": 6.0, "end": 7.0},   # double layout (same line)
+        {"word": "C", "start": 11.0, "end": 12.0}, # single layout (same line)
+    ]
+    layout_events = [
+        {"time": 0.0, "layout": "single"},
+        {"time": 5.0, "layout": "double"},
+        {"time": 10.0, "layout": "single"},
+    ]
+    filters = compositor.build_subtitle_filter_chain(
+        words=words,
+        style={
+            "line_transition": "word_pop",
+            "max_words_per_line": 3,
+            "layout_events": layout_events,
+            "grid_position_y": 50.0,
+            "position_y": 80.0,
+        },
+    )
+    assert len(filters) == 3
+    ys = [f.split(":y=", 1)[1].split(":enable=", 1)[0] for f in filters]
+    # All words in one line → identical Y (from line_start=1.0 → single → 80%)
+    assert len(set(ys)) == 1, f"Y must be uniform within a line, got {ys}"
+    assert ys[0] == "(h*0.80-text_h/2)"
+
+
+def test_word_pop_multiline_y_shifts_per_line(compositor):
+    """When each word is its own line, Y may shift per line per layout event."""
+    words = [
+        {"word": "A", "start": 1.0, "end": 2.0},   # single layout
+        {"word": "B", "start": 6.0, "end": 7.0},   # double layout
+        {"word": "C", "start": 11.0, "end": 12.0}, # single layout
+    ]
+    layout_events = [
+        {"time": 0.0, "layout": "single"},
+        {"time": 5.0, "layout": "double"},
+        {"time": 10.0, "layout": "single"},
+    ]
+    filters = compositor.build_subtitle_filter_chain(
+        words=words,
+        style={
+            "line_transition": "word_pop",
+            "max_words_per_line": 1,
+            "layout_events": layout_events,
+            "grid_position_y": 50.0,
+            "position_y": 80.0,
+        },
+    )
+    assert len(filters) == 3
+    ys = [f.split(":y=", 1)[1].split(":enable=", 1)[0] for f in filters]
+    # Each word is its own line → Y from line_start
+    assert ys[0] == "(h*0.80-text_h/2)"   # line A starts in single
+    assert ys[1] == "(h*0.50-text_h/2)"   # line B starts in double
+    assert ys[2] == "(h*0.80-text_h/2)"   # line C starts in single
+
+
 def test_build_watermark_filter_chain_text(compositor, tmp_path):
     watermark_config = {
         "enabled": True,

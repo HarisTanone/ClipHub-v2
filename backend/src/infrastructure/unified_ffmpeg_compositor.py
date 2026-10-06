@@ -540,6 +540,12 @@ class UnifiedFFmpegCompositor:
             line_end = float(line[-1].get("end", 0)) + offset + timing_adj
 
             if config.line_transition == "word_pop":
+                # Compute Y once per line using line_start so all words in the
+                # line stay at the same vertical position — otherwise per-word
+                # w_start queries the layout timeline independently and words
+                # in the same line can drift to different Y positions across
+                # a layout transition.
+                line_y = _get_y_for_time(line_start)
                 for w in line:
                     w_start = float(w.get("start", 0)) + offset + timing_adj
                     w_end = float(w.get("end", 0)) + offset + timing_adj
@@ -550,7 +556,6 @@ class UnifiedFFmpegCompositor:
                     box_opt = f":box=1:boxcolor=black@{config.background_opacity}:boxborderw=10" if config.background_opacity > 0 else ""
                     active_stroke_w = (config.stroke_width + 1) if (config.stroke_width and config.stroke_width > 0) else 0
                     active_stroke_opt = f":borderw={active_stroke_w}:bordercolor={stroke_color}" if active_stroke_w > 0 else ""
-                    current_y = _get_y_for_time(w_start)
                     filters.append(
                         f"drawtext=text='{escaped_word}'"
                         f":fontsize={int(config.font_size * 1.2)}"
@@ -559,12 +564,13 @@ class UnifiedFFmpegCompositor:
                         f"{active_stroke_opt}"
                         f"{shadow_opt}"
                         f"{box_opt}"
-                        f":x=(w-text_w)/2:y={current_y}"
+                        f":x=(w-text_w)/2:y={line_y}"
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                     )
             elif config.line_transition == "typing":
                 # One progressive line per cue. Never render revealed text and active word
                 # as separate centered drawtext layers; that causes glyph overlap.
+                line_y = _get_y_for_time(line_start)
                 for w_idx, w in enumerate(line):
                     w_start = float(w.get("start", 0)) + offset + timing_adj
                     next_w_start = (float(line[w_idx + 1].get("start", 0)) + offset + timing_adj) if (w_idx + 1 < len(line)) else line_end
@@ -574,7 +580,6 @@ class UnifiedFFmpegCompositor:
                         typed_text = typed_text.upper()
                     escaped_typed = self._escape_drawtext(typed_text)
                     box_opt = f":box=1:boxcolor=black@{config.background_opacity}:boxborderw=8" if config.background_opacity > 0 else ""
-                    current_y = _get_y_for_time(w_start)
                     filters.append(
                         f"drawtext=text='{escaped_typed}'"
                         f":fontsize={config.font_size}"
@@ -583,7 +588,7 @@ class UnifiedFFmpegCompositor:
                         f"{stroke_opt}"
                         f"{shadow_opt}"
                         f"{box_opt}"
-                        f":x=(w-text_w)/2:y={current_y}"
+                        f":x=(w-text_w)/2:y={line_y}"
                         f":enable='between(t,{w_start:.3f},{w_end:.3f})'"
                     )
             else:
@@ -805,8 +810,17 @@ class UnifiedFFmpegCompositor:
                 logger.error(f"unified_compositor: rendered file missing or empty: {output_video}")
                 return False
 
-            # High-fidelity subtitle overlay for exact 1:1 match to preview modal
-            if words and (subtitle_style_config or {}).get("enabled", True) is not False:
+            # Engine fidelity: the 1-pass FFmpeg drawtext IS the final subtitle layer
+            # when sub_engine=ffmpeg. Do NOT re-render via Skia — that would produce
+            # a different visual (neon/glow style) from the FFmpeg preset the user
+            # requested, and it overwrites the correct FFmpeg output. Only apply the
+            # Skia fallback when sub_engine is explicitly skia.
+            sub_eng = str(
+                (subtitle_style_config or {}).get("engine")
+                or (subtitle_style_config or {}).get("engine_")
+                or ""
+            ).lower().strip()
+            if sub_eng == "skia" and words and (subtitle_style_config or {}).get("enabled", True) is not False:
                 try:
                     from src.infrastructure.skia_subtitle_renderer import SkiaSubtitleRenderer
                     sub_renderer = SkiaSubtitleRenderer(font_dir=self._font_dir)
@@ -821,7 +835,7 @@ class UnifiedFFmpegCompositor:
                     if os.path.exists(tmp_sub_out) and os.path.getsize(tmp_sub_out) > 0:
                         os.replace(tmp_sub_out, output_video)
                 except Exception as e:
-                    logger.warning(f"unified_compositor: subtitle overlay failed ({e}), keeping base render")
+                    logger.warning(f"unified_compositor: Skia overlay failed ({e}), keeping FFmpeg base")
 
             logger.info(f"unified_compositor: 1-pass render success → {output_video}")
             return True
