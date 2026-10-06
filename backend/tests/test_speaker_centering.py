@@ -938,6 +938,84 @@ def test_panning_defaults_to_center_or_last_center_when_frame_is_empty():
     assert source == "last_center"
 
 
+# ─── Speaker landmark propagation (P1: diarization → speaker_landmarks) ────
+
+def test_diarization_result_builder_populates_speaker_landmarks_from_tracked_data():
+    """When per_frame_tracked has anatomical_center_x on detections,
+    DRB.build() must aggregate them into speaker_landmarks[spk_id].
+    Regression for: 'focus not on speaker' when anatomical centering
+    silently falls through to torso seat because landmarks are empty."""
+    from src.infrastructure.diarization_result_builder import DiarizationResultBuilder
+    from src.infrastructure.speaker_diarizer import DiarizationSegment, DiarizationResult
+    from src.infrastructure.speaker_face_mapper import MappingResult, SpeakerFaceMapping
+    from src.infrastructure.person_tracker import TrackedDetection, BBox
+
+    diarization = DiarizationResult(
+        segments=[DiarizationSegment(0.0, 5.0, "SPEAKER_00"),
+                  DiarizationSegment(5.0, 10.0, "SPEAKER_01")],
+        speaker_count=2,
+    )
+    # SPEAKER_00 -> track 0 (median x=520), SPEAKER_01 -> track 1 (median x=1480)
+    mapping = MappingResult(
+        mappings={
+            "SPEAKER_00": SpeakerFaceMapping("SPEAKER_00", 0, 0.9, 20),
+            "SPEAKER_01": SpeakerFaceMapping("SPEAKER_01", 1, 0.9, 20),
+        },
+        overall_confidence=0.9,
+        is_reliable=True,
+    )
+    per_frame_tracked = [
+        [TrackedDetection(track_id=0, bbox=BBox(470, 100, 570, 240),
+                          frame_idx=i, anatomical_center_x=520.0),
+         TrackedDetection(track_id=1, bbox=BBox(1430, 100, 1530, 240),
+                          frame_idx=i, anatomical_center_x=1480.0)]
+        for i in range(30)
+    ]
+    result = DiarizationResultBuilder.build(
+        diarization=diarization,
+        mapping=mapping,
+        fps=30.0,
+        total_frames=300,
+        stable_positions={0: 520.0, 1: 1480.0},
+        track_to_position={0: 0, 1: 1},
+        per_frame_tracked=per_frame_tracked,
+    )
+
+    # Regression: speaker_landmarks was always empty in diarization path
+    assert result.speaker_landmarks, "speaker_landmarks must be populated"
+    assert result.speaker_landmarks[0].anatomical_center_x > 0
+    assert result.speaker_landmarks[1].anatomical_center_x > 0
+    # Speaker 0 tracks around x=520; speaker 1 around x=1480
+    assert 480 <= result.speaker_landmarks[0].anatomical_center_x <= 560
+    assert 1440 <= result.speaker_landmarks[1].anatomical_center_x <= 1520
+
+
+def test_diarization_result_builder_returns_empty_landmarks_when_no_tracked_data():
+    """Backward compat: when per_frame_tracked is None/empty, speaker_landmarks
+    defaults to {} (current behavior)."""
+    from src.infrastructure.diarization_result_builder import DiarizationResultBuilder
+    from src.infrastructure.speaker_diarizer import DiarizationSegment, DiarizationResult
+    from src.infrastructure.speaker_face_mapper import MappingResult, SpeakerFaceMapping
+
+    diarization = DiarizationResult(
+        segments=[DiarizationSegment(0.0, 5.0, "SPEAKER_00")],
+        speaker_count=1,
+    )
+    mapping = MappingResult(
+        mappings={"SPEAKER_00": SpeakerFaceMapping("SPEAKER_00", 0, 0.9, 20)},
+        overall_confidence=0.9, is_reliable=True,
+    )
+    result = DiarizationResultBuilder.build(
+        diarization=diarization,
+        mapping=mapping,
+        fps=30.0, total_frames=300,
+        stable_positions={0: 520.0},
+        track_to_position={0: 0},
+        per_frame_tracked=None,
+    )
+    assert result.speaker_landmarks == {}
+
+
 # ─── Crop geometry: clamp behavior and vertical eye-level ──────────────────
 
 def test_panning_clamp_keeps_crop_within_source():

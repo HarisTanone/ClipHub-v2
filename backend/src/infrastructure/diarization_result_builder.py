@@ -9,7 +9,11 @@ same data structure whether the source is lip-movement detection or diarization.
 import logging
 from typing import Dict, List, Optional
 
-from src.infrastructure.active_speaker_detector import ActiveSpeakerResult, SpeakerSegment
+from src.infrastructure.active_speaker_detector import (
+    ActiveSpeakerResult,
+    SpeakerAnatomicalLandmarks,
+    SpeakerSegment,
+)
 from src.infrastructure.speaker_diarizer import DiarizationResult, DiarizationSegment
 from src.infrastructure.speaker_face_mapper import MappingResult
 
@@ -38,6 +42,7 @@ class DiarizationResultBuilder:
         stable_positions: Dict[int, float],
         sample_interval_sec: float = 1.0,
         track_to_position: Optional[Dict[int, int]] = None,
+        per_frame_tracked: Optional[list] = None,
     ) -> ActiveSpeakerResult:
         """Build ActiveSpeakerResult from diarization and speaker-face mapping.
 
@@ -54,6 +59,10 @@ class DiarizationResultBuilder:
                                  Default 1.0 means one sample per second.
             track_to_position: Optional precomputed mapping from raw tracker IDs
                                to consolidated positional IDs.
+            per_frame_tracked: Optional list of TrackedDetection lists (one per
+                               sampled frame). When provided, speaker_landmarks
+                               are aggregated per positional speaker ID using
+                               anatomical_center_x from the tracks.
 
         Returns:
             ActiveSpeakerResult compatible with the dynamic panning pipeline.
@@ -102,12 +111,18 @@ class DiarizationResultBuilder:
             DiarizationResultBuilder._calculate_dominant_speaker(segments)
         )
 
+        # Step 4: Build speaker_landmarks from per-frame tracked detections
+        speaker_landmarks = DiarizationResultBuilder._build_speaker_landmarks(
+            mapping, track_to_position, stable_positions, per_frame_tracked
+        )
+
         result = ActiveSpeakerResult(
             segments=segments,
             dominant_speaker_id=dominant_speaker_id,
             dominant_ratio=dominant_ratio,
             per_frame_speaker=per_frame_speaker,
             total_speakers=diarization.speaker_count,
+            speaker_landmarks=speaker_landmarks,
         )
 
         logger.info(
@@ -290,6 +305,65 @@ class DiarizationResultBuilder:
             )
 
         return segments
+
+    @staticmethod
+    def _build_speaker_landmarks(
+        mapping: MappingResult,
+        track_to_position: Dict[int, int],
+        stable_positions: Dict[int, float],
+        per_frame_tracked: Optional[list],
+    ) -> Dict[int, SpeakerAnatomicalLandmarks]:
+        """Aggregate per-speaker anatomical landmarks from tracked detections.
+
+        For each positional speaker ID (mapped from a track), collect all
+        anatomical_center_x values across frames and emit a median. When
+        per_frame_tracked is None or empty, returns an empty dict (caller
+        keeps the result's default of {}).
+
+        ponytail: only anatomical_center_x is filled with real data; the
+        other SpeakerAnatomicalLandmarks fields use the track's stable
+        X/Y as best-available proxies. The downstream panning code only
+        reads anatomical_center_x (> 0 guard), so this is sufficient.
+        """
+        if not per_frame_tracked:
+            return {}
+
+        # track_id -> list of (anatomical_center_x)
+        track_xs: Dict[int, list] = {}
+        for frame_dets in per_frame_tracked:
+            for det in frame_dets:
+                x = getattr(det, "anatomical_center_x", None)
+                if x is None or x <= 0:
+                    continue
+                track_xs.setdefault(int(det.track_id), []).append(float(x))
+
+        if not track_xs:
+            return {}
+
+        # positional_id -> median x
+        pos_xs: Dict[int, float] = {}
+        for track_id, xs in track_xs.items():
+            pos_id = track_to_position.get(track_id)
+            if pos_id is None:
+                continue
+            pos_xs[int(pos_id)] = float(sorted(xs)[len(xs) // 2])
+
+        out: Dict[int, SpeakerAnatomicalLandmarks] = {}
+        for pos_id, med_x in pos_xs.items():
+            # ponytail: proxy all sub-landmarks with the median X; Y unknown
+            out[pos_id] = SpeakerAnatomicalLandmarks(
+                speaker_id=int(pos_id),
+                eyes_center_x=med_x, eyes_center_y=0.0,
+                left_eye_x=med_x, left_eye_y=0.0,
+                right_eye_x=med_x, right_eye_y=0.0,
+                nose_tip_x=med_x, nose_tip_y=0.0,
+                mouth_center_x=med_x, mouth_center_y=0.0,
+                chin_x=med_x, chin_y=0.0,
+                forehead_x=med_x, forehead_y=0.0,
+                anatomical_center_x=med_x,
+                anatomical_center_y=0.0,
+            )
+        return out
 
     @staticmethod
     def _calculate_dominant_speaker(

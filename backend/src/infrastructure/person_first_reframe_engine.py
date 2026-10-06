@@ -334,9 +334,9 @@ class PersonFirstReframeEngine(IReframeEngine):
                 if person is None:
                     continue
                 frame_face_x.append(face.center_x)
-                # A head and its body are two observations of ONE visual person.
-                # Keep the persistent body track as the identity/geometry anchor,
-                # and attach the head bbox for precise framing and headroom.
+                # ponytail: anatomical_center_x = face bbox center (best available
+                # proxy when full 68-pt mesh not extracted). Downstream `> 0` guard
+                # in _render_dynamic_panning/_render_single_crop passes.
                 frame_tracked_compat.append(TrackedDetection(
                     track_id=face.person_track_id,
                     bbox=person.bbox,
@@ -344,6 +344,7 @@ class PersonFirstReframeEngine(IReframeEngine):
                     is_new=person.is_new,
                     person_bbox=person.bbox,
                     face_bbox=face.bbox,
+                    anatomical_center_x=face.bbox.center_x,
                 ))
 
             # Also include persons without face detection (body-only anchor)
@@ -487,6 +488,7 @@ class PersonFirstReframeEngine(IReframeEngine):
                 stable_positions=tracked_data["stable_positions"],
                 sample_interval_sec=self.SAMPLE_INTERVAL_SEC,
                 track_to_position=tracked_data.get("track_to_position"),
+                per_frame_tracked=tracked_data.get("per_frame_tracked"),
             )
 
             logger.info("person_first_reframe: [OK] using DIARIZATION speaker detection")
