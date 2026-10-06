@@ -76,6 +76,12 @@ class PersonFirstReframeEngine(IReframeEngine):
     AUDIO_FILTER = "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS"
     VALID_TRANSITIONS = {"cut", "fade", "slide", "zoom"}
 
+    @staticmethod
+    def _clamp_crop_x(target_x: int, crop_w: int, frame_w: int) -> int:
+        """Clamp crop X so the crop stays within the source frame."""
+        max_crop_x = max(0, frame_w - crop_w)
+        return max(0, min(target_x - crop_w // 2, max_crop_x))
+
     def __init__(self, hf_token: Optional[str] = None):
         # Person detection (RF-DETR)
         self._person_detector = PersonDetector(
@@ -897,7 +903,7 @@ class PersonFirstReframeEngine(IReframeEngine):
                     keyframes.append((t, keyframes[-1][1], keyframes[-1][2]))
                 continue
 
-            crop_x = max(0, min(int(target_x) - crop_w // 2, max_crop_x))
+            crop_x = self._clamp_crop_x(int(target_x), crop_w, width)
             keyframes.append((t, crop_x, active_speaker))
 
         if not keyframes:
@@ -1008,7 +1014,7 @@ class PersonFirstReframeEngine(IReframeEngine):
             crop_h = (height // 2) * 2
         max_crop_x = max(0, width - crop_w)
         max_crop_y = max(0, height - crop_h)
-        crop_x = max(0, min(crop_center_x - crop_w // 2, max_crop_x))
+        crop_x = self._clamp_crop_x(crop_center_x, crop_w, width)
         crop_y = (max_crop_y // 2 // 2) * 2
         crop_x = (crop_x // 2) * 2
 

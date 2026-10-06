@@ -938,6 +938,46 @@ def test_panning_defaults_to_center_or_last_center_when_frame_is_empty():
     assert source == "last_center"
 
 
+# ─── Crop geometry: clamp behavior and vertical eye-level ──────────────────
+
+def test_panning_clamp_keeps_crop_within_source():
+    """_clamp_crop_x returns crop_x such that [crop_x, crop_x+crop_w] ⊆ [0, frame_w]."""
+    from src.infrastructure.person_first_reframe_engine import PersonFirstReframeEngine
+    engine = PersonFirstReframeEngine()
+    width, crop_w = 1920, 606
+    # Centered speaker → crop centered
+    crop_x = engine._clamp_crop_x(960, crop_w, width)
+    assert crop_x == 960 - crop_w // 2
+    assert 0 <= crop_x and crop_x + crop_w <= width
+    # Speaker near left edge → crop clamps to left wall
+    crop_x = engine._clamp_crop_x(50, crop_w, width)
+    assert crop_x == 0
+    # Speaker near right edge → crop clamps to right wall
+    crop_x = engine._clamp_crop_x(1870, crop_w, width)
+    assert crop_x == width - crop_w
+    # Edge case: crop_w == frame_w → no panning possible
+    crop_x = engine._clamp_crop_x(50, 1920, 1920)
+    assert crop_x == 0
+    # Edge case: crop_w > frame_w (should not happen, but defensive)
+    crop_x = engine._clamp_crop_x(50, 2000, 1920)
+    assert crop_x == 0
+
+
+def test_vertical_crop_y_uses_eyes_when_available():
+    """_clamp_grid_y positions eyes at ~38% down the panel when crop_h < frame_h."""
+    from src.infrastructure.podcast_reframe_engine import PodcastReframeEngine
+    crop_h = 960
+    frame_h = 1080
+    eyes_y = 200.0
+    crop_y = PodcastReframeEngine._clamp_grid_y(
+        face_y=240.0, face_height=140.0,
+        crop_h=crop_h, frame_h=frame_h,
+        eyes_y=eyes_y,
+    )
+    ratio = (eyes_y - crop_y) / crop_h
+    assert 0.20 <= ratio <= 0.45, f"eyes at {ratio:.2f}, expected 0.20-0.45"
+
+
 if __name__ == "__main__":
 
     test_single_visible_face_uses_stable_position_target()
