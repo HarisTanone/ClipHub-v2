@@ -63,7 +63,7 @@ PUBLIC_FRONTEND_URL="${PUBLIC_FRONTEND_URL:-http://$PUBLIC_HOST:$FRONTEND_PORT}"
 PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-http://$PUBLIC_HOST:$BACKEND_PORT}"
 AUTOCLIPER_PUBLIC_URL="${AUTOCLIPER_PUBLIC_URL:-https://jnck.cliperhub.web.id}"
 NINE_ROUTER_PORT="${NINE_ROUTER_PORT:-20128}"
-NINE_ROUTER_HOST="${NINE_ROUTER_HOST:-127.0.0.1}"
+NINE_ROUTER_HOST="${NINE_ROUTER_HOST:-100.64.5.96}"
 NINE_ROUTER_CLI_VERSION="${NINE_ROUTER_CLI_VERSION:-0.5.20}"
 NINE_ROUTER_DEFAULT_BASE_URL="http://$NINE_ROUTER_HOST:$NINE_ROUTER_PORT/v1"
 HERMES_HOME_DEPLOY="${HERMES_HOME:-$DEPLOY_HOME/.hermes}"
@@ -388,6 +388,14 @@ fi
 if [ -f ".env" ]; then
     append_env_if_missing ".env" "AUTOCLIPER_PUBLIC_URL" "$AUTOCLIPER_PUBLIC_URL"
     append_env_if_missing ".env" "CORS_ORIGINS" "$PUBLIC_FRONTEND_URL,http://$PUBLIC_HOST:3000,$AUTOCLIPER_PUBLIC_URL,https://cliperhub-tunnel.trycloudflare.com,https://jnck.cliperhub.web.id"
+
+    # 9router-only mode: point backend at the LLM gateway (host + port).
+    # Endpoint / key / model are configured via the admin panel (system settings);
+    # these defaults just make the gateway reachable.
+    append_env_if_missing ".env" "NINE_ROUTER_BASE_URL" "$NINE_ROUTER_DEFAULT_BASE_URL"
+    append_env_if_missing ".env" "NINE_ROUTER_API_KEY" "${NINE_ROUTER_API_KEY:-9router-default}"
+    append_env_if_missing ".env" "NINE_ROUTER_MODEL" "${NINE_ROUTER_MODEL:-nine-router}"
+    append_env_if_missing ".env" "ALLOW_DIRECT_PROVIDER_FALLBACKS" "${ALLOW_DIRECT_PROVIDER_FALLBACKS:-false}"
 
     # Auto-generate cryptographically secure JWT keys if default or missing
     CURRENT_JWT="$(env_value ".env" "JWT_SECRET_KEY" "")"

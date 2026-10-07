@@ -1496,7 +1496,7 @@ export function Settings() {
         label: "System & Administration",
         tabs: [
           { id: "system_config" as const, label: "Database & Env Config", icon: <HardDrive className="h-4 w-4" />, badge: "Dynamic DB", desc: "Konfigurasi variabel sistem tersimpan di DB" },
-          { id: "models" as const, label: "AI Models", icon: <BrainCircuit className="h-4 w-4" />, badge: "Superadmin", desc: "Routing 9Router LLM & Pool Gemini API Keys" },
+          { id: "models" as const, label: "AI Models", icon: <BrainCircuit className="h-4 w-4" />, badge: "Superadmin", desc: "Routing 9Router LLM" },
           { id: "users" as const, label: "Access Control & RBAC", icon: <ShieldCheck className="h-4 w-4" />, badge: "RBAC Matrix", desc: "Manajemen pengguna & hak akses role permission" },
           { id: "testing" as const, label: "Test & Deploy", icon: <Terminal className="h-4 w-4" />, badge: "Superadmin", desc: "Verifikasi pipeline test runner & deployment" },
         ],
@@ -1832,34 +1832,19 @@ export function Settings() {
                       <h3 className="text-xs font-semibold text-zinc-200">Pipeline Engine Mode</h3>
                     </div>
                     <p className="text-[11px] text-zinc-400 mb-3">
-                      Pilih engine AI default untuk pemrosesan kurasi video klip.
+                      9Router is the only supported AI routing path.
                     </p>
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleChange("pipeline_mode", "v1")}
-                        className={cn(
-                          "flex-1 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all text-left",
-                          settings.pipeline_mode === "v1"
-                            ? "border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-sm"
-                            : "border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                        )}
-                      >
-                        <span className="block text-[10px] uppercase font-bold text-emerald-400">V1 — Gemini</span>
-                        <span className="text-[11px] text-zinc-300">Multi-Key Pool & High Accuracy</span>
-                      </button>
                       <button
                         type="button"
                         onClick={() => handleChange("pipeline_mode", "v2")}
                         className={cn(
                           "flex-1 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all text-left",
-                          settings.pipeline_mode === "v2"
-                            ? "border-blue-500 bg-blue-500/10 text-blue-400 shadow-sm"
-                            : "border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                          "border-blue-500 bg-blue-500/10 text-blue-400 shadow-sm"
                         )}
                       >
                         <span className="block text-[10px] uppercase font-bold text-blue-400">V2 — 9Router</span>
-                        <span className="text-[11px] text-zinc-300">Local Gateway & LLM Fallback</span>
+                        <span className="text-[11px] text-zinc-300">OpenAI-compatible gateway</span>
                       </button>
                     </div>
                   </Card>
@@ -2397,7 +2382,7 @@ export function Settings() {
               <div className="flex items-center gap-2.5">
                 <BrainCircuit className="h-4 w-4 text-violet-400 shrink-0" />
                 <span className="text-zinc-300">
-                  Monitoring status LLM model 9Router, fallback provider, kuota Gemini API key pool, dan latensi benchmark.
+                  Monitoring status LLM model 9Router dan latensi benchmark.
                 </span>
               </div>
               <Badge variant="default" className="text-[10px]">Superadmin Access</Badge>
@@ -2436,7 +2421,7 @@ export function Settings() {
                         value={modelEdits[s.key] ?? ""}
                         onChange={(e) => setModelEdits((p) => ({ ...p, [s.key]: e.target.value }))}
                         className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none transition-colors"
-                        placeholder={s.key}
+                        placeholder={s.key === "NINE_ROUTER_BASE_URL" ? "http://100.64.5.96:20128/v1" : s.key}
                       />
                       {s.updated_at && (
                         <p className="text-[9px] text-zinc-700 mt-0.5">Updated: {new Date(s.updated_at).toLocaleString()}</p>
@@ -4767,6 +4752,35 @@ export function Settings() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {sysConfigItems
                   .filter((item) => {
+                    // 9router-only: hide legacy direct-provider LLM keys from panel.
+                    // All LLM routing is now via 9router (managed in "AI Models" tab).
+                    // These keys remain in DB/env only as dormant fallbacks behind
+                    // ALLOW_DIRECT_PROVIDER_FALLBACKS=false.
+                    const HIDDEN_KEYS = new Set([
+                      "GEMINI_API_KEY",
+                      "GEMINI_MODEL",
+                      "GEMINI_FALLBACK_MODEL",
+                      "GROQ_API_KEY",
+                      "GROQ_LLM_MODEL",
+                      "GROQ_WHISPER_MODEL",
+                      "OLLAMA_BASE_URL",
+                      "OLLAMA_MODEL",
+                      "LLM_ROTATE_ALL",
+                      "LLM_PROVIDER",
+                      "ALLOW_DIRECT_PROVIDER_FALLBACKS",
+                      "TRANSCRIPTION_PROVIDER",
+                      // 9router LLM key/model moved to "AI Models" tab (avoid dup)
+                      "NINE_ROUTER_BASE_URL",
+                      "NINE_ROUTER_API_KEY",
+                      "NINE_ROUTER_MODEL",
+                      "NINE_ROUTER_PASS1_MODEL",
+                      "NINE_ROUTER_PASS2_MODEL",
+                      "NINE_ROUTER_AI_LAYER_MODEL",
+                      "NINE_ROUTER_MODEL_PASS1",
+                      "NINE_ROUTER_MODEL_PASS2",
+                      "NINE_ROUTER_MODEL_AI_LAYER",
+                    ]);
+                    if (HIDDEN_KEYS.has(item.key)) return false;
                     if (sysConfigCategory !== "all" && item.category !== sysConfigCategory) return false;
                     if (sysConfigSearch.trim()) {
                       const q = sysConfigSearch.toLowerCase();

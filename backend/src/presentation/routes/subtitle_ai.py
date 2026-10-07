@@ -6,10 +6,8 @@ from typing import Optional, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from src.infrastructure.auth import GeminiKeyRotator
 from src.config import settings
-from google import genai
-from google.genai import types
+from src.infrastructure.nine_router_client import get_nine_router_client
 
 logger = logging.getLogger(__name__)
 
@@ -212,23 +210,25 @@ def _parse_with_local_rules(prompt: str, current_style: Optional[dict[str, Any]]
 
 @router.post("/subtitle-ai-generate", response_model=SubtitleAIGenerateResponse)
 async def generate_subtitle_with_ai(req: SubtitleAIGenerateRequest):
-    """Generate dynamic subtitle styling parameters from natural language prompt."""
+    """Generate dynamic subtitle styling parameters from natural language prompt.
+
+    9router is the only LLM path. Endpoint/key/model all come from the
+    9router panel via system settings.
+    """
     prompt = req.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt tidak boleh kosong")
 
-    rotator = GeminiKeyRotator()
-    key = rotator.get_current_key()
-
     fallback_style = _parse_with_local_rules(prompt, req.current_style)
 
-    if not key:
-        logger.info("gemini_key_missing: using fast local rule parser for subtitle generation")
+    client = get_nine_router_client()
+    if not client.is_configured:
+        logger.info("subtitle_ai: 9router not configured — using fast local rule parser")
         return SubtitleAIGenerateResponse(
             ok=True,
             subtitle_style=fallback_style,
             explanation=f"Gaya subtitle AI berhasil dibuat berdasarkan instruksi: '{prompt}'",
-            highlight_keywords=fallback_style.get("highlightWords", [])  # ponytail: no hardcode fallback,
+            highlight_keywords=fallback_style.get("highlightWords", []),
         )
 
     system_instruction = """You are an expert typography and video motion designer specializing in viral short-form video subtitles (TikTok, Reels, YouTube Shorts).
@@ -277,29 +277,26 @@ The JSON output must strictly adhere to these field types:
 }
 Output ONLY valid JSON."""
 
+    messages = [
+        {"role": "system", "content": system_instruction},
+        {"role": "user", "content": (
+            f"User Prompt: {prompt}\n"
+            f"Video Context: {req.video_context or 'Short-form viral video clip'}\n"
+            f"Current Style: {json.dumps(req.current_style or {})}"
+        )},
+    ]
+
     try:
-        client = genai.Client(api_key=key)
-        model_name = settings.GEMINI_MODEL or "gemini-2.0-flash"
-        
-        response = client.models.generate_content(
-            model=model_name,
-            contents=[
-                f"User Prompt: {prompt}\nVideo Context: {req.video_context or 'Short-form viral video clip'}\nCurrent Style: {json.dumps(req.current_style or {})}"
-            ],
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                temperature=0.3,
-            ),
+        raw_text = client.complete_json(
+            prompt=messages[1]["content"],
+            system_prompt=messages[0]["content"],
+            max_tokens=2000,
+            temperature=0.3,
         )
-
-        raw_text = response.text or ""
         parsed = json.loads(raw_text)
-
-        # Merge with fallback to guarantee all keys exist
         merged_style = {**fallback_style, **parsed}
         explanation = parsed.get("explanation") or f"Gaya subtitle AI berhasil dibuat berdasarkan: '{prompt}'"
-        highlight_keywords = parsed.get("highlightWords") or merged_style.get("highlightWords") or []  # ponytail: dynamic from AI
+        highlight_keywords = parsed.get("highlightWords") or merged_style.get("highlightWords") or []
 
         return SubtitleAIGenerateResponse(
             ok=True,
@@ -309,10 +306,10 @@ Output ONLY valid JSON."""
         )
 
     except Exception as e:
-        logger.warning(f"gemini_subtitle_ai_error: {e} -> fallback to local rule parser")
+        logger.warning(f"subtitle_ai: 9router failed ({e}) -> fallback to local rule parser")
         return SubtitleAIGenerateResponse(
             ok=True,
             subtitle_style=fallback_style,
             explanation=f"Gaya subtitle AI (mode cerdas) berhasil diterapkan berdasarkan: '{prompt}'",
-            highlight_keywords=fallback_style.get("highlightWords", [])  # ponytail: no hardcode fallback,
+            highlight_keywords=fallback_style.get("highlightWords", []),
         )

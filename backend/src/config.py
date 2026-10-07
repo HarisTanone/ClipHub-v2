@@ -15,11 +15,13 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = ""
 
     # === Model routing ===
-    # 9router is the default LLM gateway. Direct provider fallbacks stay off in
-    # production so Gemini/Groq keys are not used accidentally.
+    # 9router is the ONLY LLM gateway for chat completions. Direct provider
+    # fallbacks (Gemini/Groq keys called directly from backend code) are
+    # disabled by default so that endpoint + key + model/combination come
+    # exclusively from the 9router panel.
     LLM_PROVIDER: str = "nine_router"
     FORCE_V2_PIPELINE: bool = True
-    ALLOW_DIRECT_PROVIDER_FALLBACKS: bool = True
+    ALLOW_DIRECT_PROVIDER_FALLBACKS: bool = False
     # Legacy value retained for existing deployments. When 9router is
     # configured, Whisper calls are router-first with an automatic local fallback.
     TRANSCRIPTION_PROVIDER: str = "local"

@@ -703,67 +703,28 @@ class HermesTrendingService:
         return results
 
     async def _call_gemini_json(self, system_prompt: str, user_prompt: str) -> Optional[str]:
-        """Call Gemini model via Direct API with automatic key rotation."""
-        from src.infrastructure.auth import get_gemini_key_rotator, is_gemini_rate_limit_error
+        """Call LLM via 9router (OpenAI-compatible). Returns JSON string or None.
 
-        rotator = get_gemini_key_rotator()
-        keys = rotator.get_available_keys()
-        if not keys and getattr(settings, "GEMINI_API_KEY", ""):
-            keys = [settings.GEMINI_API_KEY]
+        Model + key + endpoint are configured via the 9router admin panel
+        (system_settings: NINE_ROUTER_BASE_URL, NINE_ROUTER_API_KEY,
+        NINE_ROUTER_MODEL). No hardcoded model list.
+        """
+        try:
+            from src.infrastructure.nine_router_client import get_nine_router_client
 
-        if not keys:
-            logger.warning("hermes_trending: No Gemini API keys configured.")
+            client = get_nine_router_client()
+            if not client.is_configured:
+                logger.warning("hermes_trending: 9router not configured — skipping LLM analysis")
+                return None
+            return client.complete_json(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                max_tokens=2000,
+                temperature=0.5,
+            )
+        except Exception as e:
+            logger.warning(f"hermes_trending: 9router call failed: {e}")
             return None
-
-        models = [
-            "gemini-3.8-flash",
-            "gemini-3.7-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-pro",
-        ]
-
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}],
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.5,
-                "responseMimeType": "application/json",
-            },
-        }
-
-        for model in models:
-            for key in keys:
-                if rotator.is_key_rate_limited(key):
-                    continue
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-                try:
-                    async with httpx.AsyncClient(timeout=25) as client:
-                        resp = await client.post(url, json=payload)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        candidates = data.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            if parts:
-                                return parts[0].get("text", "")
-                    elif resp.status_code == 429:
-                        rotator.mark_rate_limited(key=key, retry_after=60.0)
-                except Exception as ex:
-                    is_rl, retry_sec = is_gemini_rate_limit_error(ex)
-                    if is_rl:
-                        rotator.mark_rate_limited(key=key, retry_after=retry_sec)
-                    continue
-
-        return None
 
     # ─── 5. Main Aggregated Method ────────────────────────────────────────────
 

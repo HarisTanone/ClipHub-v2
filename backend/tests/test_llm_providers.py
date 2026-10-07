@@ -112,25 +112,13 @@ def test_auth_guard(client):
     assert r.status_code in (401, 403)
 
 
-def test_chain_off_is_gemini_only(monkeypatch):
+def test_chain_is_nine_router_only():
+    """Chain is always 9router regardless of LLM_ROTATE_ALL (deprecated)."""
     from src.infrastructure import llm_router
     from src.infrastructure.system_config_store import set_system_setting
 
     set_system_setting("LLM_ROTATE_ALL", False)
-    chain = llm_router.get_llm_chain()
-    assert [c["kind"] for c in chain] == ["gemini"]
+    assert [c["kind"] for c in llm_router.get_llm_chain()] == ["nine_router"]
 
-
-def test_chain_on_includes_enabled_customs(client, auth_headers):
-    from src.infrastructure import llm_router
-    from src.infrastructure.system_config_store import set_system_setting
-
-    _add(client, auth_headers, name="t-glm")
-    try:
-        set_system_setting("LLM_ROTATE_ALL", True)
-        chain = llm_router.get_llm_chain()
-        kinds = [c["kind"] for c in chain]
-        assert kinds[0] == "gemini"
-        assert "custom" in kinds
-    finally:
-        set_system_setting("LLM_ROTATE_ALL", False)
+    set_system_setting("LLM_ROTATE_ALL", True)
+    assert [c["kind"] for c in llm_router.get_llm_chain()] == ["nine_router"]

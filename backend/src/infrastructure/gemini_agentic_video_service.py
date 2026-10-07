@@ -1,21 +1,10 @@
-"""Gemini Agentic Video Understanding Service.
+"""GeminiAgenticVideoUnderstanding — Gemini native multimodal video analysis.
 
-Follows official Gemini Agentic Video Understanding principles:
-https://ai.google.dev/gemini-api/docs/video-understanding#agentic-video-understanding
-
-Key Capabilities:
-1. Agentic Video & Narrative Alignment:
-   Inspects video footage dynamically across its timeline using Gemini's Agentic Video
-   Understanding (processing="agentic") to verify that the video visually matches the spoken
-   narration, calculates semantic alignment scores, and identifies the exact best timestamp
-   interval [best_start_timestamp, best_end_timestamp] for seamless visual-audio harmony.
-2. Multi-Candidate Curated Selection:
-   Evaluates multiple candidate footage files for a scene and picks the footage with the highest
-   semantic harmony with the story and narration.
-3. Dynamic Subtitle & Context Reasoning:
-   Generates targeted English visual search queries when local keywords require stock b-roll.
-4. Candidate Verification:
-   Filters out banned or abstract nonsense visuals.
+NOTE: Video understanding (multimodal video + text) requires Gemini's native
+Files API and is NOT proxied by 9router. This service is the exception to the
+"9router-only" policy — for text chat completions we strictly go through
+9router, but for true video understanding Gemini is still required. All other
+AI text paths in the backend MUST use 9router.
 """
 from __future__ import annotations
 

@@ -27,8 +27,9 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "is_secret": False,
         "default": False,
         "description": (
-            "Rotasi LLM semua provider: off = hanya Gemini, on = Gemini + semua "
-            "provider custom aktif (failover berantai)"
+            "DEPRECATED: tidak dipakai lagi setelah migrasi 9router-only. "
+            "Semua chat completion kini melewati 9router; endpoint + key + "
+            "model/combination dikelola langsung dari dashboard 9router."
         ),
     },
     "LLM_PROVIDER": {
@@ -37,7 +38,7 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "min_role": "superadmin",
         "is_secret": False,
         "default": "nine_router",
-        "description": "Provider utama LLM (nine_router, groq, gemini, ollama)",
+        "description": "Gateway LLM satu-satunya. Selalu nine_router.",
     },
     "FORCE_V2_PIPELINE": {
         "category": "ai_llm",
@@ -52,8 +53,12 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "data_type": "bool",
         "min_role": "superadmin",
         "is_secret": False,
-        "default": True,
-        "description": "Izinkan fallback langsung ke Gemini/Groq jika 9router gagal",
+        "default": False,
+        "description": (
+            "Izinkan backend memanggil Gemini/Groq secara langsung ketika "
+            "9router gagal. Default false — semua chat completion wajib via "
+            "9router untuk jaga satu sumber kebenaran endpoint/key/model."
+        ),
     },
     "TRANSCRIPTION_PROVIDER": {
         "category": "ai_llm",

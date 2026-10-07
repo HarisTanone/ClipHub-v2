@@ -10,9 +10,6 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
 
 const PROVIDER_ICONS: Record<string, string> = {
   "9router": "9",
-  gemini: "G",
-  groq: "Q",
-  ollama: "O",
 };
 
 export function ModelStatusPanel() {

@@ -1,11 +1,19 @@
-"""GeminiAnalyzer — Multi-phase YouTube video analysis via Gemini.
+"""GeminiAnalyzer — multimodal YouTube video analysis (video understanding only).
 
-v2.0 Decomposed Analysis:
-  Phase 1 (video): Clip selection + scoring + creative direction
-  Phase 2 (text):  Hook refinement + b-roll placement per clip
+IMPORTANT: This analyzer performs GEMINI-NATIVE multimodal video understanding
+(Phase 1: video → clip candidates). It cannot be proxied through 9router
+because 9router only forwards OpenAI-compatible /chat/completions text; it has
+no video-input support.
 
-This decomposition improves output quality because each call has a focused task.
-Phase 1 requires video understanding (expensive). Phase 2 is text-only (cheap & fast).
+Per the "9router-only" policy, this module is retained ONLY for video
+understanding. Text-only LLM calls (hooks, b-roll, story, subtitle AI,
+transcript analysis, whisper) MUST go through 9router — see llm_router /
+story_agent / subtitle_ai / groq_transcriber / groq_analyzer /
+highlight_analyzer, all of which have been migrated.
+
+This module raises when ALLOW_DIRECT_PROVIDER_FALLBACKS=false AND no Gemini
+key is configured, so a deployment that wants strict 9router-only text
+generation can leave video understanding off.
 """
 import asyncio
 import json

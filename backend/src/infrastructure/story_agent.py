@@ -268,26 +268,14 @@ class StoryAgent:
                 logger.warning(f"story_agent: attempt {attempt + 1} failed: {e}")
                 time.sleep(1.5)
 
-        # Fallback to direct Gemini if 9router output failed
-        if getattr(settings, "ALLOW_DIRECT_PROVIDER_FALLBACKS", True) and settings.gemini_api_keys:
-            try:
-                logger.info("story_agent: attempting fallback to direct Gemini")
-                raw_gemini = self._call_gemini(prompt)
-                story = self._parse_response(raw_gemini, topic)
-                story = self._validate_and_fix(story, target_duration)
-                if len(story.get("scenes", [])) >= 2:
-                    return story
-            except Exception as gemini_err:
-                logger.error(f"story_agent: direct Gemini fallback failed: {gemini_err}")
-
+        # 9router is the only LLM path now. If it failed after retries, surface
+        # the last error — no direct-provider fallback (endpoint + key + model
+        # all come from the 9router panel).
         raise StoryGenerationError(f"Story generation failed after {self._max_retries} attempts: {last_error}")
 
     def _call_llm(self, prompt: str, attempt: int = 0) -> str:
-        """Call LLM via 9Router or Gemini fallback."""
-        if settings.use_nine_router:
-            return self._call_nine_router(prompt, attempt=attempt)
-        else:
-            return self._call_gemini(prompt)
+        """Call LLM via 9router. Direct-provider fallbacks are disabled."""
+        return self._call_nine_router(prompt, attempt=attempt)
 
     def _call_nine_router(self, prompt: str, attempt: int = 0) -> str:
         """Call 9Router for story generation."""
@@ -297,9 +285,9 @@ class StoryAgent:
         temp = 0.5 if attempt > 0 else 0.7
 
         primary_model = settings.get_nine_router("NINE_ROUTER_PASS2_MODEL") or settings.nine_router_model
-        # Rotate model on repeated retry attempts to prevent stuck on a single broken upstream combo
-        model_candidates = [primary_model, "gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
-        model_to_use = model_candidates[attempt % len(model_candidates)] if attempt > 0 else primary_model
+        # 9router combo decides the actual upstream model; we pass the
+        # configured alias and let the router route it.
+        model_to_use = primary_model
 
         for retry in range(self._max_retries):
             try:
@@ -327,82 +315,6 @@ class StoryAgent:
                 time.sleep(2)
 
         raise StoryGenerationError("LLM max retries exceeded")
-
-    def _call_gemini(self, prompt: str) -> str:
-        """Fallback: call Gemini directly."""
-        import httpx
-
-        from src.infrastructure.auth import get_gemini_key_rotator, is_gemini_rate_limit_error
-
-        rotator = get_gemini_key_rotator()
-        keys = rotator.get_available_keys()
-        if not keys:
-            raise StoryGenerationError("No Gemini API key configured")
-
-        gemini_models = [
-            settings.GEMINI_MODEL or "gemini-2.5-flash",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-        ]
-        models_to_try = [m for i, m in enumerate(gemini_models) if m and m not in gemini_models[:i]]
-
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": f"{STORY_SYSTEM_PROMPT}\n\n{prompt}"}
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 4096,
-                "responseMimeType": "application/json",
-            },
-        }
-
-        last_gemini_err = ""
-        for attempt in range(self._max_retries):
-            available_keys = rotator.get_available_keys()
-            api_key = available_keys[0] if available_keys else keys[attempt % len(keys)]
-            model = models_to_try[attempt % len(models_to_try)]
-            url = (
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-                f":generateContent?key={api_key}"
-            )
-            try:
-                with httpx.Client(timeout=settings.GEMINI_TIMEOUT) as client:
-                    resp = client.post(url, json=payload)
-
-                if resp.status_code == 429:
-                    rotator.mark_rate_limited(key=api_key, retry_after=60.0)
-                    time.sleep(1)
-                    continue
-
-                if resp.status_code != 200:
-                    last_gemini_err = f"Gemini API error {resp.status_code}: {resp.text[:200]}"
-                    continue
-
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    last_gemini_err = "Gemini returned no candidates"
-                    continue
-
-                content = candidates[0].get("content", {})
-                parts = content.get("parts", [])
-                if not parts:
-                    last_gemini_err = "Gemini returned empty parts"
-                    continue
-
-                return parts[0].get("text", "")
-
-            except Exception as e:
-                last_gemini_err = str(e)
-                time.sleep(1.5)
-
-        raise StoryGenerationError(f"Direct Gemini fallback failed: {last_gemini_err}")
 
     def _parse_response(self, raw: str, topic: str) -> dict:
         """Parse LLM JSON response to structured story dict with truncated JSON repair."""

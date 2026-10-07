@@ -1,4 +1,13 @@
-"""9router OpenAI-compatible chat completions client."""
+"""9router OpenAI-compatible chat completions client.
+
+The OpenAI-compatible gateway (9router) decides which combo/model to use based
+on its own config. We do NOT force a specific upstream model from the backend —
+that's the gateway's job. The `model` parameter is kept for backwards
+compatibility but is treated as a *hint*: when set to one of the backend's
+9router aliases (NINE_ROUTER_MODEL, NINE_ROUTER_PASS1_MODEL, etc.) we resolve
+it to the actual model name configured in the panel; otherwise we let 9router
+route on its default combo.
+"""
 from __future__ import annotations
 
 import logging
@@ -32,9 +41,9 @@ class NineRouterClient:
         self.api_key = api_key if api_key is not None else (settings.get_nine_router("NINE_ROUTER_API_KEY") or settings.NINE_ROUTER_API_KEY)
         self.timeout = int(timeout or settings.get_nine_router("NINE_ROUTER_TIMEOUT") or settings.NINE_ROUTER_TIMEOUT)
         self.max_retries = int(max_retries or settings.get_nine_router("NINE_ROUTER_MAX_RETRIES") or settings.NINE_ROUTER_MAX_RETRIES)
-        # When False, chat() first tries the system LLM router chain
-        # (Gemini + custom providers); this client stays the last-resort
-        # fallback inside llm_router (constructed there with bypass_router=True).
+        # When True, this client is used *directly* against 9router without
+        # being wrapped by llm_router (which would add another hop).
+        # Kept for compatibility with llm_router.route_chat.
         self._bypass_router = bypass_router
 
     @property
@@ -50,23 +59,11 @@ class NineRouterClient:
         response_format: Optional[dict[str, Any]] = None,
     ) -> str:
         """Call 9router and return the first message content as text."""
-        if not self._bypass_router:
-            try:
-                from src.infrastructure.llm_router import route_chat
-                return route_chat(
-                    messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    require_json=response_format is not None,
-                )
-            except Exception as exc:
-                # Router chain down → fall through to legacy direct 9router.
-                logger.warning(f"nine_router: llm_router chain failed ({str(exc)[:200]}), falling back to direct 9router")
         if not self.base_url:
             raise NineRouterError("NINE_ROUTER_BASE_URL belum dikonfigurasi")
 
         payload: dict[str, Any] = {
-            "model": model or settings.nine_router_model,
+            "model": self._resolve_model_hint(model),
             "messages": messages,
             "temperature": (
                 settings.NINE_ROUTER_TEMPERATURE
@@ -87,6 +84,29 @@ class NineRouterClient:
                 payload.pop("response_format", None)
                 return self._post_chat(payload)
             raise
+
+    def _resolve_model_hint(self, model: Optional[str]) -> str:
+        """Resolve backend-side aliases to the model name configured in the panel.
+
+        Backend callers sometimes pass aliases like "nine_router", "gemini-flash",
+        "story", "pass1", "pass2", "ai_layer" — these are mapped to the actual
+        9router model name stored in system settings. Any other string is
+        treated as an upstream model name and passed through verbatim so the
+        9router combo can decide whether to use it.
+        """
+        hints = {
+            "nine_router": settings.get_nine_router("NINE_ROUTER_MODEL"),
+            "gemini-flash": settings.get_nine_router("NINE_ROUTER_MODEL"),
+            "story": settings.get_nine_router("NINE_ROUTER_MODEL"),
+            "pass1": settings.get_nine_router("NINE_ROUTER_PASS1_MODEL"),
+            "pass2": settings.get_nine_router("NINE_ROUTER_PASS2_MODEL"),
+            "ai_layer": settings.get_nine_router("NINE_ROUTER_AI_LAYER_MODEL"),
+        }
+        if model and model.lower() in hints:
+            val = hints[model.lower()]
+            if val:
+                return val
+        return model or settings.get_nine_router("NINE_ROUTER_MODEL") or settings.NINE_ROUTER_MODEL
 
     def complete_json(
         self,

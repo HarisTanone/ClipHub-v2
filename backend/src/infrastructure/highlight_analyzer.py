@@ -1,12 +1,10 @@
-"""HighlightAnalyzer — LLM fallback chain for viral clip analysis.
+"""HighlightAnalyzer — 9router-only highlight analysis.
 
-Strategy:
-1. 9router (primary) — OpenAI-compatible model combo
-2. Optional direct providers only when ALLOW_DIRECT_PROVIDER_FALLBACKS=true
-3. Ollama local (last resort) when direct fallbacks are allowed
-
-Each LLM receives the same prompt and returns the same HighlightAnalysisResult.
-If one fails, the next in chain is tried automatically.
+All LLM calls go through 9router (OpenAI-compatible gateway). Direct provider
+paths (Groq / Gemini / Ollama) are retained only as guarded fallbacks and are
+reachable only when ALLOW_DIRECT_PROVIDER_FALLBACKS=true — which is off by
+default. When they are enabled, they are tried in priority order after 9router
+fails so legacy deployments can still run.
 """
 import asyncio
 import json
@@ -29,45 +27,28 @@ class HighlightAnalyzerError(Exception):
 
 
 class HighlightAnalyzer:
-    """Multi-LLM highlight analyzer with automatic fallback chain."""
+    """Highlight analyzer — 9router primary, guarded direct fallbacks."""
 
     def __init__(self):
         self._use_nine_router = settings.use_nine_router
-        self._gemini_keys = settings.gemini_api_keys
-        self._groq_key = settings.GROQ_API_KEY
-        self._ollama_url = settings.OLLAMA_BASE_URL
+        self._allow_direct = bool(getattr(settings, "ALLOW_DIRECT_PROVIDER_FALLBACKS", False))
+        self._gemini_keys = settings.gemini_api_keys if self._allow_direct else []
+        self._groq_key = settings.GROQ_API_KEY if self._allow_direct else ""
+        self._ollama_url = settings.OLLAMA_BASE_URL if self._allow_direct else ""
 
     async def analyze_highlights(
         self, transcript: TranscriptResult, video_duration: float, max_clips: int
     ) -> HighlightAnalysisResult:
-        """Analyze transcript for viral clips using best available LLM.
-        
-        Chain: Groq LLM (primary) → Gemini (fallback) → Ollama (last resort)
-        Groq is preferred: fast, 128K context, reliable JSON mode.
+        """Analyze transcript for viral clips via 9router.
+
+        9router is always tried first. Direct Groq / Gemini / Ollama fallbacks
+        only run when ALLOW_DIRECT_PROVIDER_FALLBACKS=true (default false).
         """
         from src.infrastructure.model_status import ModelStatusTracker
         tracker = ModelStatusTracker()
         errors = []
 
-        # ─── 1. Try Direct Groq LLM (PRIMARY — Ultra fast ~1.5s, 128K context) ──
-        if self._groq_key and tracker.is_available("groq_llm"):
-            try:
-                logger.info("highlight_analyzer: trying Direct Groq LLM (primary)")
-                result = await self._analyze_with_groq(transcript, video_duration, max_clips)
-                if result and result.clips:
-                    logger.info(f"highlight_analyzer: Groq LLM success — {len(result.clips)} clips")
-                    tracker.mark_success("groq_llm")
-                    return result
-                logger.warning("highlight_analyzer: Groq LLM returned empty result")
-            except Exception as e:
-                errors.append(f"Groq: {e}")
-                logger.warning(f"highlight_analyzer: Groq LLM failed: {e}")
-                if "413" in str(e) or "429" in str(e) or "rate" in str(e).lower():
-                    tracker.mark_rate_limited("groq_llm", 60, str(e)[:200])
-                else:
-                    tracker.mark_error("groq_llm", str(e)[:200])
-
-        # ─── 2. Try 9router (Fast Secondary) ──────────────────────────
+        # ─── 1. 9router (PRIMARY — only always-on path) ─────────────
         if self._use_nine_router and tracker.is_available("nine_router"):
             try:
                 logger.info("highlight_analyzer: trying 9router")
@@ -87,40 +68,55 @@ class HighlightAnalyzer:
                 else:
                     tracker.mark_error("nine_router", str(e)[:200])
 
-        # ─── 3. Try Gemini Text (fallback — 1M context) ───────────────
+        if not self._allow_direct:
+            raise HighlightAnalyzerError(
+                "9router gagal dan ALLOW_DIRECT_PROVIDER_FALLBACKS=false: "
+                f"{' | '.join(errors)}"
+            )
+
+        # ─── 2. Direct Groq LLM (only when explicitly enabled) ─────
+        if self._groq_key and tracker.is_available("groq_llm"):
+            try:
+                logger.info("highlight_analyzer: guarded fallback → Groq LLM")
+                result = await self._analyze_with_groq(transcript, video_duration, max_clips)
+                if result and result.clips:
+                    tracker.mark_success("groq_llm")
+                    return result
+            except Exception as e:
+                errors.append(f"Groq: {e}")
+                if "413" in str(e) or "429" in str(e) or "rate" in str(e).lower():
+                    tracker.mark_rate_limited("groq_llm", 60, str(e)[:200])
+                else:
+                    tracker.mark_error("groq_llm", str(e)[:200])
+
+        # ─── 3. Direct Gemini (only when explicitly enabled) ───────
         if self._gemini_keys and tracker.is_available("gemini"):
             try:
-                logger.info("highlight_analyzer: trying Gemini Text (fallback)")
+                logger.info("highlight_analyzer: guarded fallback → Gemini")
                 result = await self._analyze_with_gemini(transcript, video_duration, max_clips)
                 if result and result.clips:
-                    logger.info(f"highlight_analyzer: Gemini success — {len(result.clips)} clips")
                     tracker.mark_success("gemini")
                     return result
-                logger.warning("highlight_analyzer: Gemini returned empty result")
             except Exception as e:
                 errors.append(f"Gemini: {e}")
-                logger.warning(f"highlight_analyzer: Gemini failed: {e}")
                 if "429" in str(e) or "quota" in str(e).lower():
                     tracker.mark_exhausted("gemini", str(e)[:200])
                 else:
                     tracker.mark_error("gemini", str(e)[:200])
 
-        # ─── 4. Ollama local (last resort — slow but guaranteed) ──────
+        # ─── 4. Ollama local (only when explicitly enabled) ────────
         try:
-            logger.info("highlight_analyzer: trying Ollama (last resort)")
+            logger.info("highlight_analyzer: guarded fallback → Ollama")
             from src.infrastructure.ollama_analyzer import OllamaAnalyzer
             analyzer = OllamaAnalyzer()
             result = await analyzer.analyze_highlights(transcript, video_duration, max_clips)
             if result and result.clips:
-                logger.info(f"highlight_analyzer: Ollama success — {len(result.clips)} clips")
                 tracker.mark_success("ollama")
                 return result
         except Exception as e:
             errors.append(f"Ollama: {e}")
-            logger.error(f"highlight_analyzer: Ollama failed: {e}")
             tracker.mark_error("ollama", str(e)[:200])
 
-        # All failed
         raise HighlightAnalyzerError(
             f"All LLM backends failed: {'; '.join(errors)}"
         )

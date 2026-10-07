@@ -1,14 +1,18 @@
-"""DB-backed LLM provider registry for the system-wide LLM router.
+"""DB-backed LLM provider registry (DEPRECATED — 9router-only mode).
 
-Providers live in the `llm_providers` table (superadmin-managed via
-/api/settings/llm-providers). Each row = one OpenAI-compatible endpoint.
+⚠ This table is NOT used for chat completion routing. Since the 9router-only
+migration, ALL AI text/JSON/transcription calls go through 9router, whose
+endpoint, key, and model/combination are configured from the admin panel
+(system settings: NINE_ROUTER_BASE_URL, NINE_ROUTER_API_KEY, NINE_ROUTER_MODEL,
+NINE_ROUTER_PASS1_MODEL, NINE_ROUTER_PASS2_MODEL, NINE_ROUTER_AI_LAYER_MODEL).
 
-The active chain is resolved by `llm_router.get_llm_chain()`:
-- LLM_ROTATE_ALL = false (default) -> Gemini only
-- LLM_ROTATE_ALL = true -> Gemini + all enabled custom providers in priority order
+The `llm_providers` table is retained as an audit log of legacy rows and for
+migration tooling. `llm_router.get_llm_chain()` ALWAYS returns
+[{"kind": "nine_router"}] regardless of what rows live in this table.
 
-Gemini itself is pinned and read from .env (GEMINI_API_KEY / GEMINI_MODEL /
-GEMINI_FALLBACK_MODEL) — it is not a row in this table.
+Do NOT use this store for chat completions. Direct Gemini/Groq keys live in
+system settings (GEMINI_API_KEY / GROQ_API_KEY) and are only reachable via
+ALLOW_DIRECT_PROVIDER_FALLBACKS=true, which is off by default.
 """
 import logging
 from typing import Any, Optional
