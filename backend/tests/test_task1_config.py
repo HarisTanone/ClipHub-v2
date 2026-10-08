@@ -33,8 +33,10 @@ def test_config_nine_router_settings():
 
 def test_config_v2_pipeline_settings():
     assert settings.V2_PIPELINE_ENABLED is True
-    assert settings.V2_CHUNK_MAX_SECONDS == 600
-    assert settings.V2_CHUNK_MAX_CHARS == 4000
+    assert settings.V2_CHUNK_MIN_SECONDS == 300
+    assert settings.V2_CHUNK_MAX_SECONDS == 480
+    assert settings.V2_CHUNK_OVERLAP_SECONDS == 40
+    assert settings.V2_CHUNK_MAX_CHARS == 7500
     assert settings.V2_AUDIO_PADDING_SECONDS == 3.0
     assert settings.V2_VAD_SEARCH_RADIUS == 2.0
     assert settings.V2_VAD_MIN_SILENCE_MS == 300

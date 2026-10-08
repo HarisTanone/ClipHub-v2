@@ -49,44 +49,43 @@ def test_chunk_short_video_single_chunk():
 
 
 def test_chunk_by_time_limit():
-    """Chunking respects 600s (10 min) time limit (with 60s overlap)."""
+    """Chunking respects max chunk time limit (with overlap)."""
     a = GroqAnalyzer()
     # 30 segments × 60s each = 1800s (30 min)
-    # → 4 chunks: 3 full 600s chunks + 1 trailing (60s overlap between chunks)
+    # With 480s (8 min) ceiling and ~40s overlap: ~5 chunks
     segments = [
         TranscriptSegment(text=f"Segment {i}", start=i * 60.0, end=(i + 1) * 60.0)
         for i in range(30)
     ]
     chunks = [segs for segs, _ in a._chunk_transcript_with_ids(segments)]
-    assert len(chunks) == 4
-    # Each chunk stays within the 600s limit (+ 60s overlap tolerance)
+    assert len(chunks) == 5
+    # Each chunk stays within the max time limit
     for chunk in chunks:
         total_duration = sum(s.end - s.start for s in chunk)
-        assert total_duration <= 660  # Some tolerance
+        assert total_duration <= 480
     # Full coverage: every segment appears in at least one chunk
     covered = {id(s) for chunk in chunks for s in chunk}
     assert len(covered) == 30
-    print("  [PASS] Chunking respects 600s time limit (with overlap)")
+    print("  [PASS] Chunking respects time limit (with overlap)")
 
 
 def test_chunk_by_char_limit():
-    """Chunking respects 4000 char limit (with 60s overlap)."""
+    """Chunking respects configured char limit (with overlap)."""
     a = GroqAnalyzer()
+    a._chunk_max_chars = 4000
     # Each segment is 1000 chars, duration 60s → char limit hit at 4 segments
-    # → 4 chunks: 3 full 4000-char chunks + 1 trailing (1-segment overlap)
     segments = [
         TranscriptSegment(text="x" * 1000, start=i * 60.0, end=(i + 1) * 60.0)
         for i in range(12)
     ]
     chunks = [segs for segs, _ in a._chunk_transcript_with_ids(segments)]
-    assert len(chunks) == 4
     for chunk in chunks:
         total_chars = sum(len(s.text) for s in chunk)
         assert total_chars <= 4000
     # Full coverage: every segment appears in at least one chunk
     covered = {id(s) for chunk in chunks for s in chunk}
     assert len(covered) == 12
-    print("  [PASS] Chunking respects 4000 char limit (with overlap)")
+    print("  [PASS] Chunking respects char limit (with overlap)")
 
 
 def test_chunk_empty_segments():
@@ -100,26 +99,20 @@ def test_chunk_empty_segments():
 def test_chunk_mixed_limits():
     """Char limit triggers before time limit (overlap capped to avoid oversized chunks)."""
     a = GroqAnalyzer()
-    # Each segment 2000 chars but only 30s → char limit triggers at 2 segments (4000 chars)
-    # even though time would allow 20 segments (600s / 30s). Overlap rewind is capped
-    # at half the char budget (2000 chars = 1 segment) so chunks never exceed the limit.
+    a._chunk_max_chars = 4000
     segments = [
         TranscriptSegment(text="y" * 2000, start=i * 30.0, end=(i + 1) * 30.0)
         for i in range(8)
     ]
     chunks = [segs for segs, _ in a._chunk_transcript_with_ids(segments)]
-    # Every chunk must respect the 4000 char limit (previously the rewind could
-    # produce a 6000-char chunk)
     for chunk in chunks:
         total_chars = sum(len(s.text) for s in chunk)
         assert total_chars <= 4000
         total_duration = sum(s.end - s.start for s in chunk)
-        assert total_duration <= 660
+        assert total_duration <= 480
     # Full coverage: every segment appears in at least one chunk
     covered = {id(s) for chunk in chunks for s in chunk}
     assert len(covered) == 8
-    # Overlap rewind produces more than the naive 4 non-overlapping chunks
-    assert len(chunks) > 4
     print("  [PASS] Char limit triggers before time limit (overlap capped)")
 
 

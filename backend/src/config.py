@@ -390,9 +390,11 @@ class Settings(BaseSettings):
 
     # ─── V2 Pipeline Settings ────────────────────────────────────────────
     V2_PIPELINE_ENABLED: bool = True
-    V2_CHUNK_MAX_SECONDS: int = 600
-    V2_CHUNK_MAX_CHARS: int = 4000
-    V2_MAX_AUDIO_CHUNK_MB: int = 25  # Groq Whisper file size limit
+    V2_CHUNK_MIN_SECONDS: int = 300            # 5 menit min per chunk (boundary search)
+    V2_CHUNK_MAX_SECONDS: int = 480            # 8 menit max per chunk (hard cap)
+    V2_CHUNK_OVERLAP_SECONDS: int = 40         # 30-45 detik overlap antar chunk
+    V2_CHUNK_MAX_CHARS: int = 7500             # Safety character limit per chunk
+    V2_MAX_AUDIO_CHUNK_MB: int = 25            # Groq Whisper file size limit
 
     # ─── Word-Level Transcription (on trimmed clips) ─────────────────────
     WORD_LEVEL_GROQ_MODEL: str = "whisper-large-v3-turbo"

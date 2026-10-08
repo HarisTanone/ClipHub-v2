@@ -88,7 +88,12 @@ class GroqAnalyzer(IGroqAnalyzer):
     PROMPT_MIN_DURATION = 45   # Instructed min in prompts (seconds)
     PROMPT_MAX_DURATION = 180   # Soft suggestion to AI (seconds)
     OVERLAP_THRESHOLD = 0.5    # 50% overlap required to consider as duplicate
-    CHUNK_OVERLAP_SECONDS = 60 # Overlap between consecutive chunks (seconds)
+    CHUNK_MIN_SECONDS = 300.0  # 5 min minimum duration before looking for sentence end
+    CHUNK_MAX_SECONDS = 480.0  # 8 min maximum duration (hard safety ceiling)
+    CHUNK_OVERLAP_SECONDS = 40.0 # 30-45s target overlap between consecutive chunks
+    CHUNK_MAX_CHARS = 7500     # Safety character limit per chunk
+    SENTENCE_TERMINATORS = (".", "?", "!", "...", ".”", "?”", "!”", "…")
+    MIN_PAUSE_SECONDS = 0.5    # 500ms speech pause between segments indicates boundary
 
     # ─── Concurrency Control ──────────────────────────────────────────────────
     # Limits concurrent video analyses to prevent Groq rate limit exhaustion
@@ -117,8 +122,10 @@ class GroqAnalyzer(IGroqAnalyzer):
             self._model_pass2 = settings.GROQ_LLM_FALLBACK_MODEL  # 70b — quality ranking
             self._max_retries = settings.GROQ_MAX_RETRIES
             self._timeout = settings.GROQ_TIMEOUT
-        self._chunk_max_seconds = settings.V2_CHUNK_MAX_SECONDS
-        self._chunk_max_chars = settings.V2_CHUNK_MAX_CHARS
+        self._chunk_min_seconds = getattr(settings, "V2_CHUNK_MIN_SECONDS", self.CHUNK_MIN_SECONDS)
+        self._chunk_max_seconds = getattr(settings, "V2_CHUNK_MAX_SECONDS", self.CHUNK_MAX_SECONDS)
+        self._chunk_overlap_seconds = getattr(settings, "V2_CHUNK_OVERLAP_SECONDS", self.CHUNK_OVERLAP_SECONDS)
+        self._chunk_max_chars = getattr(settings, "V2_CHUNK_MAX_CHARS", self.CHUNK_MAX_CHARS)
 
     def _get_groq_client(self):
         """Lazy-init Groq client."""
@@ -1338,9 +1345,10 @@ OUTPUT RAW JSON:
 
             # Rate limit delay between chunks
             if i < len(chunks) - 1:
-                delay = 20
-                logger.info(f"v2_analyzer: rate limit delay {delay}s")
-                await asyncio.sleep(delay)
+                delay = 3 if settings.use_nine_router else 20
+                if delay > 0:
+                    logger.info(f"v2_analyzer: rate limit delay {delay}s")
+                    await asyncio.sleep(delay)
 
         metrics.pass1_time_seconds = time.perf_counter() - t_pass1_start
         metrics.pass1_candidates_total = len(all_candidates)
@@ -1368,8 +1376,10 @@ OUTPUT RAW JSON:
         logger.info(f"v2_analyzer: Pass 1 complete — {len(all_candidates)} total candidates")
 
         # ─── Pass 2: Global re-ranking (70b) ─────────────────────────
-        logger.info("v2_analyzer: waiting 20s before Pass 2 (rate limit)")
-        await asyncio.sleep(20)
+        pass2_delay = 2 if settings.use_nine_router else 20
+        if pass2_delay > 0:
+            logger.info(f"v2_analyzer: waiting {pass2_delay}s before Pass 2 (rate limit)")
+            await asyncio.sleep(pass2_delay)
 
         t_pass2_start = time.perf_counter()
         metrics.pass2_model_used = self._model_pass2
@@ -1434,74 +1444,113 @@ OUTPUT RAW JSON:
 
     # ─── Chunking with Segment IDs ────────────────────────────────────────────
 
+    def _is_sentence_boundary(self, text: str) -> bool:
+        """Check if segment text ends with sentence-terminating punctuation."""
+        t = text.strip()
+        return any(t.endswith(term) for term in self.SENTENCE_TERMINATORS)
+
     def _chunk_transcript_with_ids(
         self, segments: list[TranscriptSegment]
     ) -> list[tuple[list[TranscriptSegment], str]]:
-        """Split transcript into chunks with overlap, each with Segment ID formatted text.
+        """Split transcript into 5-8 minute chunks with 30-45s overlap, cutting at sentence boundaries.
 
-        Applies CHUNK_OVERLAP_SECONDS overlap between consecutive chunks to ensure
-        clip boundaries that span chunk edges are still detected.
+        Algorithm:
+        1. Accumulates segments until duration reaches min_seconds (5 min / 300s).
+        2. Within the [5m, 8m] window, cuts as soon as a segment completes a sentence
+           (ends in ., ?, !) or a natural speech pause (gap >= 0.5s) occurs.
+        3. Enforces max_seconds (8 min / 480s) and max_chars (7500 chars) as hard safety ceilings.
+        4. Overlap: rewinds by ~30-45s to a segment starting right after a sentence boundary,
+           preventing sentences from being sliced in half across chunks.
 
         Returns list of (segments, formatted_text_with_ids).
         """
         if not segments:
             return []
 
-        chunks = []
-        current_segments: list[TranscriptSegment] = []
-        current_duration = 0.0
-        current_chars = 0
-        chunk_start_idx = 0  # Track where this chunk starts in global index
-        global_idx = 0
+        chunks: list[tuple[list[TranscriptSegment], str]] = []
+        n = len(segments)
+        start_idx = 0
 
-        for seg in segments:
-            seg_duration = seg.end - seg.start
-            seg_chars = len(seg.text)
+        min_seconds = getattr(self, "_chunk_min_seconds", self.CHUNK_MIN_SECONDS)
+        max_seconds = getattr(self, "_chunk_max_seconds", self.CHUNK_MAX_SECONDS)
+        target_overlap = getattr(self, "_chunk_overlap_seconds", self.CHUNK_OVERLAP_SECONDS)
+        max_chars = getattr(self, "_chunk_max_chars", self.CHUNK_MAX_CHARS)
 
-            would_exceed_time = (current_duration + seg_duration) > self._chunk_max_seconds
-            would_exceed_chars = (current_chars + seg_chars) > self._chunk_max_chars
+        while start_idx < n:
+            chunk_start_time = segments[start_idx].start
+            current_chars = 0
+            end_idx = start_idx
 
-            if (would_exceed_time or would_exceed_chars) and current_segments:
-                # Flush chunk
-                text = self._format_segments_with_ids(current_segments, chunk_start_idx)
-                chunks.append((list(current_segments), text))
+            for idx in range(start_idx, n):
+                seg = segments[idx]
+                seg_len = len(seg.text)
+                elapsed = seg.end - chunk_start_time
+                current_chars += seg_len
+                end_idx = idx
 
-                # Apply overlap: rewind by CHUNK_OVERLAP_SECONDS (capped at half the
-                # chunk limits so a rewind can never consume the entire chunk budget,
-                # which would produce near-duplicate oversized chunks that exceed
-                # the char/time limits)
-                overlap_segments = []
-                overlap_duration = 0.0
-                overlap_chars = 0
-                max_overlap_dur = min(self.CHUNK_OVERLAP_SECONDS, self._chunk_max_seconds / 2)
-                max_overlap_chars = self._chunk_max_chars / 2
-                for s in reversed(current_segments):
-                    s_dur = s.end - s.start
-                    s_chars = len(s.text)
-                    if (
-                        overlap_duration + s_dur > max_overlap_dur
-                        or overlap_chars + s_chars > max_overlap_chars
-                    ):
-                        break
-                    overlap_segments.insert(0, s)
-                    overlap_duration += s_dur
-                    overlap_chars += s_chars
+                nxt = segments[idx + 1] if idx + 1 < n else None
+                is_sentence_end = self._is_sentence_boundary(seg.text)
+                has_speech_pause = (nxt.start - seg.end >= self.MIN_PAUSE_SECONDS) if nxt else True
+                is_boundary = is_sentence_end or has_speech_pause
 
-                # Start new chunk from overlap segments
-                chunk_start_idx = global_idx - len(overlap_segments)
-                current_segments = list(overlap_segments)
-                current_duration = overlap_duration
-                current_chars = sum(len(s.text) for s in overlap_segments)
+                # Natural sentence/speech boundary reached within the 5-8 min window
+                if elapsed >= min_seconds and is_boundary:
+                    break
 
-            current_segments.append(seg)
-            current_duration += seg_duration
-            current_chars += seg_chars
-            global_idx += 1
+                # Safety ceilings (hard duration limit or char limit)
+                if elapsed >= max_seconds or current_chars >= max_chars:
+                    break
 
-        # Last chunk
-        if current_segments:
-            text = self._format_segments_with_ids(current_segments, chunk_start_idx)
-            chunks.append((current_segments, text))
+            chunk_segments = segments[start_idx : end_idx + 1]
+            text = self._format_segments_with_ids(chunk_segments, start_idx)
+            chunks.append((chunk_segments, text))
+
+            # Completed entire transcript
+            if end_idx >= n - 1:
+                break
+
+            # Find rewind segment for overlap (30-45s) at a sentence boundary
+            chunk_end_time = segments[end_idx].end
+            target_time = chunk_end_time - target_overlap
+            window_min = chunk_end_time - 55.0
+            window_max = chunk_end_time - 25.0
+
+            best_cand = None
+            best_diff = float("inf")
+
+            # Look for candidate segment that starts a new sentence
+            for cand in range(end_idx, start_idx, -1):
+                s = segments[cand]
+                if window_min <= s.start <= window_max:
+                    prev = segments[cand - 1]
+                    prev_is_boundary = self._is_sentence_boundary(prev.text) or (s.start - prev.end >= self.MIN_PAUSE_SECONDS)
+                    diff = abs(s.start - target_time)
+                    if prev_is_boundary and diff < best_diff:
+                        best_diff = diff
+                        best_cand = cand
+
+            # Fallback 1: segment in window even if no punctuation
+            if best_cand is None:
+                for cand in range(end_idx, start_idx, -1):
+                    s = segments[cand]
+                    if s.start <= chunk_end_time - 15.0:
+                        diff = abs(s.start - target_time)
+                        if diff < best_diff:
+                            best_diff = diff
+                            best_cand = cand
+
+            # Fallback 2: closest segment strictly before end_idx
+            if best_cand is None and end_idx > start_idx + 1:
+                best_cand = min(
+                    range(start_idx + 1, end_idx),
+                    key=lambda c: abs(segments[c].start - target_time),
+                )
+
+            # Ensure forward progress
+            if best_cand is None or best_cand <= start_idx or best_cand >= end_idx:
+                best_cand = max(start_idx + 1, end_idx - 1)
+
+            start_idx = best_cand
 
         return chunks
 
