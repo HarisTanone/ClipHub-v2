@@ -22,6 +22,21 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+import re
+
+
+def normalize_nine_router_base_url(url: str) -> str:
+    """Normalize 9router base URL ensuring it points to /v1 and strips web UI /dashboard."""
+    cleaned = (url or "").strip().rstrip("/")
+    if not cleaned:
+        return ""
+    # Strip web UI /dashboard paths (e.g. /dashboard, /dashboard/models, /dashboard/combos)
+    cleaned = re.sub(r"/dashboard(?:/.*)?$", "", cleaned).rstrip("/")
+    if not cleaned.endswith("/v1") and not cleaned.endswith("/chat/completions"):
+        cleaned = f"{cleaned}/v1"
+    return cleaned
+
+
 class NineRouterError(RuntimeError):
     """Raised when the 9router API cannot return a usable response."""
 
@@ -37,7 +52,8 @@ class NineRouterClient:
         max_retries: Optional[int] = None,
         bypass_router: bool = False,
     ):
-        self.base_url = (base_url or settings.get_nine_router("NINE_ROUTER_BASE_URL") or settings.NINE_ROUTER_BASE_URL).rstrip("/")
+        raw_url = base_url or settings.get_nine_router("NINE_ROUTER_BASE_URL") or settings.NINE_ROUTER_BASE_URL
+        self.base_url = normalize_nine_router_base_url(raw_url)
         self.api_key = api_key if api_key is not None else (settings.get_nine_router("NINE_ROUTER_API_KEY") or settings.NINE_ROUTER_API_KEY)
         self.timeout = int(timeout or settings.get_nine_router("NINE_ROUTER_TIMEOUT") or settings.NINE_ROUTER_TIMEOUT)
         self.max_retries = int(max_retries or settings.get_nine_router("NINE_ROUTER_MAX_RETRIES") or settings.NINE_ROUTER_MAX_RETRIES)

@@ -176,6 +176,9 @@ def set_model_setting(key: str, value: str, user_id: Optional[int] = None) -> bo
     """Upsert a model setting. Returns True on success."""
     if key not in VALID_MODEL_KEYS:
         return False
+    if key == "NINE_ROUTER_BASE_URL" and isinstance(value, str):
+        from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+        value = normalize_nine_router_base_url(value)
     _ensure_table()
     conn = get_dict_connection()
     try:
@@ -215,6 +218,9 @@ def bulk_set_model_settings(
         for key, value in updates.items():
             if key not in VALID_MODEL_KEYS:
                 continue
+            if key == "NINE_ROUTER_BASE_URL" and isinstance(value, str):
+                from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+                value = normalize_nine_router_base_url(value)
             conn.execute(
                 """INSERT INTO model_settings (key, value, updated_at, updated_by)
                    VALUES (?, ?, datetime('now'), ?)
@@ -230,6 +236,9 @@ def bulk_set_model_settings(
         try:
             from src.infrastructure.system_config_store import set_system_setting, SYSTEM_SETTINGS_METADATA
             for k, v in updates.items():
+                if k == "NINE_ROUTER_BASE_URL" and isinstance(v, str):
+                    from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+                    v = normalize_nine_router_base_url(v)
                 if k in SYSTEM_SETTINGS_METADATA:
                     set_system_setting(k, v, user_id=user_id)
         except Exception as e:

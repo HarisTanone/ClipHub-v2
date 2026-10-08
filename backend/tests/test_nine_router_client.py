@@ -42,3 +42,25 @@ def test_extract_json_with_trailing_sse_done_marker():
     )
 
     assert client._extract_response_content(response) == "Provider OK"
+
+
+def test_normalize_nine_router_base_url():
+    from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+
+    # Strips /dashboard web UI path
+    assert normalize_nine_router_base_url("http://100.64.5.96:20128/dashboard") == "http://100.64.5.96:20128/v1"
+    assert normalize_nine_router_base_url("http://100.64.5.96:20128/dashboard/") == "http://100.64.5.96:20128/v1"
+    assert normalize_nine_router_base_url("http://100.64.5.96:20128/dashboard/models") == "http://100.64.5.96:20128/v1"
+
+    # Preserves clean endpoints
+    assert normalize_nine_router_base_url("http://100.64.5.96:20128/v1") == "http://100.64.5.96:20128/v1"
+    assert normalize_nine_router_base_url("http://100.64.5.96:20128") == "http://100.64.5.96:20128/v1"
+    assert normalize_nine_router_base_url("http://100.64.5.96:20128/v1/chat/completions") == "http://100.64.5.96:20128/v1/chat/completions"
+    assert normalize_nine_router_base_url("") == ""
+
+
+def test_nine_router_client_normalizes_base_url():
+    client = NineRouterClient(base_url="http://100.64.5.96:20128/dashboard")
+    assert client.base_url == "http://100.64.5.96:20128/v1"
+    assert client._chat_url() == "http://100.64.5.96:20128/v1/chat/completions"
+

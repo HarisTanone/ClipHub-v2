@@ -442,6 +442,9 @@ class Settings(BaseSettings):
                 if name in VALID_MODEL_KEYS:
                     val = get_model_setting(name)
                     if val is not None and val != "":
+                        if name == "NINE_ROUTER_BASE_URL" and isinstance(val, str) and val:
+                            from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+                            return normalize_nine_router_base_url(val)
                         return val
             except Exception:
                 pass
@@ -450,10 +453,17 @@ class Settings(BaseSettings):
                 if name in SYSTEM_SETTINGS_METADATA:
                     val = get_system_setting(name)
                     if val is not None and val != "":
+                        if name == "NINE_ROUTER_BASE_URL" and isinstance(val, str) and val:
+                            from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+                            return normalize_nine_router_base_url(val)
                         return val
             except Exception:
                 pass
-        return super().__getattribute__(name)
+        val = super().__getattribute__(name)
+        if name == "NINE_ROUTER_BASE_URL" and isinstance(val, str) and val:
+            from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+            return normalize_nine_router_base_url(val)
+        return val
 
     def __setattr__(self, name: str, value: Any):
         super().__setattr__(name, value)
@@ -480,6 +490,9 @@ class Settings(BaseSettings):
             if key in VALID_MODEL_KEYS:
                 val = get_model_setting(key)
                 if val is not None and val != "":
+                    if key == "NINE_ROUTER_BASE_URL" and isinstance(val, str) and val:
+                        from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+                        return normalize_nine_router_base_url(val)
                     return val
         except Exception:
             pass
@@ -487,10 +500,17 @@ class Settings(BaseSettings):
             from src.infrastructure.system_config_store import get_system_setting
             val = get_system_setting(key)
             if val is not None and val != "":
+                if key == "NINE_ROUTER_BASE_URL" and isinstance(val, str) and val:
+                    from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+                    return normalize_nine_router_base_url(val)
                 return val
         except Exception:
             pass
-        return getattr(self, key, "")
+        val = getattr(self, key, "")
+        if key == "NINE_ROUTER_BASE_URL" and isinstance(val, str) and val:
+            from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+            return normalize_nine_router_base_url(val)
+        return val
 
     @property
     def is_local(self) -> bool:

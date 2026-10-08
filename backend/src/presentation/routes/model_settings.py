@@ -21,6 +21,7 @@ from src.infrastructure.model_settings_store import (
     bulk_set_model_settings,
     VALID_MODEL_KEYS,
 )
+from src.infrastructure.nine_router_client import normalize_nine_router_base_url
 from src.presentation.auth_deps import CurrentUser, require_superadmin
 
 router = APIRouter(prefix="/settings/models", tags=["model-settings"])
@@ -212,7 +213,7 @@ async def test_model_connection(
 
     Uses provided overrides or current DB settings.
     """
-    base_url = (body.base_url or get_model_setting("NINE_ROUTER_BASE_URL") or "").rstrip("/")
+    base_url = normalize_nine_router_base_url(body.base_url or get_model_setting("NINE_ROUTER_BASE_URL") or "")
     api_key = body.api_key if body.api_key is not None else get_model_setting("NINE_ROUTER_API_KEY")
     model = body.model or get_model_setting("NINE_ROUTER_MODEL") or "CliperHub"
 
@@ -308,7 +309,7 @@ async def test_model_connection(
 @router.get("/available")
 async def list_available_models(user: CurrentUser = Depends(require_superadmin())):
     """Query 9router /models endpoint to list available models."""
-    base_url = (get_model_setting("NINE_ROUTER_BASE_URL") or "").rstrip("/")
+    base_url = normalize_nine_router_base_url(get_model_setting("NINE_ROUTER_BASE_URL") or "")
     api_key = get_model_setting("NINE_ROUTER_API_KEY")
 
     if not base_url:
@@ -349,7 +350,7 @@ async def test_all_models(user: CurrentUser = Depends(require_superadmin())):
     Fetches /models list, then sends a minimal chat completion to each one.
     Reports success or failure per model with latency and error info.
     """
-    base_url = (get_model_setting("NINE_ROUTER_BASE_URL") or "").rstrip("/")
+    base_url = normalize_nine_router_base_url(get_model_setting("NINE_ROUTER_BASE_URL") or "")
     api_key = get_model_setting("NINE_ROUTER_API_KEY")
 
     if not base_url:

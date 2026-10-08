@@ -439,3 +439,13 @@ def test_test_all_models_handles_streaming_and_garbage():
     assert by_model["ag/gemini-3.6-flash-high"]["streamed"] is True
     assert by_model["broken-model"]["status"] == "error"
     assert "Expecting value" not in by_model["broken-model"]["error"]
+
+
+def test_nine_router_base_url_normalization_via_settings():
+    from src.config import settings
+    from src.infrastructure.model_settings_store import set_model_setting
+
+    set_model_setting("NINE_ROUTER_BASE_URL", "http://100.64.5.96:20128/dashboard")
+    assert settings.NINE_ROUTER_BASE_URL == "http://100.64.5.96:20128/v1"
+    assert settings.get_nine_router("NINE_ROUTER_BASE_URL") == "http://100.64.5.96:20128/v1"
+

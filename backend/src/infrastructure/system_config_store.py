@@ -1497,6 +1497,10 @@ def set_system_setting(key: str, value: Any, user_id: Optional[int] = None) -> b
     else:
         val_str = str(value) if value is not None else ""
 
+    if key == "NINE_ROUTER_BASE_URL" and isinstance(val_str, str) and val_str:
+        from src.infrastructure.nine_router_client import normalize_nine_router_base_url
+        val_str = normalize_nine_router_base_url(val_str)
+
     conn = get_dict_connection()
     try:
         conn.execute("""
