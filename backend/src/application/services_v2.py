@@ -253,6 +253,16 @@ class V2PipelineService:
         title = str(source.get("filename") or os.path.basename(source_path) or "Uploaded video")
         return title, duration
 
+    async def _is_job_cancelled_or_deleted(self, job_id: str) -> bool:
+        """Check if job was cancelled, marked as failed, or deleted from DB."""
+        try:
+            current = await self._repo.get_by_job_id(job_id)
+            if not current:
+                return True
+            return current.status.value in ("failed", "completed")
+        except Exception:
+            return False
+
     # ─── Main Pipeline ────────────────────────────────────────────────────────
 
     async def run_pipeline(self, job: Job) -> None:
@@ -679,6 +689,10 @@ class V2PipelineService:
                 flags = PipelineFlags.for_portrait() if job.target_aspect_ratio == "9:16" else PipelineFlags.for_landscape()
             self._emit(job_id, 6, "aspect_router", "complete")
 
+            if await self._is_job_cancelled_or_deleted(job_id):
+                logger.info(f"[{job_id}] Job cancelled or deleted by user; stopping V2 pipeline.")
+                return
+
             # ═══ Step 7: Trim Clips ═══
             self._emit(job_id, 7, "trim", "start")
             await self._repo.update_status(job_id, JobStatus.TRIMMING)
@@ -693,6 +707,10 @@ class V2PipelineService:
                 normalize_timestamps=True,
             )
             self._emit(job_id, 7, "trim", "complete")
+
+            if await self._is_job_cancelled_or_deleted(job_id):
+                logger.info(f"[{job_id}] Job cancelled or deleted by user; stopping V2 pipeline.")
+                return
 
             # ═══ Step 8: YOLO Seg + Reframe ═══
             self._emit(job_id, 8, "yolo_reframe", "start")
@@ -925,6 +943,10 @@ class V2PipelineService:
                 pass
             except Exception as e:
                 logger.warning(f"[{job_id}] GPU cleanup warning (non-critical): {e}")
+
+            if await self._is_job_cancelled_or_deleted(job_id):
+                logger.info(f"[{job_id}] Job cancelled or deleted by user; stopping V2 pipeline.")
+                return
 
             # ═══ Step 9: Word-Level Transcription on Trimmed Clips ═══
             self._emit(job_id, 9, "word_level", "start")

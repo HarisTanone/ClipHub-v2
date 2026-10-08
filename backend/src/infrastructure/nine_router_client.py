@@ -201,7 +201,13 @@ class NineRouterClient:
 
         choice = choices[0]
         message = choice.get("message") or {}
-        content = message.get("content") or choice.get("text") or ""
+        content = (
+            message.get("content")
+            or choice.get("text")
+            or message.get("reasoning_content")
+            or message.get("thought")
+            or ""
+        )
         if isinstance(content, list):
             parts = []
             for item in content:
@@ -243,6 +249,7 @@ class NineRouterClient:
 
     def _extract_sse_content(self, text: str) -> str:
         parts: list[str] = []
+        reasoning_parts: list[str] = []
         for line in text.splitlines():
             line = line.strip()
             if not line.startswith("data:"):
@@ -268,12 +275,25 @@ class NineRouterClient:
                 parts.append(self._stringify_content(content))
                 continue
 
+            reasoning = delta.get("reasoning_content") or delta.get("thought") or delta.get("reasoning")
+            if reasoning:
+                reasoning_parts.append(self._stringify_content(reasoning))
+                continue
+
             message = choice.get("message") or {}
             content = message.get("content") or choice.get("text")
             if content:
                 parts.append(self._stringify_content(content))
+                continue
 
-        return "".join(parts).strip()
+            msg_reasoning = message.get("reasoning_content") or message.get("thought") or message.get("reasoning")
+            if msg_reasoning:
+                reasoning_parts.append(self._stringify_content(msg_reasoning))
+
+        final = "".join(parts).strip()
+        if not final and reasoning_parts:
+            final = "".join(reasoning_parts).strip()
+        return final
 
     def _stringify_content(self, content: Any) -> str:
         if isinstance(content, list):
