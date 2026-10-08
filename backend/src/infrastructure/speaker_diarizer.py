@@ -24,6 +24,8 @@ import inspect
 import logging
 import os
 import tempfile
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -213,6 +215,7 @@ class SpeakerDiarizer:
         video_path: str,
         min_speakers: Optional[int] = None,
         max_speakers: Optional[int] = None,
+        timeout_sec: Optional[int] = None,
     ) -> Optional[DiarizationResult]:
         """Run speaker diarization on a video/audio file.
 
@@ -223,6 +226,7 @@ class SpeakerDiarizer:
             video_path: Path to video or audio file.
             min_speakers: Optional dynamic lower bound. None means PyAnnote auto.
             max_speakers: Optional dynamic upper bound. None means PyAnnote auto.
+            timeout_sec: Optional override for diarization timeout in seconds.
 
         Returns:
             DiarizationResult on success, None on any failure.
@@ -236,6 +240,7 @@ class SpeakerDiarizer:
             return None
 
         audio_path: Optional[str] = None
+        timed_out = False
 
         try:
             # Step 1: Extract audio to temp WAV
@@ -243,17 +248,25 @@ class SpeakerDiarizer:
             if audio_path is None:
                 return None
 
+            audio_duration = await self._get_audio_duration(audio_path)
+
             # Step 2: Ensure model is loaded
             if not self._load_model():
                 return None
 
-            # Step 3: Run diarization with timeout
+            # Step 3: Run diarization with dynamic timeout
             effective_min = (
                 min_speakers if min_speakers and min_speakers > 0 else self._min_speakers
             )
             effective_max = (
                 max_speakers if max_speakers and max_speakers > 0 else self._max_speakers
             )
+            base_timeout = timeout_sec if timeout_sec and timeout_sec > 0 else self._timeout_sec
+            if audio_duration > 0:
+                effective_timeout = max(base_timeout, int(audio_duration * 0.25) + 60)
+            else:
+                effective_timeout = base_timeout
+
             diarization = await asyncio.wait_for(
                 asyncio.to_thread(
                     self._run_diarization,
@@ -261,7 +274,7 @@ class SpeakerDiarizer:
                     effective_min,
                     effective_max,
                 ),
-                timeout=self._timeout_sec,
+                timeout=effective_timeout,
             )
 
             if diarization is None:
@@ -284,9 +297,6 @@ class SpeakerDiarizer:
 
             speakers = sorted(speakers_set)
 
-            # Get audio duration from file
-            audio_duration = await self._get_audio_duration(audio_path)
-
             result = DiarizationResult(
                 segments=segments,
                 speaker_count=len(speakers),
@@ -303,9 +313,10 @@ class SpeakerDiarizer:
             return result
 
         except asyncio.TimeoutError:
+            timed_out = True
             logger.error(
-                f"speaker_diarizer: timeout after {self._timeout_sec}s "
-                f"for {video_path}"
+                f"speaker_diarizer: timeout after {effective_timeout}s "
+                f"for {video_path} (audio duration {audio_duration:.1f}s)"
             )
             return None
 
@@ -318,12 +329,23 @@ class SpeakerDiarizer:
             return None
 
         finally:
-            # ALWAYS clean up temp audio
+            # Clean up temp audio safely
             if audio_path and os.path.exists(audio_path):
-                try:
-                    os.unlink(audio_path)
-                except OSError:
-                    pass
+                if timed_out:
+                    # PyAnnote thread may still be running in background; delay unlink
+                    def _delayed_unlink(path: str):
+                        time.sleep(120)
+                        try:
+                            if os.path.exists(path):
+                                os.unlink(path)
+                        except OSError:
+                            pass
+                    threading.Thread(target=_delayed_unlink, args=(audio_path,), daemon=True).start()
+                else:
+                    try:
+                        os.unlink(audio_path)
+                    except OSError:
+                        pass
             try:
                 import torch
                 if torch.cuda.is_available():

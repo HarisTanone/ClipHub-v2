@@ -731,15 +731,20 @@ class V2PipelineService:
                     if global_diarization:
                         logger.info(f"[{job_id}] Global diarization CACHE HIT for {video_path}")
                     else:
+                        global_timeout = max(
+                            getattr(settings, "DIARIZATION_TIMEOUT_SEC", 120),
+                            int(duration * 0.25) + 60,
+                            180,
+                        )
                         diarizer = SpeakerDiarizer(
                             hf_token=settings.HF_TOKEN,
                             model_name=getattr(settings, "DIARIZATION_MODEL", "pyannote/speaker-diarization-3.1"),
-                            timeout_sec=getattr(settings, "DIARIZATION_TIMEOUT_SEC", 120),
+                            timeout_sec=global_timeout,
                         )
                         if diarizer.is_available:
-                            logger.info(f"[{job_id}] Running GLOBAL audio diarization on source video ({duration:.1f}s)...")
+                            logger.info(f"[{job_id}] Running GLOBAL audio diarization on source video ({duration:.1f}s, timeout={global_timeout}s)...")
                             t_dia = time.time()
-                            global_diarization = await diarizer.diarize(video_path)
+                            global_diarization = await diarizer.diarize(video_path, timeout_sec=global_timeout)
                             if global_diarization:
                                 set_cached_global_diarization(cache_key, global_diarization)
                                 logger.info(
