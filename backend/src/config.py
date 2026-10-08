@@ -438,10 +438,18 @@ class Settings(BaseSettings):
     def __getattribute__(self, name: str):
         if not name.startswith("_") and name.isupper():
             try:
+                from src.infrastructure.model_settings_store import get_model_setting, VALID_MODEL_KEYS
+                if name in VALID_MODEL_KEYS:
+                    val = get_model_setting(name)
+                    if val is not None and val != "":
+                        return val
+            except Exception:
+                pass
+            try:
                 from src.infrastructure.system_config_store import get_system_setting, SYSTEM_SETTINGS_METADATA
                 if name in SYSTEM_SETTINGS_METADATA:
                     val = get_system_setting(name)
-                    if val is not None:
+                    if val is not None and val != "":
                         return val
             except Exception:
                 pass
@@ -467,6 +475,14 @@ class Settings(BaseSettings):
 
     def get_nine_router(self, key: str):
         """Get a 9router setting from DB first, fallback to .env."""
+        try:
+            from src.infrastructure.model_settings_store import get_model_setting, VALID_MODEL_KEYS
+            if key in VALID_MODEL_KEYS:
+                val = get_model_setting(key)
+                if val is not None and val != "":
+                    return val
+        except Exception:
+            pass
         try:
             from src.infrastructure.system_config_store import get_system_setting
             val = get_system_setting(key)

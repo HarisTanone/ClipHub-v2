@@ -394,7 +394,7 @@ if [ -f ".env" ]; then
     # these defaults just make the gateway reachable.
     append_env_if_missing ".env" "NINE_ROUTER_BASE_URL" "$NINE_ROUTER_DEFAULT_BASE_URL"
     append_env_if_missing ".env" "NINE_ROUTER_API_KEY" "${NINE_ROUTER_API_KEY:-9router-default}"
-    append_env_if_missing ".env" "NINE_ROUTER_MODEL" "${NINE_ROUTER_MODEL:-nine-router}"
+    append_env_if_missing ".env" "NINE_ROUTER_MODEL" "${NINE_ROUTER_MODEL:-CliperHub}"
     append_env_if_missing ".env" "ALLOW_DIRECT_PROVIDER_FALLBACKS" "${ALLOW_DIRECT_PROVIDER_FALLBACKS:-false}"
 
     # Auto-generate cryptographically secure JWT keys if default or missing

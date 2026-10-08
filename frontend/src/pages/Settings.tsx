@@ -710,6 +710,7 @@ export function Settings() {
   const [testAllResults, setTestAllResults] = useState<any>(null);
   const [isTestingAll, setIsTestingAll] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
+  const [modelFilterType, setModelFilterType] = useState<"all" | "combos">("all");
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
 
   // Telegram settings (superadmin)
@@ -2446,28 +2447,60 @@ export function Settings() {
                   </div>
                 </div>
                 {availableModels.length > 0 && (
-                  <div className="relative mb-3">
-                    <input
-                      type="text"
-                      placeholder="Cari model atau penyedia (mis. groq, openai)..."
-                      value={modelSearch}
-                      onChange={(e) => setModelSearch(e.target.value)}
-                      className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 pl-3 pr-8 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none transition-colors"
-                    />
-                    {modelSearch && (
+                  <div className="space-y-2 mb-3">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Cari model atau combo (mis. CliperHub, groq, gemini)..."
+                        value={modelSearch}
+                        onChange={(e) => setModelSearch(e.target.value)}
+                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/60 pl-3 pr-8 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-violet-500 focus:outline-none transition-colors"
+                      />
+                      {modelSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setModelSearch("")}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                          aria-label="Clear search"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    {/* Quick filter for Combos vs All models */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-zinc-500 font-medium">Tipe:</span>
                       <button
                         type="button"
-                        onClick={() => setModelSearch("")}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-                        aria-label="Clear search"
+                        onClick={() => setModelFilterType("all")}
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[10px] font-medium border transition-colors",
+                          modelFilterType === "all"
+                            ? "bg-violet-600 border-violet-500 text-white"
+                            : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                        )}
                       >
-                        <XCircle className="h-3.5 w-3.5" />
+                        Semua ({availableModels.length})
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => setModelFilterType("combos")}
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[10px] font-medium border transition-colors",
+                          modelFilterType === "combos"
+                            ? "bg-fuchsia-600 border-fuchsia-500 text-white"
+                            : "bg-zinc-900 border-zinc-800 text-fuchsia-400 hover:text-fuchsia-300"
+                        )}
+                      >
+                        Combos Only ({availableModels.filter((m) => m.owned_by === "combo" || m.id.toLowerCase().includes("cliper")).length})
+                      </button>
+                    </div>
                   </div>
                 )}
                 {availableModels.length > 0 ? (() => {
                   const filtered = availableModels.filter((m) => {
+                    const isCombo = m.owned_by === "combo" || m.id.toLowerCase().includes("cliper");
+                    if (modelFilterType === "combos" && !isCombo) return false;
                     const q = modelSearch.trim().toLowerCase();
                     if (!q) return true;
                     return m.id.toLowerCase().includes(q) || (m.owned_by || "").toLowerCase().includes(q);
@@ -2486,6 +2519,7 @@ export function Settings() {
                           const isPass2 = modelEdits["NINE_ROUTER_PASS2_MODEL"] === m.id || modelEdits["NINE_ROUTER_MODEL_PASS2"] === m.id;
                           const isAiLayer = modelEdits["NINE_ROUTER_AI_LAYER_MODEL"] === m.id || modelEdits["NINE_ROUTER_MODEL_AI_LAYER"] === m.id;
                           const isAssigned = isDefault || isPass1 || isPass2 || isAiLayer;
+                          const isCombo = m.owned_by === "combo" || m.id.toLowerCase().includes("cliper");
 
                           return (
                             <div
@@ -2501,6 +2535,7 @@ export function Settings() {
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="font-semibold text-zinc-100 truncate block">{m.id}</span>
+                                    {isCombo && <span className="rounded bg-fuchsia-500/20 border border-fuchsia-500/30 px-1.5 py-0.2 text-[8px] font-bold text-fuchsia-300 uppercase">Combo</span>}
                                     {isDefault && <span className="rounded bg-violet-500/20 px-1.5 py-0.2 text-[8px] font-bold text-violet-300 uppercase">Default</span>}
                                     {isPass1 && <span className="rounded bg-blue-500/20 px-1.5 py-0.2 text-[8px] font-bold text-blue-300 uppercase">Pass 1</span>}
                                     {isPass2 && <span className="rounded bg-emerald-500/20 px-1.5 py-0.2 text-[8px] font-bold text-emerald-300 uppercase">Pass 2</span>}
@@ -4742,6 +4777,29 @@ export function Settings() {
               </div>
             </div>
 
+            {/* Quick Link Banner to AI Models Tab */}
+            {(sysConfigCategory === "ai_llm" || sysConfigCategory === "all" || sysConfigSearch.toLowerCase().includes("nine") || sysConfigSearch.toLowerCase().includes("model") || sysConfigSearch.toLowerCase().includes("combo") || sysConfigSearch.toLowerCase().includes("router")) && (
+              <div className="rounded-xl border border-violet-500/30 bg-violet-950/20 p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <BrainCircuit className="h-4 w-4 text-violet-400 shrink-0" />
+                  <span className="text-zinc-300">
+                    Pengaturan visual, routing preset, dan live latency benchmark <strong>Model &amp; Combo 9Router</strong> tersedia di tab <strong>AI Models</strong>.
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setTab("models");
+                    navigate("/settings/models");
+                  }}
+                  icon={<ExternalLink className="h-3.5 w-3.5" />}
+                >
+                  Buka Tab AI Models
+                </Button>
+              </div>
+            )}
+
             {/* Settings Cards List */}
             {isLoadingSysConfig ? (
               <div className="p-8 text-center text-zinc-500 text-xs">
@@ -4752,10 +4810,7 @@ export function Settings() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {sysConfigItems
                   .filter((item) => {
-                    // 9router-only: hide legacy direct-provider LLM keys from panel.
-                    // All LLM routing is now via 9router (managed in "AI Models" tab).
-                    // These keys remain in DB/env only as dormant fallbacks behind
-                    // ALLOW_DIRECT_PROVIDER_FALLBACKS=false.
+                    // Legacy direct-provider LLM keys hidden behind ALLOW_DIRECT_PROVIDER_FALLBACKS=false.
                     const HIDDEN_KEYS = new Set([
                       "GEMINI_API_KEY",
                       "GEMINI_MODEL",
@@ -4769,13 +4824,7 @@ export function Settings() {
                       "LLM_PROVIDER",
                       "ALLOW_DIRECT_PROVIDER_FALLBACKS",
                       "TRANSCRIPTION_PROVIDER",
-                      // 9router LLM key/model moved to "AI Models" tab (avoid dup)
-                      "NINE_ROUTER_BASE_URL",
-                      "NINE_ROUTER_API_KEY",
-                      "NINE_ROUTER_MODEL",
-                      "NINE_ROUTER_PASS1_MODEL",
-                      "NINE_ROUTER_PASS2_MODEL",
-                      "NINE_ROUTER_AI_LAYER_MODEL",
+                      // Redundant internal duplicate aliases (NINE_ROUTER_PASS1_MODEL etc. are shown)
                       "NINE_ROUTER_MODEL_PASS1",
                       "NINE_ROUTER_MODEL_PASS2",
                       "NINE_ROUTER_MODEL_AI_LAYER",

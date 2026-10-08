@@ -1511,6 +1511,12 @@ def set_system_setting(key: str, value: Any, user_id: Optional[int] = None) -> b
         # Invalidate / update cache
         _SETTINGS_CACHE[key] = _coerce_value(val_str, data_type)
         logger.info(f"[system_config_store] Set {key} by user_id={user_id}")
+        try:
+            from src.infrastructure.model_settings_store import set_model_setting, VALID_MODEL_KEYS
+            if key in VALID_MODEL_KEYS:
+                set_model_setting(key, val_str, user_id=user_id)
+        except Exception:
+            pass
         return True
     except Exception as exc:
         logger.error(f"[system_config_store] Failed to save {key}: {exc}")
@@ -1552,6 +1558,14 @@ def bulk_set_system_settings(updates: dict[str, Any], user_id: Optional[int] = N
             count += 1
         conn.commit()
         logger.info(f"[system_config_store] Bulk updated {count} settings by user_id={user_id}")
+        try:
+            from src.infrastructure.model_settings_store import set_model_setting, VALID_MODEL_KEYS
+            for key, value in updates.items():
+                if key in VALID_MODEL_KEYS:
+                    val_str = "true" if value is True else "false" if value is False else str(value or "")
+                    set_model_setting(key, val_str, user_id=user_id)
+        except Exception:
+            pass
         return count
     except Exception as exc:
         logger.error(f"[system_config_store] Bulk update failed: {exc}")

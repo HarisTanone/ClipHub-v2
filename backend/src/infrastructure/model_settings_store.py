@@ -87,6 +87,24 @@ def _ensure_table():
     _table_ensured = True
 
 
+def get_local_9router_api_key() -> str:
+    """Read active API key from local ~/.9router/db/data.sqlite if available."""
+    try:
+        from pathlib import Path
+        db_path = Path.home() / ".9router" / "db" / "data.sqlite"
+        if db_path.is_file():
+            con = sqlite3.connect(str(db_path), timeout=1.0)
+            cur = con.cursor()
+            cur.execute("SELECT key FROM apiKeys WHERE isActive = 1 ORDER BY createdAt ASC LIMIT 1")
+            row = cur.fetchone()
+            con.close()
+            if row and row[0]:
+                return str(row[0])
+    except Exception:
+        pass
+    return ""
+
+
 def get_model_setting(key: str) -> Any:
     """Get a single model setting. DB first, fallback to .env/Settings default."""
     if key not in VALID_MODEL_KEYS:
@@ -107,8 +125,11 @@ def get_model_setting(key: str) -> Any:
     except Exception as e:
         logger.warning(f"[model_settings] DB read failed for {key}: {e}")
 
-    # Fallback to .env
-    return getattr(settings, key, "")
+    # Fallback to .env or local 9router
+    val = getattr(settings, key, "")
+    if (not val or val == "") and key == "NINE_ROUTER_API_KEY":
+        val = get_local_9router_api_key()
+    return val
 
 
 def get_all_model_settings() -> list[dict[str, Any]]:
@@ -123,9 +144,12 @@ def get_all_model_settings() -> list[dict[str, Any]]:
         rows = cur.fetchall()
         result = []
         for row in rows:
+            val = row["value"]
+            if (not val or val == "") and row["key"] == "NINE_ROUTER_API_KEY":
+                val = get_local_9router_api_key()
             result.append({
                 "key": row["key"],
-                "value": row["value"],
+                "value": val,
                 "description": row["description"],
                 "updated_at": row["updated_at"],
                 "updated_by": row["updated_by"],
@@ -134,6 +158,8 @@ def get_all_model_settings() -> list[dict[str, Any]]:
         existing_keys = {r["key"] for r in result}
         for key in sorted(VALID_MODEL_KEYS - existing_keys):
             env_val = getattr(settings, key, "")
+            if (not env_val or env_val == "") and key == "NINE_ROUTER_API_KEY":
+                env_val = get_local_9router_api_key()
             result.append({
                 "key": key,
                 "value": str(env_val) if env_val is not None else "",
@@ -164,6 +190,12 @@ def set_model_setting(key: str, value: str, user_id: Optional[int] = None) -> bo
         )
         conn.commit()
         logger.info(f"[model_settings] Updated {key} by user {user_id}")
+        try:
+            from src.infrastructure.system_config_store import set_system_setting, SYSTEM_SETTINGS_METADATA
+            if key in SYSTEM_SETTINGS_METADATA:
+                set_system_setting(key, value, user_id=user_id)
+        except Exception as e:
+            logger.debug(f"[model_settings] Optional sync to system_settings skipped: {e}")
         return True
     except Exception as e:
         logger.error(f"[model_settings] Failed to set {key}: {e}")
@@ -195,6 +227,13 @@ def bulk_set_model_settings(
             count += 1
         conn.commit()
         logger.info(f"[model_settings] Bulk updated {count} keys by user {user_id}")
+        try:
+            from src.infrastructure.system_config_store import set_system_setting, SYSTEM_SETTINGS_METADATA
+            for k, v in updates.items():
+                if k in SYSTEM_SETTINGS_METADATA:
+                    set_system_setting(k, v, user_id=user_id)
+        except Exception as e:
+            logger.debug(f"[model_settings] Optional sync to system_settings skipped: {e}")
     except Exception as e:
         logger.error(f"[model_settings] Bulk set failed: {e}")
     finally:
