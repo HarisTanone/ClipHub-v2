@@ -1413,8 +1413,10 @@ OUTPUT RAW JSON:
             raise GroqAnalyzerError("Semua clip gagal validasi akhir")
 
         # ─── Creative Direction (separate call) ───────────────────────
-        logger.info("v2_analyzer: waiting 20s before creative direction (rate limit)")
-        await asyncio.sleep(20)
+        creative_delay = 2 if settings.use_nine_router else 20
+        if creative_delay > 0:
+            logger.info(f"v2_analyzer: waiting {creative_delay}s before creative direction (rate limit)")
+            await asyncio.sleep(creative_delay)
         t_creative_start = time.perf_counter()
         try:
             creative_result = await asyncio.wait_for(
