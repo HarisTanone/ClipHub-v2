@@ -102,13 +102,12 @@ class NineRouterClient:
             raise
 
     def _resolve_model_hint(self, model: Optional[str]) -> str:
-        """Resolve backend-side aliases to the model name configured in the panel.
+        """Resolve backend-side aliases to the model name configured in the database/panel.
 
         Backend callers sometimes pass aliases like "nine_router", "gemini-flash",
         "story", "pass1", "pass2", "ai_layer" — these are mapped to the actual
-        9router model name stored in system settings. Any other string is
-        treated as an upstream model name and passed through verbatim so the
-        9router combo can decide whether to use it.
+        model name stored in the database model_settings table.
+        Any other string is passed through verbatim directly to 9router.
         """
         hints = {
             "nine_router": settings.get_nine_router("NINE_ROUTER_MODEL"),
@@ -118,27 +117,15 @@ class NineRouterClient:
             "pass2": settings.get_nine_router("NINE_ROUTER_PASS2_MODEL"),
             "ai_layer": settings.get_nine_router("NINE_ROUTER_AI_LAYER_MODEL"),
         }
-        resolved = model
-        if resolved and resolved.lower() in hints:
-            val = hints[resolved.lower()]
+        if model and model.lower() in hints:
+            val = hints[model.lower()]
             if val:
-                resolved = val
+                return val
 
-        if not resolved:
-            resolved = settings.get_nine_router("NINE_ROUTER_MODEL") or settings.NINE_ROUTER_MODEL or "CliperHub"
+        if model:
+            return model
 
-        # Case & alias normalization for known 9router combos:
-        # 9router combo matching is case-sensitive ("Claude", "CliperHub").
-        # If user specifies "claude", "cliperhub", or "gemini", map to exact registered combo name.
-        combo_normalization = {
-            "claude": "Claude",
-            "cliperhub": "CliperHub",
-            "gemini": "CliperHub",
-        }
-        if resolved and resolved.lower() in combo_normalization:
-            return combo_normalization[resolved.lower()]
-
-        return resolved
+        return settings.get_nine_router("NINE_ROUTER_MODEL") or settings.NINE_ROUTER_MODEL or ""
 
     def complete_json(
         self,
