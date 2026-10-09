@@ -64,3 +64,22 @@ def test_nine_router_client_normalizes_base_url():
     assert client.base_url == "http://100.64.5.96:20128/v1"
     assert client._chat_url() == "http://100.64.5.96:20128/v1/chat/completions"
 
+
+def test_resolve_model_hint_combo_normalization():
+    client = NineRouterClient(base_url="http://127.0.0.1:20128/v1")
+
+    # Lowercase combos normalize to exact registered casing
+    assert client._resolve_model_hint("claude") == "Claude"
+    assert client._resolve_model_hint("Claude") == "Claude"
+    assert client._resolve_model_hint("cliperhub") == "CliperHub"
+    assert client._resolve_model_hint("CliperHub") == "CliperHub"
+
+    # User alias "gemini" / "Gemini" maps to the CliperHub combo
+    assert client._resolve_model_hint("gemini") == "CliperHub"
+    assert client._resolve_model_hint("Gemini") == "CliperHub"
+
+    # Specific model IDs pass through verbatim
+    assert client._resolve_model_hint("gemini/gemini-3.8-flash") == "gemini/gemini-3.8-flash"
+    assert client._resolve_model_hint("kr/claude-sonnet-4.6") == "kr/claude-sonnet-4.6"
+
+

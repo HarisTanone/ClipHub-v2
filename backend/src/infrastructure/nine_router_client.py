@@ -118,11 +118,27 @@ class NineRouterClient:
             "pass2": settings.get_nine_router("NINE_ROUTER_PASS2_MODEL"),
             "ai_layer": settings.get_nine_router("NINE_ROUTER_AI_LAYER_MODEL"),
         }
-        if model and model.lower() in hints:
-            val = hints[model.lower()]
+        resolved = model
+        if resolved and resolved.lower() in hints:
+            val = hints[resolved.lower()]
             if val:
-                return val
-        return model or settings.get_nine_router("NINE_ROUTER_MODEL") or settings.NINE_ROUTER_MODEL
+                resolved = val
+
+        if not resolved:
+            resolved = settings.get_nine_router("NINE_ROUTER_MODEL") or settings.NINE_ROUTER_MODEL or "CliperHub"
+
+        # Case & alias normalization for known 9router combos:
+        # 9router combo matching is case-sensitive ("Claude", "CliperHub").
+        # If user specifies "claude", "cliperhub", or "gemini", map to exact registered combo name.
+        combo_normalization = {
+            "claude": "Claude",
+            "cliperhub": "CliperHub",
+            "gemini": "CliperHub",
+        }
+        if resolved and resolved.lower() in combo_normalization:
+            return combo_normalization[resolved.lower()]
+
+        return resolved
 
     def complete_json(
         self,
