@@ -37,6 +37,17 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function SuperadminRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const isSuperadmin = user?.is_superadmin || user?.role === "superadmin" || false;
+
+  if (!isSuperadmin) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <>
@@ -63,8 +74,22 @@ export default function App() {
           <Route path="jobs/:jobId" element={<JobDetail />} />
           <Route path="jobs/:jobId/clips/:rank" element={<ClipViewer />} />
           <Route path="social" element={<SocialAccounts />} />
-          <Route path="social-engagement" element={<SocialEngagement />} />
-          <Route path="social/engagement" element={<SocialEngagement />} />
+          <Route
+            path="social-engagement"
+            element={
+              <SuperadminRoute>
+                <SocialEngagement />
+              </SuperadminRoute>
+            }
+          />
+          <Route
+            path="social/engagement"
+            element={
+              <SuperadminRoute>
+                <SocialEngagement />
+              </SuperadminRoute>
+            }
+          />
           <Route path="video-generator" element={<VideoGeneratorPage />} />
           <Route path="settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="settings/hermes" element={<Navigate to="/settings/hermes/autopilot" replace />} />

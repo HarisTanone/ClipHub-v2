@@ -1144,6 +1144,7 @@ export const socialApi = {
     targetAccountId?: string;
     targetMode?: string;
     contentId?: string;
+    contentIds?: string[];
     metadata?: any;
     delayMinutes?: number;
     commenters?: any[];

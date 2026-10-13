@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from src.presentation.api import app
 from src.presentation.routes.auth import get_current_user
-from src.presentation.auth_deps import CurrentUser
+from src.presentation.auth_deps import CurrentUser, require_superadmin
 
 # Mock current user
 class MockUser:
@@ -19,6 +19,7 @@ class MockUser:
 
 @pytest.fixture
 def client():
+    app.dependency_overrides[require_superadmin()] = lambda: MockUser()
     app.dependency_overrides[get_current_user] = lambda: MockUser()
     with TestClient(app) as c:
         yield c
@@ -154,9 +155,9 @@ def test_trigger_engagement_with_staggered_delay(client):
         res = client.post("/api/social/engagement/trigger", json=payload)
         assert res.status_code == 200
         data = res.json()
-        assert data["contentId"] == "content_tt_123"
+        assert data["totalPosts"] == 1
         assert data["totalCommenters"] == 2
-        task_id = data["taskId"]
+        task_id = data["tasks"][0]["taskId"]
 
         # Check tasks endpoint
         res = client.get("/api/social/engagement/tasks")

@@ -10,12 +10,16 @@ from pydantic import BaseModel, Field
 
 from src.infrastructure.db_connection import get_dict_connection
 from src.infrastructure.llm_router import route_chat
-from src.presentation.routes.auth import get_current_user
+from src.presentation.auth_deps import get_current_user, require_superadmin
 from src.presentation.routes.social.helpers import repliz_get, repliz_post
 
 logger = logging.getLogger(__name__)
 
-engagement_router = APIRouter(prefix="/engagement", tags=["social-engagement"])
+engagement_router = APIRouter(
+    prefix="/engagement",
+    tags=["social-engagement"],
+    dependencies=[Depends(require_superadmin())]
+)
 
 
 def _init_engagement_db():
@@ -29,6 +33,7 @@ def _init_engagement_db():
                 name TEXT NOT NULL,
                 target_account_id TEXT NOT NULL,
                 target_account_name TEXT DEFAULT '',
+                target_platform TEXT DEFAULT 'tiktok',
                 target_mode TEXT DEFAULT 'latest',
                 specific_content_id TEXT DEFAULT '',
                 is_active INTEGER DEFAULT 1,
@@ -41,6 +46,8 @@ def _init_engagement_db():
         # Ensure new columns exist if table was previously created
         cur.execute("PRAGMA table_info(social_engagement_rules)")
         cols = [r["name"] for r in cur.fetchall()]
+        if "target_platform" not in cols:
+            cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN target_platform TEXT DEFAULT 'tiktok'")
         if "target_mode" not in cols:
             cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN target_mode TEXT DEFAULT 'latest'")
         if "specific_content_id" not in cols:
@@ -111,8 +118,10 @@ class EngagementRulePayload(BaseModel):
     name: str
     targetAccountId: str
     targetAccountName: Optional[str] = ""
+    targetPlatform: Optional[str] = Field("tiktok", description="Platform target (tiktok, instagram, etc)")
     targetMode: str = Field("latest", description="'latest' atau 'specific'")
-    specificContentId: Optional[str] = Field("", description="Content ID jika mode specific")
+    specificContentIds: List[str] = Field(default_factory=list, description="List content ID jika mode specific")
+    specificContentId: Optional[str] = Field("", description="Backward compatibility single content ID")
     isActive: bool = True
     delayMinutes: int = Field(5, ge=0, description="Jeda menit antar user komentar")
     commenters: List[CommenterConfig] = Field(default_factory=list)
@@ -131,7 +140,8 @@ class TriggerEngagementRequest(BaseModel):
     ruleId: Optional[int] = None
     targetAccountId: Optional[str] = None
     targetMode: Optional[str] = None  # 'latest' | 'specific'
-    contentId: Optional[str] = None  # Specific contentId override
+    contentId: Optional[str] = None  # Specific single contentId override
+    contentIds: Optional[List[str]] = None  # Multiple contentIds override
     metadata: Optional[Dict[str, Any]] = None
     delayMinutes: Optional[int] = None
     commenters: Optional[List[CommenterConfig]] = None
@@ -332,13 +342,27 @@ async def list_engagement_rules(user=Depends(get_current_user)):
             commenters = json.loads(r["commenters_config"] or "[]")
         except Exception:
             pass
+
+        # Parse specific content IDs (could be JSON array or single comma string)
+        specific_raw = r["specific_content_id"] or ""
+        specific_ids: List[str] = []
+        if specific_raw.startswith("["):
+            try:
+                specific_ids = json.loads(specific_raw)
+            except Exception:
+                specific_ids = [specific_raw] if specific_raw else []
+        elif specific_raw:
+            specific_ids = [s.strip() for s in specific_raw.split(",") if s.strip()]
+
         result.append({
             "id": r["id"],
             "name": r["name"],
             "targetAccountId": r["target_account_id"],
             "targetAccountName": r["target_account_name"] or "",
+            "targetPlatform": r["target_platform"] or "tiktok",
             "targetMode": r["target_mode"] or "latest",
-            "specificContentId": r["specific_content_id"] or "",
+            "specificContentId": specific_ids[0] if specific_ids else "",
+            "specificContentIds": specific_ids,
             "isActive": bool(r["is_active"]),
             "delayMinutes": r["delay_minutes"] if r["delay_minutes"] is not None else 5,
             "commenters": commenters,
@@ -355,17 +379,25 @@ async def create_engagement_rule(payload: EngagementRulePayload, user=Depends(ge
     conn = get_dict_connection()
     cur = conn.cursor()
     commenters_json = json.dumps([c.model_dump() for c in payload.commenters])
+
+    # Store specific content IDs as JSON array string
+    content_ids = payload.specificContentIds
+    if not content_ids and payload.specificContentId:
+        content_ids = [payload.specificContentId]
+    specific_stored = json.dumps(content_ids) if content_ids else ""
+
     cur.execute("""
         INSERT INTO social_engagement_rules (
-            name, target_account_id, target_account_name, target_mode, specific_content_id, is_active, delay_minutes, commenters_config
+            name, target_account_id, target_account_name, target_platform, target_mode, specific_content_id, is_active, delay_minutes, commenters_config
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         payload.name,
         payload.targetAccountId,
         payload.targetAccountName or "",
+        payload.targetPlatform or "tiktok",
         payload.targetMode,
-        payload.specificContentId or "",
+        specific_stored,
         1 if payload.isActive else 0,
         payload.delayMinutes,
         commenters_json
@@ -383,16 +415,23 @@ async def update_engagement_rule(rule_id: int, payload: EngagementRulePayload, u
     conn = get_dict_connection()
     cur = conn.cursor()
     commenters_json = json.dumps([c.model_dump() for c in payload.commenters])
+
+    content_ids = payload.specificContentIds
+    if not content_ids and payload.specificContentId:
+        content_ids = [payload.specificContentId]
+    specific_stored = json.dumps(content_ids) if content_ids else ""
+
     cur.execute("""
         UPDATE social_engagement_rules
-        SET name = ?, target_account_id = ?, target_account_name = ?, target_mode = ?, specific_content_id = ?, is_active = ?, delay_minutes = ?, commenters_config = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, target_account_id = ?, target_account_name = ?, target_platform = ?, target_mode = ?, specific_content_id = ?, is_active = ?, delay_minutes = ?, commenters_config = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
     """, (
         payload.name,
         payload.targetAccountId,
         payload.targetAccountName or "",
+        payload.targetPlatform or "tiktok",
         payload.targetMode,
-        payload.specificContentId or "",
+        specific_stored,
         1 if payload.isActive else 0,
         payload.delayMinutes,
         commenters_json,
@@ -437,20 +476,26 @@ async def list_target_account_contents(
     limit: int = Query(20, ge=1, le=50),
     user=Depends(get_current_user)
 ):
-    """Fetch recent posts of a target account from Repliz so user can select a post."""
+    """Fetch recent posts of a target account from Repliz with thumbnails so user can select visually."""
     try:
         data = await repliz_get("/public/content", params={"accountId": accountId, "limit": limit})
         docs = data.get("docs") or []
         items = []
         for d in docs:
+            medias = d.get("medias") or []
+            thumbnail = ""
+            if medias and isinstance(medias, list):
+                m0 = medias[0] or {}
+                thumbnail = m0.get("thumbnail") or m0.get("url") or ""
             items.append({
                 "id": d.get("id"),
                 "title": d.get("title") or "",
                 "description": d.get("description") or "",
                 "type": d.get("type") or "video",
                 "url": d.get("url") or "",
+                "thumbnail": thumbnail,
                 "createdAt": d.get("createdAt") or "",
-                "medias": d.get("medias") or [],
+                "medias": medias,
             })
         return items
     except Exception as exc:
@@ -511,100 +556,116 @@ async def trigger_engagement(payload: TriggerEngagementRequest, user=Depends(get
     if not commenters:
         raise HTTPException(status_code=400, detail="Tidak ada akun pengomentar yang dikonfigurasi")
 
-    # Resolve target contentId
-    content_id = payload.contentId or (rule["specific_content_id"] if rule and target_mode == "specific" else None)
+    # Resolve target content IDs list
+    target_content_ids: List[str] = []
+    if payload.contentIds:
+        target_content_ids = [cid.strip() for cid in payload.contentIds if cid.strip()]
+    elif payload.contentId:
+        target_content_ids = [payload.contentId.strip()]
+    elif rule and target_mode == "specific":
+        specific_raw = rule["specific_content_id"] or ""
+        if specific_raw.startswith("["):
+            try:
+                target_content_ids = json.loads(specific_raw)
+            except Exception:
+                target_content_ids = [specific_raw] if specific_raw else []
+        elif specific_raw:
+            target_content_ids = [s.strip() for s in specific_raw.split(",") if s.strip()]
 
-    metadata = payload.metadata or {}
-
-    # If mode is latest or content_id not provided, fetch newest post from Repliz
-    if target_mode == "latest" or not content_id:
+    # If mode is latest or no content_ids, fetch newest post from Repliz
+    if target_mode == "latest" or not target_content_ids:
         try:
             content_list = await repliz_get("/public/content", params={"accountId": target_acc, "limit": 1})
             docs = content_list.get("docs") or []
             if not docs:
                 raise HTTPException(status_code=404, detail=f"Tidak ditemukan postingan pada akun target {target_acc}")
             latest_doc = docs[0]
-            content_id = latest_doc.get("id")
-            if not metadata:
-                metadata = {
-                    "title": latest_doc.get("title", ""),
-                    "description": latest_doc.get("description", ""),
-                    "topic": latest_doc.get("topic", ""),
-                }
+            target_content_ids = [latest_doc.get("id")]
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Gagal mengambil postingan terbaru dari Repliz: {exc}")
 
-    # If metadata still empty, fetch single content detail
-    if not metadata and content_id:
-        try:
-            content_detail = await repliz_get(f"/public/content/{content_id}", params={"accountId": target_acc})
-            if content_detail:
-                metadata = {
-                    "title": content_detail.get("title", ""),
-                    "description": content_detail.get("description", ""),
-                    "topic": content_detail.get("topic", ""),
-                }
-        except Exception as exc:
-            logger.warning(f"Could not fetch metadata for content {content_id}: {exc}")
+    created_tasks = []
 
-    # Create task in database
-    conn = get_dict_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO social_engagement_tasks (
-            rule_id, content_id, target_account_id, target_mode, status, total_commenters, completed_commenters
-        ) VALUES (?, ?, ?, ?, 'pending', ?, 0)
-    """, (rule["id"] if rule else None, content_id, target_acc, target_mode, len(commenters)))
-    task_id = int(cur.lastrowid or 0)
+    for content_id in target_content_ids:
+        # Fetch metadata JSON from Repliz for each content
+        metadata = payload.metadata or {}
+        if not metadata or len(target_content_ids) > 1:
+            try:
+                content_detail = await repliz_get(f"/public/content/{content_id}", params={"accountId": target_acc})
+                if content_detail:
+                    metadata = {
+                        "title": content_detail.get("title", ""),
+                        "description": content_detail.get("description", ""),
+                        "topic": content_detail.get("topic", ""),
+                        "type": content_detail.get("type", "video"),
+                        "tags": content_detail.get("tags") or [],
+                    }
+            except Exception as exc:
+                logger.warning(f"Could not fetch metadata for content {content_id}: {exc}")
 
-    # Create pending logs with scheduled_at timestamp
-    now = dt.datetime.now(dt.timezone.utc)
-    enriched_commenters = []
-    for i, c in enumerate(commenters):
-        sched_time = now + dt.timedelta(minutes=(i * delay_minutes))
+        # Create task in database
+        conn = get_dict_connection()
+        cur = conn.cursor()
         cur.execute("""
-            INSERT INTO social_engagement_logs (
-                task_id, rule_id, content_id, target_account_id, commenter_account_id, commenter_account_name,
-                comment_text, scheduled_at, status
-            ) VALUES (?, ?, ?, ?, ?, ?, '', ?, 'pending')
-        """, (
-            task_id,
-            rule["id"] if rule else None,
-            content_id,
-            target_acc,
-            c.get("accountId"),
-            c.get("accountName", ""),
-            sched_time.isoformat()
-        ))
-        log_id = int(cur.lastrowid or 0)
-        enriched_commenters.append({**c, "logId": log_id, "scheduledAt": sched_time.isoformat()})
+            INSERT INTO social_engagement_tasks (
+                rule_id, content_id, target_account_id, target_mode, status, total_commenters, completed_commenters
+            ) VALUES (?, ?, ?, ?, 'pending', ?, 0)
+        """, (rule["id"] if rule else None, content_id, target_acc, target_mode, len(commenters)))
+        task_id = int(cur.lastrowid or 0)
 
-    conn.commit()
-    conn.close()
+        # Create pending logs with scheduled_at timestamp
+        now = dt.datetime.now(dt.timezone.utc)
+        enriched_commenters = []
+        for i, c in enumerate(commenters):
+            sched_time = now + dt.timedelta(minutes=(i * delay_minutes))
+            cur.execute("""
+                INSERT INTO social_engagement_logs (
+                    task_id, rule_id, content_id, target_account_id, commenter_account_id, commenter_account_name,
+                    comment_text, scheduled_at, status
+                ) VALUES (?, ?, ?, ?, ?, ?, '', ?, 'pending')
+            """, (
+                task_id,
+                rule["id"] if rule else None,
+                content_id,
+                target_acc,
+                c.get("accountId"),
+                c.get("accountName", ""),
+                sched_time.isoformat()
+            ))
+            log_id = int(cur.lastrowid or 0)
+            enriched_commenters.append({**c, "logId": log_id, "scheduledAt": sched_time.isoformat()})
 
-    # Launch background async worker
-    bg_task = asyncio.create_task(
-        _execute_staggered_task(
-            task_id=task_id,
-            rule_id=rule["id"] if rule else 0,
-            content_id=content_id or "",
-            target_acc=target_acc,
-            delay_minutes=delay_minutes,
-            commenters=enriched_commenters,
-            metadata=metadata
+        conn.commit()
+        conn.close()
+
+        # Launch background async worker
+        bg_task = asyncio.create_task(
+            _execute_staggered_task(
+                task_id=task_id,
+                rule_id=rule["id"] if rule else 0,
+                content_id=content_id,
+                target_acc=target_acc,
+                delay_minutes=delay_minutes,
+                commenters=enriched_commenters,
+                metadata=metadata
+            )
         )
-    )
-    _RUNNING_ENGAGEMENT_TASKS[task_id] = bg_task
+        _RUNNING_ENGAGEMENT_TASKS[task_id] = bg_task
+        created_tasks.append({
+            "taskId": task_id,
+            "contentId": content_id,
+            "totalCommenters": len(commenters),
+            "delayMinutes": delay_minutes,
+        })
 
     return {
-        "taskId": task_id,
-        "contentId": content_id,
+        "tasks": created_tasks,
+        "totalPosts": len(created_tasks),
         "totalCommenters": len(commenters),
         "delayMinutes": delay_minutes,
-        "message": f"Engagement dijadwalkan untuk {len(commenters)} akun dengan jeda {delay_minutes} menit per akun",
-        "commenters": enriched_commenters
+        "message": f"Engagement dijadwalkan untuk {len(created_tasks)} postingan dengan {len(commenters)} akun pengomentar (jeda {delay_minutes}m per akun)",
     }
 
 

@@ -13,7 +13,7 @@ const mainNavItems = [
   { to: "/jobs/new", icon: PlusCircle, label: "New Job" },
   { to: "/video-generator", icon: Film, label: "Video Generator" },
   { to: "/social", icon: Share2, label: "Social Accounts" },
-  { to: "/social-engagement", icon: MessageSquareQuote, label: "Auto Engagement" },
+  { to: "/social-engagement", icon: MessageSquareQuote, label: "Auto Engagement", superadminOnly: true },
 ];
 
 interface SidebarProps {
@@ -79,7 +79,9 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
 
         {/* Navigation */}
         <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto scrollbar-thin">
-          {mainNavItems.map((item) => (
+          {mainNavItems
+            .filter((item) => !item.superadminOnly || isSuperadmin)
+            .map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

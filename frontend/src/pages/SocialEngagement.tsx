@@ -89,8 +89,10 @@ interface EngagementRule {
   name: string;
   targetAccountId: string;
   targetAccountName: string;
+  targetPlatform: string;
   targetMode: "latest" | "specific";
   specificContentId: string;
+  specificContentIds?: string[];
   isActive: boolean;
   delayMinutes: number;
   commenters: CommenterConfig[];
@@ -149,7 +151,8 @@ export function SocialEngagement() {
   const [formName, setFormName] = useState("");
   const [formTargetAccountId, setFormTargetAccountId] = useState("");
   const [formTargetMode, setFormTargetMode] = useState<"latest" | "specific">("latest");
-  const [formSpecificContentId, setFormSpecificContentId] = useState("");
+  const [formSpecificContentIds, setFormSpecificContentIds] = useState<string[]>([]);
+  const [manualContentIdInput, setManualContentIdInput] = useState("");
   const [formDelayMinutes, setFormDelayMinutes] = useState(5);
   const [formIsActive, setFormIsActive] = useState(true);
   const [formCommenters, setFormCommenters] = useState<CommenterConfig[]>([]);
@@ -217,40 +220,57 @@ export function SocialEngagement() {
     }
   }, [formTargetAccountId, formTargetMode]);
 
+  // Auto-sync commenters based on target account platform
+  const syncCommentersForTarget = useCallback(
+    (targetAccId: string, currentCommenters: CommenterConfig[] = []) => {
+      const targetAcc = accounts.find((a) => a.id === targetAccId);
+      if (!targetAcc) return [];
+
+      const targetPlatform = targetAcc.platform || "tiktok";
+
+      // Filter all accounts that share the SAME platform and EXCLUDE the target account itself
+      const peerAccounts = accounts.filter(
+        (a) =>
+          (a.platform || "tiktok").toLowerCase() === targetPlatform.toLowerCase() &&
+          a.id !== targetAccId
+      );
+
+      // Map each peer account to a commenter config
+      return peerAccounts.map((a, idx) => {
+        // Check if user already had a config for this account
+        const existing = currentCommenters.find((c) => c.accountId === a.id);
+        const role = ROLE_OPTIONS[idx % ROLE_OPTIONS.length];
+        return {
+          accountId: a.id,
+          accountName: a.name,
+          roleCategory: existing?.roleCategory || role.value,
+          persona: existing?.persona || role.defaultPersona,
+        };
+      });
+    },
+    [accounts]
+  );
+
+  const handleTargetAccountChange = (newTargetId: string) => {
+    setFormTargetAccountId(newTargetId);
+    setFormSpecificContentIds([]);
+    const autoCommenters = syncCommentersForTarget(newTargetId, formCommenters);
+    setFormCommenters(autoCommenters);
+  };
   const handleOpenCreate = () => {
     setEditingRuleId(null);
-    setFormName("Trio Auto Comment");
-    setFormTargetAccountId(accounts[0]?.id || "");
+    setFormName("Auto Engagement Rule");
+    const firstAcc = accounts[0];
+    const firstAccId = firstAcc?.id || "";
+    setFormTargetAccountId(firstAccId);
     setFormTargetMode("latest");
-    setFormSpecificContentId("");
+    setFormSpecificContentIds([]);
+    setManualContentIdInput("");
     setFormDelayMinutes(5);
     setFormIsActive(true);
 
-    // Default 2 commenter accounts if available
-    const otherAccounts = accounts.filter((a) => a.id !== accounts[0]?.id);
-    const defaultCommenters: CommenterConfig[] = otherAccounts.slice(0, 2).map((a, idx) => {
-      const role = idx === 0 ? ROLE_OPTIONS[0] : ROLE_OPTIONS[1];
-      return {
-        accountId: a.id,
-        accountName: a.name,
-        roleCategory: role.value as any,
-        persona: role.defaultPersona,
-      };
-    });
-
-    setFormCommenters(
-      defaultCommenters.length > 0
-        ? defaultCommenters
-        : [
-            {
-              accountId: "",
-              accountName: "",
-              roleCategory: "pro",
-              persona: ROLE_OPTIONS[0].defaultPersona,
-            },
-          ]
-    );
-
+    const autoCommenters = syncCommentersForTarget(firstAccId);
+    setFormCommenters(autoCommenters);
     setModalOpen(true);
   };
 
@@ -259,7 +279,13 @@ export function SocialEngagement() {
     setFormName(rule.name);
     setFormTargetAccountId(rule.targetAccountId);
     setFormTargetMode(rule.targetMode);
-    setFormSpecificContentId(rule.specificContentId || "");
+    const contentIds = rule.specificContentIds && rule.specificContentIds.length > 0
+      ? rule.specificContentIds
+      : rule.specificContentId
+      ? [rule.specificContentId]
+      : [];
+    setFormSpecificContentIds(contentIds);
+    setManualContentIdInput("");
     setFormDelayMinutes(rule.delayMinutes ?? 5);
     setFormIsActive(rule.isActive);
     setFormCommenters(
@@ -273,7 +299,7 @@ export function SocialEngagement() {
 
   const handleSaveRule = async () => {
     if (!formTargetAccountId) {
-      alert("Pilih akun TikTok target (Akun A)");
+      alert("Pilih akun target utama (Akun A)");
       return;
     }
     if (formCommenters.length === 0 || formCommenters.some((c) => !c.accountId)) {
@@ -281,12 +307,15 @@ export function SocialEngagement() {
       return;
     }
 
+    const targetAcc = accounts.find((a) => a.id === formTargetAccountId);
     const payload = {
       name: formName || "Auto Engagement Rule",
       targetAccountId: formTargetAccountId,
-      targetAccountName: accounts.find((a) => a.id === formTargetAccountId)?.name || "",
+      targetAccountName: targetAcc?.name || "",
+      targetPlatform: targetAcc?.platform || "tiktok",
       targetMode: formTargetMode,
-      specificContentId: formSpecificContentId,
+      specificContentIds: formSpecificContentIds,
+      specificContentId: formSpecificContentIds[0] || "",
       isActive: formIsActive,
       delayMinutes: Number(formDelayMinutes) || 0,
       commenters: formCommenters.map((c) => ({
@@ -773,40 +802,49 @@ export function SocialEngagement() {
 
       {/* Modal: Create / Edit Rule */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="w-full max-w-xl rounded-2xl border border-zinc-800 bg-[#0d0d11] p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
-              <div className="flex items-center gap-2">
-                <Sliders className="h-4 w-4 text-emerald-400" />
-                <h2 className="text-sm font-semibold text-zinc-100">
-                  {editingRuleId ? "Edit Aturan Engagement" : "Buat Aturan Engagement Baru"}
-                </h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto">
+          <div className="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl border border-zinc-800 bg-[#0d0d11] shadow-2xl overflow-hidden animate-in fade-in-50 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-zinc-800/80 px-6 py-4 shrink-0 bg-zinc-950/40">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+                  <Sliders className="h-4 w-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-zinc-100">
+                    {editingRuleId ? "Edit Aturan Engagement" : "Buat Aturan Engagement Baru"}
+                  </h2>
+                  <p className="text-[11px] text-zinc-400">
+                    Konfigurasi akun target, video spesifik, dan akun pengomentar otomatis.
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="p-1 rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="space-y-3.5 text-xs">
+            {/* Modal Body */}
+            <div className="p-6 space-y-5 text-xs overflow-y-auto flex-1">
               {/* Rule Name & Active Toggle */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2 space-y-1">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2 space-y-1.5">
                   <label className="text-zinc-400 font-medium">Nama Aturan</label>
                   <input
                     type="text"
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
-                    placeholder="Contoh: Auto Comment Trio"
-                    className="w-full px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/60 text-zinc-200 focus:outline-none focus:border-emerald-500"
+                    placeholder="Contoh: Auto Comment TikTok Skena"
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900/60 text-zinc-200 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <label className="text-zinc-400 font-medium">Status Otomasi</label>
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex items-center gap-2.5 pt-1">
                     <Toggle checked={formIsActive} onChange={setFormIsActive} />
                     <span className="text-zinc-300 font-medium">
                       {formIsActive ? "Aktif" : "Nonaktif"}
@@ -816,16 +854,21 @@ export function SocialEngagement() {
               </div>
 
               {/* Target Account (Akun A) */}
-              <div className="space-y-1">
-                <label className="text-zinc-400 font-medium">
-                  Akun Target Utama (Akun A yang memposting video)
-                </label>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-zinc-300 font-medium">
+                    Akun Target Utama (Akun yang memposting video)
+                  </label>
+                  <span className="text-[11px] text-emerald-400 font-mono">
+                    Akun pengomentar otomatis disesuaikan platform yang sama
+                  </span>
+                </div>
                 <select
                   value={formTargetAccountId}
-                  onChange={(e) => setFormTargetAccountId(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/60 text-zinc-200 focus:outline-none focus:border-emerald-500"
+                  onChange={(e) => handleTargetAccountChange(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900/60 text-zinc-200 focus:outline-none focus:border-emerald-500"
                 >
-                  <option value="">-- Pilih Akun TikTok Target --</option>
+                  <option value="">-- Pilih Akun Target --</option>
                   {accounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
                       {acc.name} ({acc.platform})
@@ -835,80 +878,161 @@ export function SocialEngagement() {
               </div>
 
               {/* Mode Target: Latest Post vs Specific Post */}
-              <div className="space-y-2 p-3 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
-                <label className="text-zinc-300 font-medium flex items-center gap-1.5">
-                  <Video className="h-3.5 w-3.5 text-cyan-400" />
-                  Target Postingan Video
-                </label>
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="targetMode"
-                      value="latest"
-                      checked={formTargetMode === "latest"}
-                      onChange={() => setFormTargetMode("latest")}
-                      className="accent-emerald-500"
-                    />
-                    <span>Otomatis di Postingan Terbaru</span>
+              <div className="space-y-3 p-4 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="text-zinc-300 font-semibold flex items-center gap-1.5">
+                    <Video className="h-4 w-4 text-cyan-400" />
+                    Target Postingan Video
                   </label>
-                  <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="targetMode"
-                      value="specific"
-                      checked={formTargetMode === "specific"}
-                      onChange={() => setFormTargetMode("specific")}
-                      className="accent-emerald-500"
-                    />
-                    <span>Pilih Postingan Spesifik</span>
-                  </label>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="targetMode"
+                        value="latest"
+                        checked={formTargetMode === "latest"}
+                        onChange={() => setFormTargetMode("latest")}
+                        className="accent-emerald-500"
+                      />
+                      <span>Otomatis di Postingan Terbaru</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="targetMode"
+                        value="specific"
+                        checked={formTargetMode === "specific"}
+                        onChange={() => setFormTargetMode("specific")}
+                        className="accent-emerald-500"
+                      />
+                      <span>Pilih Postingan Spesifik (Bisa Multiple)</span>
+                    </label>
+                  </div>
                 </div>
 
                 {formTargetMode === "specific" && (
-                  <div className="pt-2 space-y-1.5">
-                    {loadingContents ? (
-                      <div className="text-zinc-500 italic py-1">Mengambil daftar video akun target...</div>
-                    ) : targetContents.length > 0 ? (
-                      <div>
-                        <label className="text-zinc-400">Pilih dari postingan video terbaru akun A:</label>
-                        <select
-                          value={formSpecificContentId}
-                          onChange={(e) => setFormSpecificContentId(e.target.value)}
-                          className="w-full mt-1 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-200 focus:outline-none focus:border-emerald-500"
+                  <div className="pt-2 space-y-3 border-t border-zinc-800/70">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-400 font-medium">
+                        Pilih satu atau lebih video dari galeri akun target ({formSpecificContentIds.length} dipilih):
+                      </span>
+                      {formSpecificContentIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setFormSpecificContentIds([])}
+                          className="text-xs text-rose-400 hover:text-rose-300 underline"
                         >
-                          <option value="">-- Pilih Video --</option>
-                          {targetContents.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.title || c.description?.slice(0, 45) || c.id} ({new Date(c.createdAt).toLocaleDateString()})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : null}
+                          Reset Pilihan
+                        </button>
+                      )}
+                    </div>
 
-                    <div>
-                      <label className="text-zinc-400">Atau masukkan ID Postingan secara manual:</label>
+                    {loadingContents ? (
+                      <div className="flex items-center justify-center gap-2 py-8 text-zinc-500">
+                        <RefreshCw className="h-4 w-4 animate-spin text-cyan-400" />
+                        <span>Mengambil daftar video & thumbnail dari Repliz...</span>
+                      </div>
+                    ) : targetContents.length > 0 ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-64 overflow-y-auto pr-1">
+                        {targetContents.map((c) => {
+                          const isSelected = formSpecificContentIds.includes(c.id);
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => {
+                                setFormSpecificContentIds((prev) =>
+                                  isSelected
+                                    ? prev.filter((id) => id !== c.id)
+                                    : [...prev, c.id]
+                                );
+                              }}
+                              className={`group relative rounded-xl border p-2 flex flex-col gap-2 cursor-pointer transition-all ${
+                                isSelected
+                                  ? "border-emerald-500 bg-emerald-500/10 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500"
+                                  : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-900"
+                              }`}
+                            >
+                              {/* Video Thumbnail */}
+                              <div className="aspect-[9/16] w-full bg-zinc-950 rounded-lg overflow-hidden relative flex items-center justify-center">
+                                {c.thumbnail ? (
+                                  <img
+                                    src={c.thumbnail}
+                                    alt={c.title || "Video thumbnail"}
+                                    className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                                  />
+                                ) : (
+                                  <div className="text-zinc-600 flex flex-col items-center gap-1">
+                                    <Video className="h-6 w-6" />
+                                    <span className="text-[10px]">No Preview</span>
+                                  </div>
+                                )}
+
+                                {/* Selection Checkmark Badge */}
+                                <div
+                                  className={`absolute top-2 right-2 rounded-full p-1 transition-all ${
+                                    isSelected
+                                      ? "bg-emerald-500 text-zinc-950"
+                                      : "bg-black/60 text-transparent border border-zinc-700"
+                                  }`}
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5 fill-current" />
+                                </div>
+                              </div>
+
+                              {/* Title / Description */}
+                              <div className="space-y-0.5">
+                                <p className="text-[11px] font-medium text-zinc-200 line-clamp-2 leading-snug">
+                                  {c.title || c.description || "Video Tanpa Judul"}
+                                </p>
+                                <p className="text-[10px] text-zinc-500">
+                                  {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : ""}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-zinc-500 border border-zinc-800/80 rounded-lg">
+                        Tidak ada postingan video yang ditemukan untuk akun ini.
+                      </div>
+                    )}
+
+                    {/* Manual ID Input */}
+                    <div className="pt-2 flex items-center gap-2">
                       <input
                         type="text"
-                        value={formSpecificContentId}
-                        onChange={(e) => setFormSpecificContentId(e.target.value)}
-                        placeholder="Contoh: 113958387982006_942538351814577"
-                        className="w-full mt-1 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono"
+                        value={manualContentIdInput}
+                        onChange={(e) => setManualContentIdInput(e.target.value)}
+                        placeholder="Atau tambah ID Postingan manual (misal: 113958387982006_942538351814577)"
+                        className="flex-1 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono text-xs"
                       />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = manualContentIdInput.trim();
+                          if (val && !formSpecificContentIds.includes(val)) {
+                            setFormSpecificContentIds((prev) => [...prev, val]);
+                            setManualContentIdInput("");
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold"
+                      >
+                        Tambah ID
+                      </button>
                     </div>
                   </div>
                 )}
               </div>
 
               {/* Delay Inter-User Setting */}
-              <div className="space-y-1 p-3 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
+              <div className="space-y-1.5 p-4 rounded-xl border border-zinc-800/80 bg-zinc-950/40">
                 <div className="flex items-center justify-between">
-                  <label className="text-zinc-300 font-medium flex items-center gap-1.5">
-                    <Timer className="h-3.5 w-3.5 text-amber-400" />
+                  <label className="text-zinc-300 font-semibold flex items-center gap-1.5">
+                    <Timer className="h-4 w-4 text-amber-400" />
                     Jeda Waktu Antar User Komentar (Menit)
                   </label>
-                  <span className="font-mono text-amber-400 font-semibold">{formDelayMinutes} Menit</span>
+                  <span className="font-mono text-amber-400 font-bold text-sm">{formDelayMinutes} Menit</span>
                 </div>
                 <input
                   type="number"
@@ -916,159 +1040,180 @@ export function SocialEngagement() {
                   max="120"
                   value={formDelayMinutes}
                   onChange={(e) => setFormDelayMinutes(Math.max(0, parseInt(e.target.value) || 0))}
-                  className="w-full px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-200 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-200 focus:outline-none focus:border-emerald-500"
                 />
                 <p className="text-[11px] text-zinc-500 leading-relaxed">
                   Contoh: Jika disetel 5 menit, maka Akun 1 komentar di menit ke-0, Akun 2 di menit ke-5, Akun 3 di menit ke-10, dst.
                 </p>
               </div>
 
-              {/* Commenter Accounts & Personas (Akun B, C, dst) */}
-              <div className="space-y-2.5">
+              {/* Commenter Accounts & Personas */}
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-zinc-400 font-medium flex items-center gap-1">
-                    <Users className="h-3.5 w-3.5 text-emerald-400" />
-                    Akun Pengomentar & Persona AI ({formCommenters.length} Akun)
-                  </label>
+                  <div>
+                    <label className="text-zinc-200 font-semibold flex items-center gap-1.5">
+                      <Users className="h-4 w-4 text-emerald-400" />
+                      Akun Pengomentar & Persona AI ({formCommenters.length} Akun)
+                    </label>
+                    <p className="text-[11px] text-zinc-500">
+                      Otomatis mencakup semua akun se-platform selain akun target utama. Persona tidak wajib diubah karena sudah otomatis sesuai peran.
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={addCommenterRow}
-                    className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-xs font-semibold"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-semibold transition-colors"
                   >
-                    <Plus className="h-3 w-3" /> Tambah Akun
+                    <Plus className="h-3 w-3" /> Tambah Baris
                   </button>
                 </div>
 
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {formCommenters.map((commenter, idx) => (
-                    <div
-                      key={idx}
-                      className="p-2.5 rounded-lg border border-zinc-800 bg-zinc-900/50 space-y-2"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-semibold text-zinc-400">
-                          Akun #{idx + 1} (+{idx * formDelayMinutes}m)
-                        </span>
-                        {formCommenters.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeCommenterRow(idx)}
-                            className="text-zinc-500 hover:text-rose-400"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] text-zinc-400">Akun Pengomentar</label>
-                          <select
-                            value={commenter.accountId}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setFormCommenters((prev) =>
-                                prev.map((c, i) =>
-                                  i === idx
-                                    ? {
-                                        ...c,
-                                        accountId: val,
-                                        accountName: accounts.find((a) => a.id === val)?.name || "",
-                                      }
-                                    : c
-                                )
-                              );
-                            }}
-                            className="w-full mt-0.5 px-2.5 py-1.5 rounded border border-zinc-800 bg-zinc-900 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500"
-                          >
-                            <option value="">-- Pilih Akun --</option>
-                            {accounts
-                              .filter((a) => a.id !== formTargetAccountId)
-                              .map((acc) => (
-                                <option key={acc.id} value={acc.id}>
-                                  {acc.name}
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] text-zinc-400">Kategori Peran / Stance</label>
-                          <select
-                            value={commenter.roleCategory || "pro"}
-                            onChange={(e) => {
-                              const val = e.target.value as any;
-                              const matchedRole = ROLE_OPTIONS.find((r) => r.value === val);
-                              setFormCommenters((prev) =>
-                                prev.map((c, i) =>
-                                  i === idx
-                                    ? {
-                                        ...c,
-                                        roleCategory: val,
-                                        persona: matchedRole?.defaultPersona || c.persona,
-                                      }
-                                    : c
-                                )
-                              );
-                            }}
-                            className="w-full mt-0.5 px-2.5 py-1.5 rounded border border-zinc-800 bg-zinc-900 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500 font-medium"
-                          >
-                            {ROLE_OPTIONS.map((r) => (
-                              <option key={r.value} value={r.value}>
-                                {r.label} ({r.desc})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between text-[10px] text-zinc-400">
-                          <span>Instruksi Persona (Gaya Typing: Skena Jaksel / Slang)</span>
-                          <span className="text-zinc-500">Bisa diedit manual</span>
-                        </div>
-                        <input
-                          type="text"
-                          value={commenter.persona}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setFormCommenters((prev) =>
-                              prev.map((c, i) => (i === idx ? { ...c, persona: val } : c))
-                            );
-                          }}
-                          placeholder="Instruksi sudut pandang atau kustom persona..."
-                          className="w-full mt-0.5 px-2.5 py-1.5 rounded border border-zinc-800 bg-zinc-900 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500 font-mono"
-                        />
-                      </div>
+                <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                  {formCommenters.length === 0 ? (
+                    <div className="text-center py-6 text-zinc-500 border border-zinc-800/80 rounded-xl">
+                      Tidak ada akun lain yang tersedia di platform yang sama.
                     </div>
-                  ))}
+                  ) : (
+                    formCommenters.map((commenter, idx) => {
+                      const currentRoleObj =
+                        ROLE_OPTIONS.find((r) => r.value === (commenter.roleCategory || "pro")) ||
+                        ROLE_OPTIONS[0];
+
+                      return (
+                        <div
+                          key={idx}
+                          className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 space-y-2.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-zinc-200">
+                                #{idx + 1} {commenter.accountName || commenter.accountId}
+                              </span>
+                              <span className="text-[11px] text-amber-400 font-mono">
+                                (+{idx * formDelayMinutes}m)
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeCommenterRow(idx)}
+                              className="text-zinc-500 hover:text-rose-400 p-1 rounded"
+                              title="Hapus baris pengomentar ini"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] text-zinc-400">Pilih Akun Pengomentar</label>
+                              <select
+                                value={commenter.accountId}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setFormCommenters((prev) =>
+                                    prev.map((c, i) =>
+                                      i === idx
+                                        ? {
+                                            ...c,
+                                            accountId: val,
+                                            accountName: accounts.find((a) => a.id === val)?.name || "",
+                                          }
+                                        : c
+                                    )
+                                  );
+                                }}
+                                className="w-full mt-1 px-2.5 py-1.5 rounded border border-zinc-800 bg-zinc-900 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500"
+                              >
+                                <option value="">-- Pilih Akun --</option>
+                                {accounts
+                                  .filter((a) => a.id !== formTargetAccountId)
+                                  .map((acc) => (
+                                    <option key={acc.id} value={acc.id}>
+                                      {acc.name} ({acc.platform})
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] text-zinc-400">Kategori Peran (Stance Komentar)</label>
+                              <select
+                                value={commenter.roleCategory || "pro"}
+                                onChange={(e) => {
+                                  const val = e.target.value as any;
+                                  const matchedRole = ROLE_OPTIONS.find((r) => r.value === val);
+                                  setFormCommenters((prev) =>
+                                    prev.map((c, i) =>
+                                      i === idx
+                                        ? {
+                                            ...c,
+                                            roleCategory: val,
+                                            persona: matchedRole?.defaultPersona || c.persona,
+                                          }
+                                        : c
+                                    )
+                                  );
+                                }}
+                                className="w-full mt-1 px-2.5 py-1.5 rounded border border-zinc-800 bg-zinc-900 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500 font-medium"
+                              >
+                                {ROLE_OPTIONS.map((r) => (
+                                  <option key={r.value} value={r.value}>
+                                    {r.label} — {r.desc}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                              <span>Instruksi Persona AI (Skena Jaksel):</span>
+                              <span className="text-zinc-500 italic">Otomatis diisi sesuai peran (opsional jika ingin diedit)</span>
+                            </div>
+                            <input
+                              type="text"
+                              value={commenter.persona}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setFormCommenters((prev) =>
+                                  prev.map((c, i) => (i === idx ? { ...c, persona: val } : c))
+                                );
+                              }}
+                              placeholder="Gaya bahasa persona..."
+                              className="w-full mt-1 px-2.5 py-1.5 rounded border border-zinc-800 bg-zinc-900 text-zinc-200 text-xs focus:outline-none focus:border-emerald-500 font-mono"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Footer Buttons */}
-            <div className="flex items-center justify-between border-t border-zinc-800/80 pt-3">
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between border-t border-zinc-800/80 px-6 py-4 shrink-0 bg-zinc-950/40">
               <button
                 type="button"
                 onClick={handlePreviewAI}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition-colors"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition-colors"
               >
-                <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+                <Sparkles className="h-4 w-4 text-cyan-400" />
                 Preview Variasi Komentar AI
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
-                  className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors"
+                  className="px-4 py-2 rounded-lg border border-zinc-800 bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors"
                 >
                   Batal
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveRule}
-                  className="px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-xs font-semibold transition-colors"
+                  className="px-5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-xs font-semibold transition-colors"
                 >
                   Simpan Aturan
                 </button>
