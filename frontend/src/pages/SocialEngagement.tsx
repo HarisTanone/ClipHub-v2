@@ -435,8 +435,9 @@ export function SocialEngagement() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-1">
+      <div className="space-y-6">
+        {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -1298,6 +1299,7 @@ export function SocialEngagement() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

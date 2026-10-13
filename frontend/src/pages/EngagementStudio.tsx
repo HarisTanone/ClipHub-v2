@@ -328,8 +328,9 @@ export function EngagementStudio() {
   const targetAccountObj = accounts.find((a) => a.id === formTargetAccountId);
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-16">
-      {/* Top Header */}
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-1">
+      <div className="space-y-6 max-w-6xl mx-auto w-full pb-20">
+        {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
         <div className="flex items-center gap-3">
           <button
@@ -846,6 +847,7 @@ export function EngagementStudio() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
