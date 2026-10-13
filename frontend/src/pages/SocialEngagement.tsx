@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   MessageSquareQuote,
   Plus,
@@ -138,6 +139,7 @@ interface SocialAccountOption {
 }
 
 export function SocialEngagement() {
+  const navigate = useNavigate();
   const [rules, setRules] = useState<EngagementRule[]>([]);
   const [tasks, setTasks] = useState<EngagementTask[]>([]);
   const [logs, setLogs] = useState<EngagementLog[]>([]);
@@ -458,11 +460,11 @@ export function SocialEngagement() {
             Refresh
           </button>
           <button
-            onClick={handleOpenCreate}
+            onClick={() => navigate("/social-engagement/studio")}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-xs font-semibold text-zinc-950 transition-colors"
           >
             <Plus className="h-3.5 w-3.5" />
-            Buat Rule Baru
+            Buka Studio Engagement
           </button>
         </div>
       </div>
@@ -558,11 +560,11 @@ export function SocialEngagement() {
                 Atur akun target A dan akun bot B & C untuk saling berkomentar otomatis dengan jeda waktu yang aman.
               </p>
               <button
-                onClick={handleOpenCreate}
+                onClick={() => navigate("/social-engagement/studio")}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-xs font-semibold text-zinc-950 hover:bg-emerald-600"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Buat Rule Pertama
+                Buka Studio Engagement
               </button>
             </div>
           ) : (
@@ -616,9 +618,9 @@ export function SocialEngagement() {
                         Jalankan Sekarang
                       </button>
                       <button
-                        onClick={() => handleOpenEdit(rule)}
+                        onClick={() => navigate(`/social-engagement/studio?edit=${rule.id}`)}
                         className="p-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-                        title="Edit rule"
+                        title="Edit rule di Studio"
                       >
                         <Edit2 className="h-3.5 w-3.5" />
                       </button>

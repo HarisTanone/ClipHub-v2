@@ -9,6 +9,7 @@ import { ReviewClips } from "@/pages/ReviewClips";
 import { Settings } from "@/pages/Settings";
 import { SocialAccounts } from "@/pages/SocialAccounts";
 import { SocialEngagement } from "@/pages/SocialEngagement";
+import { EngagementStudio } from "@/pages/EngagementStudio";
 import { VideoGeneratorPage } from "@/pages/VideoGenerator";
 import { FacebookCallback } from "@/pages/FacebookCallback";
 import { TikTokCallback } from "@/pages/TikTokCallback";
@@ -79,6 +80,14 @@ export default function App() {
             element={
               <SuperadminRoute>
                 <SocialEngagement />
+              </SuperadminRoute>
+            }
+          />
+          <Route
+            path="social-engagement/studio"
+            element={
+              <SuperadminRoute>
+                <EngagementStudio />
               </SuperadminRoute>
             }
           />

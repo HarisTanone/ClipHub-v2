@@ -38,6 +38,7 @@ def _init_engagement_db():
                 specific_content_id TEXT DEFAULT '',
                 is_active INTEGER DEFAULT 1,
                 delay_minutes INTEGER DEFAULT 5,
+                auto_like_comments INTEGER DEFAULT 1,
                 commenters_config TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -54,6 +55,8 @@ def _init_engagement_db():
             cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN specific_content_id TEXT DEFAULT ''")
         if "delay_minutes" not in cols:
             cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN delay_minutes INTEGER DEFAULT 5")
+        if "auto_like_comments" not in cols:
+            cur.execute("ALTER TABLE social_engagement_rules ADD COLUMN auto_like_comments INTEGER DEFAULT 1")
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS social_engagement_tasks (
@@ -124,6 +127,7 @@ class EngagementRulePayload(BaseModel):
     specificContentId: Optional[str] = Field("", description="Backward compatibility single content ID")
     isActive: bool = True
     delayMinutes: int = Field(5, ge=0, description="Jeda menit antar user komentar")
+    autoLikeComments: bool = Field(True, description="Otomatis like komentar antar sesama akun pengomentar")
     commenters: List[CommenterConfig] = Field(default_factory=list)
 
 
@@ -144,7 +148,20 @@ class TriggerEngagementRequest(BaseModel):
     contentIds: Optional[List[str]] = None  # Multiple contentIds override
     metadata: Optional[Dict[str, Any]] = None
     delayMinutes: Optional[int] = None
+    autoLikeComments: Optional[bool] = None
     commenters: Optional[List[CommenterConfig]] = None
+
+
+class LikeCommentRequest(BaseModel):
+    contentId: str
+    commentId: str
+    accountId: str
+
+
+class FetchContentCommentsRequest(BaseModel):
+    contentId: str
+    accountId: str
+    limit: Optional[int] = 20
 
 
 ROLE_CATEGORY_PROMPTS = {
@@ -215,10 +232,20 @@ Tulis komentar TikTok sekarang:"""
 _RUNNING_ENGAGEMENT_TASKS: Dict[int, asyncio.Task] = {}
 
 
-async def _execute_staggered_task(task_id: int, rule_id: int, content_id: str, target_acc: str, delay_minutes: int, commenters: List[Dict[str, Any]], metadata: Dict[str, Any]):
-    """Background worker for sequential staggered comments per user."""
-    logger.info(f"Starting staggered engagement task {task_id} for content {content_id} ({len(commenters)} commenters, delay {delay_minutes}m)")
+async def _execute_staggered_task(
+    task_id: int,
+    rule_id: int,
+    content_id: str,
+    target_acc: str,
+    delay_minutes: int,
+    commenters: List[Dict[str, Any]],
+    metadata: Dict[str, Any],
+    auto_like_comments: bool = True
+):
+    """Background worker for sequential staggered comments per user with auto-like."""
+    logger.info(f"Starting staggered engagement task {task_id} for content {content_id} ({len(commenters)} commenters, delay {delay_minutes}m, auto_like={auto_like_comments})")
     generated_comments: List[str] = []
+    created_comment_ids: List[str] = []
 
     try:
         # Mark task running
@@ -276,10 +303,25 @@ async def _execute_staggered_task(task_id: int, rule_id: int, content_id: str, t
                     }
                 )
                 repliz_comment_id = (repliz_res or {}).get("commentId", "")
+                if repliz_comment_id:
+                    created_comment_ids.append(repliz_comment_id)
             except Exception as exc:
                 status = "failed"
                 error_msg = str(exc)
                 logger.error(f"Task {task_id} commenter {acc_id} failed: {error_msg}")
+
+            # Optional Auto-Like: This commenter likes previous commenters' comments
+            if auto_like_comments and created_comment_ids and acc_id:
+                for prev_comm_id in created_comment_ids:
+                    if prev_comm_id != repliz_comment_id:
+                        try:
+                            await repliz_post(
+                                f"/public/content/{content_id}/like/{prev_comm_id}?accountId={acc_id}",
+                                json_body={}
+                            )
+                            logger.info(f"Task {task_id}: Account {acc_name} liked comment {prev_comm_id}")
+                        except Exception as e:
+                            logger.debug(f"Task {task_id}: Could not like comment {prev_comm_id}: {e}")
 
             # Update log
             now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -365,6 +407,7 @@ async def list_engagement_rules(user=Depends(get_current_user)):
             "specificContentIds": specific_ids,
             "isActive": bool(r["is_active"]),
             "delayMinutes": r["delay_minutes"] if r["delay_minutes"] is not None else 5,
+            "autoLikeComments": bool(r["auto_like_comments"]) if "auto_like_comments" in r.keys() and r["auto_like_comments"] is not None else True,
             "commenters": commenters,
             "createdAt": r["created_at"],
             "updatedAt": r["updated_at"],
@@ -388,9 +431,9 @@ async def create_engagement_rule(payload: EngagementRulePayload, user=Depends(ge
 
     cur.execute("""
         INSERT INTO social_engagement_rules (
-            name, target_account_id, target_account_name, target_platform, target_mode, specific_content_id, is_active, delay_minutes, commenters_config
+            name, target_account_id, target_account_name, target_platform, target_mode, specific_content_id, is_active, delay_minutes, auto_like_comments, commenters_config
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         payload.name,
         payload.targetAccountId,
@@ -400,6 +443,7 @@ async def create_engagement_rule(payload: EngagementRulePayload, user=Depends(ge
         specific_stored,
         1 if payload.isActive else 0,
         payload.delayMinutes,
+        1 if payload.autoLikeComments else 0,
         commenters_json
     ))
     rule_id = int(cur.lastrowid or 0)
@@ -423,7 +467,7 @@ async def update_engagement_rule(rule_id: int, payload: EngagementRulePayload, u
 
     cur.execute("""
         UPDATE social_engagement_rules
-        SET name = ?, target_account_id = ?, target_account_name = ?, target_platform = ?, target_mode = ?, specific_content_id = ?, is_active = ?, delay_minutes = ?, commenters_config = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, target_account_id = ?, target_account_name = ?, target_platform = ?, target_mode = ?, specific_content_id = ?, is_active = ?, delay_minutes = ?, auto_like_comments = ?, commenters_config = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
     """, (
         payload.name,
@@ -434,6 +478,7 @@ async def update_engagement_rule(rule_id: int, payload: EngagementRulePayload, u
         specific_stored,
         1 if payload.isActive else 0,
         payload.delayMinutes,
+        1 if payload.autoLikeComments else 0,
         commenters_json,
         rule_id
     ))
@@ -501,6 +546,47 @@ async def list_target_account_contents(
     except Exception as exc:
         logger.error(f"Failed to fetch content list for account {accountId}: {exc}")
         return []
+
+
+@engagement_router.post("/like-comment")
+async def like_single_comment(payload: LikeCommentRequest, user=Depends(get_current_user)):
+    """Like a comment using a specific connected social account via Repliz API."""
+    try:
+        await repliz_post(
+            f"/public/content/{payload.contentId}/like/{payload.commentId}?accountId={payload.accountId}",
+            json_body={}
+        )
+        return {"status": "success", "message": f"Komentar {payload.commentId} berhasil di-like oleh akun {payload.accountId}"}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gagal like komentar: {exc}")
+
+
+@engagement_router.post("/content-comments")
+async def get_content_comments(payload: FetchContentCommentsRequest, user=Depends(get_current_user)):
+    """Fetch existing comments from a post to inspect and allow selective actions."""
+    try:
+        res = await repliz_get(
+            f"/public/content/{payload.contentId}/comment",
+            params={"accountId": payload.accountId, "limit": payload.limit or 20}
+        )
+        docs = res.get("docs") or []
+        items = []
+        for d in docs:
+            owner = d.get("owner") or {}
+            items.append({
+                "id": d.get("id"),
+                "text": d.get("text") or "",
+                "type": d.get("type") or "text",
+                "ownerId": owner.get("id") or "",
+                "ownerName": owner.get("name") or "",
+                "ownerPicture": owner.get("picture") or "",
+                "createdAt": d.get("createdAt") or "",
+                "hasReplies": bool(d.get("hasReplies")),
+            })
+        return {"comments": items, "total": len(items)}
+    except Exception as exc:
+        logger.error(f"Failed to fetch comments for {payload.contentId}: {exc}")
+        return {"comments": [], "total": 0}
 
 
 @engagement_router.post("/generate-preview")
@@ -641,6 +727,7 @@ async def trigger_engagement(payload: TriggerEngagementRequest, user=Depends(get
         conn.close()
 
         # Launch background async worker
+        auto_like = payload.autoLikeComments if payload.autoLikeComments is not None else (bool(rule["auto_like_comments"]) if rule else True)
         bg_task = asyncio.create_task(
             _execute_staggered_task(
                 task_id=task_id,
@@ -649,7 +736,8 @@ async def trigger_engagement(payload: TriggerEngagementRequest, user=Depends(get
                 target_acc=target_acc,
                 delay_minutes=delay_minutes,
                 commenters=enriched_commenters,
-                metadata=metadata
+                metadata=metadata,
+                auto_like_comments=auto_like
             )
         )
         _RUNNING_ENGAGEMENT_TASKS[task_id] = bg_task

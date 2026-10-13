@@ -1117,6 +1117,18 @@ export const socialApi = {
   async getTargetAccountContents(accountId: string, limit = 20): Promise<any[]> {
     return request(`/api/social/engagement/contents?accountId=${encodeURIComponent(accountId)}&limit=${limit}`);
   },
+  async getContentComments(contentId: string, accountId: string, limit = 20): Promise<{ comments: any[]; total: number }> {
+    return request("/api/social/engagement/content-comments", {
+      method: "POST",
+      body: JSON.stringify({ contentId, accountId, limit }),
+    });
+  },
+  async likeComment(payload: { contentId: string; commentId: string; accountId: string }): Promise<any> {
+    return request("/api/social/engagement/like-comment", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   async getEngagementTasks(limit = 20): Promise<any[]> {
     return request(`/api/social/engagement/tasks?limit=${limit}`);
   },

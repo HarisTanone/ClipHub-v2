@@ -138,6 +138,7 @@ def test_trigger_engagement_with_staggered_delay(client):
             "targetAccountId": "acc_target_a",
             "targetMode": "latest",
             "delayMinutes": 0,  # 0 for fast test execution
+            "autoLikeComments": True,
             "commenters": [
                 {
                     "accountId": "acc_bot_b",
@@ -164,3 +165,39 @@ def test_trigger_engagement_with_staggered_delay(client):
         assert res.status_code == 200
         tasks = res.json()
         assert any(t["id"] == task_id for t in tasks)
+
+def test_like_comment_and_content_comments_endpoints(client):
+    with patch("src.presentation.routes.social.engagement.repliz_post", new_callable=AsyncMock) as mock_post, \
+         patch("src.presentation.routes.social.engagement.repliz_get", new_callable=AsyncMock) as mock_get:
+        mock_post.return_value = None
+        mock_get.return_value = {
+            "docs": [
+                {
+                    "id": "comm_123",
+                    "text": "Konten keren!",
+                    "type": "text",
+                    "owner": {"id": "user_1", "name": "Budi"},
+                    "createdAt": "2026-04-01T00:00:00Z",
+                    "hasReplies": False,
+                }
+            ]
+        }
+
+        # Test like comment
+        res = client.post("/api/social/engagement/like-comment", json={
+            "contentId": "post_999",
+            "commentId": "comm_123",
+            "accountId": "acc_bot_b"
+        })
+        assert res.status_code == 200
+        assert res.json()["status"] == "success"
+
+        # Test content comments
+        res = client.post("/api/social/engagement/content-comments", json={
+            "contentId": "post_999",
+            "accountId": "acc_bot_b",
+            "limit": 10
+        })
+        assert res.status_code == 200
+        assert len(res.json()["comments"]) == 1
+        assert res.json()["comments"][0]["id"] == "comm_123"

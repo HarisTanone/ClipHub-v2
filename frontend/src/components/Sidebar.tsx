@@ -3,7 +3,8 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, PlusCircle, Settings, Zap, X, ChevronLeft, ChevronRight,
   Share2, Film, ChevronDown, SlidersHorizontal, Bot, Video, Cpu, Sparkles,
-  Palette, Send, HardDrive, BrainCircuit, ShieldCheck, Terminal, MessageSquareQuote
+  Palette, Send, HardDrive, BrainCircuit, ShieldCheck, Terminal, MessageSquareQuote,
+  Sparkle, Layers
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -13,7 +14,6 @@ const mainNavItems = [
   { to: "/jobs/new", icon: PlusCircle, label: "New Job" },
   { to: "/video-generator", icon: Film, label: "Video Generator" },
   { to: "/social", icon: Share2, label: "Social Accounts" },
-  { to: "/social-engagement", icon: MessageSquareQuote, label: "Auto Engagement", superadminOnly: true },
 ];
 
 interface SidebarProps {
@@ -30,11 +30,13 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
 
   const isSettingsActive = location.pathname.startsWith("/settings");
   const isHermesActive = location.pathname.startsWith("/settings/hermes");
+  const isEngagementActive = location.pathname.startsWith("/social-engagement");
 
   const [settingsOpen, setSettingsOpen] = useState<boolean>(true);
   const [hermesOpen, setHermesOpen] = useState<boolean>(true);
+  const [engagementOpen, setEngagementOpen] = useState<boolean>(true);
 
-  // Auto-expand on navigation to settings
+  // Auto-expand on navigation to settings or engagement
   useEffect(() => {
     if (isSettingsActive) {
       setSettingsOpen(true);
@@ -42,7 +44,10 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
     if (isHermesActive) {
       setHermesOpen(true);
     }
-  }, [isSettingsActive, isHermesActive]);
+    if (isEngagementActive) {
+      setEngagementOpen(true);
+    }
+  }, [isSettingsActive, isHermesActive, isEngagementActive]);
 
   return (
     <>
@@ -79,9 +84,7 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
 
         {/* Navigation */}
         <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto scrollbar-thin">
-          {mainNavItems
-            .filter((item) => !item.superadminOnly || isSuperadmin)
-            .map((item) => (
+          {mainNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -100,6 +103,87 @@ export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarP
               <span className={cn(collapsed && "md:hidden")}>{item.label}</span>
             </NavLink>
           ))}
+
+          {/* ─── Auto Engagement Tree (Superadmin Only) ─── */}
+          {isSuperadmin && (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (collapsed) {
+                    onToggleCollapse();
+                    setEngagementOpen(true);
+                  } else {
+                    setEngagementOpen((prev) => !prev);
+                  }
+                }}
+                className={cn(
+                  "w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors select-none",
+                  collapsed && "md:justify-center md:px-0",
+                  isEngagementActive
+                    ? "text-zinc-100 bg-zinc-850"
+                    : "text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200"
+                )}
+                title={collapsed ? "Auto Engagement" : undefined}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <MessageSquareQuote className={cn("h-4 w-4 shrink-0", isEngagementActive ? "text-emerald-400" : "text-zinc-400")} />
+                  <span className={cn("truncate", collapsed && "md:hidden")}>Auto Engagement</span>
+                </div>
+                {!collapsed && (
+                  <ChevronDown
+                    className={cn(
+                      "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-200",
+                      engagementOpen && "rotate-180"
+                    )}
+                  />
+                )}
+              </button>
+
+              {engagementOpen && !collapsed && (
+                <div className="mt-1 ml-2.5 pl-2.5 border-l border-zinc-800/80 space-y-0.5 animate-in fade-in-50 duration-150">
+                  {/* Sub-item 1: Cross-Account Auto Engagement */}
+                  <NavLink
+                    to="/social-engagement"
+                    end
+                    onClick={onClose}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
+                        isActive
+                          ? "bg-emerald-500/15 text-emerald-300 font-semibold"
+                          : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
+                      )
+                    }
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Layers className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">Cross-Account Auto Engagement</span>
+                    </div>
+                  </NavLink>
+
+                  {/* Sub-item 2: Studio Konfigurasi (formerly modal) */}
+                  <NavLink
+                    to="/social-engagement/studio"
+                    onClick={onClose}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
+                        isActive
+                          ? "bg-emerald-500/15 text-emerald-300 font-semibold"
+                          : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
+                      )
+                    }
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Sparkles className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
+                      <span className="truncate">Studio Konfigurasi Engagement</span>
+                    </div>
+                  </NavLink>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ─── Settings Accordion / Dropdown Tree ─── */}
           <div className="pt-1">
