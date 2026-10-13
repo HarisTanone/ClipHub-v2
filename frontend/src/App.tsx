@@ -8,6 +8,7 @@ import { ClipViewer } from "@/pages/ClipViewer";
 import { ReviewClips } from "@/pages/ReviewClips";
 import { Settings } from "@/pages/Settings";
 import { SocialAccounts } from "@/pages/SocialAccounts";
+import { SocialEngagement } from "@/pages/SocialEngagement";
 import { VideoGeneratorPage } from "@/pages/VideoGenerator";
 import { FacebookCallback } from "@/pages/FacebookCallback";
 import { TikTokCallback } from "@/pages/TikTokCallback";
@@ -62,6 +63,8 @@ export default function App() {
           <Route path="jobs/:jobId" element={<JobDetail />} />
           <Route path="jobs/:jobId/clips/:rank" element={<ClipViewer />} />
           <Route path="social" element={<SocialAccounts />} />
+          <Route path="social-engagement" element={<SocialEngagement />} />
+          <Route path="social/engagement" element={<SocialEngagement />} />
           <Route path="video-generator" element={<VideoGeneratorPage />} />
           <Route path="settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="settings/hermes" element={<Navigate to="/settings/hermes/autopilot" replace />} />

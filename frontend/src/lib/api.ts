@@ -1088,6 +1088,71 @@ export const socialApi = {
       }
     );
   },
+  async getEngagementRules(): Promise<any[]> {
+    return request("/api/social/engagement/rules");
+  },
+  async createEngagementRule(payload: any): Promise<any> {
+    return request("/api/social/engagement/rules", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async updateEngagementRule(ruleId: number, payload: any): Promise<any> {
+    return request(`/api/social/engagement/rules/${ruleId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  async toggleEngagementRule(ruleId: number, isActive: boolean): Promise<any> {
+    return request(`/api/social/engagement/rules/${ruleId}/toggle`, {
+      method: "PATCH",
+      body: JSON.stringify({ isActive }),
+    });
+  },
+  async deleteEngagementRule(ruleId: number): Promise<any> {
+    return request(`/api/social/engagement/rules/${ruleId}`, {
+      method: "DELETE",
+    });
+  },
+  async getTargetAccountContents(accountId: string, limit = 20): Promise<any[]> {
+    return request(`/api/social/engagement/contents?accountId=${encodeURIComponent(accountId)}&limit=${limit}`);
+  },
+  async getEngagementTasks(limit = 20): Promise<any[]> {
+    return request(`/api/social/engagement/tasks?limit=${limit}`);
+  },
+  async cancelEngagementTask(taskId: number): Promise<any> {
+    return request(`/api/social/engagement/tasks/${taskId}/cancel`, {
+      method: "POST",
+    });
+  },
+  async getEngagementLogs(params?: { limit?: number; taskId?: number; ruleId?: number }): Promise<any[]> {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.taskId) q.set("taskId", String(params.taskId));
+    if (params?.ruleId) q.set("ruleId", String(params.ruleId));
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return request(`/api/social/engagement/logs${qs}`);
+  },
+  async previewEngagementComments(metadata: any, commenters: any[]): Promise<{ previews: any[] }> {
+    return request("/api/social/engagement/generate-preview", {
+      method: "POST",
+      body: JSON.stringify({ metadata, commenters }),
+    });
+  },
+  async triggerEngagement(payload: {
+    ruleId?: number;
+    targetAccountId?: string;
+    targetMode?: string;
+    contentId?: string;
+    metadata?: any;
+    delayMinutes?: number;
+    commenters?: any[];
+  }): Promise<any> {
+    return request("/api/social/engagement/trigger", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
 export interface BatchMusicRecommendation {

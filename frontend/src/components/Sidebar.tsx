@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, PlusCircle, Settings, Zap, X, ChevronLeft, ChevronRight,
   Share2, Film, ChevronDown, SlidersHorizontal, Bot, Video, Cpu, Sparkles,
-  Palette, Send, HardDrive, BrainCircuit, ShieldCheck, Terminal
+  Palette, Send, HardDrive, BrainCircuit, ShieldCheck, Terminal, MessageSquareQuote
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -13,6 +13,7 @@ const mainNavItems = [
   { to: "/jobs/new", icon: PlusCircle, label: "New Job" },
   { to: "/video-generator", icon: Film, label: "Video Generator" },
   { to: "/social", icon: Share2, label: "Social Accounts" },
+  { to: "/social-engagement", icon: MessageSquareQuote, label: "Auto Engagement" },
 ];
 
 interface SidebarProps {

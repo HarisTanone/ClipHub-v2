@@ -14,6 +14,7 @@ from src.presentation.routes.social.youtube import youtube_router
 from src.presentation.routes.social.linkedin import linkedin_router
 from src.presentation.routes.social.schedule import schedule_router
 from src.presentation.routes.social.publish import publish_router
+from src.presentation.routes.social.engagement import engagement_router
 
 router = APIRouter(prefix="/social", tags=["social"])
 router.include_router(accounts_router)
@@ -25,3 +26,4 @@ router.include_router(youtube_router)
 router.include_router(linkedin_router)
 router.include_router(schedule_router)
 router.include_router(publish_router)
+router.include_router(engagement_router)
