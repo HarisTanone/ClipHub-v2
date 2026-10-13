@@ -89,10 +89,16 @@ class FFmpegRenderer(IRenderer):
             )
 
         if proc.returncode != 0:
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
             err = stderr.decode().strip()
-            logger.error(f"FFmpeg trim gagal untuk clip #{clip.rank}: {err[:300]}")
+            err_summary = err[-500:] if len(err) > 500 else err
+            logger.error(f"FFmpeg trim gagal untuk clip #{clip.rank}: {err_summary}")
             raise RuntimeError(
-                f"FFmpeg trim gagal: {err[:300]}"
+                f"FFmpeg trim gagal: {err_summary}"
             )
 
         if os.path.exists(output_path) and not timeline_is_safe(

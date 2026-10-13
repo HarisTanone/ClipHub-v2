@@ -708,6 +708,13 @@ class V2PipelineService:
             )
             self._emit(job_id, 7, "trim", "complete")
 
+            if not any(trim_results.values()):
+                err_msg = f"Semua ({len(clips)}) clip gagal di-trim oleh FFmpeg"
+                logger.error(f"[{job_id}] {err_msg}")
+                await self._repo.update_error(job_id, err_msg)
+                await self._repo.update_status(job_id, JobStatus.FAILED)
+                return
+
             if await self._is_job_cancelled_or_deleted(job_id):
                 logger.info(f"[{job_id}] Job cancelled or deleted by user; stopping V2 pipeline.")
                 return
@@ -1121,14 +1128,24 @@ class V2PipelineService:
             )
 
             # ═══ Final: Assemble results ═══
+            def _is_valid_mp4(path: str) -> bool:
+                return os.path.isfile(path) and os.path.getsize(path) > 0
+
             success_count = sum(
                 1 for clip in clips
-                if os.path.exists(f"{output_dir}/clip_{clip.rank:02d}_final.mp4")
-                or os.path.exists(f"{output_dir}/clip_{clip.rank:02d}_subtitled.mp4")
-                or os.path.exists(f"{output_dir}/clip_{clip.rank:02d}.mp4")
+                if _is_valid_mp4(f"{output_dir}/clip_{clip.rank:02d}_final.mp4")
+                or _is_valid_mp4(f"{output_dir}/clip_{clip.rank:02d}_subtitled.mp4")
+                or _is_valid_mp4(f"{output_dir}/clip_{clip.rank:02d}.mp4")
             )
             failed_count = clips_count - success_count
             await self._repo.update_clips_count(job_id, clips_count, success_count, failed_count)
+
+            if success_count == 0:
+                err_msg = f"Tidak ada clip yang berhasil di-render ({failed_count}/{clips_count} gagal)"
+                logger.error(f"[{job_id}] {err_msg}")
+                await self._repo.update_error(job_id, err_msg)
+                await self._repo.update_status(job_id, JobStatus.FAILED)
+                return
 
             clips_data = self._assemble_clips_data(
                 clips, clips_with_words, creative_direction, output_dir,

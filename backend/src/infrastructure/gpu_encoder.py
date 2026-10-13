@@ -19,17 +19,26 @@ _nvenc_available: bool = False
 
 
 def _detect_nvenc() -> bool:
-    """Check if h264_nvenc is available in FFmpeg."""
+    """Check that h264_nvenc is listed and can encode a frame."""
     try:
         result = subprocess.run(
             ["ffmpeg", "-encoders"],
             capture_output=True, text=True, timeout=10,
         )
-        if getattr(result, "returncode", 1) == 0 and "h264_nvenc" in (getattr(result, "stdout", "") or ""):
-            return True
+        if getattr(result, "returncode", 1) != 0 or "h264_nvenc" not in (getattr(result, "stdout", "") or ""):
+            return False
+        probe = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=black:s=16x16:r=1",
+                "-frames:v", "1", "-an", "-c:v", "h264_nvenc",
+                "-f", "null", "-",
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        return getattr(probe, "returncode", 1) == 0
     except Exception:
-        pass
-    return False
+        return False
 
 
 _nvenc_available = _detect_nvenc()
