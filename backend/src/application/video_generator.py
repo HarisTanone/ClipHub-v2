@@ -115,6 +115,7 @@ class VideoGenJob:
     tts_provider: str = "gemini"
     tts_model: str = "gemini-3.1-flash-tts-preview"
     voice: str = "Kore"
+    voice_style: Optional[str] = ""
     speed: float = 1.0
     instructions: str = ""
     num_scenes: int = 0
@@ -245,6 +246,8 @@ class VideoGenerator:
                 cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN ai_text_config TEXT")
             if "thumbnail_url" not in cols:
                 cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN thumbnail_url TEXT")
+            if "voice_style" not in cols:
+                cur.execute("ALTER TABLE video_generator_jobs ADD COLUMN voice_style TEXT DEFAULT ''")
             conn.commit()
             conn.close()
         except Exception as exc:
@@ -276,8 +279,8 @@ class VideoGenerator:
                     timeline_json, output_path, error, created_at, completed_at,
                     tts_provider, tts_model, source_video_url, agentic_understanding, language,
                     video_processing_mode, media_resolution, fps, start_offset, end_offset,
-                    watermark_config, transition, cta_config, ai_text_config, thumbnail_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    watermark_config, transition, cta_config, ai_text_config, thumbnail_url, voice_style
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     user_id=excluded.user_id,
                     topic=excluded.topic,
@@ -316,7 +319,8 @@ class VideoGenerator:
                     transition=excluded.transition,
                     cta_config=excluded.cta_config,
                     ai_text_config=excluded.ai_text_config,
-                    thumbnail_url=excluded.thumbnail_url
+                    thumbnail_url=excluded.thumbnail_url,
+                    voice_style=excluded.voice_style
             """, (
                 job.job_id,
                 job.user_id,
@@ -358,6 +362,7 @@ class VideoGenerator:
                 cta_config_json,
                 ai_text_config_json,
                 job.thumbnail_url or "",
+                job.voice_style or "",
             ))
             conn.commit()
             conn.close()
@@ -399,6 +404,7 @@ class VideoGenerator:
         cta_config = json.loads(row["cta_config"]) if ("cta_config" in row.keys() and row["cta_config"]) else None
         ai_text_config = json.loads(row["ai_text_config"]) if ("ai_text_config" in row.keys() and row["ai_text_config"]) else None
         thumbnail_url = row["thumbnail_url"] if ("thumbnail_url" in row.keys()) else None
+        voice_style = row["voice_style"] if ("voice_style" in row.keys() and row["voice_style"]) else ""
 
         return VideoGenJob(
             job_id=row["job_id"],
@@ -409,6 +415,7 @@ class VideoGenerator:
             tts_provider=tts_provider,
             tts_model=tts_model,
             voice=row["voice"] or "Kore",
+            voice_style=voice_style,
             speed=float(row["speed"] or 1.0),
             instructions=row["instructions"] or "",
             num_scenes=int(row["num_scenes"]) if "num_scenes" in row.keys() and row["num_scenes"] is not None else 0,
@@ -450,6 +457,7 @@ class VideoGenerator:
         tts_provider: Optional[str] = None,
         tts_model: Optional[str] = None,
         voice: str = "",
+        voice_style: Optional[str] = "",
         speed: float = 1.0,
         instructions: str = "",
         num_scenes: int = 0,
@@ -509,6 +517,7 @@ class VideoGenerator:
             tts_provider=resolved_provider,
             tts_model=resolved_model,
             voice=voice or default_voice,
+            voice_style=(voice_style or "").strip(),
             speed=speed or 1.0,
             instructions=instructions,
             num_scenes=num_scenes,
@@ -1358,8 +1367,12 @@ class VideoGenerator:
                         video_id=cand.get("video_id"),
                     )
                     if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-                        # Check for burned-in subtitles / text overlays
-                        has_text, density = self.check_video_has_burned_in_text(local_path)
+                        # Check for burned-in subtitles / text overlays (OpenCV frame
+                        # sampling is CPU-bound/blocking — run off the event loop so it
+                        # doesn't stall the TTS task running concurrently via asyncio.gather)
+                        has_text, density = await asyncio.to_thread(
+                            self.check_video_has_burned_in_text, local_path
+                        )
                         if has_text and cand_idx < len(ordered_candidates) - 1:
                             logger.warning(
                                 f"video_gen: candidate {cand_idx + 1} ({cand.get('title', '')[:40]}) has burned-in subtitles/text "
@@ -1536,6 +1549,7 @@ class VideoGenerator:
                     voice_id=voice_id,
                     model_id=model_id,
                     speed=job.speed,
+                    voice_style=job.voice_style or None,
                 )
             except Exception as exc:
                 logger.warning(f"video_gen: GeminiTTS synthesize_scenes failed ({exc}), falling back to individual calls")
@@ -1560,6 +1574,7 @@ class VideoGenerator:
                             voice_id=voice_id,
                             model_id="gemini-2.5-flash-preview-tts",
                             speed=job.speed,
+                            voice_style=job.voice_style or None,
                             output_path=os.path.join(tts_dir, f"scene_{i + 1:02d}_tts.mp3"),
                         )
                         if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
@@ -1626,7 +1641,11 @@ class VideoGenerator:
                     sec_tts = GeminiTTS(output_dir=tts_dir)
                     for i, scene in enumerate(scenes):
                         if not scene.get("tts_path") and (scene.get("narration") or "").strip():
-                            a_path = await sec_tts.synthesize(text=scene["narration"].strip(), speed=job.speed)
+                            a_path = await sec_tts.synthesize(
+                                text=scene["narration"].strip(),
+                                speed=job.speed,
+                                voice_style=job.voice_style or None,
+                            )
                             if a_path and os.path.exists(a_path):
                                 dur = await self._media_duration(a_path, fallback=5.0)
                                 scene["tts_path"] = a_path

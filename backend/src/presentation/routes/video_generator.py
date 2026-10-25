@@ -6,6 +6,7 @@ GET  /video-generator/jobs/{id} — get job status/details
 GET  /video-generator/jobs/{id}/download — download final video
 GET  /video-generator/voices    — list available TTS voices
 """
+import logging
 import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
@@ -17,6 +18,7 @@ from src.config import settings
 from src.application.video_generator import VideoGenStatus
 from src.presentation.auth_deps import CurrentUser, require_superadmin, get_current_user, get_optional_user
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/video-generator", tags=["video-generator"])
 
@@ -244,6 +246,7 @@ async def generate_video(
         tts_provider=req.tts_provider,
         tts_model=req.tts_model,
         voice=req.voice,
+        voice_style=req.voice_style,
         speed=req.speed,
         instructions=req.instructions,
         num_scenes=req.num_scenes,
@@ -349,6 +352,7 @@ async def plan_video(
         tts_provider=req.tts_provider,
         tts_model=req.tts_model,
         voice=req.voice,
+        voice_style=req.voice_style,
         speed=req.speed,
         instructions=req.instructions,
         num_scenes=req.num_scenes,
@@ -1143,6 +1147,7 @@ def _job_to_response(job) -> JobStatusResponse:
         tts_provider=job.tts_provider,
         tts_model=job.tts_model,
         voice=job.voice,
+        voice_style=getattr(job, "voice_style", "") or "",
         speed=job.speed,
         num_scenes=job.num_scenes,
         subtitles_enabled=job.subtitles_enabled,

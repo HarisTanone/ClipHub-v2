@@ -331,11 +331,12 @@ class NineRouterClient:
         time.sleep(delay)
 
 
-_client: Optional[NineRouterClient] = None
-
-
 def get_nine_router_client() -> NineRouterClient:
-    global _client
-    if _client is None:
-        _client = NineRouterClient()
-    return _client
+    """Build a fresh client on every call.
+
+    Base URL / API key / timeout / retries are read from the DB-backed panel
+    settings inside `NineRouterClient.__init__`. Caching a singleton here
+    would freeze those values at first use, so a change made in the Settings
+    panel wouldn't take effect until the process restarts.
+    """
+    return NineRouterClient()

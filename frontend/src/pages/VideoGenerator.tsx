@@ -2146,7 +2146,7 @@ export function VideoGeneratorPage() {
   const [ttsModel, setTtsModel] = useState<string>("gemini-3.1-flash-tts-preview");
   const [ttsModels, setTtsModels] = useState<TTSModelOption[]>([]);
   const [ttsProviders, setTtsProviders] = useState<TTSProviderOption[]>([]);
-  const [voice, setVoice] = useState("Kore");
+  const [voice, setVoice] = useState("Kore__id_storytelling");
   const [customVoiceId, setCustomVoiceId] = useState("");
   const [selectedCountry, setSelectedCountry] = useState<string>("All");
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
@@ -3338,7 +3338,7 @@ export function VideoGeneratorPage() {
                         type="button"
                         onClick={() => {
                           setTtsProvider("gemini");
-                          setVoice("Kore");
+                          setVoice("Kore__id_storytelling");
                         }}
                         className={`flex items-center justify-between rounded-lg border p-2.5 text-left transition ${
                           ttsProvider === "gemini"

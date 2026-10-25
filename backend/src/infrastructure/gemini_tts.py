@@ -627,8 +627,13 @@ class GeminiTTS:
         from src.infrastructure.auth import get_gemini_key_rotator
         rotator = get_gemini_key_rotator()
 
-        # Paced execution with concurrency limit 1 to prevent triggering Google burst rate limits
-        sem = asyncio.Semaphore(1)
+        # Concurrency scales with the number of available keys (each scene gets
+        # round-robin'd onto its own key below) so multi-key setups don't pay a
+        # fully serial 1-request-at-a-time tax. Capped at 3 to stay polite with
+        # Google's burst rate limits even when many keys are configured.
+        num_keys = len(_get_gemini_api_keys())
+        concurrency = max(1, min(num_keys or 1, 3))
+        sem = asyncio.Semaphore(concurrency)
 
         async def _synth_scene(i: int, scene: dict[str, Any], attempt_model: str) -> dict[str, Any]:
             narration = (scene.get("narration") or "").strip()
@@ -643,8 +648,10 @@ class GeminiTTS:
             pref_key = rotator.get_round_robin_key(offset=i)
 
             async with sem:
-                # Polite stagger between scenes to avoid sudden burst detection
-                if i > 0:
+                # Polite stagger only matters when everything funnels through a
+                # single slot (e.g. one key available); with real concurrency
+                # the semaphore itself already paces requests.
+                if concurrency <= 1 and i > 0:
                     await asyncio.sleep(0.35)
 
                 audio_path = await self.synthesize(
