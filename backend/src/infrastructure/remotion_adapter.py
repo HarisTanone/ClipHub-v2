@@ -194,9 +194,16 @@ class RemotionAdapter(IRemotionRenderer):
         try:
             session = await self._get_session()
             
-            # Dynamic timeout: 3x clip duration + 2 min buffer (minimum 5 min)
+            # Dynamic timeout: Remotion on CPU renders ~3-5 FPS (concurrency 1).
+            # For 60-70s clips (1800-2100 frames), CPU rendering takes 400-600s.
+            # Allow at least 12x clip duration + 5 min buffer (minimum 10 min / 600s),
+            # or configurable via REMOTION_RENDER_TIMEOUT setting.
             clip_dur = clip_duration if clip_duration > 0 else 60
-            render_timeout = max(300, int(clip_dur * 3 + 120))
+            custom_timeout = getattr(settings, "REMOTION_RENDER_TIMEOUT", 0)
+            if custom_timeout and int(custom_timeout) > 0:
+                render_timeout = int(custom_timeout)
+            else:
+                render_timeout = max(600, int(clip_dur * 12 + 300))
             
             # Send render request (server returns synchronously when done)
             async with session.post(

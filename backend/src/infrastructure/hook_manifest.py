@@ -109,6 +109,17 @@ def resolve_hook_preset(
     override = dict(explicit_override or {})
     base_engine = str(base.get("engine") or "").strip().lower()
     override_engine = str(override.get("engine") or "").strip().lower()
+    if not override_engine and key in _EMPTY_PRESETS:
+        anim = str(override.get("animation") or "").lower().strip()
+        if anim.startswith("skia_") or anim.startswith("skia-") or anim.startswith("skia:"):
+            override_engine = "skia"
+            base["engine"] = "skia"
+        elif anim.startswith("hf_") or anim.startswith("hook_"):
+            override_engine = "hyperframes"
+            base["engine"] = "hyperframes"
+        elif anim.startswith("ffmpeg_"):
+            override_engine = "ffmpeg"
+            base["engine"] = "ffmpeg"
     if override_engine and override_engine not in SUPPORTED_HOOK_ENGINES:
         raise HookManifestError(f"Unsupported hook engine: {override_engine}")
     # A named preset owns its engine and cannot be silently changed. The

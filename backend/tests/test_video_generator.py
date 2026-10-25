@@ -635,6 +635,82 @@ async def test_step_render_video_with_hook_and_subtitles(tmp_path, monkeypatch):
     assert os.path.getsize(out_path) > 0
 
 
+@pytest.mark.asyncio
+async def test_step_render_video_with_remotion_spliced_hook(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    from unittest.mock import AsyncMock
+    from src.application.video_generator import VideoGenerator
+    from src.domain.interfaces_remotion import RemotionRenderResult
+
+    generator = VideoGenerator(output_dir=str(tmp_path))
+    job = generator.create_job(
+        topic="Remotion Speed Test",
+        target_duration=6,
+        subtitles_enabled=False,
+        hook_enabled=True,
+        custom_hook="FAST REMOTION HOOK",
+        hook_style={"engine": "remotion", "animation": "zoom_punch", "duration": 2.0},
+        include_bgm=False,
+    )
+
+    work_dir = str(tmp_path / job.job_id)
+    os.makedirs(work_dir, exist_ok=True)
+
+    dummy_concat = os.path.join(work_dir, "dummy_base.mp4")
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=1080x1920:d=6:r=30", "-c:v", "libx264", "-pix_fmt", "yuv420p", dummy_concat],
+        capture_output=True, check=True
+    )
+    dummy_audio = os.path.join(work_dir, "dummy_audio.mp3")
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "6", dummy_audio],
+        capture_output=True, check=True
+    )
+
+    async def mock_prepare(entry, clips_dir, *args, **kwargs):
+        return dummy_concat
+
+    async def mock_concat(scene_clips, concat_path):
+        import shutil
+        shutil.copy2(dummy_concat, concat_path)
+
+    async def mock_concat_audio(timeline, merged_audio_path):
+        import shutil
+        shutil.copy2(dummy_audio, merged_audio_path)
+
+    monkeypatch.setattr(generator, "_prepare_scene_clip", mock_prepare)
+    monkeypatch.setattr(generator, "_concat_clips", mock_concat)
+    monkeypatch.setattr(generator, "_concat_audio", mock_concat_audio)
+
+    # Track what duration was passed to RemotionAdapter
+    rendered_durations = []
+
+    async def mock_render_clip(self, scene_graph, creative_direction, video_path, output_path, **kwargs):
+        rendered_durations.append(scene_graph.get("duration"))
+        import shutil
+        shutil.copy2(video_path, output_path)
+        return RemotionRenderResult(success=True, output_path=output_path)
+
+    from src.infrastructure.remotion_adapter import RemotionAdapter
+    monkeypatch.setattr(RemotionAdapter, "health_check", AsyncMock(return_value=True))
+    monkeypatch.setattr(RemotionAdapter, "render_clip", mock_render_clip)
+    monkeypatch.setattr(RemotionAdapter, "close", AsyncMock())
+
+    timeline = [
+        {"scene_id": 1, "narration": "Scene satu", "duration": 3.0},
+        {"scene_id": 2, "narration": "Scene dua", "duration": 3.0},
+    ]
+
+    out_path = await generator._step_render_video(timeline, job, work_dir)
+    assert os.path.exists(out_path)
+    assert os.path.getsize(out_path) > 0
+    # Crucial assertion: Remotion was asked to render ONLY the hook head duration (~2.5s), NOT the full 6.0s!
+    assert len(rendered_durations) == 1
+    assert rendered_durations[0] <= 3.0
+    assert rendered_durations[0] < 6.0
+
+
 def test_video_generator_agentic_video_persistence_and_routing(tmp_path):
     generator = VideoGenerator(output_dir=str(tmp_path))
     job = generator.create_job(

@@ -338,6 +338,7 @@ class Settings(BaseSettings):
     REMOTION_ENABLE_THREEJS: bool = True
     REMOTION_ENABLE_AI_LAYER: bool = True
     REMOTION_SUBTITLE_OFFSET: float = -0.5  # seconds — negative = subtitle earlier
+    REMOTION_RENDER_TIMEOUT: int = 0  # 0 = dynamic (max(600, clip_dur * 12 + 300))
 
     # ─── HyperFrames polish layer (AI lower-third; does NOT replace Remotion) ─
     HYPERFRAMES_ENABLED: bool = False

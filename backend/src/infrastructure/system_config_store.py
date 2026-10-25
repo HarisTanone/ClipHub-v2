@@ -432,6 +432,14 @@ SYSTEM_SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "default": -0.5,
         "description": "Offset sinkronisasi subtitle Remotion dalam detik (negatif = lebih awal)",
     },
+    "REMOTION_RENDER_TIMEOUT": {
+        "category": "render_limits",
+        "data_type": "int",
+        "min_role": "superadmin",
+        "is_secret": False,
+        "default": 0,
+        "description": "Batas timeout render Remotion dalam detik (0 = otomatis dinamis)",
+    },
     "USE_NVENC": {
         "category": "render_limits",
         "data_type": "bool",
