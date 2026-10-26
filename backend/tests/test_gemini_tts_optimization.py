@@ -296,3 +296,21 @@ def test_story_agent_tag_script_emotions():
         assert res == "<thoughtful> Kadang seseorang pergi. <sigh> Mereka hanya lelah."
         assert mock_client.chat.called
 
+
+def test_hermes_videogen_voice_style_settings():
+    """Verify Hermes VideoGen settings correctly persists and retrieves voice_style."""
+    from src.infrastructure.hermes_videogen_service import hermes_videogen_service
+
+    # Update with voice_style
+    updated = hermes_videogen_service.update_settings(
+        user_id=9999,
+        data={"voice": "Kore", "voice_style": "id_jakarta", "tts_provider": "gemini"},
+    )
+    assert updated.get("voice_style") == "id_jakarta"
+
+    # Fetch settings
+    fetched = hermes_videogen_service.get_settings(user_id=9999)
+    assert fetched.get("voice_style") == "id_jakarta"
+    assert fetched.get("voice") == "Kore"
+
+

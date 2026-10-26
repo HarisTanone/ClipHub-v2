@@ -90,21 +90,27 @@ class HermesVideoGenService:
                 )
             """)
 
-            # Seed default settings for user 1 if not exists
+            # Migration: ensure voice_style column exists
             cur = conn.cursor()
+            cur.execute("PRAGMA table_info(hermes_videogen_settings)")
+            cols = {row["name"] for row in cur.fetchall()}
+            if "voice_style" not in cols:
+                conn.execute("ALTER TABLE hermes_videogen_settings ADD COLUMN voice_style TEXT DEFAULT ''")
+
+            # Seed default settings for user 1 if not exists
             cur.execute("SELECT id FROM hermes_videogen_settings WHERE user_id = 1")
             if not cur.fetchone():
                 conn.execute("""
                     INSERT INTO hermes_videogen_settings (
                         user_id, enabled, target_region, daily_video_count,
-                        trending_sources, niche_focus, voice, tts_provider,
+                        trending_sources, niche_focus, voice, voice_style, tts_provider,
                         preset_slug, hook_enabled, subtitles_enabled, ai_text_enabled,
                         thumbnail_enabled, watermark_enabled, watermark_text,
                         transition_style, cta_enabled, cta_headline, cta_button_text,
                         target_platforms, target_account_ids, schedule_mode, run_time
                     ) VALUES (
                         1, 0, 'ID', 3,
-                        'google,youtube,tiktok,gemini', '', 'Kore', 'gemini',
+                        'google,youtube,tiktok,gemini', '', 'Kore', '', 'gemini',
                         'default', 1, 1, 1,
                         1, 0, '',
                         'dissolve', 1, 'Follow for more', 'FOLLOW',
@@ -150,6 +156,7 @@ class HermesVideoGenService:
             "trending_sources": "google,youtube,tiktok,gemini",
             "niche_focus": "",
             "voice": "Kore",
+            "voice_style": "",
             "tts_provider": "gemini",
             "tts_model": "gemini-3.1-flash-tts-preview",
             "target_duration": 65,
@@ -225,13 +232,13 @@ class HermesVideoGenService:
             conn.execute("""
                 INSERT INTO hermes_videogen_settings (
                     user_id, enabled, target_region, daily_video_count,
-                    trending_sources, niche_focus, voice, tts_provider, tts_model,
+                    trending_sources, niche_focus, voice, voice_style, tts_provider, tts_model,
                     target_duration, aspect_ratio, preset_slug, hook_enabled,
                     subtitles_enabled, ai_text_enabled, thumbnail_enabled,
                     watermark_enabled, watermark_text, transition_style,
                     cta_enabled, cta_headline, cta_button_text, target_platforms,
                     target_account_ids, schedule_mode, run_time, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(user_id) DO UPDATE SET
                     enabled=excluded.enabled,
                     target_region=excluded.target_region,
@@ -239,6 +246,7 @@ class HermesVideoGenService:
                     trending_sources=excluded.trending_sources,
                     niche_focus=excluded.niche_focus,
                     voice=excluded.voice,
+                    voice_style=excluded.voice_style,
                     tts_provider=excluded.tts_provider,
                     tts_model=excluded.tts_model,
                     target_duration=excluded.target_duration,
@@ -267,6 +275,7 @@ class HermesVideoGenService:
                 trending_sources_str,
                 current.get("niche_focus") or "",
                 current.get("voice") or "Kore",
+                (current.get("voice_style") or "").strip(),
                 current.get("tts_provider") or "gemini",
                 current.get("tts_model") or "gemini-3.1-flash-tts-preview",
                 int(current.get("target_duration") or 65),

@@ -22,6 +22,7 @@ class UpdateHermesVideoGenSettingsRequest(BaseModel):
     sources: Optional[Union[List[str], str]] = Field(None, description="Alias untuk trending_sources")
     niche_focus: Optional[str] = None
     voice: Optional[str] = None
+    voice_style: Optional[str] = Field(None, description="Voice style / accent identifier (e.g. id_jakarta, id_formal)")
     tts_provider: Optional[str] = None
     tts_model: Optional[str] = None
     target_duration: Optional[int] = None
