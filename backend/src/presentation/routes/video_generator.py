@@ -213,6 +213,7 @@ class AutoTagScriptRequest(BaseModel):
 
 
 class AutoTagScriptResponse(BaseModel):
+    success: bool = True
     original_script: str
     tagged_script: str
     clean_script: str
