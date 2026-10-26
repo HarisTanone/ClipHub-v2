@@ -1565,9 +1565,11 @@ class VideoGenerator:
                     f"executing dedicated Gemini recovery pass with model fallback..."
                 )
                 await asyncio.sleep(1.0)
+                from src.application.video_gen_captions import strip_vocal_tags
+
                 for i in missing_gemini:
                     scene = scenes[i]
-                    narration = (scene.get("narration") or "").strip()
+                    narration = (scene.get("tagged_narration") or scene.get("narration") or "").strip()
                     try:
                         audio_path = await tts.synthesize(
                             text=narration,
@@ -1588,8 +1590,15 @@ class VideoGenerator:
 
         else:
             from src.infrastructure.deepgram_tts import DeepgramTTS
+            from src.application.video_gen_captions import strip_vocal_tags
+
             tts = DeepgramTTS(output_dir=tts_dir)
             voice = job.voice or settings.DEEPGRAM_TTS_VOICE
+
+            # Deepgram does not parse Gemini vocal tags, sanitize text
+            for s in scenes:
+                if s.get("narration"):
+                    s["narration"] = strip_vocal_tags(s["narration"])
 
             try:
                 scenes = await tts.synthesize_scenes(
@@ -1600,12 +1609,12 @@ class VideoGenerator:
             except Exception as exc:
                 logger.warning(f"video_gen: Deepgram synthesize_scenes failed ({exc}), falling back to individual calls")
                 for i, scene in enumerate(scenes):
-                    narration = (scene.get("narration") or "").strip()
-                    if not narration or scene.get("tts_path"):
+                    clean_narr = strip_vocal_tags(scene.get("narration") or scene.get("tagged_narration") or "")
+                    if not clean_narr or scene.get("tts_path"):
                         continue
                     try:
                         audio_path = await tts.synthesize(
-                            text=narration,
+                            text=clean_narr,
                             voice=voice,
                             speed=job.speed,
                             output_path=os.path.join(tts_dir, f"tts_{i + 1}.mp3"),
@@ -1620,6 +1629,8 @@ class VideoGenerator:
         # ── 2. Fallback to Secondary Provider for any failed scenes ──
         missing_scenes = [s for s in scenes if not s.get("tts_path") and (s.get("narration") or "").strip()]
         if missing_scenes:
+            from src.application.video_gen_captions import strip_vocal_tags
+
             sec_provider = "deepgram" if primary_provider == "gemini" else "gemini"
             logger.info(f"video_gen: {len(missing_scenes)} scenes missing audio, attempting secondary provider '{sec_provider}'")
             if sec_provider == "deepgram":
@@ -1628,7 +1639,8 @@ class VideoGenerator:
                     sec_tts = DeepgramTTS(output_dir=tts_dir)
                     for i, scene in enumerate(scenes):
                         if not scene.get("tts_path") and (scene.get("narration") or "").strip():
-                            a_path = await sec_tts.synthesize(text=scene["narration"].strip(), speed=job.speed)
+                            clean_text = strip_vocal_tags(scene.get("narration") or scene.get("tagged_narration") or "")
+                            a_path = await sec_tts.synthesize(text=clean_text, speed=job.speed)
                             if a_path and os.path.exists(a_path):
                                 dur = await self._media_duration(a_path, fallback=5.0)
                                 scene["tts_path"] = a_path
@@ -1641,8 +1653,9 @@ class VideoGenerator:
                     sec_tts = GeminiTTS(output_dir=tts_dir)
                     for i, scene in enumerate(scenes):
                         if not scene.get("tts_path") and (scene.get("narration") or "").strip():
+                            gemini_text = (scene.get("tagged_narration") or scene.get("narration") or "").strip()
                             a_path = await sec_tts.synthesize(
-                                text=scene["narration"].strip(),
+                                text=gemini_text,
                                 speed=job.speed,
                                 voice_style=job.voice_style or None,
                             )
@@ -1656,14 +1669,17 @@ class VideoGenerator:
         # ── 3. Failproof Tertiary Fallback: EdgeTTS (Free Neural TTS) ──
         still_missing = [s for s in scenes if not s.get("tts_path") and (s.get("narration") or "").strip()]
         if still_missing:
+            from src.application.video_gen_captions import strip_vocal_tags
+
             logger.info(f"video_gen: {len(still_missing)} scenes still missing audio, applying zero-quota EdgeTTS Neural fallback")
             try:
                 from src.infrastructure.edge_tts_helper import EdgeTTSHelper
                 edge_helper = EdgeTTSHelper(output_dir=tts_dir)
                 for i, scene in enumerate(scenes):
                     if not scene.get("tts_path") and (scene.get("narration") or "").strip():
+                        clean_text = strip_vocal_tags(scene.get("narration") or scene.get("tagged_narration") or "")
                         a_path = await edge_helper.synthesize(
-                            text=scene["narration"].strip(),
+                            text=clean_text,
                             speed=job.speed,
                             output_path=os.path.join(tts_dir, f"edge_scene_{i + 1}.mp3"),
                         )
@@ -1689,12 +1705,15 @@ class VideoGenerator:
         timeline = []
         current_time = 0.0
 
+        from src.application.video_gen_captions import strip_vocal_tags
+
         for scene in scenes:
             duration = scene.get("tts_duration") or scene.get("audio_duration") or scene.get("duration_estimate", 7)
             audio_path = scene.get("tts_path") or scene.get("audio_path")
             entry = {
                 "scene_id": scene.get("id", len(timeline) + 1),
-                "narration": scene.get("narration", ""),
+                "narration": strip_vocal_tags(str(scene.get("narration", "") or "")),
+                "tagged_narration": scene.get("tagged_narration", ""),
                 "footage_path": scene.get("footage_path"),
                 "audio_path": audio_path,
                 "tts_path": audio_path,
@@ -1809,18 +1828,22 @@ class VideoGenerator:
                 # Build timed words from timeline narration & scene word timestamps
                 timeline_words = []
                 t_cursor = 0.0
+                from src.application.video_gen_captions import strip_vocal_tags
+
                 for entry in timeline:
                     dur = max(0.1, float(entry.get("duration", 0.0) or entry.get("tts_duration", 0.0) or entry.get("audio_duration", 0.0) or 0.0))
-                    narr = str(entry.get("narration", "") or "").strip()
+                    narr = strip_vocal_tags(str(entry.get("narration", "") or ""))
                     entry_words = entry.get("words")
                     if entry_words and isinstance(entry_words, list) and len(entry_words) > 0:
                         for w in entry_words:
                             if isinstance(w, dict) and "word" in w:
-                                timeline_words.append({
-                                    "word": str(w["word"]),
-                                    "start": round(t_cursor + float(w.get("start", 0)), 2),
-                                    "end": round(t_cursor + float(w.get("end", 0.1)), 2),
-                                })
+                                cleaned_w = strip_vocal_tags(str(w["word"]))
+                                if cleaned_w:
+                                    timeline_words.append({
+                                        "word": cleaned_w,
+                                        "start": round(t_cursor + float(w.get("start", 0)), 2),
+                                        "end": round(t_cursor + float(w.get("end", 0.1)), 2),
+                                    })
                     elif narr:
                         tokens = narr.split()
                         if tokens:

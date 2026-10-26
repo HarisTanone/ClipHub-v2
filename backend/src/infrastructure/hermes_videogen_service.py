@@ -480,6 +480,7 @@ class HermesVideoGenService:
                     tts_provider=settings_dict.get("tts_provider") or "gemini",
                     tts_model=settings_dict.get("tts_model") or "gemini-3.1-flash-tts-preview",
                     voice=settings_dict.get("voice") or "Kore",
+                    voice_style=settings_dict.get("voice_style") or "",
                     instructions=custom_instructions,
                     num_scenes=5,
                     subtitles_enabled=bool(settings_dict.get("subtitles_enabled", True)),

@@ -274,12 +274,25 @@ def _ass_header(style: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def strip_vocal_tags(text: str) -> str:
+    """Remove inline vocal and emotion tags from text (e.g. <sigh>, <short pause>, <sad>, [style: ...])."""
+    if not text:
+        return ""
+    # Strip inline vocal tags such as <sigh>, <short pause>, <style: sad>, <whispers>
+    cleaned = re.sub(r"<[/]?[a-zA-Z0-9_\s:-]+>", " ", text)
+    # Strip square bracket style directives if present
+    cleaned = re.sub(r"\[(?:style:[^\]]+)\]", " ", cleaned)
+    # Normalize multiple whitespace
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 def _caption_cues(
     timeline: Iterable[Mapping[str, Any]],
     max_words_per_line: int,
 ) -> Iterable[tuple[float, float, list[str], list[int]]]:
     for entry in timeline:
-        narration = str(entry.get("narration") or "").strip()
+        narration = strip_vocal_tags(str(entry.get("narration") or ""))
         if not narration:
             continue
         start = _as_float(entry.get("start_time"), 0.0)

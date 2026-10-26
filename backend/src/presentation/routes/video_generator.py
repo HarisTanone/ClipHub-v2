@@ -207,7 +207,37 @@ class TTSProviderOption(BaseModel):
     default_voice: str
 
 
+class AutoTagScriptRequest(BaseModel):
+    script: str = Field(..., min_length=1, description="Raw narration script to tag")
+    mood: Optional[str] = Field(default="dramatic", description="Mood context (e.g. sad, dramatic, thoughtful, energetic)")
+
+
+class AutoTagScriptResponse(BaseModel):
+    original_script: str
+    tagged_script: str
+    clean_script: str
+
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
+
+@router.post("/auto-tag-script", response_model=AutoTagScriptResponse)
+async def auto_tag_script(
+    req: AutoTagScriptRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Analyze narration script and inject Gemini inline vocal and emotional tags."""
+    from src.infrastructure.story_agent import StoryAgent
+    from src.application.video_gen_captions import strip_vocal_tags
+
+    agent = StoryAgent()
+    tagged = await agent.async_tag_script_emotions(req.script, mood=req.mood or "dramatic")
+    clean = strip_vocal_tags(req.script)
+    return AutoTagScriptResponse(
+        original_script=req.script,
+        tagged_script=tagged,
+        clean_script=clean,
+    )
+
 
 @router.post("/generate", response_model=JobStatusResponse)
 async def generate_video(

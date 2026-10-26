@@ -636,7 +636,7 @@ class GeminiTTS:
         sem = asyncio.Semaphore(concurrency)
 
         async def _synth_scene(i: int, scene: dict[str, Any], attempt_model: str) -> dict[str, Any]:
-            narration = (scene.get("narration") or "").strip()
+            narration = (scene.get("tagged_narration") or scene.get("narration") or "").strip()
             if not narration:
                 return scene
 
@@ -680,7 +680,7 @@ class GeminiTTS:
         # Pass 2: Second-chance recovery specifically for any missing scenes
         missing_indices = [
             i for i, s in enumerate(scenes)
-            if not s.get("tts_path") and (s.get("narration") or "").strip()
+            if not s.get("tts_path") and ((s.get("tagged_narration") or s.get("narration") or "").strip())
         ]
         if missing_indices:
             logger.info(

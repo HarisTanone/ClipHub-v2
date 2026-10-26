@@ -49,7 +49,12 @@ Rules for High Retention & Target Duration Compliance:
 5. OBEY CREATIVE DIRECTION: If user provided specific creative direction (e.g. "Buka dengan aerial masa kini lalu transisi ke foto kolonial, ceritakan asal-usul, keindahan alam, kesejukan"), you MUST faithfully structure the scenes and visual descriptions to follow that exact narrative flow.
 6. HIGH VISUAL DIVERSITY: Never repeat visual concepts across adjacent scenes. Alternate between wide drone shots, macro close-ups, archival vintage footage, dramatic angles, and vivid environments.
 7. SCENE COUNT: Generate {num_scenes} distinct scenes matching the target duration.
-8. STRICT RULE: NEVER include generic subscribe, like, follow, or channel CTA. The final scene MUST be an insightful, memorable takeaway directly related to the topic."""
+8. STRICT RULE: NEVER include generic subscribe, like, follow, or channel CTA. The final scene MUST be an insightful, memorable takeaway directly related to the topic.
+9. EXPRESSIVE EMOTIONAL VOCAL TAGS:
+   For every scene, provide both:
+   - "narration": Clean human dialogue and narration text WITHOUT any XML or vocal tags (used for subtitles, karaoke captions, and UI display).
+   - "tagged_narration": The exact same narration enhanced with natural inline vocal and emotion tags at natural inflection points and breath pauses for the Gemini TTS voice generator.
+   Permitted inline vocal tags: <sigh>, <short pause>, <whispers>, <sad>, <thoughtful>, <gentle>, <softly>, <warmly>, <encouraging>, <gasp>, <laugh>, <curiosity>, <hope>, <excitement>."""
 
 STORY_USER_PROMPT = """Create a dynamic, rich vertical video script about: "{topic}"
 
@@ -69,7 +74,8 @@ Output this exact JSON structure:
   "scenes": [
     {{
       "id": 1,
-      "narration": "The spoken narration for this scene (rich, descriptive storytelling, approximately {words_per_scene} words)",
+      "narration": "The clean spoken narration for this scene without any tags (rich, descriptive storytelling, approx {words_per_scene} words)",
+      "tagged_narration": "The identical narration enriched with natural inline vocal tags like <thoughtful>, <sigh>, <short pause>, <sad>, <gentle>",
       "visual": "Concrete description of the exact visual footage, archive photos, camera movement, and aesthetic to display",
       "search_queries": [
         "Primary search query matching target language (e.g. Salatiga aerial drone Jawa Tengah 4k viral shorts)",
@@ -113,7 +119,8 @@ Output this exact JSON structure (raw JSON only, no markdown):
   "scenes": [
     {{
       "id": 1,
-      "narration": "Spoken narration for this scene (approx {words_per_scene} words)",
+      "narration": "Clean spoken narration for this scene without tags (approx {words_per_scene} words)",
+      "tagged_narration": "Identical narration with inline vocal tags like <thoughtful>, <sigh>, <short pause>",
       "visual": "Description of the visual moment seen in the source video",
       "source_start_timestamp": 12.5,
       "source_end_timestamp": 19.0,
@@ -473,6 +480,8 @@ class StoryAgent:
             r"(?i)\b(klik\s+tombol\s+subscribe[^.!?]*[.!?]?)",
         ]
 
+        from src.application.video_gen_captions import strip_vocal_tags
+
         valid_scenes = []
         for i, scene in enumerate(story["scenes"]):
             if not isinstance(scene, dict):
@@ -480,12 +489,26 @@ class StoryAgent:
 
             scene.setdefault("id", i + 1)
             raw_narration = str(scene.get("narration") or "").strip()
+            raw_tagged = str(scene.get("tagged_narration") or "").strip()
 
             # Sanitize subscribe / CTA phrases
             for pat in cta_patterns:
                 raw_narration = re.sub(pat, "", raw_narration).strip()
+                if raw_tagged:
+                    raw_tagged = re.sub(pat, "", raw_tagged).strip()
+
+            # If narration contained inline tags but tagged_narration wasn't set, salvage them
+            if ("<" in raw_narration and ">" in raw_narration) and not raw_tagged:
+                raw_tagged = raw_narration
+                raw_narration = strip_vocal_tags(raw_narration)
+            else:
+                raw_narration = strip_vocal_tags(raw_narration)
+
+            if not raw_tagged:
+                raw_tagged = raw_narration
 
             scene["narration"] = raw_narration
+            scene["tagged_narration"] = raw_tagged
             scene.setdefault("visual", "")
             scene.setdefault("search_queries", [])
             
@@ -528,11 +551,13 @@ class StoryAgent:
 
                     sc1 = dict(sc)
                     sc1["narration"] = p1_narr
+                    sc1["tagged_narration"] = p1_narr
                     sc1["search_queries"] = sq1
                     sc1["duration_estimate"] = max(3.0, round(len(p1_narr.split()) / 2.3, 1))
 
                     sc2 = dict(sc)
                     sc2["narration"] = p2_narr
+                    sc2["tagged_narration"] = p2_narr
                     sc2["search_queries"] = sq2
                     sc2["visual"] = f"Close up / dynamic angle of {sc.get('visual', '')[:60]}"
                     sc2["duration_estimate"] = max(3.0, round(len(p2_narr.split()) / 2.3, 1))
@@ -554,10 +579,12 @@ class StoryAgent:
 
                     s1 = dict(target)
                     s1["narration"] = w1
+                    s1["tagged_narration"] = w1
                     s1["duration_estimate"] = max(2.5, round(len(w1.split()) / 2.3, 1))
 
                     s2 = dict(target)
                     s2["narration"] = w2
+                    s2["tagged_narration"] = w2
                     s2["visual"] = f"Cinematic perspective cut: {target.get('visual', '')[:50]}"
                     s2["search_queries"] = [f"cinematic broll {w2[:30]}", target.get("visual", "")[:50]]
                     s2["duration_estimate"] = max(2.5, round(len(w2.split()) / 2.3, 1))
@@ -722,6 +749,47 @@ class StoryAgent:
                 except Exception:
                     pass
         return {}
+
+    def tag_script_emotions(self, script: str, mood: str = "dramatic") -> str:
+        """Analyze raw script and inject Gemini inline emotion and vocal tags."""
+        if not script or not script.strip():
+            return ""
+
+        from src.infrastructure.nine_router_client import get_nine_router_client
+
+        client = get_nine_router_client()
+        prompt = (
+            f"You are an expert voice director for viral vertical video narration.\n"
+            f"Analyze the following script and inject expressive vocal events and emotion tags.\n"
+            f"Mood context: {mood}\n\n"
+            f"Allowed tags to use naturally:\n"
+            f"<sigh>, <short pause>, <whispers>, <sad>, <thoughtful>, <gentle>, <softly>, <warmly>, <encouraging>, <gasp>, <laugh>, <curiosity>, <hope>, <excitement>\n\n"
+            f"Rules:\n"
+            f"1. Do NOT change, rephrase, add, or delete the original words or sentences.\n"
+            f"2. Place tags naturally before the relevant clauses or sentences.\n"
+            f"3. Do NOT output any explanation, commentary, or markdown formatting.\n"
+            f"4. Output ONLY the tagged script text.\n\n"
+            f"Script:\n{script.strip()}"
+        )
+
+        try:
+            tagged = client.chat(
+                messages=[
+                    {"role": "system", "content": "You are a voice director that injects Gemini inline vocal tags into narration scripts. Output only the tagged script text."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=2048,
+            )
+            return tagged.strip() if tagged else script
+        except Exception as e:
+            logger.warning(f"story_agent: tag_script_emotions failed: {e}")
+            return script
+
+    async def async_tag_script_emotions(self, script: str, mood: str = "dramatic") -> str:
+        """Async wrapper for tag_script_emotions."""
+        import asyncio
+        return await asyncio.to_thread(self.tag_script_emotions, script, mood)
 
 
 class StoryGenerationError(Exception):

@@ -191,3 +191,108 @@ def test_no_deprecated_gemini_3_5_models():
     src_service = inspect.getsource(GeminiAgenticVideoService)
     assert "gemini-3.5-flash" not in src_service
     assert "gemini-3.5-flash-lite" not in src_service
+
+
+def test_strip_vocal_tags():
+    """Verify strip_vocal_tags removes inline vocal and emotion tags while preserving clean spoken words."""
+    from src.application.video_gen_captions import strip_vocal_tags
+
+    raw = "<thoughtful> Kadang, seseorang pergi bukan karena sudah tidak sayang. <sigh> Mereka hanya lelah <short pause> menunggu."
+    cleaned = strip_vocal_tags(raw)
+    assert cleaned == "Kadang, seseorang pergi bukan karena sudah tidak sayang. Mereka hanya lelah menunggu."
+
+    style_tag = "<style: sad> Dan yang paling menyakitkan, kita masih berharap."
+    assert strip_vocal_tags(style_tag) == "Dan yang paling menyakitkan, kita masih berharap."
+
+    bracket_style = "[style: gentle] Mungkin dia hanya menemukan seseorang yang lebih baik."
+    assert strip_vocal_tags(bracket_style) == "Mungkin dia hanya menemukan seseorang yang lebih baik."
+
+    empty_or_none = strip_vocal_tags("")
+    assert empty_or_none == ""
+
+
+def test_story_agent_tagged_narration_validation():
+    """Verify StoryAgent._validate_and_fix cleanly separates narration and tagged_narration."""
+    from src.infrastructure.story_agent import StoryAgent
+
+    agent = StoryAgent()
+    story = {
+        "title": "Ketika Seseorang Pergi",
+        "scenes": [
+            {
+                "id": 1,
+                "narration": "Kadang seseorang pergi bukan karena tidak sayang.",
+                "tagged_narration": "<thoughtful> Kadang seseorang pergi <short pause> bukan karena tidak sayang.",
+                "visual": "A person walking away into the mist",
+            },
+            {
+                "id": 2,
+                "narration": "<sigh> Mereka hanya lelah menunggu sesuatu yang tidak pernah berubah.",
+                "visual": "Rain falling against a window pane",
+            },
+            {"id": 3, "narration": "Dan kita masih terus berharap.", "visual": "V3"},
+            {"id": 4, "narration": "Mungkin dia tidak benar melupakan.", "visual": "V4"},
+            {"id": 5, "narration": "Hanya rasa nyaman yang berbeda.", "visual": "V5"},
+            {"id": 6, "narration": "Jangan terus menyalahkan diri.", "visual": "V6"},
+        ],
+    }
+
+    fixed = agent._validate_and_fix(story, target_duration=30)
+    scenes = fixed["scenes"]
+
+    # Scene 1: narration should remain clean, tagged_narration preserved
+    assert "<" not in scenes[0]["narration"]
+    assert scenes[0]["narration"] == "Kadang seseorang pergi bukan karena tidak sayang."
+    assert "<thoughtful>" in scenes[0]["tagged_narration"]
+    assert "<short pause>" in scenes[0]["tagged_narration"]
+
+    # Scene 2: inline tag in narration should be extracted to tagged_narration and stripped from narration
+    assert "<" not in scenes[1]["narration"]
+    assert scenes[1]["narration"] == "Mereka hanya lelah menunggu sesuatu yang tidak pernah berubah."
+    assert "<sigh>" in scenes[1]["tagged_narration"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_tts_synthesize_scenes_uses_tagged_narration():
+    """Verify GeminiTTS synthesize_scenes prioritizes tagged_narration over raw narration."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tts = GeminiTTS(output_dir=tmpdir)
+        scenes = [
+            {
+                "narration": "Teks bersih tanpa tag.",
+                "tagged_narration": "<sad> Teks dengan tag emosi. <sigh>",
+            }
+        ]
+
+        captured_texts = []
+
+        async def fake_synthesize(text, **kwargs):
+            captured_texts.append(text)
+            out = kwargs.get("output_path", os.path.join(tmpdir, "out.mp3"))
+            with open(out, "wb") as f:
+                f.write(b"AUDIO")
+            return out
+
+        with patch.object(tts, "synthesize", side_effect=fake_synthesize):
+            with patch.object(tts, "_probe_audio_duration", new_callable=AsyncMock, return_value=3.5):
+                await tts.synthesize_scenes(scenes=scenes, voice_id="Kore")
+
+        assert len(captured_texts) == 1
+        # Must use tagged_narration with the emotional tags
+        assert captured_texts[0] == "<sad> Teks dengan tag emosi. <sigh>"
+        assert "<sad>" in captured_texts[0]
+
+
+def test_story_agent_tag_script_emotions():
+    """Verify StoryAgent.tag_script_emotions routes through NineRouter and returns tagged script."""
+    from src.infrastructure.story_agent import StoryAgent
+
+    agent = StoryAgent()
+    mock_client = MagicMock()
+    mock_client.chat.return_value = "<thoughtful> Kadang seseorang pergi. <sigh> Mereka hanya lelah."
+
+    with patch("src.infrastructure.nine_router_client.get_nine_router_client", return_value=mock_client):
+        res = agent.tag_script_emotions("Kadang seseorang pergi. Mereka hanya lelah.", mood="sad")
+        assert res == "<thoughtful> Kadang seseorang pergi. <sigh> Mereka hanya lelah."
+        assert mock_client.chat.called
+
