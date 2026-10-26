@@ -278,7 +278,7 @@ def test_agentic_video_service_auto_rotates_on_429(tmp_path):
 
     created_clients = {}
 
-    def mock_client_factory(api_key):
+    def mock_client_factory(api_key, **kwargs):
         client = MagicMock()
         if api_key == "gemini_key_1":
             # Simulate 429 quota error on key 1

@@ -194,15 +194,16 @@ class GeminiAgenticVideoService:
             or video_path.startswith("gs://")
         )
         file_size = 0 if is_url else os.path.getsize(video_path)
-        # Inline data is recommended for smaller videos (<20MB)
-        use_inline = (not is_url) and (file_size > 0) and (file_size < 20 * 1024 * 1024)
+        # Videos over 4MB sent via inline base64 trigger 503 Service Unavailable / load shedding
+        # on Google's interactions proxy. Google Files API has dedicated chunked upload and is rock-solid.
+        use_inline = (not is_url) and (file_size > 0) and (file_size < 4 * 1024 * 1024)
 
         inline_base64 = ""
         if use_inline:
             try:
                 with open(video_path, "rb") as f:
                     inline_base64 = base64.b64encode(f.read()).decode("utf-8")
-                logger.info(f"[GeminiVideoUnderstanding] Using Inline Data ({file_size / 1024 / 1024:.2f}MB < 20MB)")
+                logger.info(f"[GeminiVideoUnderstanding] Using Inline Data ({file_size / 1024 / 1024:.2f}MB < 4MB)")
             except Exception as read_err:
                 logger.warning(f"[GeminiVideoUnderstanding] Failed reading inline bytes: {read_err}, falling back to File API")
                 use_inline = False
@@ -227,7 +228,11 @@ class GeminiAgenticVideoService:
                 logger.info(f"[GeminiVideoUnderstanding] Skipping key ...{k[-6:]} (in rate limit cooldown)")
                 continue
 
-            client = genai.Client(api_key=k)
+            http_timeout_ms = int(timeout * 1000) if timeout else 90000
+            client = genai.Client(
+                api_key=k,
+                http_options=types.HttpOptions(timeout=http_timeout_ms),
+            )
             video_file = None
             key_dead = False
             try:
@@ -294,6 +299,7 @@ class GeminiAgenticVideoService:
                                 curr_video_input,
                                 {"type": "text", "text": prompt},
                             ],
+                            timeout=float(timeout) if timeout else 90.0,
                         )
 
                         output_text = getattr(interaction, "output_text", "")

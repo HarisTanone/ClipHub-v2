@@ -877,57 +877,8 @@ class VideoGenerator:
             job.progress = 60
             self._persist_job(job)
 
-            # Step 4b: Gemini Agentic Video Understanding Alignment Pass
-            if getattr(job, "agentic_understanding", True):
-                logger.info(f"video_gen [{job.job_id}]: running Gemini Agentic Video Understanding alignment pass...")
-                try:
-                    from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
-                    agentic_svc = GeminiAgenticVideoService()
-                    for scene in scenes:
-                        f_path = scene.get("footage_path")
-                        if f_path and os.path.exists(f_path):
-                            ext = os.path.splitext(f_path)[1].lower()
-                            is_img = (
-                                ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp")
-                                or scene.get("media_type") == "image"
-                                or (isinstance(scene.get("selected_footage"), dict) and scene.get("selected_footage", {}).get("media_type") == "image")
-                                or (isinstance(scene.get("footage_source"), dict) and scene.get("footage_source", {}).get("media_type") == "image")
-                            )
-                            if is_img:
-                                sc_dur = float(scene.get("duration", 5.0) or scene.get("duration_estimate", 5.0) or 5.0)
-                                logger.info(
-                                    f"video_gen [{job.job_id}]: scene {scene.get('id')} uses high-res image B-roll — "
-                                    f"bypassing Agentic Video Understanding to save Gemini quota/credits."
-                                )
-                                scene["agentic_alignment"] = {
-                                    "is_relevant": True,
-                                    "alignment_score": 9.5,
-                                    "best_start_timestamp": 0.0,
-                                    "best_end_timestamp": sc_dur,
-                                    "best_start_mm_ss": "00:00",
-                                    "best_end_mm_ss": f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}",
-                                    "visual_summary": "High-resolution portrait photo B-roll",
-                                    "reasoning": "Static image footage (no video cut alignment required, quota preserved)",
-                                    "processing_mode": "static_image",
-                                }
-                                scene["start_timestamp"] = 0.0
-                                scene["end_timestamp"] = sc_dur
-                                scene["start_mm_ss"] = "00:00"
-                                scene["end_mm_ss"] = f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}"
-                                continue
-
-                            await agentic_svc.align_scene_footage(
-                                scene=scene,
-                                local_footage_path=f_path,
-                                topic=job.topic,
-                                processing_mode=getattr(job, "video_processing_mode", "agentic") or "agentic",
-                                media_resolution=getattr(job, "media_resolution", "low") or "low",
-                                fps=getattr(job, "fps", None),
-                                start_offset=getattr(job, "start_offset", None),
-                                end_offset=getattr(job, "end_offset", None),
-                            )
-                except Exception as ag_err:
-                    logger.warning(f"video_gen [{job.job_id}]: agentic alignment pass fallback ({ag_err})")
+            # Step 4b: Gemini Agentic Video Understanding Alignment Pass (parallel bounded)
+            await self._step_align_scenes_with_agentic_video(job, scenes)
 
             job.scenes_with_footage = scenes
             job.progress = 70
@@ -1095,57 +1046,8 @@ class VideoGenerator:
             job.progress = 65
             self._persist_job(job)
 
-            # Step 4b: Gemini Agentic Video Understanding Alignment Pass
-            if getattr(job, "agentic_understanding", True):
-                logger.info(f"video_gen [{job_id}]: running Gemini Agentic Video Understanding alignment pass on selected scenes...")
-                try:
-                    from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
-                    agentic_svc = GeminiAgenticVideoService()
-                    for scene in scenes:
-                        f_path = scene.get("footage_path")
-                        if f_path and os.path.exists(f_path):
-                            ext = os.path.splitext(f_path)[1].lower()
-                            is_img = (
-                                ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp")
-                                or scene.get("media_type") == "image"
-                                or (isinstance(scene.get("selected_footage"), dict) and scene.get("selected_footage", {}).get("media_type") == "image")
-                                or (isinstance(scene.get("footage_source"), dict) and scene.get("footage_source", {}).get("media_type") == "image")
-                            )
-                            if is_img:
-                                sc_dur = float(scene.get("duration", 5.0) or scene.get("duration_estimate", 5.0) or 5.0)
-                                logger.info(
-                                    f"video_gen [{job_id}]: scene {scene.get('id')} uses high-res image B-roll — "
-                                    f"bypassing Agentic Video Understanding to save Gemini quota/credits."
-                                )
-                                scene["agentic_alignment"] = {
-                                    "is_relevant": True,
-                                    "alignment_score": 9.5,
-                                    "best_start_timestamp": 0.0,
-                                    "best_end_timestamp": sc_dur,
-                                    "best_start_mm_ss": "00:00",
-                                    "best_end_mm_ss": f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}",
-                                    "visual_summary": "High-resolution portrait photo B-roll",
-                                    "reasoning": "Static image footage (no video cut alignment required, quota preserved)",
-                                    "processing_mode": "static_image",
-                                }
-                                scene["start_timestamp"] = 0.0
-                                scene["end_timestamp"] = sc_dur
-                                scene["start_mm_ss"] = "00:00"
-                                scene["end_mm_ss"] = f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}"
-                                continue
-
-                            await agentic_svc.align_scene_footage(
-                                scene=scene,
-                                local_footage_path=f_path,
-                                topic=job.topic,
-                                processing_mode=getattr(job, "video_processing_mode", "agentic") or "agentic",
-                                media_resolution=getattr(job, "media_resolution", "low") or "low",
-                                fps=getattr(job, "fps", None),
-                                start_offset=getattr(job, "start_offset", None),
-                                end_offset=getattr(job, "end_offset", None),
-                            )
-                except Exception as ag_err:
-                    logger.warning(f"video_gen [{job_id}]: agentic alignment pass fallback ({ag_err})")
+            # Step 4b: Gemini Agentic Video Understanding Alignment Pass (parallel bounded)
+            await self._step_align_scenes_with_agentic_video(job, scenes)
 
             job.scenes_with_footage = scenes
             job.progress = 75
@@ -1522,6 +1424,77 @@ class VideoGenerator:
             scene["footage_source"] = used_source
 
         return scenes
+
+    async def _step_align_scenes_with_agentic_video(
+        self, job: VideoGenJob, scenes: list[dict[str, Any]]
+    ) -> None:
+        """Step 4b: Run Gemini Agentic Video Understanding alignment pass on scenes concurrently."""
+        if not getattr(job, "agentic_understanding", True):
+            return
+
+        logger.info(
+            f"video_gen [{job.job_id}]: running Gemini Agentic Video Understanding alignment pass on {len(scenes)} scenes (bounded concurrency=3)..."
+        )
+        try:
+            from src.infrastructure.gemini_agentic_video_service import GeminiAgenticVideoService
+            agentic_svc = GeminiAgenticVideoService()
+            sem = asyncio.Semaphore(3)
+
+            async def _align_single_scene(sc: dict[str, Any]) -> None:
+                f_path = sc.get("footage_path")
+                if not f_path or not os.path.exists(f_path):
+                    return
+
+                ext = os.path.splitext(f_path)[1].lower()
+                is_img = (
+                    ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+                    or sc.get("media_type") == "image"
+                    or (isinstance(sc.get("selected_footage"), dict) and sc.get("selected_footage", {}).get("media_type") == "image")
+                    or (isinstance(sc.get("footage_source"), dict) and sc.get("footage_source", {}).get("media_type") == "image")
+                )
+                if is_img:
+                    sc_dur = float(sc.get("duration", 5.0) or sc.get("duration_estimate", 5.0) or 5.0)
+                    logger.info(
+                        f"video_gen [{job.job_id}]: scene {sc.get('id')} uses high-res image B-roll — "
+                        f"bypassing Agentic Video Understanding to save Gemini quota/credits."
+                    )
+                    sc["agentic_alignment"] = {
+                        "is_relevant": True,
+                        "alignment_score": 9.5,
+                        "best_start_timestamp": 0.0,
+                        "best_end_timestamp": sc_dur,
+                        "best_start_mm_ss": "00:00",
+                        "best_end_mm_ss": f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}",
+                        "visual_summary": "High-resolution portrait photo B-roll",
+                        "reasoning": "Static image footage (no video cut alignment required, quota preserved)",
+                        "processing_mode": "static_image",
+                    }
+                    sc["start_timestamp"] = 0.0
+                    sc["end_timestamp"] = sc_dur
+                    sc["start_mm_ss"] = "00:00"
+                    sc["end_mm_ss"] = f"{int(sc_dur // 60):02d}:{int(sc_dur % 60):02d}"
+                    return
+
+                async with sem:
+                    try:
+                        await agentic_svc.align_scene_footage(
+                            scene=sc,
+                            local_footage_path=f_path,
+                            topic=job.topic,
+                            processing_mode=getattr(job, "video_processing_mode", "agentic") or "agentic",
+                            media_resolution=getattr(job, "media_resolution", "low") or "low",
+                            fps=getattr(job, "fps", None),
+                            start_offset=getattr(job, "start_offset", None),
+                            end_offset=getattr(job, "end_offset", None),
+                        )
+                    except Exception as sc_err:
+                        logger.warning(
+                            f"video_gen [{job.job_id}]: scene {sc.get('id')} agentic alignment error ({sc_err})"
+                        )
+
+            await asyncio.gather(*[_align_single_scene(s) for s in scenes])
+        except Exception as ag_err:
+            logger.warning(f"video_gen [{job.job_id}]: agentic alignment pass fallback ({ag_err})")
 
     async def _step_generate_tts(
         self, scenes: list[dict], job: VideoGenJob, work_dir: str

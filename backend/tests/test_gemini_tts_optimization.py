@@ -314,3 +314,30 @@ def test_hermes_videogen_voice_style_settings():
     assert fetched.get("voice") == "Kore"
 
 
+@pytest.mark.asyncio
+async def test_video_generator_parallel_alignment_step():
+    """Verify _step_align_scenes_with_agentic_video executes scenes concurrently."""
+    from src.application.video_generator import VideoGenerator, VideoGenJob
+
+    vg = VideoGenerator()
+    job = VideoGenJob(job_id="test_align_job", topic="Test Topic", agentic_understanding=True)
+
+    scenes = [
+        {"id": 1, "footage_path": "/tmp/fake_1.mp4", "duration": 5.0},
+        {"id": 2, "footage_path": "/tmp/fake_2.mp4", "duration": 6.0},
+        {"id": 3, "footage_path": "/tmp/fake_3.jpg", "duration": 5.0, "media_type": "image"},
+    ]
+
+    mock_align = AsyncMock()
+
+    with patch("os.path.exists", return_value=True), \
+         patch("src.infrastructure.gemini_agentic_video_service.GeminiAgenticVideoService.align_scene_footage", mock_align):
+        await vg._step_align_scenes_with_agentic_video(job, scenes)
+
+        # Image scene should be bypassed immediately
+        assert scenes[2]["agentic_alignment"]["processing_mode"] == "static_image"
+        # Video scenes should have been aligned concurrently
+        assert mock_align.await_count == 2
+
+
+
